@@ -16,8 +16,8 @@ function normalizeMessage(value?: string) {
   return trimmed ? trimmed.slice(0, 600) : undefined;
 }
 
-async function requireAdmin(ctx: Parameters<typeof getUserByClerkId>[0], actorClerkId: string) {
-  const actor = await getUserByClerkId(ctx, actorClerkId);
+async function requireAdmin(ctx: Parameters<typeof getUserByClerkId>[0], actorClerkId: string, orgId?: Id<"orgs">) {
+  const actor = await getUserByClerkId(ctx, actorClerkId, orgId);
   if (!actor || actor.role !== "admin") {
     throw new Error("Admin access required");
   }
@@ -156,10 +156,11 @@ export const createAccessRequest = mutation({
 export const listOrgAccessRequests = query({
   args: {
     actorClerkId: v.string(),
+    orgId: v.optional(v.id("orgs")),
     status: v.optional(v.union(v.literal("pending"), v.literal("invited"), v.literal("rejected"))),
   },
   handler: async (ctx, args) => {
-    const actor = await requireAdmin(ctx, args.actorClerkId);
+    const actor = await requireAdmin(ctx, args.actorClerkId, args.orgId);
     const requests = await ctx.db
       .query("accessRequests")
       .withIndex("by_org_status", (q) => q.eq("orgId", actor.orgId).eq("status", args.status ?? "pending"))
@@ -172,10 +173,11 @@ export const listOrgAccessRequests = query({
 export const getOrgAccessRequest = query({
   args: {
     actorClerkId: v.string(),
+    orgId: v.optional(v.id("orgs")),
     requestId: v.id("accessRequests"),
   },
   handler: async (ctx, args) => {
-    const actor = await requireAdmin(ctx, args.actorClerkId);
+    const actor = await requireAdmin(ctx, args.actorClerkId, args.orgId);
     const request = await ctx.db.get(args.requestId);
     if (!request || request.orgId !== actor.orgId) {
       throw new Error("Access request not found");
@@ -187,12 +189,13 @@ export const getOrgAccessRequest = query({
 export const resolveAccessRequest = mutation({
   args: {
     actorClerkId: v.string(),
+    orgId: v.optional(v.id("orgs")),
     requestId: v.id("accessRequests"),
     status: v.union(v.literal("invited"), v.literal("rejected")),
     role: v.optional(vRole),
   },
   handler: async (ctx, args) => {
-    const actor = await requireAdmin(ctx, args.actorClerkId);
+    const actor = await requireAdmin(ctx, args.actorClerkId, args.orgId);
     const request = await ctx.db.get(args.requestId);
     if (!request || request.orgId !== actor.orgId) {
       throw new Error("Access request not found");

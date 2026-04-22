@@ -1,4 +1,5 @@
 import { auth, currentUser } from "@clerk/nextjs/server";
+import { cookies } from "next/headers";
 import { getAdminEmails } from "@/lib/env";
 import { hasClerkServerConfig } from "@/lib/clerk-config";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
@@ -35,6 +36,7 @@ async function bootstrapActor(params: {
   email: string;
   name: string;
   bootstrapAdmin: boolean;
+  orgId?: string;
 }) {
   await convexMutation("users:ensureUser", {
     clerkId: params.clerkId,
@@ -42,10 +44,11 @@ async function bootstrapActor(params: {
     name: params.name,
     requestedRole: "student",
     bootstrapAdmin: params.bootstrapAdmin,
+    orgId: params.orgId,
   });
 
   const me = await convexQuery<
-    { clerkId: string },
+    { clerkId: string; orgId?: string },
     {
       _id: string;
       role: Role;
@@ -56,6 +59,7 @@ async function bootstrapActor(params: {
     } | null
   >("users:me", {
     clerkId: params.clerkId,
+    orgId: params.orgId,
   });
 
   if (!me) {
@@ -73,12 +77,13 @@ async function bootstrapActor(params: {
   };
 }
 
-async function assertActiveOrgAccess(clerkId: string) {
+async function assertActiveOrgAccess(clerkId: string, orgId: string) {
   const access = await convexQuery<
-    { clerkId: string },
+    { clerkId: string; orgId: string },
     { hasUser: boolean; hasOrg: boolean; orgActive: boolean } | null
   >("users:accessState", {
     clerkId,
+    orgId,
   });
 
   if (!access?.hasUser || !access.hasOrg) {
@@ -122,12 +127,16 @@ async function acceptInvitationFromCookie(params: {
 }
 
 export async function requireActor(): Promise<SessionActor> {
+  const cookieStore = await cookies();
+  const activeOrgId = cookieStore.get("spectra_active_org_id")?.value;
+
   if (!hasClerkServerConfig()) {
     return bootstrapActor({
       clerkId: "local-demo-admin",
       email: "local-admin@school.local",
       name: "Local Demo Admin",
       bootstrapAdmin: true,
+      orgId: activeOrgId,
     });
   }
 
@@ -147,7 +156,7 @@ export async function requireActor(): Promise<SessionActor> {
   }
 
   const existing = await convexQuery<
-    { clerkId: string },
+    { clerkId: string; orgId?: string },
     {
       _id: string;
       role: Role;
@@ -158,6 +167,7 @@ export async function requireActor(): Promise<SessionActor> {
     } | null
   >("users:me", {
     clerkId: userId,
+    orgId: activeOrgId,
   });
 
   if (existing) {
@@ -189,12 +199,13 @@ export async function requireActor(): Promise<SessionActor> {
 
     const superAdminByEmail = isSuperAdminEmail(syncedEmail);
     const shouldBootstrapAdmin = existing.role !== "admin" && superAdminByEmail;
-    const access = superAdminByEmail
+    const access = (superAdminByEmail || activeOrgId)
       ? await convexQuery<
-          { clerkId: string },
+          { clerkId: string; orgId?: string },
           { hasUser: boolean; hasOrg: boolean; orgActive: boolean } | null
         >("users:accessState", {
           clerkId: userId,
+          orgId: activeOrgId,
         })
       : null;
     const shouldRecoverMissingOrg = superAdminByEmail && !access?.hasOrg;
@@ -207,10 +218,11 @@ export async function requireActor(): Promise<SessionActor> {
         name: syncedName,
         requestedRole: existing.role,
         bootstrapAdmin: shouldBootstrapAdmin || shouldRecoverMissingOrg,
+        orgId: activeOrgId,
       });
 
       const refreshed = await convexQuery<
-        { clerkId: string },
+        { clerkId: string; orgId?: string },
         {
           _id: string;
           role: Role;
@@ -221,6 +233,7 @@ export async function requireActor(): Promise<SessionActor> {
         } | null
       >("users:me", {
         clerkId: userId,
+        orgId: activeOrgId,
       });
       if (refreshed) {
         current = refreshed;
@@ -235,7 +248,7 @@ export async function requireActor(): Promise<SessionActor> {
       });
       if (invitationResult === "accepted") {
         const refreshed = await convexQuery<
-          { clerkId: string },
+          { clerkId: string; orgId?: string },
           {
             _id: string;
             role: Role;
@@ -246,6 +259,7 @@ export async function requireActor(): Promise<SessionActor> {
           } | null
         >("users:me", {
           clerkId: userId,
+          orgId: activeOrgId,
         });
         if (refreshed) {
           current = refreshed;
@@ -254,7 +268,7 @@ export async function requireActor(): Promise<SessionActor> {
     }
 
     if (!isSuperAdminEmail(current.email)) {
-      await assertActiveOrgAccess(userId);
+      await assertActiveOrgAccess(userId, current.orgId);
     }
 
     return {
@@ -288,6 +302,7 @@ export async function requireActor(): Promise<SessionActor> {
       email,
       name,
       bootstrapAdmin,
+      orgId: activeOrgId,
     });
   }
 
@@ -298,7 +313,7 @@ export async function requireActor(): Promise<SessionActor> {
   });
   if (invitationResult === "accepted") {
     const provisioned = await convexQuery<
-      { clerkId: string },
+      { clerkId: string; orgId?: string },
       {
         _id: string;
         role: Role;
@@ -309,11 +324,12 @@ export async function requireActor(): Promise<SessionActor> {
       } | null
     >("users:me", {
       clerkId: userId,
+      orgId: activeOrgId,
     });
 
     if (provisioned) {
       if (!isSuperAdminEmail(provisioned.email)) {
-        await assertActiveOrgAccess(userId);
+        await assertActiveOrgAccess(userId, provisioned.orgId);
       }
       return {
         clerkId: userId,
@@ -331,7 +347,7 @@ export async function requireActor(): Promise<SessionActor> {
   // exist in the database (e.g. manually added by email), try to link them.
   try {
     const recovered = await convexMutation<
-      { clerkId: string; email: string; name: string; bootstrapAdmin: boolean },
+      { clerkId: string; email: string; name: string; bootstrapAdmin: boolean; orgId?: string },
       {
         _id: string;
         clerkId: string;
@@ -346,10 +362,11 @@ export async function requireActor(): Promise<SessionActor> {
       email,
       name,
       bootstrapAdmin: false,
+      orgId: activeOrgId,
     });
     if (recovered && recovered.orgId) {
       if (!isSuperAdminEmail(recovered.email)) {
-        await assertActiveOrgAccess(userId);
+        await assertActiveOrgAccess(userId, recovered.orgId);
       }
       return {
         clerkId: userId,

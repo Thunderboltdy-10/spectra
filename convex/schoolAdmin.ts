@@ -33,7 +33,7 @@ async function requireAdmin(ctx: Parameters<typeof getUserByClerkId>[0], actorCl
 }
 
 function isSeatCountedMember(email: string) {
-  return !SUPER_ADMIN_EMAILS.has(email.trim().toLowerCase());
+  return true;
 }
 
 async function getMemberSeatSnapshot(ctx: Parameters<typeof getUserByClerkId>[0], orgId: Id<"orgs">) {

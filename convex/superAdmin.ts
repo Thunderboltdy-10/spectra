@@ -50,7 +50,7 @@ function isSuperAdminEmail(email: string) {
 }
 
 function isSeatCountedMember(email: string) {
-  return !isSuperAdminEmail(email);
+  return true;
 }
 
 async function getOrgMemberCapacity(

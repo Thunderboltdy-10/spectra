@@ -16,7 +16,7 @@ type GuardrailModel = {
 };
 
 const NON_TEXT_MODEL_PATTERN =
-  /\b(audio|speech|voice|music|song|audio-song|tts|stt|transcrib|transcript|whisper|voiceover|lyria|text-to-speech|speech-to-text|text-to-video|video[-_ ]gen|video[-_ ]only|veo|sora|lip[-_ ]sync)\b/i;
+  /\b(audio|speech|voice|music|song|audio-song|tts|stt|transcrib|transcript|whisper|voiceover|lyria|lyra|gemini-lyra|text-to-speech|speech-to-text|text-to-video|video[-_ ]gen|video[-_ ]only|veo|sora|lip[-_ ]sync)\b/i;
 const SMALL_MODEL_PATTERN = /\b(1b|2b|3b|4b|6b|7b|8b|9b|12b|14b|16b)\b/i;
 const EXEMPT_SMALL_MODEL_PATTERN = /\b(gpt-oss-120b|qwen3-next-80b|kimi-k2|deepseek-r1)\b/i;
 const FRONTIER_OPEN_SOURCE_PATTERN =

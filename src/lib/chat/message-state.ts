@@ -8,9 +8,12 @@ export type PanelChatMessage = {
   role: "user" | "assistant";
   content: string;
   thinking?: string;
+  thinkingSegments?: Array<{ id: string; label: string; content: string; status: string }>;
   streaming?: boolean;
   phase?: string;
   modelUsed?: string;
+  activeModel?: string;
+  executionPath?: string;
   citations?: Array<{ url: string; title: string }>;
   routeTrace?: RouteTrace;
   createdAt: number;
@@ -21,12 +24,23 @@ function appendThinkingNote(existing: string, next: string) {
   return existing ? `${existing}\n${next}` : next;
 }
 
+function collapseSegments(segments: Array<{ id: string; label: string; content: string; status: string }>, activeId: string) {
+  return segments.map((segment) =>
+    segment.id === activeId
+      ? { ...segment, status: segment.status === "completed" ? "completed" : "running" }
+      : { ...segment, status: segment.status === "failed" ? "failed" : "completed" },
+  );
+}
+
 export class ChatMessageAccumulator {
   private messagesValue: PanelChatMessage[];
   private assistantMessageId: string | null = null;
   private assistantContent = "";
   private thinkingContent = "";
+  private thinkingSegments: Array<{ id: string; label: string; content: string; status: string }> = [];
   private modelUsed: string | undefined;
+  private activeModel: string | undefined;
+  private executionPath: string | undefined;
   private citations: PanelChatMessage["citations"];
   private phaseValue = "idle";
 
@@ -64,7 +78,10 @@ export class ChatMessageAccumulator {
     this.assistantMessageId = id;
     this.assistantContent = "";
     this.thinkingContent = "";
+    this.thinkingSegments = [];
     this.modelUsed = undefined;
+    this.activeModel = undefined;
+    this.executionPath = undefined;
     this.citations = undefined;
     this.messagesValue = [
       ...this.messagesValue,
@@ -97,7 +114,26 @@ export class ChatMessageAccumulator {
 
     if (event.type === "thinking" && event.content) {
       this.thinkingContent += event.content;
-      this.patchAssistant({ thinking: this.thinkingContent });
+      this.patchAssistant({ thinking: this.thinkingContent, thinkingSegments: this.thinkingSegments });
+      return;
+    }
+
+    if (event.type === "thinking_segment" && event.segment) {
+      const nextSegment = {
+        id: String(event.segment.id ?? `segment-${this.thinkingSegments.length + 1}`),
+        label: String(event.segment.label ?? "Thinking"),
+        content: String(event.segment.content ?? ""),
+        status: String(event.segment.status ?? "running"),
+      };
+      const existingIndex = this.thinkingSegments.findIndex((segment) => segment.id === nextSegment.id);
+      if (existingIndex >= 0) {
+        this.thinkingSegments[existingIndex] = nextSegment;
+      } else {
+        this.thinkingSegments = [...this.thinkingSegments, nextSegment];
+      }
+      this.thinkingSegments = collapseSegments(this.thinkingSegments, nextSegment.id);
+      this.thinkingContent = this.thinkingSegments.map((segment) => segment.content).filter(Boolean).join("\n\n");
+      this.patchAssistant({ thinking: this.thinkingContent, thinkingSegments: this.thinkingSegments });
       return;
     }
 
@@ -140,26 +176,39 @@ export class ChatMessageAccumulator {
       return;
     }
 
-    if (event.type === "route_model" && event.modelUsed) {
-      this.modelUsed = event.modelUsed;
+    if ((event.type === "route_model" || event.type === "model_selected") && event.modelUsed) {
+      this.activeModel = event.modelUsed;
+      this.executionPath = typeof (event as { executionPath?: unknown }).executionPath === "string"
+        ? String((event as { executionPath?: unknown }).executionPath)
+        : this.executionPath;
       this.patchAssistant({
-        modelUsed: this.modelUsed,
+        activeModel: this.activeModel,
+        modelUsed: event.type === "route_model" ? this.modelUsed : this.modelUsed ?? this.activeModel,
+        executionPath: this.executionPath,
         routeTrace: event.routeTrace as RouteTrace | undefined,
       });
       return;
     }
 
     if (event.type === "done") {
-      this.modelUsed = event.modelUsed ?? this.modelUsed;
+      this.modelUsed = event.modelUsed ?? this.modelUsed ?? this.activeModel;
+      this.activeModel = this.modelUsed ?? this.activeModel;
       if (event.citations) {
         this.citations = event.citations;
       }
       this.phaseValue = "idle";
+      this.thinkingSegments = this.thinkingSegments.map((segment) => ({
+        ...segment,
+        status: segment.status === "failed" ? "failed" : "completed",
+      }));
       this.patchAssistant({
         content: this.assistantContent,
         thinking: this.thinkingContent || undefined,
+        thinkingSegments: this.thinkingSegments.length > 0 ? this.thinkingSegments : undefined,
         streaming: false,
         modelUsed: this.modelUsed,
+        activeModel: this.activeModel,
+        executionPath: this.executionPath,
         citations: this.citations,
       });
       return;
@@ -167,7 +216,11 @@ export class ChatMessageAccumulator {
 
     if (event.type === "error") {
       this.phaseValue = "idle";
-      this.patchAssistant({ streaming: false });
+      this.thinkingSegments = this.thinkingSegments.map((segment) => ({
+        ...segment,
+        status: segment.status === "completed" ? "completed" : "failed",
+      }));
+      this.patchAssistant({ streaming: false, thinkingSegments: this.thinkingSegments });
     }
   }
 
@@ -182,6 +235,7 @@ export class ChatMessageAccumulator {
       this.assistantMessageId = null;
       this.assistantContent = "";
       this.thinkingContent = "";
+      this.thinkingSegments = [];
       this.modelUsed = undefined;
       this.citations = undefined;
     }

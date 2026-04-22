@@ -1,4 +1,6 @@
+
 "use client";
+import { createPortal } from "react-dom";
 
 /**
  * Artifact AI Interaction Surface
@@ -24,19 +26,18 @@ import {
   Layers,
   Clock,
 } from "lucide-react";
-import type { Editor } from "@tiptap/core";
 import { useChatPanel } from "@/hooks/use-chat-panel";
 import { cn } from "@/lib/utils";
 import { QuickChat } from "@/components/shared/quick-chat";
-import { ExecutionTimeline } from "@/components/shared/execution-timeline";
 
 interface ArtifactAiSurfaceProps {
   artifactId: string;
-  editor?: Editor | null;
   context: "full-page" | "workspace-panel";
   onApplyEdits?: (ops: Array<{ type: string; from: number; to: number; content?: string }>) => void;
   onDiscard?: () => void;
   workstreamId?: string;
+  panelOpen?: boolean;
+  onPanelOpenChange?: (open: boolean) => void;
 }
 
 /** Edit version record */
@@ -53,6 +54,8 @@ export function ArtifactAiSurface({
   onApplyEdits,
   onDiscard,
   workstreamId,
+  panelOpen = true,
+  onPanelOpenChange,
 }: ArtifactAiSurfaceProps) {
   const [input, setInput] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -69,7 +72,6 @@ export function ArtifactAiSurface({
     messages,
     streaming,
     streamPhase,
-    latestRouteTrace,
     error,
     sendMessage,
     stopGeneration,
@@ -81,8 +83,11 @@ export function ArtifactAiSurface({
     thinkingLevel: "low",
     routerMode: "auto",
   });
-  const latestAssistantTrace = latestRouteTrace
-    ?? [...messages].reverse().find((message) => message.role === "assistant" && message.routeTrace)?.routeTrace;
+  useEffect(() => {
+    if (messages.length > 0 && !panelOpen) {
+      onPanelOpenChange?.(true);
+    }
+  }, [messages.length, panelOpen, onPanelOpenChange]);
 
   // Auto-scroll
   useEffect(() => {
@@ -175,16 +180,7 @@ export function ArtifactAiSurface({
               transition={{ duration: 0.2 }}
               className="border-t border-[var(--border-default)] overflow-hidden"
             >
-              {/* Execution Timeline — inline, compact */}
-              {latestAssistantTrace && (
-                <div className="px-3 pt-2">
-                  <ExecutionTimeline
-                    routeTrace={latestAssistantTrace}
-                    streaming={streaming}
-                    compact
-                  />
-                </div>
-              )}
+              
 
               <div className="max-h-48 overflow-y-auto px-4 py-3 space-y-3">
                 {error ? (
@@ -194,11 +190,12 @@ export function ArtifactAiSurface({
                 ) : null}
                 {messages.filter((m) => m.role === "assistant").slice(-2).map((msg) => (
                   <div key={msg.id} className="text-sm text-[var(--text-primary)] leading-relaxed">
-                    {msg.streaming && !msg.content && (
-                      <span className="text-[var(--accent-cyan)] text-xs animate-pulse">
-                        {streamPhase || "Thinking..."}
-                      </span>
-                    )}
+                    {msg.streaming && (
+    <div className="mb-1 text-[10px] text-[var(--accent-cyan)] font-medium uppercase tracking-[0.08em] animate-pulse flex items-center gap-1.5">
+      <Sparkles className="w-3 h-3" />
+      {streamPhase || "Generating..."}
+    </div>
+  )}
                     {msg.content}
                   </div>
                 ))}
@@ -289,7 +286,7 @@ export function ArtifactAiSurface({
             onStop={stopGeneration}
             isStreaming={streaming}
             placeholder="Ask AI about this artifact..."
-            leftContent={<Sparkles className="w-3.5 h-3.5 text-[var(--text-tertiary)] shrink-0" />}
+            rightContent={<Sparkles className="w-3.5 h-3.5 text-[var(--text-tertiary)] shrink-0" />}
           />
         </div>
       </div>
@@ -297,6 +294,25 @@ export function ArtifactAiSurface({
   }
 
   // Full-page context — conversational layout
+  if (!panelOpen && context === "full-page") {
+    return createPortal(
+      <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-50 w-full max-w-2xl px-4">
+        <QuickChat
+          value={input}
+          onChange={setInput}
+          onSubmit={() => {
+            onPanelOpenChange?.(true);
+            handleSend();
+          }}
+          onStop={stopGeneration}
+          isStreaming={streaming}
+          placeholder="Ask AI about this artifact..."
+        />
+      </div>,
+      document.getElementById("artifact-main-area") || document.body
+    );
+  }
+
   return (
     <div className="flex flex-col h-full">
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
@@ -305,22 +321,7 @@ export function ArtifactAiSurface({
             {error}
           </div>
         ) : null}
-        {/* Execution trace header */}
-        {latestAssistantTrace && (
-          <div className="space-y-2">
-            <div className="flex flex-wrap gap-2">
-              <span className="rounded-full border border-[var(--border-default)] px-2 py-1 text-[10px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">
-                {latestAssistantTrace.routePlan?.executionPath ?? "direct_chat"}
-              </span>
-              {latestAssistantTrace.routePlan?.workspaceAction?.intent ? (
-                <span className="rounded-full border border-[var(--border-default)] px-2 py-1 text-[10px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">
-                  action {latestAssistantTrace.routePlan.workspaceAction.intent}
-                </span>
-              ) : null}
-            </div>
-            <ExecutionTimeline routeTrace={latestAssistantTrace} compact />
-          </div>
-        )}
+        
 
         {messages.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-center py-8">
@@ -347,11 +348,13 @@ export function ArtifactAiSurface({
                   : "bg-[var(--bg-secondary)] text-[var(--text-primary)] rounded-bl-md",
               )}
             >
-              {msg.content || (msg.streaming && (
-                <span className="text-[var(--accent-cyan)] text-xs animate-pulse">
-                  {streamPhase || "Thinking..."}
-                </span>
-              ))}
+              {msg.streaming && (
+    <div className="mb-1.5 text-[10px] text-[var(--accent-cyan)] font-medium uppercase tracking-[0.08em] animate-pulse flex items-center gap-1.5">
+      <Sparkles className="w-3 h-3" />
+      {streamPhase || "Generating..."}
+    </div>
+  )}
+  {msg.content}
             </div>
           </div>
         ))}
@@ -421,6 +424,7 @@ export function ArtifactAiSurface({
           onStop={stopGeneration}
           isStreaming={streaming}
           placeholder="Ask AI about this artifact..."
+          rightContent={<Sparkles className="w-3.5 h-3.5 text-[var(--text-tertiary)] shrink-0" />}
         />
       </div>
     </div>

@@ -243,14 +243,16 @@ function ArtifactsPageInner() {
                 aiPanelOpen ? "w-[380px]" : "w-0 overflow-hidden border-l-0",
               )}
             >
-              {aiPanelOpen ? (
+              {
                 <ArtifactAiSurface
                   key={`artifact-ai-${activeNote._id}`}
                   artifactId={activeNote._id}
                   workstreamId={activeNote.workstreamId}
                   context="full-page"
+                  onPanelOpenChange={setAiPanelOpen}
+                  panelOpen={aiPanelOpen}
                 />
-              ) : null}
+              }
             </aside>
           ) : null}
 

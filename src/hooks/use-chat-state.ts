@@ -1285,6 +1285,7 @@ export function useChatState() {
     (agentId?: string) => {
       selectedChatIdRef.current = "";
       setSelectedChatId("");
+      syncChatIdToUrl(undefined);
       clearRecentChatActivity();
       setMessages([]);
       setMessage("");
@@ -1318,7 +1319,7 @@ export function useChatState() {
         setSelectedAgentId(agentId);
       }
     },
-    [clearRecentChatActivity],
+    [clearRecentChatActivity, syncChatIdToUrl],
   );
 
   const persistDismissedProactiveIds = useCallback(() => {

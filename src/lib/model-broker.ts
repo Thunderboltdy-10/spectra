@@ -129,6 +129,8 @@ export function getBrokerEligibilityIssues(model: CatalogModelEntry, intent: Bro
   const mode = (intent.mode ?? "").toLowerCase();
   const imageTurn = mode === "image" || (intent.requiredCapabilities ?? []).includes("image_generation");
   if (!model?.modelId || model.modelId === 'openrouter/auto') issues.push('unsupported-router-model');
+  const normalizedModelBlob = `${model.modelId} ${model.name ?? ""} ${model.description ?? ""}`.toLowerCase();
+  if (/\b(lyria|music|song[-_ ]?gen|audio[-_ ]?gen)\b/.test(normalizedModelBlob) && !imageTurn) issues.push('excluded_audio_family');
   if (!imageTurn && isNonTextOnlyModel(model)) issues.push("excluded_non_text_model");
   if (!isTextChatCapableModel(model) && !supportsBrokerCapability(model, 'image_generation')) issues.push('not-text-chat-capable');
   for (const capability of intent.requiredCapabilities ?? []) {
@@ -233,7 +235,8 @@ function reasoningStrength(model: CatalogModelEntry, mode?: string) {
 function instructionReliability(model: CatalogModelEntry) {
   const provider = (model.provider ?? model.modelId.split('/')[0] ?? '').toLowerCase();
   let score = 0.58;
-  if (/^(openai|anthropic|google|moonshotai|minimax|z-ai|qwen|deepseek|mistralai|mistral|thudm|glm|stepfun|inception|arcee|arcee-ai)$/.test(provider)) score += 0.2;
+  if (/^(openai|google|moonshotai|minimax|z-ai|qwen|deepseek|mistralai|mistral|thudm|glm|stepfun|inception|arcee|arcee-ai)$/.test(provider)) score += 0.2;
+  if (/^anthropic$/.test(provider)) score += 0.04;
   if (/^(perplexity|meta|meta-llama|nousresearch|cohere)$/.test(provider)) score += 0.08;
   if (isFrontierOpenSourceModel(model)) score += 0.06;
   if (/(mini|flash|air)/i.test(model.modelId)) score -= 0.04;
@@ -285,7 +288,7 @@ function latency(model: CatalogModelEntry, runtimeStats?: Record<string, ModelRu
 function costGuidance(model: CatalogModelEntry, intent: BrokerIntent) {
   const band = brokerCostBand(model);
   const stake = intent.stakeLevel ?? 'medium';
-  if (stake === 'high') return band === 'high' ? 0.92 : band === 'medium' ? 0.88 : 0.72;
+  if (stake === 'high') return band === 'medium' ? 0.94 : band === 'low' ? 0.9 : band === 'high' ? 0.7 : 0.76;
   if (intent.spendingTier === 'free_only') return band === 'free' ? 1 : 0;
   if (intent.spendingTier === 'cheap_only') return band === 'free' ? 1 : band === 'low' ? 0.86 : 0.35;
   if ((intent.mode ?? '').toLowerCase() === 'image' || (intent.requiredCapabilities ?? []).includes('vision')) {

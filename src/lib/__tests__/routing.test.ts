@@ -3,6 +3,7 @@ import { chooseModelRoute } from "@/lib/routing/heuristic";
 import { CHEAP_MODEL_DEFAULTS, MODEL_CONFIG, MODEL_COST_BLOCK_LIST, ROUTER_FALLBACKS } from "@/lib/model-config";
 import { STUDY_MODES, isValidStudyMode, safeStudyMode } from "@/lib/contracts/studyModes";
 
+
 describe("chooseModelRoute", () => {
   it("routes marker mode to marker model", () => {
     const route = chooseModelRoute({

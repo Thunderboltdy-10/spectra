@@ -9,8 +9,12 @@ export function buildRuntimeDoneEvent(params: {
     messageId: params.messageId,
     routeTrace: params.artifacts?.routeTrace,
     modelUsed: params.artifacts?.modelUsed,
+    activeModel: params.artifacts?.activeModel ?? params.artifacts?.modelUsed,
+    executionPath: params.artifacts?.executionPath,
     citations: params.artifacts?.citations,
     thinkingContent: params.artifacts?.thinkingContent,
+    renderInstructions: params.artifacts?.renderInstructions,
+    artifactUpdates: params.artifacts?.artifactUpdates,
   };
 }
 

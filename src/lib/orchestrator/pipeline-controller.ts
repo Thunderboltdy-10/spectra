@@ -187,7 +187,7 @@ export class PipelineController {
     orchestratorEnabled: boolean;
     budgetSoftLimited: boolean;
   }) {
-    let searchEnabled = params.allowSearch && this.shouldRun("webSearch");
+    const searchEnabled = params.allowSearch && this.shouldRun("webSearch");
     let ragEnabled = params.allowRag && this.shouldRun("ragRetrieval");
     let multiAgentEnabled = params.allowMultiAgent && this.shouldRun("multiAgent");
 
@@ -205,9 +205,12 @@ export class PipelineController {
       multiAgentEnabled = false;
       this.markStageSkipped("multiAgent", "free_only tier disables multi-agent orchestration.");
     }
+    if (params.spendingTier === "free_only" && ragEnabled) {
+      ragEnabled = false;
+      this.markStageSkipped("ragRetrieval", "free_only tier disables RAG retrieval to avoid embedding spend.");
+    }
 
-    const tierAllowsForcedMultiAgent =
-      params.spendingTier !== "free_only";
+    const tierAllowsForcedMultiAgent = params.spendingTier !== "free_only";
     const forceDeniedReasons: string[] = [];
     if (params.forceMultiAgentRequested) {
       if (!tierAllowsForcedMultiAgent) forceDeniedReasons.push(`tier ${params.spendingTier} blocks forced multi-agent`);

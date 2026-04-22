@@ -46,6 +46,7 @@ export async function POST(request: NextRequest) {
       manualModel?: string;
       usePersonalResources?: boolean;
       title?: string;
+      allowExistingThreadReuse?: boolean;
     };
 
     if (!body.mode || !body.thinkingLevel || !body.routerMode) {
@@ -67,6 +68,7 @@ export async function POST(request: NextRequest) {
       manualModel: body.manualModel,
       usePersonalResources: body.usePersonalResources ?? true,
       title: body.title,
+      allowExistingThreadReuse: body.allowExistingThreadReuse,
     });
 
     return ok(result);

@@ -45,7 +45,6 @@ import {
   ensureInlineCitationMarkers,
   inferCitations,
   maybeExtractMemory,
-  maybeGenerateTitle,
   maybeGenerateTitleFromUserPrompt,
   planMemoryRead,
   routeMemoryWrite,
@@ -1167,10 +1166,12 @@ export async function runChatPipeline(request: NextRequest) {
     && existingChatTitle !== "Untitled";
   const shouldGenerateTitle = isFirstAssistantTurn && !chatAlreadyNamed;
   const attemptStats = extractAttemptStats(history);
-  const currentWorkstreamFocusSurface = (): "workspace" | "panel" | "chat" | "none" =>
-    activeWorkstreamId
-      ? (body.chatId ? "chat" : "panel")
-      : "none";
+  const currentWorkstreamFocusSurface = (): "workspace" | "panel" | "chat" | "none" => {
+    if (!activeWorkstreamId) return "none";
+    if (clientScopeLevel === "workspace") return "workspace";
+    if (clientScopeLevel === "artifact") return "panel";
+    return body.chatId ? "chat" : "panel";
+  };
   const workstreamClassificationContext = {
     activeWorkstreamId,
     focusSurface: currentWorkstreamFocusSurface(),
@@ -1863,9 +1864,10 @@ export async function runChatPipeline(request: NextRequest) {
     routePlan.allowedToolBundles = routePlan.allowedToolBundles.filter((bundle) => bundle !== "memory");
   }
   const runtimeSurface: RuntimeSurface =
-    body.artifactId ? "artifact"
+    body.scopeLevel === "artifact" || body.artifactId ? "artifact"
       : activeWorkstreamId ? "workspace"
         : "chat";
+  const allowArtifactSavePrompt = runtimeSurface !== "artifact";
   const runtimePathDecision = selectRuntimeExecutionPath(buildExecutionPathInputs({
     routePlan,
     mode: effectiveMode,
@@ -2502,15 +2504,35 @@ export async function runChatPipeline(request: NextRequest) {
       }
     };
 
-    if (event.type === "thinking") {
-      const current = existing.find((entry) => entry.id === "runtime-thinking");
-      upsert("runtime-thinking", {
-        id: "runtime-thinking",
+    if (event.type === "thinking" || event.type === "thinking_segment") {
+      const eventSegment = event.type === "thinking_segment"
+        ? (event as { segment?: { id?: unknown; label?: unknown; content?: unknown; status?: unknown } }).segment
+        : undefined;
+      const segment: { id: string; label: string; content: string; status: "running" | "completed" | "failed" } =
+        event.type === "thinking_segment"
+          ? {
+              id: String(eventSegment?.id ?? "runtime-thinking"),
+              label: String(eventSegment?.label ?? "Thinking"),
+              content: String(eventSegment?.content ?? ""),
+              status:
+                eventSegment?.status === "completed" || eventSegment?.status === "failed"
+                  ? eventSegment.status
+                  : "running",
+            }
+          : {
+              id: "runtime-thinking",
+              label: "Thinking",
+              content: String((event as { content?: unknown }).content ?? ""),
+              status: "running",
+            };
+      upsert(`thinking:${segment.id}`, {
+        id: `thinking:${segment.id}`,
         kind: "thinking",
-        label: "Thinking",
-        status: "running",
-        content: `${current?.content ?? ""}${String((event as { content?: unknown }).content ?? "")}`,
-        startedAt: current?.startedAt ?? now,
+        label: segment.label,
+        status: segment.status,
+        content: segment.content,
+        startedAt: now,
+        finishedAt: segment.status === "completed" || segment.status === "failed" ? now : undefined,
       });
       route.trace.executionEvents = existing;
       return;
@@ -2588,6 +2610,21 @@ export async function runChatPipeline(request: NextRequest) {
       return;
     }
 
+    if (event.type === "action_applied" || event.type === "artifact_patch_applied" || event.type === "version_restored" || event.type === "widget_created" || event.type === "widget_updated" || event.type === "workstream_layout_updated" || event.type === "render_instruction") {
+      const payload = event as Record<string, unknown>;
+      existing.push({
+        id: `runtime-action-${existing.length + 1}`,
+        kind: event.type === "render_instruction" ? "skill" : "action",
+        label: formatRuntimeLabel(String(payload.toolName ?? payload.title ?? event.type), "Runtime action"),
+        status: "completed",
+        detail: typeof payload.summary === "string" ? payload.summary : typeof payload.message === "string" ? payload.message : undefined,
+        startedAt: now,
+        finishedAt: now,
+      });
+      route.trace.executionEvents = existing;
+      return;
+    }
+
     if (event.type === "mode_switched" || event.type === "navigation_instruction" || event.type === "notice") {
       const modeLabel = event.type === "mode_switched" && typeof event.mode === "string"
         ? formatRuntimeLabel(event.mode, "Mode")
@@ -2622,10 +2659,11 @@ export async function runChatPipeline(request: NextRequest) {
     }
 
     if (event.type === "done" || event.type === "error") {
-      const thinkingIndex = existing.findIndex((entry) => entry.id === "runtime-thinking");
-      if (thinkingIndex >= 0) {
-        existing[thinkingIndex] = {
-          ...existing[thinkingIndex],
+      for (let index = 0; index < existing.length; index += 1) {
+        const entry = existing[index];
+        if (!entry || entry.kind !== "thinking" || entry.status !== "running") continue;
+        existing[index] = {
+          ...entry,
           status: event.type === "done" ? "completed" : "failed",
           finishedAt: now,
         };
@@ -2903,6 +2941,13 @@ export async function runChatPipeline(request: NextRequest) {
   earlyEventBuffer.push({
     type: "route_model",
     modelUsed: route.primaryModel,
+    routeTrace: route.trace,
+    executionPath: routePlan.executionPath,
+  });
+  earlyEventBuffer.push({
+    type: "model_selected",
+    modelUsed: route.primaryModel,
+    executionPath: routePlan.executionPath,
     routeTrace: route.trace,
   });
 
@@ -3946,6 +3991,17 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
   };
   const emitPhaseUpdate = async (phaseId: string, status: PhaseUpdateStatus, detail?: string) => {
     const phasePlan = applyPhaseUpdate(phaseId, status, detail);
+    if (status === "in_progress") {
+      await emitRuntimeEvent({
+        type: "thinking_segment",
+        segment: {
+          id: phaseId,
+          label: phaseId.replace(/[_-]/g, " "),
+          content: detail ?? "",
+          status: "running",
+        },
+      });
+    }
     await send({
       type: "phase_update",
       phaseId,
@@ -5230,7 +5286,18 @@ BACK: [answer or definition]`,
       }
       let generatedArtifactAttachments: string[] | undefined;
       let generatedArtifactResourceIds: string[] | undefined;
-      if (effectiveMode === "document" || isGeneratedDocumentContent(finalizedResponse)) {
+      const renderInstructions: Array<{
+        kind: "code" | "visual" | "document" | "table" | "markdown";
+        title?: string;
+        content?: string;
+        language?: string;
+        artifactId?: string;
+        renderMode?: string;
+        props?: Record<string, unknown>;
+      }> = [];
+      const artifactUpdates: Array<Record<string, unknown>> = [];
+      const shouldAutoGenerateArtifactResources = routePlan.artifactSavePolicy === "auto" && (effectiveMode === "document" || isGeneratedDocumentContent(finalizedResponse));
+      if (shouldAutoGenerateArtifactResources) {
         const parsedDocument = parseGeneratedDocument(finalizedResponse);
         const artifactResult = await generateArtifactResources({
           actorClerkId: actor.clerkId,
@@ -5253,7 +5320,21 @@ BACK: [answer or definition]`,
             ? `${userFacingDocumentResponse}\n\n${artifactResult.markdownBlock}`
             : userFacingDocumentResponse;
           route.trace.toolchain.push("artifact_generation");
+          artifactUpdates.push({
+            kind: "generated_document_resource",
+            confidence: 0.95,
+            persisted: true,
+            requestedFormats: routePlan.requestedArtifactFormats,
+          });
+          renderInstructions.push({ kind: "document", title: parsedDocument.document?.title ?? "Generated document", content: finalizedResponse });
         }
+      }
+      if (routePlan.artifactSavePolicy === "prompt" && allowArtifactSavePrompt) {
+        await send({
+          type: "notice",
+          message: "This response looks artifact-worthy. Save it as an artifact if you want it persisted in the workspace.",
+        });
+        route.trace.toolchain.push("artifact_save_prompt");
       }
       citations = attachInlinePositionsToCitations(finalizedResponse, citations);
       const whyThisResponse = summarizeWhyResponse(effectiveMode, route.reason);
@@ -5300,6 +5381,15 @@ BACK: [answer or definition]`,
       });
       assistantPersisted = true;
 
+      if (visualArtifact) {
+        renderInstructions.push({
+          kind: "visual",
+          title: visualArtifact.title,
+          content: visualArtifact.content,
+          renderMode: visualArtifact.renderMode,
+          props: visualArtifact.renderProps,
+        });
+      }
       if (visualArtifact && activeWorkstreamId) {
         try {
           const visualArtifactId = await convexMutation<
@@ -5341,6 +5431,13 @@ BACK: [answer or definition]`,
           }).catch(() => {});
 
           route.trace.toolchain.push("spectra_visual_dual_render");
+          renderInstructions.push({
+            kind: "visual",
+            title: visualArtifact.title,
+            artifactId: visualArtifactId,
+            renderMode: visualArtifact.renderMode,
+            props: visualArtifact.renderProps,
+          });
         } catch (error) {
           logger.warn("visual artifact persistence failed", {
             chatId,
@@ -5737,11 +5834,15 @@ BACK: [answer or definition]`,
           artifacts: {
             routeTrace: route.trace,
             modelUsed,
+            activeModel: modelUsed,
+            executionPath: routePlan.executionPath,
             citations: citations.map((citation) => ({
               url: citation.url ?? "",
               title: citation.title ?? citation.filename,
             })),
             thinkingContent: thinkingContent || undefined,
+            renderInstructions,
+            artifactUpdates,
           },
         }),
         content: finalizedResponse,

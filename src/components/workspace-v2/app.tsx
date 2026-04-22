@@ -1841,7 +1841,8 @@ export default function WorkspaceV2() {
       }
 
       // Default → persisted workspace quick action / linked result.
-      if (!requiresWorkspace() || !requiresLiveRuntime()) return;
+      // Runtime chat works even without live workspace data — the chat API is independent.
+      // Creation actions (/note, /task, etc.) already gate on requiresLiveRuntime above.
       const scopedPrimaryItem = explicitTargetItem
         ?? (focusedViewOpen
           ? getBaseItemById(focusViewPrimaryId ?? focusSetIds[0] ?? null)
@@ -1957,6 +1958,12 @@ export default function WorkspaceV2() {
   };
 
   /* ─── Widget Handlers ─── */
+  const resizeWidget = (id: string, w: number, h: number) => {
+    setWidgets((ws) =>
+      ws.map((wid) => (wid.id === id ? { ...wid, w, h } : wid))
+    );
+  };
+
   const moveWidget = (id: string, x: number, y: number) =>
     setWidgets((ws) => {
       const next = ws.map((w) => {
@@ -2745,6 +2752,7 @@ export default function WorkspaceV2() {
             x={artifactPanel.x} y={artifactPanel.y} w={artifactPanel.w} h={artifactPanel.h}
             collapsed={false}
             onMove={(x, y) => moveWidget(artifactPanel.id, x, y)}
+            onResize={(w, h) => resizeWidget(artifactPanel.id, w, h)}
             onClose={() => closeWidget(artifactPanel.id)}
             onCollapse={() => toggleWidgetCollapsed(artifactPanel.id)}
             onExpand={() => expandWidget(artifactPanel.id)}
@@ -2782,7 +2790,8 @@ export default function WorkspaceV2() {
             workspaceItems={baseItems}
             tick={widgetStateRevision}
             onMove={moveWidget}
-            onClose={closeWidget}
+                    onResize={resizeWidget}
+                    onClose={closeWidget}
             onCollapse={toggleWidgetCollapsed}
             onExpand={expandWidget}
             onTimerToggle={toggleTimer}

@@ -304,6 +304,12 @@ export async function executeOrchestratorTool(params: {
         targetIds: run.targetIds,
         resultIds: run.resultIds,
         results: run.results,
+        artifactPatches: run.results
+          .filter((entry): entry is Extract<typeof entry, { ok: true }> => entry.ok && Boolean(entry.ui?.diff))
+          .map((entry) => ({ targetId: entry.targetId, patch: entry.ui?.artifactPatch, version: entry.version })),
+        renderInstructions: run.results
+          .filter((entry): entry is Extract<typeof entry, { ok: true }> => entry.ok && Boolean(entry.ui?.renderInstruction))
+          .map((entry) => entry.ui?.renderInstruction),
       },
       runtimeEventType: run.appliedCount > 0 ? "action_applied" : "tool_result",
     };

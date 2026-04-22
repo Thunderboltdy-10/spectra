@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Icon, type IconName } from "./icons";
-import { ExecutionTimeline } from "@/components/shared/execution-timeline";
 import { QuickChat } from "@/components/shared/quick-chat";
 import type { RouteTrace } from "@/types";
 import type { V2Item, V2Territory, QuickStart } from "./data";
@@ -641,29 +640,36 @@ export function CommandBar({
         </div>
       )}
 
-      {/* Expandable execution timeline below result island when streaming */}
-      {resultIsland && resultIsland.routeTrace && (resultIsland.status === "running" || resultIsland.status === "streaming") && (
-        <div
-          className="sv2-island mb-1.5 px-3 py-2 overflow-hidden"
-          style={{ maxWidth: "420px", width: "100%", borderRadius: "12px", fontSize: "11px" }}
-        >
-          <ExecutionTimeline
-            routeTrace={resultIsland.routeTrace}
-            streaming
-            compact
-          />
-        </div>
-      )}
+      
 
       <div className="flex items-end gap-2 w-[min(760px,calc(100vw-34px))]">
-        {/* Plus button — opens inline creation menu */}
+        <QuickChat
+          value={value}
+          onChange={setValue}
+          onSubmit={submit}
+          onStop={onStop}
+          isStreaming={isStreaming}
+          isProcessing={isProcessing}
+          placeholder={placeholder}
+          className="w-full min-w-0"
+          leftContent={focusedItem && !value
+            ? (
+                <div className="hidden sm:flex sv2-chip shrink-0 opacity-70 h-6">
+                  <Icon name={KIND_META[focusedItem.kind].icon} size={10} />
+                  <span className="max-w-[72px] truncate">{focusedItem.title}</span>
+                </div>
+              )
+            : null}
+          rightContent={(
+            <div className="flex items-center gap-1">
+              {/* Plus button — opens inline creation menu */}
         <div className="relative shrink-0">
           <button
             onClick={() => setShowCreateMenu((v) => !v)}
-            className="w-10 h-10 rounded-full flex items-center justify-center shadow-md sv2-island hover:shadow-lg transition-all group"
+            className="w-8 h-8 rounded-full flex items-center justify-center transition-colors hover:bg-[var(--bg2)] text-[var(--ink-400)] group"
             title="Create…"
           >
-            <Icon name="plus" size={15} style={{ color: "var(--accent)" }} className="group-hover:scale-110 transition-transform" />
+            <Icon name="plus" size={14} style={{ color: "var(--ink-400)" }} className="group-hover:text-[var(--ink-100)] transition-transform" />
           </button>
           {showCreateMenu && (
             <div
@@ -690,18 +696,6 @@ export function CommandBar({
             </div>
           )}
         </div>
-
-        <QuickChat
-          value={value}
-          onChange={setValue}
-          onSubmit={submit}
-          onStop={onStop}
-          isStreaming={isStreaming}
-          isProcessing={isProcessing}
-          placeholder={placeholder}
-          className="w-full min-w-0"
-          leftContent={(
-            <>
               <button
                 onClick={() => { onSpotlight?.(); }}
                 className="shrink-0 transition-opacity opacity-60 hover:opacity-100"
@@ -724,16 +718,8 @@ export function CommandBar({
                   </button>
                 </div>
               )}
-            </>
+            </div>
           )}
-          rightContent={focusedItem && !value
-            ? (
-                <div className="hidden sm:flex sv2-chip shrink-0 opacity-70 h-6">
-                  <Icon name={KIND_META[focusedItem.kind].icon} size={10} />
-                  <span className="max-w-[72px] truncate">{focusedItem.title}</span>
-                </div>
-              )
-            : null}
         />
       </div>
     </div>

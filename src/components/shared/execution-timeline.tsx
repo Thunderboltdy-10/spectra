@@ -150,9 +150,11 @@ function ExecutionEventRow({
   streaming?: boolean;
   defaultOpen?: boolean;
 }) {
-  const [expanded, setExpanded] = useState(
-    defaultOpen || event.status === "running" || !!streaming
-  );
+  const [expanded, setExpanded] = useState(defaultOpen || event.status === "running" || !!streaming);
+  useEffect(() => {
+    if (event.status === "running") setExpanded(true);
+    else if (event.status === "completed" && !defaultOpen) setExpanded(false);
+  }, [event.status, defaultOpen]);
   const meta = KIND_META[event.kind];
   const Icon = meta.icon;
   const hasChildren = event.children && event.children.length > 0;
@@ -252,7 +254,7 @@ function ExecutionEventRow({
                   )}
                   {hasContent && (
                     <div className="max-h-48 overflow-y-auto pr-1 rounded-md bg-[var(--bg-secondary)]/50 border border-[var(--border-default)]/30 p-2">
-                      <div className="text-[11px] leading-relaxed text-[var(--text-tertiary)]">
+                      <div className="text-[12px] leading-relaxed text-[var(--text-secondary)]">
                         <ReactMarkdown remarkPlugins={[remarkGfm]}>
                           {event.content!.trim()}
                         </ReactMarkdown>
@@ -456,23 +458,26 @@ export function ExecutionTimeline({
 
     // Inject thinking content as a thinking event if present
     if (thinkingContent?.trim()) {
-      const existingThinkIdx = traceEvents.findIndex(
-        (e) => e.kind === "thinking"
-      );
-      if (existingThinkIdx >= 0) {
-        traceEvents[existingThinkIdx] = {
-          ...traceEvents[existingThinkIdx],
-          content: thinkingContent,
+      // Split by double newline to create paragraphs/sections
+      const chunks = thinkingContent.split(/(?:\r?\n){2,}/).map(s => s.trim()).filter(Boolean);
+      const thinkingEvents = chunks.map((chunk, i) => {
+        const isLast = i === chunks.length - 1;
+        return {
+          id: `thinking-chunk-${i}`,
+          kind: "thinking" as const,
+          label: `Thinking${chunks.length > 1 ? ` (${i + 1}/${chunks.length})` : ''}`,
+          status: (streaming && isLast) ? "running" as const : "completed" as const,
+          content: chunk,
         };
+      });
+
+      const existingThinkIdx = traceEvents.findIndex(e => e.kind === "thinking" && !e.id.startsWith("thinking-chunk-"));
+      if (existingThinkIdx >= 0 && traceEvents[existingThinkIdx].content) {
+         traceEvents[existingThinkIdx].content = thinkingContent;
+      } else if (existingThinkIdx >= 0) {
+         traceEvents.splice(existingThinkIdx, 1, ...thinkingEvents);
       } else {
-        // Prepend thinking event
-        traceEvents.unshift({
-          id: "thinking-content",
-          kind: "thinking",
-          label: "Thinking",
-          status: streaming ? "running" : "completed",
-          content: thinkingContent,
-        });
+         traceEvents.unshift(...thinkingEvents);
       }
     }
 

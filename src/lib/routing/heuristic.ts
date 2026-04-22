@@ -583,6 +583,9 @@ function dynamicRouteFromCatalog(params: {
       || params.input.mode === "general"
       || !params.complexPrompt
       || lowSignalSimpleTurn,
+    anchorModelId: preferConversationStability ? params.input.previousModelUsed : undefined,
+    preserveAnchor: preferConversationStability,
+    anchorModelBias: preferConversationStability ? 0.26 : undefined,
     requiredCapabilities,
     preferredCapabilities,
     preferredModelIds,
@@ -592,9 +595,6 @@ function dynamicRouteFromCatalog(params: {
         ...lowSignalAvoidModels,
       ]),
     ),
-    anchorModelId: preferConversationStability ? params.input.previousModelUsed : undefined,
-    preserveAnchor: preferConversationStability,
-    anchorModelBias: preferConversationStability ? 0.26 : undefined,
     runtimeStats: params.input.modelRuntimeStats,
   } as const;
   const fallbackCatalogModelId =
@@ -678,7 +678,23 @@ function dynamicRouteFromCatalog(params: {
     const picked = pickModelAndFallbacks({ ...pickParams, maxFallbacks: 4 });
     primaryModel = picked.selected?.modelId ?? ranked[0]?.model.modelId ?? fallbackCatalogModelId ?? "";
     fallbackModels = picked.fallbacks;
-    reason = "Adaptive catalog route";
+    if (
+      params.input.routerMode === "auto"
+      && params.input.mode === "tutor"
+      && params.complexPrompt
+      && primaryModel === MODEL_CONFIG.tutorFast
+    ) {
+      const strongerCheapModel = ranked.find((row) => row.model.modelId !== primaryModel)?.model.modelId;
+      if (strongerCheapModel) {
+        fallbackModels = [primaryModel, ...fallbackModels.filter((modelId) => modelId !== strongerCheapModel)];
+        primaryModel = strongerCheapModel;
+        reason = "Adaptive catalog route with complex tutor escalation";
+      } else {
+        reason = "Adaptive catalog route";
+      }
+    } else {
+      reason = "Adaptive catalog route";
+    }
   }
 
   if (!primaryModel) {
@@ -753,6 +769,12 @@ export function chooseModelRoute(input: ModelRouteInput): ModelRouteResult {
   const longMessage = input.messageLength > 1200;
   const complexPrompt = longMessage || input.thinkingLevel === "high" || input.studentSeemsStuck || tabularNeeded;
   const promptCategory = input.promptCategory ?? "general";
+  const tutorComplexityNeedsUpgrade =
+    input.routerMode === "auto"
+    && input.mode === "tutor"
+    && complexPrompt
+    && !multimodalNeeded
+    && input.spendingTier === "normal";
   const searchAuxModel = getCatalogBackedEmergencyModel({
     catalog,
     role: "search",
@@ -768,6 +790,24 @@ export function chooseModelRoute(input: ModelRouteInput): ModelRouteResult {
     routingStartedAt,
   });
   if (catalogRoute) {
+    if (tutorComplexityNeedsUpgrade && catalogRoute.primaryModel === MODEL_CONFIG.tutorFast) {
+      const strongerCheapFallback = catalogRoute.fallbackModels.find((modelId) => modelId !== MODEL_CONFIG.tutorFast);
+      if (strongerCheapFallback) {
+        return {
+          ...catalogRoute,
+          primaryModel: strongerCheapFallback,
+          fallbackModels: [catalogRoute.primaryModel, ...catalogRoute.fallbackModels.filter((modelId) => modelId !== strongerCheapFallback)],
+          reason: `${catalogRoute.reason}; complex tutor upgrade`,
+          trace: {
+            ...catalogRoute.trace,
+            selected: {
+              modelId: strongerCheapFallback,
+              reason: `${catalogRoute.reason}; complex tutor upgrade`,
+            },
+          },
+        };
+      }
+    }
     return catalogRoute;
   }
 
@@ -969,6 +1009,29 @@ export function chooseModelRoute(input: ModelRouteInput): ModelRouteResult {
       0.72,
       "Search augmentation model will run in parallel while preserving a mode-optimized primary model",
     );
+  }
+
+  if (tutorComplexityNeedsUpgrade) {
+    const upgradedModel = enforceTierWithCatalog(MODEL_CONFIG.tutorHigh, input.spendingTier, catalog);
+    const upgradedFallbacks = [
+      MODEL_CONFIG.tutorFast,
+      ...fallbackForCatalog(upgradedModel, input.spendingTier, catalog),
+    ];
+    pushCandidate(candidates, upgradedModel, input.spendingTier, 0.93, "Complex tutor route prefers stronger cheap reasoning");
+    return finalizeRoute({
+      input,
+      primaryModel: upgradedModel,
+      fallbackModels: upgradedFallbacks,
+      verificationModel: input.mode === "marker" ? getCatalogBackedEmergencyModel({ catalog, role: "verify" }) : undefined,
+      reason: "Tutor route for complex prompts with stronger cheap reasoning",
+      autoEnhanced: true,
+      searchEnabled: input.needsSearch,
+      candidates,
+      complexPrompt,
+      promptCategory,
+      multimodalNeeded,
+      routingStartedAt,
+    });
   }
 
   let baseModel: string = getCatalogBackedEmergencyModel({ catalog, role: "text" });

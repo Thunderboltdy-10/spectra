@@ -352,6 +352,7 @@ export const createChat = mutation({
     usePersonalResources: v.boolean(),
     title: v.optional(v.string()),
     allowExistingThreadReuse: v.optional(v.boolean()),
+    forceFresh: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const actor = await getUserByClerkId(ctx, args.actorClerkId);
@@ -368,7 +369,9 @@ export const createChat = mutation({
       .withIndex("by_owner_updated", (q) => q.eq("ownerUserId", actor._id))
       .collect();
 
-    if (args.allowExistingThreadReuse !== false) {
+    const allowExistingThreadReuse = args.forceFresh ? false : args.allowExistingThreadReuse !== false;
+
+    if (allowExistingThreadReuse) {
       const duplicate = existingChats
         .filter((chat) => !chat.deletedAt)
         .sort((a, b) => b.createdAt - a.createdAt)
@@ -518,20 +521,6 @@ export const getOrCreateArtifactThread = mutation({
       if (!workstream || workstream.ownerUserId !== actor._id || workstream.orgId !== actor.orgId) {
         throw new Error("Workstream not found");
       }
-    }
-
-    const existing = await ctx.db
-      .query("chats")
-      .withIndex("by_artifact", (q) => q.eq("artifactId", args.artifactId))
-      .collect()
-      .then((rows) =>
-        rows
-          .filter((row) => row.ownerUserId === actor._id && row.orgId === actor.orgId && !row.deletedAt)
-          .sort((a, b) => b.updatedAt - a.updatedAt)[0],
-      );
-
-    if (existing) {
-      return { chatId: existing._id, created: false };
     }
 
     const now = Date.now();
@@ -926,6 +915,28 @@ export const branchFromMessage = mutation({
       updatedAt: now + messageCount,
     });
 
+    await recordWorkspaceMutation(ctx, {
+      orgId: actor.orgId,
+      ownerUserId: actor._id,
+      workstreamId: sourceChat.workstreamId,
+      mutationType: "create_thread",
+      source: "user",
+      entity: "thread",
+      action: "created",
+      summary: `Created thread ${branchedTitle}`,
+      after: { chatId, branchedFromChatId: sourceChat._id, pivotMessageId: pivot._id },
+    });
+    await syncWorkspaceItemForChat(ctx, {
+      chatId,
+      ownerUserId: actor._id,
+      orgId: actor.orgId,
+      workstreamId: sourceChat.workstreamId,
+      title: branchedTitle,
+      latestUserPrompt,
+      contextSummary: sourceChat.contextSummary,
+      createdAt: now,
+      updatedAt: now + messageCount,
+    });
     await adjustWorkstreamThreadCount(ctx, sourceChat.workstreamId, 1);
 
     return { chatId };
@@ -1043,6 +1054,40 @@ export const updateChatSettings = mutation({
       workstreamId: nextWorkstreamId,
       usePersonalResources: args.usePersonalResources ?? chat.usePersonalResources,
       title: args.title ?? chat.title,
+      updatedAt: Date.now(),
+    });
+
+    await recordWorkspaceMutation(ctx, {
+      orgId: actor.orgId,
+      ownerUserId: actor._id,
+      workstreamId: chat.workstreamId,
+      targetWorkstreamId: nextWorkstreamId !== chat.workstreamId ? nextWorkstreamId : undefined,
+      mutationType: nextWorkstreamId !== chat.workstreamId ? "move_thread" : "update_thread",
+      source: "user",
+      entity: "thread",
+      action: "updated",
+      summary: `Updated thread ${args.title ?? chat.title}`,
+      before: chat,
+      after: {
+        mode: args.mode ?? chat.mode,
+        thinkingLevel: args.thinkingLevel ?? chat.thinkingLevel,
+        routerMode: args.routerMode ?? chat.routerMode,
+        manualModel: args.manualModel ?? chat.manualModel,
+        agentId: nextAgentId,
+        workstreamId: nextWorkstreamId,
+        usePersonalResources: args.usePersonalResources ?? chat.usePersonalResources,
+        title: args.title ?? chat.title,
+      },
+    });
+    await syncWorkspaceItemForChat(ctx, {
+      chatId: chat._id,
+      ownerUserId: actor._id,
+      orgId: actor.orgId,
+      workstreamId: nextWorkstreamId,
+      title: args.title ?? chat.title,
+      latestUserPrompt: chat.latestUserPrompt,
+      contextSummary: chat.contextSummary,
+      createdAt: chat.createdAt,
       updatedAt: Date.now(),
     });
 

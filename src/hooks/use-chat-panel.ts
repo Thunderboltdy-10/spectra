@@ -56,6 +56,8 @@ function toPanelMessages(messages: Array<Record<string, unknown>>): PanelChatMes
       phase: undefined,
       streaming: false,
       modelUsed: typeof message.modelUsed === "string" ? message.modelUsed : undefined,
+      activeModel: typeof (message as { activeModel?: unknown }).activeModel === "string" ? String((message as { activeModel?: unknown }).activeModel) : undefined,
+      executionPath: typeof (message as { executionPath?: unknown }).executionPath === "string" ? String((message as { executionPath?: unknown }).executionPath) : undefined,
       citations: Array.isArray(message.citations)
         ? (message.citations as Array<{ url?: string; title?: string }>)
             .map((citation) => ({
@@ -83,11 +85,6 @@ export function useChatPanel(params: UseChatPanelParams = {}) {
   const accumulatorRef = useRef(
     new ChatMessageAccumulator([], () => `msg-${++counterRef.current}-${Date.now()}`),
   );
-  const initialChatIdRef = useRef(params.initialChatId ?? null);
-
-  useEffect(() => {
-    initialChatIdRef.current = params.initialChatId ?? null;
-  }, [params.initialChatId]);
 
   const syncAccumulator = useCallback(() => {
     const nextMessages = [...accumulatorRef.current.messages];
@@ -117,8 +114,14 @@ export function useChatPanel(params: UseChatPanelParams = {}) {
     if (inflightLookupRef.current) return inflightLookupRef.current;
 
     const createPromise = (async () => {
-      if (params.threadType === "artifact_edit" && params.artifactId) {
-        const existingResponse = await fetch(`/api/chats?artifactId=${encodeURIComponent(params.artifactId)}&limit=1`);
+      const shouldHydrateExistingArtifactThread =
+        params.threadType === "artifact_edit"
+        && params.artifactId
+        && !params.title
+        && !params.initialChatId;
+
+      if (shouldHydrateExistingArtifactThread) {
+        const existingResponse = await fetch(`/api/chats?artifactId=${encodeURIComponent(params.artifactId ?? "")}&limit=1`);
         if (existingResponse.ok) {
           const existingData = (await existingResponse.json()) as { chats?: Array<{ _id: string }> };
           const existingChatId = existingData.chats?.[0]?._id;
@@ -143,6 +146,7 @@ export function useChatPanel(params: UseChatPanelParams = {}) {
         manualModel: params.manualModel,
           usePersonalResources: params.usePersonalResources ?? true,
           title: params.title,
+          allowExistingThreadReuse: false,
         }),
       });
       if (!response.ok) throw new Error("Failed to create chat");
@@ -169,6 +173,7 @@ export function useChatPanel(params: UseChatPanelParams = {}) {
     hydrateChat,
     params.artifactId,
     params.agentId,
+    params.initialChatId,
     params.mode,
     params.manualModel,
     params.routerMode,
@@ -187,7 +192,7 @@ export function useChatPanel(params: UseChatPanelParams = {}) {
   }, [hydrateChat, params.initialChatId]);
 
   useEffect(() => {
-    if (!params.artifactId || params.threadType !== "artifact_edit" || params.initialChatId) return;
+    if (!params.artifactId || params.threadType !== "artifact_edit" || params.initialChatId || params.title) return;
     const artifactId = params.artifactId;
     void (async () => {
       try {
@@ -202,7 +207,7 @@ export function useChatPanel(params: UseChatPanelParams = {}) {
         // Best-effort hydration.
       }
     })();
-  }, [hydrateChat, params.artifactId, params.initialChatId, params.threadType]);
+  }, [hydrateChat, params.artifactId, params.initialChatId, params.threadType, params.title]);
 
   const sendMessage = useCallback(async (text: string) => {
     if (!text.trim() || streaming) return;
@@ -273,20 +278,7 @@ export function useChatPanel(params: UseChatPanelParams = {}) {
       setStreaming(false);
       setStreamPhase("idle");
     }
-  }, [
-    getOrCreateChat,
-    params.agentId,
-    params.artifactId,
-    params.mode,
-    params.manualModel,
-    params.onStreamEvent,
-    params.routerMode,
-    params.scopeLevel,
-    params.thinkingLevel,
-    params.workstreamId,
-    streaming,
-    syncAccumulator,
-  ]);
+  }, [getOrCreateChat, params, streaming, syncAccumulator]);
 
   const stopGeneration = useCallback(() => {
     abortRef.current?.abort();

@@ -65,13 +65,11 @@ export function CodePreview({ code, language }: CodePreviewProps) {
 
   return (
     <div
-      className="mt-2 overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)]"
+      className="overflow-hidden bg-[var(--bg-elevated)] w-full"
       style={mermaidMode ? { contain: "layout" } : undefined}
     >
-      <div className="flex items-center justify-between border-b border-[var(--border-default)] px-3 py-1.5">
-        <span className="text-[10px] font-medium uppercase tracking-[0.1em] text-[var(--text-secondary)]">
-          Live Preview
-        </span>
+      <div className="flex items-center justify-between border-b border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-1">
+        <div></div>
         <div className="flex items-center gap-1">
           {pythonMode ? (
             <button

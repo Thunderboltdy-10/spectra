@@ -22,6 +22,13 @@ export type ChatStreamEvent = {
   result?: unknown;
   routeTrace?: unknown;
   skill?: unknown;
+  executionPath?: string;
+  segment?: {
+    id?: string;
+    label?: string;
+    content?: string;
+    status?: string;
+  };
 };
 
 export type CreateChatStreamParams = {

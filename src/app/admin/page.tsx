@@ -16,7 +16,7 @@ import { Breadcrumb } from "@/components/ui/breadcrumb";
 import { useSidebar } from "@/context/sidebar-context";
 import { cn } from "@/lib/utils";
 
-type OrgSettings = { name?: string; description?: string; schoolType?: string; timezone?: string; maxStudents?: number; maxResourceFileSizeBytes?: number; monthlyBudgetCentsPerUser?: number; budgetMarginPercent?: number; soulEnabled?: boolean; orchestratorV2Enabled?: boolean; adaptiveQuizEnabled?: boolean; spacedRepetitionEnabled?: boolean; agentModelBoostEnabled?: boolean };
+type OrgSettings = { _id?: string; name?: string; description?: string; schoolType?: string; timezone?: string; maxStudents?: number; maxResourceFileSizeBytes?: number; monthlyBudgetCentsPerUser?: number; budgetMarginPercent?: number; soulEnabled?: boolean; orchestratorV2Enabled?: boolean; adaptiveQuizEnabled?: boolean; spacedRepetitionEnabled?: boolean; agentModelBoostEnabled?: boolean };
 type OrgSettingsEnvelope = {
   org: OrgSettings;
   openRouterConfigured?: boolean;

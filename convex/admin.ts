@@ -1,5 +1,6 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import type { Id } from "./_generated/dataModel";
 import { getUserByClerkId } from "./helpers";
 import { getOpenRouterAdminWarnings, isOpenRouterConfigured } from "./env";
 

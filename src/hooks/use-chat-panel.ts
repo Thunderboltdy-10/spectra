@@ -146,7 +146,6 @@ export function useChatPanel(params: UseChatPanelParams = {}) {
         manualModel: params.manualModel,
           usePersonalResources: params.usePersonalResources ?? true,
           title: params.title,
-          allowExistingThreadReuse: false,
         }),
       });
       if (!response.ok) throw new Error("Failed to create chat");

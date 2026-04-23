@@ -179,6 +179,38 @@ function normalizePhaseStatus(value?: string): "planned" | "running" | "complete
   return "planned";
 }
 
+function normalizeVisiblePhasePlan(
+  phases: Array<{
+    id: string;
+    label: string;
+    status: "planned" | "running" | "completed" | "skipped" | "failed" | "in_progress";
+    detail?: string;
+    model?: string;
+    thinkingLevel?: ThinkingLevel;
+    startedAt?: number;
+    finishedAt?: number;
+  }>,
+  options?: { finalizeRunning?: boolean },
+) {
+  const now = Date.now();
+  return phases
+    .map((phase) => ({
+      ...phase,
+      status: normalizePhaseStatus(phase.status),
+    }))
+    .filter((phase) => phase.status !== "planned" || Boolean(phase.startedAt || phase.finishedAt || phase.detail))
+    .map((phase) => {
+      if (options?.finalizeRunning && phase.status === "running") {
+        return {
+          ...phase,
+          status: "completed" as const,
+          finishedAt: phase.finishedAt ?? now,
+        };
+      }
+      return phase;
+    });
+}
+
 function streamPhaseFromPhaseId(phaseId?: string): StreamPhase | undefined {
   if (!phaseId) return undefined;
   if (phaseId === "routing" || phaseId === "planning") return "routing";
@@ -850,6 +882,12 @@ export function useChatState() {
     const routerParam = params?.get("router") ?? null;
     const modeParam = (params?.get("mode") as StudyMode | null) ?? null;
     const chatIdParam = params?.get("chatId") ?? null;
+    const forceFreshFromQuery = (() => {
+      const raw = params?.get("new");
+      if (!raw) return false;
+      const normalized = raw.trim().toLowerCase();
+      return normalized === "1" || normalized === "true" || normalized === "yes";
+    })();
     const forceManualFromQuery =
       routerParam === "manual" &&
       Boolean(modelParam && modelParam.trim().length > 0);
@@ -872,7 +910,15 @@ export function useChatState() {
     }
 
     let firstChat: Chat | undefined;
-    if (forceManualFromQuery && !chatIdParam) {
+    if (forceFreshFromQuery) {
+      firstChat = undefined;
+      clearRecentChatActivity();
+      if (typeof window !== "undefined") {
+        const next = new URL(window.location.href);
+        next.searchParams.delete("new");
+        window.history.replaceState(null, "", `${next.pathname}${next.search}${next.hash}`);
+      }
+    } else if (forceManualFromQuery && !chatIdParam) {
       firstChat = undefined;
     } else if (chatIdParam) {
       firstChat = chats.find((chat) => chat._id === chatIdParam);
@@ -912,7 +958,7 @@ export function useChatState() {
     })();
 
     setLoading(false);
-  }, [sidebar.loading, sidebar.models, sidebar.agents, chats, getRecentChatIdFromStorage, markChatActive, syncChatIdToUrl]);
+  }, [sidebar.loading, sidebar.models, sidebar.agents, chats, getRecentChatIdFromStorage, markChatActive, syncChatIdToUrl, clearRecentChatActivity]);
 
   useEffect(() => {
     if (sidebar.loading || !initializedRef.current) return;
@@ -1283,6 +1329,13 @@ export function useChatState() {
 
   const startNewChat = useCallback(
     (agentId?: string) => {
+      if (typeof window !== "undefined") {
+        const current = new URL(window.location.href);
+        if (current.searchParams.has("new")) {
+          current.searchParams.delete("new");
+          window.history.replaceState(null, "", `${current.pathname}${current.search}${current.hash}`);
+        }
+      }
       selectedChatIdRef.current = "";
       setSelectedChatId("");
       syncChatIdToUrl(undefined);
@@ -2592,13 +2645,13 @@ export function useChatState() {
 
           if (payload.type === "phase_update") {
             if (Array.isArray(payload.phasePlan) && payload.phasePlan.length > 0) {
-              const normalized = payload.phasePlan.map((phase) => ({
-                ...phase,
-                status: normalizePhaseStatus(phase.status),
-              }));
+              const normalized = normalizeVisiblePhasePlan(payload.phasePlan);
               setLivePhasePlan(normalized);
             } else if (payload.phaseId) {
               const normalizedStatus = normalizePhaseStatus(payload.status);
+              if (normalizedStatus === "planned") {
+                continue;
+              }
               setLivePhasePlan((prev) => {
                 const existingIndex = prev.findIndex((phase) => phase.id === payload.phaseId);
                 if (existingIndex < 0) {
@@ -2681,6 +2734,12 @@ export function useChatState() {
                   },
                 };
               }
+              if (trace.phasePlan?.length) {
+                trace = {
+                  ...trace,
+                  phasePlan: normalizeVisiblePhasePlan(trace.phasePlan, { finalizeRunning: true }),
+                };
+              }
               return trace;
             })();
             if (resolvedStreamModel) {
@@ -2691,7 +2750,17 @@ export function useChatState() {
               setLiveRouteTrace(normalizedTrace);
             }
             if (normalizedTrace?.phasePlan?.length) {
-              setLivePhasePlan(normalizedTrace.phasePlan);
+              setLivePhasePlan(normalizeVisiblePhasePlan(normalizedTrace.phasePlan, { finalizeRunning: true }));
+            } else {
+              setLivePhasePlan((prev) =>
+                normalizeVisiblePhasePlan(
+                  prev.map((phase) => ({
+                    ...phase,
+                    status: phase.status === "running" ? "completed" : phase.status,
+                    finishedAt: phase.status === "running" ? Date.now() : phase.finishedAt,
+                  })),
+                ),
+              );
             }
             const workstreamAssignment = normalizedTrace?.workstreamAssignment;
             if (workstreamAssignment?.status === "assigned" && workstreamAssignment.workstreamId) {

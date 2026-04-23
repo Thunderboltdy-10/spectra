@@ -419,7 +419,6 @@ async function executeSingleAction(context: ToolCallContext, action: ActionRecor
         routerMode: "auto",
         usePersonalResources: true,
         title,
-        allowExistingThreadReuse: false,
       }) as CreateChatResult;
       const setupMessage = asOptionalTrimmedString(action.setupMessage ?? action.content, "setupMessage", { max: 3000, allowEmpty: true });
       if (setupMessage) {
@@ -752,7 +751,6 @@ async function executeSingleAction(context: ToolCallContext, action: ActionRecor
         routerMode: "auto",
         usePersonalResources: true,
         title,
-        allowExistingThreadReuse: false,
       }) as CreateChatResult;
       const messageResult = await convexMutation("chats:appendMessage", {
         actorClerkId: context.actorClerkId,
@@ -819,7 +817,6 @@ async function executeSingleAction(context: ToolCallContext, action: ActionRecor
         routerMode: "auto",
         usePersonalResources: true,
         title,
-        allowExistingThreadReuse: false,
       }) as CreateChatResult;
       const messageResult = await convexMutation("chats:appendMessage", {
         actorClerkId: context.actorClerkId,

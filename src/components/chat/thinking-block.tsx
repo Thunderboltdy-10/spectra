@@ -19,8 +19,28 @@ export function ThinkingBlock({ content, streaming = false, routeTrace, segments
   const shouldAutoScrollRef = useRef(true);
   const clean = content.trim();
   const normalizedSegments = useMemo(
-    () => segments.filter((segment) => segment.content.trim().length > 0),
-    [segments],
+    () => {
+      const explicit = segments.filter((segment) => segment.content.trim().length > 0);
+      if (explicit.length > 0) return explicit;
+      if (!clean) return [];
+      const chunks = clean
+        .split(/\n{2,}/)
+        .map((chunk) => chunk.trim())
+        .filter(Boolean);
+      return chunks.map((chunk, index) => {
+        const firstLine = chunk.split("\n")[0]?.replace(/^[#>*\-\d.\s]+/, "").trim();
+        const label = firstLine && firstLine.length > 0
+          ? (firstLine.length > 70 ? `${firstLine.slice(0, 67)}…` : firstLine)
+          : `Step ${index + 1}`;
+        return {
+          id: `derived-${index}-${label.toLowerCase().replace(/\s+/g, "-")}`,
+          label,
+          content: chunk,
+          status: streaming && index === chunks.length - 1 ? "running" : "completed",
+        };
+      });
+    },
+    [clean, segments, streaming],
   );
   const [openSegmentId, setOpenSegmentId] = useState<string | null>(
     normalizedSegments[normalizedSegments.length - 1]?.id ?? null,

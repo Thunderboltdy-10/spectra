@@ -351,8 +351,6 @@ export const createChat = mutation({
     manualModel: v.optional(v.string()),
     usePersonalResources: v.boolean(),
     title: v.optional(v.string()),
-    allowExistingThreadReuse: v.optional(v.boolean()),
-    forceFresh: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const actor = await getUserByClerkId(ctx, args.actorClerkId);
@@ -361,34 +359,6 @@ export const createChat = mutation({
     }
 
     const agentId = args.agentId;
-
-    const incomingThreadType = args.threadType ?? (args.artifactId ? "artifact_edit" : "conversation");
-
-    const existingChats = await ctx.db
-      .query("chats")
-      .withIndex("by_owner_updated", (q) => q.eq("ownerUserId", actor._id))
-      .collect();
-
-    const allowExistingThreadReuse = args.forceFresh ? false : args.allowExistingThreadReuse !== false;
-
-    if (allowExistingThreadReuse) {
-      const duplicate = existingChats
-        .filter((chat) => !chat.deletedAt)
-        .sort((a, b) => b.createdAt - a.createdAt)
-        .find(
-          (chat) =>
-            chat.orgId === actor.orgId
-            && chat.workstreamId === args.workstreamId
-            && chat.artifactId === args.artifactId
-            && chat.packId === args.packId
-            && chat.agentId === agentId
-            && chat.threadType === incomingThreadType,
-        );
-
-      if (duplicate) {
-        return { chatId: duplicate._id };
-      }
-    }
 
     if (args.packId) {
       const pack = await ctx.db.get(args.packId);

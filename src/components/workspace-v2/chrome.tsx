@@ -479,6 +479,17 @@ export type ResultIsland = {
   routeTrace?: RouteTrace;
 } | null;
 
+export type RuntimeRequestBar = {
+  id: string;
+  chatId: string;
+  prompt: string;
+  status: "pending" | "running" | "done" | "error";
+  label: string;
+  summary?: string;
+  startedAt: number;
+  updatedAt: number;
+};
+
 type CommandBarProps = {
   focusedItem: V2Item | null;
   workspace: V2Territory | null;
@@ -504,6 +515,10 @@ type CommandBarProps = {
     color: string;
     count?: number;
   } | null;
+  runtimeRequests?: RuntimeRequestBar[];
+  activeRuntimeRequestId?: string | null;
+  onSelectRuntimeRequest?: (requestId: string) => void;
+  onClearRuntimeSelection?: () => void;
 };
 
 /* Creation menu items — shared with right-click context menu in app.tsx */
@@ -520,15 +535,30 @@ export function CommandBar({
   resultIsland, onSubmit, onDismissResult, isProcessing = false,
   isStreaming = false, onStop,
   onSpotlight, onCreate, onClearFocusContext, focusContext,
+  runtimeRequests = [],
+  activeRuntimeRequestId = null,
+  onSelectRuntimeRequest,
+  onClearRuntimeSelection,
 }: CommandBarProps) {
   const [value, setValue] = useState("");
   const [showCreateMenu, setShowCreateMenu] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const handleCloseCreate = () => setShowCreateMenu(false);
     window.addEventListener("workspace:close-create-menu", handleCloseCreate);
     return () => window.removeEventListener("workspace:close-create-menu", handleCloseCreate);
   }, []);
+
+  useEffect(() => {
+    if (!showCreateMenu) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (menuRef.current?.contains(event.target as Node)) return;
+      setShowCreateMenu(false);
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    return () => document.removeEventListener("mousedown", onPointerDown);
+  }, [showCreateMenu]);
 
   const placeholder = (() => {
     if (focusContext?.kind === "focused-view") return `Ask about ${focusContext.count ?? 1} items in focus…`;
@@ -558,6 +588,70 @@ export function CommandBar({
 
   return (
     <div className="absolute left-1/2 -translate-x-1/2 bottom-8 z-40 pointer-events-auto flex flex-col items-center max-w-[92vw]">
+      {runtimeRequests.length > 0 && (
+        <div className="w-[min(760px,calc(100vw-34px))] flex flex-col gap-1.5 mb-2">
+          {runtimeRequests.slice(0, 4).map((request) => {
+            const active = request.id === activeRuntimeRequestId;
+            const statusColor =
+              request.status === "error"
+                ? "var(--coral)"
+                : request.status === "done"
+                  ? "var(--mint)"
+                  : "var(--accent)";
+            return (
+              <button
+                key={request.id}
+                type="button"
+                onClick={() => onSelectRuntimeRequest?.(request.id)}
+                className={`w-full text-left rounded-xl border px-3 py-2 transition-all ${
+                  active ? "shadow-sm" : "opacity-90 hover:opacity-100"
+                }`}
+                style={{
+                  borderColor: active ? statusColor : "var(--line)",
+                  background: active
+                    ? `color-mix(in oklab, ${statusColor} 8%, var(--paper))`
+                    : "var(--paper)",
+                }}
+                title={request.prompt}
+              >
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`inline-block h-2 w-2 rounded-full ${
+                      request.status === "pending" || request.status === "running" ? "sv2-breathe" : ""
+                    }`}
+                    style={{ background: statusColor }}
+                  />
+                  <span
+                    className="text-[12px] font-medium truncate flex-1"
+                    style={{ color: "var(--ink-100)" }}
+                  >
+                    {request.label}
+                  </span>
+                  <span className="text-[9px] font-mono uppercase tracking-[0.12em]" style={{ color: "var(--ink-400)" }}>
+                    {request.status}
+                  </span>
+                </div>
+                <div className="mt-1 text-[10px] font-mono truncate" style={{ color: "var(--ink-400)" }}>
+                  {request.prompt}
+                </div>
+              </button>
+            );
+          })}
+          {activeRuntimeRequestId && (
+            <div className="flex justify-end pr-1">
+              <button
+                type="button"
+                onClick={onClearRuntimeSelection}
+                className="text-[10px] font-mono uppercase tracking-[0.12em] opacity-70 hover:opacity-100 transition-opacity"
+                style={{ color: "var(--ink-400)" }}
+              >
+                Clear Thread Selection
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Result island — animated pill attachment with four honest states */}
       {resultIsland && (
         <div
@@ -663,7 +757,7 @@ export function CommandBar({
           rightContent={(
             <div className="flex items-center gap-1">
               {/* Plus button — opens inline creation menu */}
-        <div className="relative shrink-0">
+        <div ref={menuRef} className="relative shrink-0">
           <button
             onClick={() => setShowCreateMenu((v) => !v)}
             className="w-8 h-8 rounded-full flex items-center justify-center transition-colors hover:bg-[var(--bg2)] text-[var(--ink-400)] group"
@@ -676,6 +770,10 @@ export function CommandBar({
               className="absolute bottom-full mb-2 left-0 w-[180px] rounded-xl py-1.5 sv2-island sv2-drift-in shadow-xl"
               style={{ border: "1px solid var(--line)" }}
             >
+              <div
+                className="absolute left-4 top-full h-2 w-2 -translate-y-[1px] rotate-45"
+                style={{ background: "var(--paper)", borderRight: "1px solid var(--line)", borderBottom: "1px solid var(--line)" }}
+              />
               <div className="px-3 py-1 font-mono text-[9px] uppercase tracking-[0.16em]" style={{ color: "var(--ink-400)" }}>
                 Create here
               </div>

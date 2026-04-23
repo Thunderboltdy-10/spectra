@@ -36,8 +36,6 @@ interface ArtifactAiSurfaceProps {
   onApplyEdits?: (ops: Array<{ type: string; from: number; to: number; content?: string }>) => void;
   onDiscard?: () => void;
   workstreamId?: string;
-  panelOpen?: boolean;
-  onPanelOpenChange?: (open: boolean) => void;
 }
 
 /** Edit version record */
@@ -54,8 +52,6 @@ export function ArtifactAiSurface({
   onApplyEdits,
   onDiscard,
   workstreamId,
-  panelOpen = true,
-  onPanelOpenChange,
 }: ArtifactAiSurfaceProps) {
   const [input, setInput] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -83,11 +79,6 @@ export function ArtifactAiSurface({
     thinkingLevel: "low",
     routerMode: "auto",
   });
-  useEffect(() => {
-    if (messages.length > 0 && !panelOpen) {
-      onPanelOpenChange?.(true);
-    }
-  }, [messages.length, panelOpen, onPanelOpenChange]);
 
   // Auto-scroll
   useEffect(() => {
@@ -293,28 +284,29 @@ export function ArtifactAiSurface({
     );
   }
 
-  // Full-page context — conversational layout
-  if (!panelOpen && context === "full-page") {
-    return createPortal(
-      <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-50 w-full max-w-2xl px-4">
-        <QuickChat
-          value={input}
-          onChange={setInput}
-          onSubmit={() => {
-            onPanelOpenChange?.(true);
-            handleSend();
-          }}
-          onStop={stopGeneration}
-          isStreaming={streaming}
-          placeholder="Ask AI about this artifact..."
-        />
-      </div>,
-      document.getElementById("artifact-main-area") || document.body
-    );
-  }
+  const fullPageComposer = context === "full-page" && typeof document !== "undefined"
+    ? createPortal(
+        <div className="pointer-events-none absolute bottom-6 left-1/2 z-50 w-full max-w-3xl -translate-x-1/2 px-4">
+          <div className="pointer-events-auto mx-auto w-full max-w-2xl">
+            <QuickChat
+              value={input}
+              onChange={setInput}
+              onSubmit={handleSend}
+              onStop={stopGeneration}
+              isStreaming={streaming}
+              placeholder="Ask AI about this artifact..."
+              rightContent={<Sparkles className="w-3.5 h-3.5 text-[var(--text-tertiary)] shrink-0" />}
+            />
+          </div>
+        </div>,
+        document.getElementById("artifact-main-area") || document.body,
+      )
+    : null;
 
   return (
-    <div className="flex flex-col h-full">
+    <>
+      {fullPageComposer}
+      <div className="flex h-full flex-col">
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
         {error ? (
           <div className="rounded-xl border border-[color-mix(in_oklab,var(--danger)_24%,var(--border-default))] bg-[color-mix(in_oklab,var(--danger)_8%,var(--bg-secondary))] px-3 py-2 text-xs text-[var(--danger)]">
@@ -415,18 +407,20 @@ export function ArtifactAiSurface({
         )}
       </AnimatePresence>
 
-      {/* Composer */}
-      <div className="shrink-0 p-3 pb-8">
-        <QuickChat
-          value={input}
-          onChange={setInput}
-          onSubmit={handleSend}
-          onStop={stopGeneration}
-          isStreaming={streaming}
-          placeholder="Ask AI about this artifact..."
-          rightContent={<Sparkles className="w-3.5 h-3.5 text-[var(--text-tertiary)] shrink-0" />}
-        />
+      {context === "workspace-panel" && (
+        <div className="shrink-0 p-3 pb-8">
+          <QuickChat
+            value={input}
+            onChange={setInput}
+            onSubmit={handleSend}
+            onStop={stopGeneration}
+            isStreaming={streaming}
+            placeholder="Ask AI about this artifact..."
+            rightContent={<Sparkles className="w-3.5 h-3.5 text-[var(--text-tertiary)] shrink-0" />}
+          />
+        </div>
+      )}
       </div>
-    </div>
+    </>
   );
 }

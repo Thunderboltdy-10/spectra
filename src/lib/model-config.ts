@@ -31,8 +31,8 @@ export const MODEL_CONFIG = {
   gptOss: "meta-llama/llama-3.3-70b-instruct",
 
   // Paid tier for normal spending.
-  smartPaid: "meta-llama/llama-3.3-70b-instruct",
-  smartCheap: "google/gemini-2.5-flash",
+  smartPaid: "anthropic/claude-sonnet-4-20250514",
+  smartCheap: "google/gemini-2.5-flash-lite",
   reasoningPaid: "deepseek/deepseek-r1",
 
   // Search-focused routes.
@@ -251,7 +251,6 @@ export const ROUTER_FALLBACKS: Record<string, string[]> = {
     MODEL_CONFIG.marker,
     MODEL_CONFIG.smartCheap,
   ],
-  [MODEL_CONFIG.gptOss]: [MODEL_CONFIG.tutorHigh, MODEL_CONFIG.marker],
 
   [MODEL_CONFIG.smartPaid]: [MODEL_CONFIG.smartCheap, MODEL_CONFIG.tutorFast],
   [MODEL_CONFIG.smartCheap]: [MODEL_CONFIG.tutorFast, MODEL_CONFIG.marker],

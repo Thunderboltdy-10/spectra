@@ -485,25 +485,25 @@ export function ExecutionTimeline({
       thinkingEvents = thinkingSegments.map((seg, i) => {
         const isLast = i === thinkingSegments.length - 1;
         return {
-          id: \`thinking-seg-\${seg.id || i}\`,
+          id: `thinking-seg-${seg.id || i}`,
           kind: "thinking" as const,
-          label: seg.label || \`Thinking (\${i + 1}/\${thinkingSegments.length})\`,
+          label: seg.label || `Thinking (${i + 1}/${thinkingSegments.length})`,
           status: (streaming && isLast) ? "running" as const : "completed" as const,
           content: seg.content,
         };
       });
     } else if (thinkingContent?.trim()) {
       // Split by double newline to create paragraphs/sections
-      const chunks = thinkingContent.split(/(?:\\r?\\n){2,}/).map(s => s.trim()).filter(Boolean);
+      const chunks = thinkingContent.split(/(?:\r?\n){2,}/).map(s => s.trim()).filter(Boolean);
       thinkingEvents = chunks.map((chunk, i) => {
-        const firstLine = chunk.split("\\n")[0]?.replace(/^[#>*\\-\\d.\\s]+/, "").trim();
+        const firstLine = chunk.split("\n")[0]?.replace(/^[#>*-\d.\s]+/, "").trim();
         const label = firstLine && firstLine.length > 0
-          ? (firstLine.length > 70 ? \`\${firstLine.slice(0, 67)}…\` : firstLine)
-          : \`Thinking (\${i + 1}/\${chunks.length})\`;
+          ? (firstLine.length > 70 ? `${firstLine.slice(0, 67)}…` : firstLine)
+          : `Thinking (${i + 1}/${chunks.length})`;
         
         const isLast = i === chunks.length - 1;
         return {
-          id: \`thinking-chunk-\${i}\`,
+          id: `thinking-chunk-${i}`,
           kind: "thinking" as const,
           label,
           status: (streaming && isLast) ? "running" as const : "completed" as const,

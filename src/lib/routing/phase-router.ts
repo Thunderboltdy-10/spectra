@@ -13,6 +13,7 @@ import { runCapabilityFirstBroker } from "@/lib/model-broker";
 import {
   failsTextQualityFloor,
   isFreshForAutoRouting,
+  isHardAudioFamilyModel,
   isNonTextOnlyModel,
 } from "@/lib/runtime/model-guardrails";
 import type { AssignmentLevel, RouteTraceCandidate, RouteTracePhase, SpendingTier, StudyMode } from "@/types";
@@ -585,6 +586,7 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
     const brokerRank = brokerRankById.get(model.modelId);
     if (!brokerRank && brokerDecision.ranked.length > 0) continue;
     if (!isModelAllowedInTier(model, input.spendingTier, { lane })) continue;
+    if (!imageTurn && isHardAudioFamilyModel(model)) continue;
     if (!imageTurn && isNonTextOnlyModel(model)) continue;
     if (
       !imageTurn
@@ -625,7 +627,8 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
     const fresh = freshnessScore(model);
     const ageDays = modelAgeDays(model);
     const provider = providerFromModelId(model.modelId);
-    const cost = costFit(normalizeCost(model), input.stakes, Boolean(model.isFree || model.modelId.includes(":free")));
+    const rawCostPerM = normalizeCost(model);
+    const cost = costFit(rawCostPerM, input.stakes, Boolean(model.isFree || model.modelId.includes(":free")));
     const cacheWarm = hasWarmCache({ modelId: model.modelId, model, cacheWindow: input.cacheWindow });
     const cacheBonus = cacheWarm ? 1 : model.promptCachingSupported ? 0.58 : 0.22;
 
@@ -744,6 +747,30 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
       multiplier *= 1.04;
       breakdown.push("large_context_bonus x1.04");
       reasonTags.push("large-context fit");
+    }
+
+    if (
+      input.routerMode !== "manual"
+      && input.spendingTier === "normal"
+      && input.stakes !== "high"
+      && input.mode !== "research"
+      && input.mode !== "exam"
+      && input.mode !== "marker"
+    ) {
+      if (rawCostPerM > 12 && input.assignmentLevel !== "L4") {
+        multiplier *= 0.78;
+        breakdown.push("overpriced_turn_penalty x0.78");
+        reasonTags.push("cost discipline");
+      } else if (rawCostPerM > 8 && input.assignmentLevel !== "L4") {
+        multiplier *= 0.88;
+        breakdown.push("premium_cost_penalty x0.88");
+        reasonTags.push("cost discipline");
+      }
+      if (provider === "anthropic" && rawCostPerM > 6 && input.assignmentLevel !== "L4") {
+        multiplier *= 0.84;
+        breakdown.push("anthropic_default_penalty x0.84");
+        reasonTags.push("provider cost preference");
+      }
     }
 
     if (input.mode !== "image" && !input.hasAttachments && looksImageTunedModel(model)) {

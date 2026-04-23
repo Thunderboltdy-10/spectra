@@ -3,6 +3,10 @@
 import { useRef, useState, useEffect, useMemo, useCallback } from "react";
 import { Icon, type IconName } from "./icons";
 import type { V2Item } from "./data";
+import { MarkdownRenderer } from "@/components/chat/markdown-renderer";
+import { ThinkingBlock } from "@/components/chat/thinking-block";
+import { ExecutionTimeline } from "@/components/shared/execution-timeline";
+import type { RouteTrace } from "@/types";
 
 export type WidgetKind =
   | "timer"
@@ -729,7 +733,7 @@ export function ArtifactWidget({
       const width = rect?.width ?? (collapsed ? 120 : w);
       const height = rect?.height ?? (collapsed ? 36 : h);
       onMove(
-        Math.max(16, Math.min(window.innerWidth - width - 16, d.ox + (ev.clientX - d.sx))),
+        Math.max(8, Math.min(window.innerWidth - width, d.ox + (ev.clientX - d.sx))),
         Math.max(84, Math.min(window.innerHeight - height - 20, d.oy + (ev.clientY - d.sy))),
       );
     };
@@ -1019,6 +1023,9 @@ type ThreadWidgetProps = {
   w: number;
   h: number;
   collapsed?: boolean;
+  runtimeStatus?: "pending" | "running" | "done" | "error";
+  runtimeLabel?: string;
+  refreshToken?: number;
   onMove: (x: number, y: number) => void;
   onResize?: (w: number, h: number) => void;
   onClose: () => void;
@@ -1026,7 +1033,32 @@ type ThreadWidgetProps = {
   onExpand: () => void;
 };
 
-export function ThreadWidget({ item, x, y, w, h, collapsed, onMove, onResize, onClose, onCollapse, onExpand }: ThreadWidgetProps) {
+type ThreadWidgetMessage = {
+  id: string;
+  role: "user" | "assistant" | "system";
+  content: string;
+  thinkingContent?: string;
+  thinkingSegments?: Array<{ id: string; label: string; content: string; status: string }>;
+  routeTrace?: RouteTrace;
+  createdAt?: number;
+};
+
+export function ThreadWidget({
+  item,
+  x,
+  y,
+  w,
+  h,
+  collapsed,
+  runtimeStatus,
+  runtimeLabel,
+  refreshToken,
+  onMove,
+  onResize,
+  onClose,
+  onCollapse,
+  onExpand,
+}: ThreadWidgetProps) {
   const dragRef = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
   const frameRef = useRef<HTMLDivElement | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -1042,7 +1074,7 @@ export function ThreadWidget({ item, x, y, w, h, collapsed, onMove, onResize, on
       const width = rect?.width ?? (collapsed ? 120 : w);
       const height = rect?.height ?? (collapsed ? 36 : h);
       onMove(
-        Math.max(16, Math.min(window.innerWidth - width - 16, d.ox + (ev.clientX - d.sx))),
+        Math.max(8, Math.min(window.innerWidth - width, d.ox + (ev.clientX - d.sx))),
         Math.max(84, Math.min(window.innerHeight - height - 20, d.oy + (ev.clientY - d.sy))),
       );
     };
@@ -1057,28 +1089,92 @@ export function ThreadWidget({ item, x, y, w, h, collapsed, onMove, onResize, on
     window.addEventListener("mouseup", up);
   };
 
-  const [messages, setMessages] = useState<{ role: string; text: string }[]>(item.messages ?? []);
+  const [messages, setMessages] = useState<ThreadWidgetMessage[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
-  useEffect(() => { setMessages(item.messages ?? []); }, [item.id, item.messages]);
+
+  useEffect(() => {
+    const seeded = (item.messages ?? []).map((entry, index) => ({
+      id: `seed-${item.id}-${index}`,
+      role: entry.role === "ai" ? "assistant" : "user",
+      content: entry.text,
+      createdAt: Date.now() + index,
+    } satisfies ThreadWidgetMessage));
+    if (seeded.length > 0) {
+      setMessages(seeded);
+    } else if (!item.sourceChatId) {
+      setMessages([]);
+    }
+  }, [item.id, item.messages, item.sourceChatId]);
+
   useEffect(() => {
     if (!item.sourceChatId) return;
     let cancelled = false;
-    fetch(`/api/chat?chatId=${item.sourceChatId}`)
-      .then((r) => r.json())
+
+    void fetch(`/api/chats/${encodeURIComponent(item.sourceChatId)}`)
+      .then(async (response) => {
+        if (!response.ok) return null;
+        return response.json();
+      })
       .then((data) => {
         if (cancelled) return;
-        if (data.chat?.messages) {
-          setMessages(data.chat.messages.map((m: { role: string; content: string }) => ({ role: m.role, text: m.content })));
-        }
+        const rows = Array.isArray((data as { messages?: unknown })?.messages)
+          ? ((data as { messages: Array<Record<string, unknown>> }).messages)
+          : [];
+        const parsed = rows
+          .map((row, index) => {
+            const roleRaw = typeof row.role === "string" ? row.role : "assistant";
+            const role: ThreadWidgetMessage["role"] =
+              roleRaw === "user" || roleRaw === "assistant" || roleRaw === "system"
+                ? roleRaw
+                : "assistant";
+            return {
+              id: typeof row._id === "string" ? row._id : `thread-${index}`,
+              role,
+              content: typeof row.content === "string" ? row.content : "",
+              thinkingContent: typeof row.thinkingContent === "string" ? row.thinkingContent : undefined,
+              thinkingSegments: Array.isArray(row.thinkingSegments)
+                ? (row.thinkingSegments as Array<Record<string, unknown>>)
+                    .map((segment, segmentIndex) => {
+                      const content = typeof segment.content === "string" ? segment.content : "";
+                      if (!content.trim()) return null;
+                      const id = typeof segment.id === "string" && segment.id.trim()
+                        ? segment.id
+                        : `seg-${index}-${segmentIndex}`;
+                      const label = typeof segment.label === "string" && segment.label.trim()
+                        ? segment.label
+                        : `Step ${segmentIndex + 1}`;
+                      const status = typeof segment.status === "string" && segment.status.trim()
+                        ? segment.status
+                        : "completed";
+                      return { id, label, content, status };
+                    })
+                    .filter((segment): segment is { id: string; label: string; content: string; status: string } => Boolean(segment))
+                : undefined,
+              routeTrace: (row.routeTrace as RouteTrace | undefined),
+              createdAt: typeof row.createdAt === "number" ? row.createdAt : index,
+            } satisfies ThreadWidgetMessage;
+          })
+          .sort((left, right) => (left.createdAt ?? 0) - (right.createdAt ?? 0));
+        setMessages(parsed);
       })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [item.sourceChatId]);
+  }, [item.sourceChatId, refreshToken]);
+
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [messages.length]);
+    bottomRef.current?.scrollIntoView({
+      behavior: runtimeStatus === "running" || runtimeStatus === "pending" ? "auto" : "smooth",
+      block: "end",
+    });
+  }, [messages.length, refreshToken, runtimeStatus]);
 
   const isCollapsed = Boolean(collapsed);
+  const runtimeTone =
+    runtimeStatus === "error"
+      ? "var(--accent-coral)"
+      : runtimeStatus === "done"
+        ? "var(--success)"
+        : "var(--accent)";
 
   return (
     <div
@@ -1145,12 +1241,14 @@ export function ThreadWidget({ item, x, y, w, h, collapsed, onMove, onResize, on
             <div className="font-display text-[20px] leading-[1.15]" style={{ color: "var(--ink-100)" }}>
               {item.title}
             </div>
-            <div className="mt-2 flex items-center gap-2 text-[10.5px] font-mono" style={{ color: "var(--ink-400)" }}>
-              <span className="inline-flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--accent)" }} />
-                Quick chat is typing here
-              </span>
-            </div>
+            {runtimeLabel ? (
+              <div className="mt-2 flex items-center gap-2 text-[10.5px] font-mono" style={{ color: "var(--ink-400)" }}>
+                <span className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5" style={{ borderColor: `${runtimeTone}55`, color: runtimeTone }}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${(runtimeStatus === "running" || runtimeStatus === "pending") ? "sv2-breathe" : ""}`} style={{ background: runtimeTone }} />
+                  {runtimeLabel}
+                </span>
+              </div>
+            ) : null}
           </div>
           <div className="flex-1 overflow-y-auto sv2-slim px-6 pb-4 space-y-3" data-nodrag>
             {messages.length === 0 && (
@@ -1158,24 +1256,39 @@ export function ThreadWidget({ item, x, y, w, h, collapsed, onMove, onResize, on
                 No messages yet. Reply from the quick chat below.
               </div>
             )}
-            {messages.map((m, i) => (
-              <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+            {messages.map((m) => (
+              <div key={m.id} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
                 <div
-                  className={`max-w-[86%] text-[12.5px] leading-[1.58] rounded-xl px-3 py-2 whitespace-pre-wrap ${
-                    m.role === "user" ? "rounded-br-sm text-white" : "rounded-bl-sm"
+                  className={`max-w-[92%] rounded-xl border px-3 py-2 ${
+                    m.role === "user"
+                      ? "rounded-br-sm border-transparent bg-[var(--accent)] text-white"
+                      : "rounded-bl-sm border-[var(--line)] bg-[var(--bg2)] text-[var(--ink-200)]"
                   }`}
-                  style={{
-                    background: m.role === "user" ? "var(--accent)" : "var(--bg2)",
-                    border: `1px solid ${m.role === "user" ? "transparent" : "var(--line)"}`,
-                    color: m.role === "user" ? "#fff" : "var(--ink-200)",
-                  }}
                 >
-                  {m.text}
+                  {m.role === "assistant" ? (
+                    <div className="space-y-2">
+                      <ThinkingBlock
+                        content={m.thinkingContent ?? ""}
+                        segments={m.thinkingSegments}
+                        routeTrace={m.routeTrace}
+                        streaming={false}
+                      />
+                      <MarkdownRenderer
+                        content={m.content}
+                        mode="general"
+                      />
+                      {m.routeTrace ? (
+                        <ExecutionTimeline routeTrace={m.routeTrace} compact />
+                      ) : null}
+                    </div>
+                  ) : (
+                    <MarkdownRenderer content={m.content} userMessage={m.role === "user"} />
+                  )}
                 </div>
               </div>
             ))}
             <div ref={bottomRef} />
-                  </div>
+          </div>
           {!isCollapsed && onResize && (
             <div
               data-nodrag

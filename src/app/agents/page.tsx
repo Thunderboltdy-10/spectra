@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { Suspense } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Plus, Search } from "lucide-react";
 import { toast } from "sonner";
@@ -97,7 +98,8 @@ export default function AgentsPage() {
   }, [agents, category, query, visibility]);
 
   return (
-    <AppShell>
+    <Suspense fallback={<div className="p-10 text-center text-sm text-[var(--text-secondary)]">Loading...</div>}>
+      <AppShell>
       <div className="mb-5 flex flex-wrap items-start justify-between gap-3" data-tour="agents-header">
         <div>
           <h1 className="font-display text-2xl">Custom Agents</h1>
@@ -159,5 +161,6 @@ export default function AgentsPage() {
         </p>
       )}
     </AppShell>
+    </Suspense>
   );
 }

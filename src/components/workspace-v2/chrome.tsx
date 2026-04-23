@@ -581,7 +581,7 @@ export function CommandBar({
 
   const submit = () => {
     const trimmed = value.trim();
-    if (!trimmed || isProcessing || isStreaming) return;
+    if (!trimmed || isProcessing) return;
     onSubmit(trimmed);
     setValue("");
   };
@@ -589,8 +589,8 @@ export function CommandBar({
   return (
     <div className="absolute left-1/2 -translate-x-1/2 bottom-8 z-40 pointer-events-auto flex flex-col items-center max-w-[92vw]">
       {runtimeRequests.length > 0 && (
-        <div className="w-[min(760px,calc(100vw-34px))] flex flex-col gap-1.5 mb-2">
-          {runtimeRequests.slice(0, 4).map((request) => {
+        <div className="w-[min(760px,calc(100vw-34px))] max-h-[240px] overflow-y-auto sv2-slim flex flex-col gap-1.5 mb-2">
+          {runtimeRequests.slice(0, 6).map((request) => {
             const active = request.id === activeRuntimeRequestId;
             const statusColor =
               request.status === "error"

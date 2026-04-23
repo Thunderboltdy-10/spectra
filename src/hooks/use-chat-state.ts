@@ -9,6 +9,7 @@ import { appendToBuffer, createBufferState } from "@/lib/structured-stream-buffe
 import { useSidebar } from "@/context/sidebar-context";
 import { isModeAvailable } from "@/lib/modes";
 import { parseRecentContext } from "@/lib/orchestrator/clarification";
+import { isHardAudioFamilyModel } from "@/lib/runtime/model-guardrails";
 import { shouldRetryResourceProcessing, toClientFileStatus } from "../../shared/resource-processing";
 
 export type Chat = {
@@ -536,6 +537,7 @@ function mergeModels(catalog: ModelOption[], live: LiveModel[]) {
 
   for (const model of catalog) {
     if (!model.modelId || isLocalProvider(model.provider) || isLocalProvider(model.modelId)) continue;
+    if (isHardAudioFamilyModel(model)) continue;
     merged.set(model.modelId, {
       ...model,
       name: sanitizeModelName(model.name),
@@ -545,6 +547,7 @@ function mergeModels(catalog: ModelOption[], live: LiveModel[]) {
 
   for (const model of live) {
     if (!model.id || isLocalProvider(model.provider) || isLocalProvider(model.id)) continue;
+    if (isHardAudioFamilyModel({ modelId: model.id, name: model.name, description: model.description, tags: model.tags })) continue;
     const existing = merged.get(model.id);
     merged.set(model.id, {
       _id: existing?._id ?? model.id,
@@ -667,6 +670,7 @@ export function useChatState() {
   const abortReasonRef = useRef<AbortReason | null>(null);
   const activeStreamsRef = useRef<Set<string>>(new Set());
   const activeStreamIdsRef = useRef<Set<string>>(new Set());
+  const forceFreshChatRef = useRef(false);
   const draftResponsesRef = useRef<Map<string, string>>(new Map());
   const draftThinkingsRef = useRef<Map<string, string>>(new Map());
   const pendingLocalUserMessageIdsRef = useRef<Set<string>>(new Set());
@@ -916,6 +920,7 @@ export function useChatState() {
       if (typeof window !== "undefined") {
         const next = new URL(window.location.href);
         next.searchParams.delete("new");
+        next.searchParams.delete("fresh");
         window.history.replaceState(null, "", `${next.pathname}${next.search}${next.hash}`);
       }
     } else if (forceManualFromQuery && !chatIdParam) {
@@ -1022,6 +1027,7 @@ export function useChatState() {
     if (!initializedRef.current) return;
     syncChatIdToUrl(selectedChatId || undefined);
     if (selectedChatId) {
+      forceFreshChatRef.current = false;
       markChatActive(selectedChatId);
     }
     setLivePhasePlan([]);
@@ -1326,10 +1332,17 @@ export function useChatState() {
 
   const startNewChat = useCallback(
     (agentId?: string) => {
+      if (abortControllerRef.current) {
+        abortReasonRef.current = "new_send";
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
+      forceFreshChatRef.current = true;
       if (typeof window !== "undefined") {
         const current = new URL(window.location.href);
-        if (current.searchParams.has("new")) {
+        if (current.searchParams.has("new") || current.searchParams.has("fresh")) {
           current.searchParams.delete("new");
+          current.searchParams.delete("fresh");
           window.history.replaceState(null, "", `${current.pathname}${current.search}${current.hash}`);
         }
       }
@@ -1352,6 +1365,16 @@ export function useChatState() {
       setSearchStatusInfo(null);
       setStreamModelUsed(null);
       setLiveRouteTrace(null);
+      setLivePhasePlan([]);
+      setDraftResponses(new Map());
+      setDraftThinkings(new Map());
+      activeStreamsRef.current.clear();
+      activeStreamIdsRef.current.clear();
+      setActiveStreamIds(new Set());
+      pendingCompletionsRef.current.clear();
+      streamChatIdRef.current = null;
+      streamModelUsedRef.current = null;
+      previousSelectedChatIdRef.current = "";
       pendingLocalUserMessageIdsRef.current.clear();
       pendingLocalUserMessagesRef.current.clear();
       pendingLocalUserMessageChatIdsRef.current.clear();
@@ -1717,13 +1740,15 @@ export function useChatState() {
   }
 
   async function createChatIfNeeded(chatIdOverride?: string, modeOverride?: StudyMode) {
-    if (chatIdOverride) {
+    const overrideAllowed = Boolean(chatIdOverride && !forceFreshChatRef.current);
+    if (overrideAllowed && chatIdOverride) {
+      forceFreshChatRef.current = false;
       markChatActive(chatIdOverride);
       return chatIdOverride;
     }
 
     const currentChatId = selectedChatIdRef.current;
-    if (currentChatId) {
+    if (currentChatId && !forceFreshChatRef.current) {
       markChatActive(currentChatId);
       return currentChatId;
     }
@@ -1743,6 +1768,7 @@ export function useChatState() {
     });
     if (!response.ok) throw new Error(await response.text());
     const data = (await response.json()) as { chatId: string };
+    forceFreshChatRef.current = false;
 
     const newChat: Chat = {
       _id: data.chatId,
@@ -1902,7 +1928,8 @@ export function useChatState() {
       lastSendTimestampRef.current = now;
       lastSendContentRef.current = text;
     }
-    const targetChatId = options?.chatIdOverride || selectedChatIdRef.current || "";
+    const requestedChatOverride = forceFreshChatRef.current ? undefined : options?.chatIdOverride;
+    const targetChatId = requestedChatOverride || selectedChatIdRef.current || "";
     if (activeStreamIds.has(targetChatId) && retryAttempt === 0) return;
     const preservedText = options?.preservedText ?? text;
     const preservedFiles = options?.preservedFiles ?? [...fileList];
@@ -1920,7 +1947,7 @@ export function useChatState() {
     const messageCountBeforeSend = messages.filter((item) => item.role !== "system").length;
 
     // Capture which chat this stream belongs to
-    const streamChatId = selectedChatIdRef.current || options?.chatIdOverride || "";
+    const streamChatId = selectedChatIdRef.current || requestedChatOverride || "";
     streamChatIdRef.current = streamChatId;
     activeStreamModeRef.current = requestedMode;
     cancelledDraftPersistedRef.current = false;
@@ -1954,7 +1981,7 @@ export function useChatState() {
     }
 
     abortControllerRef.current = new AbortController();
-    let activeChatId = options?.chatIdOverride;
+    let activeChatId = requestedChatOverride;
     let chatOnlyResourceIds: string[] = [];
 
     try {
@@ -1983,7 +2010,7 @@ export function useChatState() {
         setMessages((prev) => [...prev, userMessage]);
       }
 
-      const chatId = await createChatIfNeeded(options?.chatIdOverride, requestedMode);
+      const chatId = await createChatIfNeeded(requestedChatOverride, requestedMode);
       activeChatId = chatId;
       markChatActive(chatId);
       pendingLocalUserMessageChatIdsRef.current.set(localUserMessageId, chatId);
@@ -2212,6 +2239,7 @@ export function useChatState() {
       let orchestrationNotes: string[] = [];
       let memoryUpdateAccum: { updated: boolean; summary: string } | null = null;
       let finalAgentIdForTurn = selectedAgentId;
+      let receivedDoneEvent = false;
 
       const buildThinkingContent = () => {
         const sections: string[] = [];
@@ -2541,7 +2569,16 @@ export function useChatState() {
             streamModelUsedRef.current = payload.modelUsed;
             setStreamModelUsed(payload.modelUsed);
             if (payload.routeTrace) {
-              setLiveRouteTrace(payload.routeTrace);
+              const normalizedTrace: RouteTrace = payload.routeTrace.phasePlan?.length
+                ? {
+                    ...payload.routeTrace,
+                    phasePlan: normalizeVisiblePhasePlan(payload.routeTrace.phasePlan),
+                  }
+                : payload.routeTrace;
+              setLiveRouteTrace(normalizedTrace);
+              if (normalizedTrace.phasePlan?.length) {
+                setLivePhasePlan(normalizedTrace.phasePlan);
+              }
             } else {
               setLiveRouteTrace((prev) => ({
                 ...(prev ?? {
@@ -2935,6 +2972,15 @@ export function useChatState() {
             if (typeof window !== "undefined") {
               window.dispatchEvent(new Event("ai-school:refresh-gamification"));
             }
+            activeStreamsRef.current.delete(chatId);
+            setActiveStreamIds((prev) => {
+              if (!prev.has(chatId)) return prev;
+              const next = new Set(prev);
+              next.delete(chatId);
+              return next;
+            });
+            receivedDoneEvent = true;
+            continue;
           }
 
           if (payload.type === "chat_title" && typeof payload.chatTitle === "string" && payload.chatTitle.trim()) {
@@ -2978,6 +3024,15 @@ export function useChatState() {
               typeof payload.error === "string" ? payload.error : payload.error?.message ?? "Chat stream failed";
             throw new Error(messageFromPayload);
           }
+        }
+
+        if (receivedDoneEvent) {
+          try {
+            await reader.cancel();
+          } catch {
+            // Best-effort: stream may already be closed.
+          }
+          break;
         }
       }
 

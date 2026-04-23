@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Layers, RotateCcw, Shuffle, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -218,7 +219,8 @@ export default function FlashcardsPage() {
   }
 
   return (
-    <AppShell fullBleed contentClassName="2xl:px-14">
+    <Suspense fallback={<div className="p-10 text-center text-sm text-[var(--text-secondary)]">Loading...</div>}>
+      <AppShell fullBleed contentClassName="2xl:px-14">
       <section className="space-y-6">
         <div data-tour="flashcards-header" className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -436,5 +438,6 @@ export default function FlashcardsPage() {
         </div>
       </section>
     </AppShell>
+    </Suspense>
   );
 }

@@ -21,6 +21,8 @@ export type RegisteredSkill = {
 };
 
 const SKILLS_DIR = path.join(process.cwd(), "public", "skills");
+const ONLINE_SKILLS_DIR = path.join(SKILLS_DIR, "online");
+const ONLINE_MANIFEST_PATH = path.join(ONLINE_SKILLS_DIR, "manifest.json");
 
 function readSkillMarkdown(relativeName: string) {
   const absolutePath = path.join(SKILLS_DIR, relativeName);
@@ -40,6 +42,122 @@ function markdownToGuidance(markdown?: string) {
     .map((line) => line.replace(/^[-*]\s+/, "").trim())
     .filter((line) => line.length > 0 && !line.startsWith("#"))
     .slice(0, 8);
+}
+
+function parseCategory(value: unknown): SkillCategory {
+  if (value === "visualization" || value === "code" || value === "flashcard" || value === "research" || value === "writing" || value === "math") {
+    return value;
+  }
+  return "research";
+}
+
+function parseStudyModes(value: unknown): StudyMode[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const modes = value.filter((entry): entry is StudyMode => typeof entry === "string") as StudyMode[];
+  return modes.length > 0 ? modes : undefined;
+}
+
+function parseToolBundles(value: unknown): RegisteredSkill["requiredToolBundles"] {
+  if (!Array.isArray(value)) return undefined;
+  const allowed = new Set(["skills", "search", "retrieval", "memory", "artifact", "multi_agent"]);
+  const bundles = value.filter((entry): entry is "skills" | "search" | "retrieval" | "memory" | "artifact" | "multi_agent" => typeof entry === "string" && allowed.has(entry));
+  return bundles.length > 0 ? bundles : undefined;
+}
+
+function parseAssignmentLevels(value: unknown): RegisteredSkill["preferredAssignmentLevels"] {
+  if (!Array.isArray(value)) return undefined;
+  const allowed = new Set(["L0", "L1", "L2", "L3", "L4"]);
+  const levels = value.filter((entry): entry is "L0" | "L1" | "L2" | "L3" | "L4" => typeof entry === "string" && allowed.has(entry));
+  return levels.length > 0 ? levels : undefined;
+}
+
+function parseAudience(value: unknown): RegisteredSkill["audience"] {
+  if (!Array.isArray(value)) return undefined;
+  const allowed = new Set(["student", "teacher", "admin", "general"]);
+  const audience = value.filter((entry): entry is "student" | "teacher" | "admin" | "general" => typeof entry === "string" && allowed.has(entry));
+  return audience.length > 0 ? audience : undefined;
+}
+
+function compileTrigger(value: unknown): RegExp | undefined {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  try {
+    return new RegExp(value, "i");
+  } catch {
+    return undefined;
+  }
+}
+
+function loadDownloadedOnlineSkills(): RegisteredSkill[] {
+  try {
+    if (!fs.existsSync(ONLINE_MANIFEST_PATH)) return [];
+    const raw = fs.readFileSync(ONLINE_MANIFEST_PATH, "utf8");
+    const parsed = JSON.parse(raw) as {
+      skills?: Array<{
+        id?: unknown;
+        name?: unknown;
+        category?: unknown;
+        summary?: unknown;
+        guidance?: unknown;
+        prompt?: unknown;
+        appliesToModes?: unknown;
+        trigger?: unknown;
+        priority?: unknown;
+        audience?: unknown;
+        preferredAssignmentLevels?: unknown;
+        requiredToolBundles?: unknown;
+        localPath?: unknown;
+        sourceUrl?: unknown;
+      }>;
+    };
+    const records = Array.isArray(parsed.skills) ? parsed.skills : [];
+
+    return records.flatMap((record) => {
+      const id = typeof record.id === "string" ? record.id.trim() : "";
+      if (!id) return [];
+      const name = typeof record.name === "string" && record.name.trim() ? record.name.trim() : id;
+      const category = parseCategory(record.category);
+      const summary = typeof record.summary === "string" && record.summary.trim()
+        ? record.summary.trim()
+        : "Online skill";
+      const localPath = typeof record.localPath === "string" ? record.localPath.trim() : "";
+      const absolutePath = localPath
+        ? path.join(SKILLS_DIR, localPath.replace(/^\/?public\/skills\//, ""))
+        : path.join(ONLINE_SKILLS_DIR, `${id}.md`);
+      const markdown = (() => {
+        try {
+          if (!fs.existsSync(absolutePath)) return undefined;
+          const text = fs.readFileSync(absolutePath, "utf8").trim();
+          return text.length > 0 ? text : undefined;
+        } catch {
+          return undefined;
+        }
+      })();
+      const guidance = Array.isArray(record.guidance)
+        ? (record.guidance as unknown[])
+            .filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0)
+            .slice(0, 8)
+        : markdownToGuidance(markdown);
+      const sourcePath = localPath || `/public/skills/online/${id}.md`;
+
+      return [{
+        id,
+        name,
+        category,
+        summary,
+        guidance,
+        prompt: typeof record.prompt === "string" ? record.prompt : markdown,
+        appliesToModes: parseStudyModes(record.appliesToModes),
+        trigger: compileTrigger(record.trigger),
+        priority: typeof record.priority === "number" && Number.isFinite(record.priority) ? record.priority : 3,
+        audience: parseAudience(record.audience),
+        preferredAssignmentLevels: parseAssignmentLevels(record.preferredAssignmentLevels),
+        requiredToolBundles: parseToolBundles(record.requiredToolBundles),
+        sourcePath,
+      } satisfies RegisteredSkill];
+    });
+  } catch {
+    return [];
+  }
 }
 
 const COMMUNITY_SKILLS: RegisteredSkill[] = [
@@ -200,13 +318,20 @@ const BUILTIN_SKILLS: RegisteredSkill[] = [
   },
 ];
 
-const SKILL_LIBRARY: RegisteredSkill[] = [...BUILTIN_SKILLS, ...COMMUNITY_SKILLS].map((skill) => ({
-  ...skill,
-  guidance: skill.guidance.length > 0
-    ? skill.guidance
-    : ["Follow best practices for this skill category and keep output actionable."],
-  prompt: skill.prompt,
-}));
+const DOWNLOADED_ONLINE_SKILLS = loadDownloadedOnlineSkills();
+
+const SKILL_LIBRARY: RegisteredSkill[] = Array.from(
+  new Map(
+    [...BUILTIN_SKILLS, ...COMMUNITY_SKILLS, ...DOWNLOADED_ONLINE_SKILLS]
+      .map((skill) => [skill.id, {
+        ...skill,
+        guidance: skill.guidance.length > 0
+          ? skill.guidance
+          : ["Follow best practices for this skill category and keep output actionable."],
+        prompt: skill.prompt,
+      } satisfies RegisteredSkill]),
+  ).values(),
+);
 
 export function listRegisteredSkills() {
   return SKILL_LIBRARY.slice();

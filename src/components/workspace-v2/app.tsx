@@ -526,6 +526,39 @@ function compactRuntimeSummary(value: string) {
   return normalized.length > 132 ? `${normalized.slice(0, 129)}…` : normalized;
 }
 
+function oneSentenceRuntimeSummary(value: string) {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (!normalized) return "";
+  const sentenceMatch = normalized.match(/^(.+?[.!?])(?:\s|$)/);
+  const sentence = sentenceMatch?.[1]?.trim() ?? normalized;
+  return compactRuntimeSummary(sentence);
+}
+
+function parseApiErrorMessage(raw: string, fallback: string) {
+  const trimmed = raw.trim();
+  if (!trimmed) return fallback;
+  try {
+    const parsed = JSON.parse(trimmed) as {
+      error?: { message?: string };
+      message?: string;
+    };
+    const message = parsed.error?.message ?? parsed.message;
+    if (typeof message === "string" && message.trim()) return message.trim();
+  } catch {
+    // Non-JSON error response.
+  }
+  return trimmed;
+}
+
+function normalizeRuntimeWorkstreamId(value?: string | null) {
+  const id = (value ?? "").trim();
+  if (!id) return undefined;
+  if (id.startsWith("demo-") || id.startsWith("terr-")) return undefined;
+  if (id.includes(" ")) return undefined;
+  if (id.length < 10) return undefined;
+  return id;
+}
+
 export default function WorkspaceV2() {
   /* ─── Theme ─── */
   const [theme, setTheme] = useState<"light" | "dark">("light");
@@ -1607,36 +1640,71 @@ export default function WorkspaceV2() {
   }, [committedWorkspaceId, currentTerritory?.sourceId, effectiveTerritories]);
 
   const createWorkspaceRuntimeThread = useCallback(async (workstreamId?: string | null, title?: string) => {
-    const response = await fetch("/api/chats", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        workstreamId: workstreamId ?? undefined,
-        threadType: "conversation",
-        mode: "tutor",
-        thinkingLevel: "low",
-        routerMode: "auto",
-        title,
-      }),
-    });
-    if (!response.ok) {
-      const text = await response.text().catch(() => "");
-      throw new Error(text || "Failed to create workspace thread.");
+    const create = async (candidateWorkstreamId?: string) => {
+      const response = await fetch("/api/chats", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          workstreamId: candidateWorkstreamId,
+          threadType: "conversation",
+          mode: "general",
+          thinkingLevel: "low",
+          routerMode: "auto",
+          title,
+        }),
+      });
+      if (!response.ok) {
+        const text = await response.text().catch(() => "");
+        return {
+          chatId: null as string | null,
+          error: parseApiErrorMessage(text, "Failed to create workspace thread."),
+        };
+      }
+      const data = (await response.json()) as { chatId?: string };
+      if (!data.chatId) {
+        return {
+          chatId: null as string | null,
+          error: "Chat id missing from thread creation response.",
+        };
+      }
+      return {
+        chatId: data.chatId,
+        error: null as string | null,
+      };
+    };
+
+    const scopedWorkstreamId = normalizeRuntimeWorkstreamId(workstreamId);
+    const firstAttempt = await create(scopedWorkstreamId);
+    if (firstAttempt.chatId) return firstAttempt.chatId;
+
+    // Fall back to unscoped thread creation if workspace-scoped creation fails.
+    if (scopedWorkstreamId) {
+      const retry = await create(undefined);
+      if (retry.chatId) return retry.chatId;
+      throw new Error(retry.error || firstAttempt.error || "Failed to create workspace thread.");
     }
-    const data = (await response.json()) as { chatId?: string };
-    if (!data.chatId) throw new Error("Chat id missing from thread creation response.");
-    return data.chatId;
+    throw new Error(firstAttempt.error || "Failed to create workspace thread.");
   }, []);
 
   const handleWorkspaceRuntimeEvent = useCallback((runId: string, event: ChatStreamEvent) => {
     const holder = activeRuntimeRunsRef.current.get(runId);
     if (!holder) return;
     const { run } = holder;
+    collectRuntimeTargetIds(event.result, run.targetIds);
+    collectRuntimeTargetIds(event as unknown as Record<string, unknown>, run.targetIds);
 
     const phaseLabel = runtimePhaseLabel(event);
     if (phaseLabel) {
       run.currentLabel = phaseLabel;
       upsertRuntimeRequest(runId, { status: "running", label: phaseLabel });
+    }
+
+    if (event.type === "phase_update" && typeof event.detail === "string" && event.detail.trim()) {
+      const detailLabel = oneSentenceRuntimeSummary(event.detail);
+      if (detailLabel) {
+        run.currentLabel = detailLabel;
+        upsertRuntimeRequest(runId, { status: "running", label: detailLabel });
+      }
     }
 
     if ((event.type === "route_model" || event.type === "done") && event.routeTrace) {
@@ -1647,13 +1715,13 @@ export default function WorkspaceV2() {
     if (event.type === "tool_result") {
       collectRuntimeTargetIds(event.result, run.targetIds);
       if (typeof event.summary === "string" && event.summary.trim()) {
-        run.lastSummary = compactRuntimeSummary(event.summary);
+        run.lastSummary = oneSentenceRuntimeSummary(event.summary);
         upsertRuntimeRequest(runId, { status: "running", label: run.lastSummary });
       }
     }
 
     if (event.type === "done" && typeof event.content === "string" && event.content.trim()) {
-      run.lastSummary = compactRuntimeSummary(event.content);
+      run.lastSummary = oneSentenceRuntimeSummary(event.content);
     }
 
     if (event.type === "error") {
@@ -2003,12 +2071,32 @@ export default function WorkspaceV2() {
         : scopedPrimaryItem
           ? [scopedPrimaryItem.id]
           : [];
-      let runtimeChatId: string | null = null;
-      runtimeChatId = await createWorkspaceRuntimeThread(
-        wsId,
-        raw.length > 72 ? `${raw.slice(0, 69)}…` : raw,
-      );
-      if (!runtimeChatId) return;
+      const selectedThreadBusy = activeRuntimeThreadId
+        ? runtimeRequests.some(
+            (request) =>
+              request.chatId === activeRuntimeThreadId
+              && (request.status === "pending" || request.status === "running"),
+          )
+        : false;
+
+      const runtimeWorkstreamId = isLive ? normalizeRuntimeWorkstreamId(wsId) : undefined;
+      let runtimeChatId: string;
+      try {
+        runtimeChatId = activeRuntimeThreadId && !selectedThreadBusy
+          ? activeRuntimeThreadId
+          : await createWorkspaceRuntimeThread(
+              runtimeWorkstreamId,
+              raw.length > 72 ? `${raw.slice(0, 69)}…` : raw,
+            );
+      } catch (error) {
+        const message = oneSentenceRuntimeSummary((error as Error)?.message || "Failed to create workspace thread.");
+        scheduleIslandDismiss({
+          status: "error",
+          text: message || "Failed to create workspace thread.",
+          chips: ["Workspace runtime"],
+        });
+        return;
+      }
 
       setActiveRuntimeThreadId(runtimeChatId);
       const runId = `run-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -2038,11 +2126,11 @@ export default function WorkspaceV2() {
           for await (const event of createChatStream({
             chatId: runtimeChatId!,
             message: raw,
-            mode: "tutor",
+            mode: "general",
             thinkingLevel: "low",
             routerMode: "auto",
-            workstreamId: wsId ?? undefined,
-            scopeLevel: wsId ? "workspace" : "global",
+            workstreamId: runtimeWorkstreamId,
+            scopeLevel: runtimeWorkstreamId ? "workspace" : "global",
             signal: controller.signal,
           })) {
             handleWorkspaceRuntimeEvent(runId, event);
@@ -2051,7 +2139,7 @@ export default function WorkspaceV2() {
             }
           }
 
-          await refresh();
+          void refresh();
 
           let resolvedTargetId = Array.from(run.targetIds)[0];
           if (!resolvedTargetId && commandResultCards.length > 0) {
@@ -2069,7 +2157,7 @@ export default function WorkspaceV2() {
           }
 
           const completion = run.failed
-            ? compactRuntimeSummary(run.failed)
+            ? oneSentenceRuntimeSummary(run.failed)
             : run.lastSummary || "Workspace runtime completed.";
           upsertRuntimeRequest(runId, {
             status: run.failed ? "error" : "done",
@@ -2081,7 +2169,7 @@ export default function WorkspaceV2() {
           const aborted = (error as Error)?.name === "AbortError" || run.aborted;
           const message = aborted
             ? "Stopped."
-            : compactRuntimeSummary((error as Error)?.message || "Workspace action failed.");
+            : oneSentenceRuntimeSummary((error as Error)?.message || "Workspace action failed.");
           upsertRuntimeRequest(runId, {
             status: aborted ? "done" : "error",
             label: message,
@@ -2094,7 +2182,7 @@ export default function WorkspaceV2() {
 
       if (touched.length) touchAI(touched, raw);
     },
-    [addWidget, commandResultCards, createItemAction, createWorkspaceRuntimeThread, explicitTargetItem, focusSetIds, focusViewPrimaryId, focusedItem, focusedViewOpen, getBaseItemById, handleWorkspaceRuntimeEvent, refresh, resolveWorkspaceId, runQuickStartScaffold, runtimeRequests, scheduleIslandDismiss, selection, spawnTrail, touchAI, upsertRuntimeRequest],
+    [activeRuntimeThreadId, addWidget, commandResultCards, createItemAction, createWorkspaceRuntimeThread, explicitTargetItem, focusSetIds, focusViewPrimaryId, focusedItem, focusedViewOpen, getBaseItemById, handleWorkspaceRuntimeEvent, isLive, refresh, resolveWorkspaceId, runQuickStartScaffold, runtimeRequests, scheduleIslandDismiss, selection, spawnTrail, touchAI, upsertRuntimeRequest],
   );
 
   const stopWorkspaceRuntime = useCallback(() => {
@@ -2111,10 +2199,6 @@ export default function WorkspaceV2() {
     holder?.controller.abort();
   }, [activeRuntimeThreadId]);
 
-  const runtimeBusy = useMemo(
-    () => runtimeRequests.some((request) => request.status === "pending" || request.status === "running"),
-    [runtimeRequests],
-  );
   const activeRuntimeRequestId = useMemo(() => {
     if (!activeRuntimeThreadId) return null;
     const fromActiveThread = runtimeRequests
@@ -2122,11 +2206,33 @@ export default function WorkspaceV2() {
       .sort((a, b) => b.startedAt - a.startedAt)[0];
     return fromActiveThread?.id ?? null;
   }, [activeRuntimeThreadId, runtimeRequests]);
+  const activeRuntimeRequest = useMemo(
+    () => runtimeRequests.find((request) => request.id === activeRuntimeRequestId) ?? null,
+    [activeRuntimeRequestId, runtimeRequests],
+  );
+  const activeRuntimeThreadRefreshToken = useMemo(() => {
+    if (!activeRuntimeThreadId) return 0;
+    const latest = runtimeRequests
+      .filter((request) => request.chatId === activeRuntimeThreadId)
+      .sort((a, b) => b.updatedAt - a.updatedAt)[0];
+    return latest?.updatedAt ? Math.floor(latest.updatedAt / 1000) : 0;
+  }, [activeRuntimeThreadId, runtimeRequests]);
   const selectRuntimeRequest = useCallback((requestId: string) => {
     const request = runtimeRequests.find((entry) => entry.id === requestId);
     if (!request?.chatId) return;
     setActiveRuntimeThreadId(request.chatId);
     setOpenInspectorId(null);
+    setWidgets((prev) =>
+      prev.map((widget) =>
+        widget.kind === "thread"
+          ? {
+              ...widget,
+              collapsed: false,
+              state: { ...widget.state, hidden: false },
+            }
+          : widget,
+      ),
+    );
   }, [runtimeRequests]);
   const clearRuntimeSelection = useCallback(() => {
     setActiveRuntimeThreadId(null);
@@ -3019,9 +3125,7 @@ export default function WorkspaceV2() {
         const threadPanel = widgets.find((widget) => widget.kind === "thread");
         if (!threadPanel || widgetsHidden || Boolean((threadPanel.state as Record<string, unknown>).hidden)) return null;
         const fallbackWorkspace = currentTerritory ?? effectiveTerritories[0] ?? null;
-        const runtimeRequest = activeRuntimeRequestId
-          ? runtimeRequests.find((request) => request.id === activeRuntimeRequestId)
-          : null;
+        const runtimeRequest = activeRuntimeRequest;
         const fallbackThreadItem = fallbackWorkspace
           ? ({
               id: "thread-panel",
@@ -3062,6 +3166,9 @@ export default function WorkspaceV2() {
             }}
             onCollapse={() => toggleWidgetCollapsed(threadPanel.id)}
             onExpand={() => expandWidget(threadPanel.id)}
+            runtimeStatus={activeRuntimeRequest?.status}
+            runtimeLabel={activeRuntimeRequest?.label}
+            refreshToken={activeRuntimeThreadRefreshToken}
           />
         );
       })()}
@@ -3168,7 +3275,7 @@ export default function WorkspaceV2() {
           bloomedCount={0}
           resultIsland={resultIsland}
           isProcessing={commandProcessing}
-          isStreaming={runtimeBusy}
+          isStreaming={false}
           onStop={stopWorkspaceRuntime}
           quickStarts={QUICK_STARTS}
           onSubmit={handleSendMessage}

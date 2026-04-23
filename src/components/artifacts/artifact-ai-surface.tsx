@@ -29,6 +29,7 @@ import {
 import { useChatPanel } from "@/hooks/use-chat-panel";
 import { cn } from "@/lib/utils";
 import { QuickChat } from "@/components/shared/quick-chat";
+import { notifyWorkspaceContentMutated } from "@/lib/workspace/events";
 
 interface ArtifactAiSurfaceProps {
   artifactId: string;
@@ -55,6 +56,7 @@ export function ArtifactAiSurface({
 }: ArtifactAiSurfaceProps) {
   const [input, setInput] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const lastCompletedAssistantIdRef = useRef<string | null>(null);
 
   // Discard state
   const [discardTimer, setDiscardTimer] = useState<number | null>(null);
@@ -75,7 +77,7 @@ export function ArtifactAiSurface({
     workstreamId,
     artifactId,
     threadType: "artifact_edit",
-    mode: "tutor",
+    mode: "general",
     thinkingLevel: "low",
     routerMode: "auto",
   });
@@ -84,6 +86,21 @@ export function ArtifactAiSurface({
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  useEffect(() => {
+    const lastCompletedAssistant = [...messages]
+      .reverse()
+      .find((message) => message.role === "assistant" && !message.streaming);
+    if (!lastCompletedAssistant || lastCompletedAssistant.id === lastCompletedAssistantIdRef.current) return;
+    lastCompletedAssistantIdRef.current = lastCompletedAssistant.id;
+    notifyWorkspaceContentMutated({
+      workstreamId,
+      entity: "artifact",
+      action: "updated",
+      refreshHub: true,
+      refreshWorkstreams: true,
+    });
+  }, [messages, workstreamId]);
 
   // Handle send
   const handleSend = useCallback(async () => {

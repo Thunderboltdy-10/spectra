@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -498,7 +499,8 @@ export default function SuperAdminDashboard() {
   }
 
   return (
-    <AppShell>
+    <Suspense fallback={<div className="p-10 text-center text-sm text-[var(--text-secondary)]">Loading...</div>}>
+      <AppShell>
       <div className="space-y-8">
          {/* Header */}
          <div className="flex flex-wrap items-start justify-between gap-4">
@@ -1142,5 +1144,6 @@ export default function SuperAdminDashboard() {
         )}
       </div>
     </AppShell>
+    </Suspense>
   );
 }

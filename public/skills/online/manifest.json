@@ -1,0 +1,62 @@
+{
+  "syncedAt": 1771930000000,
+  "sources": [
+    "https://raw.githubusercontent.com/openai/openai-cookbook/main/README.md",
+    "https://raw.githubusercontent.com/langchain-ai/langchain/master/README.md",
+    "https://raw.githubusercontent.com/mermaid-js/mermaid/develop/README.md"
+  ],
+  "skills": [
+    {
+      "id": "online-tool-orchestration",
+      "name": "Online Tool Orchestration",
+      "category": "research",
+      "summary": "Execute multi-tool loops with explicit progress and reliable completion handling.",
+      "guidance": [
+        "Plan-tool-verify-finalize in explicit stages.",
+        "Do not show completion before tool confirmation.",
+        "Return one-sentence completion summaries for request bars."
+      ],
+      "appliesToModes": ["general", "research", "document"],
+      "trigger": "\\b(tool|orchestrate|workflow|execute|action loop|progress)\\b",
+      "priority": 5,
+      "requiredToolBundles": ["skills", "artifact", "search"],
+      "sourceUrl": "https://raw.githubusercontent.com/openai/openai-cookbook/main/README.md",
+      "localPath": "/public/skills/online/openai-tool-orchestration.md"
+    },
+    {
+      "id": "online-subagent-coordination",
+      "name": "Online Sub-Agent Coordination",
+      "category": "code",
+      "summary": "Coordinate delegated agent tasks with strict ownership and merge discipline.",
+      "guidance": [
+        "Delegate bounded tasks only.",
+        "Avoid overlapping write scopes.",
+        "Merge and verify quickly after each sub-agent returns."
+      ],
+      "appliesToModes": ["general", "research"],
+      "trigger": "\\b(sub[- ]?agent|delegate|parallel|worker|explorer)\\b",
+      "priority": 4,
+      "requiredToolBundles": ["skills", "multi_agent"],
+      "sourceUrl": "https://raw.githubusercontent.com/langchain-ai/langchain/master/README.md",
+      "localPath": "/public/skills/online/subagent-coordination.md"
+    },
+    {
+      "id": "online-diagram-fidelity",
+      "name": "Online Diagram Fidelity",
+      "category": "visualization",
+      "summary": "Create diagrams that are readable, editable, and structurally faithful.",
+      "guidance": [
+        "Use semantic grouping and explicit labels.",
+        "Prioritize readability at default zoom.",
+        "Include a short interpretation guide."
+      ],
+      "appliesToModes": ["general", "research", "document", "explain"],
+      "trigger": "\\b(diagram|flowchart|schema|mermaid|timeline|visual)\\b",
+      "priority": 4,
+      "requiredToolBundles": ["skills", "artifact"],
+      "sourceUrl": "https://raw.githubusercontent.com/mermaid-js/mermaid/develop/README.md",
+      "localPath": "/public/skills/online/diagram-fidelity.md"
+    }
+  ],
+  "failures": []
+}

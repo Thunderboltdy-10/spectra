@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { BookmarkCheck, ExternalLink, RefreshCw, Trash2 } from "lucide-react";
@@ -127,7 +128,8 @@ export default function BookmarksPage() {
   }
 
   return (
-    <AppShell fullBleed contentClassName="2xl:px-14">
+    <Suspense fallback={<div className="p-10 text-center text-sm text-[var(--text-secondary)]">Loading...</div>}>
+      <AppShell fullBleed contentClassName="2xl:px-14">
       <section className="space-y-6">
         <div data-tour="bookmarks-header" className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -223,5 +225,6 @@ export default function BookmarksPage() {
         )}
       </section>
     </AppShell>
+    </Suspense>
   );
 }

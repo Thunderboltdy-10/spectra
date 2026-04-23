@@ -11,6 +11,7 @@ import {
 import {
   failsTextQualityFloor,
   isFrontierOpenSourceModel,
+  isHardAudioFamilyModel,
   isFreshForAutoRouting,
   isNonTextOnlyModel,
   modelAgeDays,
@@ -129,8 +130,7 @@ export function getBrokerEligibilityIssues(model: CatalogModelEntry, intent: Bro
   const mode = (intent.mode ?? "").toLowerCase();
   const imageTurn = mode === "image" || (intent.requiredCapabilities ?? []).includes("image_generation");
   if (!model?.modelId || model.modelId === 'openrouter/auto') issues.push('unsupported-router-model');
-  const normalizedModelBlob = `${model.modelId} ${model.name ?? ""} ${model.description ?? ""}`.toLowerCase();
-  if (/\b(lyria|music|song[-_ ]?gen|audio[-_ ]?gen)\b/.test(normalizedModelBlob) && !imageTurn) issues.push('excluded_audio_family');
+  if (!imageTurn && isHardAudioFamilyModel(model)) issues.push('excluded_audio_family');
   if (!imageTurn && isNonTextOnlyModel(model)) issues.push("excluded_non_text_model");
   if (!isTextChatCapableModel(model) && !supportsBrokerCapability(model, 'image_generation')) issues.push('not-text-chat-capable');
   for (const capability of intent.requiredCapabilities ?? []) {
@@ -236,7 +236,7 @@ function instructionReliability(model: CatalogModelEntry) {
   const provider = (model.provider ?? model.modelId.split('/')[0] ?? '').toLowerCase();
   let score = 0.58;
   if (/^(openai|google|moonshotai|minimax|z-ai|qwen|deepseek|mistralai|mistral|thudm|glm|stepfun|inception|arcee|arcee-ai)$/.test(provider)) score += 0.2;
-  if (/^anthropic$/.test(provider)) score += 0.04;
+  if (/^anthropic$/.test(provider)) score -= 0.02;
   if (/^(perplexity|meta|meta-llama|nousresearch|cohere)$/.test(provider)) score += 0.08;
   if (isFrontierOpenSourceModel(model)) score += 0.06;
   if (/(mini|flash|air)/i.test(model.modelId)) score -= 0.04;

@@ -433,7 +433,7 @@ export function rankCatalogModels(params: RankParams): RankedModel[] {
   for (const model of params.catalog) {
     if (!model?.modelId || avoid.has(model.modelId)) continue;
     const normalizedModelBlob = `${model.modelId} ${model.name ?? ""} ${model.description ?? ""}`.toLowerCase();
-    if (/\b(lyria|music|song[-_ ]?gen|audio[-_ ]?gen)\b/.test(normalizedModelBlob) && !imageTurn) continue;
+    if (/\b(lyria|lyra|gemini-lyra|music|song[-_ ]?gen|audio[-_ ]?gen)\b/.test(normalizedModelBlob) && !imageTurn) continue;
     if (!isModelAllowedInTier(model, params.tier, {
       lane: params.lane,
       allowManualOverride: params.allowManualOverride,

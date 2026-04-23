@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -11,7 +12,8 @@ export default function NewAgentPage() {
   const router = useRouter();
 
   return (
-    <AppShell>
+    <Suspense fallback={<div className="p-10 text-center text-sm text-[var(--text-secondary)]">Loading...</div>}>
+      <AppShell>
       <div className="mx-auto w-full max-w-5xl">
         {/* Back link */}
         <Link
@@ -53,5 +55,6 @@ export default function NewAgentPage() {
         </div>
       </div>
     </AppShell>
+    </Suspense>
   );
 }

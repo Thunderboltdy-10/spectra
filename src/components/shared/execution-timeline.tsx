@@ -346,10 +346,16 @@ function routeTraceToEvents(trace: RouteTrace, streaming: boolean): ExecutionEve
   // Phase plan events
   if (trace.phasePlan && trace.phasePlan.length > 0) {
     for (const phase of trace.phasePlan) {
+      if (phase.status === "planned") continue;
+
       // Find subcalls for this phase
       const phaseSubcalls = trace.subcalls?.filter(
         (sc) => sc.phaseId === phase.id
       );
+      const normalizedStatus: ExecutionEventStatus =
+        !streaming && phase.status === "running"
+          ? "completed"
+          : phaseStatusToEventStatus(phase.status);
 
       const children: ExecutionEvent[] = (phaseSubcalls ?? []).map((sc) => ({
         id: sc.id,
@@ -366,7 +372,7 @@ function routeTraceToEvents(trace: RouteTrace, streaming: boolean): ExecutionEve
         id: phase.id,
         kind: inferEventKind(phase),
         label: phase.label,
-        status: phaseStatusToEventStatus(phase.status),
+        status: normalizedStatus,
         detail: phase.detail,
         durationMs:
           phase.startedAt && phase.finishedAt

@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import { useEffect, useMemo, useState } from "react";
 import {
   Award,
@@ -123,8 +124,9 @@ export default function AchievementsPage() {
   }, [data?.catalog, unlockedByType]);
 
   return (
-    <AppShell fullBleed contentClassName="2xl:px-14">
-      <section className="space-y-6">
+    <Suspense fallback={<div className="p-10 text-center text-sm text-[var(--text-secondary)]">Loading...</div>}>
+      <AppShell fullBleed contentClassName="2xl:px-14">
+        <section className="space-y-6">
         <header data-tour="achievements-header" className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h1 className="font-display text-3xl">Achievements</h1>
@@ -211,5 +213,6 @@ export default function AchievementsPage() {
         )}
       </section>
     </AppShell>
+    </Suspense>
   );
 }

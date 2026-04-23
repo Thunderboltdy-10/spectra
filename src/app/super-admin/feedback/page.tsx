@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
@@ -185,7 +186,8 @@ export default function SuperAdminFeedbackInboxPage() {
   }
 
   return (
-    <AppShell>
+    <Suspense fallback={<div className="p-10 text-center text-sm text-[var(--text-secondary)]">Loading...</div>}>
+      <AppShell>
       <div className="space-y-6">
         <div className="flex flex-wrap items-start justify-between gap-4" data-tour="super-feedback-header">
           <div>
@@ -471,5 +473,6 @@ export default function SuperAdminFeedbackInboxPage() {
         </div>
       </div>
     </AppShell>
+    </Suspense>
   );
 }

@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { ChatSidebar } from "@/components/chat/chat-sidebar";
 import { useSidebar } from "@/context/sidebar-context";
@@ -287,23 +287,27 @@ const PAGE_TOUR_STEPS: Record<string, GuidedTourStep[]> = {
 
 const NON_BLOCKING_TOUR_PATHS = new Set(["/workspace"]);
 
-export function AppShell({
+function AppShellInner({
   children,
-  fullBleed = false,
-  noScroll = false,
+  fullBleed,
+  noScroll,
   contentClassName,
 }: {
   children: React.ReactNode;
-  fullBleed?: boolean;
-  noScroll?: boolean;
+  fullBleed: boolean;
+  noScroll: boolean;
   contentClassName?: string;
 }) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const router = useRouter();
   const sidebar = useSidebar();
   const [tourOpen, setTourOpen] = useState(false);
 
-  const selectedChatId = "";
+  const selectedChatId =
+    pathname === "/chat"
+      ? (searchParams.get("chatId") ?? "")
+      : "";
   const pageTourSteps = useMemo(
     () => PAGE_TOUR_STEPS[pathname] ?? BASE_TOUR_STEPS,
     [pathname],
@@ -377,7 +381,7 @@ export function AppShell({
             } catch {
               // Ignore storage failures.
             }
-            router.push("/chat?new=1");
+            router.push(`/chat?new=1&fresh=${Date.now()}`);
             window.dispatchEvent(new Event("ai-school:new-chat"));
           }}
           onDeleteChat={(chatId) => {
@@ -430,5 +434,25 @@ export function AppShell({
         />
       ) : null}
     </div>
+  );
+}
+
+export function AppShell({
+  children,
+  fullBleed = false,
+  noScroll = false,
+  contentClassName,
+}: {
+  children: React.ReactNode;
+  fullBleed?: boolean;
+  noScroll?: boolean;
+  contentClassName?: string;
+}) {
+  return (
+    <Suspense fallback={<div className="h-screen" />}>
+      <AppShellInner fullBleed={fullBleed} noScroll={noScroll} contentClassName={contentClassName}>
+        {children}
+      </AppShellInner>
+    </Suspense>
   );
 }

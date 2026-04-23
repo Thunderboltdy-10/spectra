@@ -407,19 +407,6 @@ export function ArtifactAiSurface({
         )}
       </AnimatePresence>
 
-      {context === "workspace-panel" && (
-        <div className="shrink-0 p-3 pb-8">
-          <QuickChat
-            value={input}
-            onChange={setInput}
-            onSubmit={handleSend}
-            onStop={stopGeneration}
-            isStreaming={streaming}
-            placeholder="Ask AI about this artifact..."
-            rightContent={<Sparkles className="w-3.5 h-3.5 text-[var(--text-tertiary)] shrink-0" />}
-          />
-        </div>
-      )}
       </div>
     </>
   );

@@ -2003,16 +2003,11 @@ export default function WorkspaceV2() {
         : scopedPrimaryItem
           ? [scopedPrimaryItem.id]
           : [];
-      const selectedThreadBusy = activeRuntimeThreadId
-        ? runtimeRequests.some((request) => request.chatId === activeRuntimeThreadId && (request.status === "pending" || request.status === "running"))
-        : false;
-      let runtimeChatId = activeRuntimeThreadId;
-      if (!runtimeChatId || selectedThreadBusy) {
-        runtimeChatId = await createWorkspaceRuntimeThread(
-          wsId,
-          raw.length > 72 ? `${raw.slice(0, 69)}…` : raw,
-        );
-      }
+      let runtimeChatId: string | null = null;
+      runtimeChatId = await createWorkspaceRuntimeThread(
+        wsId,
+        raw.length > 72 ? `${raw.slice(0, 69)}…` : raw,
+      );
       if (!runtimeChatId) return;
 
       setActiveRuntimeThreadId(runtimeChatId);
@@ -2099,7 +2094,7 @@ export default function WorkspaceV2() {
 
       if (touched.length) touchAI(touched, raw);
     },
-    [activeRuntimeThreadId, addWidget, commandResultCards, createItemAction, createWorkspaceRuntimeThread, explicitTargetItem, focusSetIds, focusViewPrimaryId, focusedItem, focusedViewOpen, getBaseItemById, handleWorkspaceRuntimeEvent, refresh, resolveWorkspaceId, runQuickStartScaffold, runtimeRequests, scheduleIslandDismiss, selection, spawnTrail, touchAI, upsertRuntimeRequest],
+    [addWidget, commandResultCards, createItemAction, createWorkspaceRuntimeThread, explicitTargetItem, focusSetIds, focusViewPrimaryId, focusedItem, focusedViewOpen, getBaseItemById, handleWorkspaceRuntimeEvent, refresh, resolveWorkspaceId, runQuickStartScaffold, runtimeRequests, scheduleIslandDismiss, selection, spawnTrail, touchAI, upsertRuntimeRequest],
   );
 
   const stopWorkspaceRuntime = useCallback(() => {

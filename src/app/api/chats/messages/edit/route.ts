@@ -17,6 +17,9 @@ export async function POST(request: NextRequest) {
     if (!messageId || !newContent) {
       return badRequest("messageId and newContent are required");
     }
+    if (messageId.startsWith("local-") || messageId.startsWith("msg-")) {
+      return badRequest("Cannot edit a message that has not been persisted yet");
+    }
 
     const result = await convexMutation("chats:editMessageAsSibling", {
       actorClerkId: actor.clerkId,

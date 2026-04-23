@@ -929,10 +929,7 @@ export function useChatState() {
         }
       }
     } else {
-      const recentChatId = getRecentChatIdFromStorage();
-      if (recentChatId) {
-        firstChat = chats.find((chat) => chat._id === recentChatId);
-      }
+      clearRecentChatActivity();
     }
     if (firstChat?._id) {
       selectedChatIdRef.current = firstChat._id;
@@ -3544,6 +3541,7 @@ export function useChatState() {
     if (!selectedChatId) return;
     const clean = newContent.trim();
     if (!clean || sending) return;
+    if (messageId.startsWith("local-")) return;
 
     const response = await fetch("/api/chats/messages/edit", {
       method: "POST",
@@ -3573,6 +3571,7 @@ export function useChatState() {
   }
 
   async function branchFromMessage(messageId: string) {
+    if (messageId.startsWith("local-")) return;
     const response = await fetch("/api/chats/messages/branch", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -3593,7 +3592,7 @@ export function useChatState() {
 
   async function toggleBookmark(messageId: string) {
     const chatId = selectedChatIdRef.current;
-    if (!chatId || !messageId || bookmarkingMessageId) return;
+    if (!chatId || !messageId || bookmarkingMessageId || messageId.startsWith("local-")) return;
 
     const currentlyBookmarked = bookmarkedMessageIds.has(messageId);
     setBookmarkingMessageId(messageId);

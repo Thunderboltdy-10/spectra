@@ -15,6 +15,9 @@ export async function POST(request: NextRequest) {
     if (!messageId) {
       return badRequest("messageId is required");
     }
+    if (messageId.startsWith("local-") || messageId.startsWith("msg-")) {
+      return badRequest("Cannot branch from a message that has not been persisted yet");
+    }
 
     const result = await convexMutation("chats:branchFromMessage", {
       actorClerkId: actor.clerkId,

@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/layout/app-shell";
@@ -142,7 +143,8 @@ export default function AnalyticsPage() {
   }, [range.endDate, range.startDate]);
 
   return (
-    <AppShell fullBleed contentClassName="2xl:px-14">
+    <Suspense fallback={<div className="p-10 text-center text-sm text-[var(--text-secondary)]">Loading...</div>}>
+      <AppShell fullBleed contentClassName="2xl:px-14">
       <div data-tour="analytics-header" className="mb-6">
         <h1 className="font-display text-3xl">Analytics</h1>
         <p className="mt-1 text-sm text-[var(--text-secondary)]">Track your study progress and learning patterns</p>
@@ -169,5 +171,6 @@ export default function AnalyticsPage() {
         </div>
       )}
     </AppShell>
+    </Suspense>
   );
 }

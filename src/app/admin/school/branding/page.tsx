@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
@@ -139,7 +140,8 @@ export default function SchoolBrandingPage() {
     "h-10 w-full rounded-xl border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-sm text-[var(--text-primary)] outline-none transition focus:ring-2 focus:ring-[var(--accent-cyan)]";
 
   return (
-    <AppShell>
+    <Suspense fallback={<div className="p-10 text-center text-sm text-[var(--text-secondary)]">Loading...</div>}>
+      <AppShell>
       <div className="space-y-6">
         {/* Header */}
         <div className="flex flex-wrap items-start justify-between gap-4" data-tour="branding-header">
@@ -337,5 +339,6 @@ export default function SchoolBrandingPage() {
         </div>
       </div>
     </AppShell>
+    </Suspense>
   );
 }

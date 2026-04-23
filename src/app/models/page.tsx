@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -545,7 +546,7 @@ export default function ModelsPage() {
         : "Largest context";
 
   if (loading) {
-    return (
+    return <Suspense fallback={<div className="p-10 text-center text-sm text-[var(--text-secondary)]">Loading...</div>}>
       <AppShell>
         <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
           {Array.from({ length: 9 }).map((_, index) => (
@@ -553,10 +554,10 @@ export default function ModelsPage() {
           ))}
         </div>
       </AppShell>
-    );
+    </Suspense>;
   }
 
-  return (
+  return <Suspense fallback={<div className="p-10 text-center text-sm text-[var(--text-secondary)]">Loading...</div>}>
     <AppShell fullBleed contentClassName="2xl:px-14">
       <section data-tour="models-header">
         <div className="mb-4">
@@ -772,5 +773,5 @@ export default function ModelsPage() {
         </aside>
       </div>
     </AppShell>
-  );
+    </Suspense>;
 }

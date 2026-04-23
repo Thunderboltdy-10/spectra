@@ -94,6 +94,7 @@ export async function recordModelUsage(params: {
       ? Math.max(0, params.openRouterCost)
       : undefined;
   const skipIfZeroTokens = params.skipIfZeroTokens ?? true;
+  const isLocalId = (id?: string) => !id || id.startsWith("local-") || id.startsWith("msg-");
   if (!actorClerkId || !model) return false;
   if (skipIfZeroTokens && inputTokens + outputTokens <= 0 && !openRouterCost) return false;
 
@@ -106,8 +107,8 @@ export async function recordModelUsage(params: {
   try {
     await convexMutation("usage:recordUsageWithCost", {
       actorClerkId,
-      chatId: params.chatId,
-      messageId: params.messageId,
+      chatId: isLocalId(params.chatId) ? undefined : params.chatId,
+      messageId: isLocalId(params.messageId) ? undefined : params.messageId,
       model,
       inputTokens,
       outputTokens,
@@ -128,8 +129,8 @@ export async function recordModelUsage(params: {
       try {
         await convexMutation("usage:recordUsageWithCost", {
           actorClerkId,
-          chatId: params.chatId,
-          messageId: params.messageId,
+          chatId: isLocalId(params.chatId) ? undefined : params.chatId,
+          messageId: isLocalId(params.messageId) ? undefined : params.messageId,
           model,
           inputTokens,
           outputTokens,
@@ -247,11 +248,12 @@ export async function recordSearchUsage(params: {
       : 0;
   if (creditsUsed <= 0 && typeof params.costCents !== "number") return false;
 
+  const isLocalId = (id?: string) => !id || id.startsWith("local-") || id.startsWith("msg-");
   try {
     await convexMutation("usage:recordSearchUsage", {
       actorClerkId,
-      chatId: params.chatId,
-      messageId: params.messageId,
+      chatId: isLocalId(params.chatId) ? undefined : params.chatId,
+      messageId: isLocalId(params.messageId) ? undefined : params.messageId,
       provider: params.provider,
       operation: params.operation,
       creditsUsed,

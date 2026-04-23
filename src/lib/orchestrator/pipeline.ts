@@ -1136,7 +1136,7 @@ export async function runChatPipeline(request: NextRequest) {
   }
   const latestUserMessageInHistory = [...history].reverse().find((message) => message.role === "user");
   const requestedParentMessageId =
-    typeof body.parentMessageId === "string" && body.parentMessageId.trim().length > 0
+    typeof body.parentMessageId === "string" && body.parentMessageId.trim().length > 0 && !body.parentMessageId.startsWith("local-")
       ? body.parentMessageId.trim()
       : undefined;
   const requestedParentExists = requestedParentMessageId

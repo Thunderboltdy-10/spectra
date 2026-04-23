@@ -17,23 +17,23 @@ declare global {
 }
 
 export const MODEL_CONFIG = {
-  utilityFree: "z-ai/glm-4.5-air:free",
-  tutorFast: "z-ai/glm-4.5-air:free",
-  tutorHigh: "moonshotai/kimi-k2:free",
-  marker: "qwen/qwen3-next-80b-a3b-instruct:free",
-  markerHard: "deepseek/deepseek-r1-0528:free",
-  multimodal: "qwen/qwen2.5-vl-72b-instruct:free",
-  verify: "openai/gpt-5.4-mini",
+  utilityFree: "google/gemini-2.0-flash-exp:free",
+  tutorFast: "google/gemini-2.0-flash-exp:free",
+  tutorHigh: "meta-llama/llama-3.3-70b-instruct",
+  marker: "qwen/qwen-2.5-coder-32b-instruct",
+  markerHard: "deepseek/deepseek-r1",
+  multimodal: "google/gemini-2.5-flash",
+  verify: "meta-llama/llama-3.3-70b-instruct",
   autoRouter: "openrouter/auto",
-  embedding: "openai/text-embedding-3-large",
-  promptEnhance: "stepfun/step-3.5-flash:free",
-  glmAir: "z-ai/glm-4.5-air:free",
-  gptOss: "openai/gpt-oss-120b:free",
+  embedding: "nomic-ai/nomic-embed-text-v1.5",
+  promptEnhance: "google/gemini-2.0-flash-exp:free",
+  glmAir: "google/gemini-2.0-flash-exp:free",
+  gptOss: "meta-llama/llama-3.3-70b-instruct",
 
   // Paid tier for normal spending.
-  smartPaid: "minimax/minimax-m1",
-  smartCheap: "z-ai/glm-4.5-air",
-  reasoningPaid: "moonshotai/kimi-k2",
+  smartPaid: "meta-llama/llama-3.3-70b-instruct",
+  smartCheap: "google/gemini-2.5-flash",
+  reasoningPaid: "deepseek/deepseek-r1",
 
   // Search-focused routes.
   searchFast: "perplexity/sonar",

@@ -92,7 +92,8 @@ function hashContent(value: string) {
 function TagSkeleton({ type }: { type: "quiz" | "flashcard" | "document" }) {
   if (type === "quiz") {
     return (
-      <div className="animate-pulse space-y-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
+      <div className="relative overflow-hidden space-y-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
+        <div className="absolute inset-0 -translate-x-full animate-[shimmer_2s_infinite] bg-gradient-to-r from-transparent via-[var(--bg-secondary)] to-transparent opacity-30" />
         <div className="flex items-center gap-2">
           <div className="h-5 w-5 rounded bg-[var(--mode-quiz)]/20" />
           <div className="h-4 w-32 rounded bg-[var(--bg-secondary)]" />
@@ -116,7 +117,8 @@ function TagSkeleton({ type }: { type: "quiz" | "flashcard" | "document" }) {
 
   if (type === "flashcard") {
     return (
-      <div className="animate-pulse space-y-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
+      <div className="relative overflow-hidden space-y-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
+        <div className="absolute inset-0 -translate-x-full animate-[shimmer_2s_infinite] bg-gradient-to-r from-transparent via-[var(--bg-secondary)] to-transparent opacity-30" />
         <div className="flex items-center gap-2">
           <div className="h-5 w-5 rounded bg-[var(--mode-flashcard)]/20" />
           <div className="h-4 w-36 rounded bg-[var(--bg-secondary)]" />
@@ -135,7 +137,8 @@ function TagSkeleton({ type }: { type: "quiz" | "flashcard" | "document" }) {
 
   // Document skeleton
   return (
-    <div className="animate-pulse space-y-2.5 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
+    <div className="relative overflow-hidden space-y-2.5 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
+      <div className="absolute inset-0 -translate-x-full animate-[shimmer_2s_infinite] bg-gradient-to-r from-transparent via-[var(--bg-secondary)] to-transparent opacity-30" />
       <div className="flex items-center gap-2">
         <div className="h-5 w-5 rounded bg-[var(--mode-document)]/20" />
         <div className="h-4 w-40 rounded bg-[var(--bg-secondary)]" />
@@ -418,34 +421,31 @@ export function ChatMessages({
     if (!element) return;
     scrollContainerRef.current = element;
 
-    const handleUserInteraction = () => {
-      shouldAutoScrollRef.current = false;
-    };
-
     let rafId = 0;
     const onScroll = () => {
       rafId = requestAnimationFrame(() => {
         const scrollTop = element.scrollTop;
+        const isScrollingUp = scrollTop < lastScrollTopRef.current;
+        lastScrollTopRef.current = scrollTop;
+
         const deltaFromBottom = element.scrollHeight - scrollTop - element.clientHeight;
         const nearBottom = deltaFromBottom < 100;
 
         if (nearBottom) {
           shouldAutoScrollRef.current = true;
+        } else if (isScrollingUp) {
+          shouldAutoScrollRef.current = false;
         }
 
         setShowJumpButton(deltaFromBottom > 120);
-        lastScrollTopRef.current = scrollTop;
       });
     };
 
     onScroll();
     element.addEventListener("scroll", onScroll);
-    element.addEventListener("wheel", handleUserInteraction, { passive: true });
-    element.addEventListener("touchmove", handleUserInteraction, { passive: true });
+    
     return () => {
       element.removeEventListener("scroll", onScroll);
-      element.removeEventListener("wheel", handleUserInteraction);
-      element.removeEventListener("touchmove", handleUserInteraction);
       if (rafId) cancelAnimationFrame(rafId);
     };
   }, []);
@@ -1488,86 +1488,72 @@ export function ChatMessages({
               </div>
             </article>
           ) : visibleDraftResponse ? (
-            <article className="chat-fade-in flex justify-start" aria-label="Assistant response">
-              <div className="w-full max-w-5xl xl:max-w-6xl">
-                <div className="message-journal flex min-w-0 items-start gap-3 px-1 py-4">
-                  <ProviderLogo
-                    provider={activeProvider}
-                    modelId={streamingModelId}
-                    className="mt-0.5 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)]"
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="mb-4 flex flex-wrap items-center gap-2 text-xs text-[var(--text-secondary)]">
-                      <span>{modelLabel(streamingModelId)}</span>
-                      <span className="h-1 w-1 rounded-full bg-[var(--border-default)]" />
-                      <span className="thinking-wave">{streamingStatus}</span>
+            <div className="chat-fade-in">
+              <ChatMessage
+                role="assistant"
+                content={streamingOpenTag ? "" : visibleDraftResponse}
+                thinkingContent={hasRealThinking ? draftThinking : ""}
+                routeTrace={runtimeRouteTrace ?? undefined}
+                modelUsed={streamingModelId}
+                mode={mode}
+                isLastAssistant={false}
+                animateIn={false}
+              >
+                {streamingOpenTag ? (() => {
+                  const tagPattern = /<<(?:quiz|flashcard|flashcards|document|doc)_?start>>/i;
+                  const match = visibleDraftResponse.match(tagPattern);
+                  const preamble = match?.index !== undefined ? visibleDraftResponse.slice(0, match.index).trim() : "";
+                  const structuredContent = match?.index !== undefined ? visibleDraftResponse.slice(match.index + match[0].length).trim() : "";
+                  
+                  return (
+                    <div className="space-y-4">
+                      {preamble ? renderDraftMarkdown(preamble) : null}
+                      
+                      {streamingOpenTag === "flashcard" && structuredContent ? (
+                        <FlashcardReveal content={structuredContent} />
+                      ) : streamingOpenTag === "quiz" && structuredContent ? (
+                        <QuizReveal 
+                          content={structuredContent} 
+                          chatId={chatId} 
+                          difficulty={inferQuizDifficulty(runtimeRouteTrace?.toolchain)}
+                          autoOpen={false} 
+                        />
+                      ) : null}
+                      
+                      <TagSkeleton type={streamingOpenTag} />
                     </div>
-                    {(runtimeRouteTrace || (hasRealThinking && draftThinking)) ? (
-                      <ThinkingBlock
-                        content={hasRealThinking ? draftThinking ?? "" : ""}
-                        routeTrace={runtimeRouteTrace ?? undefined}
-                        streaming={sending}
-                      />
-                    ) : null}
-                    {streamingOpenTag ? (() => {
-                      const tagPattern = /<<(?:quiz|flashcard|flashcards|document|doc)_?start>>/i;
-                      const match = visibleDraftResponse.match(tagPattern);
-                      const preamble = match?.index ? visibleDraftResponse.slice(0, match.index).trim() : "";
-                      return (
-                        <>
-                          {preamble ? renderDraftMarkdown(preamble) : null}
-                          <TagSkeleton type={streamingOpenTag} />
-                        </>
-                      );
-                    })() : renderDraftMarkdown(visibleDraftResponse)}
-                    {showStreamCursor ? (
-                      <span className={`stream-cursor ${sending ? "" : "stream-cursor--fade"}`} aria-hidden>
-                        |
-                      </span>
-                    ) : null}
-                    <div className="mt-5 flex flex-wrap items-center gap-1.5 opacity-40">
-                      <span className="h-7 w-14 animate-pulse rounded bg-[var(--bg-secondary)]" />
-                      <span className="h-7 w-20 animate-pulse rounded bg-[var(--bg-secondary)]" />
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </article>
+                  );
+                })() : null}
+                {showStreamCursor && !streamingOpenTag ? (
+                  <span className={`stream-cursor ${sending ? "" : "stream-cursor--fade"}`} aria-hidden>
+                    |
+                  </span>
+                ) : null}
+              </ChatMessage>
+            </div>
           ) : null}
 
           {sending && !visibleDraftResponse && (
-            <article className="chat-fade-in flex justify-start" aria-label="Assistant thinking">
-              <div className="w-full max-w-5xl xl:max-w-6xl">
-                <div className="message-journal flex min-w-0 items-start gap-3 px-1 py-4">
-                  <ProviderLogo
-                    provider={activeProvider}
-                    modelId={streamingModelId}
-                    className="mt-0.5 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)]"
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="mb-4 flex flex-wrap items-center gap-2 text-xs text-[var(--text-secondary)]">
-                      <span>{modelLabel(streamingModelId)}</span>
-                      <span className="h-1 w-1 rounded-full bg-[var(--border-default)]" />
-                      <span className="thinking-wave">{streamingStatus}</span>
-                    </div>
-                    {(runtimeRouteTrace || (hasRealThinking && draftThinking)) ? (
-                      <ThinkingBlock
-                        content={hasRealThinking ? draftThinking ?? "" : ""}
-                        routeTrace={runtimeRouteTrace ?? undefined}
-                        streaming={sending}
-                      />
-                    ) : null}
-                    {!hasRealThinking && activeCollaborators.length === 0 ? (
-                      <div className="space-y-2">
-                        <div className="h-4 w-3/4 animate-pulse rounded bg-[var(--bg-secondary)]" />
-                        <div className="h-4 w-1/2 animate-pulse rounded bg-[var(--bg-secondary)]" />
-                        <div className="h-4 w-5/6 animate-pulse rounded bg-[var(--bg-secondary)]" />
-                      </div>
-                    ) : null}
+            <div className="chat-fade-in">
+              <ChatMessage
+                role="assistant"
+                content=""
+                thinkingContent={hasRealThinking ? draftThinking : ""}
+                routeTrace={runtimeRouteTrace ?? undefined}
+                modelUsed={streamingModelId}
+                mode={mode}
+                isLastAssistant={false}
+                animateIn={false}
+              >
+                {!hasRealThinking && activeCollaborators.length === 0 ? (
+                  <div className="space-y-2 mt-2">
+                    <div className="h-4 w-3/4 animate-pulse rounded bg-[var(--bg-secondary)]" />
+                    <div className="h-4 w-1/2 animate-pulse rounded bg-[var(--bg-secondary)]" />
+                    <div className="h-4 w-5/6 animate-pulse rounded bg-[var(--bg-secondary)]" />
                   </div>
-                </div>
-              </div>
-            </article>
+                ) : null}
+              </ChatMessage>
+            </div>
           )}
 
           {streamError && (

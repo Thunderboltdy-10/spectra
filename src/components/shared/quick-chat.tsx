@@ -196,53 +196,56 @@ export function QuickChat({
       )}
 
 
-      <div
-        className={cn(
-          "relative flex flex-col gap-0 rounded-[20px] border",
-          "border-[var(--border-default)]/40 bg-[var(--bg-elevated)]/95 backdrop-blur-xl",
-          "transition-all duration-300 ease-[var(--ease-standard)]",
-          focused
-            ? "shadow-[0_18px_48px_-14px_rgba(8,22,40,0.26),0_4px_18px_-10px_rgba(8,22,40,0.16)] border-[color-mix(in_oklab,var(--accent-cyan)_25%,var(--border-default))]"
-            : "shadow-[0_10px_32px_-14px_rgba(8,22,40,0.18),0_4px_12px_-10px_rgba(8,22,40,0.12)]"
-        )}
-      >
-        {topContent && (
-          <div className="w-full px-4 pt-2 pb-0 opacity-80">
-            {topContent}
+      <div className="flex items-end gap-2 w-full">
+        {leftContent && (
+          <div className="flex items-center gap-1.5 shrink-0 self-end mb-[2px]">
+            {leftContent}
           </div>
         )}
-        <div className="flex items-end gap-2 pl-2.5 pr-2.5 py-2">
 
-        <div className="flex items-center gap-1.5 shrink-0 self-end mb-0.5">
-          {leftContent}
-        </div>
-
-        <div className="flex min-w-0 flex-1 items-end gap-2">
-          {isProcessing ? (
-            <Loader2 className="mb-2.5 h-4 w-4 shrink-0 animate-spin text-[var(--accent-cyan)] opacity-70" />
-          ) : !focused && !value ? (
-            <Zap className="mb-2.5 h-4 w-4 shrink-0 text-[var(--accent-cyan)] opacity-40" />
-          ) : (
-            <Search className="mb-2.5 h-4 w-4 shrink-0 text-[var(--text-tertiary)] opacity-40" />
+        <div
+          className={cn(
+            "relative flex flex-1 flex-col gap-0 rounded-[24px] border",
+            "border-[var(--border-default)]/40 bg-[var(--bg-elevated)]/95 backdrop-blur-xl",
+            "transition-all duration-300 ease-[var(--ease-standard)]",
+            focused
+              ? "shadow-[0_18px_48px_-14px_rgba(8,22,40,0.26),0_4px_18px_-10px_rgba(8,22,40,0.16)] border-[color-mix(in_oklab,var(--accent-cyan)_25%,var(--border-default))]"
+              : "shadow-[0_10px_32px_-14px_rgba(8,22,40,0.18),0_4px_12px_-10px_rgba(8,22,40,0.12)]"
           )}
-          <textarea
-            ref={resolvedTextareaRef}
-            rows={1}
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
-            onKeyDown={handleKeyDown}
-            onFocus={() => setFocused(true)}
-            onBlur={() => setFocused(false)}
-            onPaste={handlePaste}
-            placeholder={placeholder}
-            disabled={Boolean((disabled || isProcessing) && !isStreaming)}
-            className="min-w-0 flex-1 resize-none border-none bg-transparent py-1.5 text-[14px] leading-[1.5] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]/60"
-            style={{ maxHeight: 120, minHeight: 24 }}
-          />
-        </div>
+        >
+          {topContent && (
+            <div className="w-full px-4 pt-2 pb-0 opacity-80">
+              {topContent}
+            </div>
+          )}
+          <div className="flex items-end gap-2 pl-3 pr-2.5 py-2">
 
-        <div className="flex items-center gap-1.5 shrink-0 self-end">
-          {rightContent}
+          <div className="flex min-w-0 flex-1 items-end gap-2">
+            {isProcessing ? (
+              <Loader2 className="mb-2.5 h-4 w-4 shrink-0 animate-spin text-[var(--accent-cyan)] opacity-70" />
+            ) : !focused && !value ? (
+              <Zap className="mb-2.5 h-4 w-4 shrink-0 text-[var(--accent-cyan)] opacity-40" />
+            ) : (
+              <Search className="mb-2.5 h-4 w-4 shrink-0 text-[var(--text-tertiary)] opacity-40" />
+            )}
+            <textarea
+              ref={resolvedTextareaRef}
+              rows={1}
+              value={value}
+              onChange={(e) => onChange(e.target.value)}
+              onKeyDown={handleKeyDown}
+              onFocus={() => setFocused(true)}
+              onBlur={() => setFocused(false)}
+              onPaste={handlePaste}
+              placeholder={placeholder}
+              disabled={Boolean((disabled || isProcessing) && !isStreaming)}
+              className="min-w-0 flex-1 resize-none border-none bg-transparent py-1.5 text-[14px] leading-[1.5] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]/60"
+              style={{ maxHeight: 120, minHeight: 24 }}
+            />
+          </div>
+
+          <div className="flex items-center gap-1.5 shrink-0 self-end">
+            {rightContent}
 
           {showMic && (speech.isSupported || onMicUnsupported) && (
             <button
@@ -282,6 +285,7 @@ export function QuickChat({
           )}
         </div>
         </div>
+      </div>
       </div>
 
       {showSpeechStatus && (speech.isListening || speech.error) ? (

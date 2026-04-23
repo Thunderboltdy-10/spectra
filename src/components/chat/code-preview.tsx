@@ -47,7 +47,11 @@ export function CodePreview({ code, language }: CodePreviewProps) {
       setRendering(false);
     }
     if (data?.type === "spectra-sandbox-error" && typeof data.message === "string") {
-      setError(data.message);
+      if (data.isMermaid) {
+        // Suppress top-level banner for Mermaid errors, they are rendered in the iframe.
+      } else {
+        setError(data.message);
+      }
       setRendering(false);
     }
   }, [expanded, frameId]);

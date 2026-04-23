@@ -15,69 +15,12 @@ type ThinkingBlockProps = {
 };
 
 export function ThinkingBlock({ content, streaming = false, routeTrace, segments = [] }: ThinkingBlockProps) {
-  const scrollRef = useRef<HTMLDivElement | null>(null);
-  const shouldAutoScrollRef = useRef(true);
   const clean = content.trim();
-  const normalizedSegments = useMemo(
-    () => {
-      const explicit = segments.filter((segment) => segment.content.trim().length > 0);
-      if (explicit.length > 0) return explicit;
-      if (!clean) return [];
-      const chunks = clean
-        .split(/\n{2,}/)
-        .map((chunk) => chunk.trim())
-        .filter(Boolean);
-      return chunks.map((chunk, index) => {
-        const firstLine = chunk.split("\n")[0]?.replace(/^[#>*\-\d.\s]+/, "").trim();
-        const label = firstLine && firstLine.length > 0
-          ? (firstLine.length > 70 ? `${firstLine.slice(0, 67)}…` : firstLine)
-          : `Step ${index + 1}`;
-        return {
-          id: `derived-${index}-${label.toLowerCase().replace(/\s+/g, "-")}`,
-          label,
-          content: chunk,
-          status: streaming && index === chunks.length - 1 ? "running" : "completed",
-        };
-      });
-    },
-    [clean, segments, streaming],
-  );
-  const [openSegmentId, setOpenSegmentId] = useState<string | null>(
-    normalizedSegments[normalizedSegments.length - 1]?.id ?? null,
-  );
-
-  useEffect(() => {
-    const node = scrollRef.current;
-    if (!node) return;
-    const onScroll = () => {
-      const delta = node.scrollHeight - node.scrollTop - node.clientHeight;
-      shouldAutoScrollRef.current = delta < 30;
-    };
-    node.addEventListener("scroll", onScroll);
-    return () => node.removeEventListener("scroll", onScroll);
-  }, []);
-
-  useEffect(() => {
-    const node = scrollRef.current;
-    if (!node || !streaming) return;
-    if (!shouldAutoScrollRef.current) return;
-    node.scrollTop = node.scrollHeight;
-  }, [clean, streaming]);
-
-  useEffect(() => {
-    if (normalizedSegments.length === 0) return;
-    const running = normalizedSegments.find((segment) => segment.status === "running");
-    if (running) {
-      setOpenSegmentId(running.id);
-      return;
-    }
-    setOpenSegmentId(normalizedSegments[normalizedSegments.length - 1]?.id ?? null);
-  }, [normalizedSegments]);
 
   const hasTimeline = routeTrace?.phasePlan && routeTrace.phasePlan.length > 0;
   const hasSearchTrace = routeTrace?.searchTrace && routeTrace.searchTrace.strategy && routeTrace.searchTrace.strategy !== "none";
-  const hasExecutionContent = hasTimeline || hasSearchTrace;
-  if (!clean && !hasExecutionContent) return null;
+  const hasExecutionContent = hasTimeline || hasSearchTrace || clean || segments.length > 0;
+  if (!hasExecutionContent) return null;
 
   return (
     <div className="mb-4">
@@ -99,39 +42,10 @@ export function ThinkingBlock({ content, streaming = false, routeTrace, segments
           className="mt-2 ml-0.5"
         >
           <div className="space-y-2">
-            {normalizedSegments.length > 0 ? (
-              <div ref={scrollRef} className="space-y-2">
-                {normalizedSegments.map((segment) => {
-                  const isOpen = openSegmentId === segment.id;
-                  const isRunning = segment.status === "running";
-                  return (
-                    <div key={segment.id} className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)]/55">
-                      <button
-                        type="button"
-                        onClick={() => setOpenSegmentId((current) => current === segment.id ? null : segment.id)}
-                        className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left"
-                      >
-                        <span className="text-[11px] font-medium text-[var(--text-secondary)]">{segment.label}</span>
-                        <span className="flex items-center gap-2">
-                          {isRunning ? (
-                            <span className="text-[9px] font-semibold uppercase tracking-[0.1em] text-[var(--accent-cyan)]">live</span>
-                          ) : null}
-                          <ChevronDown className={`h-3.5 w-3.5 text-[var(--text-tertiary)] transition ${isOpen ? "rotate-180" : ""}`} />
-                        </span>
-                      </button>
-                      {isOpen ? (
-                        <div className="border-t border-[var(--border-default)] px-3 py-2 text-[12px] leading-relaxed text-[var(--text-secondary)]">
-                          {segment.content}
-                        </div>
-                      ) : null}
-                    </div>
-                  );
-                })}
-              </div>
-            ) : null}
             <ExecutionTimeline
               routeTrace={routeTrace}
-              thinkingContent={normalizedSegments.length === 0 ? clean : undefined}
+              thinkingContent={clean}
+              thinkingSegments={segments}
               streaming={streaming}
             />
           </div>

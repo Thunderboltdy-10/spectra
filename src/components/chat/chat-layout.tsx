@@ -963,7 +963,26 @@ export function ChatLayout() {
           onCodeChange: canvas.setCode,
           onLanguageChange: canvas.setLanguage,
           onRun: canvas.runPreview,
-          onSaveVersion: canvas.saveVersion,
+          onSaveVersion: () => {
+            canvas.saveVersion();
+            const promise = fetch("/api/artifacts", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                action: "create",
+                type: "code_project",
+                title: `Canvas: ${canvas.language}`,
+                content: { code: canvas.code, language: canvas.language },
+                contentPlaintext: canvas.code,
+                linkedChatId: chat.selectedChatId || undefined,
+              }),
+            });
+            toast.promise(promise, {
+              loading: "Saving to artifacts...",
+              success: "Saved to artifacts",
+              error: "Failed to save artifact",
+            });
+          },
           onRestoreVersion: canvas.restoreVersion,
           onAskAiModify: (instruction) => {
             const artifactPrompt = [

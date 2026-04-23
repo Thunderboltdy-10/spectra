@@ -1241,7 +1241,7 @@ async function generateTitleFromSnippet(
       void recordUsage(completion);
     }).catch(() => {});
 
-    const completion = await withTimeout(completionPromise, 4500);
+    const completion = await withTimeout(completionPromise, 8000);
     if (completion) {
       await recordUsage(completion);
     }
@@ -1430,7 +1430,7 @@ export async function maybeExtractMemory(params: {
 
   const completion = await withTimeout(
     completionPromise,
-    5000,
+    10000,
   );
 
   const now = Date.now();
@@ -1592,7 +1592,7 @@ export async function maybeExtractMemory(params: {
 
     const workstreamCompletion = await withTimeout(
       workstreamCompletionPromise,
-      4500,
+      8000,
     );
 
     if (workstreamCompletion) {

@@ -236,6 +236,17 @@ function ExecutionEventRow({
             )}
           </div>
 
+          {/* Always show a preview of thinking content if collapsed, or full content if expanded */}
+          {hasContent && !expanded && (
+            <div className="mt-1 ml-1 pl-4 border-l-2 border-[var(--border-default)]/30">
+              <div className="text-[12px] leading-relaxed text-[var(--text-secondary)] line-clamp-2 opacity-70">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {event.content!.trim()}
+                </ReactMarkdown>
+              </div>
+            </div>
+          )}
+
           {/* Expandable detail/content */}
           <AnimatePresence initial={false}>
             {expanded && expandable && (
@@ -327,9 +338,10 @@ function routeTraceToEvents(trace: RouteTrace, streaming: boolean): ExecutionEve
     || /\b(route|routing|select|plan)\b/i.test(phase.label),
   );
   const shouldShowStandaloneRouting = !routingPhase;
-  const routingStatus = routingPhase
+  const rawRoutingStatus = routingPhase
     ? phaseStatusToEventStatus(routingPhase.status)
     : (streaming && !trace.routingDurationMs ? "running" : "completed");
+  const routingStatus = !streaming && rawRoutingStatus === "running" ? "completed" : rawRoutingStatus;
 
   // Routing as first event
   if (shouldShowStandaloneRouting) {
@@ -396,7 +408,7 @@ function routeTraceToEvents(trace: RouteTrace, streaming: boolean): ExecutionEve
     const anyCompleted = operations.some((op) => op.status === "completed");
     const anyFailed = operations.some((op) => op.status === "failed");
     const allSkipped = operations.length > 0 && operations.every((op) => op.status === "skipped");
-    const searchStatus: ExecutionEventStatus = searchPhase
+    const rawSearchStatus: ExecutionEventStatus = searchPhase
       ? phaseStatusToEventStatus(searchPhase.status)
       : anyCompleted
         ? "completed"
@@ -405,6 +417,8 @@ function routeTraceToEvents(trace: RouteTrace, streaming: boolean): ExecutionEve
           : allSkipped
             ? "skipped"
             : (streaming ? "running" : "pending");
+    
+    const searchStatus = !streaming && rawSearchStatus === "running" ? "completed" : rawSearchStatus;
     const searchChildren: ExecutionEvent[] = (trace.searchTrace.operations ?? []).map((op, idx) => ({
       id: `search-op-${idx}`,
       kind: (op.tool === "search" ? "search" : "tool") as ExecutionEventKind,
@@ -436,6 +450,7 @@ export type ExecutionTimelineProps = {
   routeTrace?: RouteTrace;
   /** Thinking content to attach as a "thinking" event */
   thinkingContent?: string;
+  thinkingSegments?: Array<{ id: string; label: string; content: string; status: string }>;
   /** Whether the AI is currently streaming */
   streaming?: boolean;
   /** Compact mode — shows only active/completed events in a tighter layout */
@@ -448,6 +463,7 @@ export function ExecutionTimeline({
   events: directEvents,
   routeTrace,
   thinkingContent,
+  thinkingSegments = [],
   streaming = false,
   compact = false,
   className,
@@ -458,29 +474,47 @@ export function ExecutionTimeline({
   // Build events from routeTrace or use direct events
   const events = useMemo(() => {
     if (directEvents && directEvents.length > 0) return directEvents;
-    if (!routeTrace) return [] as ExecutionEvent[];
+    if (!routeTrace && !thinkingContent && thinkingSegments.length === 0) return [] as ExecutionEvent[];
 
-    const traceEvents = routeTraceToEvents(routeTrace, streaming);
+    const traceEvents = routeTrace ? routeTraceToEvents(routeTrace, streaming) : [];
 
-    // Inject thinking content as a thinking event if present
-    if (thinkingContent?.trim()) {
+    let thinkingEvents: ExecutionEvent[] = [];
+
+    // Prioritize explicit segments over raw thinkingContent
+    if (thinkingSegments.length > 0) {
+      thinkingEvents = thinkingSegments.map((seg, i) => {
+        const isLast = i === thinkingSegments.length - 1;
+        return {
+          id: \`thinking-seg-\${seg.id || i}\`,
+          kind: "thinking" as const,
+          label: seg.label || \`Thinking (\${i + 1}/\${thinkingSegments.length})\`,
+          status: (streaming && isLast) ? "running" as const : "completed" as const,
+          content: seg.content,
+        };
+      });
+    } else if (thinkingContent?.trim()) {
       // Split by double newline to create paragraphs/sections
-      const chunks = thinkingContent.split(/(?:\r?\n){2,}/).map(s => s.trim()).filter(Boolean);
-      const thinkingEvents = chunks.map((chunk, i) => {
+      const chunks = thinkingContent.split(/(?:\\r?\\n){2,}/).map(s => s.trim()).filter(Boolean);
+      thinkingEvents = chunks.map((chunk, i) => {
+        const firstLine = chunk.split("\\n")[0]?.replace(/^[#>*\\-\\d.\\s]+/, "").trim();
+        const label = firstLine && firstLine.length > 0
+          ? (firstLine.length > 70 ? \`\${firstLine.slice(0, 67)}…\` : firstLine)
+          : \`Thinking (\${i + 1}/\${chunks.length})\`;
+        
         const isLast = i === chunks.length - 1;
         return {
-          id: `thinking-chunk-${i}`,
+          id: \`thinking-chunk-\${i}\`,
           kind: "thinking" as const,
-          label: `Thinking${chunks.length > 1 ? ` (${i + 1}/${chunks.length})` : ''}`,
+          label,
           status: (streaming && isLast) ? "running" as const : "completed" as const,
           content: chunk,
         };
       });
+    }
 
-      const existingThinkIdx = traceEvents.findIndex(e => e.kind === "thinking" && !e.id.startsWith("thinking-chunk-"));
-      if (existingThinkIdx >= 0 && traceEvents[existingThinkIdx].content) {
-         traceEvents[existingThinkIdx].content = thinkingContent;
-      } else if (existingThinkIdx >= 0) {
+    if (thinkingEvents.length > 0) {
+      const existingThinkIdx = traceEvents.findIndex(e => e.kind === "thinking" && !e.id.startsWith("thinking-"));
+      if (existingThinkIdx >= 0) {
          traceEvents.splice(existingThinkIdx, 1, ...thinkingEvents);
       } else {
          traceEvents.unshift(...thinkingEvents);
@@ -488,7 +522,7 @@ export function ExecutionTimeline({
     }
 
     return traceEvents;
-  }, [directEvents, routeTrace, thinkingContent, streaming]);
+  }, [directEvents, routeTrace, thinkingContent, thinkingSegments, streaming]);
 
   // Auto-scroll management
   useEffect(() => {
@@ -535,18 +569,26 @@ export function ExecutionTimeline({
       <div
         ref={scrollRef}
         className={cn(
-          compact ? "max-h-32" : "max-h-64",
+          compact ? "max-h-32" : "max-h-80",
           "overflow-y-auto space-y-0 pr-1"
         )}
       >
-        {events.map((event, idx) => (
-          <ExecutionEventRow
-            key={event.id}
-            event={event}
-            streaming={streaming}
-            defaultOpen={idx === events.length - 1 && streaming}
-          />
-        ))}
+        <AnimatePresence initial={false}>
+          {events.map((event, idx) => (
+            <motion.div
+              key={event.id}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.3 }}
+            >
+              <ExecutionEventRow
+                event={event}
+                streaming={streaming}
+                defaultOpen={idx === events.length - 1 && streaming}
+              />
+            </motion.div>
+          ))}
+        </AnimatePresence>
       </div>
     </div>
   );

@@ -1,7 +1,7 @@
 import type { OpenRouterMessage, OpenRouterToolDefinition } from "@/lib/openrouter";
 import type { ExecutedToolResult } from "@/lib/orchestrator/tool-executor";
 import { runAssistantStreaming, runCollaborativeStreaming } from "@/lib/orchestrator/streaming";
-import { toLegacyChatStreamEvent, type RuntimeEvent, type RuntimeSurface } from "@/lib/orchestrator/runtime-contract";
+import { type RuntimeEvent, type RuntimeSurface } from "@/lib/orchestrator/runtime-contract";
 import type { CatalogModelEntry } from "@/lib/model-selection";
 import type { RouteTraceFallback, RuntimeExecutionPath } from "@/types";
 

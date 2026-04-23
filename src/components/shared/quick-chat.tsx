@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import Image from "next/image";
+import { useEffect, useRef, useState, useCallback, type ReactNode, type KeyboardEvent, type ClipboardEvent } from "react";
 import {
   Search,
   ArrowUp,
@@ -26,7 +27,7 @@ export type QuickChatProps = {
   isStreaming?: boolean;
   isProcessing?: boolean;
   disabled?: boolean;
-  onKeyDown?: (event: React.KeyboardEvent<HTMLTextAreaElement>) => void;
+  onKeyDown?: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
   onMicUnsupported?: () => void;
   showMic?: boolean;
   showSpeechStatus?: boolean;
@@ -41,8 +42,9 @@ export type QuickChatProps = {
   textareaRef?: React.RefObject<HTMLTextAreaElement | null>;
   
   // Custom Left/Right Content
-  leftContent?: React.ReactNode;
-  rightContent?: React.ReactNode;
+  leftContent?: ReactNode;
+  rightContent?: ReactNode;
+  topContent?: ReactNode;
 };
 
 export function QuickChat({
@@ -66,6 +68,7 @@ export function QuickChat({
   textareaRef,
   leftContent,
   rightContent,
+  topContent,
 }: QuickChatProps) {
   const [focused, setFocused] = useState(false);
   const innerTextareaRef = useRef<HTMLTextAreaElement>(null);
@@ -74,16 +77,12 @@ export function QuickChat({
   const listeningBaseValueRef = useRef<string | null>(null);
   const [attachmentsExpanded, setAttachmentsExpanded] = useState(true);
 
-  const adjustTextareaHeight = () => {
+  useEffect(() => {
     const el = resolvedTextareaRef.current;
     if (!el) return;
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
-  };
-
-  useEffect(() => {
-    adjustTextareaHeight();
-  }, [value, resolvedTextareaRef]);
+  }, [resolvedTextareaRef, value]);
 
   useEffect(() => {
     if (!speech.isListening) {
@@ -116,8 +115,8 @@ export function QuickChat({
     speech.start();
   }, [onMicUnsupported, speech, value]);
 
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    onKeyDown?.(e as React.KeyboardEvent<HTMLTextAreaElement>);
+  const handleKeyDown = useCallback((e: KeyboardEvent<HTMLTextAreaElement>) => {
+    onKeyDown?.(e);
     if (e.defaultPrevented) return;
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -126,7 +125,7 @@ export function QuickChat({
     }
   }, [disabled, isStreaming, onKeyDown, onStop, onSubmit, value]);
 
-  const handlePaste = useCallback((e: React.ClipboardEvent) => {
+  const handlePaste = useCallback((e: ClipboardEvent<HTMLTextAreaElement>) => {
     if (!onFilesAdd) return;
     const items = Array.from(e.clipboardData.items);
     const files = items.map(i => i.getAsFile()).filter(Boolean) as File[];
@@ -155,7 +154,7 @@ export function QuickChat({
   }
 
   return (
-    <div className={cn("relative flex flex-col w-full min-w-[320px] transition-all duration-300", className)}>
+    <div className={cn("relative flex flex-col mx-auto min-w-[320px] transition-all duration-300", focused ? "w-full" : "w-[96%]", className)}>
       {files.length > 0 && (
         <div className="mb-2 w-[95%] mx-auto overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)]/95 backdrop-blur-xl">
           <div className="flex items-center justify-between px-2.5 py-1.5 border-b border-[var(--border-default)]/40">
@@ -177,7 +176,7 @@ export function QuickChat({
                 return (
                   <div key={fileKey(file)} className="inline-flex items-center gap-2 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-1.5 text-xs">
                     {state.thumbnailUrl ? (
-                      <img src={state.thumbnailUrl} alt="" className="h-8 w-8 rounded-md object-cover" />
+                      <Image src={state.thumbnailUrl} alt="" width={32} height={32} className="h-8 w-8 rounded-md object-cover" unoptimized />
                     ) : (
                       <span className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] text-[9px] font-bold text-[var(--text-secondary)]">
                         {extension}
@@ -196,9 +195,10 @@ export function QuickChat({
         </div>
       )}
 
+
       <div
         className={cn(
-          "relative flex items-end gap-2 rounded-[20px] border pl-2.5 pr-2.5 py-2",
+          "relative flex flex-col gap-0 rounded-[20px] border",
           "border-[var(--border-default)]/40 bg-[var(--bg-elevated)]/95 backdrop-blur-xl",
           "transition-all duration-300 ease-[var(--ease-standard)]",
           focused
@@ -206,6 +206,13 @@ export function QuickChat({
             : "shadow-[0_10px_32px_-14px_rgba(8,22,40,0.18),0_4px_12px_-10px_rgba(8,22,40,0.12)]"
         )}
       >
+        {topContent && (
+          <div className="w-full px-4 pt-2 pb-0 opacity-80">
+            {topContent}
+          </div>
+        )}
+        <div className="flex items-end gap-2 pl-2.5 pr-2.5 py-2">
+
         <div className="flex items-center gap-1.5 shrink-0 self-end mb-0.5">
           {leftContent}
         </div>
@@ -273,6 +280,7 @@ export function QuickChat({
               <ArrowUp className="h-4 w-4" />
             </button>
           )}
+        </div>
         </div>
       </div>
 

@@ -285,10 +285,10 @@ async function executeSingleAction(context: ToolCallContext, action: ActionRecor
         targetKind: "artifact",
         targetId: artifactId,
         summary: `Created artifact ${title}.`,
-        mutation: { type, workstreamId },
-        result: { artifactId, workspaceResultId: workspaceResult?.resultId },
+        mutation: { type, workstreamId, artifactType },
+        result: { artifactId, workspaceResultId: workspaceResult?.resultId, title, artifactType },
         version: { created: true },
-        ui: { resultBar: true },
+        ui: { resultBar: true, renderInstruction: { kind: artifactType === "visualization" ? "visual" : artifactType === "code" ? "code" : "document", title, artifactId } },
       };
     }
 
@@ -368,9 +368,9 @@ async function executeSingleAction(context: ToolCallContext, action: ActionRecor
         targetId: artifactId,
         summary: `${type} applied to ${artifact.title}.`,
         mutation: { type, operations: patch.operations },
-        result: { artifactId, versionId: editResult.versionId, workspaceResultId: workspaceResult?.resultId },
+        result: { artifactId, versionId: editResult.versionId, workspaceResultId: workspaceResult?.resultId, contentPreview: patch.nextText.slice(0, 400) },
         version: { created: true, versionId: editResult.versionId, guardedByUpdatedAt: typeof expectedUpdatedAt === "number" },
-        ui: { resultBar: true, diff: true },
+        ui: { resultBar: true, diff: true, artifactPatch: patch.operations, renderInstruction: { kind: "document", artifactId, title: artifact.title, content: patch.nextText } },
       };
     }
 
@@ -399,9 +399,9 @@ async function executeSingleAction(context: ToolCallContext, action: ActionRecor
         targetId: artifactId,
         summary: `Restored artifact version ${versionId}.`,
         mutation: { type },
-        result: { artifactId, restored: restoreResult.success, workspaceResultId: workspaceResult?.resultId },
+        result: { artifactId, restored: restoreResult.success, workspaceResultId: workspaceResult?.resultId, restoredFrom: versionId },
         version: { created: true, restoredFrom: versionId },
-        ui: { resultBar: true, diff: true },
+        ui: { resultBar: true, diff: true, restoredFrom: versionId },
       };
     }
 
@@ -419,7 +419,6 @@ async function executeSingleAction(context: ToolCallContext, action: ActionRecor
         routerMode: "auto",
         usePersonalResources: true,
         title,
-        allowExistingThreadReuse: false,
       }) as CreateChatResult;
       const setupMessage = asOptionalTrimmedString(action.setupMessage ?? action.content, "setupMessage", { max: 3000, allowEmpty: true });
       if (setupMessage) {
@@ -752,7 +751,6 @@ async function executeSingleAction(context: ToolCallContext, action: ActionRecor
         routerMode: "auto",
         usePersonalResources: true,
         title,
-        allowExistingThreadReuse: false,
       }) as CreateChatResult;
       const messageResult = await convexMutation("chats:appendMessage", {
         actorClerkId: context.actorClerkId,
@@ -819,7 +817,6 @@ async function executeSingleAction(context: ToolCallContext, action: ActionRecor
         routerMode: "auto",
         usePersonalResources: true,
         title,
-        allowExistingThreadReuse: false,
       }) as CreateChatResult;
       const messageResult = await convexMutation("chats:appendMessage", {
         actorClerkId: context.actorClerkId,

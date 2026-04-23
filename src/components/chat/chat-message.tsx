@@ -2,12 +2,11 @@
 
 import { useMemo, useState } from "react";
 import Image from "next/image";
-import { Bookmark, BookmarkCheck, Bot, Brain, ChevronDown, ChevronLeft, ChevronRight, Copy, FileText, GitBranch, Globe, Info, Layers, MoreHorizontal, Paperclip, Pencil, RefreshCw, ThumbsDown, ThumbsUp, Zap } from "lucide-react";
+import { Bookmark, BookmarkCheck, Bot, Brain, ChevronDown, ChevronLeft, ChevronRight, Copy, FileText, GitBranch, Globe, Info, MoreHorizontal, Paperclip, Pencil, RefreshCw, ThumbsDown, ThumbsUp, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer";
-import { ModelRoutingBadge } from "@/components/chat/model-routing-badge";
 import { ProviderLogo } from "@/components/provider-logo";
 import { ThinkingBlock } from "@/components/chat/thinking-block";
 import { ExecutionTimeline } from "@/components/shared/execution-timeline";
@@ -17,7 +16,6 @@ import { usePanel } from "@/context/panel-context";
 import type { Citation, RouteTrace, StudyMode } from "@/types";
 import { DocumentPanel } from "@/components/chat/document-panel";
 import { parseGeneratedDocument } from "@/lib/document-generator";
-import { getModeConfig } from "@/lib/modes";
 import { cn } from "@/lib/utils";
 import { useTextToSpeech } from "@/hooks/use-text-to-speech";
 
@@ -27,6 +25,7 @@ type ChatMessageProps = {
   content: string;
   cancelled?: boolean;
   thinkingContent?: string;
+  thinkingSegments?: Array<{ id: string; label: string; content: string; status: string }>;
   enhancedContent?: string;
   attachments?: string[];
   attachmentResourceIds?: string[];
@@ -58,6 +57,8 @@ type ChatMessageProps = {
   bookmarking?: boolean;
   onSaveAsArtifact?: () => void;
   isArtifactSaved?: boolean;
+  onPinModel?: (modelId: string) => void;
+  isPinned?: boolean;
   siblingIndex?: number;
   siblingCount?: number;
   onNavigateSibling?: (direction: "prev" | "next") => void;
@@ -65,8 +66,6 @@ type ChatMessageProps = {
   animateIn?: boolean;
   memoryUpdated?: boolean;
   memoryUpdateSummary?: string;
-  onPinModel?: (modelId: string) => void;
-  isPinned?: boolean;
   children?: React.ReactNode;
 };
 
@@ -236,6 +235,7 @@ export function ChatMessage({
   content,
   cancelled = false,
   thinkingContent,
+  thinkingSegments,
   enhancedContent,
   attachments,
   attachmentResourceIds,
@@ -262,6 +262,8 @@ export function ChatMessage({
   bookmarking = false,
   onSaveAsArtifact,
   isArtifactSaved = false,
+  onPinModel,
+  isPinned,
   siblingIndex,
   siblingCount,
   onNavigateSibling,
@@ -269,12 +271,9 @@ export function ChatMessage({
   animateIn = true,
   memoryUpdated = false,
   memoryUpdateSummary,
-  onPinModel,
-  isPinned = false,
   children,
 }: ChatMessageProps) {
   const isUser = role === "user";
-  const modeConfig = mode ? getModeConfig(mode) : undefined;
   const [feedback, setFeedback] = useState<"up" | "down" | null>(null);
   const [showEnhanced, setShowEnhanced] = useState(false);
   const [showWhy, setShowWhy] = useState(false);
@@ -419,18 +418,6 @@ export function ChatMessage({
                   );
                 })}
               </div>
-            ) : attachments && attachments.length > 0 ? (
-              <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                {attachments.map((name) => (
-                  <span
-                    key={name}
-                    className="inline-flex min-h-[3.5rem] items-center gap-2 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[12px] text-[var(--text-secondary)]"
-                  >
-                    <Paperclip className="h-3.5 w-3.5" />
-                    {name}
-                  </span>
-                ))}
-              </div>
             ) : null}
             {!editing ? (
               <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
@@ -495,27 +482,7 @@ export function ChatMessage({
             />
             <div className="min-w-0 flex-1">
               <div className="mb-4 flex flex-wrap items-center gap-2">
-                {modeConfig && (
-                  <span
-                    className="inline-flex h-2 w-2 rounded-full"
-                    style={{ background: modeConfig.color }}
-                  />
-                )}
-                <ModelRoutingBadge
-                  modelUsed={modelUsed}
-                  whyThisResponse={whyThisResponse}
-                  routeTrace={routeTrace}
-                />
-                {activeModelId && !isPinned && onPinModel ? (
-                  <button
-                    type="button"
-                    onClick={() => onPinModel(activeModelId)}
-                    className="text-[10px] text-[var(--text-tertiary)] transition hover:text-[var(--accent-cyan)]"
-                    title="Pin this model for the rest of this conversation"
-                  >
-                    Pin model
-                  </button>
-                ) : null}
+                
                 {cancelled ? (
                   <span className="inline-flex items-center rounded-full border border-[color-mix(in_oklab,var(--warning)_35%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_12%,var(--bg-secondary))] px-2 py-0.5 text-[10px] text-[var(--warning)]">
                     Cancelled
@@ -546,32 +513,14 @@ export function ChatMessage({
                 ) : null}
               </div>
 
-              {/* Inline toolchain execution strip */}
-              {routeTrace && routeTrace.toolchain.length > 0 && (
-                <div className="mt-1.5 flex flex-wrap items-center gap-1">
-                  {routeTrace.toolchain.map((tool, idx) => (
-                    <span
-                      key={tool}
-                      className={cn(
-                        "inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[9px] font-medium",
-                        idx === routeTrace.toolchain.length - 1
-                          ? "border-[color-mix(in_oklab,var(--accent-cyan)_25%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_6%,transparent)] text-[var(--accent-cyan)]"
-                          : "border-[var(--border-default)]/40 bg-[var(--bg-secondary)] text-[var(--text-tertiary)]"
-                      )}
-                    >
-                      <Zap className="h-2 w-2" />
-                      {tool.replace(/_/g, " ")}
-                    </span>
-                  ))}
-                  {routeTrace.totalDurationMs != null && routeTrace.totalDurationMs > 0 && (
-                    <span className="text-[9px] text-[var(--text-tertiary)] tabular-nums ml-1">
-                      {(routeTrace.totalDurationMs / 1000).toFixed(1)}s
-                    </span>
-                  )}
-                </div>
-              )}
+              
 
-              <ThinkingBlock content={thinkingContent ?? ""} routeTrace={routeTrace} streaming={!isLastAssistant ? false : !content && !!thinkingContent} />
+              <ThinkingBlock
+                content={thinkingContent ?? ""}
+                segments={thinkingSegments}
+                routeTrace={routeTrace}
+                streaming={!isLastAssistant ? false : !content && !!thinkingContent}
+              />
               {children ? children : parsedDocument.document ? (
                 <>
                   {parsedDocument.preamble ? (
@@ -696,13 +645,16 @@ export function ChatMessage({
                     type="button"
                     variant="ghost"
                     size="sm"
-                    className={cn("h-8 cursor-pointer gap-1.5 text-xs", isArtifactSaved && "text-[var(--brand-primary)]")}
+                    className="h-8 cursor-pointer gap-1.5 text-xs"
                     onClick={onSaveAsArtifact}
+                    disabled={isArtifactSaved}
                   >
-                    <Layers className="h-3.5 w-3.5" />
-                    {isArtifactSaved ? "View Artifact" : "Save as Artifact"}
+                    {isArtifactSaved ? <BookmarkCheck className="h-3.5 w-3.5" /> : <FileText className="h-3.5 w-3.5" />}
+                    {isArtifactSaved ? "Saved to artifacts" : "Save to artifacts"}
                   </Button>
                 ) : null}
+
+                
 
                 {onFeedback ? (
                   <>
@@ -757,6 +709,11 @@ export function ChatMessage({
                       {tts.isSupported ? (
                         <DropdownMenuItem onSelect={() => (tts.isSpeaking ? tts.stop() : tts.speak(content))}>
                           {tts.isSpeaking ? "Stop audio" : "Read aloud"}
+                        </DropdownMenuItem>
+                      ) : null}
+                      {onPinModel && activeModelId ? (
+                        <DropdownMenuItem onSelect={() => onPinModel(activeModelId)}>
+                          {isPinned ? "Unpin model" : "Pin model"}
                         </DropdownMenuItem>
                       ) : null}
                     </DropdownMenuContent>

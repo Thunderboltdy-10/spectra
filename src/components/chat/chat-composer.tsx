@@ -273,6 +273,8 @@ export function ChatComposer(props: ChatComposerProps) {
   const modelSearchRef = useRef<HTMLInputElement | null>(null);
   const modelPortalRef = useRef<HTMLDivElement | null>(null);
   const dragDepthRef = useRef(0);
+  const plusMenuRef = useRef<HTMLDivElement | null>(null);
+  const [showPlusMenu, setShowPlusMenu] = useState(false);
   const modeMenuRef = useRef<HTMLDivElement | null>(null);
   const modelMenuRef = useRef<HTMLDivElement | null>(null);
   const agentMenuRef = useRef<HTMLDivElement | null>(null);
@@ -602,11 +604,14 @@ export function ChatComposer(props: ChatComposerProps) {
       if (showAgentSelector && agentMenuRef.current && !agentMenuRef.current.contains(target)) {
         setShowAgentSelector(false);
       }
+      if (showPlusMenu && plusMenuRef.current && !plusMenuRef.current.contains(target)) {
+        setShowPlusMenu(false);
+      }
     };
 
     document.addEventListener("mousedown", onPointerDown);
     return () => document.removeEventListener("mousedown", onPointerDown);
-  }, [showAgentSelector, showModeSelector, showModelSelector]);
+  }, [showAgentSelector, showModeSelector, showModelSelector, showPlusMenu]);
 
   // Issue #14: Lift composer above the virtual keyboard on mobile using the Visual Viewport API
   useEffect(() => {
@@ -1335,20 +1340,535 @@ export function ChatComposer(props: ChatComposerProps) {
                 window.dispatchEvent(new CustomEvent("ai-school:open-feedback"));
               }}
               className={cn(!sidebarExpanded && "px-2")}
-              leftContent={
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="h-9 w-9 rounded-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-                  onClick={() => attachInputRef.current?.click()}
-                  aria-label="Attach files"
-                  title="Attach files"
-                >
-                  <Paperclip className="h-4.5 w-4.5" />
-                </Button>
+              
+              rightContent={
+                <div className="flex items-center gap-1">
+                  <div ref={plusMenuRef} className="relative">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className={cn("h-9 w-9 rounded-full text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-transform", showPlusMenu && "bg-[var(--bg-hover)] rotate-45")}
+                      onClick={() => setShowPlusMenu((prev) => !prev)}
+                    >
+                      <Plus className="h-5 w-5" />
+                    </Button>
+                    
+                    {showPlusMenu && (
+                      <div className="absolute bottom-full left-0 mb-2 w-48 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[var(--shadow-soft)] z-[340] flex flex-col gap-0.5">
+                        <button type="button" className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-[var(--bg-hover)] transition-colors text-left" onClick={() => { setShowPlusMenu(false); setShowModeSelector(true); }}>
+                          <span className="inline-flex h-2 w-2 rounded-full shrink-0" style={{ background: modeConfig.color }} /> <span className="truncate text-[var(--text-primary)]">Mode: {modeConfig.label}</span>
+                        </button>
+                        <button type="button" className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-[var(--bg-hover)] transition-colors text-left" onClick={() => { setShowPlusMenu(false); setShowModelSelector(true); }}>
+                          <Bot className="h-4 w-4 shrink-0 text-[var(--text-secondary)]" /> <span className="truncate text-[var(--text-primary)]">Model: {formatModelLabel(selectedModel?.modelId ?? manualModel)}</span>
+                        </button>
+                        <button type="button" className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-[var(--bg-hover)] transition-colors text-left" onClick={() => { setShowPlusMenu(false); setShowAgentSelector(true); }}>
+                          <span className="text-sm shrink-0 leading-none">{selectedAgent?.avatarEmoji ?? "🧠"}</span> <span className="truncate text-[var(--text-primary)]">Agent: {selectedAgent?.name ?? "None"}</span>
+                        </button>
+                        <div className="my-0.5 border-t border-[var(--border-default)]" />
+                        <button type="button" className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-[var(--bg-hover)] transition-colors text-left" onClick={() => { setShowPlusMenu(false); attachInputRef.current?.click(); }}>
+                          <Paperclip className="h-4 w-4 shrink-0 text-[var(--text-secondary)]" /> <span className="text-[var(--text-primary)]">Attach File</span>
+                        </button>
+                      </div>
+                    )}
+
+                    <div ref={modeMenuRef}>
+                      {showModeSelector && (
+                  <div className="absolute bottom-full left-0 z-[340] mb-2 max-h-[320px] w-[min(92vw,22rem)] overflow-y-auto overscroll-contain rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[var(--shadow-soft)]">
+                    <p className="mb-1 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.11em] text-[var(--text-secondary)]">
+                      Available
+                    </p>
+                    {orderedModes
+                      .filter((candidate) => isModeAvailable(candidate.key))
+                      .map((m) => {
+                      const mc = getModeConfig(m.key);
+                      const isActive = m.key === mode;
+                      const available = isModeAvailable(m.key);
+                      return (
+                        <button
+                          key={m.key}
+                          type="button"
+                          disabled={!available}
+                          onClick={() => handleModeSelect(m.key)}
+                          className={`flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm transition ${
+                            isActive
+                              ? "bg-[color-mix(in_oklab,var(--accent-cyan)_14%,var(--bg-primary))] font-medium text-[var(--text-primary)]"
+                              : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                          } ${available ? "cursor-pointer" : "cursor-not-allowed opacity-45"}`}
+                        >
+                          <span className="h-2 w-2 rounded-full" style={{ backgroundColor: mc.color }} />
+                          <div>
+                            <p className="inline-flex items-center gap-1.5">
+                              <span>{mc.label}</span>
+                            </p>
+                            <p className="text-[11px] text-[var(--text-secondary)]">{mc.description}</p>
+                          </div>
+                        </button>
+                      );
+                    })}
+
+                    {orderedModes.some((candidate) => COMING_SOON_MODES.has(candidate.key)) ? (
+                      <>
+                        <div className="my-1 border-t border-[var(--border-default)]" />
+                        <p className="mb-1 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.11em] text-[var(--text-secondary)]">
+                          Coming Soon
+                        </p>
+                      </>
+                    ) : null}
+                    {orderedModes
+                      .filter((candidate) => COMING_SOON_MODES.has(candidate.key))
+                      .map((m) => {
+                      const mc = getModeConfig(m.key);
+                      const isActive = m.key === mode;
+                      const available = isModeAvailable(m.key);
+                      const comingSoon = COMING_SOON_MODES.has(m.key);
+                      return (
+                        <button
+                          key={m.key}
+                          type="button"
+                          disabled={!available}
+                          onClick={() => handleModeSelect(m.key)}
+                          className={`flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm transition ${
+                            isActive
+                              ? "bg-[color-mix(in_oklab,var(--accent-cyan)_14%,var(--bg-primary))] font-medium text-[var(--text-primary)]"
+                              : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                          } ${available ? "cursor-pointer" : "cursor-not-allowed opacity-45"}`}
+                        >
+                          <span className="h-2 w-2 rounded-full" style={{ backgroundColor: mc.color }} />
+                          <div>
+                            <p className="inline-flex items-center gap-1.5">
+                              <span>{mc.label}</span>
+                              {comingSoon ? (
+                                <span className="rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[9px] uppercase tracking-[0.08em]">
+                                  Soon
+                                </span>
+                              ) : null}
+                            </p>
+                            <p className="text-[11px] text-[var(--text-secondary)]">{mc.description}</p>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                    </div>
+                    <div ref={modelMenuRef}>
+                      {showModelSelector && createPortal(
+                  <div
+                    ref={modelPortalRef}
+                    className="fixed z-[9999] max-h-[480px] w-[min(92vw,32rem)] overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-soft)]"
+                    style={modelSelectorPosition ? { bottom: modelSelectorPosition.bottom, left: modelSelectorPosition.left, opacity: 1 } : { top: 0, left: 0, opacity: 0, pointerEvents: "none" }}
+                  >
+                    <div className="flex h-full max-h-[480px]">
+                      <div className="flex w-12 shrink-0 flex-col items-center gap-2 border-r border-[var(--border-default)] bg-[var(--bg-secondary)] py-2 overflow-y-auto">
+                        <button
+                          type="button"
+                          onClick={() => setProviderFilter("all")}
+                          className={`flex h-8 w-8 items-center justify-center rounded-lg transition ${providerFilter === "all" ? "bg-[var(--bg-elevated)] shadow-sm border border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] text-[var(--accent-cyan)]" : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}
+                          title="All models"
+                        >
+                          <Globe className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setProviderFilter("starred")}
+                          className={`flex h-8 w-8 items-center justify-center rounded-lg transition ${providerFilter === "starred" ? "bg-[var(--bg-elevated)] shadow-sm border border-[color-mix(in_oklab,var(--warning)_45%,var(--border-default))] text-[var(--warning)]" : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}
+                          title="Starred models"
+                        >
+                          <Star className="h-4 w-4" />
+                        </button>
+                        <div className="my-1 w-6 border-b border-[var(--border-default)] shrink-0" />
+                        {providerOptions.map((provider) => (
+                          <button
+                            key={provider}
+                            type="button"
+                            onClick={() => setProviderFilter(provider)}
+                            className={`flex h-8 w-8 items-center justify-center rounded-lg transition ${providerFilter === provider ? "bg-[var(--bg-elevated)] shadow-sm border border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))]" : "hover:bg-[var(--bg-hover)]"}`}
+                            title={provider}
+                          >
+                            <ProviderLogo provider={provider} size={20} className="rounded-md" />
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+                        <div className="flex items-center justify-between border-b border-[var(--border-default)] px-3 py-2">
+                          <p className="text-xs font-medium text-[var(--text-primary)]">Choose model</p>
+                          <button
+                            type="button"
+                            onClick={() => setShowModelSelector(false)}
+                            className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md border border-[var(--border-default)] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
+                            aria-label="Close model selector"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+
+                        <div className="border-b border-[var(--border-default)] p-2">
+                          <div className="relative">
+                            <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-[var(--text-secondary)]" />
+                            <input
+                              ref={modelSearchRef}
+                              value={modelSearch}
+                              onChange={(event) => setModelSearch(event.target.value)}
+                              placeholder="Search models..."
+                              className="h-9 w-full appearance-none rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] pl-10 pr-2 text-sm outline-none transition focus:border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))]"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto p-2">
+                          {providerFilter === "all" || providerFilter === "starred" ? (
+                            <div className="mb-2">
+                              <p className="mb-1 px-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
+                                Auto
+                              </p>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (autoRoutingRestriction) return;
+                                  onSelectAuto();
+                                  setShowModelSelector(false);
+                                }}
+                                disabled={Boolean(autoRoutingRestriction)}
+                                title={autoRoutingRestriction ?? "Use adaptive routing for this conversation."}
+                                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition ${
+                                  autoRoutingRestriction
+                                    ? "cursor-not-allowed opacity-55"
+                                    : "cursor-pointer hover:bg-[var(--bg-hover)]"
+                                } ${
+                                  routerMode !== "manual"
+                                    ? "bg-[color-mix(in_oklab,var(--accent-cyan)_14%,var(--bg-primary))] font-medium text-[var(--text-primary)]"
+                                    : ""
+                                }`}
+                              >
+                                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-[color-mix(in_oklab,var(--accent-cyan)_20%,var(--bg-secondary))]">
+                                  <Sparkles className="h-4 w-4 text-[var(--accent-cyan)]" />
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <p className="truncate text-sm font-medium text-[var(--text-primary)]">Auto</p>
+                                  <p className="truncate text-[10px] text-[var(--text-secondary)]">
+                                    Adaptive routing (only while Auto is selected)
+                                  </p>
+                                  {autoRoutingRestriction ? (
+                                    <p className="truncate text-[10px] text-[var(--warning)]">{autoRoutingRestriction}</p>
+                                  ) : null}
+                                </div>
+                                {routerMode !== "manual" ? (
+                                  <span className="shrink-0 rounded-full bg-[var(--accent-cyan)] px-1.5 py-0.5 text-[10px] font-medium text-white">
+                                    Active
+                                  </span>
+                                ) : null}
+                              </button>
+                            </div>
+                          ) : null}
+
+                          {filteredModelRows.length === 0 ? (
+                            <p className="px-3 py-4 text-center text-sm text-[var(--text-secondary)]">No models found</p>
+                          ) : (
+                            <div className="space-y-1">
+                              {filteredModelRows.map((row, index) => {
+                                const model = row.model;
+                                const isSelected = routerMode === "manual" && manualModel === model.modelId;
+                                const displayName = cleanModelDisplayText(model.name) || formatModelLabel(model.modelId);
+                                const disabled = Boolean(row.restrictionReason);
+                                const isStarred = starredModels.has(model.modelId);
+
+                                return (
+                                  <div key={model.modelId} className="group relative">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        if (disabled) return;
+                                        onSelectModel(model.modelId);
+                                        setShowModelSelector(false);
+                                      }}
+                                      title={row.restrictionReason ?? undefined}
+                                      className={`w-full rounded-lg border px-2.5 py-2 text-left transition pr-10 ${
+                                        disabled
+                                          ? "cursor-not-allowed opacity-55"
+                                          : "cursor-pointer hover:bg-[var(--bg-hover)]"
+                                      } ${
+                                        isSelected
+                                          ? "border-[color-mix(in_oklab,var(--accent-cyan)_42%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_14%,var(--bg-primary))] font-medium text-[var(--text-primary)]"
+                                          : "border-transparent"
+                                      }`}
+                                    >
+                                      <div className="flex items-start gap-2">
+                                        <ProviderLogo provider={model.provider} modelId={model.modelId} size={14} className="mt-0.5 h-6 w-6 rounded-md" />
+                                        <div className="min-w-0 flex-1">
+                                          <div className="flex items-center gap-1.5">
+                                            {index < 5 && !modelSearch.trim() && providerFilter === "all" ? (
+                                              <span className="rounded-full border border-[var(--border-default)] px-1.5 py-0.5 text-[9px] uppercase tracking-[0.08em] text-[var(--text-secondary)]">
+                                                Popular
+                                              </span>
+                                            ) : null}
+                                            {row.recommended ? (
+                                              <span className="rounded-full border border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] px-1.5 py-0.5 text-[9px] uppercase tracking-[0.08em] text-[var(--accent-cyan)]">
+                                                Recommended
+                                              </span>
+                                            ) : null}
+                                          </div>
+                                          <p className="truncate text-sm font-medium text-[var(--text-primary)]">{displayName}</p>
+                                          <p className="truncate text-[10px] text-[var(--text-secondary)]">
+                                            {model.provider} · {model.contextLength ? `${Math.round((model.contextLength ?? 0) / 1000)}k ctx` : "Context unknown"}
+                                          </p>
+                                          {row.cautionReason ? (
+                                            <p className="truncate text-[10px] text-[var(--warning)]">{row.cautionReason}</p>
+                                          ) : null}
+                                          {row.restrictionReason ? (
+                                            <p className="truncate text-[10px] text-[var(--warning)]">{row.restrictionReason}</p>
+                                          ) : null}
+                                        </div>
+                                      </div>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => toggleStarModel(e, model.modelId)}
+                                      className={`absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1.5 transition ${isStarred ? 'text-[var(--warning)] opacity-100' : 'text-[var(--text-tertiary)] opacity-0 group-hover:opacity-100 hover:text-[var(--text-primary)]'}`}
+                                      title={isStarred ? "Unstar model" : "Star model"}
+                                    >
+                                      <Star className="h-4 w-4" fill={isStarred ? "currentColor" : "none"} />
+                                    </button>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>,
+                  document.body,
+                )}
+                    </div>
+                    <div ref={agentMenuRef}>
+                      {showAgentSelector && (
+                  <div className="absolute bottom-full left-0 z-[340] mb-2 w-[min(95vw,22rem)] overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-soft)]">
+                    <div className="border-b border-[var(--border-default)] px-3 py-2">
+                      <p className="text-xs font-semibold uppercase tracking-[0.1em] text-[var(--text-secondary)]">Agent Workspace</p>
+                      <div className="mt-2 flex flex-col gap-2">
+                        <div className="relative w-full">
+                          <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-[var(--text-secondary)]" />
+                          <input
+                            value={agentSearch}
+                            onChange={(event) => setAgentSearch(event.target.value)}
+                            placeholder="Search agents..."
+                            className="h-8 w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] pl-8 pr-2 text-xs outline-none transition focus:border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))]"
+                          />
+                        </div>
+                        <select
+                          value={agentSubjectFilter}
+                          onChange={(event) => setAgentSubjectFilter(event.target.value)}
+                          className="h-8 w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 text-xs text-[var(--text-primary)] outline-none"
+                        >
+                          <option value="all">All subjects</option>
+                          {agentSubjectOptions.map((subject) => (
+                            <option key={subject} value={subject}>
+                              {subject}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                    <div className="max-h-[380px] overflow-y-auto p-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onSelectAgent(undefined);
+                          setShowAgentSelector(false);
+                        }}
+                        className={`mb-2 flex w-full cursor-pointer items-center justify-between rounded-lg border px-3 py-2 text-left text-xs transition ${
+                          !selectedAgentId
+                            ? "border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_12%,transparent)] text-[var(--text-primary)]"
+                            : "border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                        }`}
+                      >
+                        <span className="inline-flex items-center gap-1.5">
+                          <span>🧠</span>
+                          No agent
+                        </span>
+                        {!selectedAgentId ? <span className="text-[10px] uppercase tracking-[0.08em]">Active</span> : null}
+                      </button>
+
+                      {recommendedAgents.length > 0 ? (
+                        <div className="mb-3">
+                          <p className="mb-1 px-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--text-secondary)]">Recommended</p>
+                          <div className="flex flex-col gap-1.5">
+                            {recommendedAgents.map((agent) => (
+                              <button
+                                key={`recommended-${agent._id}`}
+                                type="button"
+                                onClick={() => {
+                                  onSelectAgent(agent._id);
+                                  setShowAgentSelector(false);
+                                }}
+                                className={`rounded-lg border p-2 text-left transition ${
+                                  selectedAgentId === agent._id
+                                    ? "border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_12%,transparent)]"
+                                    : "border-[var(--border-default)] bg-[var(--bg-secondary)] hover:bg-[var(--bg-hover)]"
+                                }`}
+                              >
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="flex items-center gap-2 overflow-hidden">
+                                    <span className="text-base leading-none">{agent.avatarEmoji ?? "🧠"}</span>
+                                    <div className="min-w-0 flex-1">
+                                      <p className="truncate text-xs font-medium text-[var(--text-primary)]">{agent.name}</p>
+                                      <p className="truncate text-[10px] text-[var(--text-secondary)]">
+                                        {(agent.subjectArea || agent.category || "General").slice(0, 32)}
+                                      </p>
+                                    </div>
+                                  </div>
+                                  <span className="shrink-0 rounded-full border border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] px-1.5 py-0.5 text-[9px] uppercase tracking-[0.08em] text-[var(--accent-cyan)]">
+                                    Match
+                                  </span>
+                                </div>
+                                <p className="mt-1 text-[10px] text-[var(--text-secondary)]">
+                                  {agent.resourceCount ?? 0} resources · {agent.usageCount} uses
+                                </p>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+
+                      {schoolAgents.length > 0 ? (
+                        <div className="mb-3">
+                          <p className="mb-1 px-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--text-secondary)]">School Agents</p>
+                          <div className="flex flex-col gap-1.5">
+                            {schoolAgents.slice(0, 8).map((agent) => (
+                              <button
+                                key={`school-${agent._id}`}
+                                type="button"
+                                onClick={() => {
+                                  onSelectAgent(agent._id);
+                                  setShowAgentSelector(false);
+                                }}
+                                className={`rounded-lg border p-2 text-left transition flex flex-col justify-center min-h-[50px] ${
+                                  selectedAgentId === agent._id
+                                    ? "border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_12%,transparent)]"
+                                    : "border-[var(--border-default)] bg-[var(--bg-secondary)] hover:bg-[var(--bg-hover)]"
+                                }`}
+                              >
+                                <div className="flex items-center gap-2 overflow-hidden">
+                                  <span className="text-base leading-none">{agent.avatarEmoji ?? "🧠"}</span>
+                                  <div className="min-w-0 flex-1">
+                                    <p className="truncate text-xs font-medium text-[var(--text-primary)]">{agent.name}</p>
+                                    <p className="truncate text-[10px] text-[var(--text-secondary)]">
+                                      {(agent.subjectArea || agent.category || "General").slice(0, 32)}
+                                    </p>
+                                  </div>
+                                </div>
+                                <p className="mt-1 text-[10px] text-[var(--text-secondary)]">
+                                  {agent.resourceCount ?? 0} resources · {agent.usageCount} uses
+                                </p>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+
+                      {myAgents.length > 0 ? (
+                        <div className="mb-3">
+                          <p className="mb-1 px-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--text-secondary)]">My Agents</p>
+                          <div className="flex flex-col gap-1.5">
+                            {myAgents.slice(0, 8).map((agent) => (
+                              <button
+                                key={`mine-${agent._id}`}
+                                type="button"
+                                onClick={() => {
+                                  onSelectAgent(agent._id);
+                                  setShowAgentSelector(false);
+                                }}
+                                className={`rounded-lg border p-2 text-left transition flex flex-col justify-center min-h-[50px] ${
+                                  selectedAgentId === agent._id
+                                    ? "border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_12%,transparent)]"
+                                    : "border-[var(--border-default)] bg-[var(--bg-secondary)] hover:bg-[var(--bg-hover)]"
+                                }`}
+                              >
+                                <div className="flex items-center gap-2 overflow-hidden">
+                                  <span className="text-base leading-none">{agent.avatarEmoji ?? "🧠"}</span>
+                                  <div className="min-w-0 flex-1">
+                                    <p className="truncate text-xs font-medium text-[var(--text-primary)]">{agent.name}</p>
+                                    <p className="truncate text-[10px] text-[var(--text-secondary)]">
+                                      {(agent.subjectArea || agent.category || "General").slice(0, 32)}
+                                    </p>
+                                  </div>
+                                </div>
+                                <p className="mt-1 text-[10px] text-[var(--text-secondary)]">
+                                  {agent.resourceCount ?? 0} resources · {agent.usageCount} uses
+                                </p>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+
+                      {allAgentsSection.length > 0 ? (
+                        <div className="mb-2">
+                          <p className="mb-1 px-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--text-secondary)]">All Agents</p>
+                          <div className="flex flex-col gap-1.5">
+                            {allAgentsSection.slice(0, 10).map((agent) => (
+                              <button
+                                key={`all-${agent._id}`}
+                                type="button"
+                                onClick={() => {
+                                  onSelectAgent(agent._id);
+                                  setShowAgentSelector(false);
+                                }}
+                                className={`rounded-lg border p-2 text-left transition flex flex-col justify-center min-h-[50px] ${
+                                  selectedAgentId === agent._id
+                                    ? "border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_12%,transparent)]"
+                                    : "border-[var(--border-default)] bg-[var(--bg-secondary)] hover:bg-[var(--bg-hover)]"
+                                }`}
+                              >
+                                <div className="flex items-center gap-2 overflow-hidden">
+                                  <span className="text-base leading-none">{agent.avatarEmoji ?? "🧠"}</span>
+                                  <div className="min-w-0 flex-1">
+                                    <p className="truncate text-xs font-medium text-[var(--text-primary)]">{agent.name}</p>
+                                    <p className="truncate text-[10px] text-[var(--text-secondary)]">
+                                      {(agent.subjectArea || agent.category || "General").slice(0, 32)}
+                                    </p>
+                                  </div>
+                                </div>
+                                <p className="mt-1 text-[10px] text-[var(--text-secondary)]">
+                                  {agent.resourceCount ?? 0} resources · {agent.usageCount} uses
+                                </p>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                    <div className="border-t border-[var(--border-default)] p-2">
+                      <Link
+                        href="/agents/new"
+                        className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-xs font-medium text-[var(--text-primary)] transition hover:bg-[var(--bg-hover)]"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        Quick create agent
+                      </Link>
+                    </div>
+                  </div>
+                )}
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-9 w-9 rounded-full text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                    onClick={() => {
+                      // K-bar search action
+                      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true }));
+                    }}
+                    title="Search workspace (⌘K)"
+                  >
+                    <Search className="h-4 w-4" />
+                  </Button>
+                </div>
               }
-            />
+ />
             {sendDisabledReason ? (
               <p className="pt-1 text-xs text-[var(--warning)]" aria-live="polite">{sendDisabledReason}</p>
             ) : null}

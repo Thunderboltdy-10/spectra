@@ -3,7 +3,7 @@ import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { adjustWorkstreamArtifactCount, getUserByClerkId } from "./helpers";
 import { resolveWorkstreamTransfer } from "./workstreamAssignment";
-import { removeWorkspaceItemForArtifact, syncWorkspaceItemForArtifact } from "./workspaceItemSync";
+import { removeWorkspaceItemForArtifact, syncWorkspaceItemForArtifact, syncWorkspaceItemForChat } from "./workspaceItemSync";
 import { recordWorkspaceMutation } from "./workspaceHelpers";
 
 const vArtifactSourceType = v.union(
@@ -774,7 +774,7 @@ export const applyAiEdit = mutation({
       lastAiEditId: normalizeString(args.lastAiEditId),
       pendingDiffs: args.pendingDiffs,
       linkedChatId: args.sourceChatId ?? artifact.linkedChatId,
-      sourceType: artifact.sourceType ?? "ai_generated",
+      sourceType: "ai_generated",
       updatedAt: now,
     });
 
@@ -1082,10 +1082,22 @@ export const remove = mutation({
       .withIndex("by_artifact", (q) => q.eq("artifactId", args.artifactId))
       .collect();
     for (const chat of linkedChats) {
+      const updatedAt = Date.now();
       await ctx.db.patch(chat._id, {
         artifactId: undefined,
         threadType: chat.threadType === "artifact_edit" ? "conversation" : chat.threadType,
-        updatedAt: Date.now(),
+        updatedAt,
+      });
+      await syncWorkspaceItemForChat(ctx, {
+        chatId: chat._id,
+        ownerUserId: actor._id,
+        orgId: actor.orgId,
+        workstreamId: chat.workstreamId,
+        title: chat.title,
+        latestUserPrompt: chat.latestUserPrompt,
+        contextSummary: chat.contextSummary,
+        createdAt: chat.createdAt,
+        updatedAt,
       });
     }
     const plannerItems = await ctx.db
@@ -1180,6 +1192,20 @@ export const restoreVersion = mutation({
       description: "Restored to earlier version",
       status: "confirmed",
       createdAt: now,
+    });
+    await recordWorkspaceMutation(ctx, {
+      orgId: actor.orgId,
+      ownerUserId: actor._id,
+      workstreamId: artifact.workstreamId,
+      mutationType: "restore_artifact_version",
+      source: "user",
+      entity: "artifact",
+      action: "updated",
+      includeHub: true,
+      refreshHub: true,
+      summary: `Restored artifact ${artifact.title} to an earlier version`,
+      before: { content: artifact.content, contentPlaintext: artifact.contentPlaintext },
+      after: { content: restoredContent, contentPlaintext: getVersionPlaintext(version, artifact.contentPlaintext) },
     });
     const refreshed = await ctx.db.get(args.artifactId);
     await syncWorkspaceItemForArtifact(ctx, {

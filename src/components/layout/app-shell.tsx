@@ -377,7 +377,7 @@ export function AppShell({
             } catch {
               // Ignore storage failures.
             }
-            router.push("/chat");
+            router.push("/chat?new=1");
             window.dispatchEvent(new Event("ai-school:new-chat"));
           }}
           onDeleteChat={(chatId) => {

@@ -140,6 +140,90 @@ describe("buildRoutePlan", () => {
     expect(plan.requestedArtifactFormats).toContain("pdf");
   });
 
+  it("assigns confidence-based artifact save policy instead of universal autosave", () => {
+    const autoPlan = buildRoutePlan({
+      message: "Create and export a PDF study guide artifact for this lesson.",
+      mode: "document",
+      selectedMode: "document",
+      hasAttachments: false,
+      hasAgent: false,
+      hasPack: false,
+      hasPersonalResources: false,
+      hasAgentResources: false,
+      autoSearchEnabled: false,
+      thinkingLevel: "medium",
+      complexity: "medium",
+      schoolSoulVersion: "school-soul-save-auto",
+    });
+
+    const promptPlan = buildRoutePlan({
+      message: "Create a concise study guide summary I might want to save later.",
+      mode: "general",
+      selectedMode: "general",
+      hasAttachments: false,
+      hasAgent: false,
+      hasPack: false,
+      hasPersonalResources: false,
+      hasAgentResources: false,
+      autoSearchEnabled: false,
+      thinkingLevel: "medium",
+      complexity: "medium",
+      schoolSoulVersion: "school-soul-save-prompt",
+    });
+
+    const nonePlan = buildRoutePlan({
+      message: "What is kinetic energy?",
+      mode: "general",
+      selectedMode: "general",
+      hasAttachments: false,
+      hasAgent: false,
+      hasPack: false,
+      hasPersonalResources: false,
+      hasAgentResources: false,
+      autoSearchEnabled: false,
+      thinkingLevel: "low",
+      complexity: "simple",
+      schoolSoulVersion: "school-soul-save-none",
+    });
+
+    expect(autoPlan.artifactSavePolicy).toBe("auto");
+    expect(promptPlan.artifactSavePolicy).toBe("prompt");
+    expect(nonePlan.artifactSavePolicy).toBe("none");
+  });
+
+  it("does not force artifact save prompts for explicit artifact-surface editing requests", () => {
+    const plan = buildRoutePlan({
+      message: "Edit this artifact and replace the second paragraph with a tighter version.",
+      mode: "document",
+      selectedMode: "document",
+      hasAttachments: false,
+      hasAgent: false,
+      hasPack: false,
+      hasPersonalResources: false,
+      hasAgentResources: false,
+      autoSearchEnabled: false,
+      thinkingLevel: "medium",
+      complexity: "medium",
+      workstreamContext: {
+        activeWorkstreamId: "ws_1",
+        focusSurface: "panel",
+        activeWorkstream: {
+          _id: "ws_1",
+          title: "English",
+          artifactCount: 1,
+          noteCount: 0,
+          plannerItemCount: 0,
+          threadCount: 1,
+        },
+        candidates: [],
+      },
+      schoolSoulVersion: "school-soul-v14",
+    });
+
+    expect(plan.artifactSavePolicy).not.toBe("none");
+    expect(plan.threadStrategy.action).not.toBe("new_chat");
+  });
+
   it("captures model and orchestration intent signals", () => {
     const plan = buildRoutePlan({
       message: "Use Claude and get different perspectives with multiple models.",

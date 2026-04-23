@@ -354,8 +354,22 @@ function decideThreadStrategy(params: {
     };
   }
 
+  if (!params.threadContext.explicitlySameThread) {
+    return {
+      action: "new_chat",
+      confidence: 1,
+      reason: "Starting a clean new conversation unless continuation is explicitly requested.",
+      contextWindowPressure: normalizeConfidence(params.threadContext.contextWindowUtilization ?? 0),
+      topicContinuity: 0,
+      timeGapHours: params.threadContext.lastMessageAt
+        ? Math.max(0, (Date.now() - params.threadContext.lastMessageAt) / (60 * 60 * 1000))
+        : undefined,
+      turnsSinceCompaction: params.threadContext.turnsSinceCompaction,
+    };
+  }
+
   const normalizedMessage = compactText(params.message).toLowerCase();
-  const explicitFork = /\b(new thread|separate thread|start fresh|fork this|branch this|split this off)\b/i.test(params.message);
+  const explicitFork = /\b(new thread|separate thread|fork this|branch this|split this off)\b/i.test(params.message);
   const explicitContinueCue =
     /\b(continue(?: this| the)?(?: thread| chat| conversation)?|resume(?: this| the)?(?: thread| chat| conversation)?|same thread|same chat|pick up where we left off|carry on from previous)\b/i.test(params.message);
   const explicitContinuationReference = /\b(as above|based on that|from the previous|from the prior)\b/i.test(params.message);
@@ -384,9 +398,7 @@ function decideThreadStrategy(params: {
     && turnsSinceCompaction < 12
     && (typeof timeGapHours !== "number" || timeGapHours < 10);
   const pivotIntent = switchIntent || explicitIgnorePrior;
-  const shouldContinue =
-    explicitContinue
-    || (!pivotIntent && strongContinuity);
+  const shouldContinue = explicitContinue || (!pivotIntent && strongContinuity);
   const shouldFork = !shouldContinue && explicitFork;
   return {
     action: shouldFork ? "fork" : shouldContinue ? "continue" : "new_chat",
@@ -820,14 +832,21 @@ export function buildRoutePlan(params: BuildRoutePlanParams): RoutePlan {
   });
   const shouldUseSchoolResources = params.hasPack || params.hasAgentResources || /upload|attached|file|notes|resource|chapter|pack/i.test(lowerMessage);
   const artifactSignalStrength = [
-    params.mode === "document" ? 0.7 : 0,
-    artifactRequest ? 0.2 : 0,
-    requestedArtifactFormats.length > 0 ? 0.1 : 0,
-    /\b(create|make|build|generate|draft|produce|export|save)\b/i.test(lowerMessage) ? 0.12 : 0,
-    /\b(summary|handout|worksheet|slides|report|guide|brief|deck|artifact)\b/i.test(lowerMessage) ? 0.12 : 0,
-    params.workstreamContext?.focusSurface === "workspace" || params.workstreamContext?.focusSurface === "panel" ? 0.12 : 0,
+    params.mode === "document" ? 0.58 : 0,
+    artifactRequest ? 0.18 : 0,
+    requestedArtifactFormats.length > 0 ? 0.12 : 0,
+    /\b(create|make|build|generate|draft|produce|export)\b/i.test(lowerMessage) ? 0.16 : 0,
+    /\b(save|store|keep|persist|turn this into|create an artifact|new document|deliverable)\b/i.test(lowerMessage) ? 0.18 : 0,
+    /\b(summary|handout|worksheet|slides|report|guide|brief|deck|artifact|timeline|table|diagram|visual)\b/i.test(lowerMessage) ? 0.14 : 0,
+    params.workstreamContext?.focusSurface === "workspace" || params.workstreamContext?.focusSurface === "panel" ? 0.08 : 0,
   ].reduce((sum, value) => sum + value, 0);
-  const artifactWorthSaving = artifactSignalStrength >= 0.74;
+  const artifactSavePolicy =
+    artifactSignalStrength >= 0.82
+      ? "auto"
+      : artifactSignalStrength >= 0.6
+        ? "prompt"
+        : "none";
+  const artifactWorthSaving = artifactSavePolicy !== "none";
   const researchNeedsSearch =
     params.mode === "research"
     && (
@@ -1077,6 +1096,7 @@ export function buildRoutePlan(params: BuildRoutePlanParams): RoutePlan {
     },
     executionPath,
     requestedArtifactFormats,
+    artifactSavePolicy,
     allowSubAgents: shouldUseMultiStep && (params.mode === "research" || params.complexity === "complex"),
     orchestrationProfile,
     modeContract,

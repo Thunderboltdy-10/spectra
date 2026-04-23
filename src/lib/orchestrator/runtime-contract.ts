@@ -5,6 +5,7 @@ export type RuntimeSurface = "chat" | "workspace" | "artifact";
 export type RuntimeEventType =
   | "delta"
   | "thinking"
+  | "thinking_segment"
   | "tool_call"
   | "tool_result"
   | "skill_loaded"
@@ -34,6 +35,27 @@ export type RuntimeEventType =
   | "collab_synthesizing"
   | "done"
   | "error";
+
+export type RuntimeExecutionStatus = "idle" | "running" | "completed" | "failed";
+export type RuntimeThinkingSegment = {
+  id: string;
+  label: string;
+  content: string;
+  status: RuntimeExecutionStatus;
+};
+
+export type RuntimePhaseEvent = RuntimeEventBase & {
+  type: "phase_update";
+  phaseId?: string;
+  status?: RuntimeExecutionStatus | "planned" | "skipped";
+  detail?: string;
+  phasePlan?: unknown;
+};
+
+export type RuntimeThinkingSegmentEvent = RuntimeEventBase & {
+  type: "thinking_segment";
+  segment: RuntimeThinkingSegment;
+};
 
 export type RuntimeContextLayerBudget = {
   name: "system" | "history" | "memory" | "retrieval" | "search" | "attachments" | "workspace";
@@ -80,11 +102,25 @@ export type RuntimeContextEnvelope = {
   };
 };
 
+export type RuntimeRenderInstruction = {
+  kind: "code" | "visual" | "document" | "table" | "markdown";
+  title?: string;
+  content?: string;
+  language?: string;
+  artifactId?: string;
+  renderMode?: string;
+  props?: Record<string, unknown>;
+};
+
 export type RuntimeResponseArtifacts = {
   routeTrace?: RouteTrace;
   citations?: Array<{ url: string; title: string }>;
   modelUsed?: string;
+  activeModel?: string;
+  executionPath?: RuntimeExecutionPath;
   thinkingContent?: string;
+  renderInstructions?: RuntimeRenderInstruction[];
+  artifactUpdates?: Array<Record<string, unknown>>;
 };
 
 export type RuntimeEventBase = {
@@ -134,8 +170,12 @@ export type RuntimeDoneEvent = RuntimeEventBase & {
   messageId?: string;
   routeTrace?: RouteTrace;
   modelUsed?: string;
+  activeModel?: string;
+  executionPath?: RuntimeExecutionPath;
   citations?: Array<{ url: string; title: string }>;
   thinkingContent?: string;
+  renderInstructions?: RuntimeRenderInstruction[];
+  artifactUpdates?: Array<Record<string, unknown>>;
 };
 
 export type RuntimeErrorEvent = RuntimeEventBase & {
@@ -152,6 +192,8 @@ export type RuntimeGenericEvent = RuntimeEventBase & Record<string, unknown>;
 export type RuntimeEvent =
   | RuntimeToolCallEvent
   | RuntimeToolResultEvent
+  | RuntimePhaseEvent
+  | RuntimeThinkingSegmentEvent
   | RuntimeModeSwitchedEvent
   | RuntimeNavigationInstructionEvent
   | RuntimeModelSelectedEvent

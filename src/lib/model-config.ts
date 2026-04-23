@@ -196,6 +196,12 @@ export function buildRouterFallbacksFromCatalog(catalog: CatalogModelEntry[], pr
         if (uptimeDelta !== 0) return uptimeDelta;
         return a.modelId.localeCompare(b.modelId);
       })
+      .sort((a, b) => {
+        const aIsGlm = a.modelId === MODEL_CONFIG.glmAir;
+        const bIsGlm = b.modelId === MODEL_CONFIG.glmAir;
+        if (aIsGlm !== bIsGlm) return Number(aIsGlm) - Number(bIsGlm);
+        return 0;
+      })
       .map((model) => model.modelId)
       .slice(0, 4);
 
@@ -249,10 +255,20 @@ export const ROUTER_FALLBACKS: Record<string, string[]> = {
 
   [MODEL_CONFIG.smartPaid]: [MODEL_CONFIG.smartCheap, MODEL_CONFIG.tutorFast],
   [MODEL_CONFIG.smartCheap]: [MODEL_CONFIG.tutorFast, MODEL_CONFIG.marker],
-  [MODEL_CONFIG.reasoningPaid]: [MODEL_CONFIG.smartPaid, MODEL_CONFIG.tutorHigh],
-  [MODEL_CONFIG.searchFast]: [MODEL_CONFIG.searchDeep, MODEL_CONFIG.tutorFast],
-  [MODEL_CONFIG.searchDeep]: [MODEL_CONFIG.searchFast, MODEL_CONFIG.reasoningPaid],
+  [MODEL_CONFIG.reasoningPaid]: [MODEL_CONFIG.tutorHigh, MODEL_CONFIG.smartPaid],
+  [MODEL_CONFIG.searchFast]: [MODEL_CONFIG.tutorFast, MODEL_CONFIG.searchDeep],
+  [MODEL_CONFIG.searchDeep]: [MODEL_CONFIG.reasoningPaid, MODEL_CONFIG.searchFast],
 };
+
+for (const fallbacks of Object.values(ROUTER_FALLBACKS)) {
+  if (fallbacks[0] === MODEL_CONFIG.glmAir) {
+    const replacementIndex = fallbacks.findIndex((candidate) => candidate !== MODEL_CONFIG.glmAir);
+    if (replacementIndex > 0) {
+      const [replacement] = fallbacks.splice(replacementIndex, 1);
+      fallbacks.unshift(replacement);
+    }
+  }
+}
 
 export function getRouterFallbacks(catalog?: CatalogModelEntry[]) {
   if (!catalog || catalog.length === 0) return ROUTER_FALLBACKS;

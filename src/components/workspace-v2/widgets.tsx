@@ -34,8 +34,8 @@ const WIDGET_META: Record<WidgetKind, { label: string; short: string; icon: Icon
   timetable:{ label: "Timetable",    short: "Table",    icon: "schedule", defaultSize: { w: 308, h: 248 }, color: "#6b5f52" },
   scratch:  { label: "Scratchpad",   short: "Note",     icon: "note",     defaultSize: { w: 304, h: 232 }, color: "#b67616" },
   calendar: { label: "Calendar",     short: "Calendar", icon: "schedule", defaultSize: { w: 312, h: 270 }, color: "#6b5f52" },
-  thread:   { label: "Thread",        short: "Thread",   icon: "thread",   defaultSize: { w: 340, h: 320 }, color: "#0e8ee8" },
-  artifact: { label: "Artifact",      short: "Artifact", icon: "note",     defaultSize: { w: 380, h: 300 }, color: "#b67616" },
+  thread:   { label: "Thread",        short: "Thread",   icon: "thread",   defaultSize: { w: 420, h: 480 }, color: "#0e8ee8" },
+  artifact: { label: "Artifact",      short: "Artifact", icon: "note",     defaultSize: { w: 480, h: 560 }, color: "#b67616" },
 };
 
 export const WIDGET_KINDS: WidgetKind[] = ["timer", "planner", "today", "timetable", "scratch", "calendar", "artifact"];
@@ -92,6 +92,7 @@ function TimerInner({
         >
           {running ? "Pause" : "Start"}
         </button>
+
       </div>
     </div>
   );
@@ -393,6 +394,7 @@ type FloatingProps = {
   /** Tick counter to force rerender of collapsed live-preview. */
   tick?: number;
   onMove: (id: string, x: number, y: number) => void;
+  onResize?: (id: string, w: number, h: number) => void;
   onClose: (id: string) => void;
   onCollapse: (id: string) => void;
   onExpand: (id: string) => void;
@@ -416,7 +418,7 @@ const COLLAPSED_H = 56;
 export function FloatingWidget({
   widget, workspaceItems = [], tick = 0, onMove, onClose, onCollapse, onExpand,
   onTimerToggle, onTimerReset, aiTouched, onAsk, onWidgetEdit, onOpenItem, onExpandEdit,
-  onDropAnchor, isRevealing,
+  onDropAnchor, isRevealing, onResize,
 }: FloatingProps) {
   void onExpandEdit;
   const dragRef = useRef<{ sx: number; sy: number; ox: number; oy: number; moved: boolean } | null>(null);
@@ -644,6 +646,34 @@ export function FloatingWidget({
             onOpenItem={onOpenItem}
           />
         </div>
+        {!isCollapsed && onResize && (
+          <div
+            data-nodrag
+            className="absolute bottom-0 right-0 w-4 h-4 cursor-se-resize flex items-end justify-end p-1 hover:bg-black/5 rounded-tl-sm transition-colors z-50"
+            onMouseDown={(e) => {
+              e.stopPropagation();
+              document.body.classList.add("sv2-dragging-widget");
+              const startX = e.clientX;
+              const startY = e.clientY;
+              const startW = widget.w;
+              const startH = widget.h;
+              const doResize = (ev: MouseEvent) => {
+                const nw = Math.max(260, startW + (ev.clientX - startX));
+                const nh = Math.max(160, startH + (ev.clientY - startY));
+                onResize(widget.id, nw, nh);
+              };
+              const stopResize = () => {
+                window.removeEventListener("mousemove", doResize);
+                window.removeEventListener("mouseup", stopResize);
+                document.body.classList.remove("sv2-dragging-widget");
+              };
+              window.addEventListener("mousemove", doResize);
+              window.addEventListener("mouseup", stopResize);
+            }}
+          >
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--ink-400)" strokeWidth="1.5"><path d="M9 1v8H1M5 9V5h4" opacity="0.5"/></svg>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -659,6 +689,7 @@ type ArtifactWidgetProps = {
   h: number;
   collapsed?: boolean;
   onMove: (x: number, y: number) => void;
+  onResize?: (w: number, h: number) => void;
   onClose: () => void;
   onCollapse: () => void;
   onExpand: () => void;
@@ -675,6 +706,7 @@ export function ArtifactWidget({
   h,
   collapsed,
   onMove,
+  onResize,
   onClose,
   onCollapse,
   onExpand,
@@ -684,9 +716,12 @@ export function ArtifactWidget({
 }: ArtifactWidgetProps) {
   const dragRef = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
   const frameRef = useRef<HTMLDivElement | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
   const onDown = (e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest("[data-nodrag]")) return;
     dragRef.current = { sx: e.clientX, sy: e.clientY, ox: x, oy: y };
+    document.body.classList.add("sv2-dragging-widget");
+    setIsDragging(true);
     const move = (ev: MouseEvent) => {
       const d = dragRef.current;
       if (!d) return;
@@ -702,6 +737,8 @@ export function ArtifactWidget({
       dragRef.current = null;
       window.removeEventListener("mousemove", move);
       window.removeEventListener("mouseup", up);
+      document.body.classList.remove("sv2-dragging-widget");
+      setIsDragging(false);
     };
     window.addEventListener("mousemove", move);
     window.addEventListener("mouseup", up);
@@ -790,6 +827,7 @@ export function ArtifactWidget({
         left: x, top: y,
         width: isCollapsed ? 240 : w,
         height: isCollapsed ? 44 : h,
+        userSelect: isDragging ? "none" : "auto",
         borderRadius: isCollapsed ? 14 : 16,
         background: "var(--paper)",
         border: `1px solid ${isCollapsed ? `${kindColor}30` : "var(--line)"}`,
@@ -940,6 +978,34 @@ export function ArtifactWidget({
             </>
           )}
       </div>
+      {!isCollapsed && onResize && (
+        <div
+          data-nodrag
+          className="absolute bottom-0 right-0 w-4 h-4 cursor-se-resize flex items-end justify-end p-1 hover:bg-black/5 rounded-tl-sm transition-colors z-50"
+          onMouseDown={(e) => {
+            e.stopPropagation();
+            document.body.classList.add("sv2-dragging-widget");
+            const startX = e.clientX;
+            const startY = e.clientY;
+            const startW = w;
+            const startH = h;
+            const doResize = (ev: MouseEvent) => {
+              const nw = Math.max(320, startW + (ev.clientX - startX));
+              const nh = Math.max(240, startH + (ev.clientY - startY));
+              onResize(nw, nh);
+            };
+            const stopResize = () => {
+              window.removeEventListener("mousemove", doResize);
+              window.removeEventListener("mouseup", stopResize);
+              document.body.classList.remove("sv2-dragging-widget");
+            };
+            window.addEventListener("mousemove", doResize);
+            window.addEventListener("mouseup", stopResize);
+          }}
+        >
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--ink-400)" strokeWidth="1.5"><path d="M9 1v8H1M5 9V5h4" opacity="0.5"/></svg>
+        </div>
+      )}
     </div>
   );
 }
@@ -954,17 +1020,21 @@ type ThreadWidgetProps = {
   h: number;
   collapsed?: boolean;
   onMove: (x: number, y: number) => void;
+  onResize?: (w: number, h: number) => void;
   onClose: () => void;
   onCollapse: () => void;
   onExpand: () => void;
 };
 
-export function ThreadWidget({ item, x, y, w, h, collapsed, onMove, onClose, onCollapse, onExpand }: ThreadWidgetProps) {
+export function ThreadWidget({ item, x, y, w, h, collapsed, onMove, onResize, onClose, onCollapse, onExpand }: ThreadWidgetProps) {
   const dragRef = useRef<{ sx: number; sy: number; ox: number; oy: number } | null>(null);
   const frameRef = useRef<HTMLDivElement | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
   const onDown = (e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest("[data-nodrag]")) return;
     dragRef.current = { sx: e.clientX, sy: e.clientY, ox: x, oy: y };
+    document.body.classList.add("sv2-dragging-widget");
+    setIsDragging(true);
     const move = (ev: MouseEvent) => {
       const d = dragRef.current;
       if (!d) return;
@@ -980,6 +1050,8 @@ export function ThreadWidget({ item, x, y, w, h, collapsed, onMove, onClose, onC
       dragRef.current = null;
       window.removeEventListener("mousemove", move);
       window.removeEventListener("mouseup", up);
+      document.body.classList.remove("sv2-dragging-widget");
+      setIsDragging(false);
     };
     window.addEventListener("mousemove", move);
     window.addEventListener("mouseup", up);
@@ -1017,6 +1089,7 @@ export function ThreadWidget({ item, x, y, w, h, collapsed, onMove, onClose, onC
         left: x, top: y,
         width: isCollapsed ? 120 : w,
         height: isCollapsed ? 36 : h,
+        userSelect: isDragging ? "none" : "auto",
         borderRadius: isCollapsed ? 18 : 16,
         background: "var(--paper)",
         border: "1px solid var(--line)",
@@ -1102,7 +1175,35 @@ export function ThreadWidget({ item, x, y, w, h, collapsed, onMove, onClose, onC
               </div>
             ))}
             <div ref={bottomRef} />
-          </div>
+                  </div>
+          {!isCollapsed && onResize && (
+            <div
+              data-nodrag
+              className="absolute bottom-0 right-0 w-4 h-4 cursor-se-resize flex items-end justify-end p-1 hover:bg-black/5 rounded-tl-sm transition-colors z-50"
+              onMouseDown={(e) => {
+                e.stopPropagation();
+                document.body.classList.add("sv2-dragging-widget");
+                const startX = e.clientX;
+                const startY = e.clientY;
+                const startW = w;
+                const startH = h;
+                const doResize = (ev: MouseEvent) => {
+                  const nw = Math.max(300, startW + (ev.clientX - startX));
+                  const nh = Math.max(200, startH + (ev.clientY - startY));
+                  onResize(nw, nh);
+                };
+                const stopResize = () => {
+                  window.removeEventListener("mousemove", doResize);
+                  window.removeEventListener("mouseup", stopResize);
+                  document.body.classList.remove("sv2-dragging-widget");
+                };
+                window.addEventListener("mousemove", doResize);
+                window.addEventListener("mouseup", stopResize);
+              }}
+            >
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--ink-400)" strokeWidth="1.5"><path d="M9 1v8H1M5 9V5h4" opacity="0.5"/></svg>
+            </div>
+          )}
         </>
       )}
     </div>

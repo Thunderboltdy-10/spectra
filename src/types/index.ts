@@ -312,6 +312,7 @@ export type RoutePlan = {
   };
   executionPath?: RuntimeExecutionPath;
   requestedArtifactFormats: ArtifactFormat[];
+  artifactSavePolicy?: "auto" | "prompt" | "none";
   allowSubAgents: boolean;
   orchestrationProfile: OrchestrationProfile;
   modeContract: ModeContract;

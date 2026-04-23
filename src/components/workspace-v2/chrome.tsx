@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Icon, type IconName } from "./icons";
-import { ExecutionTimeline } from "@/components/shared/execution-timeline";
 import { QuickChat } from "@/components/shared/quick-chat";
 import type { RouteTrace } from "@/types";
 import type { V2Item, V2Territory, QuickStart } from "./data";
@@ -480,6 +479,17 @@ export type ResultIsland = {
   routeTrace?: RouteTrace;
 } | null;
 
+export type RuntimeRequestBar = {
+  id: string;
+  chatId: string;
+  prompt: string;
+  status: "pending" | "running" | "done" | "error";
+  label: string;
+  summary?: string;
+  startedAt: number;
+  updatedAt: number;
+};
+
 type CommandBarProps = {
   focusedItem: V2Item | null;
   workspace: V2Territory | null;
@@ -505,6 +515,10 @@ type CommandBarProps = {
     color: string;
     count?: number;
   } | null;
+  runtimeRequests?: RuntimeRequestBar[];
+  activeRuntimeRequestId?: string | null;
+  onSelectRuntimeRequest?: (requestId: string) => void;
+  onClearRuntimeSelection?: () => void;
 };
 
 /* Creation menu items — shared with right-click context menu in app.tsx */
@@ -521,15 +535,30 @@ export function CommandBar({
   resultIsland, onSubmit, onDismissResult, isProcessing = false,
   isStreaming = false, onStop,
   onSpotlight, onCreate, onClearFocusContext, focusContext,
+  runtimeRequests = [],
+  activeRuntimeRequestId = null,
+  onSelectRuntimeRequest,
+  onClearRuntimeSelection,
 }: CommandBarProps) {
   const [value, setValue] = useState("");
   const [showCreateMenu, setShowCreateMenu] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const handleCloseCreate = () => setShowCreateMenu(false);
     window.addEventListener("workspace:close-create-menu", handleCloseCreate);
     return () => window.removeEventListener("workspace:close-create-menu", handleCloseCreate);
   }, []);
+
+  useEffect(() => {
+    if (!showCreateMenu) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (menuRef.current?.contains(event.target as Node)) return;
+      setShowCreateMenu(false);
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    return () => document.removeEventListener("mousedown", onPointerDown);
+  }, [showCreateMenu]);
 
   const placeholder = (() => {
     if (focusContext?.kind === "focused-view") return `Ask about ${focusContext.count ?? 1} items in focus…`;
@@ -559,6 +588,70 @@ export function CommandBar({
 
   return (
     <div className="absolute left-1/2 -translate-x-1/2 bottom-8 z-40 pointer-events-auto flex flex-col items-center max-w-[92vw]">
+      {runtimeRequests.length > 0 && (
+        <div className="w-[min(760px,calc(100vw-34px))] flex flex-col gap-1.5 mb-2">
+          {runtimeRequests.slice(0, 4).map((request) => {
+            const active = request.id === activeRuntimeRequestId;
+            const statusColor =
+              request.status === "error"
+                ? "var(--coral)"
+                : request.status === "done"
+                  ? "var(--mint)"
+                  : "var(--accent)";
+            return (
+              <button
+                key={request.id}
+                type="button"
+                onClick={() => onSelectRuntimeRequest?.(request.id)}
+                className={`w-full text-left rounded-xl border px-3 py-2 transition-all ${
+                  active ? "shadow-sm" : "opacity-90 hover:opacity-100"
+                }`}
+                style={{
+                  borderColor: active ? statusColor : "var(--line)",
+                  background: active
+                    ? `color-mix(in oklab, ${statusColor} 8%, var(--paper))`
+                    : "var(--paper)",
+                }}
+                title={request.prompt}
+              >
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`inline-block h-2 w-2 rounded-full ${
+                      request.status === "pending" || request.status === "running" ? "sv2-breathe" : ""
+                    }`}
+                    style={{ background: statusColor }}
+                  />
+                  <span
+                    className="text-[12px] font-medium truncate flex-1"
+                    style={{ color: "var(--ink-100)" }}
+                  >
+                    {request.label}
+                  </span>
+                  <span className="text-[9px] font-mono uppercase tracking-[0.12em]" style={{ color: "var(--ink-400)" }}>
+                    {request.status}
+                  </span>
+                </div>
+                <div className="mt-1 text-[10px] font-mono truncate" style={{ color: "var(--ink-400)" }}>
+                  {request.prompt}
+                </div>
+              </button>
+            );
+          })}
+          {activeRuntimeRequestId && (
+            <div className="flex justify-end pr-1">
+              <button
+                type="button"
+                onClick={onClearRuntimeSelection}
+                className="text-[10px] font-mono uppercase tracking-[0.12em] opacity-70 hover:opacity-100 transition-opacity"
+                style={{ color: "var(--ink-400)" }}
+              >
+                Clear Thread Selection
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Result island — animated pill attachment with four honest states */}
       {resultIsland && (
         <div
@@ -641,35 +734,46 @@ export function CommandBar({
         </div>
       )}
 
-      {/* Expandable execution timeline below result island when streaming */}
-      {resultIsland && resultIsland.routeTrace && (resultIsland.status === "running" || resultIsland.status === "streaming") && (
-        <div
-          className="sv2-island mb-1.5 px-3 py-2 overflow-hidden"
-          style={{ maxWidth: "420px", width: "100%", borderRadius: "12px", fontSize: "11px" }}
-        >
-          <ExecutionTimeline
-            routeTrace={resultIsland.routeTrace}
-            streaming
-            compact
-          />
-        </div>
-      )}
+      
 
       <div className="flex items-end gap-2 w-[min(760px,calc(100vw-34px))]">
-        {/* Plus button — opens inline creation menu */}
-        <div className="relative shrink-0">
+        <QuickChat
+          value={value}
+          onChange={setValue}
+          onSubmit={submit}
+          onStop={onStop}
+          isStreaming={isStreaming}
+          isProcessing={isProcessing}
+          placeholder={placeholder}
+          className="w-full min-w-0"
+          leftContent={focusedItem && !value
+            ? (
+                <div className="hidden sm:flex sv2-chip shrink-0 opacity-70 h-6">
+                  <Icon name={KIND_META[focusedItem.kind].icon} size={10} />
+                  <span className="max-w-[72px] truncate">{focusedItem.title}</span>
+                </div>
+              )
+            : null}
+          rightContent={(
+            <div className="flex items-center gap-1">
+              {/* Plus button — opens inline creation menu */}
+        <div ref={menuRef} className="relative shrink-0">
           <button
             onClick={() => setShowCreateMenu((v) => !v)}
-            className="w-10 h-10 rounded-full flex items-center justify-center shadow-md sv2-island hover:shadow-lg transition-all group"
+            className="w-8 h-8 rounded-full flex items-center justify-center transition-colors hover:bg-[var(--bg2)] text-[var(--ink-400)] group"
             title="Create…"
           >
-            <Icon name="plus" size={15} style={{ color: "var(--accent)" }} className="group-hover:scale-110 transition-transform" />
+            <Icon name="plus" size={14} style={{ color: "var(--ink-400)" }} className="group-hover:text-[var(--ink-100)] transition-transform" />
           </button>
           {showCreateMenu && (
             <div
               className="absolute bottom-full mb-2 left-0 w-[180px] rounded-xl py-1.5 sv2-island sv2-drift-in shadow-xl"
               style={{ border: "1px solid var(--line)" }}
             >
+              <div
+                className="absolute left-4 top-full h-2 w-2 -translate-y-[1px] rotate-45"
+                style={{ background: "var(--paper)", borderRight: "1px solid var(--line)", borderBottom: "1px solid var(--line)" }}
+              />
               <div className="px-3 py-1 font-mono text-[9px] uppercase tracking-[0.16em]" style={{ color: "var(--ink-400)" }}>
                 Create here
               </div>
@@ -690,18 +794,6 @@ export function CommandBar({
             </div>
           )}
         </div>
-
-        <QuickChat
-          value={value}
-          onChange={setValue}
-          onSubmit={submit}
-          onStop={onStop}
-          isStreaming={isStreaming}
-          isProcessing={isProcessing}
-          placeholder={placeholder}
-          className="w-full min-w-0"
-          leftContent={(
-            <>
               <button
                 onClick={() => { onSpotlight?.(); }}
                 className="shrink-0 transition-opacity opacity-60 hover:opacity-100"
@@ -724,16 +816,8 @@ export function CommandBar({
                   </button>
                 </div>
               )}
-            </>
+            </div>
           )}
-          rightContent={focusedItem && !value
-            ? (
-                <div className="hidden sm:flex sv2-chip shrink-0 opacity-70 h-6">
-                  <Icon name={KIND_META[focusedItem.kind].icon} size={10} />
-                  <span className="max-w-[72px] truncate">{focusedItem.title}</span>
-                </div>
-              )
-            : null}
         />
       </div>
     </div>

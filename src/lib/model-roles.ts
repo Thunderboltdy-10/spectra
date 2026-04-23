@@ -37,7 +37,7 @@ export const MODEL_ROLE_CRITERIA: Record<ModelRole, RoleCriteria> = {
     requiredCapabilities: ["reasoning"],
     preferredCapabilities: ["reasoning"],
     preferFast: false,
-    preferCheap: true,
+    preferCheap: false,
   },
   reasoningFree: {
     requiredCapabilities: ["reasoning"],

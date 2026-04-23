@@ -239,15 +239,18 @@ function providerQualityPreferenceScore(model: CatalogModelEntry) {
   const provider = (model.provider ?? model.modelId.split("/")[0] ?? "").toLowerCase();
   const blob = `${textBlob(model)} ${modalityBlob(model)}`.toLowerCase();
 
-  if (/\b(audio|speech|tts|stt|transcrib|whisper|voice|music|video)\b/.test(blob) && !isTextChatCapableModel(model)) {
+  if (/\b(audio|speech|tts|stt|transcrib|whisper|voice|music|song|lyria|video)\b/.test(blob) && !isTextChatCapableModel(model)) {
     return -0.35;
   }
 
   if (/^(minimax|z-ai|thudm|moonshotai|deepseek|qwen|mistralai|mistral|arcee-ai|arcee|stepfun|stepup|inception|01-ai|baai)$/.test(provider)) {
     return 0.16;
   }
-  if (/^(google|anthropic|openai|meta-llama|meta|nousresearch)$/.test(provider)) {
+  if (/^(google|openai|meta-llama|meta|nousresearch)$/.test(provider)) {
     return 0.08;
+  }
+  if (/^anthropic$/.test(provider)) {
+    return -0.04;
   }
   if (/^(cohere|nvidia|x-ai|amazon|microsoft|perplexity)$/.test(provider)) {
     return 0.03;
@@ -326,7 +329,11 @@ export function isModelAllowedInTier(
 
   const cheapLike =
     freeLike
-    || (effectiveInputCost(model) <= CHEAP_MODEL_COST_PER_MILLION && effectiveOutputCost(model) <= CHEAP_MODEL_COST_PER_MILLION);
+    || (
+      effectiveInputCost(model) <= CHEAP_MODEL_COST_PER_MILLION
+      && effectiveOutputCost(model) <= CHEAP_MODEL_COST_PER_MILLION
+      && !isModelTooExpensivePerMillion(model, options)
+    );
   if (tier === "cheap_only") {
     return cheapLike;
   }
@@ -395,6 +402,7 @@ function modeScore(mode: string | undefined, model: CatalogModelEntry) {
   let score = 0.4;
   if (wantsReasoning) score += reasoningScore(model) * 0.45;
   if (wantsFast) score += speedScore(model) * 0.35;
+  if (safeMode === "tutor") score += reasoningScore(model) * 0.12;
   if (wantsCode) score += (modelSupportsCapability(model, "code") ? 0.35 : 0);
   return clamp01(score);
 }
@@ -424,6 +432,8 @@ export function rankCatalogModels(params: RankParams): RankedModel[] {
   const rows: RankedModel[] = [];
   for (const model of params.catalog) {
     if (!model?.modelId || avoid.has(model.modelId)) continue;
+    const normalizedModelBlob = `${model.modelId} ${model.name ?? ""} ${model.description ?? ""}`.toLowerCase();
+    if (/\b(lyria|music|song[-_ ]?gen|audio[-_ ]?gen)\b/.test(normalizedModelBlob) && !imageTurn) continue;
     if (!isModelAllowedInTier(model, params.tier, {
       lane: params.lane,
       allowManualOverride: params.allowManualOverride,
@@ -524,6 +534,25 @@ export function rankCatalogModels(params: RankParams): RankedModel[] {
     if (params.tier === "normal" && !freeLike) {
       score += 0.05;
       reasons.push("paid-option-allowed");
+    }
+    if (
+      params.tier === "normal"
+      && params.mode === "tutor"
+      && (params.messageLength ?? 0) >= 1000
+      && !freeLike
+    ) {
+      score += 0.12;
+      reasons.push("long-tutor-paid-bias");
+    }
+    if (
+      params.tier === "normal"
+      && params.mode === "tutor"
+      && (params.messageLength ?? 0) >= 1000
+      && freeLike
+      && !/(kimi|deepseek|qwen|moonshotai|deepseek\/|qwen\/)/i.test(model.modelId)
+    ) {
+      score -= 0.22;
+      reasons.push("complex-tutor-cheap-baseline-penalty");
     }
 
     const providerQuality = providerQualityPreferenceScore(model);

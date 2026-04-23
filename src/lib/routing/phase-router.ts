@@ -229,8 +229,8 @@ function capabilityMatch(params: {
 }
 
 function costFit(costPerM: number, stakes: StakeLevel, isFree: boolean) {
-  if (isFree) return stakes === "high" ? 0.66 : 0.88;
-  const target = stakes === "low" ? 2.2 : stakes === "medium" ? 8.5 : 18;
+  if (isFree) return stakes === "high" ? 0.74 : 0.9;
+  const target = stakes === "low" ? 2.2 : stakes === "medium" ? 6.5 : 10.5;
   if (costPerM <= 0.02) return 0.95;
   if (costPerM <= target) return 0.9;
   if (costPerM <= target * 1.6) return 0.66;
@@ -331,14 +331,14 @@ function scoreWeights(input: PhaseRoutingInput) {
   }
   if (input.stakes === "high" || input.requestClass === "T3" || input.mode === "research") {
     return {
-      capability: 0.33,
-      cost: 0.14,
+      capability: 0.34,
+      cost: 0.19,
       reliability: 0.18,
-      latency: 0.08,
-      diversity: 0.12,
-      cache: 0.06,
-      freshness: 0.09,
-      context: 0.10,
+      latency: 0.06,
+      diversity: 0.10,
+      cache: 0.05,
+      freshness: 0.08,
+      context: 0.08,
     };
   }
   if (input.stakes === "medium" || input.requestClass === "T2") {
@@ -645,8 +645,8 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
       + (weights.context * context);
     const brokerPriorWeight =
       input.stakes === "high" || input.mode === "research" || input.mode === "exam" || input.mode === "marker"
-        ? 0.08
-        : 0.05;
+        ? 0.12
+        : 0.06;
     const brokerScorePrior = brokerRank ? brokerRank.row.totalScore * brokerPriorWeight : 0;
     const brokerRankBonus = brokerRank
       ? Math.max(0.008, 0.05 - (brokerRank.index * 0.006))

@@ -12,6 +12,7 @@ import { useEditorStore, normalizeEditorMode } from "@/stores/editor-store";
 import { getArtifactMeta, type ArtifactType } from "@/lib/artifact-types";
 import { cn } from "@/lib/utils";
 import { stripGeneratedDocumentMarkers } from "@/lib/document-generator";
+import { subscribeWorkspaceContentMutated } from "@/lib/workspace/events";
 
 const EMPTY_DOC = {
   type: "doc",
@@ -36,6 +37,7 @@ function ArtifactsPageInner() {
     createNote,
     fetchNote,
     updateNote,
+    refresh,
   } = useNotesData({ noteId });
 
   useEffect(() => {
@@ -62,6 +64,15 @@ function ArtifactsPageInner() {
       router.replace(`/artifacts?${next.toString()}`, { scroll: false });
     }
   }, [noteId, notes, params, router]);
+
+  useEffect(() => {
+    return subscribeWorkspaceContentMutated((detail) => {
+      if (!activeNote?._id) return;
+      if (detail.entity && detail.entity !== "artifact" && detail.entity !== "chat") return;
+      void fetchNote(activeNote._id);
+      void refresh();
+    });
+  }, [activeNote?._id, fetchNote, refresh]);
 
   const handleSelectNote = useCallback((nextNoteId: string) => {
     const next = new URLSearchParams(params.toString());
@@ -204,7 +215,7 @@ function ArtifactsPageInner() {
           </div>
         </aside>
 
-        <main className="relative flex min-h-0 flex-1 bg-[var(--bg-primary)]">
+        <main id="artifact-main-area" className="relative flex min-h-0 flex-1 bg-[var(--bg-primary)]">
           <div className="min-h-0 min-w-0 flex-1">
             {activeNote ? (
               <TiptapEditor
@@ -243,22 +254,21 @@ function ArtifactsPageInner() {
                 aiPanelOpen ? "w-[380px]" : "w-0 overflow-hidden border-l-0",
               )}
             >
-              {aiPanelOpen ? (
+              {
                 <ArtifactAiSurface
                   key={`artifact-ai-${activeNote._id}`}
                   artifactId={activeNote._id}
                   workstreamId={activeNote.workstreamId}
                   context="full-page"
                 />
-              ) : null}
+              }
             </aside>
           ) : null}
 
           <button
             type="button"
             onClick={() => setAiPanelOpen((open) => !open)}
-            disabled={!activeNote}
-            className="absolute right-4 top-4 inline-flex items-center gap-1.5 rounded-full border border-[var(--border-default)] bg-[var(--bg-elevated)]/90 px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] shadow-sm backdrop-blur-md transition-colors hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-50"
+            className="absolute right-4 top-4 inline-flex items-center gap-1.5 rounded-full border border-[var(--border-default)] bg-[var(--bg-elevated)]/90 px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] shadow-sm backdrop-blur-md transition-colors hover:text-[var(--text-primary)]"
           >
             {aiPanelOpen ? <PanelRightClose className="h-3.5 w-3.5" /> : <PanelRightOpen className="h-3.5 w-3.5" />}
             {aiPanelOpen ? "Hide AI panel" : "Show AI panel"}

@@ -6,7 +6,7 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import rehypeHighlight from "rehype-highlight";
-import { Check, Copy, ExternalLink, Globe2 } from "lucide-react";
+import { Check, Copy, ExternalLink, Globe2, Sparkles, Code2, Maximize2 } from "lucide-react";
 
 import { QuizReveal, isQuizContent, type QuizSubmitResult } from "@/components/chat/quiz-reveal";
 import { FlashcardReveal, isFlashcardContent } from "@/components/chat/flashcard-reveal";
@@ -65,69 +65,69 @@ function CodeBlock({
   }
 
   return (
-    <div className="group relative my-4 flex flex-col rounded-xl border border-[var(--border-default)] bg-[var(--bg-code)] shadow-sm">
-      <div className="flex items-center justify-between rounded-t-xl border-b border-[var(--border-default)] bg-[var(--bg-tertiary)] px-3 py-1.5">
-        <div className="flex items-center gap-2">
-          <span className="font-mono text-[11px] font-medium uppercase tracking-wider text-[var(--text-secondary)]">
-            {language ? language.charAt(0).toUpperCase() + language.slice(1) : "Code"}
-          </span>
-          {previewable ? (
-            <div className="ml-2 flex items-center overflow-hidden rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)]">
-              <button
-                type="button"
-                onClick={() => setViewMode("preview")}
-                className={`px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider transition ${viewMode === "preview" ? "bg-[var(--bg-primary)] text-[var(--text-primary)]" : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"}`}
-              >
-                Preview
-              </button>
-              <div className="h-3 w-px bg-[var(--border-default)]" />
-              <button
-                type="button"
-                onClick={() => setViewMode("code")}
-                className={`px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider transition ${viewMode === "code" ? "bg-[var(--bg-primary)] text-[var(--text-primary)]" : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"}`}
-              >
-                Code
-              </button>
+    <div className="group relative my-4 flex flex-col rounded-xl border border-[var(--border-default)] shadow-sm overflow-hidden bg-[var(--bg-elevated)]">
+      {previewable && viewMode === "preview" ? (
+        <div className="relative w-full flex flex-col">
+          <div className="flex items-center justify-between border-b border-[var(--border-default)] px-3 py-1.5 bg-[var(--bg-secondary)]">
+            <div className="flex items-center gap-2 text-[10px] font-medium uppercase tracking-wider text-[var(--text-secondary)]">
+              <Sparkles className="h-3.5 w-3.5 text-[var(--accent-cyan)]" />
+              Generated {language === "mermaid" ? "Diagram" : "Preview"}
             </div>
-          ) : null}
-        </div>
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={handleCopy}
-            className="inline-flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-[11px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
-          >
-            {copied ? (
-              <>
-                <Check className="h-3 w-3 text-[var(--success)]" />
-                <span className="text-[var(--success)]">Copied</span>
-              </>
-            ) : (
-              <>
-                <Copy className="h-3 w-3" />
-                <span>Copy</span>
-              </>
-            )}
-          </button>
-          {canOpenCanvas ? (
             <button
               type="button"
-              onClick={() => onOpenCanvas?.({ code: codeText, language: language || "text" })}
-              className="inline-flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-[11px] text-[var(--accent-cyan)] transition hover:bg-[var(--bg-hover)]"
+              onClick={() => setViewMode("code")}
+              className="inline-flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-[11px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
             >
-              Open in Canvas
+              <Code2 className="h-3.5 w-3.5" />
+              View Source
             </button>
-          ) : null}
-        </div>
-      </div>
-      {previewable && viewMode === "preview" ? (
-        <div className="relative min-h-[260px] rounded-b-xl overflow-hidden bg-[var(--bg-elevated)] p-1">
-          <CodePreview code={codeText} language={language as PreviewLanguage} />
+          </div>
+          <div className="bg-white p-0">
+             <CodePreview code={codeText} language={language as PreviewLanguage} />
+          </div>
         </div>
       ) : (
-        <pre className="!m-0 overflow-x-auto rounded-b-xl !p-4" {...props}>
-          <code className={className}>{children}</code>
-        </pre>
+        <div className="relative w-full flex flex-col">
+          <div className="flex items-center justify-between border-b border-[var(--border-default)] bg-[var(--bg-tertiary)] px-3 py-1.5">
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-[11px] font-medium uppercase tracking-wider text-[var(--text-secondary)]">
+                {language ? language.charAt(0).toUpperCase() + language.slice(1) : "Code"}
+              </span>
+            </div>
+            <div className="flex items-center gap-1">
+              {previewable && (
+                <button
+                  type="button"
+                  onClick={() => setViewMode("preview")}
+                  className="inline-flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-[11px] text-[var(--accent-cyan)] transition hover:bg-[var(--bg-hover)]"
+                >
+                  <Maximize2 className="h-3.5 w-3.5" />
+                  Show Preview
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handleCopy}
+                className="inline-flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-[11px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
+              >
+                {copied ? <Check className="h-3.5 w-3.5 text-[var(--success)]" /> : <Copy className="h-3.5 w-3.5" />}
+                <span className={copied ? "text-[var(--success)]" : ""}>{copied ? "Copied" : "Copy"}</span>
+              </button>
+              {canOpenCanvas ? (
+                <button
+                  type="button"
+                  onClick={() => onOpenCanvas?.({ code: codeText, language: language || "text" })}
+                  className="inline-flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1 text-[11px] text-[var(--accent-cyan)] transition hover:bg-[var(--bg-hover)]"
+                >
+                  Open in Canvas
+                </button>
+              ) : null}
+            </div>
+          </div>
+          <pre className="!m-0 overflow-x-auto bg-[var(--bg-code)] !p-4" {...props}>
+            <code className={className}>{children}</code>
+          </pre>
+        </div>
       )}
     </div>
   );

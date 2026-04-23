@@ -16,6 +16,7 @@ import { usePanel } from "@/context/panel-context";
 import type { Citation, RouteTrace, StudyMode } from "@/types";
 import { DocumentPanel } from "@/components/chat/document-panel";
 import { parseGeneratedDocument } from "@/lib/document-generator";
+import { autoCloseMarkdown } from "@/lib/stream-markdown";
 import { cn } from "@/lib/utils";
 import { useTextToSpeech } from "@/hooks/use-text-to-speech";
 
@@ -289,7 +290,7 @@ export function ChatMessage({
     ? routeTrace?.selected?.modelId ?? modelUsed
     : modelUsed ?? routeTrace?.selected?.modelId;
   const activeProvider = activeModelId?.split("/")[0] ?? "openrouter";
-  const renderedContent = content;
+  const renderedContent = autoCloseMarkdown(content);
   const parsedDocument = useMemo(() => parseGeneratedDocument(renderedContent), [renderedContent]);
   const subcallInputTokens = routeTrace?.subcalls?.reduce((sum, item) => sum + (item.inputTokens ?? 0), 0) ?? 0;
   const subcallOutputTokens = routeTrace?.subcalls?.reduce((sum, item) => sum + (item.outputTokens ?? 0), 0) ?? 0;

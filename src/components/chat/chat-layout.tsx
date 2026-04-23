@@ -649,17 +649,45 @@ export function ChatLayout() {
               window.location.assign("/artifacts");
               return;
             }
+            const sourceMessage = chat.messages.find((message) => message._id === messageId);
+            const routeTrace = sourceMessage?.routeTrace;
+            const classifierConfidence = routeTrace?.inputs?.classifierDecision?.confidence;
+            const workspaceConfidence = routeTrace?.routePlan?.workspaceAction?.confidence;
+            const routeConfidence = Math.max(
+              typeof classifierConfidence === "number" ? classifierConfidence : 0,
+              typeof workspaceConfidence === "number" ? workspaceConfidence : 0,
+            );
             let type = "document";
             let title = "Saved from chat";
             let contentPlaintext = content;
             let artifactContent: Record<string, unknown> = plainTextToTiptapJson(content) as Record<string, unknown>;
             const parsedDocument = parseGeneratedDocument(content);
             const lower = content.toLowerCase();
-            if (lower.includes("<<flashcards_start>>") || lower.includes("<<flashcard_start>>")) {
+            const taskClass = routeTrace?.routePlan?.taskClass;
+            const hasStructuredContent =
+              lower.includes("<<flashcards_start>>")
+              || lower.includes("<<flashcard_start>>")
+              || lower.includes("<<document_start>>")
+              || lower.includes("<<doc_start>>")
+              || lower.includes("```")
+              || Boolean(parsedDocument.document);
+            if (!hasStructuredContent && routeConfidence < 0.72) {
+              toast.info("This response is conversational. Save is available once the output is artifact-ready.", { duration: 5000 });
+              return;
+            }
+            if (
+              lower.includes("<<flashcards_start>>")
+              || lower.includes("<<flashcard_start>>")
+            ) {
               type = "flashcard_deck";
               title = "Flashcards from chat";
               artifactContent = { text: content };
-            } else if (parsedDocument.document || lower.includes("<<document_start>>") || lower.includes("<<doc_start>>")) {
+            } else if (
+              parsedDocument.document
+              || lower.includes("<<document_start>>")
+              || lower.includes("<<doc_start>>")
+              || taskClass === "artifact_generation"
+            ) {
               type = "document";
               title = parsedDocument.document?.title || "Document from chat";
               contentPlaintext = parsedDocument.document
@@ -714,6 +742,7 @@ export function ChatLayout() {
           mode={chat.mode}
           thinkingLevel={chat.thinkingLevel}
           lastModelUsed={lastModelUsed}
+          streamModelUsed={chat.streamModelUsed}
           streamRouteTrace={chat.liveRouteTrace}
           livePhasePlan={chat.livePhasePlan}
           lastAutoResult={chat.lastAutoResult}

@@ -64,6 +64,7 @@ type ChatMessagesProps = {
   mode: StudyMode;
   thinkingLevel?: "low" | "medium" | "high";
   lastModelUsed?: string;
+  streamModelUsed?: string | null;
   streamRouteTrace?: RouteTrace | null;
   livePhasePlan?: RouteTrace["phasePlan"];
   lastAutoResult?: {
@@ -222,6 +223,7 @@ export function ChatMessages({
   mode,
   thinkingLevel = "medium",
   lastModelUsed,
+  streamModelUsed = null,
   streamRouteTrace = null,
   livePhasePlan,
   lastAutoResult,
@@ -503,6 +505,35 @@ export function ChatMessages({
     return modelId.split("/").pop() ?? "Model";
   }
 
+  function shouldOfferSaveAsArtifact(message: Message) {
+    if (message.role !== "assistant") return false;
+    const clean = message.content.trim();
+    if (!clean) return false;
+    const lower = clean.toLowerCase();
+    const structuredHint =
+      lower.includes("<<document_start>>")
+      || lower.includes("<<doc_start>>")
+      || lower.includes("<<flashcards_start>>")
+      || lower.includes("<<flashcard_start>>")
+      || lower.includes("```")
+      || isGeneratedDocumentContent(clean);
+    const classifierConfidence = message.routeTrace?.inputs?.classifierDecision?.confidence;
+    const workspaceConfidence = message.routeTrace?.routePlan?.workspaceAction?.confidence;
+    const confidence = Math.max(
+      typeof classifierConfidence === "number" ? classifierConfidence : 0,
+      typeof workspaceConfidence === "number" ? workspaceConfidence : 0,
+    );
+    const taskClass = message.routeTrace?.routePlan?.taskClass;
+    const artifactOriented =
+      taskClass === "artifact_generation"
+      || taskClass === "study_mode"
+      || taskClass === "research"
+      || taskClass === "workstream_deep";
+    if (structuredHint) return true;
+    if (!artifactOriented) return false;
+    return confidence >= 0.72 && clean.length >= 140;
+  }
+
   useEffect(() => {
     if (sending) {
       setShowStreamCursor(true);
@@ -621,7 +652,9 @@ export function ChatMessages({
         return "Generating response";
     }
   })();
-  const streamingModelId = streamRouteTrace?.selected?.modelId ?? lastModelUsed;
+  const streamingModelId = sending
+    ? (streamModelUsed ?? streamRouteTrace?.selected?.modelId ?? undefined)
+    : (streamRouteTrace?.selected?.modelId ?? lastModelUsed);
   const activeProvider = streamingModelId?.split("/")[0] ?? "openrouter";
   const runtimeRouteTrace = useMemo<RouteTrace | null>(() => {
     const activePhasePlan = livePhasePlan && livePhasePlan.length > 0 ? livePhasePlan : undefined;
@@ -845,7 +878,7 @@ export function ChatMessages({
                     onEdit={undefined}
                     onBranch={onBranchMessage ? () => void onBranchMessage(msg._id) : undefined}
                     onToggleBookmark={onToggleBookmarkMessage ? () => void onToggleBookmarkMessage(msg._id) : undefined}
-                    onSaveAsArtifact={onSaveAsArtifact ? () => onSaveAsArtifact(msg._id, msg.content) : undefined}
+                    onSaveAsArtifact={onSaveAsArtifact && shouldOfferSaveAsArtifact(msg) ? () => onSaveAsArtifact(msg._id, msg.content) : undefined}
                     isArtifactSaved={artifactSavedMessageIds.has(msg._id)}
                     isBookmarked={assistantIsBookmarked}
                     bookmarking={assistantBookmarking}
@@ -1031,7 +1064,7 @@ export function ChatMessages({
                     onEdit={undefined}
                     onBranch={onBranchMessage ? () => void onBranchMessage(msg._id) : undefined}
                     onToggleBookmark={onToggleBookmarkMessage ? () => void onToggleBookmarkMessage(msg._id) : undefined}
-                    onSaveAsArtifact={onSaveAsArtifact ? () => onSaveAsArtifact(msg._id, msg.content) : undefined}
+                    onSaveAsArtifact={onSaveAsArtifact && shouldOfferSaveAsArtifact(msg) ? () => onSaveAsArtifact(msg._id, msg.content) : undefined}
                     isArtifactSaved={artifactSavedMessageIds.has(msg._id)}
                     isBookmarked={assistantIsBookmarked}
                     bookmarking={assistantBookmarking}
@@ -1169,7 +1202,7 @@ export function ChatMessages({
                     onEdit={undefined}
                     onBranch={onBranchMessage ? () => void onBranchMessage(msg._id) : undefined}
                     onToggleBookmark={onToggleBookmarkMessage ? () => void onToggleBookmarkMessage(msg._id) : undefined}
-                    onSaveAsArtifact={onSaveAsArtifact ? () => onSaveAsArtifact(msg._id, msg.content) : undefined}
+                    onSaveAsArtifact={onSaveAsArtifact && shouldOfferSaveAsArtifact(msg) ? () => onSaveAsArtifact(msg._id, msg.content) : undefined}
                     isArtifactSaved={artifactSavedMessageIds.has(msg._id)}
                     isBookmarked={assistantIsBookmarked}
                     bookmarking={assistantBookmarking}
@@ -1222,7 +1255,7 @@ export function ChatMessages({
                     regenModels={regenModels}
                     onBranch={onBranchMessage ? () => void onBranchMessage(msg._id) : undefined}
                     onToggleBookmark={onToggleBookmarkMessage ? () => void onToggleBookmarkMessage(msg._id) : undefined}
-                    onSaveAsArtifact={onSaveAsArtifact ? () => onSaveAsArtifact(msg._id, msg.content) : undefined}
+                    onSaveAsArtifact={onSaveAsArtifact && shouldOfferSaveAsArtifact(msg) ? () => onSaveAsArtifact(msg._id, msg.content) : undefined}
                     isArtifactSaved={artifactSavedMessageIds.has(msg._id)}
                     isBookmarked={assistantIsBookmarked}
                     bookmarking={assistantBookmarking}
@@ -1273,7 +1306,7 @@ export function ChatMessages({
                     regenModels={regenModels}
                     onBranch={onBranchMessage ? () => void onBranchMessage(msg._id) : undefined}
                     onToggleBookmark={onToggleBookmarkMessage ? () => void onToggleBookmarkMessage(msg._id) : undefined}
-                    onSaveAsArtifact={onSaveAsArtifact ? () => onSaveAsArtifact(msg._id, msg.content) : undefined}
+                    onSaveAsArtifact={onSaveAsArtifact && shouldOfferSaveAsArtifact(msg) ? () => onSaveAsArtifact(msg._id, msg.content) : undefined}
                     isArtifactSaved={artifactSavedMessageIds.has(msg._id)}
                     isBookmarked={assistantIsBookmarked}
                     bookmarking={assistantBookmarking}
@@ -1323,7 +1356,7 @@ export function ChatMessages({
                     regenModels={regenModels}
                     onBranch={onBranchMessage ? () => void onBranchMessage(msg._id) : undefined}
                     onToggleBookmark={onToggleBookmarkMessage ? () => void onToggleBookmarkMessage(msg._id) : undefined}
-                    onSaveAsArtifact={onSaveAsArtifact ? () => onSaveAsArtifact(msg._id, msg.content) : undefined}
+                    onSaveAsArtifact={onSaveAsArtifact && shouldOfferSaveAsArtifact(msg) ? () => onSaveAsArtifact(msg._id, msg.content) : undefined}
                     isArtifactSaved={artifactSavedMessageIds.has(msg._id)}
                     isBookmarked={assistantIsBookmarked}
                     bookmarking={assistantBookmarking}
@@ -1386,7 +1419,7 @@ export function ChatMessages({
                   onEdit={msg.role === "user" && onEditMessage ? (value) => onEditMessage(msg._id, value) : undefined}
                   onBranch={msg.role === "assistant" && onBranchMessage ? () => void onBranchMessage(msg._id) : undefined}
                   onToggleBookmark={msg.role === "assistant" && onToggleBookmarkMessage ? () => void onToggleBookmarkMessage(msg._id) : undefined}
-                  onSaveAsArtifact={msg.role === "assistant" && onSaveAsArtifact ? () => onSaveAsArtifact(msg._id, msg.content) : undefined}
+                  onSaveAsArtifact={msg.role === "assistant" && onSaveAsArtifact && shouldOfferSaveAsArtifact(msg) ? () => onSaveAsArtifact(msg._id, msg.content) : undefined}
                   isArtifactSaved={msg.role === "assistant" ? artifactSavedMessageIds.has(msg._id) : undefined}
                   isBookmarked={msg.role === "assistant" ? assistantIsBookmarked : undefined}
                   bookmarking={msg.role === "assistant" ? assistantBookmarking : undefined}

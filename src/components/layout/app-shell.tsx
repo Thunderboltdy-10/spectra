@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { ChatSidebar } from "@/components/chat/chat-sidebar";
 import { useSidebar } from "@/context/sidebar-context";
@@ -299,11 +299,15 @@ export function AppShell({
   contentClassName?: string;
 }) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const router = useRouter();
   const sidebar = useSidebar();
   const [tourOpen, setTourOpen] = useState(false);
 
-  const selectedChatId = "";
+  const selectedChatId =
+    pathname === "/chat"
+      ? (searchParams.get("chatId") ?? "")
+      : "";
   const pageTourSteps = useMemo(
     () => PAGE_TOUR_STEPS[pathname] ?? BASE_TOUR_STEPS,
     [pathname],
@@ -377,7 +381,7 @@ export function AppShell({
             } catch {
               // Ignore storage failures.
             }
-            router.push("/chat?new=1");
+            router.push(`/chat?new=1&fresh=${Date.now()}`);
             window.dispatchEvent(new Event("ai-school:new-chat"));
           }}
           onDeleteChat={(chatId) => {

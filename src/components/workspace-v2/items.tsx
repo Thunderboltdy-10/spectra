@@ -508,12 +508,12 @@ function BloomThread({ item, onEdit }: { item: V2Item; onEdit?: (patch: Partial<
   useEffect(() => {
     if (!item.sourceChatId) return;
     let cancelled = false;
-    fetch(`/api/chat?chatId=${item.sourceChatId}`)
-      .then(r => r.json())
+    fetch(`/api/chats/${encodeURIComponent(item.sourceChatId)}`)
+      .then((response) => (response.ok ? response.json() : null))
       .then(data => {
          if (cancelled) return;
-         if (data.chat?.messages) {
-           setFetchedMessages(data.chat.messages.map((m: { role: string; content: string }) => ({
+         if (Array.isArray(data?.messages)) {
+           setFetchedMessages(data.messages.map((m: { role: string; content: string }) => ({
              role: m.role,
              text: m.content
            })));

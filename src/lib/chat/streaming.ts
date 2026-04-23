@@ -6,6 +6,7 @@ export type ChatStreamEvent = {
   message?: string;
   phase?: string;
   phaseId?: string;
+  detail?: string;
   phasePlan?: unknown;
   modelUsed?: string;
   error?: string;

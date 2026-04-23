@@ -69,10 +69,11 @@ function ArtifactsPageInner() {
     return subscribeWorkspaceContentMutated((detail) => {
       if (!activeNote?._id) return;
       if (detail.entity && detail.entity !== "artifact" && detail.entity !== "chat") return;
+      if (detail.workstreamId && activeNote.workstreamId && detail.workstreamId !== activeNote.workstreamId) return;
       void fetchNote(activeNote._id);
       void refresh();
     });
-  }, [activeNote?._id, fetchNote, refresh]);
+  }, [activeNote?._id, activeNote?.workstreamId, fetchNote, refresh]);
 
   const handleSelectNote = useCallback((nextNoteId: string) => {
     const next = new URLSearchParams(params.toString());

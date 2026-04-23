@@ -2,6 +2,7 @@ import { requireActor } from "@/lib/auth-server";
 import { withRouteErrorHandling } from "@/lib/route-handler";
 import { ok } from "@/lib/http";
 import { fetchOpenRouterModels } from "@/lib/openrouter";
+import { isHardAudioFamilyModel } from "@/lib/runtime/model-guardrails";
 
 type LiveModel = {
   id: string;
@@ -75,6 +76,14 @@ export async function GET() {
       const modality = model.architecture?.modality ?? "text";
 
       if (shouldExclude(model.id, modality, prompt, completion)) continue;
+      if (isHardAudioFamilyModel({
+        modelId: model.id,
+        name: model.name,
+        description: model.description,
+        tags: Array.isArray(model.supported_parameters)
+          ? model.supported_parameters.filter((entry): entry is string => typeof entry === "string")
+          : undefined,
+      })) continue;
 
       const provider = model.top_provider?.name || model.id.split("/")[0] || "Unknown";
       mapped.push({

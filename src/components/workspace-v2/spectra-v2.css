@@ -573,6 +573,11 @@
 /* ─── Canvas: prevent text selection during drag ─── */
 [data-canvas-bg] { user-select: none; }
 [data-canvas-bg] * { user-select: none; }
+body.sv2-dragging-widget,
+body.sv2-dragging-widget * {
+  user-select: none !important;
+  cursor: grabbing !important;
+}
 /* Allow selection inside explicitly editable areas */
 [contenteditable="true"] { user-select: text !important; }
 textarea { user-select: text !important; }

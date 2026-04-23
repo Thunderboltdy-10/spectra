@@ -100,7 +100,7 @@ import { generatePromptAwareClarification } from "@/lib/orchestrator/clarificati
 import { formatSchoolNow } from "@/lib/timezone";
 import { recordOpenRouterUsage } from "@/lib/usage-tracking";
 import { MODEL_CONFIG } from "@/lib/model-config";
-import type { ModelRouteResult, RouteTrace, StudyMode } from "@/types";
+import type { AiToolName, ModelRouteResult, RouteTrace, StudyMode } from "@/types";
 
 type ChatRequestBody = {
   chatId?: string;
@@ -1867,6 +1867,56 @@ export async function runChatPipeline(request: NextRequest) {
     body.scopeLevel === "artifact" || body.artifactId ? "artifact"
       : activeWorkstreamId ? "workspace"
         : "chat";
+  const actionVerbPattern = /\b(create|make|build|generate|draft|save|update|edit|rewrite|rename|move|attach|restore|delete|remove|refactor|fix|polish|reword|shorten|expand)\b/i;
+  const artifactMutationIntent =
+    runtimeSurface === "artifact"
+    && (actionVerbPattern.test(auto.message) || /\b(version|diff|revision|change log|restore)\b/i.test(auto.message));
+  const workspaceMutationIntent =
+    runtimeSurface === "workspace"
+    && (
+      actionVerbPattern.test(auto.message)
+      || /\b(widget|planner|thread|artifact|layout|workspace|workstream|note|task|result)\b/i.test(auto.message)
+    );
+  const ensureAllowedBundle = (bundle: string) => {
+    if (!routePlan.allowedToolBundles.includes(bundle as typeof routePlan.allowedToolBundles[number])) {
+      routePlan.allowedToolBundles.push(bundle as typeof routePlan.allowedToolBundles[number]);
+    }
+  };
+  const ensureAllowedTool = (tool: AiToolName) => {
+    if (!routePlan.allowedAiTools.includes(tool)) {
+      routePlan.allowedAiTools.push(tool);
+    }
+  };
+  if (runtimeSurface === "artifact") {
+    ensureAllowedBundle("artifact");
+    ensureAllowedBundle("skills");
+    ensureAllowedTool("inspect_runtime_context");
+    ensureAllowedTool("propose_actions");
+    ensureAllowedTool("apply_actions");
+    ensureAllowedTool("get_version_history");
+    if (artifactMutationIntent && routePlan.executionPath === "direct_chat") {
+      routePlan.executionPath = routePlan.assignmentLevel === "L4" ? "action_loop" : "single_action";
+    }
+  }
+  if (runtimeSurface === "workspace" && workspaceMutationIntent) {
+    ensureAllowedBundle("skills");
+    ensureAllowedTool("inspect_runtime_context");
+    ensureAllowedTool("propose_actions");
+    ensureAllowedTool("apply_actions");
+    ensureAllowedTool("get_workstream_context");
+    ensureAllowedTool("create_note");
+    ensureAllowedTool("update_planner");
+    ensureAllowedTool("create_widget");
+    ensureAllowedTool("update_widget");
+    ensureAllowedTool("move_widget");
+    ensureAllowedTool("attach_items_to_workstream");
+    ensureAllowedTool("update_workstream_layout");
+    ensureAllowedTool("create_workstream");
+    ensureAllowedTool("surface_result");
+    if (routePlan.executionPath === "direct_chat") {
+      routePlan.executionPath = routePlan.assignmentLevel === "L4" ? "action_loop" : "single_action";
+    }
+  }
   const allowArtifactSavePrompt = runtimeSurface !== "artifact";
   const runtimePathDecision = selectRuntimeExecutionPath(buildExecutionPathInputs({
     routePlan,
@@ -3443,7 +3493,7 @@ export async function runChatPipeline(request: NextRequest) {
     `Memory directives applied: ${directiveStatus}`,
     `Learning context: ${learningContextStatus}`,
   ].join("\n");
-  const openRouterTools = getOpenRouterToolsForAssignmentLevel(routePlan.assignmentLevel)
+  const openRouterTools = getOpenRouterToolsForAssignmentLevel("L4")
     .filter((tool) => routePlan.allowedAiTools.includes(tool.function.name as typeof routePlan.allowedAiTools[number]));
   const toolUsageGuidance = formatToolUsageGuidance(routePlan.allowedAiTools);
   const capabilityContract = buildCapabilityContract({
@@ -3531,6 +3581,29 @@ export async function runChatPipeline(request: NextRequest) {
     quizDifficultyLevel,
     quizDifficultyLabel,
   })];
+  if (runtimeSurface === "artifact") {
+    systemPromptParts.push(
+      `=== ARTIFACT ACTION CONTRACT ===
+You are operating inside a live editable artifact.
+- When the user asks to modify content, execute real edits via tool actions (apply_actions), not advisory prose.
+- Do not claim the artifact is not editable, and do not ask the user to copy/paste replacement text.
+- Prefer patch_artifact for broad edits; use replace_range / insert_block / delete_block for targeted changes.
+- Use get_version_history when the user asks about diffs, revisions, or restore operations.
+After tool execution, summarize what changed and what version/diff was produced.
+=== END ARTIFACT ACTION CONTRACT ===`,
+    );
+  }
+  if (runtimeSurface === "workspace") {
+    systemPromptParts.push(
+      `=== WORKSPACE ACTION CONTRACT ===
+You are operating inside a live actionable workspace.
+- For requests that create, edit, move, attach, or organize workspace entities, execute actions through tools.
+- Do not claim workspace actions are unavailable when action tools are route-approved.
+- Use apply_actions for deterministic workspace mutations (threads, widgets, planner, artifacts, layout).
+After tool execution, summarize completed actions and the primary created/updated targets.
+=== END WORKSPACE ACTION CONTRACT ===`,
+    );
+  }
   if (effectiveMode === "research") {
     systemPromptParts.push(
       `=== RESEARCH OUTPUT CONTRACT ===

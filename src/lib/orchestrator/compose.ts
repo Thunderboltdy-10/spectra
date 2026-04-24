@@ -17,12 +17,13 @@ export function toOpenRouterMessages(
   imageBlocks?: Array<{ type: "image_url"; image_url: { url: string; detail?: "low" | "auto" } }>,
 ) {
   return messages.map((message, index) => {
+    const hasInlineImages = message.role === "user" && Array.isArray(message.attachmentResourceIds) && message.attachmentResourceIds.length > 0;
     const isLastUser = message.role === "user" && index === messages.length - 1;
 
-    if (isLastUser && imageBlocks && imageBlocks.length > 0) {
+    if ((isLastUser || hasInlineImages) && imageBlocks && imageBlocks.length > 0) {
       const content: OpenRouterMessageContentPart[] = [
         { type: "text", text: message.content },
-        ...imageBlocks,
+        ...(isLastUser ? imageBlocks : []),
       ];
       return {
         role: message.role,

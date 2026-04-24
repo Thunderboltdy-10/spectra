@@ -561,6 +561,34 @@ function buildResearchSubqueries(message: string) {
   return [cleaned].slice(0, 3);
 }
 
+function buildSearchIntentQuery(params: {
+  message: string;
+  mode: StudyMode;
+  timeSensitive: boolean;
+  requestedUrl?: string;
+}) {
+  const raw = compactText(params.message);
+  if (!raw) return "";
+
+  const withoutUrl = params.requestedUrl
+    ? raw.replace(params.requestedUrl, " ")
+    : raw;
+  const stripped = compactText(
+    withoutUrl
+      .replace(/\b(can you|could you|would you|please|help me|i need you to|i want you to|show me|tell me|find me)\b/gi, " ")
+      .replace(/\b(search (the )?web|look up online|find online|browse the web|web search|check online|verify online|use current sources|cite sources)\b/gi, " ")
+      .replace(/\b(read|summari[sz]e|analy[sz]e|review|extract|use)\b.{0,24}\b(url|link|page|source|website|site)\b/gi, " ")
+      .replace(/\b(latest|recent|current|today|this week|this month|this year|up[- ]to[- ]date)\b/gi, " ")
+      .replace(/[?!]/g, " "),
+  );
+
+  const concise = stripped || raw;
+  const suffixes: string[] = [];
+  if (params.mode === "research") suffixes.push("evidence");
+  if (params.timeSensitive) suffixes.push("2026 latest");
+  return compactText([concise, ...suffixes].join(" ")).slice(0, 240);
+}
+
 function isTimeSensitiveMessage(message: string) {
   const normalized = message.toLowerCase();
   if (/\b(current ratio|current account|electrical current|current flow)\b/i.test(normalized)) {
@@ -868,6 +896,12 @@ export function buildRoutePlan(params: BuildRoutePlanParams): RoutePlan {
     || researchNeedsSearch
     || (params.autoSearchEnabled && timeSensitive);
   const searchPlan = (() => {
+    const intentQuery = buildSearchIntentQuery({
+      message: params.message,
+      mode: params.mode,
+      timeSensitive,
+      requestedUrl,
+    });
     if (!shouldUseWebSearch) {
       return {
         strategy: "none" as const,
@@ -878,7 +912,7 @@ export function buildRoutePlan(params: BuildRoutePlanParams): RoutePlan {
       return {
         strategy: "crawl" as const,
         trigger: "crawl_request" as const,
-        query: params.message,
+        query: intentQuery || params.message,
         targetUrl: requestedUrl,
         maxResults: 8,
         maxExtractResults: 0,
@@ -888,7 +922,7 @@ export function buildRoutePlan(params: BuildRoutePlanParams): RoutePlan {
       return {
         strategy: "extract_url" as const,
         trigger: "read_url" as const,
-        query: params.message,
+        query: intentQuery || params.message,
         targetUrl: requestedUrl,
         maxResults: 1,
         maxExtractResults: 1,
@@ -898,7 +932,7 @@ export function buildRoutePlan(params: BuildRoutePlanParams): RoutePlan {
       return {
         strategy: "research" as const,
         trigger: "deep_research" as const,
-        query: params.message,
+        query: intentQuery || params.message,
         maxResults: 8,
         maxExtractResults: 3,
       };
@@ -907,7 +941,7 @@ export function buildRoutePlan(params: BuildRoutePlanParams): RoutePlan {
       return {
         strategy: "search_extract" as const,
         trigger: "research_mode" as const,
-        query: params.message,
+        query: intentQuery || params.message,
         maxResults: 8,
         maxExtractResults: params.complexity === "complex" ? 3 : 2,
         subqueries: buildResearchSubqueries(params.message),
@@ -916,7 +950,7 @@ export function buildRoutePlan(params: BuildRoutePlanParams): RoutePlan {
     return {
       strategy: "search" as const,
       trigger: explicitSearchRequest ? "explicit_search" as const : "time_sensitive" as const,
-      query: params.message,
+      query: intentQuery || params.message,
       maxResults: simpleFactSearch ? 3 : 5,
       maxExtractResults: 1,
     };

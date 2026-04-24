@@ -2557,8 +2557,13 @@ export function useChatState() {
           if (payload.type === "mode_update" && payload.suggestedMode) {
             const nextMode = payload.suggestedMode as StudyMode;
             if (isModeAvailable(nextMode)) {
-              if (requestedMode !== "auto" && requestedMode !== "general" && nextMode === "general") {
+              const explicitStructuredStudyRequest =
+                /\b(flashcards?|quiz|exam|test me|create|generate|make)\b/i.test(text)
+                && (requestedMode === "flashcard" || requestedMode === "quiz" || requestedMode === "exam");
+              if (requestedMode !== "auto" && requestedMode !== "general" && nextMode === "general" && !explicitStructuredStudyRequest) {
                 toast.info(`Mode "${requestedMode}" was unavailable — using general mode instead.`);
+              } else if (nextMode === "general" && explicitStructuredStudyRequest) {
+                continue;
               }
               setMode(nextMode);
               void updateChatSettingsById(chatId, { mode: nextMode }).catch(() => {});
@@ -2948,8 +2953,13 @@ export function useChatState() {
               setAgentSuggestion(null);
             }
             if (payload.suggestedMode && payload.suggestedMode !== requestedMode) {
-              if (requestedMode !== "auto" && requestedMode !== "general" && payload.suggestedMode === "general") {
+              const explicitStructuredStudyRequest =
+                /\b(flashcards?|quiz|exam|test me|create|generate|make)\b/i.test(text)
+                && (requestedMode === "flashcard" || requestedMode === "quiz" || requestedMode === "exam");
+              if (requestedMode !== "auto" && requestedMode !== "general" && payload.suggestedMode === "general" && !explicitStructuredStudyRequest) {
                 toast.info(`Mode "${requestedMode}" was unavailable — using general mode instead.`);
+              } else if (payload.suggestedMode === "general" && explicitStructuredStudyRequest) {
+                payload.suggestedMode = requestedMode;
               }
               setMode(payload.suggestedMode as StudyMode);
               // Use the stream's chatId, not selectedChatId, to avoid updating wrong chat

@@ -443,11 +443,19 @@ button:disabled {
   animation: chat-fade-in var(--motion-base) var(--ease-standard);
 }
 
+.thinking-orb {
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--accent-cyan) 22%, transparent),
+    0 0 22px color-mix(in oklab, var(--accent-cyan) 22%, transparent);
+  animation: thinking-orb 1.8s linear infinite;
+}
+
 .stream-cursor {
   display: inline-block;
   margin-left: 2px;
-  animation: blink-caret 1s step-end infinite;
-  color: var(--accent);
+  min-width: 0.45em;
+  animation: stream-caret-surge 1.2s ease-in-out infinite;
+  color: color-mix(in oklab, var(--accent-cyan) 85%, white);
   transition: opacity 180ms ease;
 }
 
@@ -473,6 +481,33 @@ button:disabled {
   background-clip: text;
   color: transparent;
   animation: thinking-wave 1.8s linear infinite;
+}
+
+.thinking-stream {
+  position: relative;
+}
+
+.thinking-stream > * {
+  position: relative;
+  z-index: 1;
+}
+
+.thinking-stream::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in oklab, var(--accent-cyan) 0%, transparent) 22%,
+    color-mix(in oklab, white 55%, var(--accent-cyan)) 48%,
+    color-mix(in oklab, var(--accent-cyan) 0%, transparent) 72%,
+    transparent 100%
+  );
+  opacity: 0;
+  mix-blend-mode: screen;
+  animation: thinking-scan 2.3s linear infinite;
+  pointer-events: none;
 }
 
 .card-entrance {
@@ -657,6 +692,21 @@ button:disabled {
   }
 }
 
+@keyframes stream-caret-surge {
+  0%, 100% {
+    opacity: 0.2;
+    transform: translateY(0);
+    text-shadow: 0 0 0 transparent;
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(-1px);
+    text-shadow:
+      0 0 10px color-mix(in oklab, var(--accent-cyan) 42%, transparent),
+      0 0 22px color-mix(in oklab, white 18%, transparent);
+  }
+}
+
 @keyframes thinking-fade {
   from {
     opacity: 0.55;
@@ -675,6 +725,95 @@ button:disabled {
   to {
     background-position: -40% 0;
   }
+}
+
+@keyframes thinking-orb {
+  0% {
+    opacity: 0.45;
+    transform: scale(0.9);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+  100% {
+    opacity: 0.45;
+    transform: scale(0.9);
+  }
+}
+
+@keyframes thinking-scan {
+  0% {
+    opacity: 0;
+    transform: translateX(-35%);
+  }
+  12% {
+    opacity: 0.9;
+  }
+  55% {
+    opacity: 0.35;
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(35%);
+  }
+}
+
+@keyframes thinking-reveal {
+  0% {
+    opacity: 0.55;
+    filter: blur(0.3px);
+  }
+  40% {
+    opacity: 0.85;
+    filter: blur(0px);
+  }
+  100% {
+    opacity: 1;
+    filter: blur(0px);
+  }
+}
+
+.thinking-reveal {
+  animation: thinking-reveal 0.6s ease-out both;
+}
+
+@keyframes thinking-pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent-cyan) 0%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 12px 1px color-mix(in oklab, var(--accent-cyan) 12%, transparent);
+  }
+}
+
+.thinking-pulse-glow {
+  animation: thinking-pulse-glow 2s ease-in-out infinite;
+}
+
+@keyframes stream-glow-sweep {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.stream-glow-text {
+  background: linear-gradient(
+    90deg,
+    var(--text-secondary) 0%,
+    var(--text-secondary) 35%,
+    color-mix(in oklab, var(--accent-cyan) 65%, var(--text-secondary)) 50%,
+    var(--text-secondary) 65%,
+    var(--text-secondary) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: stream-glow-sweep 3s linear infinite;
 }
 
 @keyframes onboarding-step-in {

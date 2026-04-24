@@ -5,7 +5,6 @@ import { createPortal } from "react-dom";
 import Link from "next/link";
 import {
   Bot,
-  ChevronDown,
   Paperclip,
   Plus,
   Search,
@@ -13,7 +12,6 @@ import {
   X,
   Globe,
   Star,
-  ChevronRight,
 } from "lucide-react";
 import { ProviderLogo } from "@/components/provider-logo";
 import { Button } from "@/components/ui/button";
@@ -257,7 +255,6 @@ export function ChatComposer(props: ChatComposerProps) {
     selectedAgentId,
     onSelectAgent,
     agentSuggestion,
-    onApplyAgentSuggestion,
     models,
     userSpending,
     currentUserId,
@@ -311,10 +308,6 @@ export function ChatComposer(props: ChatComposerProps) {
     });
   };
 
-  const [modeTransitioning, setModeTransitioning] = useState(false);
-  const [agentTransitioning, setAgentTransitioning] = useState(false);
-  const lastModeRef = useRef(mode);
-  const lastAgentIdRef = useRef(selectedAgentId);
   const modeConfig = getModeConfig(mode);
   const orderedModes = useMemo(
     () => [
@@ -439,8 +432,8 @@ export function ChatComposer(props: ChatComposerProps) {
           cautions.push("Context too small");
         }
         const hasKnownCost = typeof model.inputCostPerM === "number" || typeof model.outputCostPerM === "number";
-        const expensiveWarning = isSuperAdmin && hasKnownCost && isExpensiveModel(model)
-          ? "Exceeds 30/M cap (manual confirmation required)."
+        const expensiveWarning = hasKnownCost && isExpensiveModel(model)
+          ? "Exceeds $8/M — consider a cheaper model or accept the cost."
           : null;
         const restrictionReason = restrictionReasonForTier(model, userSpending?.tier, isSuperAdmin);
         return {
@@ -497,29 +490,7 @@ export function ChatComposer(props: ChatComposerProps) {
     [isSuperAdmin, userSpending?.tier],
   );
   
-  const selectorTriggerClass =
-    "inline-flex cursor-pointer items-center gap-2 rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-1.5 text-sm font-medium text-[var(--text-primary)] transition hover:bg-[var(--bg-hover)]";
   const slashActive = message.trimStart().startsWith("/");
-  useEffect(() => {
-    if (lastModeRef.current !== mode) {
-      setModeTransitioning(true);
-      const timer = window.setTimeout(() => setModeTransitioning(false), 340);
-      lastModeRef.current = mode;
-      return () => window.clearTimeout(timer);
-    }
-    lastModeRef.current = mode;
-  }, [mode]);
-
-  useEffect(() => {
-    if (lastAgentIdRef.current !== selectedAgentId) {
-      setAgentTransitioning(true);
-      const timer = window.setTimeout(() => setAgentTransitioning(false), 340);
-      lastAgentIdRef.current = selectedAgentId;
-      return () => window.clearTimeout(timer);
-    }
-    lastAgentIdRef.current = selectedAgentId;
-  }, [selectedAgentId]);
-
   useEffect(() => {
     const handler = (e: Event) => {
       const msg = (e as CustomEvent<{ message: string }>).detail?.message;
@@ -766,7 +737,7 @@ export function ChatComposer(props: ChatComposerProps) {
         ) : null}
 
         <div className="space-y-2">
-          <div>
+          <div className="flex items-end gap-2">
             <input
               ref={attachInputRef}
               type="file"
@@ -800,14 +771,13 @@ export function ChatComposer(props: ChatComposerProps) {
               }}
               className={cn(!sidebarExpanded && "px-2")}
               
-              rightContent={
-                <div className="flex items-center gap-1">
-                  <div ref={plusMenuRef} className="relative">
+              leftContent={
+                <div ref={plusMenuRef} className="relative">
                     <Button
                       type="button"
                       variant="ghost"
                       size="icon"
-                      className={cn("h-9 w-9 rounded-full text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-transform", showPlusMenu && "bg-[var(--bg-hover)] rotate-45")}
+                      className={cn("h-10 w-10 rounded-full bg-[var(--bg-elevated)]/95 backdrop-blur-xl border border-[var(--border-default)]/40 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] shadow-[0_10px_32px_-14px_rgba(8,22,40,0.18),0_4px_12px_-10px_rgba(8,22,40,0.12)] transition-transform", showPlusMenu && "bg-[var(--bg-hover)] rotate-45")}
                       onClick={() => setShowPlusMenu((prev) => !prev)}
                     >
                       <Plus className="h-5 w-5" />
@@ -1312,20 +1282,6 @@ export function ChatComposer(props: ChatComposerProps) {
                 )}
                     </div>
                   </div>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="h-10 w-10 rounded-[20px] bg-[var(--bg-elevated)]/95 backdrop-blur-xl border border-[var(--border-default)]/40 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] shadow-[0_10px_32px_-14px_rgba(8,22,40,0.18),0_4px_12px_-10px_rgba(8,22,40,0.12)]"
-                    onClick={() => {
-                      // K-bar search action
-                      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true }));
-                    }}
-                    title="Search workspace (⌘K)"
-                  >
-                    <Search className="h-5 w-5" />
-                  </Button>
-                </div>
               }
  />
             {sendDisabledReason ? (

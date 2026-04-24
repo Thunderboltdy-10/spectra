@@ -84,6 +84,32 @@ describe("toOpenRouterMessages", () => {
     expect(Array.isArray(messages[0]?.content)).toBe(true);
   });
 
+  it("preserves attachment-aware multipart content for historical user messages with attachment ids", () => {
+    const messages = toOpenRouterMessages([
+      {
+        _id: "1",
+        role: "user",
+        content: "See the attached diagram",
+        mode: "tutor",
+        citations: [],
+        attachmentResourceIds: ["res-1"],
+        createdAt: Date.now(),
+      },
+      {
+        _id: "2",
+        role: "assistant",
+        content: "I reviewed it.",
+        mode: "tutor",
+        citations: [],
+        createdAt: Date.now(),
+      },
+    ], [
+      { type: "image_url", image_url: { url: "data:image/png;base64,abc", detail: "auto" } },
+    ]);
+
+    expect(Array.isArray(messages[0]?.content)).toBe(true);
+  });
+
   it("emits plain text content when no image blocks exist", () => {
     const messages = toOpenRouterMessages(history);
     expect(typeof messages[0]?.content).toBe("string");

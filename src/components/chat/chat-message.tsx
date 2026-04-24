@@ -16,6 +16,7 @@ import { usePanel } from "@/context/panel-context";
 import type { Citation, RouteTrace, StudyMode } from "@/types";
 import { DocumentPanel } from "@/components/chat/document-panel";
 import { parseGeneratedDocument } from "@/lib/document-generator";
+import { getProviderPresentation } from "@/lib/provider-icons";
 import { autoCloseMarkdown } from "@/lib/stream-markdown";
 import { cn } from "@/lib/utils";
 import { useTextToSpeech } from "@/hooks/use-text-to-speech";
@@ -68,6 +69,7 @@ type ChatMessageProps = {
   memoryUpdated?: boolean;
   memoryUpdateSummary?: string;
   children?: React.ReactNode;
+  sending?: boolean;
 };
 
 function sanitizeNavigationHref(value: string | undefined) {
@@ -273,6 +275,7 @@ export function ChatMessage({
   memoryUpdated = false,
   memoryUpdateSummary,
   children,
+  sending = false,
 }: ChatMessageProps) {
   const isUser = role === "user";
   const [feedback, setFeedback] = useState<"up" | "down" | null>(null);
@@ -290,6 +293,7 @@ export function ChatMessage({
     ? routeTrace?.selected?.modelId ?? modelUsed
     : modelUsed ?? routeTrace?.selected?.modelId;
   const activeProvider = activeModelId?.split("/")[0] ?? "openrouter";
+  const providerPresentation = getProviderPresentation(activeModelId, activeProvider);
   const renderedContent = autoCloseMarkdown(content);
   const parsedDocument = useMemo(() => parseGeneratedDocument(renderedContent), [renderedContent]);
   const subcallInputTokens = routeTrace?.subcalls?.reduce((sum, item) => sum + (item.inputTokens ?? 0), 0) ?? 0;
@@ -483,6 +487,14 @@ export function ChatMessage({
             />
             <div className="min-w-0 flex-1">
               <div className="mb-4 flex flex-wrap items-center gap-2">
+                {activeModelId ? (
+                  <span className="text-base font-semibold text-[var(--text-primary)]">
+                    {sanitizeModelLabel(activeModelId.split("/").pop() ?? activeModelId)}
+                    <span className="ml-1.5 text-[10px] font-normal uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
+                      {providerPresentation.label}
+                    </span>
+                  </span>
+                ) : null}
                 
                 {cancelled ? (
                   <span className="inline-flex items-center rounded-full border border-[color-mix(in_oklab,var(--warning)_35%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_12%,var(--bg-secondary))] px-2 py-0.5 text-[10px] text-[var(--warning)]">
@@ -520,7 +532,7 @@ export function ChatMessage({
                 content={thinkingContent ?? ""}
                 segments={thinkingSegments}
                 routeTrace={routeTrace}
-                streaming={!isLastAssistant ? false : !content && !!thinkingContent}
+                streaming={isLastAssistant && sending}
               />
               {children ? children : parsedDocument.document ? (
                 <>
@@ -578,6 +590,7 @@ export function ChatMessage({
               ) : null}
               {validCitations.length > 0 && <SourceBlock citations={validCitations} onOpen={() => openPanel("sources", { sources: validCitations })} />}
 
+              {!sending && (
               <div className="mt-5 flex flex-wrap items-center gap-1.5">
                 <Button
                   type="button"
@@ -721,6 +734,7 @@ export function ChatMessage({
                   </DropdownMenu>
                 ) : null}
               </div>
+              )}
               {showWhy && (whyThisResponse || routeTrace) && (
                 <div className="mt-2 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3">
                   <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)]">Why this response</p>

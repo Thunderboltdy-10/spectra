@@ -3,9 +3,7 @@
 import Image from "next/image";
 import { useEffect, useRef, useState, useCallback, type ReactNode, type KeyboardEvent, type ClipboardEvent } from "react";
 import {
-  Search,
   ArrowUp,
-  Zap,
   Square,
   Mic,
   Paperclip,
@@ -221,13 +219,6 @@ export function QuickChat({
           <div className="flex items-end gap-2 pl-3 pr-2.5 py-2">
 
           <div className="flex min-w-0 flex-1 items-end gap-2">
-            {isProcessing ? (
-              <Loader2 className="mb-2.5 h-4 w-4 shrink-0 animate-spin text-[var(--accent-cyan)] opacity-70" />
-            ) : !focused && !value ? (
-              <Zap className="mb-2.5 h-4 w-4 shrink-0 text-[var(--accent-cyan)] opacity-40" />
-            ) : (
-              <Search className="mb-2.5 h-4 w-4 shrink-0 text-[var(--text-tertiary)] opacity-40" />
-            )}
             <textarea
               ref={resolvedTextareaRef}
               rows={1}
@@ -239,14 +230,12 @@ export function QuickChat({
               onPaste={handlePaste}
               placeholder={placeholder}
               disabled={Boolean((disabled || isProcessing) && !isStreaming)}
-              className="min-w-0 flex-1 resize-none border-none bg-transparent py-1.5 text-[14px] leading-[1.5] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]/60"
+              className="min-w-0 flex-1 resize-none border-none bg-transparent py-1.5 pl-1 text-[14px] leading-[1.5] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]/60"
               style={{ maxHeight: 120, minHeight: 24 }}
             />
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0 self-end">
-            {rightContent}
-
           {showMic && (speech.isSupported || onMicUnsupported) && (
             <button
               type="button"
@@ -286,6 +275,11 @@ export function QuickChat({
         </div>
         </div>
       </div>
+      {rightContent && (
+        <div className="flex items-center gap-1.5 shrink-0 self-end mb-[2px]">
+          {rightContent}
+        </div>
+      )}
       </div>
 
       {showSpeechStatus && (speech.isListening || speech.error) ? (

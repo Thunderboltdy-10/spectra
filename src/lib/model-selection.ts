@@ -3,6 +3,7 @@ import {
   CHEAP_MODEL_COST_PER_MILLION,
   DEFAULT_MANUAL_MODEL_COST_CAP_PER_MILLION,
   MAX_MODEL_COST_PER_MILLION,
+  ROUTING_LANE_COST_CAPS,
   type RoutingLane,
 } from "@/lib/model-policy";
 import {
@@ -288,13 +289,12 @@ export function isModelTooExpensivePerMillion(
   const hasKnownInput = typeof model.inputCostPerM === "number" && Number.isFinite(model.inputCostPerM);
   const hasKnownOutput = typeof model.outputCostPerM === "number" && Number.isFinite(model.outputCostPerM);
   if (!hasKnownInput || !hasKnownOutput) return false;
+  const laneCap = options?.lane ? ROUTING_LANE_COST_CAPS[options.lane] : MAX_MODEL_COST_PER_MILLION;
   const cap = options?.allowManualOverride
     ? (options.manualCostCap ?? DEFAULT_MANUAL_MODEL_COST_CAP_PER_MILLION)
-    : MAX_MODEL_COST_PER_MILLION;
-  return (
-    Math.max(0, model.inputCostPerM as number) > cap
-    || Math.max(0, model.outputCostPerM as number) > cap
-  );
+    : laneCap;
+  const totalCost = Math.max(0, model.inputCostPerM as number) + Math.max(0, model.outputCostPerM as number);
+  return totalCost > cap;
 }
 
 function costScore(model: CatalogModelEntry) {

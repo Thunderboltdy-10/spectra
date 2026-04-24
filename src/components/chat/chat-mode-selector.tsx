@@ -80,7 +80,7 @@ export function ChatModeSelector({ mode, onChange, compact = false }: ChatModeSe
   return (
     <>
       {/* Inline mode pills (existing row) */}
-      <div className="flex gap-1 overflow-x-auto pb-1">
+      <div data-tour="mode-selector" className="flex gap-1 overflow-x-auto pb-1">
         {ALL_MODES.map((m) => {
           const active = mode === m.key;
           const Icon = ICON_MAP[m.icon];

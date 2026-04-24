@@ -2926,6 +2926,20 @@ export async function runChatPipeline(request: NextRequest) {
     ...referencedHistoryImageBlocks,
   ];
   const requiresVision = allImageBlocks.length > 0;
+  const historyAttachmentContextBlocks = recentHistory
+    .filter((message) => message.role === "user" && Array.isArray(message.attachmentResourceIds) && message.attachmentResourceIds.length > 0)
+    .map((message) => {
+      const names = Array.isArray(message.attachments) && message.attachments.length > 0
+        ? message.attachments.join(", ")
+        : "attached files";
+      return `Previous user message attachments (${names}):\n${message.content}`;
+    });
+  const combinedAttachmentContextBlock = [
+    attachments.quickExtractBlock,
+    historyAttachmentContextBlocks.length > 0
+      ? `HISTORICAL ATTACHMENT REFERENCES:\n${historyAttachmentContextBlocks.join("\n\n")}`
+      : "",
+  ].filter(Boolean).join("\n\n");
 
   if (requiresVision) {
     route.trace.toolchain.push("vision_gate");
@@ -3038,7 +3052,7 @@ export async function runChatPipeline(request: NextRequest) {
     capability.requiresPrepass
     && capability.prepassModel
     && capability.prepassKind === "file_understanding"
-    && attachments.quickExtractBlock.trim().length > 0
+    && combinedAttachmentContextBlock.trim().length > 0
   ) {
     const documentPrepassStartedAt = Date.now();
     const documentPrepassFallbackModels = Array.from(
@@ -3063,7 +3077,7 @@ export async function runChatPipeline(request: NextRequest) {
           role: "user",
           content: [
             `User request:\n${auto.message}`,
-            attachments.quickExtractBlock,
+            combinedAttachmentContextBlock,
           ].join("\n\n"),
         },
       ],
@@ -3730,8 +3744,8 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
     );
   }
 
-  if (includeRichContextBlocks && attachments.quickExtractBlock) {
-    systemPromptParts.push(attachments.quickExtractBlock);
+  if (includeRichContextBlocks && combinedAttachmentContextBlock) {
+    systemPromptParts.push(combinedAttachmentContextBlock);
   }
   if (includeRichContextBlocks && documentReasoningBlock) {
     systemPromptParts.push(`DOCUMENT PREPASS:\n${documentReasoningBlock}`);
@@ -3757,7 +3771,7 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
     memoryProfile: useMemoryProfile ? personalSoulExcerpt : undefined,
     retrievalBlock: retrieval.sourceBlock,
     searchBlock,
-    attachmentsBlock: [attachments.quickExtractBlock, documentReasoningBlock, imageDescriptionBlock].filter(Boolean).join("\n\n"),
+    attachmentsBlock: [combinedAttachmentContextBlock, documentReasoningBlock, imageDescriptionBlock].filter(Boolean).join("\n\n"),
     workspaceBlock:
       activeWorkstream && includeRichContextBlocks && routePlan.assignmentLevel === "L4"
         ? [
@@ -5847,6 +5861,21 @@ BACK: [answer or definition]`,
         response: finalizedResponse,
         learningContext: mergedLearningContext,
       });
+      if (
+        normalizedMessage
+        && /\b(create|make|generate|build)\b[\s\S]{0,32}\bflashcards?\b/i.test(normalizedMessage)
+        && effectiveMode !== "flashcard"
+      ) {
+        const flashcardPrompt = normalizedMessage;
+        if (!modeSuggestions.some((suggestion) => suggestion.mode === "flashcard")) {
+          modeSuggestions.unshift({
+            mode: "flashcard",
+            label: "Create flashcards",
+            prompt: flashcardPrompt,
+          });
+        }
+        route.trace.toolchain.push("flashcard_mode_redirect");
+      }
       if (modeSuggestions.length > 0) {
         (route.trace as { modeSuggestions?: Array<{ mode: StudyMode; label: string; prompt: string }> }).modeSuggestions = modeSuggestions;
         route.trace.toolchain.push("mode_switch_chips");

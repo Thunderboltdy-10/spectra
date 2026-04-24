@@ -10,7 +10,6 @@ import { FlashcardReveal, isFlashcardContent, type FlashcardCard } from "@/compo
 import { ClarificationCard } from "@/components/chat/clarification-card";
 import { DocumentPanel } from "@/components/chat/document-panel";
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer";
-import { ThinkingBlock } from "@/components/chat/thinking-block";
 import { ProviderLogo } from "@/components/provider-logo";
 import { isGeneratedDocumentContent, parseGeneratedDocument } from "@/lib/document-generator";
 import { stripQuizMarkers } from "@/lib/quiz-parser";
@@ -252,6 +251,15 @@ export function ChatMessages({
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, []);
 
+  const syncToBottom = useCallback((behavior: ScrollBehavior = "auto") => {
+    const root = scrollContainerRef.current;
+    if (root) {
+      root.scrollTo({ top: root.scrollHeight, behavior });
+      return;
+    }
+    endRef.current?.scrollIntoView({ behavior });
+  }, []);
+
   const hasContent = messages.length > 0 || Boolean(draftResponse);
   const visibleMessages = useMemo(
     () => messages.slice(visibleStartIndex),
@@ -395,7 +403,14 @@ export function ChatMessages({
 
     if (chatChanged) {
       setVisibleStartIndex(Math.max(0, messages.length - 36));
-      return;
+      shouldAutoScrollRef.current = true;
+      requestAnimationFrame(() => {
+        syncToBottom("auto");
+      });
+      const fallback = window.setTimeout(() => {
+        syncToBottom("auto");
+      }, 80);
+      return () => window.clearTimeout(fallback);
     }
 
     if (messages.length === 0) {
@@ -407,14 +422,14 @@ export function ChatMessages({
       const next = Math.min(prev, Math.max(0, messages.length - 1));
       return next === prev ? prev : next;
     });
-  }, [chatId, messages.length]);
+  }, [chatId, messages.length, syncToBottom]);
 
   useEffect(() => {
     if (!shouldAutoScrollRef.current) return;
     requestAnimationFrame(() => {
-      endRef.current?.scrollIntoView({ behavior: "auto" });
+      syncToBottom(messages.length > 0 ? "smooth" : "auto");
     });
-  }, [draftResponse, messages.length]);
+  }, [draftResponse, messages.length, syncToBottom]);
 
   useEffect(() => {
     const element = document.querySelector<HTMLElement>("[data-chat-scroll-root]");
@@ -455,6 +470,8 @@ export function ChatMessages({
     shouldAutoScrollRef.current = true;
   }, [sending]);
 
+
+
   useEffect(() => {
     const root = scrollContainerRef.current;
     const target = topLoadSentinelRef.current;
@@ -481,7 +498,7 @@ export function ChatMessages({
 
     observer.observe(target);
     return () => observer.disconnect();
-  }, [visibleStartIndex]);
+  }, [syncToBottom, visibleStartIndex]);
 
   useEffect(() => {
     const target = endRef.current;
@@ -871,6 +888,7 @@ export function ChatMessages({
                     citations={msg.citations}
                     mode={msgMode}
                     isLastAssistant={isLastAssistant}
+                    sending={isLastAssistant && sending}
                     animateIn={!isLastAssistant}
                     onRegenerate={isLastAssistant ? onRegenerate : undefined}
                     onRegenerateWithModel={isLastAssistant ? onRegenerateWithModel : undefined}
@@ -935,6 +953,7 @@ export function ChatMessages({
                       citations={msg.citations}
                       mode={msgMode}
                       isLastAssistant={isLastAssistant}
+                    sending={isLastAssistant && sending}
                       animateIn={!isLastAssistant}
                       onRegenerate={isLastAssistant ? onRegenerate : undefined}
                       onRegenerateWithModel={isLastAssistant ? onRegenerateWithModel : undefined}
@@ -1004,6 +1023,7 @@ export function ChatMessages({
                       citations={msg.citations}
                       mode={msgMode}
                       isLastAssistant={isLastAssistant}
+                    sending={isLastAssistant && sending}
                       animateIn={!isLastAssistant}
                       onRegenerate={isLastAssistant ? onRegenerate : undefined}
                       onRegenerateWithModel={isLastAssistant ? onRegenerateWithModel : undefined}
@@ -1057,6 +1077,7 @@ export function ChatMessages({
                     citations={msg.citations}
                     mode={msgMode}
                     isLastAssistant={isLastAssistant}
+                    sending={isLastAssistant && sending}
                     animateIn={!isLastAssistant}
                     onRegenerate={isLastAssistant ? onRegenerate : undefined}
                     onRegenerateWithModel={isLastAssistant ? onRegenerateWithModel : undefined}
@@ -1117,6 +1138,7 @@ export function ChatMessages({
                       citations={msg.citations}
                       mode={msgMode}
                       isLastAssistant={isLastAssistant}
+                    sending={isLastAssistant && sending}
                       animateIn={!isLastAssistant}
                       onRegenerate={isLastAssistant ? onRegenerate : undefined}
                       onRegenerateWithModel={isLastAssistant ? onRegenerateWithModel : undefined}
@@ -1195,6 +1217,7 @@ export function ChatMessages({
                     citations={msg.citations}
                     mode={msgMode}
                     isLastAssistant={isLastAssistant}
+                    sending={isLastAssistant && sending}
                     animateIn={!isLastAssistant}
                     onRegenerate={isLastAssistant ? onRegenerate : undefined}
                     onRegenerateWithModel={isLastAssistant ? onRegenerateWithModel : undefined}
@@ -1250,6 +1273,7 @@ export function ChatMessages({
                     citations={msg.citations}
                     mode={msgMode}
                     isLastAssistant={isLastAssistant}
+                    sending={isLastAssistant && sending}
                     onRegenerate={isLastAssistant ? onRegenerate : undefined}
                     onRegenerateWithModel={isLastAssistant ? onRegenerateWithModel : undefined}
                     regenModels={regenModels}
@@ -1301,6 +1325,7 @@ export function ChatMessages({
                     citations={msg.citations}
                     mode={msgMode}
                     isLastAssistant={isLastAssistant}
+                    sending={isLastAssistant && sending}
                     onRegenerate={isLastAssistant ? onRegenerate : undefined}
                     onRegenerateWithModel={isLastAssistant ? onRegenerateWithModel : undefined}
                     regenModels={regenModels}
@@ -1351,6 +1376,7 @@ export function ChatMessages({
                     citations={msg.citations}
                     mode={msgMode}
                     isLastAssistant={isLastAssistant}
+                    sending={isLastAssistant && sending}
                     onRegenerate={isLastAssistant ? onRegenerate : undefined}
                     onRegenerateWithModel={isLastAssistant ? onRegenerateWithModel : undefined}
                     regenModels={regenModels}
@@ -1412,6 +1438,7 @@ export function ChatMessages({
                   citations={msg.citations}
                   mode={msg.role === "assistant" ? msgMode : undefined}
                   isLastAssistant={isLastAssistant}
+                    sending={isLastAssistant && sending}
                   animateIn={msg.role === "assistant" ? !isLastAssistant : true}
                   onRegenerate={isLastAssistant ? onRegenerate : undefined}
                   onRegenerateWithModel={isLastAssistant ? onRegenerateWithModel : undefined}
@@ -1496,8 +1523,9 @@ export function ChatMessages({
                 routeTrace={runtimeRouteTrace ?? undefined}
                 modelUsed={streamingModelId}
                 mode={mode}
-                isLastAssistant={false}
+                isLastAssistant={true}
                 animateIn={false}
+                sending={sending}
               >
                 {streamingOpenTag ? (() => {
                   const tagPattern = /<<(?:quiz|flashcard|flashcards|document|doc)_?start>>/i;
@@ -1525,7 +1553,7 @@ export function ChatMessages({
                   );
                 })() : null}
                 {showStreamCursor && !streamingOpenTag ? (
-                  <span className={`stream-cursor ${sending ? "" : "stream-cursor--fade"}`} aria-hidden>
+                  <span className={`stream-cursor thinking-stream ${sending ? "" : "stream-cursor--fade"}`} aria-hidden>
                     |
                   </span>
                 ) : null}
@@ -1542,8 +1570,9 @@ export function ChatMessages({
                 routeTrace={runtimeRouteTrace ?? undefined}
                 modelUsed={streamingModelId}
                 mode={mode}
-                isLastAssistant={false}
+                isLastAssistant={true}
                 animateIn={false}
+                sending={sending}
               >
                 {!hasRealThinking && activeCollaborators.length === 0 ? (
                   <div className="space-y-2 mt-2">

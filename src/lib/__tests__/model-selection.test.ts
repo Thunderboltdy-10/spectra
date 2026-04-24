@@ -208,12 +208,22 @@ describe("model selection guardrails", () => {
   it("allows manual visibility above router caps while keeping the legacy helper explicit", () => {
     const model = {
       modelId: "provider/premium",
-      inputCostPerM: 55,
-      outputCostPerM: 70,
+      inputCostPerM: 7,
+      outputCostPerM: 6,
     };
 
     expect(isModelTooExpensivePerMillion(model, { lane: "deep_reasoning" })).toBe(true);
     expect(isModelAllowedInTier(model, "normal", { allowManualOverride: true })).toBe(true);
+  });
+
+  it("treats total in+out cost above ten dollars as too expensive for standard routing", () => {
+    const model = {
+      modelId: "provider/over-cap",
+      inputCostPerM: 4.5,
+      outputCostPerM: 6.2,
+    };
+
+    expect(isModelTooExpensivePerMillion(model, { lane: "fast_chat" })).toBe(true);
   });
 
   it("does not hard-block premium models in expensive-blocked tier", () => {

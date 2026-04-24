@@ -85,6 +85,10 @@ function shuffleArray<T>(arr: T[]): T[] {
   return out;
 }
 
+function buildStableShuffleOrder(cards: FlashcardCard[]) {
+  return shuffleArray(cards.map((_, index) => index));
+}
+
 // ── Test mode helpers ──────────────────────────────────────────────────────
 
 type TestQuestion = {
@@ -578,6 +582,14 @@ type GridViewProps = {
 
 function GridView({ cards }: GridViewProps) {
   const [flippedSet, setFlippedSet] = useState<Set<number>>(new Set());
+  const [order, setOrder] = useState<number[]>(() => cards.map((_, i) => i));
+  const [isShuffled, setIsShuffled] = useState(false);
+
+  useEffect(() => {
+    setOrder(cards.map((_, i) => i));
+    setIsShuffled(false);
+    setFlippedSet(new Set());
+  }, [cards]);
 
   function toggleCard(idx: number) {
     setFlippedSet((prev) => {
@@ -591,9 +603,36 @@ function GridView({ cards }: GridViewProps) {
     });
   }
 
+  function toggleShuffle() {
+    if (isShuffled) {
+      setOrder(cards.map((_, i) => i));
+    } else {
+      setOrder(shuffleArray(cards.map((_, i) => i)));
+    }
+    setIsShuffled((prev) => !prev);
+    setFlippedSet(new Set());
+  }
+
+  const orderedCards = order.map((i) => cards[i]).filter((c): c is FlashcardCard => Boolean(c));
+
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-      {cards.map((card, idx) => {
+    <div className="space-y-3">
+      <div className="flex items-center justify-end">
+        <button
+          type="button"
+          onClick={toggleShuffle}
+          className={`inline-flex cursor-pointer items-center gap-1.5 rounded-[var(--radius-pill)] border px-2.5 py-1 text-xs transition ${
+            isShuffled
+              ? "border-[var(--mode-flashcard)] bg-[color-mix(in_oklab,var(--mode-flashcard)_12%,var(--bg-secondary))] text-[var(--mode-flashcard)]"
+              : "border-[var(--border-default)] text-[var(--text-secondary)] hover:border-[var(--border-strong)]"
+          }`}
+        >
+          <Shuffle className="h-3 w-3" />
+          {isShuffled ? "Shuffled" : "Shuffle"}
+        </button>
+      </div>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        {orderedCards.map((card, idx) => {
         const isFlipped = flippedSet.has(idx);
         return (
           <div
@@ -622,6 +661,7 @@ function GridView({ cards }: GridViewProps) {
           </div>
         );
       })}
+      </div>
     </div>
   );
 }
@@ -634,10 +674,22 @@ type TestViewProps = {
 };
 
 function TestView({ cards, onFollowUp }: TestViewProps) {
-  const questions = useMemo(() => buildTestQuestions(cards), [cards]);
+  const baseQuestions = useMemo(() => buildTestQuestions(cards), [cards]);
+  const [questionOrder, setQuestionOrder] = useState<number[]>(() => baseQuestions.map((_, i) => i));
+  const [isShuffled, setIsShuffled] = useState(false);
   const [answers, setAnswers] = useState<Record<number, number>>({}); // questionIdx -> optionIdx
   const [submitted, setSubmitted] = useState(false);
   const [activeIdx, setActiveIdx] = useState(0);
+
+  useEffect(() => {
+    setQuestionOrder(baseQuestions.map((_, i) => i));
+    setIsShuffled(false);
+    setAnswers({});
+    setSubmitted(false);
+    setActiveIdx(0);
+  }, [baseQuestions]);
+
+  const questions = useMemo(() => questionOrder.map((i) => baseQuestions[i]).filter((q): q is TestQuestion => Boolean(q)), [baseQuestions, questionOrder]);
 
   const score = useMemo(() => {
     if (!submitted) return 0;
@@ -647,6 +699,9 @@ function TestView({ cards, onFollowUp }: TestViewProps) {
   const total = questions.length;
   const currentQ = questions[activeIdx];
   const isLast = activeIdx >= total - 1;
+  const selectedAnswer = answers[activeIdx];
+  const hasAnsweredCurrent = selectedAnswer !== undefined;
+  const currentAnswerIsCorrect = hasAnsweredCurrent && selectedAnswer === currentQ?.correctOption;
 
   function submit() {
     if (submitted) return;
@@ -654,6 +709,21 @@ function TestView({ cards, onFollowUp }: TestViewProps) {
   }
 
   function restart() {
+    setAnswers({});
+    setSubmitted(false);
+    setActiveIdx(0);
+    if (isShuffled) {
+      setQuestionOrder(shuffleArray(baseQuestions.map((_, i) => i)));
+    }
+  }
+
+  function toggleShuffle() {
+    if (isShuffled) {
+      setQuestionOrder(baseQuestions.map((_, i) => i));
+    } else {
+      setQuestionOrder(shuffleArray(baseQuestions.map((_, i) => i)));
+    }
+    setIsShuffled((prev) => !prev);
     setAnswers({});
     setSubmitted(false);
     setActiveIdx(0);
@@ -686,15 +756,29 @@ function TestView({ cards, onFollowUp }: TestViewProps) {
           <ClipboardCheck className="h-3.5 w-3.5" />
           Test Mode
         </span>
-        {submitted ? (
-          <span className="text-sm font-semibold text-[var(--text-primary)]">
-            {score}/{total}
-          </span>
-        ) : (
-          <span className="text-xs text-[var(--text-secondary)]">
-            {activeIdx + 1} / {total}
-          </span>
-        )}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={toggleShuffle}
+            className={`inline-flex cursor-pointer items-center gap-1.5 rounded-[var(--radius-pill)] border px-2.5 py-1 text-xs transition ${
+              isShuffled
+                ? "border-[var(--mode-flashcard)] bg-[color-mix(in_oklab,var(--mode-flashcard)_12%,var(--bg-secondary))] text-[var(--mode-flashcard)]"
+                : "border-[var(--border-default)] text-[var(--text-secondary)] hover:border-[var(--border-strong)]"
+            }`}
+          >
+            <Shuffle className="h-3 w-3" />
+            {isShuffled ? "Shuffled" : "Shuffle"}
+          </button>
+          {submitted ? (
+            <span className="text-sm font-semibold text-[var(--text-primary)]">
+              {score}/{total}
+            </span>
+          ) : (
+            <span className="text-xs text-[var(--text-secondary)]">
+              {activeIdx + 1} / {total}
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Progress bar */}
@@ -748,17 +832,39 @@ function TestView({ cards, onFollowUp }: TestViewProps) {
                   {String.fromCharCode(65 + optIdx)}
                 </span>
                 <RichText content={option} className="flex-1 text-sm" />
-                {isCorrect ? <CheckCircle2 className="h-4 w-4 shrink-0 text-[var(--success)]" /> : null}
-                {isWrong ? <XCircle className="h-4 w-4 shrink-0 text-[var(--danger)]" /> : null}
+                {isCorrect ? <CheckCircle2 className="h-5 w-5 shrink-0 text-[var(--success)]" /> : null}
+                {isWrong ? <XCircle className="h-5 w-5 shrink-0 text-[var(--danger)]" /> : null}
               </button>
             );
           })}
         </div>
 
-        {submitted && (
-          <div className="mt-3 rounded-[var(--radius-input)] bg-[var(--bg-secondary)] px-3 py-2 text-xs text-[var(--text-secondary)]">
-            <span className="font-medium">Answer: </span>
-            <RichText content={currentQ.correctAnswer} className="inline text-xs" />
+        {hasAnsweredCurrent ? (
+          <div
+            className={`mt-3 rounded-[var(--radius-input)] border px-4 py-2.5 text-sm font-semibold ${
+              currentAnswerIsCorrect
+                ? "border-[color-mix(in_oklab,var(--success)_35%,var(--border-default))] bg-[color-mix(in_oklab,var(--success)_10%,var(--bg-secondary))] text-[var(--success)]"
+                : "border-[color-mix(in_oklab,var(--danger)_35%,var(--border-default))] bg-[color-mix(in_oklab,var(--danger)_10%,var(--bg-secondary))] text-[var(--danger)]"
+            }`}
+          >
+            {currentAnswerIsCorrect ? (
+              <span className="inline-flex items-center gap-1.5">
+                <CheckCircle2 className="h-4 w-4" />
+                Correct
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1.5">
+                <XCircle className="h-4 w-4" />
+                Incorrect — review the answer below
+              </span>
+            )}
+          </div>
+        ) : null}
+
+        {(submitted || hasAnsweredCurrent) && (
+          <div className="mt-3 rounded-[var(--radius-input)] bg-[var(--bg-secondary)] px-4 py-2.5 text-sm text-[var(--text-secondary)]">
+            <span className="font-semibold">Answer: </span>
+            <RichText content={currentQ.correctAnswer} className="inline text-sm" />
           </div>
         )}
       </div>
@@ -945,6 +1051,8 @@ export function FlashcardReveal({ content, onSaveDeck, onRateCard, onEditCard, o
   );
   const [viewMode, setViewMode] = useState<StudyViewMode>("cards");
   const [stillLearningCount, setStillLearningCount] = useState(0);
+  const [shuffledOrder, setShuffledOrder] = useState<number[]>([]);
+  const [isShuffled, setIsShuffled] = useState(false);
   const saveSignatureRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -982,11 +1090,29 @@ export function FlashcardReveal({ content, onSaveDeck, onRateCard, onEditCard, o
     void onSaveDeck({ title: inferDeckTitle(cards), cards });
   }, [cards, onSaveDeck]);
 
+  useEffect(() => {
+    setShuffledOrder(cards.map((_, index) => index));
+    setIsShuffled(false);
+  }, [cards]);
+
   if (cards.length === 0) {
     return <MarkdownRenderer content={content} citations={[]} />;
   }
 
   const title = inferDeckTitle(cards);
+  const orderedCards = (isShuffled ? shuffledOrder : cards.map((_, index) => index))
+    .map((index) => cards[index])
+    .filter((card): card is FlashcardCard => Boolean(card));
+
+  function handleToggleShuffle() {
+    if (isShuffled) {
+      setShuffledOrder(cards.map((_, index) => index));
+      setIsShuffled(false);
+      return;
+    }
+    setShuffledOrder(buildStableShuffleOrder(cards));
+    setIsShuffled(true);
+  }
 
   return (
     <div className="space-y-4">
@@ -999,21 +1125,35 @@ export function FlashcardReveal({ content, onSaveDeck, onRateCard, onEditCard, o
           </span>
           <span className="text-xs text-[var(--text-tertiary)]">{cards.length} cards</span>
         </div>
-        <ViewTabs active={viewMode} onChange={setViewMode} total={cards.length} />
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleToggleShuffle}
+            className={`inline-flex cursor-pointer items-center gap-1.5 rounded-[var(--radius-pill)] border px-3 py-1.5 text-xs font-medium transition ${
+              isShuffled
+                ? "border-[var(--mode-flashcard)] bg-[color-mix(in_oklab,var(--mode-flashcard)_12%,var(--bg-secondary))] text-[var(--mode-flashcard)]"
+                : "border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:border-[var(--border-strong)] hover:text-[var(--text-primary)]"
+            }`}
+          >
+            <Shuffle className="h-3.5 w-3.5" />
+            {isShuffled ? "Shuffled" : "Shuffle"}
+          </button>
+          <ViewTabs active={viewMode} onChange={setViewMode} total={cards.length} />
+        </div>
       </div>
 
       {/* View content */}
       {viewMode === "cards" && (
         <CardsView
-          cards={cards}
+          cards={orderedCards}
           onRateCard={onRateCard}
           onEditCard={onEditCard}
           onUpdateCard={applyCardOverride}
           onLearningCountChange={setStillLearningCount}
         />
       )}
-      {viewMode === "grid" && <GridView cards={cards} />}
-      {viewMode === "test" && <TestView cards={cards} onFollowUp={onFollowUp} />}
+      {viewMode === "grid" && <GridView cards={orderedCards} />}
+      {viewMode === "test" && <TestView cards={orderedCards} onFollowUp={onFollowUp} />}
 
       {/* Follow-up actions */}
       {onFollowUp && (

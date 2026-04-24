@@ -10,8 +10,6 @@ import {
   Cog,
   Zap,
   ChevronDown,
-  Loader2,
-  Check,
   X,
   SkipForward,
   GitBranch,
@@ -102,11 +100,9 @@ function StatusDot({ status, tint }: { status: ExecutionEventStatus; tint: strin
   if (status === "completed") {
     return (
       <span
-        className="inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center rounded-full"
-        style={{ background: "var(--success, #158f72)" }}
-      >
-        <Check className="h-1.5 w-1.5 text-white" strokeWidth={3} />
-      </span>
+        className="inline-flex h-2 w-2 shrink-0 rounded-full opacity-50"
+        style={{ background: tint }}
+      />
     );
   }
   if (status === "failed") {
@@ -150,11 +146,7 @@ function ExecutionEventRow({
   streaming?: boolean;
   defaultOpen?: boolean;
 }) {
-  const [expanded, setExpanded] = useState(defaultOpen || event.status === "running" || !!streaming);
-  useEffect(() => {
-    if (event.status === "running") setExpanded(true);
-    else if (event.status === "completed" && !defaultOpen) setExpanded(false);
-  }, [event.status, defaultOpen]);
+  const [expanded, setExpanded] = useState(() => defaultOpen || event.status === "running");
   const meta = KIND_META[event.kind];
   const Icon = meta.icon;
   const hasChildren = event.children && event.children.length > 0;
@@ -180,19 +172,21 @@ function ExecutionEventRow({
           {/* Header row */}
           <div
             className={cn(
-              "flex items-center gap-2 cursor-pointer select-none group/evt",
-              expandable && "hover:bg-[var(--bg-hover)]/40 -mx-1 px-1 rounded-md transition-colors"
+              "group/evt flex min-h-8 items-center gap-2 cursor-pointer select-none py-1 transition-colors",
+              expandable && "hover:text-[var(--text-primary)]"
             )}
             onClick={() => expandable && setExpanded((v) => !v)}
           >
             <Icon
-              className="h-3 w-3 shrink-0"
+              className="h-4 w-4 shrink-0"
               style={{ color: meta.tint }}
             />
             <span
               className={cn(
-                "text-[11px] font-semibold leading-tight",
-                event.status === "running"
+                "text-xs font-medium leading-tight truncate",
+                event.status === "running" && streaming
+                  ? "stream-glow-text"
+                  : event.status === "running"
                   ? "text-[var(--text-primary)]"
                   : event.status === "completed"
                   ? "text-[var(--text-secondary)]"
@@ -203,23 +197,23 @@ function ExecutionEventRow({
             </span>
 
             {/* Status badge */}
-            {event.status === "running" && (
-              <span className="inline-flex items-center gap-1 rounded-full border border-[color-mix(in_oklab,var(--accent-cyan)_30%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_8%,transparent)] px-1.5 py-[1px] text-[9px] font-medium text-[var(--accent-cyan)]">
-                <Loader2 className="h-2 w-2 animate-spin" />
-                live
+            {event.status === "running" && streaming && (
+              <span className="inline-flex items-center gap-1 text-[10px] text-[var(--accent-cyan)]">
+                <span className="h-1 w-1 rounded-full bg-[var(--accent-cyan)] animate-pulse" />
+                running
               </span>
             )}
 
             {/* Duration */}
             {(event.durationMs != null || (event.startedAt && event.finishedAt)) && (
-              <span className="text-[9px] text-[var(--text-tertiary)] tabular-nums">
+              <span className="text-xs text-[var(--text-tertiary)] tabular-nums">
                 <DurationChip ms={event.durationMs ?? (event.finishedAt! - event.startedAt!)} />
               </span>
             )}
 
             {/* Token counts for subcalls */}
             {(event.inputTokens != null || event.outputTokens != null) && (
-              <span className="text-[9px] text-[var(--text-tertiary)] tabular-nums">
+              <span className="text-xs text-[var(--text-tertiary)] tabular-nums">
                 {event.inputTokens != null && `${event.inputTokens.toLocaleString()}→`}
                 {event.outputTokens != null && `${event.outputTokens.toLocaleString()}`}
               </span>
@@ -229,20 +223,19 @@ function ExecutionEventRow({
             {expandable && (
               <ChevronDown
                 className={cn(
-                  "h-3 w-3 text-[var(--text-tertiary)] transition-transform duration-200",
+                  "h-4 w-4 text-[var(--text-tertiary)] transition-transform duration-200",
                   expanded && "rotate-180"
                 )}
               />
             )}
           </div>
 
-          {/* Always show a preview of thinking content if collapsed, or full content if expanded */}
+          {/* Preview when collapsed */}
           {hasContent && !expanded && (
-            <div className="mt-1 ml-1 pl-4 border-l-2 border-[var(--border-default)]/30">
-              <div className="text-[12px] leading-relaxed text-[var(--text-secondary)] line-clamp-2 opacity-70">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {event.content!.trim()}
-                </ReactMarkdown>
+            <div className="pl-5 pb-1">
+              <div className="text-xs leading-relaxed text-[var(--text-tertiary)] line-clamp-1">
+                {event.content!.trim().slice(0, 120).replace(/[#*_`]/g, "")}
+                {event.content!.trim().length > 120 ? "…" : ""}
               </div>
             </div>
           )}
@@ -259,13 +252,13 @@ function ExecutionEventRow({
               >
                 <div className="mt-1.5 ml-1 space-y-1.5">
                   {hasDetail && !hasContent && (
-                    <p className="text-[11px] leading-relaxed text-[var(--text-tertiary)]">
+                    <p className="text-sm leading-relaxed text-[var(--text-tertiary)]">
                       {event.detail}
                     </p>
                   )}
                   {hasContent && (
-                    <div className="max-h-48 overflow-y-auto pr-1 rounded-md bg-[var(--bg-secondary)]/50 border border-[var(--border-default)]/30 p-2">
-                      <div className="text-[12px] leading-relaxed text-[var(--text-secondary)]">
+                    <div className="max-h-56 overflow-y-auto py-1">
+                      <div className="text-sm leading-relaxed text-[var(--text-secondary)]">
                         <ReactMarkdown remarkPlugins={[remarkGfm]}>
                           {event.content!.trim()}
                         </ReactMarkdown>
@@ -484,10 +477,16 @@ export function ExecutionTimeline({
     if (thinkingSegments.length > 0) {
       thinkingEvents = thinkingSegments.map((seg, i) => {
         const isLast = i === thinkingSegments.length - 1;
+        const firstLine = seg.content.split("\n")[0]?.replace(/^[#>*\-\d.\s]+/, "").trim() ?? "";
+        const label = firstLine.length > 0 && firstLine.length <= 70
+          ? firstLine
+          : firstLine.length > 70
+            ? `${firstLine.slice(0, 67)}…`
+            : `Thinking (${i + 1}/${thinkingSegments.length})`;
         return {
           id: `thinking-seg-${seg.id || i}`,
           kind: "thinking" as const,
-          label: seg.label || `Thinking (${i + 1}/${thinkingSegments.length})`,
+          label,
           status: (streaming && isLast) ? "running" as const : "completed" as const,
           content: seg.content,
         };
@@ -545,8 +544,6 @@ export function ExecutionTimeline({
 
   if (events.length === 0) return null;
 
-  const hasRunning = events.some((e) => e.status === "running");
-
   return (
     <div
       className={cn(
@@ -556,20 +553,10 @@ export function ExecutionTimeline({
       )}
     >
       {/* Timeline header — only show when streaming or has running events */}
-      {hasRunning && (
-        <div className="flex items-center gap-2 mb-2">
-          <div className="h-px flex-1 bg-gradient-to-r from-[var(--accent-cyan)]/30 via-[var(--border-default)]/50 to-transparent" />
-          <span className="text-[9px] font-semibold uppercase tracking-[0.12em] text-[var(--accent-cyan)] animate-pulse">
-            Executing
-          </span>
-          <div className="h-px flex-1 bg-gradient-to-l from-[var(--accent-cyan)]/30 via-[var(--border-default)]/50 to-transparent" />
-        </div>
-      )}
-
       <div
         ref={scrollRef}
         className={cn(
-          compact ? "max-h-32" : "max-h-80",
+          compact ? "max-h-40" : "max-h-[28rem]",
           "overflow-y-auto space-y-0 pr-1"
         )}
       >

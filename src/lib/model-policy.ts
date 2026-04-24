@@ -1,4 +1,4 @@
-export const MAX_MODEL_COST_PER_MILLION = 30;
+export const MAX_MODEL_COST_PER_MILLION = 8;
 export const CHEAP_MODEL_COST_PER_MILLION = 3;
 
 export type RoutingLane =
@@ -11,17 +11,17 @@ export type RoutingLane =
   | "agent_subtask"
   | "verification";
 
-export const DEFAULT_MANUAL_MODEL_COST_CAP_PER_MILLION = Number.POSITIVE_INFINITY;
+export const DEFAULT_MANUAL_MODEL_COST_CAP_PER_MILLION = 10;
 
 export const ROUTING_LANE_COST_CAPS: Record<RoutingLane, number> = {
   utility: 6,
   fast_chat: 10,
-  deep_reasoning: 30,
+  deep_reasoning: 10,
   vision: 25,
   image_gen: 40,
-  search_reasoning: 30,
-  agent_subtask: 18,
-  verification: 24,
+  search_reasoning: 10,
+  agent_subtask: 10,
+  verification: 10,
 };
 
 export type CostModel = {

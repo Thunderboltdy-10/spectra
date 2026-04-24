@@ -58,21 +58,21 @@ export function ContextualTip({
   return (
     <div
       className={cn(
-        "mx-auto w-[95%] flex items-center gap-2.5 rounded-t-xl rounded-b-none border border-b-0 border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2 text-sm text-[var(--text-primary)] shadow-[var(--shadow-soft)]",
+        "flex w-full items-center gap-2 rounded-t-lg rounded-b-none border border-b-0 border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 py-1 text-[var(--text-primary)]",
         className,
       )}
       role="status"
       aria-live="polite"
     >
       <div className="flex-1 overflow-hidden">
-        <p key={message} className="animate-in fade-in slide-in-from-bottom-1 duration-300 truncate text-xs leading-relaxed text-[var(--text-secondary)]">{message}</p>
+        <p key={message} className="animate-in fade-in slide-in-from-bottom-1 duration-300 truncate text-[10px] leading-relaxed text-[var(--text-secondary)]">{message}</p>
       </div>
       {actionLabel && onAction ? (
         <button
           key={actionLabel}
           type="button"
           onClick={onAction}
-          className="animate-in fade-in slide-in-from-bottom-1 duration-300 cursor-pointer whitespace-nowrap rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2 py-1 text-[11px] font-medium text-[var(--text-primary)] transition hover:bg-[var(--bg-hover)]"
+          className="animate-in fade-in slide-in-from-bottom-1 duration-300 cursor-pointer whitespace-nowrap rounded border border-[var(--border-default)] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--text-primary)] transition hover:bg-[var(--bg-hover)]"
         >
           {actionLabel}
         </button>

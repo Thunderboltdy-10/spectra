@@ -33,6 +33,7 @@ async function requireAdmin(ctx: Parameters<typeof getUserByClerkId>[0], actorCl
 }
 
 function isSeatCountedMember(email: string) {
+  void email;
   return true;
 }
 

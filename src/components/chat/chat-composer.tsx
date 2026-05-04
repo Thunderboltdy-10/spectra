@@ -130,6 +130,18 @@ function isExpensiveModel(model: ModelOption) {
   return inputCost > MAX_MODEL_COST_PER_MILLION || outputCost > MAX_MODEL_COST_PER_MILLION;
 }
 
+function modelWarningBadges(model: ModelOption, hasImages: boolean, estimatedTokens: number) {
+  const blob = modelBlob(model);
+  return [
+    isExpensiveModel(model) ? "expensive" : undefined,
+    !hasVisionSupport(model) ? (hasImages ? "needs image prepass" : "text-only") : undefined,
+    !isReasoningCapable(model) ? "lightweight" : undefined,
+    model.contextLength && estimatedTokens > model.contextLength ? "low context" : undefined,
+    typeof model.inputCostPerM !== "number" || typeof model.outputCostPerM !== "number" ? "unknown pricing" : undefined,
+    /\b(flash|lite|mini|nano|small|air|tiny|free)\b/.test(blob) ? "utility" : undefined,
+  ].filter((value): value is string => Boolean(value));
+}
+
 function restrictionReasonForTier(
   model: ModelOption,
   tier?: UserSpending["tier"],
@@ -440,6 +452,7 @@ export function ChatComposer(props: ChatComposerProps) {
           model,
           recommended: recommendedModelIds.has(model.modelId),
           cautionReason: [...cautions, expensiveWarning].filter(Boolean).join(" · "),
+          warningBadges: modelWarningBadges(model, hasImages, estimatedTokens),
           restrictionReason,
         };
       });
@@ -1042,6 +1055,18 @@ export function ChatComposer(props: ChatComposerProps) {
                                           <p className="truncate text-[10px] text-[var(--text-secondary)]">
                                             {model.provider} · {model.contextLength ? `${Math.round((model.contextLength ?? 0) / 1000)}k ctx` : "Context unknown"}
                                           </p>
+                                          {row.warningBadges.length > 0 ? (
+                                            <div className="mt-1 flex flex-wrap gap-1">
+                                              {row.warningBadges.slice(0, 4).map((badge) => (
+                                                <span
+                                                  key={badge}
+                                                  className="rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[9px] uppercase tracking-[0.06em] text-[var(--text-secondary)]"
+                                                >
+                                                  {badge}
+                                                </span>
+                                              ))}
+                                            </div>
+                                          ) : null}
                                           {row.cautionReason ? (
                                             <p className="truncate text-[10px] text-[var(--warning)]">{row.cautionReason}</p>
                                           ) : null}

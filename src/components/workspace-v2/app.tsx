@@ -1384,7 +1384,7 @@ export default function WorkspaceV2() {
       if (d < bd && d < maxDist) { best = it; bd = d; }
     });
     return best;
-  }, [pan, zoom, posOf, baseItems, focusedViewOpen, panning]); // Need `panning` state to trigger re-eval when letting go of drag!
+  }, [pan, zoom, posOf, baseItems, focusedViewOpen]);
 
   const deepFocusItem = useMemo<V2Item | null>(() => {
     if (!focusedViewOpen) return null;

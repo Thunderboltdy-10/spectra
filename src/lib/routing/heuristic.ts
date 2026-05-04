@@ -888,51 +888,54 @@ export function chooseModelRoute(input: ModelRouteInput): ModelRouteResult {
   }
 
   if (input.spendingTier === "free_only") {
-    let freeModel: string = getCatalogBackedEmergencyModel({ catalog, role: "text" });
+    const freeTextModel = catalog.length > 0 ? getCatalogBackedEmergencyModel({ catalog, role: "text" }) : MODEL_CONFIG.glmAir;
+    const freeReasoningModel = catalog.length > 0 ? getCatalogBackedEmergencyModel({ catalog, role: "reasoning" }) : MODEL_CONFIG.glmAir;
+    const freeVisionModel = catalog.length > 0 ? getCatalogBackedEmergencyModel({ catalog, role: "vision" }) : MODEL_CONFIG.glmAir;
+    let freeModel: string = freeTextModel;
     let reason = "Free-tier routing";
 
     if (input.mode === "marker") {
-      freeModel = getCatalogBackedEmergencyModel({ catalog, role: "reasoning" });
+      freeModel = freeReasoningModel;
       reason = "Free-tier marker route";
     } else if (input.mode === "research" || (input.mode === "tutor" && promptCategory === "math_science")) {
-      freeModel = getCatalogBackedEmergencyModel({ catalog, role: "reasoning" });
+      freeModel = freeReasoningModel;
       reason = "Free-tier deep reasoning route";
     } else if (input.mode === "exam" || input.mode === "draft_coach") {
-      freeModel = getCatalogBackedEmergencyModel({ catalog, role: "reasoning" });
+      freeModel = freeReasoningModel;
       reason = "Free-tier structured output route";
     } else if (multimodalNeeded) {
-      freeModel = getCatalogBackedEmergencyModel({ catalog, role: "vision" });
+      freeModel = freeVisionModel;
       reason = "Free-tier multimodal route";
     } else if (promptCategory === "comparison" || promptCategory === "synthesis" || promptCategory === "debate") {
-      freeModel = getCatalogBackedEmergencyModel({ catalog, role: "reasoning" });
+      freeModel = freeReasoningModel;
       reason = "Free-tier comparative reasoning route";
     } else if (promptCategory === "code") {
-      freeModel = getCatalogBackedEmergencyModel({ catalog, role: "reasoning" });
+      freeModel = freeReasoningModel;
       reason = "Free-tier code route";
     } else if (tabularNeeded) {
-      freeModel = getCatalogBackedEmergencyModel({ catalog, role: "reasoning" });
+      freeModel = freeReasoningModel;
       reason = "Free-tier tabular analysis route";
     }
 
-    pushCandidate(candidates, getCatalogBackedEmergencyModel({ catalog, role: "text" }), input.spendingTier, 0.85, "Free-tier fast tutoring baseline");
-    pushCandidate(candidates, getCatalogBackedEmergencyModel({ catalog, role: "reasoning" }), input.spendingTier, 0.82, "Free-tier grading/review fallback");
-    pushCandidate(candidates, getCatalogBackedEmergencyModel({ catalog, role: "reasoning" }), input.spendingTier, 0.81, "Free-tier broad reasoning option");
-    pushCandidate(candidates, getCatalogBackedEmergencyModel({ catalog, role: "reasoning" }), input.spendingTier, 0.8, "Free-tier deep reasoning option");
+    pushCandidate(candidates, freeTextModel, input.spendingTier, 0.85, "Free-tier fast tutoring baseline");
+    pushCandidate(candidates, freeReasoningModel, input.spendingTier, 0.82, "Free-tier grading/review fallback");
+    pushCandidate(candidates, freeReasoningModel, input.spendingTier, 0.81, "Free-tier broad reasoning option");
+    pushCandidate(candidates, freeReasoningModel, input.spendingTier, 0.8, "Free-tier deep reasoning option");
     if (multimodalNeeded) {
-      pushCandidate(candidates, getCatalogBackedEmergencyModel({ catalog, role: "vision" }), input.spendingTier, 0.88, "Free-tier vision-capable choice");
+      pushCandidate(candidates, freeVisionModel, input.spendingTier, 0.88, "Free-tier vision-capable choice");
     }
 
     return finalizeRoute({
       input,
       primaryModel: freeModel,
       fallbackModels: [
-        getCatalogBackedEmergencyModel({ catalog, role: "text" }),
-        getCatalogBackedEmergencyModel({ catalog, role: "reasoning" }),
-        getCatalogBackedEmergencyModel({ catalog, role: "reasoning" }),
+        freeTextModel,
+        freeReasoningModel,
+        freeReasoningModel,
       ].filter(
         (candidate) => candidate !== freeModel && canUseInTier(candidate, "free_only"),
       ),
-      verificationModel: input.mode === "marker" ? getCatalogBackedEmergencyModel({ catalog, role: "verify" }) : undefined,
+      verificationModel: input.mode === "marker" ? freeReasoningModel : undefined,
       reason,
       autoEnhanced: true,
       searchEnabled: false,

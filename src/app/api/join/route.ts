@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import { convexQuery } from "@/lib/convex-server";
-import { badRequest, ok } from "@/lib/http";
+import { ok } from "@/lib/http";
 import {
   deriveInvitationAuthState,
   getInvitationCookies,

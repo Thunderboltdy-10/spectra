@@ -572,6 +572,50 @@ export type RouteTrace = {
     modelId: string;
     reason: string;
   };
+  requestPlan?: {
+    primaryModel: string;
+    finalSynthesisModel?: string;
+    fallbackModels: string[];
+    helpers: Array<{
+      kind: "vision_prepass" | "document_prepass" | "tool_helper" | "specialist" | "verification" | "repair";
+      modelId?: string;
+      reason: string;
+    }>;
+    affinity?: {
+      lastModel?: string;
+      retained: boolean;
+      reason: string;
+      expiresAt?: number;
+    };
+    warnings: string[];
+  };
+  costEstimate?: {
+    totalUsd: number;
+    totalCents: number;
+    thresholdUsd: number;
+    requiresConfirmation: boolean;
+    confidence: "high" | "medium" | "low";
+    items: Array<{
+      label: string;
+      modelId?: string;
+      inputTokens?: number;
+      outputTokens?: number;
+      costUsd?: number;
+      confidence: "high" | "medium" | "low";
+      notes?: string[];
+    }>;
+    warnings: string[];
+  };
+  capabilityPlan?: {
+    modelId: string;
+    nativeTools: boolean;
+    nativeVision: boolean;
+    nativeStructuredOutput: boolean;
+    nativeReasoning: boolean;
+    helperPlan: string[];
+    omittedParameters: string[];
+    warnings: string[];
+  };
   routePlan?: RoutePlan;
   phasePlan?: RouteTracePhase[];
   subcalls?: RouteTraceSubcall[];

@@ -181,6 +181,49 @@ export function RouteTraceDrawer({ open, onClose, trace, showCostDetails = false
               </section>
             ) : null}
 
+            {trace.requestPlan || trace.capabilityPlan || trace.costEstimate ? (
+              <section className="mb-5 rounded-2xl border border-[color-mix(in_oklab,var(--accent-cyan)_28%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_8%,var(--bg-elevated))] p-3">
+                <h4 className="mb-2 text-sm font-semibold text-[var(--text-primary)]">Why this model</h4>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {trace.requestPlan ? (
+                    <>
+                      <InputRow label="Final model" value={sanitizeModelId(trace.requestPlan.finalSynthesisModel ?? trace.requestPlan.primaryModel)} />
+                      <InputRow label="Continuity" value={trace.requestPlan.affinity?.retained ? "Retained warm model" : (trace.requestPlan.affinity?.reason ?? "Fresh route")} />
+                    </>
+                  ) : null}
+                  {trace.costEstimate ? (
+                    <>
+                      <InputRow label="Estimated cost" value={`$${trace.costEstimate.totalUsd.toFixed(4)} (${trace.costEstimate.confidence})`} />
+                      <InputRow label="Actual cost" value={typeof trace.totalCostCents === "number" ? `$${(trace.totalCostCents / 100).toFixed(4)}` : "pending"} />
+                    </>
+                  ) : null}
+                  {trace.capabilityPlan ? (
+                    <>
+                      <InputRow label="Native tools" value={trace.capabilityPlan.nativeTools ? "Yes" : "Helper/server path"} />
+                      <InputRow label="Native files/vision" value={trace.capabilityPlan.nativeVision ? "Yes" : "Prepass evidence"} />
+                    </>
+                  ) : null}
+                </div>
+                {trace.requestPlan?.helpers.length ? (
+                  <div className="mt-3 space-y-1">
+                    <Label>Helper plan</Label>
+                    {trace.requestPlan.helpers.map((helper, index) => (
+                      <p key={`${helper.kind}-${index}`} className="text-xs text-[var(--text-secondary)]">
+                        {helper.kind.replace(/_/g, " ")}{helper.modelId ? ` · ${sanitizeModelId(helper.modelId)}` : ""} — {helper.reason}
+                      </p>
+                    ))}
+                  </div>
+                ) : null}
+                {[...(trace.requestPlan?.warnings ?? []), ...(trace.capabilityPlan?.warnings ?? []), ...(trace.costEstimate?.warnings ?? [])].length ? (
+                  <div className="mt-3 rounded-xl border border-[color-mix(in_oklab,var(--warning)_30%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_8%,transparent)] p-2">
+                    {[...(trace.requestPlan?.warnings ?? []), ...(trace.capabilityPlan?.warnings ?? []), ...(trace.costEstimate?.warnings ?? [])].slice(0, 4).map((warning, index) => (
+                      <p key={`${warning}-${index}`} className="text-xs text-[var(--text-secondary)]">{warning}</p>
+                    ))}
+                  </div>
+                ) : null}
+              </section>
+            ) : null}
+
             <section className="mb-5">
           <h4 className="mb-2 text-sm font-semibold text-[var(--text-primary)]">Pipeline Timeline</h4>
           <div className="mb-4 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">

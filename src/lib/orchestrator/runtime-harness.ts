@@ -18,6 +18,7 @@ export type RuntimeHarnessParams =
       primaryModel: string;
       fallbackModels: string[];
       verificationModel?: string;
+      catalog?: CatalogModelEntry[];
       messages: OpenRouterMessage[];
       maxTokens?: number;
       maxContinuations?: number;
@@ -78,6 +79,7 @@ export async function runRuntimeHarness(
       primaryModel: params.primaryModel,
       fallbackModels: params.fallbackModels,
       verificationModel: params.verificationModel,
+      catalog: params.catalog,
       messages: params.messages,
       maxTokens: params.maxTokens,
       maxContinuations: params.maxContinuations,

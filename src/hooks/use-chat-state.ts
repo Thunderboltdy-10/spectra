@@ -2183,8 +2183,7 @@ export function useChatState() {
           // Keep plain text error.
         }
         if (
-          errorCode === "MANUAL_MODEL_CONFIRM_REQUIRED"
-          && effectiveRouterMode === "manual"
+          (errorCode === "MANUAL_MODEL_CONFIRM_REQUIRED" || errorCode === "REQUEST_COST_CONFIRM_REQUIRED")
           && !options?.confirmExpensiveModelOverride
           && requiredConfirmation
         ) {

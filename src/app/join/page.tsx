@@ -4,7 +4,7 @@ import { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
 import Image from "next/image";
-import { AlertTriangle, CheckCircle2, Clock } from "lucide-react";
+import { CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SpectraLogo } from "@/components/spectra-logo";
 import { hasClerkPublishableKey } from "@/lib/clerk-config";
@@ -75,7 +75,7 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
   const token = searchParams.get("token");
 
   const [state, setState] = useState<PageState>({ status: "loading" });
-  const [redeeming, setRedeeming] = useState(false);
+  const [redeeming] = useState(false);
   const [redeemState, setRedeemState] = useState<RedeemState>({ message: null });
 
   useEffect(() => {
@@ -191,39 +191,7 @@ function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
     // Mismatch scenarios should PRESERVE the cookie.
     await clearInvitationCookie();
     const signInUrl = process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL ?? "/sign-in";
-    window.location.href = signInUrl;
-  }
-
-  async function handleRedeem() {
-    const invitationToRedeem = resolvedPayload?.invitation;
-    if (!invitationToRedeem || redeeming) return;
-
-    setRedeeming(true);
-    setRedeemState({ message: null });
-    try {
-      const response = await fetch("/api/invitations/redeem", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: invitationToRedeem.token }),
-      });
-      const redeemPayload = (await response.json().catch(() => null)) as
-        | { error?: { message?: string }; alreadyAccepted?: boolean; sameUser?: boolean }
-        | null;
-      if (!response.ok) {
-        throw new Error(redeemPayload?.error?.message ?? "Could not accept invitation.");
-      }
-      window.location.replace("/chat");
-    } catch (error) {
-      setRedeemState({
-        message: error instanceof Error ? error.message : "Could not accept invitation.",
-      });
-      setRedeeming(false);
-    }
-  }
-
-  async function goHomeAfterClear(destination: string) {
-    await clearInvitationCookie();
-    window.location.href = destination;
+    window.location.assign(signInUrl);
   }
 
   if (state.status === "loading" || shouldAutoRedirect) {

@@ -378,7 +378,7 @@ export async function requireActor(): Promise<SessionActor> {
         onboardingComplete: Boolean(recovered.onboardingComplete),
       };
     }
-  } catch (error) {
+  } catch {
     // If ensureUser fails (e.g. no orgId found for this email either),
     // we fall through to the final error.
   }

@@ -45,11 +45,8 @@ function normalizeMaxResourceFileSizeBytes(value: number | undefined) {
   );
 }
 
-function isSuperAdminEmail(email: string) {
-  return SUPER_ADMIN_EMAILS.has(email.trim().toLowerCase());
-}
-
 function isSeatCountedMember(email: string) {
+  void email;
   return true;
 }
 

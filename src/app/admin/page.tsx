@@ -165,6 +165,7 @@ function AdminPageContent() {
     if (sidebarLoading || !hasAdminAccess) return;
     setLoading(true);
     void refresh().catch((error) => toast.error(error instanceof Error ? error.message : "Failed to load admin data")).finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasAdminAccess, sidebarLoading]);
 
   const filteredMembers = useMemo(() => {

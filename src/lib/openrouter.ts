@@ -1,4 +1,10 @@
 import type { RouteTraceFallback } from "@/types";
+import type { CatalogModelEntry } from "@/lib/model-selection";
+import {
+  buildProviderRequestCapabilityPlan,
+  filterOpenRouterRequestParams,
+  type ProviderRequestCapabilityPlan,
+} from "@/lib/provider-request-plan";
 
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 const OPENROUTER_TIMEOUT_MS = (() => {
@@ -139,7 +145,19 @@ function buildChatCompletionBody(params: {
   reasoningEffort?: OpenRouterReasoningEffort;
   tools?: OpenRouterToolDefinition[];
   toolChoice?: "auto" | "none";
+  modelCatalog?: CatalogModelEntry[];
+  onCapabilityPlan?: (plan: ProviderRequestCapabilityPlan) => void;
 }) {
+  const capabilityPlan = buildProviderRequestCapabilityPlan({
+    modelId: params.model,
+    messages: params.messages,
+    modelCatalog: params.modelCatalog,
+    tools: params.tools,
+    toolChoice: params.toolChoice,
+    reasoningEffort: params.reasoningEffort,
+  });
+  params.onCapabilityPlan?.(capabilityPlan);
+  const safeParams = filterOpenRouterRequestParams(params, capabilityPlan);
   const supportsAnthropicCaching = params.model.toLowerCase().startsWith("anthropic/");
   const preparedMessages = supportsAnthropicCaching
     ? params.messages.map((message) => {
@@ -185,14 +203,15 @@ function buildChatCompletionBody(params: {
     messages: preparedMessages,
     ...(params.stream ? { stream: true } : {}),
     ...(supportsTemperatureControl(params.model) ? { temperature: params.temperature ?? 0.2 } : {}),
-    ...(params.reasoningEffort && supportsReasoningEffortControl(params.model)
+    ...(safeParams.reasoningEffort && supportsReasoningEffortControl(params.model)
       ? {
-          reasoning: { effort: params.reasoningEffort },
-          reasoning_effort: params.reasoningEffort,
+          reasoning: { effort: safeParams.reasoningEffort },
+          reasoning_effort: safeParams.reasoningEffort,
         }
       : {}),
-    ...(params.tools && params.tools.length > 0 ? { tools: params.tools } : {}),
-    ...(params.toolChoice ? { tool_choice: params.toolChoice } : {}),
+    ...(safeParams.tools && safeParams.tools.length > 0 ? { tools: safeParams.tools } : {}),
+    ...(safeParams.toolChoice ? { tool_choice: safeParams.toolChoice } : {}),
+    ...(capabilityPlan.requireParameters ? { provider: { require_parameters: true } } : {}),
     max_tokens: params.maxTokens,
   };
 }
@@ -362,6 +381,8 @@ export async function openRouterChatCompletion(params: {
   reasoningEffort?: OpenRouterReasoningEffort;
   tools?: OpenRouterToolDefinition[];
   toolChoice?: "auto" | "none";
+  modelCatalog?: CatalogModelEntry[];
+  onCapabilityPlan?: (plan: ProviderRequestCapabilityPlan) => void;
   onFallback?: (event: RouteTraceFallback) => void;
 }): Promise<OpenRouterChatCompletionResult> {
   const candidates = uniqueModelList(params.model, params.fallbackModels);
@@ -383,6 +404,8 @@ export async function openRouterChatCompletion(params: {
               reasoningEffort: params.reasoningEffort,
               tools: params.tools,
               toolChoice: params.toolChoice,
+              modelCatalog: params.modelCatalog,
+              onCapabilityPlan: params.onCapabilityPlan,
             }),
           ),
       }, OPENROUTER_STREAM_TIMEOUT_MS);
@@ -517,6 +540,8 @@ export async function* openRouterStreamChat(params: {
   reasoningEffort?: OpenRouterReasoningEffort;
   tools?: OpenRouterToolDefinition[];
   toolChoice?: "auto" | "none";
+  modelCatalog?: CatalogModelEntry[];
+  onCapabilityPlan?: (plan: ProviderRequestCapabilityPlan) => void;
   onFallback?: (event: RouteTraceFallback) => void;
 }): AsyncGenerator<OpenRouterStreamEvent> {
   const candidates = uniqueModelList(params.model, params.fallbackModels);
@@ -539,6 +564,8 @@ export async function* openRouterStreamChat(params: {
               reasoningEffort: params.reasoningEffort,
               tools: params.tools,
               toolChoice: params.toolChoice,
+              modelCatalog: params.modelCatalog,
+              onCapabilityPlan: params.onCapabilityPlan,
             }),
           ),
       });

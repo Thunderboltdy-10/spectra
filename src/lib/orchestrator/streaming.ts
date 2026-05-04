@@ -94,6 +94,7 @@ export async function runAssistantStreaming(params: {
   primaryModel: string;
   fallbackModels: string[];
   verificationModel?: string;
+  catalog?: CatalogModelEntry[];
   messages: OpenRouterMessage[];
   maxTokens?: number;
   send: (payload: RuntimeEvent) => Promise<void>;
@@ -174,6 +175,7 @@ export async function runAssistantStreaming(params: {
           reasoningEffort: reasoningEffortForThinkingLevel(params.thinkingLevel),
           tools: params.tools,
           toolChoice: "auto",
+          modelCatalog: params.catalog,
           onFallback: params.onFallback,
         });
 
@@ -356,6 +358,7 @@ export async function runAssistantStreaming(params: {
         messages: continuationMessages,
         maxTokens: params.maxTokens,
         reasoningEffort: reasoningEffortForThinkingLevel(params.thinkingLevel),
+        modelCatalog: params.catalog,
         onFallback: params.onFallback,
       })) {
         if (event.type === "delta") {
@@ -647,6 +650,7 @@ export async function runCollaborativeStreaming(params: {
               ? "medium"
               : reasoningEffortForThinkingLevel(params.thinkingLevel),
           maxTokens: Math.min(1800, Math.max(800, params.maxTokens ?? 1800)),
+          modelCatalog: params.catalog,
           onFallback: params.onFallback,
         });
 
@@ -787,6 +791,7 @@ export async function runCollaborativeStreaming(params: {
       temperature: 0.2,
       reasoningEffort: reasoningEffortForThinkingLevel(params.thinkingLevel),
       maxTokens: params.maxTokens,
+      modelCatalog: params.catalog,
       onFallback: params.onFallback,
     })) {
       if (event.type === "delta") {

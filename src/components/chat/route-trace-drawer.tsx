@@ -100,8 +100,8 @@ export function RouteTraceDrawer({ open, onClose, trace, showCostDetails = false
       >
         <div className="mb-4 flex min-h-[72px] shrink-0 items-center justify-between px-4 pt-4 sm:px-5 sm:pt-5">
           <div className="min-w-0">
-            <p className="text-xs uppercase tracking-[0.14em] text-[var(--text-secondary)]">Route Trace</p>
-            <h3 className="truncate font-display text-2xl text-[var(--text-primary)]">Model Decision Timeline</h3>
+            <p className="text-xs uppercase tracking-[0.14em] text-[var(--text-secondary)]">Why this model?</p>
+            <h3 className="truncate font-display text-2xl text-[var(--text-primary)]">Model candidates</h3>
           </div>
           <div className="flex items-center gap-1.5">
             {compact ? (
@@ -225,7 +225,7 @@ export function RouteTraceDrawer({ open, onClose, trace, showCostDetails = false
             ) : null}
 
             <section className="mb-5">
-          <h4 className="mb-2 text-sm font-semibold text-[var(--text-primary)]">Pipeline Timeline</h4>
+          <h4 className="mb-2 text-sm font-semibold text-[var(--text-primary)]">Decision summary</h4>
           <div className="mb-4 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
             <ol className="space-y-2">
               {[

@@ -737,6 +737,7 @@ export function ChatComposer(props: ChatComposerProps) {
           </div>
         )}
 
+        <div className="space-y-2">
         {showSmartTip ? (
           <SmartTipRotator
             mode={mode}
@@ -748,8 +749,6 @@ export function ChatComposer(props: ChatComposerProps) {
             onAction={handleTipAction}
           />
         ) : null}
-
-        <div className="space-y-2">
           <div className="flex items-end gap-2">
             <input
               ref={attachInputRef}

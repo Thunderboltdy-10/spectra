@@ -109,7 +109,7 @@ export class ChatMessageAccumulator {
       return;
     }
 
-    if (event.type === "thinking" && event.content) {
+    if (event.type === "thinking" && isRenderableThinking(event.content)) {
       this.thinkingContent += event.content;
       this.patchAssistant({ thinking: this.thinkingContent, thinkingSegments: this.thinkingSegments });
       return;
@@ -122,6 +122,7 @@ export class ChatMessageAccumulator {
         content: String(event.segment.content ?? ""),
         status: String(event.segment.status ?? "running"),
       };
+      if (!isRenderableThinking(nextSegment.content)) return;
       const existingIndex = this.thinkingSegments.findIndex((segment) => segment.id === nextSegment.id);
       if (existingIndex >= 0) {
         this.thinkingSegments[existingIndex] = nextSegment;
@@ -279,15 +280,6 @@ export class ChatMessageAccumulator {
         executionPath: this.executionPath,
         routeTrace: routeTrace ? { ...routeTrace, executionEvents: mergeRuntimeEvents(routeTrace.executionEvents, this.runtimeEvents) } : undefined,
       });
-      this.upsertRuntimeEvent({
-        id: "runtime-routing",
-        kind: "routing",
-        label: `Selected ${formatRuntimeLabel(event.modelUsed, "model")}`,
-        status: "completed",
-        detail: this.executionPath ? `Execution path: ${this.executionPath}` : undefined,
-        startedAt: Date.now(),
-        finishedAt: Date.now(),
-      });
       return;
     }
 
@@ -436,4 +428,10 @@ function mergeRuntimeEvents(existing: RouteTraceExecutionEvent[] | undefined, in
     }
   }
   return merged;
+}
+
+function isRenderableThinking(value: string | undefined) {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed) return false;
+  return trimmed.replace(/[.\s…·•\-_*`]+/g, "").length >= 2;
 }

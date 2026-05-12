@@ -18,6 +18,7 @@ import {
   Circle,
   Clock3,
   AlertTriangle,
+  TerminalSquare,
   type LucideIcon,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
@@ -76,11 +77,11 @@ const KIND_META: Record<
   ExecutionEventKind,
   { icon: LucideIcon; tint: string; label: string }
 > = {
-  thinking: { icon: Brain, tint: "var(--accent-cyan)", label: "Runtime update" },
+  thinking: { icon: Brain, tint: "var(--accent-cyan)", label: "Thinking" },
   search: { icon: Search, tint: "var(--accent-mint, #20b8b2)", label: "Search" },
   memory: { icon: BookOpen, tint: "var(--accent-orange, #f59f0a)", label: "Memory" },
   resource: { icon: BookOpen, tint: "var(--accent-orange, #f59f0a)", label: "Resource" },
-  tool: { icon: Cog, tint: "var(--accent-cyan)", label: "Tool" },
+  tool: { icon: TerminalSquare, tint: "var(--accent-cyan)", label: "Tool" },
   skill: { icon: Wand2, tint: "var(--accent-coral, #e8553e)", label: "Skill" },
   artifact: { icon: Wand2, tint: "var(--accent-coral, #e8553e)", label: "Artifact" },
   workspace: { icon: Zap, tint: "var(--success, #158f72)", label: "Workspace" },
@@ -98,16 +99,16 @@ function StatusDot({ status, tint }: { status: ExecutionEventStatus; tint: strin
   if (status === "running") {
     return (
       <motion.span
-        className="relative flex h-3.5 w-3.5 shrink-0 items-center justify-center"
+        className="relative flex h-4 w-4 shrink-0 items-center justify-center"
         initial={false}
         animate={{ scale: 1 }}
       >
         <span
-          className="absolute inset-0 rounded-full animate-ping opacity-40"
+          className="absolute inset-0 rounded-full animate-ping opacity-35"
           style={{ background: tint }}
         />
         <span
-          className="relative inline-flex h-2 w-2 rounded-full"
+          className="relative inline-flex h-2.5 w-2.5 rounded-full shadow-[0_0_16px_currentColor]"
           style={{ background: tint }}
         />
       </motion.span>
@@ -156,11 +157,13 @@ function ExecutionEventRow({
   depth = 0,
   streaming = false,
   defaultOpen = false,
+  autoExpanded = false,
 }: {
   event: ExecutionEvent;
   depth?: number;
   streaming?: boolean;
   defaultOpen?: boolean;
+  autoExpanded?: boolean;
 }) {
   const [expanded, setExpanded] = useState(() => defaultOpen || event.status === "running");
   const meta = KIND_META[event.kind];
@@ -171,16 +174,22 @@ function ExecutionEventRow({
   const hasStructuredPayload = event.resultPreview != null || Boolean(event.error?.trim());
   const expandable = hasChildren || hasContent || hasDetail || hasStructuredPayload;
 
+  useEffect(() => {
+    if (!streaming) return;
+    if (autoExpanded && expandable) setExpanded(true);
+    if (!autoExpanded && event.status !== "running") setExpanded(false);
+  }, [autoExpanded, event.status, expandable, streaming]);
+
   return (
     <div className="relative">
       {/* Timeline connector line */}
       {depth === 0 && (
-        <div className="absolute left-[6.5px] top-5 bottom-0 w-px bg-[linear-gradient(to_bottom,var(--border-default),transparent)]" />
+        <div className="absolute left-[7px] top-7 bottom-0 w-px bg-[linear-gradient(to_bottom,color-mix(in_oklab,var(--text-tertiary)_46%,transparent),color-mix(in_oklab,var(--text-tertiary)_16%,transparent),transparent)]" />
       )}
 
       <div className={cn("flex items-start gap-2.5 relative", depth > 0 && "ml-5")}>
         {/* Status indicator */}
-        <div className="mt-[9px] shrink-0 rounded-full bg-[var(--bg-primary)]">
+        <div className="mt-[9px] shrink-0 rounded-full bg-[var(--bg-primary)] ring-2 ring-[var(--bg-primary)]">
           <StatusDot status={event.status} tint={meta.tint} />
         </div>
 
@@ -188,8 +197,8 @@ function ExecutionEventRow({
         <div
           className={cn(
             "min-w-0 flex-1 pb-2.5",
-            depth === 0 && "rounded-xl border border-transparent px-2 transition-colors",
-            event.status === "running" && "border-[color-mix(in_oklab,var(--accent-cyan)_26%,transparent)] bg-[color-mix(in_oklab,var(--accent-cyan)_5%,transparent)]",
+            depth === 0 && "px-2 transition-colors",
+            event.status === "running" && "rounded-xl bg-[color-mix(in_oklab,var(--accent-cyan)_5%,transparent)]",
           )}
         >
           {/* Header row */}
@@ -202,7 +211,7 @@ function ExecutionEventRow({
             onClick={() => expandable && setExpanded((v) => !v)}
           >
             <Icon
-              className="h-3.5 w-3.5 shrink-0"
+              className="h-3.5 w-3.5 shrink-0 drop-shadow-[0_0_8px_color-mix(in_oklab,currentColor_40%,transparent)]"
               style={{ color: meta.tint }}
             />
             <span
@@ -319,6 +328,7 @@ function ExecutionEventRow({
                         event={child}
                         depth={depth + 1}
                         streaming={streaming}
+                        autoExpanded={autoExpanded && child.status === "running"}
                       />
                     ))}
                 </div>
@@ -372,7 +382,9 @@ function traceExecutionEventToExecutionEvent(event: RouteTraceExecutionEvent): E
 
 export function routeTraceToExecutionEvents(trace: RouteTrace, streaming: boolean): ExecutionEvent[] {
   if (trace.executionEvents && trace.executionEvents.length > 0) {
-    return trace.executionEvents.map(traceExecutionEventToExecutionEvent);
+    return trace.executionEvents
+      .map(traceExecutionEventToExecutionEvent)
+      .filter((event) => event.kind !== "routing");
   }
   const events: ExecutionEvent[] = [];
   const routingPhase = trace.phasePlan?.find((phase) =>
@@ -380,7 +392,7 @@ export function routeTraceToExecutionEvents(trace: RouteTrace, streaming: boolea
     || phase.id === "planning"
     || /\b(route|routing|select|plan)\b/i.test(phase.label),
   );
-  const shouldShowStandaloneRouting = !routingPhase;
+  const shouldShowStandaloneRouting = false;
   const rawRoutingStatus = routingPhase
     ? phaseStatusToEventStatus(routingPhase.status)
     : (streaming && !trace.routingDurationMs ? "running" : "completed");
@@ -404,6 +416,7 @@ export function routeTraceToExecutionEvents(trace: RouteTrace, streaming: boolea
   if (trace.phasePlan && trace.phasePlan.length > 0) {
     for (const phase of trace.phasePlan) {
       if (phase.status === "planned") continue;
+      if (phase.id === "routing" || phase.id === "modelSelection") continue;
 
       // Find subcalls for this phase
       const phaseSubcalls = trace.subcalls?.filter(
@@ -543,9 +556,10 @@ export function ExecutionTimeline({
     let thinkingEvents: ExecutionEvent[] = [];
 
     // Prioritize explicit segments over raw thinkingContent
-    if (thinkingSegments.length > 0) {
-      thinkingEvents = thinkingSegments.map((seg, i) => {
-        const isLast = i === thinkingSegments.length - 1;
+    const realThinkingSegments = thinkingSegments.filter((seg) => isRenderableThinking(seg.content));
+    if (realThinkingSegments.length > 0) {
+      thinkingEvents = realThinkingSegments.map((seg, i) => {
+        const isLast = i === realThinkingSegments.length - 1;
         const firstLine = seg.content.split("\n")[0]?.replace(/^[#>*\-\d.\s]+/, "").trim() ?? "";
         const label = firstLine.length > 0 && firstLine.length <= 70
           ? firstLine
@@ -560,8 +574,8 @@ export function ExecutionTimeline({
           content: seg.content,
         };
       });
-    } else if (thinkingContent?.trim()) {
-      const chunks = thinkingContent.split(/(?:\r?\n){2,}/).map(s => s.trim()).filter(Boolean);
+    } else if (isRenderableThinking(thinkingContent)) {
+      const chunks = (thinkingContent ?? "").split(/(?:\r?\n){2,}/).map(s => s.trim()).filter(Boolean);
       thinkingEvents = chunks.map((chunk, i) => ({
         id: `thinking-chunk-${i}`,
         kind: "thinking" as const,
@@ -613,7 +627,7 @@ export function ExecutionTimeline({
     <div
       className={cn(
         "execution-timeline",
-        compact ? "space-y-1 rounded-xl border border-[var(--border-default)]/70 bg-[var(--bg-secondary)]/50 px-2 py-1" : "space-y-2 rounded-2xl border border-[var(--border-default)] bg-[var(--bg-secondary)]/60 p-3 shadow-[0_24px_70px_-48px_var(--text-primary)]",
+        compact ? "space-y-1 py-1" : "space-y-2 py-2",
         className
       )}
     >
@@ -626,7 +640,10 @@ export function ExecutionTimeline({
         )}
       >
         <AnimatePresence initial={false}>
-          {visibleEvents.map((event, idx) => (
+          {visibleEvents.map((event, idx) => {
+            const lastRunningIndex = visibleEvents.map((item) => item.status).lastIndexOf("running");
+            const autoExpanded = lastRunningIndex >= 0 ? idx === lastRunningIndex : idx === visibleEvents.length - 1 && streaming;
+            return (
             <motion.div
               key={event.id}
               initial={{ opacity: 0, y: 10 }}
@@ -636,12 +653,20 @@ export function ExecutionTimeline({
               <ExecutionEventRow
                 event={event}
                 streaming={streaming}
-                defaultOpen={idx === visibleEvents.length - 1 && streaming}
+                defaultOpen={autoExpanded}
+                autoExpanded={autoExpanded}
               />
             </motion.div>
-          ))}
+          )})}
         </AnimatePresence>
       </div>
     </div>
   );
+}
+
+function isRenderableThinking(value: string | undefined) {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed) return false;
+  const withoutPunctuation = trimmed.replace(/[.\s…·•\-_*`]+/g, "");
+  return withoutPunctuation.length >= 2;
 }

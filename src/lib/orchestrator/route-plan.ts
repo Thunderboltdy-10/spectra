@@ -510,7 +510,7 @@ function detectRequestedModelPhrase(message: string) {
 }
 
 function detectOrchestrationIntent(message: string) {
-  return /\b(use multiple models|multiple models|multi[- ]?agent|collaborat(?:e|ion)|different perspectives|multiple perspectives|specialists?)\b/i.test(
+  return /\b(use multiple models|multiple models|multi[- ]?agents?|sub[- ]?agents?|call (?:some |the )?(?:agents?|specialists?)|delegate (?:to )?(?:agents?|specialists?)|collaborat(?:e|ion)|different perspectives|multiple perspectives|specialists?)\b/i.test(
     message,
   );
 }

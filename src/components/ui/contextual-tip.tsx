@@ -58,14 +58,14 @@ export function ContextualTip({
   return (
     <div
       className={cn(
-        "flex w-full items-center gap-2 rounded-t-lg rounded-b-none border border-b-0 border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 py-1 text-[var(--text-primary)]",
+        "flex w-full items-center gap-1.5 rounded-t-lg rounded-b-none border border-b-0 border-[color-mix(in_oklab,var(--accent-cyan)_28%,var(--border-default))] bg-[linear-gradient(to_right,color-mix(in_oklab,var(--accent-cyan)_8%,transparent),color-mix(in_oklab,var(--accent-cyan)_3%,var(--bg-elevated)))] px-2.5 py-1.5 text-[var(--text-primary)]",
         className,
       )}
       role="status"
       aria-live="polite"
     >
       <div className="flex-1 overflow-hidden">
-        <p key={message} className="animate-in fade-in slide-in-from-bottom-1 duration-300 truncate text-[10px] leading-relaxed text-[var(--text-secondary)]">{message}</p>
+        <p key={message} className="animate-in fade-in slide-in-from-bottom-1 duration-300 truncate text-[11px] leading-relaxed text-[var(--text-secondary)]">{message}</p>
       </div>
       {actionLabel && onAction ? (
         <button
@@ -83,7 +83,7 @@ export function ContextualTip({
         aria-label="Dismiss tip"
         className="cursor-pointer rounded-md p-1 text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
       >
-        <X className="h-3.5 w-3.5" />
+        <X className="h-3 w-3" />
       </button>
     </div>
   );

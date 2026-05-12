@@ -47,6 +47,9 @@ type ModelInput = {
   curatedNotes?: string;
   benchmarkMMLU?: number;
   benchmarkHumanEval?: number;
+  benchmarkArtificialAnalysisIntelligence?: number;
+  benchmarkArtificialAnalysisCoding?: number;
+  benchmarkArtificialAnalysisMath?: number;
   arenaElo?: number;
 };
 
@@ -284,6 +287,9 @@ async function upsertModelCatalogBatch(
       curatedNotes: model.curatedNotes,
       benchmarkMMLU: model.benchmarkMMLU,
       benchmarkHumanEval: model.benchmarkHumanEval,
+      benchmarkArtificialAnalysisIntelligence: model.benchmarkArtificialAnalysisIntelligence,
+      benchmarkArtificialAnalysisCoding: model.benchmarkArtificialAnalysisCoding,
+      benchmarkArtificialAnalysisMath: model.benchmarkArtificialAnalysisMath,
       arenaElo: model.arenaElo,
       updatedAt: now,
       ...(model.strengthEmbedding !== undefined ? { strengthEmbedding: model.strengthEmbedding } : {}),
@@ -339,6 +345,9 @@ const vModelInput = v.object({
   curatedNotes: v.optional(v.string()),
   benchmarkMMLU: v.optional(v.number()),
   benchmarkHumanEval: v.optional(v.number()),
+  benchmarkArtificialAnalysisIntelligence: v.optional(v.number()),
+  benchmarkArtificialAnalysisCoding: v.optional(v.number()),
+  benchmarkArtificialAnalysisMath: v.optional(v.number()),
   arenaElo: v.optional(v.number()),
 });
 
@@ -930,6 +939,9 @@ export const upsertModelCatalog = mutation({
         curatedNotes: model.curatedNotes,
         benchmarkMMLU: model.benchmarkMMLU,
         benchmarkHumanEval: model.benchmarkHumanEval,
+        benchmarkArtificialAnalysisIntelligence: model.benchmarkArtificialAnalysisIntelligence,
+        benchmarkArtificialAnalysisCoding: model.benchmarkArtificialAnalysisCoding,
+        benchmarkArtificialAnalysisMath: model.benchmarkArtificialAnalysisMath,
         arenaElo: model.arenaElo,
         updatedAt: now,
         ...(model.strengthEmbedding !== undefined ? { strengthEmbedding: model.strengthEmbedding } : {}),
@@ -997,6 +1009,9 @@ export const syncModelCatalog = mutation({
         curatedNotes: model.curatedNotes,
         benchmarkMMLU: model.benchmarkMMLU,
         benchmarkHumanEval: model.benchmarkHumanEval,
+        benchmarkArtificialAnalysisIntelligence: model.benchmarkArtificialAnalysisIntelligence,
+        benchmarkArtificialAnalysisCoding: model.benchmarkArtificialAnalysisCoding,
+        benchmarkArtificialAnalysisMath: model.benchmarkArtificialAnalysisMath,
         arenaElo: model.arenaElo,
         updatedAt: now,
         ...(model.strengthEmbedding !== undefined ? { strengthEmbedding: model.strengthEmbedding } : {}),

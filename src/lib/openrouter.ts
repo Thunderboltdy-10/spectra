@@ -666,7 +666,7 @@ export async function* openRouterStreamChat(params: {
               json.choices?.[0]?.reasoning_content ??
               json.reasoning_content ??
               json.reasoning;
-            if (typeof reasoningDelta === "string" && reasoningDelta.trim()) {
+            if (typeof reasoningDelta === "string" && isRenderableReasoningDelta(reasoningDelta)) {
               yield { type: "thinking", content: reasoningDelta };
             }
           } catch {
@@ -742,6 +742,12 @@ export type OpenRouterModel = {
     name?: string;
   };
 };
+
+function isRenderableReasoningDelta(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  return trimmed.replace(/[.\s…·•\-_*`]+/g, "").length >= 2;
+}
 
 export async function fetchOpenRouterModels() {
   const response = await fetchWithTimeout(`${OPENROUTER_BASE_URL}/models`, {

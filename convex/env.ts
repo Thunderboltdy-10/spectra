@@ -1,4 +1,5 @@
 const openRouterKey = (process.env.OPENROUTER_API_KEY ?? "").trim();
+const artificialAnalysisKey = (process.env.ARTIFICIAL_ANALYSIS_API_KEY ?? "").trim();
 const hasOpenRouterKey = openRouterKey.length > 0;
 
 const warnedScopes = new Set<string>();
@@ -9,6 +10,10 @@ if (!hasOpenRouterKey) {
 
 export function getOpenRouterApiKey() {
   return hasOpenRouterKey ? openRouterKey : null;
+}
+
+export function getArtificialAnalysisApiKey() {
+  return artificialAnalysisKey.length > 0 ? artificialAnalysisKey : null;
 }
 
 export function isOpenRouterConfigured() {

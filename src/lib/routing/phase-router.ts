@@ -118,6 +118,58 @@ function normalizeCost(model: CatalogModelEntry) {
   return (input + output) / 2;
 }
 
+function combinedCost(model: CatalogModelEntry) {
+  if (model.isFree || model.modelId.includes(":free")) return 0;
+  const input = typeof model.inputCostPerM === "number" ? Math.max(0, model.inputCostPerM) : 5;
+  const output = typeof model.outputCostPerM === "number" ? Math.max(0, model.outputCostPerM) : 5;
+  return input + output;
+}
+
+const CHINESE_OPEN_SOURCE_PROVIDER_RANK: Record<string, number> = {
+  deepseek: 1,
+  "z-ai": 0.96,
+  zai: 0.96,
+  thudm: 0.96,
+  moonshotai: 0.92,
+  moonshot: 0.92,
+  minimax: 0.88,
+  qwen: 0.84,
+  alibaba: 0.84,
+  "01-ai": 0.78,
+  stepfun: 0.76,
+  baai: 0.72,
+  xiaomi: 0.7,
+  mimo: 0.7,
+};
+
+function chineseOpenSourcePreference(model: CatalogModelEntry) {
+  const provider = providerFromModelId(model.modelId);
+  const blob = `${model.modelId} ${model.provider ?? ""} ${model.name ?? ""}`.toLowerCase();
+  const providerRank = CHINESE_OPEN_SOURCE_PROVIDER_RANK[provider];
+  if (typeof providerRank === "number") return providerRank;
+  if (/\b(deepseek|glm|z\.ai|z-ai|kimi|moonshot|minimax|qwen|mimo|xiaomi|stepfun|01-ai)\b/.test(blob)) {
+    return 0.68;
+  }
+  return 0;
+}
+
+function benchmarkScore(model: CatalogModelEntry) {
+  const withBenchmarks = model as CatalogModelEntry & {
+    benchmarkMMLU?: number;
+    benchmarkHumanEval?: number;
+    arenaElo?: number;
+  };
+  const intelligence = typeof model.benchmarkArtificialAnalysisIntelligence === "number" ? model.benchmarkArtificialAnalysisIntelligence / 100 : undefined;
+  const coding = typeof model.benchmarkArtificialAnalysisCoding === "number" ? model.benchmarkArtificialAnalysisCoding / 100 : undefined;
+  const math = typeof model.benchmarkArtificialAnalysisMath === "number" ? model.benchmarkArtificialAnalysisMath / 100 : undefined;
+  const mmlu = typeof withBenchmarks.benchmarkMMLU === "number" ? withBenchmarks.benchmarkMMLU / 100 : undefined;
+  const humanEval = typeof withBenchmarks.benchmarkHumanEval === "number" ? withBenchmarks.benchmarkHumanEval / 100 : undefined;
+  const arena = typeof withBenchmarks.arenaElo === "number" ? clamp01((withBenchmarks.arenaElo - 900) / 600) : undefined;
+  const values = [intelligence, coding, math, mmlu, humanEval, arena].filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  if (values.length === 0) return 0.5;
+  return clamp01(values.reduce((sum, value) => sum + value, 0) / values.length);
+}
+
 function reliabilityScore(stat?: ModelRuntimeStat) {
   if (!stat) return 0.56;
   const success = Math.max(0, stat.successCount);
@@ -633,7 +685,10 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
     const ageDays = modelAgeDays(model);
     const provider = providerFromModelId(model.modelId);
     const rawCostPerM = normalizeCost(model);
+    const totalCostPerM = combinedCost(model);
     const cost = costFit(rawCostPerM, input.stakes, Boolean(model.isFree || model.modelId.includes(":free")));
+    const chinesePreference = chineseOpenSourcePreference(model);
+    const externalBenchmark = benchmarkScore(model);
     const cacheWarm = hasWarmCache({ modelId: model.modelId, model, cacheWindow: input.cacheWindow });
     const cacheBonus = cacheWarm ? 1 : model.promptCachingSupported ? 0.58 : 0.22;
 
@@ -675,6 +730,7 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
       `cache_bonus ${cacheBonus.toFixed(2)} x${weights.cache.toFixed(2)}`,
       `freshness ${fresh.toFixed(2)} x${weights.freshness.toFixed(2)}`,
       `context_fit ${context.toFixed(2)} x${weights.context.toFixed(2)}`,
+      `benchmark_fit ${externalBenchmark.toFixed(2)}`,
     ];
     if (brokerRank) {
       breakdown.push(`broker_rank ${brokerRank.index + 1}`);
@@ -757,25 +813,34 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
     if (
       input.routerMode !== "manual"
       && input.spendingTier === "normal"
-      && input.stakes !== "high"
-      && input.mode !== "research"
-      && input.mode !== "exam"
-      && input.mode !== "marker"
     ) {
-      if (rawCostPerM > 12 && input.assignmentLevel !== "L4") {
-        multiplier *= 0.78;
-        breakdown.push("overpriced_turn_penalty x0.78");
+      if (totalCostPerM > 10 && input.assignmentLevel !== "L4") {
+        multiplier *= input.hasAttachments && required.includes("vision") ? 0.72 : 0.28;
+        breakdown.push(`over_10_combined_cost_penalty x${input.hasAttachments && required.includes("vision") ? "0.72" : "0.28"}`);
         reasonTags.push("cost discipline");
-      } else if (rawCostPerM > 8 && input.assignmentLevel !== "L4") {
-        multiplier *= 0.88;
-        breakdown.push("premium_cost_penalty x0.88");
+      } else if (totalCostPerM > 8 && input.assignmentLevel !== "L4") {
+        multiplier *= 0.82;
+        breakdown.push("near_10_combined_cost_penalty x0.82");
         reasonTags.push("cost discipline");
       }
-      if (provider === "anthropic" && rawCostPerM > 6 && input.assignmentLevel !== "L4") {
-        multiplier *= 0.84;
-        breakdown.push("anthropic_default_penalty x0.84");
-        reasonTags.push("provider cost preference");
+      if (chinesePreference > 0 && totalCostPerM <= 10) {
+        const boost = 1 + (chinesePreference * (input.stakes === "high" || input.mode === "research" ? 0.28 : 0.42));
+        multiplier *= boost;
+        breakdown.push(`chinese_open_source_preference x${boost.toFixed(2)}`);
+        reasonTags.push("Chinese open-source value");
       }
+      if ((provider === "anthropic" || provider === "openai") && totalCostPerM > 6 && input.assignmentLevel !== "L4") {
+        multiplier *= 0.55;
+        breakdown.push(`${provider}_auto_cost_penalty x0.55`);
+        reasonTags.push("closed-source premium avoided");
+      }
+    }
+
+    if (externalBenchmark >= 0.84) {
+      const benchmarkBoost = 1 + ((externalBenchmark - 0.84) * 0.7);
+      multiplier *= benchmarkBoost;
+      breakdown.push(`benchmark_quality_boost x${benchmarkBoost.toFixed(2)}`);
+      reasonTags.push("benchmark-backed");
     }
 
     if (input.mode !== "image" && !input.hasAttachments && looksImageTunedModel(model)) {

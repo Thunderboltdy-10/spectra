@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { Activity, Brain, ChevronRight } from "lucide-react";
+import { Brain, ChevronRight } from "lucide-react";
 import { AiRunTimeline } from "@/components/chat/ai-runtime-components";
 import { cn } from "@/lib/utils";
 import type { RouteTrace } from "@/types";
@@ -14,7 +14,10 @@ function extractTitle(chunk: string): string {
 }
 
 function splitIntoParagraphs(text: string): string[] {
-  return text.split(/(?:\r?\n){2,}/).map((s) => s.trim()).filter(Boolean);
+  return text
+    .split(/(?:\r?\n){2,}/)
+    .map((s) => s.trim())
+    .filter((value) => value.replace(/[.\s…·•\-_*`]+/g, "").length >= 2);
 }
 
 type ThinkingBlockProps = {
@@ -27,10 +30,10 @@ type ThinkingBlockProps = {
 export function ThinkingBlock({ content, streaming = false, routeTrace, segments = [] }: ThinkingBlockProps) {
   const clean = content.trim();
 
-  const hasTimeline = routeTrace?.phasePlan && routeTrace.phasePlan.length > 0;
+  const hasTimeline = routeTrace?.phasePlan?.some((phase) => phase.status !== "planned" && phase.id !== "routing");
   const hasSearchTrace = routeTrace?.searchTrace && routeTrace.searchTrace.strategy && routeTrace.searchTrace.strategy !== "none";
   const hasStructuredEvents = Boolean(
-    routeTrace?.executionEvents?.length || hasTimeline || hasSearchTrace,
+    routeTrace?.executionEvents?.some((event) => event.kind !== "routing") || hasTimeline || hasSearchTrace,
   );
 
   const paragraphs = useMemo(() => {
@@ -56,24 +59,19 @@ export function ThinkingBlock({ content, streaming = false, routeTrace, segments
 
   return (
     <div className="mb-4 space-y-2">
-      {/* Inline thinking indicator */}
-      {streaming && (
-        <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-[color-mix(in_oklab,var(--accent-cyan)_24%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_6%,var(--bg-secondary))] px-2.5 py-1 text-[11px] font-semibold text-[var(--text-secondary)]">
+      {streaming && paragraphs.length > 0 && !hasStructuredEvents && (
+        <div className="mb-2 inline-flex items-center gap-2 px-0 py-1 text-[11px] font-semibold text-[var(--text-secondary)]">
           <span className="relative inline-flex h-5 w-5 items-center justify-center">
             <Brain className="h-3.5 w-3.5 text-[var(--accent-cyan)]" />
             <span className="absolute inset-0 rounded-full animate-ping opacity-20 bg-[var(--accent-cyan)]" />
           </span>
-          <span className="tracking-wide">Run active</span>
+          <span className="tracking-wide">Thinking</span>
         </div>
       )}
 
       {/* Route execution events are preferred over raw model reasoning text. */}
       {hasStructuredEvents && (
         <div className="pt-1">
-          <div className="mb-1.5 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-tertiary)]">
-            <Activity className="h-3 w-3" />
-            Runtime timeline
-          </div>
           <AiRunTimeline routeTrace={routeTrace} streaming={streaming} compact />
         </div>
       )}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { ChevronRight, LockKeyhole, Route } from "lucide-react";
+import { ChevronRight, LockKeyhole, Sparkles } from "lucide-react";
 import { usePanel } from "@/context/panel-context";
 import type { RouteTrace } from "@/types";
 
@@ -44,7 +44,7 @@ export function ModelRoutingBadge({ modelUsed, whyThisResponse, routeTrace }: Mo
   const formattedName = useMemo(() => formatModelName(activeModelId ?? ""), [activeModelId]);
   const hasTrace = Boolean(routeTrace);
   const manualLock = routeTrace?.inputs.routerMode === "manual";
-  const hintText = manualLock ? "Manual" : whyThisResponse ? "Why" : "Trace";
+  const hintText = manualLock ? "Manual" : "Why this model?";
   const isActive = activeView === "route-trace";
 
   if (!activeModelId) return null;
@@ -63,10 +63,10 @@ export function ModelRoutingBadge({ modelUsed, whyThisResponse, routeTrace }: Mo
           }`}
         >
           <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--bg-primary)] text-[var(--text-secondary)] ring-1 ring-[var(--border-default)]">
-            {manualLock ? <LockKeyhole className="h-3.5 w-3.5" /> : <Route className="h-3.5 w-3.5" />}
+            {manualLock ? <LockKeyhole className="h-3.5 w-3.5" /> : <Sparkles className="h-3.5 w-3.5" />}
           </span>
           <span className={`truncate text-[13px] font-semibold transition ${isActive ? "text-[var(--brand-primary)]" : "text-[var(--text-primary)]"}`}>{formattedName}</span>
-          <span className={`hidden text-[10px] font-semibold uppercase tracking-[0.14em] transition sm:inline ${isActive ? "text-[var(--brand-primary)]" : "text-[var(--text-tertiary)] group-hover:text-[var(--text-secondary)]"}`}>
+          <span className={`hidden text-[10px] font-semibold tracking-[0.04em] transition sm:inline ${isActive ? "text-[var(--brand-primary)]" : "text-[var(--text-tertiary)] group-hover:text-[var(--text-secondary)]"}`}>
             {hintText}
           </span>
           <ChevronRight className={`h-3.5 w-3.5 shrink-0 transition group-hover:translate-x-0.5 ${isActive ? "text-[var(--brand-primary)]" : "text-[var(--text-tertiary)]"}`} />

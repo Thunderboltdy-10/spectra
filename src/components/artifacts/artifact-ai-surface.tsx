@@ -201,7 +201,7 @@ export function ArtifactAiSurface({
             >
               
 
-              <div className="max-h-48 overflow-y-auto px-4 py-3 space-y-3">
+              <div className="max-h-[min(56vh,34rem)] overflow-y-auto px-4 py-3 space-y-3">
                 {error ? (
                   <div className="rounded-lg border border-[color-mix(in_oklab,var(--danger)_24%,var(--border-default))] bg-[color-mix(in_oklab,var(--danger)_8%,var(--bg-secondary))] px-3 py-2 text-xs text-[var(--danger)]">
                     {error}
@@ -213,15 +213,16 @@ export function ArtifactAiSurface({
                         <div className="mb-2">
                           <ExecutionTimeline routeTrace={msg.routeTrace} streaming={msg.streaming} compact realEventsOnly maxVisible={2} />
                         </div>
-                    ) : (
-                      msg.streaming ? (
-                        <div className="mb-1 text-[10px] text-[var(--accent-cyan)] font-medium uppercase tracking-[0.08em] animate-pulse flex items-center gap-1.5">
-                          <Sparkles className="w-3 h-3" />
-                          Thinking…
-                        </div>
-                      ) : null
-                    )}
-                    {msg.content}
+                    ) : msg.streaming ? (
+                      <div className="mb-1 inline-flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-[0.08em] text-[var(--accent-cyan)]">
+                        <span className="relative flex h-3 w-3 items-center justify-center">
+                          <span className="absolute h-3 w-3 rounded-full bg-[var(--accent-cyan)] opacity-25 animate-ping" />
+                          <span className="h-1.5 w-1.5 rounded-full bg-[var(--accent-cyan)]" />
+                        </span>
+                        Editing artifact…
+                      </div>
+                    ) : null}
+                    <div className="whitespace-pre-wrap">{msg.content || (msg.streaming ? "Waiting for response…" : "")}</div>
                   </div>
                 ))}
                 <div ref={messagesEndRef} />
@@ -340,8 +341,8 @@ export function ArtifactAiSurface({
   return (
     <>
       {fullPageComposer}
-      <div className="flex h-full flex-col">
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+      <div className="flex h-full min-h-0 flex-col">
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 space-y-4">
         {error ? (
           <div className="rounded-xl border border-[color-mix(in_oklab,var(--danger)_24%,var(--border-default))] bg-[color-mix(in_oklab,var(--danger)_8%,var(--bg-secondary))] px-3 py-2 text-xs text-[var(--danger)]">
             {error}
@@ -371,22 +372,23 @@ export function ArtifactAiSurface({
                 "max-w-[90%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed",
                 msg.role === "user"
                   ? "bg-[var(--accent-cyan)] text-white rounded-br-md"
-                  : "bg-[var(--bg-secondary)] text-[var(--text-primary)] rounded-bl-md",
+                  : "bg-transparent text-[var(--text-primary)] rounded-bl-md",
               )}
             >
               {hasRuntimeEvents(msg.routeTrace) ? (
                   <div className="mb-2">
                     <ExecutionTimeline routeTrace={msg.routeTrace} streaming={msg.streaming} compact realEventsOnly maxVisible={3} />
                   </div>
-              ) : (
-                msg.streaming ? (
-                  <div className="mb-1.5 text-[10px] text-[var(--accent-cyan)] font-medium uppercase tracking-[0.08em] animate-pulse flex items-center gap-1.5">
-                    <Sparkles className="w-3 h-3" />
-                    Thinking…
-                  </div>
-                ) : null
-              )}
-  {msg.content}
+              ) : msg.streaming ? (
+                <div className="mb-1.5 inline-flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-[0.08em] text-[var(--accent-cyan)]">
+                  <span className="relative flex h-3 w-3 items-center justify-center">
+                    <span className="absolute h-3 w-3 rounded-full bg-[var(--accent-cyan)] opacity-25 animate-ping" />
+                    <span className="h-1.5 w-1.5 rounded-full bg-[var(--accent-cyan)]" />
+                  </span>
+                  Editing artifact…
+                </div>
+              ) : null}
+              <div className="whitespace-pre-wrap">{msg.content || (msg.streaming ? "Waiting for response…" : "")}</div>
             </div>
           </div>
         ))}

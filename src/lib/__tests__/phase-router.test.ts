@@ -411,6 +411,64 @@ describe("phase-router", () => {
     expect(decision.candidates.some((candidate) => candidate.modelId === "google/lyra-voice")).toBe(false);
   });
 
+  it("prefers benchmark-backed Chinese open-source models under the combined $10/M band", () => {
+    const decision = selectModelForPhase({
+      phaseId: "analysis",
+      phaseLabel: "Primary response",
+      mode: "research",
+      routerMode: "auto",
+      spendingTier: "normal",
+      thinkingLevel: "high",
+      stakes: "high",
+      messageLength: 640,
+      requestClass: "T3",
+      modelCatalog: [
+        {
+          modelId: "openai/frontier-expensive",
+          provider: "openai",
+          name: "Frontier Expensive",
+          inputCostPerM: 18,
+          outputCostPerM: 36,
+          capabilities: { reasoning: 10, creative: 8, code: 9, vision: 0, speed: 6 },
+          tags: ["reasoning"],
+          benchmarkArtificialAnalysisIntelligence: 78,
+          benchmarkArtificialAnalysisCoding: 74,
+          benchmarkArtificialAnalysisMath: 78,
+        },
+        {
+          modelId: "deepseek/deepseek-reasoner",
+          provider: "deepseek",
+          name: "DeepSeek Reasoner",
+          inputCostPerM: 2,
+          outputCostPerM: 6,
+          capabilities: { reasoning: 9, creative: 7, code: 9, vision: 0, speed: 6 },
+          tags: ["reasoning", "code"],
+          benchmarkArtificialAnalysisIntelligence: 76,
+          benchmarkArtificialAnalysisCoding: 79,
+          benchmarkArtificialAnalysisMath: 82,
+        },
+        {
+          modelId: "moonshotai/kimi-k2",
+          provider: "moonshotai",
+          name: "Kimi K2",
+          inputCostPerM: 1,
+          outputCostPerM: 3,
+          capabilities: { reasoning: 8, creative: 7, code: 8, vision: 0, speed: 7 },
+          tags: ["reasoning", "code"],
+          benchmarkArtificialAnalysisIntelligence: 72,
+          benchmarkArtificialAnalysisCoding: 76,
+          benchmarkArtificialAnalysisMath: 73,
+        },
+      ],
+      seedKey: "chinese-value-routing",
+    });
+
+    expect(decision.selectedModel).toBe("deepseek/deepseek-reasoner");
+    const selected = decision.candidates.find((row) => row.modelId === "deepseek/deepseek-reasoner");
+    expect(selected?.reason).toContain("Chinese open-source value");
+    expect(selected?.scoreBreakdown?.join(" ")).toContain("benchmark_fit");
+  });
+
   it("prefers models that fit the desired context window on L4 routes", () => {
     const decision = selectModelForPhase({
       phaseId: "analysis",

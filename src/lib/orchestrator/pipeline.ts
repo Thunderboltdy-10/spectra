@@ -5048,7 +5048,32 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
         return;
       }
 
-      const fallbackModels = manualLockRequested ? [] : route.fallbackModels;
+      const EMERGENCY_RESCUE_MODELS = (() => {
+        const providerRank: Record<string, number> = {
+          minimax: 1, deepseek: 0.95, "z-ai": 0.9, moonshotai: 0.88,
+          qwen: 0.84, stepfun: 0.8, "01-ai": 0.76, mistralai: 0.5, google: 0.3, "meta-llama": 0.2,
+        };
+        return constrainedCatalog
+          .filter((m) => m.modelId !== "openrouter/auto" && !m.modelId.includes(":online"))
+          .map((m) => {
+            const provider = m.modelId.split("/")[0]?.toLowerCase() ?? "";
+            const rank = providerRank[provider] ?? 0;
+            const cost = (m.inputCostPerM ?? 5) + (m.outputCostPerM ?? 5);
+            return { modelId: m.modelId, provider, rank, cost };
+          })
+          .filter((m) => m.rank > 0 && m.cost <= 15)
+          .sort((a, b) => b.rank - a.rank || a.cost - b.cost || a.modelId.localeCompare(b.modelId))
+          .slice(0, 4)
+          .map((m) => m.modelId);
+      })();
+      const fallbackModels = manualLockRequested
+        ? []
+        : Array.from(new Set([
+            ...route.fallbackModels,
+            ...EMERGENCY_RESCUE_MODELS.filter(
+              (rm) => !route.fallbackModels.includes(rm) && rm !== route.primaryModel,
+            ),
+          ]));
       const onFallback = (event: { fromModel: string; toModel: string; error: string; attemptIndex: number }) => {
         route.trace.fallbacks.push(event);
         void emitRuntimeEvent({

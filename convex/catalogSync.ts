@@ -3,10 +3,11 @@ import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { MODEL_DEFAULTS } from "./constants";
 import { lookupCuratedModelMeta } from "./curatedModelRegistry";
-import { getOpenRouterApiKey, warnOpenRouterMissing } from "./env";
+import { getArtificialAnalysisApiKey, getOpenRouterApiKey, warnOpenRouterMissing } from "./env";
 import type { Id } from "./_generated/dataModel";
 
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
+const ARTIFICIAL_ANALYSIS_BASE_URL = "https://artificialanalysis.ai/api/v2";
 const ENDPOINT_SAMPLE_LIMIT = 60;
 const ENDPOINT_FETCH_CONCURRENCY = 6;
 
@@ -29,6 +30,22 @@ type OpenRouterModel = {
 type EndpointAggregate = {
   latencyP50Ms?: number;
   uptimePercent?: number;
+};
+
+type ArtificialAnalysisModel = {
+  id?: string;
+  name?: string;
+  slug?: string;
+  model_creator?: { name?: string; slug?: string };
+  evaluations?: Record<string, number | undefined>;
+  pricing?: {
+    price_1m_blended_3_to_1?: number;
+    price_1m_input_tokens?: number;
+    price_1m_output_tokens?: number;
+  };
+  median_output_tokens_per_second?: number;
+  median_time_to_first_token_seconds?: number;
+  median_time_to_first_answer_token?: number;
 };
 
 function rating(value: number, thresholds: [number, number]) {
@@ -205,6 +222,65 @@ async function openRouterFetch(path: string, apiKey: string, body?: unknown) {
   return response.json();
 }
 
+async function artificialAnalysisFetch(path: string, apiKey: string) {
+  const response = await fetch(`${ARTIFICIAL_ANALYSIS_BASE_URL}${path}`, {
+    headers: {
+      "x-api-key": apiKey,
+      "Content-Type": "application/json",
+    },
+  });
+  if (!response.ok) {
+    throw new Error(`Artificial Analysis ${path} failed: ${await response.text()}`);
+  }
+  return response.json();
+}
+
+function normalizeModelSearchKey(value: string | undefined) {
+  return (value ?? "")
+    .toLowerCase()
+    .replace(/[:/_.]+/g, " ")
+    .replace(/\b(instruct|chat|free|preview|latest|thinking)\b/g, " ")
+    .replace(/\b\d{4}[- ]?\d{2}[- ]?\d{2}\b/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function buildArtificialAnalysisIndex(rows: ArtificialAnalysisModel[]) {
+  const index = new Map<string, ArtificialAnalysisModel>();
+  for (const row of rows) {
+    const creator = row.model_creator?.slug ?? row.model_creator?.name;
+    for (const key of [
+      normalizeModelSearchKey(row.slug),
+      normalizeModelSearchKey(row.name),
+      normalizeModelSearchKey(`${creator ?? ""} ${row.name ?? ""}`),
+      normalizeModelSearchKey(`${creator ?? ""} ${row.slug ?? ""}`),
+    ]) {
+      if (key) index.set(key, row);
+    }
+  }
+  return index;
+}
+
+function lookupArtificialAnalysisModel(index: Map<string, ArtificialAnalysisModel>, modelId: string, name?: string) {
+  const provider = modelId.split("/")[0];
+  const slug = modelId.split("/").slice(1).join(" ");
+  const candidates = [
+    normalizeModelSearchKey(`${provider} ${slug}`),
+    normalizeModelSearchKey(slug),
+    normalizeModelSearchKey(name),
+  ].filter(Boolean);
+  for (const key of candidates) {
+    const exact = index.get(key);
+    if (exact) return exact;
+  }
+  for (const [key, value] of index) {
+    if (candidates.some((candidate) => candidate.length > 5 && (key.includes(candidate) || candidate.includes(key)))) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
 function collectNumericByKey(root: unknown, keyMatcher: (key: string) => boolean, out: number[] = []) {
   if (Array.isArray(root)) {
     for (const item of root) collectNumericByKey(item, keyMatcher, out);
@@ -306,6 +382,7 @@ function mapOpenRouterModels(params: {
   models: OpenRouterModel[];
   limit: number;
   endpointStatsByModelId: Map<string, EndpointAggregate>;
+  artificialAnalysisByKey?: Map<string, ArtificialAnalysisModel>;
 }) {
   const mapped = params.models.slice(0, params.limit).map((model) => {
     const promptCost = toFiniteNumber(model.pricing?.prompt);
@@ -341,19 +418,28 @@ function mapOpenRouterModels(params: {
       typeof model.created === "number" && Number.isFinite(model.created)
         ? new Date(model.created * 1000).toISOString()
         : undefined;
+    const artificial = lookupArtificialAnalysisModel(params.artificialAnalysisByKey ?? new Map(), model.id, model.name);
+    const intelligenceIndex = artificial?.evaluations?.artificial_analysis_intelligence_index;
+    const codingIndex = artificial?.evaluations?.artificial_analysis_coding_index;
+    const mathIndex = artificial?.evaluations?.artificial_analysis_math_index;
+    const inputCostPerMWithAA = artificial?.pricing?.price_1m_input_tokens ?? inputCostPerM;
+    const outputCostPerMWithAA = artificial?.pricing?.price_1m_output_tokens ?? outputCostPerM;
+    const speedWithAA = artificial?.median_output_tokens_per_second;
+    const ttftWithAA = artificial?.median_time_to_first_answer_token ?? artificial?.median_time_to_first_token_seconds;
+
     const item = {
       modelId: model.id,
       name: model.name || model.id,
       provider: model.id.split("/")[0] || model.top_provider?.name || "Unknown",
       description: model.description || "Model metadata from OpenRouter.",
       contextLength: model.context_length,
-      inputCostPerM,
-      outputCostPerM,
+      inputCostPerM: inputCostPerMWithAA,
+      outputCostPerM: outputCostPerMWithAA,
       supportedParameters,
       promptCachingSupported,
       cachePricingReadPerM,
       cachePricingWritePerM,
-      endpointLatencyP50Ms: endpointStats?.latencyP50Ms,
+      endpointLatencyP50Ms: ttftWithAA ? ttftWithAA * 1000 : endpointStats?.latencyP50Ms,
       endpointUptimePercent: endpointStats?.uptimePercent,
       inputModalities,
       outputModalities,
@@ -364,19 +450,19 @@ function mapOpenRouterModels(params: {
         ...(supportsSearch ? ["search"] : []),
       ],
       costRating: rating(avg, [0.2, 3]),
-      speedRating: fast ? "high" : "medium",
-      reasoningRating: rating(reasoningBoost, [0.5, 1.5]),
+      speedRating: typeof speedWithAA === "number" ? (speedWithAA >= 90 ? "high" : speedWithAA >= 35 ? "medium" : "low") : fast ? "high" : "medium",
+      reasoningRating: typeof intelligenceIndex === "number" ? rating(intelligenceIndex, [45, 60]) : rating(reasoningBoost, [0.5, 1.5]),
       multimodalRating: isVision ? "strong" : "none",
       recommendedForPhysics: /(physics|math|science|reason|deepseek|gemini-2\.5-pro)/i.test(model.id),
       isFree,
       isFeatured: false,
       featuredOrder: undefined,
       capabilities: {
-        reasoning: reasoningBoost > 1 ? 8 : 4,
+        reasoning: typeof intelligenceIndex === "number" ? Math.max(4, Math.min(10, Math.round(intelligenceIndex / 10))) : reasoningBoost > 1 ? 8 : 4,
         creative: /(claude|gpt|gemini)/i.test(model.id) ? 7 : 5,
-        code: /(code|coder|starcoder|deepseek)/i.test(model.id) ? 8 : 5,
+        code: typeof codingIndex === "number" ? Math.max(4, Math.min(10, Math.round(codingIndex / 10))) : /(code|coder|starcoder|deepseek)/i.test(model.id) ? 8 : 5,
         vision: isVision ? 7 : 0,
-        speed: fast ? 9 : 5,
+        speed: typeof speedWithAA === "number" ? Math.max(3, Math.min(10, Math.round(speedWithAA / 18))) : fast ? 9 : 5,
       },
     };
     const curated = lookupCuratedModelMeta(model.id);
@@ -390,6 +476,9 @@ function mapOpenRouterModels(params: {
       curatedNotes: curated?.curatedNotes,
       benchmarkMMLU: curated?.benchmarkMMLU,
       benchmarkHumanEval: curated?.benchmarkHumanEval,
+      benchmarkArtificialAnalysisIntelligence: intelligenceIndex,
+      benchmarkArtificialAnalysisCoding: codingIndex,
+      benchmarkArtificialAnalysisMath: mathIndex,
       arenaElo: curated?.arenaElo,
     };
   });
@@ -440,6 +529,16 @@ async function refreshCatalogBase(params: {
   const limit = Math.min(Math.max(params.limit ?? 400, 50), 400);
   const modelsResponse = (await openRouterFetch("/models", apiKey)) as { data?: OpenRouterModel[] };
   const allModels = modelsResponse.data ?? [];
+  const artificialApiKey = getArtificialAnalysisApiKey();
+  let artificialAnalysisByKey: Map<string, ArtificialAnalysisModel> | undefined;
+  if (artificialApiKey) {
+    try {
+      const payload = (await artificialAnalysisFetch("/data/llms/models", artificialApiKey)) as { data?: ArtificialAnalysisModel[] };
+      artificialAnalysisByKey = buildArtificialAnalysisIndex(payload.data ?? []);
+    } catch {
+      artificialAnalysisByKey = undefined;
+    }
+  }
 
   const usageCounts = (await params.ctx.runQuery(internal.catalogSync.listModelUsageCounts, {})) as Array<{
     modelId: string;
@@ -468,6 +567,7 @@ async function refreshCatalogBase(params: {
     models: allModels,
     limit,
     endpointStatsByModelId,
+    artificialAnalysisByKey,
   });
 
   if (params.includeEmbeddings) {

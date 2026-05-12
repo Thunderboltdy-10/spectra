@@ -42,6 +42,9 @@ export type CatalogModelEntry = {
     vision?: number;
     speed?: number;
   };
+  benchmarkArtificialAnalysisIntelligence?: number;
+  benchmarkArtificialAnalysisCoding?: number;
+  benchmarkArtificialAnalysisMath?: number;
 };
 
 export type ModelRuntimeStat = {

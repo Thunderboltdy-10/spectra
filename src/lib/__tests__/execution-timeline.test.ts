@@ -80,15 +80,28 @@ describe("execution timeline", () => {
     const events = routeTraceToExecutionEvents(trace, false);
 
     expect(events.map((event) => event.label)).toEqual([
-      "Model selected",
       "Checking uploaded materials",
       "Search activity",
     ]);
-    expect(events[0]?.meta).toBe("deepseek-v4-pro-20260423");
-    expect(events[2]?.children?.[0]).toMatchObject({
+    expect(events[1]?.children?.[0]).toMatchObject({
       kind: "search",
       label: "search: exam dates",
       status: "completed",
     });
+  });
+
+  it("does not render model selection as a runtime event", () => {
+    const trace = {
+      selected: { modelId: "deepseek/deepseek-v4-pro-20260423", reason: "Anchor retained" },
+      phasePlan: [
+        { id: "routing", label: "Planning the route", status: "completed" },
+        { id: "authoring", label: "Answer stream", status: "completed" },
+      ],
+    } as RouteTrace;
+
+    const events = routeTraceToExecutionEvents(trace, false);
+
+    expect(events.map((event) => event.kind)).not.toContain("routing");
+    expect(events.map((event) => event.label)).toEqual(["Answer stream"]);
   });
 });

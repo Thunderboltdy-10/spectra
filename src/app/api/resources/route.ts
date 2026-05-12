@@ -137,8 +137,12 @@ export async function POST(request: NextRequest) {
     if (scope === "personal") {
       const existingPersonal = (await convexQuery("resources:listPersonalResources", {
         actorClerkId: actor.clerkId,
-      })) as Array<unknown>;
-      currentPersonalCount = existingPersonal.length;
+      })) as Array<{ status?: string; usable?: boolean; savedToLibrary?: boolean }>;
+      currentPersonalCount = existingPersonal.filter((resource) =>
+        resource.savedToLibrary !== false
+        && resource.status !== "failed"
+        && resource.usable !== false,
+      ).length;
 
       const reusable = (await convexQuery("resources:findReusablePersonalResourcesByHashes", {
         actorClerkId: actor.clerkId,

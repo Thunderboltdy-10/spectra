@@ -1,7 +1,7 @@
 "use client";
 
 import type { ChatStreamEvent } from "@/lib/chat/streaming";
-import type { RouteTrace } from "@/types";
+import type { RouteTrace, RouteTraceExecutionEvent } from "@/types";
 
 export type PanelChatMessage = {
   id: string;
@@ -18,11 +18,6 @@ export type PanelChatMessage = {
   routeTrace?: RouteTrace;
   createdAt: number;
 };
-
-function appendThinkingNote(existing: string, next: string) {
-  if (!next.trim()) return existing;
-  return existing ? `${existing}\n${next}` : next;
-}
 
 function collapseSegments(segments: Array<{ id: string; label: string; content: string; status: string }>, activeId: string) {
   return segments.map((segment) =>
@@ -43,6 +38,7 @@ export class ChatMessageAccumulator {
   private executionPath: string | undefined;
   private citations: PanelChatMessage["citations"];
   private phaseValue = "idle";
+  private runtimeEvents: RouteTraceExecutionEvent[] = [];
 
   constructor(
     initialMessages: PanelChatMessage[] = [],
@@ -83,6 +79,7 @@ export class ChatMessageAccumulator {
     this.activeModel = undefined;
     this.executionPath = undefined;
     this.citations = undefined;
+    this.runtimeEvents = [];
     this.messagesValue = [
       ...this.messagesValue,
       {
@@ -103,7 +100,7 @@ export class ChatMessageAccumulator {
       return;
     }
 
-    if (event.type === "delta" && event.content) {
+    if ((event.type === "delta" || event.type === "text_delta") && event.content) {
       this.assistantContent += event.content;
       this.patchAssistant({
         content: this.assistantContent,
@@ -138,41 +135,135 @@ export class ChatMessageAccumulator {
     }
 
     if (event.type === "tool_call" && event.toolName) {
-      this.thinkingContent = appendThinkingNote(this.thinkingContent, `[Tool] ${event.toolName.replace(/_/g, " ")}...`);
-      this.patchAssistant({ thinking: this.thinkingContent });
+      this.upsertRuntimeEvent({
+        id: `tool:${event.toolCallId ?? event.toolName}`,
+        kind: "tool",
+        label: formatRuntimeLabel(event.toolName, "Tool"),
+        status: "running",
+        detail: typeof event.summary === "string" ? event.summary : undefined,
+        inputPreview: typeof event.arguments === "string" ? event.arguments : undefined,
+        toolName: event.toolName,
+        toolCallId: event.toolCallId,
+        startedAt: Date.now(),
+      });
       return;
     }
 
-    if (event.type === "tool_result" && event.summary) {
-      this.thinkingContent = appendThinkingNote(this.thinkingContent, `[Tool] ${event.summary}`);
-      this.patchAssistant({ thinking: this.thinkingContent });
+    if (event.type === "tool_result" && event.toolName) {
+      const eventError = typeof event.error === "string"
+        ? event.error
+        : event.error && typeof event.error === "object" && "message" in event.error
+          ? String((event.error as { message?: unknown }).message ?? "")
+          : undefined;
+      this.upsertRuntimeEvent({
+        id: `tool:${event.toolCallId ?? event.toolName ?? "unknown"}`,
+        kind: "tool",
+        label: formatRuntimeLabel(event.toolName, "Tool"),
+        status: event.status === "failed" ? "failed" : "completed",
+        detail: event.summary,
+        resultPreview: event.result,
+        error: eventError,
+        toolName: event.toolName,
+        toolCallId: event.toolCallId,
+        finishedAt: Date.now(),
+      });
       return;
     }
 
     if ((event.type === "mode_switch" || event.type === "mode_switched") && event.mode) {
-      this.thinkingContent = appendThinkingNote(this.thinkingContent, `[Mode] Switched to ${event.mode}.`);
-      this.patchAssistant({ thinking: this.thinkingContent });
+      this.upsertRuntimeEvent({
+        id: `mode:${event.mode}`,
+        kind: "action",
+        label: `Switched to ${formatRuntimeLabel(event.mode, "mode")}`,
+        status: "completed",
+        detail: event.reason,
+        startedAt: Date.now(),
+        finishedAt: Date.now(),
+      });
       return;
     }
 
     if (event.type === "skill_loaded") {
-      this.thinkingContent = appendThinkingNote(this.thinkingContent, "[Skill] Loaded runtime skill.");
-      this.patchAssistant({ thinking: this.thinkingContent });
+      this.upsertRuntimeEvent({
+        id: `skill:${Date.now()}`,
+        kind: "skill",
+        label: "Loaded runtime skill",
+        status: "completed",
+        finishedAt: Date.now(),
+      });
       return;
     }
 
     if (event.type === "thread_fork" || event.type === "navigation_instruction") {
-      this.thinkingContent = appendThinkingNote(
-        this.thinkingContent,
-        `[Thread] Forked${event.title ? ` ${event.title}` : ""}.`,
-      );
-      this.patchAssistant({ thinking: this.thinkingContent });
+      this.upsertRuntimeEvent({
+        id: `thread:${event.chatId ?? event.title ?? Date.now()}`,
+        kind: "action",
+        label: `Opened ${formatRuntimeLabel(event.title, "thread")}`,
+        status: "completed",
+        detail: event.reason,
+        startedAt: Date.now(),
+        finishedAt: Date.now(),
+      });
       return;
     }
 
     if (event.type === "notice" && (event.content || event.message)) {
-      this.thinkingContent = appendThinkingNote(this.thinkingContent, event.content ?? event.message ?? "");
-      this.patchAssistant({ thinking: this.thinkingContent });
+      this.upsertRuntimeEvent({
+        id: `notice:${Date.now()}`,
+        kind: "notice",
+        label: "Runtime notice",
+        status: "completed",
+        detail: event.content ?? event.message,
+        startedAt: Date.now(),
+        finishedAt: Date.now(),
+      });
+      return;
+    }
+
+    if (event.type === "memory_read" || event.type === "memory_write") {
+      this.upsertRuntimeEvent({
+        id: `${event.type}:${Date.now()}`,
+        kind: "memory",
+        label: event.type === "memory_read" ? "Read memory" : "Saved memory",
+        status: event.status === "failed" ? "failed" : "completed",
+        detail: event.summary ?? event.message ?? event.content,
+        resultPreview: event.result,
+        startedAt: Date.now(),
+        finishedAt: Date.now(),
+      });
+      return;
+    }
+
+    if (event.type === "search_status" || event.type === "rag_used") {
+      this.upsertRuntimeEvent({
+        id: event.type === "search_status" ? "search:status" : `resource:rag:${Date.now()}`,
+        kind: event.type === "search_status" ? "search" : "resource",
+        label: event.type === "search_status" ? "Search activity" : "Referenced resources",
+        status: event.status === "failed" ? "failed" : "completed",
+        detail: event.summary ?? event.message ?? event.reason,
+        resultPreview: event.result,
+        startedAt: Date.now(),
+        finishedAt: Date.now(),
+      });
+      return;
+    }
+
+    if (event.type === "helper_worker_started" || event.type === "agent_summoned" || event.type === "collab_progress" || event.type === "collab_done" || event.type === "helper_worker_finished") {
+      const workerId = typeof event.agent === "string"
+        ? event.agent
+        : event.agent && typeof event.agent === "object" && "id" in event.agent
+          ? String((event.agent as { id?: unknown }).id ?? "worker")
+          : String(event.toolCallId ?? event.title ?? "worker");
+      const finished = event.type === "collab_done" || event.type === "helper_worker_finished";
+      this.upsertRuntimeEvent({
+        id: `worker:${workerId}`,
+        kind: "worker",
+        label: formatRuntimeLabel(workerId, "Worker"),
+        status: event.status === "failed" ? "failed" : finished ? "completed" : "running",
+        detail: event.preview ?? event.summary ?? event.message,
+        startedAt: Date.now(),
+        finishedAt: finished ? Date.now() : undefined,
+      });
       return;
     }
 
@@ -181,11 +272,40 @@ export class ChatMessageAccumulator {
       this.executionPath = typeof (event as { executionPath?: unknown }).executionPath === "string"
         ? String((event as { executionPath?: unknown }).executionPath)
         : this.executionPath;
+      const routeTrace = event.routeTrace as RouteTrace | undefined;
       this.patchAssistant({
         activeModel: this.activeModel,
         modelUsed: event.type === "route_model" ? this.modelUsed : this.modelUsed ?? this.activeModel,
         executionPath: this.executionPath,
-        routeTrace: event.routeTrace as RouteTrace | undefined,
+        routeTrace: routeTrace ? { ...routeTrace, executionEvents: mergeRuntimeEvents(routeTrace.executionEvents, this.runtimeEvents) } : undefined,
+      });
+      this.upsertRuntimeEvent({
+        id: "runtime-routing",
+        kind: "routing",
+        label: `Selected ${formatRuntimeLabel(event.modelUsed, "model")}`,
+        status: "completed",
+        detail: this.executionPath ? `Execution path: ${this.executionPath}` : undefined,
+        startedAt: Date.now(),
+        finishedAt: Date.now(),
+      });
+      return;
+    }
+
+    if (event.type === "model_fallback" && event.toModel) {
+      this.activeModel = event.toModel;
+      this.modelUsed = event.toModel;
+      this.upsertRuntimeEvent({
+        id: `model-fallback:${event.fromModel ?? "model"}:${event.toModel}`,
+        kind: "routing",
+        label: `Switched to ${formatRuntimeLabel(event.toModel, "fallback model")}`,
+        status: "completed",
+        detail: event.reason ?? (event.fromModel ? `Fallback from ${event.fromModel}` : undefined),
+        startedAt: Date.now(),
+        finishedAt: Date.now(),
+      });
+      this.patchAssistant({
+        activeModel: this.activeModel,
+        modelUsed: this.modelUsed,
       });
       return;
     }
@@ -193,6 +313,7 @@ export class ChatMessageAccumulator {
     if (event.type === "done") {
       this.modelUsed = event.modelUsed ?? this.modelUsed ?? this.activeModel;
       this.activeModel = this.modelUsed ?? this.activeModel;
+      const routeTrace = event.routeTrace as RouteTrace | undefined;
       if (event.citations) {
         this.citations = event.citations;
       }
@@ -201,6 +322,7 @@ export class ChatMessageAccumulator {
         ...segment,
         status: segment.status === "failed" ? "failed" : "completed",
       }));
+      const existingRouteTrace = this.messagesValue.find((row) => row.id === this.assistantMessageId)?.routeTrace;
       this.patchAssistant({
         content: this.assistantContent,
         thinking: this.thinkingContent || undefined,
@@ -210,6 +332,11 @@ export class ChatMessageAccumulator {
         activeModel: this.activeModel,
         executionPath: this.executionPath,
         citations: this.citations,
+        routeTrace: routeTrace
+          ? { ...routeTrace, executionEvents: mergeRuntimeEvents(routeTrace.executionEvents, this.runtimeEvents) }
+          : existingRouteTrace
+            ? { ...existingRouteTrace, executionEvents: mergeRuntimeEvents(existingRouteTrace.executionEvents, this.runtimeEvents) }
+            : undefined,
       });
       return;
     }
@@ -238,6 +365,7 @@ export class ChatMessageAccumulator {
       this.thinkingSegments = [];
       this.modelUsed = undefined;
       this.citations = undefined;
+      this.runtimeEvents = [];
     }
   }
 
@@ -252,4 +380,60 @@ export class ChatMessageAccumulator {
         : message,
     );
   }
+
+  private upsertRuntimeEvent(next: RouteTraceExecutionEvent) {
+    if (!this.assistantMessageId) return;
+    const now = Date.now();
+    const message = this.messagesValue.find((row) => row.id === this.assistantMessageId);
+    const events = [...this.runtimeEvents];
+    const index = events.findIndex((event) => event.id === next.id);
+    const normalized = {
+      ...next,
+      startedAt: next.startedAt ?? (next.status === "running" ? now : undefined),
+      finishedAt: next.finishedAt ?? (next.status === "completed" || next.status === "failed" ? now : undefined),
+    };
+    if (index >= 0) {
+      events[index] = {
+        ...events[index],
+        ...normalized,
+        startedAt: events[index]?.startedAt ?? normalized.startedAt,
+      };
+    } else {
+      events.push(normalized);
+    }
+    this.runtimeEvents = events;
+    if (message?.routeTrace) {
+      this.patchAssistant({
+        routeTrace: {
+          ...message.routeTrace,
+          executionEvents: mergeRuntimeEvents(message.routeTrace.executionEvents, events),
+        },
+      });
+    }
+  }
+}
+
+function formatRuntimeLabel(value: string | undefined, fallback: string) {
+  const normalized = (value ?? "").trim();
+  if (!normalized) return fallback;
+  return normalized
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function mergeRuntimeEvents(existing: RouteTraceExecutionEvent[] | undefined, incoming: RouteTraceExecutionEvent[]) {
+  const merged = [...(existing ?? [])];
+  for (const event of incoming) {
+    const index = merged.findIndex((candidate) => candidate.id === event.id);
+    if (index >= 0) {
+      merged[index] = {
+        ...merged[index],
+        ...event,
+        startedAt: merged[index]?.startedAt ?? event.startedAt,
+      };
+    } else {
+      merged.push(event);
+    }
+  }
+  return merged;
 }

@@ -8,7 +8,7 @@ import type { ClarificationBlock } from "@/types";
 type ClarificationCardProps = {
   block: ClarificationBlock;
   disabled?: boolean;
-  onSubmit?: (message: string) => void;
+  onSubmit?: (payload: { message: string; answers: Answers }) => void;
 };
 
 type Answers = Record<string, string | string[] | boolean>;
@@ -37,9 +37,11 @@ function formatAnswer(value: string | string[] | boolean) {
 
 export function ClarificationCard({ block, disabled = false, onSubmit }: ClarificationCardProps) {
   const [answers, setAnswers] = useState<Answers>(() => initialAnswers(block));
+  const [submittedAnswers, setSubmittedAnswers] = useState<Answers | null>(null);
 
   useEffect(() => {
     setAnswers(initialAnswers(block));
+    setSubmittedAnswers(null);
   }, [block]);
 
   const canSubmit = useMemo(() => {
@@ -165,6 +167,14 @@ export function ClarificationCard({ block, disabled = false, onSubmit }: Clarifi
       </div>
 
       <div className="mt-4 flex justify-end">
+        {submittedAnswers ? (
+          <div className="mr-auto rounded-xl border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-xs text-[var(--text-secondary)]">
+            <span className="font-semibold text-[var(--text-primary)]">Submitted inline:</span>{" "}
+            {block.questions
+              .map((question) => `${question.text}: ${formatAnswer(submittedAnswers[question.id] ?? "")}`)
+              .join(" · ")}
+          </div>
+        ) : null}
         <Button
           type="button"
           size="sm"
@@ -180,11 +190,12 @@ export function ClarificationCard({ block, disabled = false, onSubmit }: Clarifi
               lines.push(`- ${question.id}: ${answer || "(not provided)"}`);
             }
             lines.push("Please continue with this scope.");
-            onSubmit?.(lines.join("\n"));
+            setSubmittedAnswers(answers);
+            onSubmit?.({ message: lines.join("\n"), answers });
           }}
-          disabled={disabled || !canSubmit}
+          disabled={disabled || !canSubmit || Boolean(submittedAnswers)}
         >
-          Continue
+          {submittedAnswers ? "Continuing…" : "Continue"}
         </Button>
       </div>
     </section>

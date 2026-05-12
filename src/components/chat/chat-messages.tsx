@@ -11,6 +11,7 @@ import { ClarificationCard } from "@/components/chat/clarification-card";
 import { DocumentPanel } from "@/components/chat/document-panel";
 import { MarkdownRenderer } from "@/components/chat/markdown-renderer";
 import { ProviderLogo } from "@/components/provider-logo";
+import { buildClarificationResumeFollowUp, type ClarificationResumeMetadata } from "@/lib/chat/clarification-resume";
 import { isGeneratedDocumentContent, parseGeneratedDocument } from "@/lib/document-generator";
 import { stripQuizMarkers } from "@/lib/quiz-parser";
 import { autoCloseMarkdown } from "@/lib/stream-markdown";
@@ -56,7 +57,11 @@ type ChatMessagesProps = {
   artifactSavedMessageIds?: Map<string, string>;
   bookmarkedMessageIds?: Set<string>;
   bookmarkingMessageId?: string | null;
-  onFollowUp?: (message: string, modeOverride?: StudyMode) => void;
+  onFollowUp?: (
+    message: string,
+    modeOverride?: StudyMode,
+    options?: { skipLocalUser?: boolean; skipServerUserPersist?: boolean; clarification?: ClarificationResumeMetadata },
+  ) => void;
   onModeChange?: (mode: string) => void;
   regenModels?: Array<{ modelId: string; name: string }>;
   emptyState?: React.ReactNode;
@@ -913,8 +918,13 @@ export function ChatMessages({
                     <ClarificationCard
                       block={clarificationBlock}
                       disabled={sending}
-                      onSubmit={(answerMessage) => {
-                        onFollowUp?.(answerMessage);
+                      onSubmit={({ message: answerMessage, answers }) => {
+                        const resume = buildClarificationResumeFollowUp({
+                          message: answerMessage,
+                          answers,
+                          sourceMessageId: msg._id,
+                        });
+                        onFollowUp?.(resume.message, undefined, resume.options);
                       }}
                     />
                   </ChatMessage>

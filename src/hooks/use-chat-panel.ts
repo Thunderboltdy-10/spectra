@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChatMessageAccumulator, type PanelChatMessage } from "@/lib/chat/message-state";
-import { createChatStream, type ChatStreamEvent } from "@/lib/chat/streaming";
+import { createChatStream, normalizeChatStreamError, type ChatStreamEvent } from "@/lib/chat/streaming";
 import { notifyWorkspaceContentMutated } from "@/lib/workspace/events";
 
 type UseChatPanelParams = {
@@ -251,7 +251,7 @@ export function useChatPanel(params: UseChatPanelParams = {}) {
         accumulator.consume(event);
         syncAccumulator();
         if (event.type === "error") {
-          throw new Error(typeof event.error === "string" ? event.error : "Generation failed");
+          throw new Error(normalizeChatStreamError(event.error, "Generation failed"));
         }
       }
       didComplete = true;

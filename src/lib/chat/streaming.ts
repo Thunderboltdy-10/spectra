@@ -9,18 +9,25 @@ export type ChatStreamEvent = {
   detail?: string;
   phasePlan?: unknown;
   modelUsed?: string;
+  model?: string;
+  fromModel?: string;
+  toModel?: string;
   error?: string;
   messageId?: string;
+  chatId?: string;
   citations?: Array<{ url: string; title: string }>;
   thinkingContent?: string;
   toolName?: string;
   toolCallId?: string;
+  arguments?: string;
   summary?: string;
   mode?: string;
   title?: string;
   status?: string;
   reason?: string;
   result?: unknown;
+  agent?: string | { id?: string; name?: string };
+  preview?: string;
   routeTrace?: unknown;
   skill?: unknown;
   executionPath?: string;
@@ -58,6 +65,22 @@ export type CreateChatStreamParams = {
   };
 };
 
+export function normalizeChatStreamError(error: unknown, fallback = "Generation failed") {
+  const raw = typeof error === "string"
+    ? error
+    : error && typeof error === "object" && "message" in error
+      ? String((error as { message?: unknown }).message ?? "")
+      : "";
+  const trimmed = raw.trim();
+  if (!trimmed) return fallback;
+  try {
+    const parsed = JSON.parse(trimmed) as { error?: { message?: string }; message?: string };
+    return parsed.error?.message ?? parsed.message ?? fallback;
+  } catch {
+    return trimmed;
+  }
+}
+
 export async function* createChatStream(params: CreateChatStreamParams): AsyncGenerator<ChatStreamEvent> {
   const response = await fetch("/api/chat", {
     method: "POST",
@@ -91,7 +114,7 @@ export async function* createChatStream(params: CreateChatStreamParams): AsyncGe
 
   if (!response.ok || !response.body) {
     const errorText = await response.text();
-    throw new Error(errorText || "Request failed");
+    throw new Error(normalizeChatStreamError(errorText, "Request failed"));
   }
 
   const reader = response.body.getReader();

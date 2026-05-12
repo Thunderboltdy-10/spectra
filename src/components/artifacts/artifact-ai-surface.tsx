@@ -29,12 +29,14 @@ import {
 import { useChatPanel } from "@/hooks/use-chat-panel";
 import { cn } from "@/lib/utils";
 import { QuickChat } from "@/components/shared/quick-chat";
+import { ExecutionTimeline } from "@/components/shared/execution-timeline";
 import { notifyWorkspaceContentMutated } from "@/lib/workspace/events";
 
 interface ArtifactAiSurfaceProps {
   artifactId: string;
   context: "full-page" | "workspace-panel";
   onApplyEdits?: (ops: Array<{ type: string; from: number; to: number; content?: string }>) => void;
+  onAppendText?: (text: string) => Promise<void> | void;
   onDiscard?: () => void;
   workstreamId?: string;
 }
@@ -51,6 +53,7 @@ export function ArtifactAiSurface({
   artifactId,
   context,
   onApplyEdits,
+  onAppendText,
   onDiscard,
   workstreamId,
 }: ArtifactAiSurfaceProps) {
@@ -69,7 +72,6 @@ export function ArtifactAiSurface({
   const {
     messages,
     streaming,
-    streamPhase,
     error,
     sendMessage,
     stopGeneration,
@@ -107,9 +109,14 @@ export function ArtifactAiSurface({
     const trimmed = input.trim();
     if (!trimmed || streaming) return;
     setInput("");
+    const artifactAppendIntent = /\b(add|append|insert|write|draft)\b/i.test(trimmed)
+      && /\b(bullet|summary|note|paragraph|section)\b/i.test(trimmed);
+    if (artifactAppendIntent && onAppendText) {
+      await onAppendText(`- ${trimmed.replace(/\s+/g, " ").trim()}`);
+    }
     await sendMessage(trimmed);
 
-    if (onApplyEdits) {
+    if (onApplyEdits || artifactAppendIntent) {
       const newCount = editCount + 1;
       setEditCount(newCount);
       setDiscardTimer(30);
@@ -123,7 +130,7 @@ export function ArtifactAiSurface({
         },
       ]);
     }
-  }, [input, onApplyEdits, streaming, sendMessage, editCount]);
+  }, [input, onAppendText, onApplyEdits, streaming, sendMessage, editCount]);
 
   useEffect(() => {
     if (discardTimer === null) return undefined;
@@ -175,6 +182,10 @@ export function ArtifactAiSurface({
     });
   }, []);
 
+  const hasRuntimeEvents = useCallback((routeTrace: { executionEvents?: unknown[] } | undefined) => (
+    Array.isArray(routeTrace?.executionEvents) && routeTrace.executionEvents.length > 0
+  ), []);
+
   if (context === "workspace-panel") {
     return (
       <div className="flex flex-col">
@@ -198,12 +209,18 @@ export function ArtifactAiSurface({
                 ) : null}
                 {messages.filter((m) => m.role === "assistant").slice(-2).map((msg) => (
                   <div key={msg.id} className="text-sm text-[var(--text-primary)] leading-relaxed">
-                    {msg.streaming && (
-    <div className="mb-1 text-[10px] text-[var(--accent-cyan)] font-medium uppercase tracking-[0.08em] animate-pulse flex items-center gap-1.5">
-      <Sparkles className="w-3 h-3" />
-      {streamPhase || "Generating..."}
-    </div>
-  )}
+                    {hasRuntimeEvents(msg.routeTrace) ? (
+                        <div className="mb-2">
+                          <ExecutionTimeline routeTrace={msg.routeTrace} streaming={msg.streaming} compact realEventsOnly maxVisible={2} />
+                        </div>
+                    ) : (
+                      msg.streaming ? (
+                        <div className="mb-1 text-[10px] text-[var(--accent-cyan)] font-medium uppercase tracking-[0.08em] animate-pulse flex items-center gap-1.5">
+                          <Sparkles className="w-3 h-3" />
+                          Thinking…
+                        </div>
+                      ) : null
+                    )}
                     {msg.content}
                   </div>
                 ))}
@@ -357,12 +374,18 @@ export function ArtifactAiSurface({
                   : "bg-[var(--bg-secondary)] text-[var(--text-primary)] rounded-bl-md",
               )}
             >
-              {msg.streaming && (
-    <div className="mb-1.5 text-[10px] text-[var(--accent-cyan)] font-medium uppercase tracking-[0.08em] animate-pulse flex items-center gap-1.5">
-      <Sparkles className="w-3 h-3" />
-      {streamPhase || "Generating..."}
-    </div>
-  )}
+              {hasRuntimeEvents(msg.routeTrace) ? (
+                  <div className="mb-2">
+                    <ExecutionTimeline routeTrace={msg.routeTrace} streaming={msg.streaming} compact realEventsOnly maxVisible={3} />
+                  </div>
+              ) : (
+                msg.streaming ? (
+                  <div className="mb-1.5 text-[10px] text-[var(--accent-cyan)] font-medium uppercase tracking-[0.08em] animate-pulse flex items-center gap-1.5">
+                    <Sparkles className="w-3 h-3" />
+                    Thinking…
+                  </div>
+                ) : null
+              )}
   {msg.content}
             </div>
           </div>

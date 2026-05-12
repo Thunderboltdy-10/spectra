@@ -612,10 +612,12 @@ export function ChatLayout() {
               back: payload.back,
             });
           }}
-          onFollowUp={(followUpMessage, modeOverride) => {
+          onFollowUp={(followUpMessage, modeOverride, options) => {
             void chat.sendMessage(followUpMessage, {
               chatIdOverride: chat.selectedChatId || undefined,
-              skipLocalUser: false,
+              skipLocalUser: Boolean(options?.skipLocalUser),
+              skipServerUserPersist: Boolean(options?.skipServerUserPersist),
+              clarification: options?.clarification,
               retryAttempt: 0,
               modeOverride,
             });

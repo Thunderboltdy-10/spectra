@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { chooseModelRoute } from "@/lib/routing/heuristic";
 import { CHEAP_MODEL_DEFAULTS, MODEL_CONFIG, MODEL_COST_BLOCK_LIST, ROUTER_FALLBACKS } from "@/lib/model-config";
 import { STUDY_MODES, isValidStudyMode, safeStudyMode } from "@/lib/contracts/studyModes";
+import type { StableModelAnchor } from "@/lib/model-anchor";
 
 
 describe("chooseModelRoute", () => {
@@ -230,6 +231,117 @@ describe("chooseModelRoute", () => {
     });
 
     expect(route.primaryModel).toBe("beta/model-b");
+  });
+
+  it("reuses a compatible stable model anchor for non-simple auto routes", () => {
+    const now = Date.now();
+    const modelAnchor: StableModelAnchor = {
+      modelId: "alpha/model-a",
+      source: "auto",
+      routeKey: "tutor:normal:no-search:no-rag:text",
+      reason: "previous anchored route",
+      requiredCapabilities: [],
+      spendingTier: "normal",
+      createdAt: now - 1_000,
+      updatedAt: now - 1_000,
+      expiresAt: now + 60_000,
+    };
+
+    const input: Parameters<typeof chooseModelRoute>[0] = {
+      mode: "tutor",
+      thinkingLevel: "medium",
+      hasAttachments: false,
+      attachmentTypes: [],
+      messageLength: 240,
+      teacherStrictness: "medium",
+      routerMode: "auto",
+      studentSeemsStuck: false,
+      spendingTier: "normal",
+      needsSearch: false,
+      promptCategory: "general",
+      modelCatalog: [
+        {
+          modelId: "alpha/model-a",
+          name: "Model A",
+          provider: "alpha",
+          description: "Fast general model",
+          tags: ["fast"],
+          speedRating: "medium",
+          costRating: "low",
+        },
+        {
+          modelId: "beta/model-b",
+          name: "Model B",
+          provider: "beta",
+          description: "Fast general model",
+          tags: ["fast"],
+          speedRating: "high",
+          costRating: "low",
+        },
+      ],
+    };
+    (input as typeof input & { modelAnchor: StableModelAnchor }).modelAnchor = modelAnchor;
+    const route = chooseModelRoute(input);
+
+    expect(route.primaryModel).toBe("alpha/model-a");
+    expect(route.trace.selected.reason).toContain("stable conversation model anchor reused");
+    expect(route.trace.requestPlan?.affinity?.retained).toBe(true);
+  });
+
+  it("does not reuse an anchor when a capability mismatch requires fallback", () => {
+    const now = Date.now();
+    const input: Parameters<typeof chooseModelRoute>[0] = {
+      mode: "tutor",
+      thinkingLevel: "medium",
+      hasAttachments: true,
+      attachmentTypes: ["image/png"],
+      messageLength: 240,
+      teacherStrictness: "medium",
+      routerMode: "auto",
+      studentSeemsStuck: false,
+      spendingTier: "normal",
+      needsSearch: false,
+      promptCategory: "general",
+      modelCatalog: [
+        {
+          modelId: "alpha/model-a",
+          name: "Model A",
+          provider: "alpha",
+          description: "Fast general model",
+          tags: ["fast"],
+          speedRating: "high",
+          costRating: "low",
+          multimodalRating: "none",
+        },
+        {
+          modelId: "beta/vision",
+          name: "Vision Model",
+          provider: "beta",
+          description: "Vision model",
+          tags: ["vision"],
+          multimodalRating: "strong",
+          capabilities: { vision: 8 },
+          speedRating: "medium",
+          costRating: "low",
+        },
+      ],
+    };
+    (input as typeof input & { modelAnchor: StableModelAnchor }).modelAnchor = {
+      modelId: "alpha/model-a",
+      source: "auto",
+      routeKey: "tutor:normal:no-search:no-rag:text",
+      reason: "previous anchored route",
+      requiredCapabilities: [],
+      spendingTier: "normal",
+      createdAt: now - 1_000,
+      updatedAt: now - 1_000,
+      expiresAt: now + 60_000,
+    };
+    const route = chooseModelRoute(input);
+
+    expect(route.primaryModel).toBe("beta/vision");
+    expect(route.trace.selected.reason).toContain("anchor missing vision");
+    expect(route.trace.requestPlan?.affinity?.retained).toBe(false);
   });
 
   it("selection varies by prompt complexity for tutor mode", () => {

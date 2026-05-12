@@ -131,6 +131,7 @@ describe("normalizeAttachments", () => {
             size: 300_000,
             scope: "personal",
             status: "processed",
+            storageId: "storage-image",
           },
           {
             _id: "res-doc",
@@ -139,6 +140,7 @@ describe("normalizeAttachments", () => {
             size: 120_000,
             scope: "personal",
             status: "processed",
+            storageId: "storage-doc",
             quickExtractText: "Newton's second law summary",
           },
         ];
@@ -168,10 +170,46 @@ describe("normalizeAttachments", () => {
     });
 
     expect(result.prepared).toHaveLength(2);
+    expect(result.skipped).toHaveLength(0);
     expect(result.imageContentBlocks).toHaveLength(1);
     expect(result.quickExtractBlock).toContain("ATTACHMENT CONTEXT");
     expect(result.requiresVision).toBe(true);
 
     vi.unstubAllGlobals();
+  });
+
+  it("reports failed resources as skipped runtime attachments", async () => {
+    const convexQuery = (vi.fn(async (name: string) => {
+      if (name === "resources:getResourcesByIds") {
+        return [
+          {
+            _id: "res-failed",
+            filename: "broken.docx",
+            mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            size: 120_000,
+            scope: "personal",
+            status: "failed",
+            storageId: "storage-doc",
+          },
+        ];
+      }
+      throw new Error(`Unexpected query ${name}`);
+    }) as unknown) as <T>(name: string, args: Record<string, unknown>) => Promise<T>;
+
+    const result = await normalizeAttachments({
+      actorClerkId: "test",
+      resourceIds: ["res-failed"],
+      convexQuery,
+    });
+
+    expect(result.prepared).toHaveLength(0);
+    expect(result.skipped).toEqual([
+      expect.objectContaining({
+        resourceId: "res-failed",
+        runtimeStatus: "failed_processing",
+        usable: false,
+      }),
+    ]);
+    expect(result.quickExtractBlock).toBe("");
   });
 });

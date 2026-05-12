@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Icon, type IconName } from "./icons";
 import { QuickChat } from "@/components/shared/quick-chat";
+import { ExecutionTimeline } from "@/components/shared/execution-timeline";
 import type { RouteTrace } from "@/types";
 import type { V2Item, V2Territory, QuickStart } from "./data";
 import { KIND_META } from "./data";
@@ -486,6 +487,7 @@ export type RuntimeRequestBar = {
   status: "pending" | "running" | "done" | "error";
   label: string;
   summary?: string;
+  routeTrace?: RouteTrace;
   startedAt: number;
   updatedAt: number;
 };
@@ -634,6 +636,17 @@ export function CommandBar({
                 <div className="mt-1 text-[10px] font-mono truncate" style={{ color: "var(--ink-400)" }}>
                   {request.prompt}
                 </div>
+                {active && request.routeTrace?.executionEvents?.length ? (
+                  <div className="mt-2">
+                    <ExecutionTimeline
+                      routeTrace={request.routeTrace}
+                      compact
+                      realEventsOnly
+                      maxVisible={4}
+                      streaming={request.status === "running" || request.status === "pending"}
+                    />
+                  </div>
+                ) : null}
               </button>
             );
           })}

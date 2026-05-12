@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import * as openrouter from "@/lib/openrouter";
 import { runAssistantStreaming } from "@/lib/orchestrator/streaming";
+import { validateAiRunEventContract, type AiRunEvent } from "@/lib/orchestrator/runtime-contract";
 
 describe("runAssistantStreaming tool loop", () => {
   it("executes tool calls and then returns a final answer", async () => {
@@ -60,6 +61,8 @@ describe("runAssistantStreaming tool loop", () => {
     expect(completionSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
     expect(sent.some((event) => event.type === "tool_call")).toBe(true);
     expect(sent.some((event) => event.type === "tool_result")).toBe(true);
+    expect(sent.some((event) => event.type === "text_delta")).toBe(true);
+    expect(sent.some((event) => event.type === "delta")).toBe(false);
     expect(result.responseText).toContain("grounded answer");
   });
 
@@ -164,6 +167,42 @@ describe("runAssistantStreaming tool loop", () => {
     expect(completionSpy).not.toHaveBeenCalled();
     expect(streamSpy).toHaveBeenCalledTimes(1);
     expect(result.responseText).toContain("Quick answer.");
+  });
+
+  it("emits runtime text_delta after model_selected when the run wrapper announces the model", async () => {
+    vi.restoreAllMocks();
+    vi.spyOn(openrouter, "openRouterStreamChat")
+      .mockImplementationOnce(async function* () {
+        yield { type: "delta", content: "Ordered answer." } as never;
+        yield {
+          type: "done",
+          model: "test-model",
+          inputTokens: 4,
+          outputTokens: 6,
+          finishReason: "stop",
+          usage: { prompt_tokens: 4, completion_tokens: 6 },
+        } as never;
+      });
+
+    const sent: AiRunEvent[] = [
+      { type: "model_selected", modelUsed: "test-model", executionPath: "direct_chat" },
+    ];
+    await runAssistantStreaming({
+      shouldVerify: false,
+      primaryModel: "test-model",
+      fallbackModels: [],
+      executionPath: "direct_chat",
+      messages: [{ role: "user", content: "Hi" }],
+      send: async (payload) => {
+        sent.push(payload);
+      },
+    });
+
+    expect(sent.map((event) => event.type)).toEqual([
+      "model_selected",
+      "text_delta",
+    ]);
+    expect(validateAiRunEventContract(sent).ok).toBe(true);
   });
 
   it("uses deeper continuation defaults for complex prompts without stopping after one shallow pass", async () => {

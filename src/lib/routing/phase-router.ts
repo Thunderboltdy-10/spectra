@@ -16,6 +16,7 @@ import {
   isHardAudioFamilyModel,
   isNonTextOnlyModel,
 } from "@/lib/runtime/model-guardrails";
+import { resolveStableModelAnchor, type StableModelAnchor } from "@/lib/model-anchor";
 import type { AssignmentLevel, RouteTraceCandidate, RouteTracePhase, SpendingTier, StudyMode } from "@/types";
 
 export type RoutingLane = "scored" | "challenger";
@@ -54,6 +55,7 @@ export type PhaseRoutingInput = {
     compactedAt?: number;
     ttlMs?: number;
   };
+  modelAnchor?: StableModelAnchor;
   modelCatalog: CatalogModelEntry[];
   modelRuntimeStats?: Record<string, ModelRuntimeStat>;
   seedKey: string;
@@ -64,6 +66,9 @@ export type PhaseRoutingDecision = {
   fallbackModels: string[];
   lane: RoutingLane;
   reason: string;
+  modelAnchor?: StableModelAnchor;
+  anchorReuseReason?: string;
+  anchorFallbackReason?: string;
   candidates: RouteTraceCandidate[];
   phase: RouteTracePhase;
   routingDurationMs: number;
@@ -427,11 +432,11 @@ export function buildPhasePlan(params: {
   if (params.routeNeedsSearch) phases.push({ id: "search", label: "Checking live sources", status: "planned" });
   if (params.multiAgentEnabled) {
     phases.push({ id: "planning", label: "Breaking work into specialists", status: "planned" });
-    phases.push({ id: "analysis", label: "Running specialist analysis", status: "planned" });
+    phases.push({ id: "analysis", label: "Specialist operations", status: "planned" });
     phases.push({ id: "synthesis", label: "Merging specialist output", status: "planned" });
   } else {
-    phases.push({ id: "analysis", label: "Analyzing your request", status: "planned" });
-    phases.push({ id: "authoring", label: "Writing the response", status: "planned" });
+    phases.push({ id: "analysis", label: "Runtime operation", status: "planned" });
+    phases.push({ id: "authoring", label: "Answer stream", status: "planned" });
   }
   if (params.shouldVerify) phases.push({ id: "verification", label: "Verifying critical claims", status: "planned" });
   if (params.shouldRepair) phases.push({ id: "repair", label: "Repairing response format", status: "planned" });
@@ -931,9 +936,28 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
       ? `Weighted random from ${weightedWindow.length} close candidates`
       : "Top pick";
   const fallbackModels: string[] = [];
-  const usedProviders = new Set<string>([selected.provider]);
+  let selectedModelId = selected.modelId;
+  let selectedProvider = selected.provider;
+  const anchorResolution = resolveStableModelAnchor({
+    existingAnchor: input.modelAnchor,
+    selectedModelId,
+    routerMode: input.routerMode,
+    manualModel: input.manualModel,
+    mode: input.mode,
+    spendingTier: input.spendingTier,
+    requiredCapabilities: input.requiredCapabilities,
+    needsSearch: input.needsSearch,
+    catalog: input.modelCatalog,
+    routeReason: `Unified weighted score selected ${selectedModelId} for ${input.phaseLabel.toLowerCase()}.`,
+  });
+  if (anchorResolution.reuseModelId && anchorResolution.reuseModelId !== selectedModelId) {
+    fallbackModels.push(selectedModelId);
+    selectedModelId = anchorResolution.reuseModelId;
+    selectedProvider = providerFromModelId(selectedModelId);
+  }
+  const usedProviders = new Set<string>([selectedProvider]);
   for (const row of scored) {
-    if (row.modelId === selected.modelId) continue;
+    if (row.modelId === selectedModelId) continue;
     if (fallbackModels.length >= 5) break;
     if (!usedProviders.has(row.provider) || fallbackModels.length < 2) {
       fallbackModels.push(row.modelId);
@@ -951,7 +975,8 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
         : `Unified weighted routing for ${input.phaseLabel.toLowerCase()}`,
     scoreBreakdown: [
       ...row.breakdown,
-      row.modelId === selected.modelId ? `selection_method ${selectionMethod}` : undefined,
+      row.modelId === selectedModelId ? `selection_method ${selectionMethod}` : undefined,
+      row.modelId === selectedModelId ? `why_this_model ${anchorResolution.whyThisModel}` : undefined,
       `provider ${row.provider}`,
       `tier ${row.dynamicTier}`,
       row.cacheWarm ? "cache_state warm" : "cache_state cold",
@@ -961,25 +986,29 @@ export function selectModelForPhase(input: PhaseRoutingInput): PhaseRoutingDecis
 
   const routingDurationMs = Math.max(0, Math.round(nowMs() - startedAt));
   const reasonParts = [
-    `Unified weighted score selected ${selected.modelId} for ${input.phaseLabel.toLowerCase()}.`,
+    anchorResolution.whyThisModel,
     `${selectionMethod}.`,
     shouldExplore ? "Exploration mode was active." : "Exploration mode was inactive.",
   ];
   if (selected.cacheWarm) reasonParts.push("Prompt cache was warm for this conversation.");
   if (selected.isChallenger) reasonParts.push("Selected model is currently in challenger onboarding.");
+  if (anchorResolution.fallbackReason) reasonParts.push(anchorResolution.fallbackReason);
 
   return {
-    selectedModel: selected.modelId,
+    selectedModel: selectedModelId,
     fallbackModels,
     lane: selected.isChallenger ? "challenger" : "scored",
     reason: reasonParts.join(" "),
+    modelAnchor: anchorResolution.anchor,
+    anchorReuseReason: anchorResolution.reuseReason,
+    anchorFallbackReason: anchorResolution.fallbackReason,
     candidates,
     phase: {
       id: input.phaseId,
       label: input.phaseLabel,
       status: "planned",
       thinkingLevel: input.thinkingLevel,
-      model: selected.modelId,
+      model: selectedModelId,
     },
     routingDurationMs,
   };

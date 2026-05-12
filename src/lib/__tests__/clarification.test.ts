@@ -7,6 +7,7 @@ import {
   parseRecentContext,
   serializeRecentContext,
 } from "@/lib/orchestrator/clarification";
+import { buildClarificationResumeFollowUp } from "@/lib/chat/clarification-resume";
 
 describe("needsClarification", () => {
   it("asks clarification for vague research requests in T2+", () => {
@@ -207,5 +208,41 @@ describe("isClarificationFollowUpMessage", () => {
       block,
     });
     expect(result).toBe(false);
+  });
+
+  it("keeps a clarification reply in the same run instead of asking again", () => {
+    const followUp = "Clarification answers:\n- research_scope: EU carbon policy since 2020\n- depth: deep_dive\nPlease continue with this scope.";
+
+    expect(isClarificationFollowUpMessage({ message: followUp, block })).toBe(true);
+    expect(needsClarification({
+      requestClass: "T2",
+      mode: "research",
+      message: followUp,
+      lastAssistantWasClarification: true,
+    })).toBeNull();
+  });
+});
+
+describe("clarification resume follow-up", () => {
+  it("builds hidden inline resume options so answers do not render as user bubbles", () => {
+    const resume = buildClarificationResumeFollowUp({
+      sourceMessageId: "assistant-clarification",
+      message: "Clarification answers:\n- scope: EU policy\nPlease continue with this scope.",
+      answers: {
+        scope: "EU policy",
+        depth: "deep_dive",
+      },
+    });
+
+    expect(resume.message).toContain("Clarification answers:");
+    expect(resume.options.skipLocalUser).toBe(true);
+    expect(resume.options.skipServerUserPersist).toBe(true);
+    expect(resume.options.clarification).toEqual({
+      sourceMessageId: "assistant-clarification",
+      answers: {
+        scope: "EU policy",
+        depth: "deep_dive",
+      },
+    });
   });
 });

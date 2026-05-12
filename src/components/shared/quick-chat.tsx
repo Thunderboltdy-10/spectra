@@ -69,11 +69,16 @@ export function QuickChat({
   topContent,
 }: QuickChatProps) {
   const [focused, setFocused] = useState(false);
+  const [mounted, setMounted] = useState(false);
   const innerTextareaRef = useRef<HTMLTextAreaElement>(null);
   const resolvedTextareaRef = textareaRef ?? innerTextareaRef;
   const speech = useSpeechToText();
   const listeningBaseValueRef = useRef<string | null>(null);
   const [attachmentsExpanded, setAttachmentsExpanded] = useState(true);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     const el = resolvedTextareaRef.current;
@@ -236,7 +241,7 @@ export function QuickChat({
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0 self-end">
-          {showMic && (speech.isSupported || onMicUnsupported) && (
+          {mounted && showMic && (speech.isSupported || onMicUnsupported) && (
             <button
               type="button"
               onClick={toggleMic}

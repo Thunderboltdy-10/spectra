@@ -60,7 +60,7 @@ import type {
   WorkspaceItemData,
 } from "@/lib/workspace/contracts";
 import { createChatStream, type ChatStreamEvent } from "@/lib/chat/streaming";
-import type { RouteTrace } from "@/types";
+import type { RouteTrace, RouteTraceExecutionEvent } from "@/types";
 
 import { UnifiedPanel } from "@/components/chat/unified-panel";
 
@@ -451,6 +451,7 @@ type RuntimeRunState = {
   currentLabel: string;
   lastSummary?: string;
   routeTrace?: RouteTrace;
+  runtimeEvents: RouteTraceExecutionEvent[];
   failed?: string;
   aborted?: boolean;
 };
@@ -499,26 +500,33 @@ function collectRuntimeTargetIds(payload: unknown, sink: Set<string>, depth = 0)
 
 function runtimePhaseLabel(event: ChatStreamEvent): string | null {
   if (event.type === "phase" && typeof event.phase === "string") {
-    if (event.phase === "routing") return "Routing workspace request…";
-    if (event.phase === "searching") return "Searching workspace context…";
     if (event.phase === "thinking") return "Thinking…";
-    if (event.phase === "generating") return "Generating response…";
-    if (event.phase === "synthesizing") return "Synthesizing result…";
-    if (event.phase === "compacting") return "Compacting context…";
-    return null;
+    return "Thinking…";
   }
   if (event.type !== "phase_update") return null;
   const status = typeof event.status === "string" ? event.status : "";
   if (status !== "in_progress") return null;
-  const phaseId = typeof (event as Record<string, unknown>).phaseId === "string"
-    ? String((event as Record<string, unknown>).phaseId).toLowerCase()
+  const detail = typeof (event as Record<string, unknown>).detail === "string"
+    ? String((event as Record<string, unknown>).detail).trim()
     : "";
-  if (phaseId.includes("route")) return "Routing workspace request…";
-  if (phaseId.includes("search")) return "Searching workspace context…";
-  if (phaseId.includes("compact")) return "Compacting context…";
-  if (phaseId.includes("author") || phaseId.includes("compose") || phaseId.includes("write")) return "Drafting output…";
-  if (phaseId.includes("synth") || phaseId.includes("verif") || phaseId.includes("repair")) return "Finalizing…";
-  return "Thinking…";
+  return detail || "Thinking…";
+}
+
+function mergeWorkspaceRuntimeEvents(existing: RouteTraceExecutionEvent[] | undefined, incoming: RouteTraceExecutionEvent[]) {
+  const merged = [...(existing ?? [])];
+  incoming.forEach((event) => {
+    const index = merged.findIndex((candidate) => candidate.id === event.id);
+    if (index >= 0) {
+      merged[index] = {
+        ...merged[index],
+        ...event,
+        startedAt: merged[index]?.startedAt ?? event.startedAt,
+      };
+    } else {
+      merged.push(event);
+    }
+  });
+  return merged;
 }
 
 function compactRuntimeSummary(value: string) {
@@ -852,6 +860,7 @@ export default function WorkspaceV2() {
     isLive,
     refresh,
   } = useWorkspaceData(committedWorkspaceId);
+  const [demoWorkspaces, setDemoWorkspaces] = useState<WorkspaceData[]>(DEMO_WORKSPACES);
   const { widgets: liveWidgets, signals: activeWorkspaceSignals } = useWorkspacePageData(committedWorkspaceId);
   useEffect(() => {
     if (!isLive || !committedWorkspaceId) return;
@@ -884,8 +893,8 @@ export default function WorkspaceV2() {
   }, [committedWorkspaceId, widgetsHidden]);
 
   const effectiveWorkspaces: WorkspaceData[] = useMemo(() => {
-    return isLive && live.length > 0 ? live : DEMO_WORKSPACES;
-  }, [isLive, live]);
+    return isLive && live.length > 0 ? live : demoWorkspaces;
+  }, [demoWorkspaces, isLive, live]);
 
   const graph = useMemo(() => buildV2Graph(effectiveWorkspaces), [effectiveWorkspaces]);
   const territories = graph.territories;
@@ -1489,7 +1498,67 @@ export default function WorkspaceV2() {
   /* ─── Backend item creation ─── */
   const createItemAction = useCallback(
     async (payload: Record<string, unknown>) => {
-      if (!isLive) return { ok: false as const };
+      if (!isLive) {
+        const action = String(payload.action ?? "");
+        const targetWorkspaceId = String(payload.workstreamId ?? committedWorkspaceId ?? "demo-calc");
+        if (action === "createWorkspace") {
+          const title = String(payload.title ?? "New workspace").trim() || "New workspace";
+          const id = `demo-${Date.now()}`;
+          setDemoWorkspaces((prev) => [
+            ...prev,
+            {
+              id,
+              name: title,
+              emoji: "✦",
+              status: "active",
+              itemCount: 0,
+              lastActivity: Date.now(),
+              items: [],
+            },
+          ]);
+          setCommittedWorkspaceId(id);
+          return { ok: true as const, data: { workstreamId: id } };
+        }
+        const title = String(payload.title ?? "Untitled").trim() || "Untitled";
+        const id = `demo-item-${Date.now()}`;
+        const actionToType: Record<string, WorkspaceItemData["itemType"]> = {
+          createNote: "note",
+          createPlannerItem: "planner",
+          createThread: "thread",
+          createArtifact: String(payload.type ?? "document") === "visualization" ? "visual" : "export",
+        };
+        const itemType = actionToType[action];
+        if (!itemType) return { ok: false as const };
+        setDemoWorkspaces((prev) =>
+          prev.map((workspace) => {
+            if (workspace.id !== targetWorkspaceId) return workspace;
+            const nextItem = {
+              id,
+              workspaceId: targetWorkspaceId,
+              title,
+              preview: String(payload.content ?? payload.description ?? "Created from workspace AI."),
+              itemType,
+              status: "active" as const,
+              meta: "just now",
+              updatedAt: Date.now(),
+            };
+            return {
+              ...workspace,
+              itemCount: workspace.itemCount + 1,
+              lastActivity: Date.now(),
+              items: [nextItem, ...workspace.items],
+            };
+          }),
+        );
+        return {
+          ok: true as const,
+          data: {
+            artifactId: itemType === "note" || itemType === "visual" || itemType === "export" ? id : undefined,
+            plannerItemId: itemType === "planner" ? id : undefined,
+            chatId: itemType === "thread" ? id : undefined,
+          },
+        };
+      }
       try {
         const res = await fetch("/api/workspace-data", {
           method: "POST",
@@ -1508,7 +1577,7 @@ export default function WorkspaceV2() {
         return { ok: false as const };
       }
     },
-    [isLive, refresh],
+    [committedWorkspaceId, isLive, refresh],
   );
 
   /* ─── Backend item update ─── */
@@ -1692,6 +1761,17 @@ export default function WorkspaceV2() {
     const { run } = holder;
     collectRuntimeTargetIds(event.result, run.targetIds);
     collectRuntimeTargetIds(event as unknown as Record<string, unknown>, run.targetIds);
+    const now = Date.now();
+    const upsertRuntimeEvent = (next: RouteTraceExecutionEvent) => {
+      run.runtimeEvents = mergeWorkspaceRuntimeEvents(run.runtimeEvents, [next]);
+      if (run.routeTrace) {
+        run.routeTrace = {
+          ...run.routeTrace,
+          executionEvents: mergeWorkspaceRuntimeEvents(run.routeTrace.executionEvents, run.runtimeEvents),
+        };
+        upsertRuntimeRequest(runId, { routeTrace: run.routeTrace });
+      }
+    };
 
     const phaseLabel = runtimePhaseLabel(event);
     if (phaseLabel) {
@@ -1708,12 +1788,63 @@ export default function WorkspaceV2() {
     }
 
     if ((event.type === "route_model" || event.type === "done") && event.routeTrace) {
-      run.routeTrace = event.routeTrace as RouteTrace;
+      const incomingTrace = event.routeTrace as RouteTrace;
+      run.routeTrace = {
+        ...incomingTrace,
+        executionEvents: mergeWorkspaceRuntimeEvents(incomingTrace.executionEvents, run.runtimeEvents),
+      };
       upsertRuntimeRequest(runId, { routeTrace: run.routeTrace });
+    }
+
+    if ((event.type === "route_model" || event.type === "model_selected") && event.modelUsed) {
+      upsertRuntimeEvent({
+        id: "workspace-runtime-model",
+        kind: "routing",
+        label: `Selected ${event.modelUsed.split("/").pop() ?? event.modelUsed}`,
+        status: "completed",
+        detail: event.executionPath ? `Execution path: ${event.executionPath}` : undefined,
+        startedAt: now,
+        finishedAt: now,
+      });
+    }
+
+    if (event.type === "model_fallback" && event.toModel) {
+      upsertRuntimeEvent({
+        id: `workspace-runtime-fallback:${event.fromModel ?? "model"}:${event.toModel}`,
+        kind: "routing",
+        label: `Switched to ${event.toModel.split("/").pop() ?? event.toModel}`,
+        status: "completed",
+        detail: event.reason ?? (event.fromModel ? `Fallback from ${event.fromModel}` : undefined),
+        startedAt: now,
+        finishedAt: now,
+      });
+    }
+
+    if (event.type === "tool_call" && event.toolName) {
+      upsertRuntimeEvent({
+        id: `workspace-runtime-tool:${event.toolCallId ?? event.toolName}`,
+        kind: "tool",
+        label: event.toolName.replace(/[_-]+/g, " "),
+        status: "running",
+        detail: typeof event.summary === "string" ? event.summary : undefined,
+        toolName: event.toolName,
+        toolCallId: event.toolCallId,
+        startedAt: now,
+      });
     }
 
     if (event.type === "tool_result") {
       collectRuntimeTargetIds(event.result, run.targetIds);
+      upsertRuntimeEvent({
+        id: `workspace-runtime-tool:${event.toolCallId ?? event.toolName ?? "unknown"}`,
+        kind: "tool",
+        label: (event.toolName ?? "Tool").replace(/[_-]+/g, " "),
+        status: event.status === "failed" ? "failed" : "completed",
+        detail: typeof event.summary === "string" ? event.summary : undefined,
+        toolName: event.toolName,
+        toolCallId: event.toolCallId,
+        finishedAt: now,
+      });
       if (typeof event.summary === "string" && event.summary.trim()) {
         run.lastSummary = oneSentenceRuntimeSummary(event.summary);
         upsertRuntimeRequest(runId, { status: "running", label: run.lastSummary });
@@ -2028,6 +2159,66 @@ export default function WorkspaceV2() {
         return;
       }
 
+      const naturalNoteIntent =
+        /\b(create|make|draft|save|add)\b.*\b(note|document)\b/i.test(raw)
+        || /\bnote titled\b/i.test(raw);
+      if (naturalNoteIntent) {
+        const workspaceId = requireWorkspace();
+        if (!workspaceId) return;
+        const titleMatch =
+          raw.match(/\btitled\s+["“]([^"”]+)["”]/i)
+          || raw.match(/\btitled\s+([^.;\n]+?)(?:\s+(?:summarizing|about|with|that|to)\b|[.;\n]|$)/i)
+          || raw.match(/\b(?:note|document)\s+(?:called|named)\s+["“]?([^"”.;\n]+)["”]?/i);
+        const title = titleMatch?.[1]?.trim() || "Workspace note";
+        setCommandProcessing(true);
+        try {
+          setResultIsland({ status: "running", text: `Creating note "${title}"…` });
+          const r = await createItemAction({
+            action: "createNote",
+            workstreamId: workspaceId,
+            title,
+            content: raw,
+          });
+          if (r.ok) spawnCenterTrail();
+          if (r.data?.artifactId) setPendingOpenSourceId(r.data.artifactId);
+          scheduleIslandDismiss({
+            status: r.ok ? "done" : "error",
+            text: r.ok ? `Created note "${title}".` : "Could not create note.",
+            action: r.data?.artifactId ? { label: "Open note", onClick: () => setPendingOpenSourceId(r.data.artifactId) } : undefined,
+          });
+        } finally {
+          setCommandProcessing(false);
+        }
+        return;
+      }
+
+      const naturalTaskIntent = /\b(create|make|add|schedule)\b.*\b(task|todo|deadline|reminder)\b/i.test(raw);
+      if (naturalTaskIntent) {
+        const workspaceId = requireWorkspace();
+        if (!workspaceId) return;
+        const title = raw
+          .replace(/\b(create|make|add|schedule)\b/gi, "")
+          .replace(/\b(task|todo|deadline|reminder)\b/gi, "")
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, 120) || "New task";
+        setCommandProcessing(true);
+        try {
+          setResultIsland({ status: "running", text: `Adding task "${title}"…` });
+          const r = await createItemAction({ action: "createPlannerItem", workstreamId: workspaceId, title, type: "deadline", priority: "medium" });
+          if (r.ok) spawnCenterTrail();
+          if (r.data?.plannerItemId) setPendingOpenSourceId(r.data.plannerItemId);
+          scheduleIslandDismiss({
+            status: r.ok ? "done" : "error",
+            text: r.ok ? `Added planner task "${title}".` : "Could not add task.",
+            action: r.data?.plannerItemId ? { label: "Open task", onClick: () => setPendingOpenSourceId(r.data.plannerItemId) } : undefined,
+          });
+        } finally {
+          setCommandProcessing(false);
+        }
+        return;
+      }
+
       // ?query / search …
       if (raw.startsWith("?") || lc.startsWith("search ")) {
         const q = raw.startsWith("?") ? raw.slice(1).trim() : raw.slice(7).trim();
@@ -2107,6 +2298,7 @@ export default function WorkspaceV2() {
         prompt: raw,
         targetIds: new Set<string>(),
         routeTrace: undefined,
+        runtimeEvents: [],
         currentLabel: "Queued in workspace runtime…",
       };
       const controller = new AbortController();
@@ -2122,7 +2314,7 @@ export default function WorkspaceV2() {
       setResultIsland(null);
       void (async () => {
         try {
-          upsertRuntimeRequest(runId, { status: "running", label: "Routing workspace request…" });
+          upsertRuntimeRequest(runId, { status: "running", label: "Thinking…" });
           for await (const event of createChatStream({
             chatId: runtimeChatId!,
             message: raw,

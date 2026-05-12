@@ -12,6 +12,7 @@ import {
   rankCatalogModels,
   type CatalogModelEntry,
 } from "@/lib/model-selection";
+import { resolveStableModelAnchor, type StableModelAnchor } from "@/lib/model-anchor";
 import type { ModelRouteInput, ModelRouteResult, RouteTrace, RouteTraceCandidate } from "@/types";
 
 const multimodalExts = ["pdf", "png", "jpg", "jpeg", "webp", "docx", "gif", "heic", "heif"];
@@ -181,6 +182,9 @@ function buildTrace(params: {
   candidates: RouteTraceCandidate[];
   selectedModel: string;
   reason: string;
+  anchor?: StableModelAnchor;
+  whyThisModel?: string;
+  anchorFallbackReason?: string;
   complexPrompt: boolean;
   promptCategory: string;
   multimodalNeeded: boolean;
@@ -214,8 +218,23 @@ function buildTrace(params: {
     candidates: params.candidates.length > 0 ? params.candidates : [{ modelId: params.selectedModel, allowed: true }],
     selected: {
       modelId: params.selectedModel,
-      reason: params.reason,
+      reason: params.whyThisModel ?? params.reason,
     },
+    requestPlan: params.anchor
+      ? {
+          primaryModel: params.selectedModel,
+          fallbackModels: [],
+          helpers: [],
+          affinity: {
+            lastModel: params.anchor.modelId,
+            retained: params.anchor.modelId === params.selectedModel && !params.anchorFallbackReason,
+            reason: params.anchorFallbackReason ?? params.anchor.reason,
+            expiresAt: params.anchor.expiresAt,
+          },
+          modelAnchor: params.anchor,
+          warnings: params.anchorFallbackReason ? [params.anchorFallbackReason] : [],
+        }
+      : undefined,
     toolchain: [],
     fallbacks: [],
     routingDurationMs: duration,
@@ -450,6 +469,9 @@ function finalizeRoute(params: {
   fallbackModels: string[];
   verificationModel?: string;
   reason: string;
+  anchor?: StableModelAnchor;
+  whyThisModel?: string;
+  anchorFallbackReason?: string;
   autoEnhanced: boolean;
   searchEnabled: boolean;
   candidates: RouteTraceCandidate[];
@@ -474,11 +496,17 @@ function finalizeRoute(params: {
     candidates: params.candidates,
     selectedModel: params.primaryModel,
     reason: params.reason,
+    anchor: params.anchor,
+    whyThisModel: params.whyThisModel,
+    anchorFallbackReason: params.anchorFallbackReason,
     complexPrompt: params.complexPrompt,
     promptCategory: params.promptCategory,
     multimodalNeeded: params.multimodalNeeded,
     routingStartedAt: params.routingStartedAt,
   });
+  if (trace.requestPlan) {
+    trace.requestPlan.fallbackModels = fallbackModels;
+  }
 
   if (params.verificationModel) trace.toolchain.push("marker_verification");
   if (params.searchEnabled) trace.toolchain.push("web_search");
@@ -497,6 +525,10 @@ function finalizeRoute(params: {
     searchEnabled: params.searchEnabled,
     trace,
   };
+}
+
+function inputAnchor(input: ModelRouteInput) {
+  return (input as ModelRouteInput & { modelAnchor?: StableModelAnchor }).modelAnchor;
 }
 
 function preferredCapabilitiesForRoute(input: ModelRouteInput) {
@@ -744,12 +776,49 @@ function dynamicRouteFromCatalog(params: {
       ? verificationCandidates[0]?.model.modelId
       : undefined;
 
+  const anchorResolution = resolveStableModelAnchor({
+    existingAnchor: inputAnchor(params.input),
+    selectedModelId: primaryModel,
+    routerMode: params.input.routerMode,
+    manualModel: params.input.manualModel,
+    mode: params.input.mode,
+    spendingTier: params.input.spendingTier,
+    requiredCapabilities,
+    needsSearch: params.input.needsSearch,
+    needsRag: params.input.needsRag,
+    catalog,
+    routeReason: reason,
+  });
+  if (anchorResolution.reuseModelId && anchorResolution.reuseModelId !== primaryModel) {
+    fallbackModels = [primaryModel, ...fallbackModels.filter((modelId) => modelId !== anchorResolution.reuseModelId)];
+    primaryModel = anchorResolution.reuseModelId;
+    reason = `${reason}; ${anchorResolution.reuseReason}`;
+    params.candidates.unshift({
+      modelId: primaryModel,
+      allowed: true,
+      score: 1,
+      reason: anchorResolution.reuseReason,
+      scoreBreakdown: ["stable model anchor"],
+    });
+  }
+  if (anchorResolution.fallbackReason) {
+    params.candidates.push({
+      modelId: anchorResolution.anchor.modelId,
+      allowed: true,
+      reason: anchorResolution.fallbackReason,
+      scoreBreakdown: anchorResolution.mismatchReasons,
+    });
+  }
+
   return finalizeRoute({
     input: params.input,
     primaryModel,
     fallbackModels: fallbackModels.filter((candidate) => candidate !== primaryModel),
     verificationModel,
     reason,
+    anchor: anchorResolution.anchor,
+    whyThisModel: anchorResolution.whyThisModel,
+    anchorFallbackReason: anchorResolution.fallbackReason,
     autoEnhanced: params.input.routerMode !== "manual",
     searchEnabled: params.input.needsSearch,
     candidates: params.candidates,

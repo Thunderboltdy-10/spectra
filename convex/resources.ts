@@ -26,6 +26,31 @@ const CONVERSATION_RESOURCE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_AGENT_RESOURCES_TEACHER = 20;
 const MAX_AGENT_RESOURCES_STUDENT = 5;
 
+type ResourceLifecycleStatus = "uploaded" | "processing" | "processed" | "failed";
+
+type ResourceLifecycleFields = {
+  status: ResourceLifecycleStatus;
+  saveToLibrary?: boolean;
+};
+
+export function resourceRuntimeStatus(resource: {
+  status: ResourceLifecycleStatus;
+  storageId?: Id<"_storage"> | string;
+}) {
+  if (resource.status === "failed") return "failed_processing" as const;
+  if (!resource.storageId) return "storage_missing" as const;
+  if (resource.status === "processed") return "indexed" as const;
+  return resource.status as "uploaded" | "processing";
+}
+
+export function isUsableResourceForLimit(resource: ResourceLifecycleFields) {
+  return resource.saveToLibrary !== false && resource.status !== "failed";
+}
+
+function usableResourceCount(resources: ResourceLifecycleFields[]) {
+  return resources.filter(isUsableResourceForLimit).length;
+}
+
 function resolveMaxResourceFileSizeBytes(value: number | undefined) {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return DEFAULT_MAX_RESOURCE_FILE_SIZE_BYTES;
@@ -138,11 +163,11 @@ export const createUploadUrl = mutation({
         throw new Error("Only pack owner/admin can upload pack resources");
       }
 
-      const count = await ctx.db
+      const resources = await ctx.db
         .query("resources")
         .withIndex("by_pack", (q) => q.eq("packId", args.packId))
         .collect();
-      if (count.length >= LIMITS.maxTeacherFilesPerPack) {
+      if (usableResourceCount(resources) >= LIMITS.maxTeacherFilesPerPack) {
         throw new Error(`Pack file limit reached (${LIMITS.maxTeacherFilesPerPack})`);
       }
     }
@@ -161,12 +186,12 @@ export const createUploadUrl = mutation({
         throw new Error("Only agent creator/admin can upload agent resources");
       }
 
-      const count = await ctx.db
+      const resources = await ctx.db
         .query("resources")
         .withIndex("by_agent", (q) => q.eq("agentId", args.agentId))
         .collect();
       const agentLimit = await resolveAgentResourceLimit(ctx, agent);
-      if (count.length >= agentLimit) {
+      if (usableResourceCount(resources) >= agentLimit) {
         throw new Error(`Agent file limit reached (${agentLimit})`);
       }
     }
@@ -176,7 +201,7 @@ export const createUploadUrl = mutation({
         .query("resources")
         .withIndex("by_owner_scope", (q) => q.eq("ownerUserId", actor._id).eq("scope", "personal"))
         .collect();
-      const personalLibraryCount = mine.filter((resource) => resource.saveToLibrary !== false).length;
+      const personalLibraryCount = usableResourceCount(mine);
       if (!args.ignorePersonalLimit && personalLibraryCount >= LIMITS.maxStudentPersonalFiles) {
         throw new Error(`Personal file limit reached (${LIMITS.maxStudentPersonalFiles})`);
       }
@@ -251,13 +276,23 @@ export const registerResource = mutation({
       if (!canUploadToAgent) {
         throw new Error("Only agent creator/admin can upload agent resources");
       }
-      const count = await ctx.db
+      const resources = await ctx.db
         .query("resources")
         .withIndex("by_agent", (q) => q.eq("agentId", args.agentId))
         .collect();
       const agentLimit = await resolveAgentResourceLimit(ctx, agent);
-      if (count.length >= agentLimit) {
+      if (usableResourceCount(resources) >= agentLimit) {
         throw new Error(`Agent file limit reached (${agentLimit})`);
+      }
+    }
+
+    if (args.scope === "personal" && args.saveToLibrary !== false) {
+      const mine = await ctx.db
+        .query("resources")
+        .withIndex("by_owner_scope", (q) => q.eq("ownerUserId", actor._id).eq("scope", "personal"))
+        .collect();
+      if (usableResourceCount(mine) >= LIMITS.maxStudentPersonalFiles) {
+        throw new Error(`Personal file limit reached (${LIMITS.maxStudentPersonalFiles})`);
       }
     }
 
@@ -288,12 +323,12 @@ export const registerResource = mutation({
     });
 
     if (args.scope === "agent" && args.agentId) {
-      const count = await ctx.db
+      const resources = await ctx.db
         .query("resources")
         .withIndex("by_agent", (q) => q.eq("agentId", args.agentId))
         .collect();
       await ctx.db.patch(args.agentId, {
-        resourceCount: count.length,
+        resourceCount: usableResourceCount(resources),
         updatedAt: now,
       });
     }
@@ -323,8 +358,11 @@ export const completeResourceIngestion = mutation({
     }
 
     const resource = await ctx.db.get(args.resourceId);
-    if (!resource || resource.orgId !== actor.orgId) {
-      throw new Error("Resource not found");
+    if (!resource) {
+      return { ok: true, alreadyDeleted: true };
+    }
+    if (resource.orgId !== actor.orgId) {
+      throw new Error("No permission to delete resource");
     }
 
     if (resource.scope === "pack") {
@@ -598,7 +636,7 @@ export const enqueueResourceProcessing = mutation({
     }
 
     const now = Date.now();
-    const attempts = resource.processingAttempts ?? 0;
+    const attempts = resource.status === "failed" ? 0 : resource.processingAttempts ?? 0;
     const stalled = resource.status === "processing" && now - resource.updatedAt > RESOURCE_PROCESSING_STALE_MS;
     if (resource.status === "processing" && !stalled) {
       return { ok: true, skipped: true, reason: "already_processing" as const };
@@ -791,6 +829,9 @@ export const listPersonalResources = query({
         error: row.error,
         processingAttempts: row.processingAttempts,
         pinned: row.pinned,
+        usable: isUsableResourceForLimit(row),
+        savedToLibrary: row.saveToLibrary !== false,
+        runtimeStatus: resourceRuntimeStatus(row),
         createdAt: row.createdAt,
         updatedAt: row.updatedAt,
       }));
@@ -816,10 +857,16 @@ export const listAgentResources = query({
       throw new Error("Not authorized for this agent");
     }
 
-    return ctx.db
+    const rows = await ctx.db
       .query("resources")
       .withIndex("by_agent", (q) => q.eq("agentId", args.agentId))
       .collect();
+    return rows.map((row) => ({
+      ...row,
+      usable: isUsableResourceForLimit(row),
+      savedToLibrary: row.saveToLibrary !== false,
+      runtimeStatus: resourceRuntimeStatus(row),
+    }));
   },
 });
 
@@ -904,7 +951,7 @@ export const assignResourcesToAgent = mutation({
       .withIndex("by_agent", (q) => q.eq("agentId", args.agentId))
       .collect();
     const agentLimit = await resolveAgentResourceLimit(ctx, agent);
-    const capacity = Math.max(0, agentLimit - existingAgentResources.length);
+    const capacity = Math.max(0, agentLimit - usableResourceCount(existingAgentResources));
     if (capacity <= 0) {
       throw new Error(`Agent file limit reached (${agentLimit})`);
     }
@@ -956,12 +1003,12 @@ export const assignResourcesToAgent = mutation({
       assigned += 1;
     }
 
-    const updatedCount = await ctx.db
+    const updatedResources = await ctx.db
       .query("resources")
       .withIndex("by_agent", (q) => q.eq("agentId", args.agentId))
       .collect();
     await ctx.db.patch(args.agentId, {
-      resourceCount: updatedCount.length,
+      resourceCount: usableResourceCount(updatedResources),
       updatedAt: now,
     });
 
@@ -992,10 +1039,16 @@ export const listPackResources = query({
       throw new Error("Not authorized for this pack");
     }
 
-    return ctx.db
+    const rows = await ctx.db
       .query("resources")
       .withIndex("by_pack", (q) => q.eq("packId", args.packId))
       .collect();
+    return rows.map((row) => ({
+      ...row,
+      usable: isUsableResourceForLimit(row),
+      savedToLibrary: row.saveToLibrary !== false,
+      runtimeStatus: resourceRuntimeStatus(row),
+    }));
   },
 });
 
@@ -1011,7 +1064,10 @@ export const deleteResource = mutation({
     }
 
     const resource = await ctx.db.get(args.resourceId);
-    if (!resource || resource.orgId !== actor.orgId) {
+    if (!resource) {
+      return { ok: true, alreadyDeleted: true };
+    }
+    if (resource.orgId !== actor.orgId) {
       throw new Error("Resource not found");
     }
 
@@ -1045,7 +1101,7 @@ export const deleteResource = mutation({
     }
 
     if (resource.storageId) {
-      await ctx.storage.delete(resource.storageId);
+      await ctx.storage.delete(resource.storageId).catch(() => {});
     }
     await ctx.db.delete(resource._id);
 
@@ -1055,7 +1111,7 @@ export const deleteResource = mutation({
         .withIndex("by_agent", (q) => q.eq("agentId", resource.agentId!))
         .collect();
       await ctx.db.patch(resource.agentId, {
-        resourceCount: remaining.length,
+        resourceCount: usableResourceCount(remaining),
         updatedAt: Date.now(),
       });
     }
@@ -1143,6 +1199,9 @@ export const getResourcesByIds = query({
       pinned?: boolean;
       processingAttempts?: number;
       error?: string;
+      usable: boolean;
+      savedToLibrary: boolean;
+      runtimeStatus: "uploaded" | "processing" | "indexed" | "failed_processing" | "storage_missing";
     }> = [];
 
     for (const resourceId of args.resourceIds) {
@@ -1198,6 +1257,9 @@ export const getResourcesByIds = query({
         pinned: resource.pinned,
         processingAttempts: resource.processingAttempts,
         error: resource.error,
+        usable: isUsableResourceForLimit(resource),
+        savedToLibrary: resource.saveToLibrary !== false,
+        runtimeStatus: resourceRuntimeStatus(resource),
       });
     }
 

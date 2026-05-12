@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { selectModelForPhase } from "@/lib/routing/phase-router";
+import type { StableModelAnchor } from "@/lib/model-anchor";
 import type { CatalogModelEntry } from "@/lib/model-selection";
 
 function baseCatalog(): CatalogModelEntry[] {
@@ -134,6 +135,45 @@ describe("phase-router", () => {
     expect(decision.selectedModel).toBe("alpha/model-a");
     const alpha = decision.candidates.find((row) => row.modelId === "alpha/model-a");
     expect(alpha?.scoreBreakdown?.join(" ")).toContain("cache_warm_boost");
+  });
+
+  it("reuses a compatible route anchor before applying recent-model diversity", () => {
+    const now = Date.now();
+    const modelAnchor: StableModelAnchor = {
+      modelId: "alpha/model-a",
+      source: "auto",
+      routeKey: "general:normal:no-search:no-rag:text",
+      reason: "previous anchored route",
+      requiredCapabilities: [],
+      spendingTier: "normal",
+      createdAt: now - 1_000,
+      updatedAt: now - 1_000,
+      expiresAt: now + 60_000,
+    };
+
+    const decision = selectModelForPhase({
+      phaseId: "analysis",
+      phaseLabel: "Primary response",
+      mode: "general",
+      routerMode: "auto",
+      spendingTier: "normal",
+      thinkingLevel: "medium",
+      stakes: "medium",
+      messageLength: 220,
+      recentModels: ["alpha/model-a", "alpha/model-a", "alpha/model-a"],
+      modelAnchor,
+      modelCatalog: baseCatalog().filter((model) => model.modelId !== "delta/expensive"),
+      modelRuntimeStats: {
+        "alpha/model-a": { successCount: 20, failureCount: 1, avgLatencyMs: 2200 },
+        "beta/model-b": { successCount: 35, failureCount: 1, avgLatencyMs: 2100 },
+      },
+      seedKey: "route-anchor-reuse",
+    });
+
+    expect(decision.selectedModel).toBe("alpha/model-a");
+    expect(decision.modelAnchor?.modelId).toBe("alpha/model-a");
+    expect(decision.anchorReuseReason).toContain("stable conversation model anchor reused");
+    expect(decision.reason).toContain("stable conversation model anchor reused");
   });
 
   it("keeps challengers deprioritized on high-stakes routes", () => {

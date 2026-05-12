@@ -1,8 +1,8 @@
 "use client";
 
 import { useMemo } from "react";
-import { Brain, ChevronRight } from "lucide-react";
-import { ExecutionTimeline } from "@/components/shared/execution-timeline";
+import { Activity, Brain, ChevronRight } from "lucide-react";
+import { AiRunTimeline } from "@/components/chat/ai-runtime-components";
 import { cn } from "@/lib/utils";
 import type { RouteTrace } from "@/types";
 
@@ -29,6 +29,9 @@ export function ThinkingBlock({ content, streaming = false, routeTrace, segments
 
   const hasTimeline = routeTrace?.phasePlan && routeTrace.phasePlan.length > 0;
   const hasSearchTrace = routeTrace?.searchTrace && routeTrace.searchTrace.strategy && routeTrace.searchTrace.strategy !== "none";
+  const hasStructuredEvents = Boolean(
+    routeTrace?.executionEvents?.length || hasTimeline || hasSearchTrace,
+  );
 
   const paragraphs = useMemo(() => {
     if (segments.length > 0) {
@@ -48,24 +51,35 @@ export function ThinkingBlock({ content, streaming = false, routeTrace, segments
     }));
   }, [clean, segments, streaming]);
 
-  const hasExecutionContent = hasTimeline || hasSearchTrace || paragraphs.length > 0;
+  const hasExecutionContent = hasStructuredEvents || paragraphs.length > 0;
   if (!hasExecutionContent) return null;
 
   return (
-    <div className="mb-4 space-y-1">
+    <div className="mb-4 space-y-2">
       {/* Inline thinking indicator */}
       {streaming && (
-        <div className="flex items-center gap-2 text-[11px] font-medium text-[var(--text-tertiary)] mb-2">
+        <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-[color-mix(in_oklab,var(--accent-cyan)_24%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_6%,var(--bg-secondary))] px-2.5 py-1 text-[11px] font-semibold text-[var(--text-secondary)]">
           <span className="relative inline-flex h-5 w-5 items-center justify-center">
             <Brain className="h-3.5 w-3.5 text-[var(--accent-cyan)]" />
             <span className="absolute inset-0 rounded-full animate-ping opacity-20 bg-[var(--accent-cyan)]" />
           </span>
-          <span className="tracking-wide">Thinking</span>
+          <span className="tracking-wide">Run active</span>
         </div>
       )}
 
-      {/* Paragraph sections */}
-      {paragraphs.map((para, idx) => {
+      {/* Route execution events are preferred over raw model reasoning text. */}
+      {hasStructuredEvents && (
+        <div className="pt-1">
+          <div className="mb-1.5 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-tertiary)]">
+            <Activity className="h-3 w-3" />
+            Runtime timeline
+          </div>
+          <AiRunTimeline routeTrace={routeTrace} streaming={streaming} compact />
+        </div>
+      )}
+
+      {/* Raw reasoning fallback only appears when no structured runtime events exist. */}
+      {!hasStructuredEvents && paragraphs.map((para, idx) => {
         const isLast = idx === paragraphs.length - 1;
         const shouldBeOpen = para.isStreaming || (!streaming && isLast && paragraphs.length === 1);
         return (
@@ -80,7 +94,7 @@ export function ThinkingBlock({ content, streaming = false, routeTrace, segments
                 "text-xs font-medium text-[var(--text-secondary)] truncate",
                 para.isStreaming && "stream-glow-text"
               )}>
-                {para.title}
+                {segments.length > 0 ? para.title : "Provider reasoning"}
               </span>
               {para.isStreaming && (
                 <span className="ml-auto h-1.5 w-1.5 rounded-full bg-[var(--accent-cyan)] animate-pulse" />
@@ -92,13 +106,6 @@ export function ThinkingBlock({ content, streaming = false, routeTrace, segments
           </details>
         );
       })}
-
-      {/* Route execution events */}
-      {(hasTimeline || hasSearchTrace) && (
-        <div className="pt-2">
-          <ExecutionTimeline routeTrace={routeTrace} compact />
-        </div>
-      )}
     </div>
   );
 }

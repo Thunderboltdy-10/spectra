@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { ChevronRight, LockKeyhole, Route } from "lucide-react";
 import { usePanel } from "@/context/panel-context";
 import type { RouteTrace } from "@/types";
 
@@ -43,30 +44,41 @@ export function ModelRoutingBadge({ modelUsed, whyThisResponse, routeTrace }: Mo
   const formattedName = useMemo(() => formatModelName(activeModelId ?? ""), [activeModelId]);
   const hasTrace = Boolean(routeTrace);
   const manualLock = routeTrace?.inputs.routerMode === "manual";
-  const hintText = whyThisResponse ? "Why this model" : "Routing details";
+  const hintText = manualLock ? "Manual" : whyThisResponse ? "Why" : "Trace";
   const isActive = activeView === "route-trace";
 
   if (!activeModelId) return null;
 
   return (
     <div className="inline-flex min-w-0 items-center">
-      {hasTrace && !manualLock ? (
+      {hasTrace ? (
         <button
           type="button"
           onClick={() => openPanel("route-trace", { routeTrace })}
-          title={whyThisResponse ?? "Model route details"}
-          className="group inline-flex min-w-0 cursor-pointer items-baseline gap-2 text-left transition"
+          title={whyThisResponse ?? (manualLock ? "Manual model route details" : "Model route details")}
+          className={`group inline-flex min-w-0 cursor-pointer items-center gap-2 rounded-full border px-2.5 py-1.5 text-left shadow-[0_12px_36px_-28px_var(--text-primary)] transition hover:-translate-y-px ${
+            isActive
+              ? "border-[color-mix(in_oklab,var(--brand-primary)_45%,var(--border-default))] bg-[color-mix(in_oklab,var(--brand-primary)_9%,var(--bg-secondary))]"
+              : "border-[var(--border-default)] bg-[var(--bg-secondary)] hover:border-[color-mix(in_oklab,var(--accent-cyan)_34%,var(--border-default))]"
+          }`}
         >
-          <span className={`truncate text-[15px] font-semibold transition ${isActive ? "text-[var(--brand-primary)]" : "text-[var(--text-primary)]"}`}>{formattedName}</span>
-          <span className={`text-[11px] underline decoration-dotted underline-offset-4 transition ${isActive ? "text-[var(--brand-primary)] decoration-[var(--brand-primary)]/50" : "text-[var(--text-secondary)] group-hover:text-[var(--text-primary)]"}`}>
+          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--bg-primary)] text-[var(--text-secondary)] ring-1 ring-[var(--border-default)]">
+            {manualLock ? <LockKeyhole className="h-3.5 w-3.5" /> : <Route className="h-3.5 w-3.5" />}
+          </span>
+          <span className={`truncate text-[13px] font-semibold transition ${isActive ? "text-[var(--brand-primary)]" : "text-[var(--text-primary)]"}`}>{formattedName}</span>
+          <span className={`hidden text-[10px] font-semibold uppercase tracking-[0.14em] transition sm:inline ${isActive ? "text-[var(--brand-primary)]" : "text-[var(--text-tertiary)] group-hover:text-[var(--text-secondary)]"}`}>
             {hintText}
           </span>
+          <ChevronRight className={`h-3.5 w-3.5 shrink-0 transition group-hover:translate-x-0.5 ${isActive ? "text-[var(--brand-primary)]" : "text-[var(--text-tertiary)]"}`} />
         </button>
       ) : (
-        <div className="inline-flex min-w-0 items-baseline gap-2">
-          <span className="truncate text-[15px] font-semibold text-[var(--text-primary)]">{formattedName}</span>
+        <div className="inline-flex min-w-0 items-center gap-2 rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-1.5">
+          <span className="truncate text-[13px] font-semibold text-[var(--text-primary)]">{formattedName}</span>
           {manualLock ? (
-            <span className="text-[11px] text-[var(--text-secondary)]">Selected manually</span>
+            <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
+              <LockKeyhole className="h-3 w-3" />
+              Manual
+            </span>
           ) : null}
         </div>
       )}

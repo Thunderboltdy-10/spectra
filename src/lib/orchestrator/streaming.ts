@@ -208,7 +208,7 @@ export async function runAssistantStreaming(params: {
           const finalContent = assistantMessage?.content?.trim() ?? "";
           responseText = finalContent;
           for (const chunk of chunkString(finalContent, 28)) {
-            await params.send({ type: "delta", content: chunk });
+            await params.send({ type: "text_delta", content: chunk });
           }
           break;
         }
@@ -364,7 +364,7 @@ export async function runAssistantStreaming(params: {
         if (event.type === "delta") {
           roundResponse += event.content;
           responseText += event.content;
-          await params.send({ type: "delta", content: event.content });
+          await params.send({ type: "text_delta", content: event.content });
         }
         if (event.type === "thinking") {
           thinkingContent += event.content;
@@ -434,7 +434,7 @@ export async function runAssistantStreaming(params: {
     verificationSubcalls = verified.subcalls;
 
     for (const chunk of chunkString(responseText, 24)) {
-      await params.send({ type: "delta", content: chunk });
+      await params.send({ type: "text_delta", content: chunk });
     }
   }
 
@@ -797,7 +797,7 @@ export async function runCollaborativeStreaming(params: {
       if (event.type === "delta") {
         roundResponse += event.content;
         responseText += event.content;
-        await params.send({ type: "delta", content: event.content });
+        await params.send({ type: "text_delta", content: event.content });
       }
       if (event.type === "thinking") {
         await params.send({ type: "thinking", content: event.content });

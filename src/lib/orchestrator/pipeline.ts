@@ -4,6 +4,7 @@ import { convexAction, convexMutation, convexQuery } from "@/lib/convex-server";
 import { openRouterChatCompletion, openRouterEmbeddingRequest, openRouterGenerateImage } from "@/lib/openrouter";
 import { canUseInTier } from "@/lib/routing/heuristic";
 import { buildPhasePlan, selectModelForPhase } from "@/lib/routing/phase-router";
+import { buildStableModelAnchorRouteKey, type StableModelAnchor } from "@/lib/model-anchor";
 import {
   buildSystemPrompt,
   checkPromptPolicyResponse,
@@ -124,6 +125,10 @@ type ChatRequestBody = {
   regenerate?: boolean;
   retryAttempt?: number;
   skipUserMessagePersist?: boolean;
+  clarification?: {
+    sourceMessageId?: string;
+    answers?: Record<string, string | string[] | boolean>;
+  };
   parentMessageId?: string;
   attachmentTypes?: string[];
   attachmentResourceIds?: string[];
@@ -176,6 +181,26 @@ type StructuredError = {
   message: string;
   retryable?: boolean;
 };
+
+function normalizeClarificationAnswers(value: unknown): Record<string, string | string[] | boolean> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const normalized: Record<string, string | string[] | boolean> = {};
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (!key.trim()) continue;
+    if (typeof raw === "string") {
+      normalized[key] = raw.slice(0, 2000);
+    } else if (typeof raw === "boolean") {
+      normalized[key] = raw;
+    } else if (Array.isArray(raw)) {
+      const items = raw
+        .filter((item): item is string => typeof item === "string")
+        .map((item) => item.slice(0, 500))
+        .slice(0, 20);
+      normalized[key] = items;
+    }
+  }
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
+}
 
 const MODE_MAX_TOKENS: Record<StudyMode, number> = {
   auto: 3072,
@@ -1123,10 +1148,12 @@ export async function runChatPipeline(request: NextRequest) {
     message: normalizedMessage,
     block: lastClarificationBlock,
   });
+  const clarificationAnswers = normalizeClarificationAnswers(body.clarification?.answers);
+  const structuredClarificationResume = Boolean(clarificationAnswers && lastAssistantWasClarification);
   const shouldReuseRecentContext = Boolean(
     recentContextCache
     && lastAssistantWasClarification
-    && clarificationFollowUp,
+    && (clarificationFollowUp || structuredClarificationResume),
   );
   if (recentContextCache && lastAssistantWasClarification) {
     void convexMutation("chats:setRecentContext", {
@@ -2314,6 +2341,32 @@ export async function runChatPipeline(request: NextRequest) {
       ...globalRecentAssistantModels.filter((model): model is string => Boolean(model && model.trim())),
     ],
   ).slice(-20);
+  const previousRouteTrace = previousAssistantTurn?.routeTrace;
+  const previousModelAnchor: StableModelAnchor | undefined =
+    previousRouteTrace?.requestPlan?.modelAnchor
+    ?? (previousAssistantTurn?.modelUsed
+      ? {
+          modelId: previousAssistantTurn.modelUsed,
+          source: previousRouteTrace?.inputs.routerMode === "manual"
+            ? "manual"
+            : previousRouteTrace?.inputs.routerMode === "openrouter_auto"
+              ? "openrouter_auto"
+              : "auto",
+          routeKey: buildStableModelAnchorRouteKey({
+            mode: previousRouteTrace?.inputs.mode ?? effectiveMode,
+            spendingTier: previousRouteTrace?.inputs.spendingTier ?? budget.tier,
+            requiredCapabilities: previousRouteTrace?.routePlan?.candidateModelRequirements.required ?? [],
+            needsSearch: previousRouteTrace?.inputs.needsSearch,
+            needsRag: previousRouteTrace?.inputs.needsRag,
+          }),
+          reason: previousRouteTrace?.selected.reason ?? "Previous conversation model anchor",
+          requiredCapabilities: previousRouteTrace?.routePlan?.candidateModelRequirements.required ?? [],
+          spendingTier: previousRouteTrace?.inputs.spendingTier ?? budget.tier,
+          createdAt: previousAssistantTurn.createdAt,
+          updatedAt: previousAssistantTurn.createdAt,
+          expiresAt: previousRouteTrace?.requestPlan?.affinity?.expiresAt ?? previousAssistantTurn.createdAt + (cacheWindow.ttlMs ?? 5 * 60 * 1000),
+        }
+      : undefined);
   const constrainedCatalog = (() => {
     if (!selectedAgent) return catalog;
     const allowlist = Array.from(
@@ -2427,6 +2480,7 @@ export async function runChatPipeline(request: NextRequest) {
     desiredContextTokens: routePlan.contextWindowStrategy.desiredContextTokens,
     preferLargeContext: routePlan.contextWindowStrategy.preferLargeContext,
     cacheWindow,
+    modelAnchor: previousModelAnchor,
     manualModelConfirmedExpensive: Boolean(body.confirmExpensiveModel),
     modelCatalog: constrainedCatalog,
     modelRuntimeStats: runtimeStatMap,
@@ -2486,16 +2540,20 @@ export async function runChatPipeline(request: NextRequest) {
         fallbackModels: routeDecision.fallbackModels,
         helpers: [],
         affinity: {
-          lastModel: cacheWindow?.lastModel,
-          retained: Boolean(cacheWindow?.lastModel && cacheWindow.lastModel === routeDecision.selectedModel),
-          reason: cacheWindow?.lastModel === routeDecision.selectedModel
-            ? "Recent compatible model retained for continuity and prompt-cache affinity."
-            : previousAssistantModel
-              ? "Model changed because current capability, cost, freshness, or reliability signals justified rerouting."
-              : "No prior model affinity for this conversation.",
-          expiresAt: cacheWindow?.lastUsedAt ? cacheWindow.lastUsedAt + (cacheWindow.ttlMs ?? 5 * 60 * 1000) : undefined,
+          lastModel: routeDecision.modelAnchor?.modelId ?? cacheWindow?.lastModel,
+          retained: Boolean(routeDecision.anchorReuseReason && routeDecision.modelAnchor?.modelId === routeDecision.selectedModel),
+          reason: routeDecision.anchorReuseReason
+            ?? routeDecision.anchorFallbackReason
+            ?? (cacheWindow?.lastModel === routeDecision.selectedModel
+              ? "Recent compatible model retained for continuity and prompt-cache affinity."
+              : previousAssistantModel
+                ? "Model changed because current capability, cost, freshness, or reliability signals justified rerouting."
+                : "No prior model affinity for this conversation."),
+          expiresAt: routeDecision.modelAnchor?.expiresAt
+            ?? (cacheWindow?.lastUsedAt ? cacheWindow.lastUsedAt + (cacheWindow.ttlMs ?? 5 * 60 * 1000) : undefined),
         },
-        warnings: [],
+        modelAnchor: routeDecision.modelAnchor,
+        warnings: routeDecision.anchorFallbackReason ? [routeDecision.anchorFallbackReason] : [],
       },
       toolchain: ["phase_router"],
       routePlan,
@@ -2532,6 +2590,33 @@ export async function runChatPipeline(request: NextRequest) {
         | undefined,
     },
   };
+  if (structuredClarificationResume && clarificationAnswers) {
+    route.trace.toolchain.push("clarification_answered_inline");
+    (route.trace as {
+      clarificationResume?: {
+        sourceMessageId?: string;
+        answers: Record<string, string | string[] | boolean>;
+      };
+    }).clarificationResume = {
+      sourceMessageId:
+        typeof body.clarification?.sourceMessageId === "string" && body.clarification.sourceMessageId.trim()
+          ? body.clarification.sourceMessageId.trim()
+          : lastAssistantMessage?._id,
+      answers: clarificationAnswers,
+    };
+    route.trace.executionEvents = [
+      ...(route.trace.executionEvents ?? []),
+      {
+        id: `clarification-answered-${Date.now()}`,
+        kind: "clarification",
+        label: "Clarification answered",
+        status: "completed",
+        detail: `${Object.keys(clarificationAnswers).length} inline answer(s) received; no user message was created.`,
+        startedAt: Date.now(),
+        finishedAt: Date.now(),
+      },
+    ];
+  }
   const appendSubcall = (entry: {
     phaseId: string;
     label: string;
@@ -2569,7 +2654,11 @@ export async function runChatPipeline(request: NextRequest) {
     if (!normalized) return "tool" as const;
     if (normalized.includes("search")) return "search" as const;
     if (normalized.includes("memory")) return "memory" as const;
-    if (normalized === "apply_actions" || normalized.includes("artifact") || normalized.includes("widget") || normalized.includes("planner")) {
+    if (normalized.includes("artifact")) return "artifact" as const;
+    if (normalized.includes("widget") || normalized.includes("planner") || normalized.includes("workstream") || normalized.includes("workspace")) {
+      return "workspace" as const;
+    }
+    if (normalized === "apply_actions") {
       return "action" as const;
     }
     if (normalized.includes("skill")) return "skill" as const;
@@ -2648,6 +2737,24 @@ export async function runChatPipeline(request: NextRequest) {
       return;
     }
 
+    if (event.type === "model_fallback") {
+      const fromModel = typeof event.fromModel === "string" ? event.fromModel : "model";
+      const toModel = typeof event.toModel === "string" ? event.toModel : "fallback model";
+      const reason = typeof event.reason === "string" ? event.reason : "Provider fallback selected.";
+      const attemptIndex = typeof event.attemptIndex === "number" ? event.attemptIndex : existing.length;
+      upsert(`model-fallback:${fromModel}:${toModel}:${attemptIndex}`, {
+        id: `model-fallback:${fromModel}:${toModel}:${attemptIndex}`,
+        kind: "routing",
+        label: `Switched to ${formatRuntimeLabel(toModel, "fallback model")}`,
+        status: "completed",
+        detail: `Fallback from ${fromModel}: ${reason}`,
+        startedAt: now,
+        finishedAt: now,
+      });
+      route.trace.executionEvents = existing;
+      return;
+    }
+
     if (event.type === "skill_loaded") {
       const skill = (event as { skill?: { id?: string; name?: string } | string }).skill;
       existing.push({
@@ -2671,6 +2778,7 @@ export async function runChatPipeline(request: NextRequest) {
         label: formatRuntimeLabel(toolName, "Tool"),
         status: "running",
         detail: typeof event.arguments === "string" ? event.arguments.slice(0, 280) : undefined,
+        inputPreview: typeof event.arguments === "string" ? event.arguments : undefined,
         toolName,
         toolCallId,
         startedAt: now,
@@ -2683,6 +2791,12 @@ export async function runChatPipeline(request: NextRequest) {
       const toolName = typeof event.toolName === "string" ? event.toolName : undefined;
       const toolCallId = typeof event.toolCallId === "string" ? event.toolCallId : `unknown-${existing.length + 1}`;
       const resultRecord = event.result && typeof event.result === "object" ? event.result as Record<string, unknown> : undefined;
+      const errorMessage =
+        typeof (event as { error?: unknown }).error === "string"
+          ? String((event as { error?: unknown }).error)
+          : (event as { error?: { message?: unknown } }).error?.message
+            ? String((event as { error?: { message?: unknown } }).error?.message)
+            : undefined;
       const detail =
         typeof event.summary === "string" && event.summary.trim()
           ? event.summary
@@ -2693,8 +2807,10 @@ export async function runChatPipeline(request: NextRequest) {
         id: `tool:${toolCallId}`,
         kind: toolEventKind(toolName),
         label: formatRuntimeLabel(toolName, "Tool"),
-        status: "completed",
+        status: (event as { status?: unknown }).status === "failed" ? "failed" : "completed",
         detail,
+        resultPreview: event.result,
+        error: errorMessage,
         toolName,
         toolCallId,
         finishedAt: now,
@@ -2706,9 +2822,17 @@ export async function runChatPipeline(request: NextRequest) {
 
     if (event.type === "action_applied" || event.type === "artifact_patch_applied" || event.type === "version_restored" || event.type === "widget_created" || event.type === "widget_updated" || event.type === "workstream_layout_updated" || event.type === "render_instruction") {
       const payload = event as Record<string, unknown>;
+      const operationKind =
+        event.type === "artifact_patch_applied" || event.type === "version_restored"
+          ? "artifact"
+          : event.type === "widget_created" || event.type === "widget_updated" || event.type === "workstream_layout_updated"
+            ? "workspace"
+            : event.type === "render_instruction"
+              ? "skill"
+              : "action";
       existing.push({
         id: `runtime-action-${existing.length + 1}`,
-        kind: event.type === "render_instruction" ? "skill" : "action",
+        kind: operationKind,
         label: formatRuntimeLabel(String(payload.toolName ?? payload.title ?? event.type), "Runtime action"),
         status: "completed",
         detail: typeof payload.summary === "string" ? payload.summary : typeof payload.message === "string" ? payload.message : undefined,
@@ -2960,6 +3084,32 @@ export async function runChatPipeline(request: NextRequest) {
     resourceIds: body.attachmentResourceIds ?? [],
     convexQuery,
   });
+  if (attachments.prepared.length > 0 || attachments.skipped.length > 0) {
+    const resourceEvents = [
+      ...attachments.prepared.map((attachment) => ({
+        id: `resource:${attachment.resourceId}`,
+        kind: "resource" as const,
+        label: attachment.filename,
+        status: "completed" as const,
+        detail: `${attachment.type} resource is available to the selected runtime context.`,
+        startedAt: Date.now(),
+        finishedAt: Date.now(),
+      })),
+      ...attachments.skipped.map((attachment) => ({
+        id: `resource:${attachment.resourceId}`,
+        kind: "resource" as const,
+        label: attachment.filename,
+        status: attachment.runtimeStatus === "failed_processing" || attachment.runtimeStatus === "storage_missing" ? "failed" as const : "skipped" as const,
+        detail: attachment.reason,
+        startedAt: Date.now(),
+        finishedAt: Date.now(),
+      })),
+    ];
+    route.trace.executionEvents = [
+      ...(route.trace.executionEvents ?? []).filter((event) => !event.id.startsWith("resource:")),
+      ...resourceEvents,
+    ];
+  }
   const attachmentCitations = attachments.prepared.map((attachment) => ({
     resourceId: attachment.resourceId,
     filename: attachment.filename,
@@ -3718,6 +3868,18 @@ Rules:
   if (includeRuntimeContextBlocks) {
     systemPromptParts.push(`=== RUNTIME CONTEXT ===\n${runtimeContextBlock}\n=== END RUNTIME CONTEXT ===`);
   }
+  if (includeRuntimeContextBlocks && structuredClarificationResume && clarificationAnswers) {
+    const answerLines = Object.entries(clarificationAnswers).map(([questionId, answer]) => {
+      const formatted = Array.isArray(answer) ? answer.join(", ") : typeof answer === "boolean" ? (answer ? "Yes" : "No") : answer;
+      return `- ${questionId}: ${formatted}`;
+    });
+    systemPromptParts.push(
+      `=== INLINE CLARIFICATION RESUME ===
+The user answered a clarification card inline. Treat these answers as resume metadata for the interrupted run, not as a new standalone prompt.
+${answerLines.join("\n")}
+=== END INLINE CLARIFICATION RESUME ===`,
+    );
+  }
   if (includeRuntimeContextBlocks && learningContextPrompt) {
     systemPromptParts.push(`=== LEARNING CONTEXT ===\n${learningContextPrompt}\n=== END LEARNING CONTEXT ===`);
   }
@@ -4164,17 +4326,6 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
   };
   const emitPhaseUpdate = async (phaseId: string, status: PhaseUpdateStatus, detail?: string) => {
     const phasePlan = applyPhaseUpdate(phaseId, status, detail);
-    if (status === "in_progress") {
-      await emitRuntimeEvent({
-        type: "thinking_segment",
-        segment: {
-          id: phaseId,
-          label: phaseId.replace(/[_-]/g, " "),
-          content: detail ?? "",
-          status: "running",
-        },
-      });
-    }
     await send({
       type: "phase_update",
       phaseId,
@@ -4420,6 +4571,9 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
     try {
       // Flush events buffered before the Response (and its reader) were created
       for (const event of earlyEventBuffer) {
+        if (event.type === "model_selected") {
+          captureRuntimeEvent(event as RuntimeEvent);
+        }
         await send(event);
       }
 
@@ -4897,6 +5051,13 @@ Do not claim you lack a supported tool when search, retrieval, or memory context
       const fallbackModels = manualLockRequested ? [] : route.fallbackModels;
       const onFallback = (event: { fromModel: string; toModel: string; error: string; attemptIndex: number }) => {
         route.trace.fallbacks.push(event);
+        void emitRuntimeEvent({
+          type: "model_fallback",
+          fromModel: event.fromModel,
+          toModel: event.toModel,
+          reason: event.error,
+          attemptIndex: event.attemptIndex,
+        });
       };
 
       if (route.trace.phasePlan?.some((phase) => phase.id === "analysis")) {

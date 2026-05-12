@@ -3,7 +3,9 @@ import type { RouteTrace, RuntimeExecutionPath, StudyMode } from "@/types";
 export type RuntimeSurface = "chat" | "workspace" | "artifact";
 
 export type RuntimeEventType =
+  | "text_delta"
   | "delta"
+  | "phase_update"
   | "thinking"
   | "thinking_segment"
   | "tool_call"
@@ -26,6 +28,7 @@ export type RuntimeEventType =
   | "render_instruction"
   | "navigation_instruction"
   | "model_selected"
+  | "model_fallback"
   | "mode_switched"
   | "notice"
   | "collab_start"
@@ -128,6 +131,66 @@ export type RuntimeEventBase = {
   timestamp?: number;
 };
 
+export type AiRunStatus =
+  | "queued"
+  | "routing"
+  | "checking_context"
+  | "waiting_for_clarification"
+  | "running"
+  | "streaming"
+  | "applying_side_effects"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export type RuntimeAttachmentRef = {
+  resourceId: string;
+  filename?: string;
+  status?: "local_pending" | "uploading" | "uploaded" | "processing" | "indexed" | "failed_processing" | "storage_missing" | "detached" | "deleted" | "unavailable";
+  usable?: boolean;
+  reason?: string;
+};
+
+export type SelectedModelSnapshot = {
+  modelId: string;
+  provider?: string;
+  family?: string;
+  reason?: string;
+};
+
+export type AiRun = {
+  id: string;
+  surface: RuntimeSurface;
+  status: AiRunStatus;
+  userId?: string;
+  conversationId?: string;
+  threadId?: string;
+  workspaceId?: string;
+  artifactId?: string;
+  parentRunId?: string;
+  createdAt?: number;
+  startedAt?: number;
+  completedAt?: number;
+  input?: {
+    text: string;
+    attachments: RuntimeAttachmentRef[];
+    selectedItems?: Array<{ type: string; id: string }>;
+    mode?: string;
+    userSelectedModelId?: string;
+  };
+  events: AiRunEvent[];
+  selectedModel?: SelectedModelSnapshot;
+  modelUsed?: string;
+  activeModel?: string;
+  executionPath?: RuntimeExecutionPath;
+  routeTrace?: RouteTrace;
+};
+
+export type RuntimeTextDeltaEvent = RuntimeEventBase & {
+  type: "text_delta";
+  content: string;
+};
+
 export type RuntimeToolCallEvent = RuntimeEventBase & {
   type: "tool_call";
   toolName: string;
@@ -165,6 +228,14 @@ export type RuntimeModelSelectedEvent = RuntimeEventBase & {
   routeTrace?: RouteTrace;
 };
 
+export type RuntimeModelFallbackEvent = RuntimeEventBase & {
+  type: "model_fallback";
+  fromModel: string;
+  toModel: string;
+  reason: string;
+  attemptIndex?: number;
+};
+
 export type RuntimeDoneEvent = RuntimeEventBase & {
   type: "done";
   messageId?: string;
@@ -190,6 +261,7 @@ export type RuntimeErrorEvent = RuntimeEventBase & {
 export type RuntimeGenericEvent = RuntimeEventBase & Record<string, unknown>;
 
 export type RuntimeEvent =
+  | RuntimeTextDeltaEvent
   | RuntimeToolCallEvent
   | RuntimeToolResultEvent
   | RuntimePhaseEvent
@@ -197,11 +269,37 @@ export type RuntimeEvent =
   | RuntimeModeSwitchedEvent
   | RuntimeNavigationInstructionEvent
   | RuntimeModelSelectedEvent
+  | RuntimeModelFallbackEvent
   | RuntimeDoneEvent
   | RuntimeErrorEvent
   | RuntimeGenericEvent;
 
+export type AiRunEvent = RuntimeEvent;
+
+export function validateAiRunEventContract(events: AiRunEvent[]) {
+  const errors: string[] = [];
+  const firstModelSelectedIndex = events.findIndex((event) => event.type === "model_selected");
+  const firstAnswerIndex = events.findIndex((event) => event.type === "text_delta" || event.type === "delta");
+
+  if (firstAnswerIndex >= 0 && firstModelSelectedIndex < 0) {
+    errors.push("answer text was emitted before any model_selected event");
+  } else if (firstAnswerIndex >= 0 && firstModelSelectedIndex > firstAnswerIndex) {
+    errors.push("model_selected must be emitted before answer text");
+  }
+
+  return {
+    ok: errors.length === 0,
+    errors,
+  };
+}
+
 export function toLegacyChatStreamEvent(event: RuntimeEvent): Record<string, unknown> {
+  if (event.type === "text_delta") {
+    return {
+      ...event,
+      type: "delta",
+    };
+  }
   if (event.type === "mode_switched") {
     return {
       ...event,

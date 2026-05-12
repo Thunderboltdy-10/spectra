@@ -375,6 +375,7 @@ export type ModelRouteInput = {
   conversationLength?: number;
   previousModelUsed?: string;
   preserveContinuity?: boolean;
+  modelAnchor?: import("@/lib/model-anchor").StableModelAnchor;
   agentPreferredModel?: string;
   agentTopModels?: Array<{ modelId: string; score: number }>;
   modelCatalog?: Array<{
@@ -454,8 +455,13 @@ export type RouteTraceExecutionEventKind =
   | "thinking"
   | "search"
   | "memory"
+  | "resource"
   | "tool"
   | "skill"
+  | "artifact"
+  | "workspace"
+  | "worker"
+  | "clarification"
   | "action"
   | "synthesis"
   | "routing"
@@ -468,6 +474,9 @@ export type RouteTraceExecutionEvent = {
   status: RouteTracePhaseStatus;
   detail?: string;
   content?: string;
+  inputPreview?: unknown;
+  resultPreview?: unknown;
+  error?: string;
   startedAt?: number;
   finishedAt?: number;
   durationMs?: number;
@@ -587,6 +596,7 @@ export type RouteTrace = {
       reason: string;
       expiresAt?: number;
     };
+    modelAnchor?: import("@/lib/model-anchor").StableModelAnchor;
     warnings: string[];
   };
   costEstimate?: {

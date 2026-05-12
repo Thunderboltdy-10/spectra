@@ -5,9 +5,30 @@ export type PreparedAttachment = {
   filename: string;
   mimeType: string;
   type: "image" | "document" | "text";
+  runtimeStatus: RuntimeResourceStatus;
+  usable: boolean;
+  unavailableReason?: string;
   imageDataUrl?: string;
   quickExtractText?: string;
   size: number;
+};
+
+export type RuntimeResourceStatus =
+  | "uploaded"
+  | "processing"
+  | "indexed"
+  | "failed_processing"
+  | "storage_missing"
+  | "unavailable";
+
+export type SkippedAttachment = {
+  resourceId: string;
+  filename: string;
+  mimeType: string;
+  size: number;
+  runtimeStatus: RuntimeResourceStatus;
+  usable: false;
+  reason: string;
 };
 
 export type NormalizedAttachments = {
@@ -17,6 +38,7 @@ export type NormalizedAttachments = {
     image_url: { url: string; detail: "low" | "auto" };
   }>;
   quickExtractBlock: string;
+  skipped: SkippedAttachment[];
   requiresVision: boolean;
   requiresDocumentReasoning: boolean;
   requiresFileUnderstanding: boolean;
@@ -24,6 +46,40 @@ export type NormalizedAttachments = {
 };
 
 type ConvexQueryFn = <T>(name: string, args: Record<string, unknown>) => Promise<T>;
+type AttachmentResourceStatus = "uploaded" | "processing" | "processed" | "failed";
+
+export function normalizeRuntimeResourceStatus(resource: {
+  status: AttachmentResourceStatus;
+  storageId?: string;
+}) {
+  if (resource.status === "failed") return "failed_processing" satisfies RuntimeResourceStatus;
+  if (!resource.storageId) return "storage_missing" satisfies RuntimeResourceStatus;
+  if (resource.status === "uploaded" || resource.status === "processing") return "processing" satisfies RuntimeResourceStatus;
+  if (resource.status === "processed") return "indexed" satisfies RuntimeResourceStatus;
+  return "unavailable" satisfies RuntimeResourceStatus;
+}
+
+export function runtimeAttachmentUnavailableReason(runtimeStatus: RuntimeResourceStatus) {
+  if (runtimeStatus === "failed_processing") return "File processing failed, so it was not included in model context.";
+  if (runtimeStatus === "storage_missing") return "The stored file is missing; the resource record can be removed.";
+  if (runtimeStatus === "processing") return "File is still processing and is not ready for model context.";
+  if (runtimeStatus === "unavailable") return "File is unavailable to the runtime.";
+  return undefined;
+}
+
+export function isRuntimeUsableAttachment(resource: {
+  filename: string;
+  mimeType: string;
+  status: AttachmentResourceStatus;
+  storageId?: string;
+}) {
+  const runtimeStatus = normalizeRuntimeResourceStatus(resource);
+  if (runtimeStatus === "failed_processing" || runtimeStatus === "storage_missing" || runtimeStatus === "unavailable") return false;
+
+  const type = inferType(resource.filename, resource.mimeType);
+  if (type === "image") return true;
+  return runtimeStatus === "indexed";
+}
 
 const IMAGE_MIME_RE = /image\/(png|jpg|jpeg|webp|gif)/i;
 const DOC_EXT_RE = /\.(pdf|docx|txt|md|pptx|xlsx|odt)$/i;
@@ -81,6 +137,7 @@ export async function normalizeAttachments(params: {
       prepared: [],
       imageContentBlocks: [],
       quickExtractBlock: "",
+      skipped: [],
       requiresVision: false,
       requiresDocumentReasoning: false,
       requiresFileUnderstanding: false,
@@ -95,7 +152,7 @@ export async function normalizeAttachments(params: {
       mimeType: string;
       size: number;
       scope: "pack" | "personal" | "agent";
-      status: "uploaded" | "processing" | "processed" | "failed";
+      status: AttachmentResourceStatus;
       storageId?: string;
       quickExtractText?: string;
     }>
@@ -106,6 +163,7 @@ export async function normalizeAttachments(params: {
   });
 
   const prepared: PreparedAttachment[] = [];
+  const skipped: SkippedAttachment[] = [];
   const imageContentBlocks: NormalizedAttachments["imageContentBlocks"] = [];
   const quickExtracts: string[] = [];
   let hasImageAttachment = false;
@@ -113,6 +171,20 @@ export async function normalizeAttachments(params: {
   let hasFileUnderstandingNeed = false;
 
   for (const resource of resources) {
+    const runtimeStatus = normalizeRuntimeResourceStatus(resource);
+    if (!isRuntimeUsableAttachment(resource)) {
+      skipped.push({
+        resourceId: resource._id,
+        filename: resource.filename,
+        mimeType: resource.mimeType,
+        size: resource.size,
+        runtimeStatus,
+        usable: false,
+        reason: runtimeAttachmentUnavailableReason(runtimeStatus) ?? "File was not included in model context.",
+      });
+      continue;
+    }
+
     const type = inferType(resource.filename, resource.mimeType);
     if (type === "image") {
       hasImageAttachment = true;
@@ -122,6 +194,8 @@ export async function normalizeAttachments(params: {
       filename: resource.filename,
       mimeType: resource.mimeType,
       type,
+      runtimeStatus,
+      usable: true,
       size: resource.size,
     };
 
@@ -196,6 +270,7 @@ export async function normalizeAttachments(params: {
     prepared,
     imageContentBlocks,
     quickExtractBlock: quickExtracts.length > 0 ? `ATTACHMENT CONTEXT:\n${quickExtracts.join("\n\n")}` : "",
+    skipped,
     requiresVision: hasImageAttachment,
     requiresDocumentReasoning: hasDocumentAttachment,
     requiresFileUnderstanding: hasFileUnderstandingNeed,

@@ -4,11 +4,13 @@ import { createElement, useCallback, useEffect, useMemo, useRef, useState } from
 import { toast } from "sonner";
 import { AchievementToast, type AchievementToastData } from "@/components/achievement-toast";
 import { NotificationToast } from "@/components/notification-toast";
-import type { Agent, Citation, RouteTrace, RouterMode, StudyMode, ThinkingLevel } from "@/types";
+import type { Agent, Citation, RouteTrace, RouteTraceExecutionEvent, RouterMode, StudyMode, ThinkingLevel } from "@/types";
 import { appendToBuffer, createBufferState } from "@/lib/structured-stream-buffer";
+import { normalizeChatStreamError } from "@/lib/chat/streaming";
 import { useSidebar } from "@/context/sidebar-context";
 import { isModeAvailable } from "@/lib/modes";
 import { parseRecentContext } from "@/lib/orchestrator/clarification";
+import type { ClarificationResumeMetadata } from "@/lib/chat/clarification-resume";
 import { isHardAudioFamilyModel } from "@/lib/runtime/model-guardrails";
 import { shouldRetryResourceProcessing, toClientFileStatus } from "../../shared/resource-processing";
 
@@ -216,8 +218,7 @@ function streamPhaseFromPhaseId(phaseId?: string): StreamPhase | undefined {
   if (!phaseId) return undefined;
   if (phaseId === "routing" || phaseId === "planning") return "routing";
   if (phaseId === "retrieval" || phaseId === "search") return "searching";
-  if (phaseId === "analysis" || phaseId === "verification" || phaseId === "memory" || phaseId === "title") return "thinking";
-  if (phaseId === "authoring" || phaseId === "repair") return "generating";
+  if (phaseId === "memory") return "thinking";
   if (phaseId === "synthesis") return "synthesizing";
   return undefined;
 }
@@ -280,6 +281,7 @@ type SendMessageOptions = {
   regenerate?: boolean;
   skipLocalUser?: boolean;
   skipServerUserPersist?: boolean;
+  clarification?: ClarificationResumeMetadata;
   retryAttempt?: number;
   chatIdOverride?: string;
   modeOverride?: StudyMode;
@@ -2144,6 +2146,7 @@ export function useChatState() {
           regenerate: isRegenerate,
           retryAttempt,
           skipUserMessagePersist: !isRegenerate && skipServerUserPersist,
+          clarification: options?.clarification,
           parentMessageId: options?.parentMessageIdOverride,
           forcedModel: options?.forcedModelOverride,
           attachmentTypes: outgoingFiles.map((file) => ext(file.name)).filter(Boolean),
@@ -2195,6 +2198,7 @@ export function useChatState() {
               regenerate: options?.regenerate,
               skipLocalUser: true,
               skipServerUserPersist: true,
+              clarification: options?.clarification,
               retryAttempt,
               chatIdOverride: activeChatId,
               modeOverride: requestedMode,
@@ -2235,19 +2239,12 @@ export function useChatState() {
       let bufferState = createBufferState(requestedMode);
       let thinkingBuffer = "";
       let hasModelThinking = false;
-      let orchestrationNotes: string[] = [];
       let memoryUpdateAccum: { updated: boolean; summary: string } | null = null;
       let finalAgentIdForTurn = selectedAgentId;
       let receivedDoneEvent = false;
 
       const buildThinkingContent = () => {
-        const sections: string[] = [];
-        const modelSection = thinkingBuffer.trim();
-        if (modelSection) sections.push(modelSection);
-        if (orchestrationNotes.length > 0) {
-          sections.push(`Planner notes\n${orchestrationNotes.map((note) => `- ${note}`).join("\n")}`);
-        }
-        return sections.join("\n\n").trim();
+        return thinkingBuffer.trim();
       };
 
       const syncDraftThinking = () => {
@@ -2266,12 +2263,54 @@ export function useChatState() {
         });
       };
 
-      const pushThinkingNote = (note: string) => {
-        const clean = note.replace(/\s+/g, " ").trim();
-        if (!clean) return;
-        orchestrationNotes = [...orchestrationNotes.filter((item) => item !== clean), clean].slice(-10);
-        setHasRealThinking(true);
-        syncDraftThinking();
+      const liveExecutionEvents: RouteTraceExecutionEvent[] = [];
+      const formatRuntimeLabel = (value: string | undefined, fallback: string) => {
+        const normalized = (value ?? "").trim();
+        if (!normalized) return fallback;
+        return normalized
+          .replace(/[_-]+/g, " ")
+          .replace(/\b\w/g, (char) => char.toUpperCase());
+      };
+      const applyLiveExecutionEvents = (trace: RouteTrace): RouteTrace => {
+        if (liveExecutionEvents.length === 0) return trace;
+        const merged = [...(trace.executionEvents ?? [])];
+        for (const event of liveExecutionEvents) {
+          const index = merged.findIndex((candidate) => candidate.id === event.id);
+          if (index >= 0) {
+            merged[index] = {
+              ...merged[index],
+              ...event,
+              startedAt: merged[index]?.startedAt ?? event.startedAt,
+            };
+          } else {
+            merged.push(event);
+          }
+        }
+        return { ...trace, executionEvents: merged };
+      };
+      const upsertLiveExecutionEvent = (
+        event: Omit<RouteTraceExecutionEvent, "startedAt" | "finishedAt"> & {
+          startedAt?: number;
+          finishedAt?: number;
+        },
+      ) => {
+        const now = Date.now();
+        const normalized: RouteTraceExecutionEvent = {
+          ...event,
+          startedAt: event.startedAt ?? (event.status === "running" ? now : undefined),
+          finishedAt: event.finishedAt ?? (event.status === "completed" || event.status === "failed" ? now : undefined),
+        };
+        const index = liveExecutionEvents.findIndex((candidate) => candidate.id === normalized.id);
+        if (index >= 0) {
+          liveExecutionEvents[index] = {
+            ...liveExecutionEvents[index],
+            ...normalized,
+            startedAt: liveExecutionEvents[index]?.startedAt ?? normalized.startedAt,
+          };
+        } else {
+          liveExecutionEvents.push(normalized);
+        }
+        setLiveRouteTrace((prev) => prev ? applyLiveExecutionEvents(prev) : prev);
       };
 
       // Periodic draft persistence during streaming
@@ -2296,6 +2335,7 @@ export function useChatState() {
               | "error"
               | "mode_update"
               | "route_model"
+              | "model_selected"
               | "collab_start"
               | "collab_progress"
               | "collab_done"
@@ -2311,6 +2351,10 @@ export function useChatState() {
               | "search_status"
               | "tool_call"
               | "tool_result"
+              | "memory_read"
+              | "memory_write"
+              | "helper_worker_started"
+              | "helper_worker_finished"
               | "thread_fork"
               | "mode_switch";
             content?: string;
@@ -2374,7 +2418,7 @@ export function useChatState() {
             toolCallId?: string;
             arguments?: string;
             summary?: string;
-            result?: Record<string, unknown>;
+            result?: unknown;
             mode?: StudyMode;
             chatId?: string;
             threadUrl?: string;
@@ -2439,9 +2483,15 @@ export function useChatState() {
             setStreamPhase("routing");
             const agents = payload.agents ?? [];
             if (agents.length > 0) {
-              pushThinkingNote(
-                `Delegating specialist work to ${agents.map((agent) => agent.replace(/_/g, " ")).join(", ")}.`,
-              );
+              for (const agent of agents) {
+                upsertLiveExecutionEvent({
+                  id: `worker:${agent}`,
+                  kind: "worker",
+                  label: formatRuntimeLabel(agent, "Worker"),
+                  status: "running",
+                  detail: "Specialist worker started.",
+                });
+              }
             }
             if (isViewingStreamChat) {
               setActiveCollaborators(
@@ -2467,11 +2517,14 @@ export function useChatState() {
               || payload.status === "skipped"
                 ? payload.status
                 : "running";
-            pushThinkingNote(
-              `${agentName} ${collaboratorStatus === "done" ? "completed" : "is running"}${
-                payload.model ? ` with ${payload.model}` : ""
-              }${payload.preview ? `: ${payload.preview}` : ""}`,
-            );
+            upsertLiveExecutionEvent({
+              id: `worker:${agentRole}`,
+              kind: "worker",
+              label: formatRuntimeLabel(agentName, "Worker"),
+              status: collaboratorStatus === "done" ? "completed" : collaboratorStatus === "failed" ? "failed" : "running",
+              detail: payload.preview,
+              resultPreview: payload.tokensUsed != null ? { tokensUsed: payload.tokensUsed } : undefined,
+            });
             if (isViewingStreamChat) {
               setCollaboratorPhase("running");
               setActiveCollaborators((prev) => {
@@ -2504,11 +2557,14 @@ export function useChatState() {
           if (payload.type === "collab_done" && payload.agent) {
             const agentRole = typeof payload.agent === "string" ? payload.agent : payload.agent.id;
             const agentName = typeof payload.agent === "string" ? payload.agent.replace(/_/g, " ") : payload.agent.name;
-            pushThinkingNote(
-              `${agentName} finished${payload.model ? ` on ${payload.model}` : ""}${
-                payload.preview ? `: ${payload.preview}` : ""
-              }`,
-            );
+            upsertLiveExecutionEvent({
+              id: `worker:${agentRole}`,
+              kind: "worker",
+              label: formatRuntimeLabel(agentName, "Worker"),
+              status: "completed",
+              detail: payload.preview,
+              resultPreview: payload.tokensUsed != null ? { tokensUsed: payload.tokensUsed } : undefined,
+            });
             if (isViewingStreamChat) {
               setActiveCollaborators((prev) =>
                 prev.map((item) =>
@@ -2528,7 +2584,12 @@ export function useChatState() {
 
           if (payload.type === "collab_synthesizing") {
             setStreamPhase("synthesizing");
-            pushThinkingNote("Synthesizing specialist outputs into one final response.");
+            upsertLiveExecutionEvent({
+              id: "synthesis:collaboration",
+              kind: "synthesis",
+              label: "Synthesizing specialist outputs",
+              status: "running",
+            });
             if (isViewingStreamChat) {
               setCollaboratorPhase("synthesizing");
             }
@@ -2569,9 +2630,16 @@ export function useChatState() {
             }
           }
 
-          if (payload.type === "route_model" && payload.modelUsed) {
+          if ((payload.type === "route_model" || payload.type === "model_selected") && payload.modelUsed) {
             streamModelUsedRef.current = payload.modelUsed;
             setStreamModelUsed(payload.modelUsed);
+            upsertLiveExecutionEvent({
+              id: "runtime-routing",
+              kind: "routing",
+              label: `Selected ${formatRuntimeLabel(payload.modelUsed, "model")}`,
+              status: "completed",
+              detail: payload.reason,
+            });
             if (payload.routeTrace) {
               const normalizedTrace: RouteTrace = payload.routeTrace.phasePlan?.length
                 ? {
@@ -2579,12 +2647,12 @@ export function useChatState() {
                     phasePlan: normalizeVisiblePhasePlan(payload.routeTrace.phasePlan),
                   }
                 : payload.routeTrace;
-              setLiveRouteTrace(normalizedTrace);
+              setLiveRouteTrace(applyLiveExecutionEvents(normalizedTrace));
               if (normalizedTrace.phasePlan?.length) {
                 setLivePhasePlan(normalizedTrace.phasePlan);
               }
             } else {
-              setLiveRouteTrace((prev) => ({
+              setLiveRouteTrace((prev) => applyLiveExecutionEvents({
                 ...(prev ?? {
                   inputs: {
                     routerMode: requestedRouterMode,
@@ -2625,23 +2693,55 @@ export function useChatState() {
           }
 
           if (payload.type === "tool_call" && payload.toolName) {
-            pushThinkingNote(`Tool call: ${payload.toolName.replace(/_/g, " ")}.`);
+            upsertLiveExecutionEvent({
+              id: `tool:${payload.toolCallId ?? payload.toolName}`,
+              kind: "tool",
+              label: formatRuntimeLabel(payload.toolName, "Tool"),
+              status: "running",
+              detail: payload.summary,
+              inputPreview: payload.arguments,
+              toolName: payload.toolName,
+              toolCallId: payload.toolCallId,
+            });
             continue;
           }
 
           if (payload.type === "tool_result" && payload.toolName) {
-            pushThinkingNote(payload.summary ?? `${payload.toolName.replace(/_/g, " ")} completed.`);
+            const toolError = typeof payload.error === "string" ? payload.error : payload.error?.message;
+            upsertLiveExecutionEvent({
+              id: `tool:${payload.toolCallId ?? payload.toolName}`,
+              kind: "tool",
+              label: formatRuntimeLabel(payload.toolName, "Tool"),
+              status: payload.status === "failed" ? "failed" : "completed",
+              detail: payload.summary,
+              resultPreview: payload.result,
+              error: toolError,
+              toolName: payload.toolName,
+              toolCallId: payload.toolCallId,
+            });
             continue;
           }
 
           if (payload.type === "mode_switch" && payload.mode) {
             setMode(payload.mode);
-            pushThinkingNote(`Switched to ${payload.mode} mode${payload.reason ? `: ${payload.reason}` : ""}.`);
+            upsertLiveExecutionEvent({
+              id: `mode:${payload.mode}`,
+              kind: "action",
+              label: `Switched to ${formatRuntimeLabel(payload.mode, "mode")}`,
+              status: "completed",
+              detail: payload.reason,
+            });
             continue;
           }
 
           if (payload.type === "thread_fork" && payload.chatId) {
-            pushThinkingNote(`Forked a new thread${payload.title ? `: ${payload.title}` : ""}.`);
+            upsertLiveExecutionEvent({
+              id: `thread:${payload.chatId}`,
+              kind: "action",
+              label: `Opened ${formatRuntimeLabel(payload.title, "thread")}`,
+              status: "completed",
+              detail: payload.reason,
+            });
             continue;
           }
 
@@ -2652,9 +2752,14 @@ export function useChatState() {
                 sourceCount: Math.max(0, payload.sourceCount ?? 0),
               });
               setSearchStatusBanner(payload.status === "completed" ? "real_search" : "error");
-              if (payload.status === "failed") {
-                pushThinkingNote("Web search unavailable. Response used fallback context.");
-              }
+              upsertLiveExecutionEvent({
+                id: "search:status",
+                kind: "search",
+                label: "Search activity",
+                status: payload.status === "failed" ? "failed" : "completed",
+                detail: payload.summary ?? payload.reason,
+                resultPreview: { sourceCount: Math.max(0, payload.sourceCount ?? 0), searchStatus: payload.searchStatus },
+              });
               continue;
             }
 
@@ -2665,12 +2770,26 @@ export function useChatState() {
                 status: "failed",
                 sourceCount: 0,
               });
-              pushThinkingNote("Web search was unavailable. Response used model knowledge fallback.");
+              upsertLiveExecutionEvent({
+                id: "search:status",
+                kind: "search",
+                label: "Search activity",
+                status: "failed",
+                detail: "Web search was unavailable. Response used model knowledge fallback.",
+                resultPreview: { sourceCount: 0, searchStatus: status },
+              });
             } else if (status === "real_search") {
               setSearchStatusBanner("real_search");
               setSearchStatusInfo({
                 status: "completed",
                 sourceCount: Math.max(0, payload.sourceCount ?? 0),
+              });
+              upsertLiveExecutionEvent({
+                id: "search:status",
+                kind: "search",
+                label: "Search activity",
+                status: "completed",
+                resultPreview: { sourceCount: Math.max(0, payload.sourceCount ?? 0), searchStatus: status },
               });
             } else if (status === "error") {
               setSearchStatusBanner("error");
@@ -2678,7 +2797,43 @@ export function useChatState() {
                 status: "failed",
                 sourceCount: 0,
               });
+              upsertLiveExecutionEvent({
+                id: "search:status",
+                kind: "search",
+                label: "Search activity",
+                status: "failed",
+                resultPreview: { sourceCount: 0, searchStatus: status },
+              });
             }
+          }
+
+          if (payload.type === "memory_read" || payload.type === "memory_write") {
+            upsertLiveExecutionEvent({
+              id: `${payload.type}:${Date.now()}`,
+              kind: "memory",
+              label: payload.type === "memory_read" ? "Read memory" : "Saved memory",
+              status: payload.status === "failed" ? "failed" : "completed",
+              detail: payload.summary ?? payload.message ?? payload.content,
+              resultPreview: payload.result,
+            });
+          }
+
+          if (payload.type === "helper_worker_started" || payload.type === "helper_worker_finished") {
+            const workerId = typeof payload.agent === "string"
+              ? payload.agent
+              : payload.agent && typeof payload.agent === "object"
+                ? payload.agent.id
+                : payload.toolCallId ?? "worker";
+            upsertLiveExecutionEvent({
+              id: `worker:${workerId}`,
+              kind: "worker",
+              label: formatRuntimeLabel(workerId, "Worker"),
+              status: payload.type === "helper_worker_finished"
+                ? payload.status === "failed" ? "failed" : "completed"
+                : "running",
+              detail: payload.summary ?? payload.preview ?? payload.message,
+              resultPreview: payload.result,
+            });
           }
 
           if (payload.type === "phase_update") {
@@ -2778,7 +2933,7 @@ export function useChatState() {
                   phasePlan: normalizeVisiblePhasePlan(trace.phasePlan, { finalizeRunning: true }),
                 };
               }
-              return trace;
+              return applyLiveExecutionEvents(trace);
             })();
             if (resolvedStreamModel) {
               streamModelUsedRef.current = resolvedStreamModel;
@@ -3000,23 +3155,36 @@ export function useChatState() {
           }
 
           if (payload.type === "notice" && typeof payload.message === "string" && payload.message.trim()) {
-            pushThinkingNote(payload.message.trim());
+            upsertLiveExecutionEvent({
+              id: `notice:${Date.now()}`,
+              kind: "notice",
+              label: "Runtime notice",
+              status: "completed",
+              detail: payload.message.trim(),
+            });
           }
 
           if (payload.type === "rag_used" && payload.sources?.length) {
-            pushThinkingNote(
-              `Referenced ${payload.sources.length} personal or school source${
-                payload.sources.length === 1 ? "" : "s"
-              }: ${payload.sources
-                .slice(0, 3)
-                .map((source) => source.filename)
-                .join(", ")}.`,
-            );
+            upsertLiveExecutionEvent({
+              id: "resource:rag-used",
+              kind: "resource",
+              label: "Referenced resources",
+              status: "completed",
+              detail: `Referenced ${payload.sources.length} personal or school source${payload.sources.length === 1 ? "" : "s"}.`,
+              resultPreview: payload.sources.slice(0, 5),
+            });
           }
 
           if (payload.type === "soul_update" && payload.entries?.length) {
-            pushThinkingNote(`Updated personal memory: ${payload.entries[0]?.key ?? "profile"}.`);
             const entryLabels = payload.entries.slice(0, 3).map((entry) => entry.key).join(", ");
+            upsertLiveExecutionEvent({
+              id: "memory:write",
+              kind: "memory",
+              label: "Saved memory",
+              status: "completed",
+              detail: payload.content || payload.message || `Saved: ${entryLabels}`,
+              resultPreview: payload.entries.slice(0, 3).map((entry) => ({ key: entry.key, confidence: entry.confidence })),
+            });
             memoryUpdateAccum = {
               updated: true,
               summary: payload.content || payload.message || `Saved: ${entryLabels}`,
@@ -3025,13 +3193,18 @@ export function useChatState() {
 
           if (payload.type === "agent_summoned" && payload.agent && payload.model) {
             const agentName = typeof payload.agent === "string" ? payload.agent.replace(/_/g, " ") : payload.agent.name;
-            pushThinkingNote(`Called specialist ${agentName} on ${payload.model}.`);
+            const agentId = typeof payload.agent === "string" ? payload.agent : payload.agent.id;
+            upsertLiveExecutionEvent({
+              id: `worker:${agentId}`,
+              kind: "worker",
+              label: formatRuntimeLabel(agentName, "Worker"),
+              status: "running",
+              detail: `Model: ${payload.model}`,
+            });
           }
 
           if (payload.type === "error") {
-            const messageFromPayload =
-              typeof payload.error === "string" ? payload.error : payload.error?.message ?? "Chat stream failed";
-            throw new Error(messageFromPayload);
+            throw new Error(normalizeChatStreamError(payload.error, "Chat stream failed"));
           }
         }
 
@@ -3210,6 +3383,7 @@ export function useChatState() {
             regenerate: options?.regenerate,
             skipLocalUser: true,
             skipServerUserPersist,
+            clarification: options?.clarification,
             retryAttempt: retryAttempt + 1,
             chatIdOverride: activeChatId,
             modeOverride: requestedMode,

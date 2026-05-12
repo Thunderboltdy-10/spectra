@@ -10,11 +10,14 @@ import {
   Cog,
   Zap,
   ChevronDown,
-  X,
   SkipForward,
   GitBranch,
   Code2,
   Sparkles,
+  CheckCircle2,
+  Circle,
+  Clock3,
+  AlertTriangle,
   type LucideIcon,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
@@ -33,8 +36,13 @@ export type ExecutionEventKind =
   | "thinking"
   | "search"
   | "memory"
+  | "resource"
   | "tool"
   | "skill"
+  | "artifact"
+  | "workspace"
+  | "worker"
+  | "clarification"
   | "action"
   | "synthesis"
   | "routing"
@@ -48,6 +56,8 @@ export type ExecutionEvent = {
   label: string;
   status: ExecutionEventStatus;
   detail?: string;
+  resultPreview?: unknown;
+  error?: string;
   durationMs?: number;
   startedAt?: number;
   finishedAt?: number;
@@ -57,6 +67,7 @@ export type ExecutionEvent = {
   /** Token counts for subcalls */
   inputTokens?: number;
   outputTokens?: number;
+  meta?: string;
 };
 
 /* ─── Kind → Icon & Color Mapping ────────────────────── */
@@ -65,15 +76,20 @@ const KIND_META: Record<
   ExecutionEventKind,
   { icon: LucideIcon; tint: string; label: string }
 > = {
-  thinking: { icon: Brain, tint: "var(--accent-cyan)", label: "Thinking" },
+  thinking: { icon: Brain, tint: "var(--accent-cyan)", label: "Runtime update" },
   search: { icon: Search, tint: "var(--accent-mint, #20b8b2)", label: "Search" },
   memory: { icon: BookOpen, tint: "var(--accent-orange, #f59f0a)", label: "Memory" },
+  resource: { icon: BookOpen, tint: "var(--accent-orange, #f59f0a)", label: "Resource" },
   tool: { icon: Cog, tint: "var(--accent-cyan)", label: "Tool" },
   skill: { icon: Wand2, tint: "var(--accent-coral, #e8553e)", label: "Skill" },
+  artifact: { icon: Wand2, tint: "var(--accent-coral, #e8553e)", label: "Artifact" },
+  workspace: { icon: Zap, tint: "var(--success, #158f72)", label: "Workspace" },
+  worker: { icon: GitBranch, tint: "var(--accent-cyan)", label: "Worker" },
+  clarification: { icon: BookOpen, tint: "var(--accent-orange, #f59f0a)", label: "Clarification" },
   action: { icon: Zap, tint: "var(--success, #158f72)", label: "Action" },
   synthesis: { icon: Sparkles, tint: "var(--accent-cyan)", label: "Synthesis" },
-  routing: { icon: GitBranch, tint: "var(--text-secondary)", label: "Route" },
-  subcall: { icon: Code2, tint: "var(--accent-cyan)", label: "Sub-call" },
+  routing: { icon: GitBranch, tint: "var(--text-secondary)", label: "Routing" },
+  subcall: { icon: Code2, tint: "var(--accent-cyan)", label: "Model call" },
 };
 
 /* ─── Status Dot ─────────────────────────────────────── */
@@ -82,7 +98,7 @@ function StatusDot({ status, tint }: { status: ExecutionEventStatus; tint: strin
   if (status === "running") {
     return (
       <motion.span
-        className="relative flex h-2.5 w-2.5 shrink-0"
+        className="relative flex h-3.5 w-3.5 shrink-0 items-center justify-center"
         initial={false}
         animate={{ scale: 1 }}
       >
@@ -91,7 +107,7 @@ function StatusDot({ status, tint }: { status: ExecutionEventStatus; tint: strin
           style={{ background: tint }}
         />
         <span
-          className="relative inline-flex h-2.5 w-2.5 rounded-full"
+          className="relative inline-flex h-2 w-2 rounded-full"
           style={{ background: tint }}
         />
       </motion.span>
@@ -99,30 +115,30 @@ function StatusDot({ status, tint }: { status: ExecutionEventStatus; tint: strin
   }
   if (status === "completed") {
     return (
-      <span
-        className="inline-flex h-2 w-2 shrink-0 rounded-full opacity-50"
-        style={{ background: tint }}
-      />
+      <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-[var(--success,#158f72)]" strokeWidth={2.2} />
     );
   }
   if (status === "failed") {
     return (
-      <span className="inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center rounded-full bg-[var(--danger, #e8553e)]">
-        <X className="h-1.5 w-1.5 text-white" strokeWidth={3} />
-      </span>
+      <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-[var(--danger,#e8553e)]" strokeWidth={2.2} />
     );
   }
   if (status === "skipped") {
     return (
-      <span className="inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center rounded-full bg-[var(--text-tertiary)]/30">
-        <SkipForward className="h-1.5 w-1.5 text-[var(--text-tertiary)]" strokeWidth={3} />
+      <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)]">
+        <SkipForward className="h-2 w-2 text-[var(--text-tertiary)]" strokeWidth={3} />
       </span>
     );
   }
   // pending
   return (
-    <span className="inline-flex h-2.5 w-2.5 shrink-0 rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)]" />
+    <Circle className="h-3.5 w-3.5 shrink-0 text-[var(--text-tertiary)]" strokeWidth={1.8} />
   );
+}
+
+function formatStatus(status: ExecutionEventStatus) {
+  if (status === "completed") return "done";
+  return status;
 }
 
 /* ─── Duration Chip ──────────────────────────────────── */
@@ -152,38 +168,46 @@ function ExecutionEventRow({
   const hasChildren = event.children && event.children.length > 0;
   const hasContent = Boolean(event.content?.trim());
   const hasDetail = Boolean(event.detail?.trim());
-  const expandable = hasChildren || hasContent || hasDetail;
+  const hasStructuredPayload = event.resultPreview != null || Boolean(event.error?.trim());
+  const expandable = hasChildren || hasContent || hasDetail || hasStructuredPayload;
 
   return (
     <div className="relative">
       {/* Timeline connector line */}
       {depth === 0 && (
-        <div className="absolute left-[5px] top-3 bottom-0 w-px bg-[var(--border-default)]/50" />
+        <div className="absolute left-[6.5px] top-5 bottom-0 w-px bg-[linear-gradient(to_bottom,var(--border-default),transparent)]" />
       )}
 
-      <div className={cn("flex items-start gap-2.5 relative", depth > 0 && "ml-4")}>
+      <div className={cn("flex items-start gap-2.5 relative", depth > 0 && "ml-5")}>
         {/* Status indicator */}
-        <div className="mt-[5px] shrink-0">
+        <div className="mt-[9px] shrink-0 rounded-full bg-[var(--bg-primary)]">
           <StatusDot status={event.status} tint={meta.tint} />
         </div>
 
         {/* Event content */}
-        <div className="min-w-0 flex-1 pb-2">
+        <div
+          className={cn(
+            "min-w-0 flex-1 pb-2.5",
+            depth === 0 && "rounded-xl border border-transparent px-2 transition-colors",
+            event.status === "running" && "border-[color-mix(in_oklab,var(--accent-cyan)_26%,transparent)] bg-[color-mix(in_oklab,var(--accent-cyan)_5%,transparent)]",
+          )}
+        >
           {/* Header row */}
           <div
             className={cn(
-              "group/evt flex min-h-8 items-center gap-2 cursor-pointer select-none py-1 transition-colors",
+              "group/evt flex min-h-8 items-center gap-2 cursor-default select-none py-1 transition-colors",
+              expandable && "cursor-pointer",
               expandable && "hover:text-[var(--text-primary)]"
             )}
             onClick={() => expandable && setExpanded((v) => !v)}
           >
             <Icon
-              className="h-4 w-4 shrink-0"
+              className="h-3.5 w-3.5 shrink-0"
               style={{ color: meta.tint }}
             />
             <span
               className={cn(
-                "text-xs font-medium leading-tight truncate",
+                "text-[13px] font-semibold leading-tight truncate",
                 event.status === "running" && streaming
                   ? "stream-glow-text"
                   : event.status === "running"
@@ -197,16 +221,27 @@ function ExecutionEventRow({
             </span>
 
             {/* Status badge */}
-            {event.status === "running" && streaming && (
-              <span className="inline-flex items-center gap-1 text-[10px] text-[var(--accent-cyan)]">
+            {event.meta ? (
+              <span className="hidden shrink-0 rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--text-tertiary)] sm:inline-flex">
+                {event.meta}
+              </span>
+            ) : null}
+
+            {event.status === "running" && streaming ? (
+              <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[color-mix(in_oklab,var(--accent-cyan)_10%,transparent)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--accent-cyan)]">
                 <span className="h-1 w-1 rounded-full bg-[var(--accent-cyan)] animate-pulse" />
-                running
+                live
+              </span>
+            ) : (
+              <span className="hidden shrink-0 text-[10px] font-medium uppercase tracking-[0.12em] text-[var(--text-tertiary)] sm:inline">
+                {formatStatus(event.status)}
               </span>
             )}
 
             {/* Duration */}
             {(event.durationMs != null || (event.startedAt && event.finishedAt)) && (
-              <span className="text-xs text-[var(--text-tertiary)] tabular-nums">
+              <span className="ml-auto inline-flex items-center gap-1 text-[10px] text-[var(--text-tertiary)] tabular-nums">
+                <Clock3 className="h-3 w-3" />
                 <DurationChip ms={event.durationMs ?? (event.finishedAt! - event.startedAt!)} />
               </span>
             )}
@@ -223,7 +258,7 @@ function ExecutionEventRow({
             {expandable && (
               <ChevronDown
                 className={cn(
-                  "h-4 w-4 text-[var(--text-tertiary)] transition-transform duration-200",
+                  "h-3.5 w-3.5 text-[var(--text-tertiary)] transition-transform duration-200",
                   expanded && "rotate-180"
                 )}
               />
@@ -252,12 +287,24 @@ function ExecutionEventRow({
               >
                 <div className="mt-1.5 ml-1 space-y-1.5">
                   {hasDetail && !hasContent && (
-                    <p className="text-sm leading-relaxed text-[var(--text-tertiary)]">
+                    <p className="rounded-lg border border-[var(--border-default)]/70 bg-[var(--bg-secondary)] px-2.5 py-2 text-xs leading-relaxed text-[var(--text-secondary)]">
                       {event.detail}
                     </p>
                   )}
+                  {event.error ? (
+                    <p className="rounded-lg border border-[color-mix(in_oklab,var(--danger,#e8553e)_35%,transparent)] bg-[color-mix(in_oklab,var(--danger,#e8553e)_8%,transparent)] px-2.5 py-2 text-xs leading-relaxed text-[var(--danger,#e8553e)]">
+                      {event.error}
+                    </p>
+                  ) : null}
+                  {event.resultPreview != null ? (
+                    <pre className="max-h-44 overflow-auto rounded-lg border border-[var(--border-default)]/70 bg-[var(--bg-primary)] px-2.5 py-2 text-[11px] leading-relaxed text-[var(--text-secondary)]">
+                      {typeof event.resultPreview === "string"
+                        ? event.resultPreview
+                        : JSON.stringify(event.resultPreview, null, 2)}
+                    </pre>
+                  ) : null}
                   {hasContent && (
-                    <div className="max-h-56 overflow-y-auto py-1">
+                    <div className="max-h-56 overflow-y-auto rounded-lg border border-[var(--border-default)]/70 bg-[var(--bg-secondary)] px-3 py-2">
                       <div className="text-sm leading-relaxed text-[var(--text-secondary)]">
                         <ReactMarkdown remarkPlugins={[remarkGfm]}>
                           {event.content!.trim()}
@@ -313,14 +360,17 @@ function traceExecutionEventToExecutionEvent(event: RouteTraceExecutionEvent): E
     label: event.label,
     status: phaseStatusToEventStatus(event.status),
     detail: event.detail,
+    resultPreview: event.resultPreview,
+    error: event.error,
     content: event.content,
     startedAt: event.startedAt,
     finishedAt: event.finishedAt,
     durationMs: event.durationMs,
+    meta: event.toolName,
   };
 }
 
-function routeTraceToEvents(trace: RouteTrace, streaming: boolean): ExecutionEvent[] {
+export function routeTraceToExecutionEvents(trace: RouteTrace, streaming: boolean): ExecutionEvent[] {
   if (trace.executionEvents && trace.executionEvents.length > 0) {
     return trace.executionEvents.map(traceExecutionEventToExecutionEvent);
   }
@@ -336,15 +386,17 @@ function routeTraceToEvents(trace: RouteTrace, streaming: boolean): ExecutionEve
     : (streaming && !trace.routingDurationMs ? "running" : "completed");
   const routingStatus = !streaming && rawRoutingStatus === "running" ? "completed" : rawRoutingStatus;
 
-  // Routing as first event
+  // Routing is shown only when no real routing phase exists. This fallback is
+  // derived from the route trace itself; it avoids decorative "thinking" copy.
   if (shouldShowStandaloneRouting) {
     events.push({
       id: `route-${trace.selected.modelId}`,
       kind: "routing",
-      label: `Routed → ${trace.selected.modelId.split("/").pop()}`,
+      label: "Model selected",
       status: routingStatus,
       detail: trace.selected.reason,
       durationMs: trace.routingDurationMs,
+      meta: trace.selected.modelId.split("/").pop(),
     });
   }
 
@@ -376,7 +428,12 @@ function routeTraceToEvents(trace: RouteTrace, streaming: boolean): ExecutionEve
       events.push({
         id: phase.id,
         kind: inferEventKind(phase),
-        label: phase.label,
+        label:
+          phase.id === "analysis"
+            ? "Runtime operations"
+            : phase.id === "authoring"
+              ? "Answer stream"
+              : phase.label,
         status: normalizedStatus,
         detail: phase.detail,
         durationMs:
@@ -385,6 +442,7 @@ function routeTraceToEvents(trace: RouteTrace, streaming: boolean): ExecutionEve
             : undefined,
         startedAt: phase.startedAt,
         finishedAt: phase.finishedAt,
+        meta: phase.model?.split("/").pop(),
         children: children.length > 0 ? children : undefined,
       });
     }
@@ -424,9 +482,10 @@ function routeTraceToEvents(trace: RouteTrace, streaming: boolean): ExecutionEve
     events.push({
       id: "search-trace",
       kind: "search",
-      label: `Search · ${trace.searchTrace.strategy}`,
+      label: "Search activity",
       status: searchStatus,
       detail: trace.searchTrace.fallbackReason,
+      meta: trace.searchTrace.strategy,
       children: searchChildren.length > 0 ? searchChildren : undefined,
     });
   }
@@ -448,6 +507,10 @@ export type ExecutionTimelineProps = {
   streaming?: boolean;
   /** Compact mode — shows only active/completed events in a tighter layout */
   compact?: boolean;
+  /** Only render explicit runtime execution events; do not derive phase/search fallbacks. */
+  realEventsOnly?: boolean;
+  /** Limit the number of rendered events, keeping the most recent entries. */
+  maxVisible?: number;
   /** Optional class name */
   className?: string;
 };
@@ -459,6 +522,8 @@ export function ExecutionTimeline({
   thinkingSegments = [],
   streaming = false,
   compact = false,
+  realEventsOnly = false,
+  maxVisible,
   className,
 }: ExecutionTimelineProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -469,7 +534,11 @@ export function ExecutionTimeline({
     if (directEvents && directEvents.length > 0) return directEvents;
     if (!routeTrace && !thinkingContent && thinkingSegments.length === 0) return [] as ExecutionEvent[];
 
-    const traceEvents = routeTrace ? routeTraceToEvents(routeTrace, streaming) : [];
+    const traceEvents = routeTrace
+      ? realEventsOnly
+        ? routeTrace.executionEvents?.map(traceExecutionEventToExecutionEvent) ?? []
+        : routeTraceToExecutionEvents(routeTrace, streaming)
+      : [];
 
     let thinkingEvents: ExecutionEvent[] = [];
 
@@ -482,7 +551,7 @@ export function ExecutionTimeline({
           ? firstLine
           : firstLine.length > 70
             ? `${firstLine.slice(0, 67)}…`
-            : `Thinking (${i + 1}/${thinkingSegments.length})`;
+            : `Runtime update ${i + 1}`;
         return {
           id: `thinking-seg-${seg.id || i}`,
           kind: "thinking" as const,
@@ -492,23 +561,14 @@ export function ExecutionTimeline({
         };
       });
     } else if (thinkingContent?.trim()) {
-      // Split by double newline to create paragraphs/sections
       const chunks = thinkingContent.split(/(?:\r?\n){2,}/).map(s => s.trim()).filter(Boolean);
-      thinkingEvents = chunks.map((chunk, i) => {
-        const firstLine = chunk.split("\n")[0]?.replace(/^[#>*-\d.\s]+/, "").trim();
-        const label = firstLine && firstLine.length > 0
-          ? (firstLine.length > 70 ? `${firstLine.slice(0, 67)}…` : firstLine)
-          : `Thinking (${i + 1}/${chunks.length})`;
-        
-        const isLast = i === chunks.length - 1;
-        return {
-          id: `thinking-chunk-${i}`,
-          kind: "thinking" as const,
-          label,
-          status: (streaming && isLast) ? "running" as const : "completed" as const,
-          content: chunk,
-        };
-      });
+      thinkingEvents = chunks.map((chunk, i) => ({
+        id: `thinking-chunk-${i}`,
+        kind: "thinking" as const,
+        label: "Provider reasoning",
+        status: (streaming && i === chunks.length - 1) ? "running" as const : "completed" as const,
+        content: chunk,
+      }));
     }
 
     if (thinkingEvents.length > 0) {
@@ -521,7 +581,12 @@ export function ExecutionTimeline({
     }
 
     return traceEvents;
-  }, [directEvents, routeTrace, thinkingContent, thinkingSegments, streaming]);
+  }, [directEvents, routeTrace, thinkingContent, thinkingSegments, streaming, realEventsOnly]);
+
+  const visibleEvents = useMemo(() => {
+    if (!maxVisible || maxVisible <= 0 || events.length <= maxVisible) return events;
+    return events.slice(-maxVisible);
+  }, [events, maxVisible]);
 
   // Auto-scroll management
   useEffect(() => {
@@ -540,15 +605,15 @@ export function ExecutionTimeline({
     if (!node || !streaming) return;
     if (!shouldAutoScrollRef.current) return;
     node.scrollTop = node.scrollHeight;
-  }, [events, streaming]);
+  }, [visibleEvents, streaming]);
 
-  if (events.length === 0) return null;
+  if (visibleEvents.length === 0) return null;
 
   return (
     <div
       className={cn(
         "execution-timeline",
-        compact ? "space-y-1" : "space-y-2",
+        compact ? "space-y-1 rounded-xl border border-[var(--border-default)]/70 bg-[var(--bg-secondary)]/50 px-2 py-1" : "space-y-2 rounded-2xl border border-[var(--border-default)] bg-[var(--bg-secondary)]/60 p-3 shadow-[0_24px_70px_-48px_var(--text-primary)]",
         className
       )}
     >
@@ -561,7 +626,7 @@ export function ExecutionTimeline({
         )}
       >
         <AnimatePresence initial={false}>
-          {events.map((event, idx) => (
+          {visibleEvents.map((event, idx) => (
             <motion.div
               key={event.id}
               initial={{ opacity: 0, y: 10 }}
@@ -571,7 +636,7 @@ export function ExecutionTimeline({
               <ExecutionEventRow
                 event={event}
                 streaming={streaming}
-                defaultOpen={idx === events.length - 1 && streaming}
+                defaultOpen={idx === visibleEvents.length - 1 && streaming}
               />
             </motion.div>
           ))}

@@ -19,6 +19,19 @@ const EMPTY_DOC = {
   content: [{ type: "paragraph" }],
 };
 
+function plaintextToDoc(value: string) {
+  const lines = value.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+  return {
+    type: "doc",
+    content: lines.length > 0
+      ? lines.map((line) => ({
+          type: "paragraph",
+          content: [{ type: "text", text: line }],
+        }))
+      : [{ type: "paragraph" }],
+  };
+}
+
 import { Suspense } from "react";
 
 function ArtifactsPageInner() {
@@ -261,6 +274,15 @@ function ArtifactsPageInner() {
                   artifactId={activeNote._id}
                   workstreamId={activeNote.workstreamId}
                   context="full-page"
+                  onAppendText={async (text) => {
+                    const nextText = [activeNote.contentPlaintext ?? "", text].filter(Boolean).join("\n");
+                    await updateNote(activeNote._id, {
+                      content: plaintextToDoc(nextText),
+                      contentPlaintext: nextText,
+                      editorMode,
+                    });
+                    await fetchNote(activeNote._id);
+                  }}
                 />
               }
             </aside>

@@ -408,6 +408,22 @@ export default defineSchema({
     .index("by_similarity", ["ownerUserId", "similarityKey"])
     .index("by_status_updated", ["status", "updatedAt"]),
 
+  ghostRegenerationState: defineTable({
+    orgId: v.id("orgs"),
+    ownerUserId: v.id("users"),
+    workstreamId: v.id("workstreams"),
+    status: v.union(v.literal("scheduled"), v.literal("running"), v.literal("idle")),
+    scheduledAt: v.optional(v.number()),
+    startedAt: v.optional(v.number()),
+    completedAt: v.optional(v.number()),
+    contextHash: v.optional(v.string()),
+    trigger: v.optional(v.string()),
+    updatedAt: v.number(),
+  })
+    .index("by_workstream", ["workstreamId"])
+    .index("by_owner_workstream", ["ownerUserId", "workstreamId"])
+    .index("by_status_updated", ["status", "updatedAt"]),
+
   workspaceMutations: defineTable({
     orgId: v.id("orgs"),
     ownerUserId: v.id("users"),
@@ -1197,6 +1213,19 @@ export default defineSchema({
     .index("by_org", ["orgId"])
     .index("by_org_featured", ["orgId", "isFeatured"])
     .index("by_org_model", ["orgId", "modelId"]),
+
+  catalogSyncState: defineTable({
+    orgId: v.optional(v.id("orgs")),
+    source: v.string(),
+    fingerprint: v.string(),
+    modelCount: v.number(),
+    includeEmbeddings: v.boolean(),
+    endpointStatsCount: v.optional(v.number()),
+    lastSyncedAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_source_org", ["source", "orgId"])
+    .index("by_updated", ["updatedAt"]),
 
   modelRuntimeStats: defineTable({
     orgId: v.id("orgs"),

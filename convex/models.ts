@@ -242,6 +242,19 @@ function stripLargeModelFields<T extends { strengthEmbedding?: number[] }>(row: 
   return rest;
 }
 
+function catalogPayloadChanged(existing: Record<string, unknown>, payload: Record<string, unknown>) {
+  for (const [key, value] of Object.entries(payload)) {
+    if (key === "updatedAt") continue;
+    const current = existing[key];
+    if (Array.isArray(value) || (value && typeof value === "object")) {
+      if (JSON.stringify(current ?? null) !== JSON.stringify(value ?? null)) return true;
+      continue;
+    }
+    if ((current ?? undefined) !== (value ?? undefined)) return true;
+  }
+  return false;
+}
+
 async function upsertModelCatalogBatch(
   ctx: Pick<MutationCtx, "db">,
   orgId: Id<"orgs">,
@@ -296,7 +309,9 @@ async function upsertModelCatalogBatch(
     };
 
     if (existing) {
-      await ctx.db.patch(existing._id, payload);
+      if (catalogPayloadChanged(existing, payload)) {
+        await ctx.db.patch(existing._id, payload);
+      }
     } else {
       await ctx.db.insert("modelCatalog", {
         ...payload,
@@ -1037,7 +1052,7 @@ export const upsertModelCatalogForOrg = internalMutation({
     models: v.array(vModelInput),
   },
   handler: async (ctx, args) => {
-    const batchSize = 20;
+    const batchSize = 80;
     const now = Date.now();
     const initialBatch = args.models.slice(0, batchSize);
     const remaining = args.models.slice(batchSize);
@@ -1061,7 +1076,7 @@ export const upsertModelCatalogChunk = internalMutation({
     models: v.array(vModelInput),
   },
   handler: async (ctx, args) => {
-    const batchSize = 20;
+    const batchSize = 80;
     const now = Date.now();
     const batch = args.models.slice(0, batchSize);
     const remaining = args.models.slice(batchSize);

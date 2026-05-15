@@ -3,10 +3,10 @@ import { internal } from "./_generated/api";
 
 const crons = cronJobs();
 
-crons.daily("refresh-model-catalog", { hourUTC: 3, minuteUTC: 30 }, internal.catalogSync.refreshCatalog, {});
+crons.daily("refresh-model-catalog", { hourUTC: 3, minuteUTC: 30 }, internal.catalogSync.refreshCatalogRuntime, {});
 crons.interval(
   "refresh-model-catalog-runtime",
-  { hours: 6 },
+  { hours: 12 },
   internal.catalogSync.refreshCatalogRuntime,
   {},
 );
@@ -43,7 +43,7 @@ crons.interval(
 );
 crons.interval(
   "retry-stale-resource-ingestion",
-  { minutes: 3 },
+  { minutes: 15 },
   internal.resources.retryStaleResourcesInternal,
   { limit: 30 },
 );

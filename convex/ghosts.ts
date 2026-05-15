@@ -1,4 +1,4 @@
-import { internalAction, internalMutation, internalQuery, mutation, query } from "./_generated/server";
+import { internalAction, internalMutation, internalQuery, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { getUserByClerkId } from "./helpers";
@@ -8,6 +8,8 @@ import { recordWorkspaceMutation } from "./workspaceHelpers";
 
 const GHOST_GENERATION_MODEL = "openai/gpt-5.4-nano";
 const GHOST_MODEL_LANE = "cheap_background";
+const GHOST_REGENERATION_DEBOUNCE_MS = 10 * 60 * 1000;
+const GHOST_SCHEDULE_SPACING_MS = 30 * 1000;
 
 async function requireActor(ctx: Parameters<typeof getUserByClerkId>[0], actorClerkId: string) {
   const actor = await getUserByClerkId(ctx, actorClerkId);
@@ -52,6 +54,56 @@ function hashContext(parts: Array<string | undefined>) {
     hash = (hash * 31 + raw.charCodeAt(index)) >>> 0;
   }
   return `ctx_${hash.toString(16)}`;
+}
+
+function hashGhostCandidateSet(candidates: Array<{ similarityKey: string; title: string; generationReason: string }>) {
+  return hashContext(
+    candidates
+      .map((candidate) => `${candidate.similarityKey}:${candidate.title}:${candidate.generationReason}`)
+      .sort(),
+  );
+}
+
+async function getRegenerationState(
+  ctx: Pick<QueryCtx, "db">,
+  workstreamId: Id<"workstreams">,
+) {
+  return ctx.db
+    .query("ghostRegenerationState")
+    .withIndex("by_workstream", (q) => q.eq("workstreamId", workstreamId))
+    .first();
+}
+
+async function patchRegenerationState(
+  ctx: Pick<MutationCtx, "db">,
+  args: {
+    ownerUserId: Id<"users">;
+    orgId: Id<"orgs">;
+    workstreamId: Id<"workstreams">;
+    status: "scheduled" | "running" | "idle";
+    trigger?: string;
+    contextHash?: string;
+    now: number;
+  },
+) {
+  const existing = await getRegenerationState(ctx, args.workstreamId);
+  const payload = {
+    orgId: args.orgId,
+    ownerUserId: args.ownerUserId,
+    workstreamId: args.workstreamId,
+    status: args.status,
+    trigger: args.trigger,
+    ...(args.status === "scheduled" ? { scheduledAt: args.now } : {}),
+    ...(args.status === "running" ? { startedAt: args.now } : {}),
+    ...(args.status === "idle" ? { completedAt: args.now } : {}),
+    ...(args.contextHash ? { contextHash: args.contextHash } : {}),
+    updatedAt: args.now,
+  };
+  if (existing) {
+    await ctx.db.patch(existing._id, payload);
+    return existing._id;
+  }
+  return ctx.db.insert("ghostRegenerationState", payload);
 }
 
 async function gatherWorkstreamContext(
@@ -445,10 +497,20 @@ export const regenerateForWorkstream = internalMutation({
     confidenceScore: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    const now = Date.now();
     const workstream = await ctx.db.get(args.workstreamId);
     if (!workstream || workstream.ownerUserId !== args.ownerUserId || workstream.orgId !== args.orgId) {
       return { created: 0, invalidated: 0, reason: "workstream_not_found" as const };
     }
+
+    await patchRegenerationState(ctx, {
+      ownerUserId: args.ownerUserId,
+      orgId: args.orgId,
+      workstreamId: args.workstreamId,
+      status: "running",
+      trigger: args.trigger,
+      now,
+    });
 
     const pendingRows = await ctx.db
       .query("ghostSuggestions")
@@ -456,18 +518,17 @@ export const regenerateForWorkstream = internalMutation({
         q.eq("ownerUserId", args.ownerUserId).eq("workstreamId", args.workstreamId).eq("status", "pending"))
       .collect();
 
-    const invalidatedAt = Date.now();
-    for (const row of pendingRows) {
-      await ctx.db.patch(row._id, {
-        status: "expired",
-        expiredAt: invalidatedAt,
-        updatedAt: invalidatedAt,
-      });
-    }
-
     const confidenceTier = args.confidenceTier ?? "medium";
     if (confidenceTier !== "medium") {
-      return { created: 0, invalidated: pendingRows.length, reason: "non_medium_confidence" as const };
+      await patchRegenerationState(ctx, {
+        ownerUserId: args.ownerUserId,
+        orgId: args.orgId,
+        workstreamId: args.workstreamId,
+        status: "idle",
+        trigger: args.trigger,
+        now: Date.now(),
+      });
+      return { created: 0, invalidated: 0, reason: "non_medium_confidence" as const };
     }
 
     const context = await gatherWorkstreamContext(ctx, args.workstreamId);
@@ -483,6 +544,26 @@ export const regenerateForWorkstream = internalMutation({
       confidenceTier,
       confidenceScore: args.confidenceScore ?? 0.68,
     });
+    const nextContextHash = hashGhostCandidateSet(candidates);
+    const state = await getRegenerationState(ctx, args.workstreamId);
+    const freshPendingRows = pendingRows.filter((row) => now - row.updatedAt < GHOST_REGENERATION_DEBOUNCE_MS);
+    if (
+      freshPendingRows.length > 0
+      && state?.contextHash === nextContextHash
+      && args.trigger !== "manual"
+      && args.trigger !== "accepted"
+    ) {
+      await patchRegenerationState(ctx, {
+        ownerUserId: args.ownerUserId,
+        orgId: args.orgId,
+        workstreamId: args.workstreamId,
+        status: "idle",
+        trigger: args.trigger,
+        contextHash: nextContextHash,
+        now: Date.now(),
+      });
+      return { created: 0, invalidated: 0, reason: "fresh_context_unchanged" as const };
+    }
 
     const existingSimilarityRows = await ctx.db
       .query("ghostSuggestions")
@@ -493,6 +574,7 @@ export const regenerateForWorkstream = internalMutation({
         .map((row) => row.similarityKey)
         .filter((value): value is string => Boolean(value)),
     );
+    const nextSimilarityKeys = new Set(candidates.map((candidate) => candidate.similarityKey));
     const dismissedKeys = new Set(
       existingSimilarityRows
         .filter((row) => row.status === "dismissed")
@@ -517,8 +599,9 @@ export const regenerateForWorkstream = internalMutation({
 
     let created = 0;
     for (const candidate of candidates) {
+      const existingPending = pendingRows.find((row) => row.similarityKey === candidate.similarityKey);
       if (dismissedKeys.has(candidate.similarityKey)) continue;
-      if (pendingSimilarityKeys.has(candidate.similarityKey)) continue;
+      if (pendingSimilarityKeys.has(candidate.similarityKey) && !existingPending) continue;
       if (projectedArtifactTitles.has(candidate.title.trim().toLowerCase())) continue;
       if (historicalKeys.has(candidate.similarityKey) && context.activeWorkspaceItems.some((item) =>
         item.sourceKind === "artifact"
@@ -526,13 +609,13 @@ export const regenerateForWorkstream = internalMutation({
         && item.title.trim().toLowerCase() === candidate.title.trim().toLowerCase())) {
         continue;
       }
-      await ctx.db.insert("ghostSuggestions", {
+      const payload = {
         orgId: args.orgId,
         ownerUserId: args.ownerUserId,
         workstreamId: args.workstreamId,
         linkedAgentId: workstream.linkedAgentId,
         sourceWorkspaceMutationId: args.sourceWorkspaceMutationId,
-        status: "pending",
+        status: "pending" as const,
         title: candidate.title,
         summary: normalizeGhostText(candidate.summary, 240),
         content: normalizeGhostText(candidate.content, 600),
@@ -551,13 +634,42 @@ export const regenerateForWorkstream = internalMutation({
         modelLane: GHOST_MODEL_LANE,
         generationReason: `${args.trigger ?? "workspace_mutation"}: ${candidate.generationReason}`,
         unseenSessions: 0,
-        createdAt: Date.now(),
         updatedAt: Date.now(),
-      });
-      created += 1;
+      };
+      if (existingPending) {
+        await ctx.db.patch(existingPending._id, payload);
+      } else {
+        await ctx.db.insert("ghostSuggestions", {
+          ...payload,
+          createdAt: Date.now(),
+        });
+        created += 1;
+      }
     }
 
-    return { created, invalidated: pendingRows.length, reason: "regenerated" as const };
+    let invalidated = 0;
+    const invalidatedAt = Date.now();
+    for (const row of pendingRows) {
+      if (nextSimilarityKeys.has(row.similarityKey)) continue;
+      await ctx.db.patch(row._id, {
+        status: "expired",
+        expiredAt: invalidatedAt,
+        updatedAt: invalidatedAt,
+      });
+      invalidated += 1;
+    }
+
+    await patchRegenerationState(ctx, {
+      ownerUserId: args.ownerUserId,
+      orgId: args.orgId,
+      workstreamId: args.workstreamId,
+      status: "idle",
+      trigger: args.trigger,
+      contextHash: nextContextHash,
+      now: Date.now(),
+    });
+
+    return { created, invalidated, reason: "regenerated" as const };
   },
 });
 
@@ -572,7 +684,26 @@ export const enqueueRegenerationForWorkstream = internalMutation({
     confidenceScore: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    await ctx.scheduler.runAfter(0, internal.ghosts.runRegenerationForWorkstream, args);
+    const now = Date.now();
+    const state = await getRegenerationState(ctx, args.workstreamId);
+    if (
+      state
+      && (state.status === "scheduled" || state.status === "running")
+      && now - state.updatedAt < GHOST_REGENERATION_DEBOUNCE_MS
+    ) {
+      return { scheduled: false, reason: "debounced" as const };
+    }
+
+    await patchRegenerationState(ctx, {
+      ownerUserId: args.ownerUserId,
+      orgId: args.orgId,
+      workstreamId: args.workstreamId,
+      status: "scheduled",
+      trigger: args.trigger,
+      now,
+    });
+
+    await ctx.scheduler.runAfter(30_000, internal.ghosts.runRegenerationForWorkstream, args);
     return { scheduled: true };
   },
 });
@@ -587,7 +718,7 @@ export const runRegenerationForWorkstream = internalAction({
     confidenceTier: v.optional(v.union(v.literal("high"), v.literal("medium"), v.literal("low"))),
     confidenceScore: v.optional(v.number()),
   },
-  handler: async (ctx, args): Promise<{ created: number; invalidated: number; reason: "workstream_not_found" | "non_medium_confidence" | "regenerated" }> => {
+  handler: async (ctx, args): Promise<{ created: number; invalidated: number; reason: "workstream_not_found" | "non_medium_confidence" | "fresh_context_unchanged" | "regenerated" }> => {
     return ctx.runMutation(internal.ghosts.regenerateForWorkstream, args);
   },
 });
@@ -597,8 +728,9 @@ export const runScheduledRegenerationSweep = internalAction({
   handler: async (ctx) => {
     const activeWorkstreams = await ctx.runQuery(internal.ghosts.listWorkstreamsForScheduledRegeneration, {});
     let scheduled = 0;
-    for (const workstream of activeWorkstreams) {
-      await ctx.scheduler.runAfter(0, internal.ghosts.runRegenerationForWorkstream, {
+    for (let index = 0; index < activeWorkstreams.length; index += 1) {
+      const workstream = activeWorkstreams[index];
+      await ctx.scheduler.runAfter(index * GHOST_SCHEDULE_SPACING_MS, internal.ghosts.runRegenerationForWorkstream, {
         ownerUserId: workstream.ownerUserId,
         orgId: workstream.orgId,
         workstreamId: workstream._id,
@@ -615,7 +747,30 @@ export const runScheduledRegenerationSweep = internalAction({
 export const listWorkstreamsForScheduledRegeneration = internalQuery({
   args: {},
   handler: async (ctx) => {
+    const now = Date.now();
     const workstreams = await ctx.db.query("workstreams").collect();
-    return workstreams.filter((workstream) => workstream.status !== "archived");
+    const eligible = [];
+    for (const workstream of workstreams) {
+      if (workstream.status === "archived") continue;
+      const state = await getRegenerationState(ctx, workstream._id);
+      if (
+        state
+        && (state.status === "scheduled" || state.status === "running")
+        && now - state.updatedAt < GHOST_REGENERATION_DEBOUNCE_MS
+      ) {
+        continue;
+      }
+      const freshPending = await ctx.db
+        .query("ghostSuggestions")
+        .withIndex("by_owner_workstream_status", (q) =>
+          q.eq("ownerUserId", workstream.ownerUserId).eq("workstreamId", workstream._id).eq("status", "pending"))
+        .first();
+      if (freshPending && now - freshPending.updatedAt < GHOST_REGENERATION_DEBOUNCE_MS) {
+        continue;
+      }
+      eligible.push(workstream);
+      if (eligible.length >= 50) break;
+    }
+    return eligible;
   },
 });

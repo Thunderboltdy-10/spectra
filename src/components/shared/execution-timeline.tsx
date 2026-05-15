@@ -7,7 +7,6 @@ import {
   Search,
   BookOpen,
   Wand2,
-  Cog,
   Zap,
   ChevronDown,
   SkipForward,

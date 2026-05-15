@@ -1,4 +1,4 @@
-import { internalAction, internalQuery, type ActionCtx } from "./_generated/server";
+import { internalAction, internalMutation, internalQuery, type ActionCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import { MODEL_DEFAULTS } from "./constants";
@@ -85,6 +85,27 @@ function chunkArray<T>(items: T[], size: number) {
     out.push(items.slice(i, i + size));
   }
   return out;
+}
+
+function stableFingerprint(value: unknown) {
+  const json = JSON.stringify(value, (_key, raw) => {
+    if (Array.isArray(raw)) return raw;
+    if (raw && typeof raw === "object") {
+      return Object.keys(raw as Record<string, unknown>)
+        .sort()
+        .reduce<Record<string, unknown>>((acc, key) => {
+          acc[key] = (raw as Record<string, unknown>)[key];
+          return acc;
+        }, {});
+    }
+    return raw;
+  });
+  let hash = 2166136261;
+  for (let index = 0; index < json.length; index += 1) {
+    hash ^= json.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `catalog_${(hash >>> 0).toString(16)}`;
 }
 
 function toFiniteNumber(value: unknown) {
@@ -494,6 +515,53 @@ export const listOrgIds = internalQuery({
   },
 });
 
+export const getCatalogSyncState = internalQuery({
+  args: {
+    orgId: v.id("orgs"),
+    source: v.string(),
+  },
+  handler: async (ctx, args) => {
+    return ctx.db
+      .query("catalogSyncState")
+      .withIndex("by_source_org", (q) => q.eq("source", args.source).eq("orgId", args.orgId))
+      .first();
+  },
+});
+
+export const upsertCatalogSyncState = internalMutation({
+  args: {
+    orgId: v.id("orgs"),
+    source: v.string(),
+    fingerprint: v.string(),
+    modelCount: v.number(),
+    includeEmbeddings: v.boolean(),
+    endpointStatsCount: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    const existing = await ctx.db
+      .query("catalogSyncState")
+      .withIndex("by_source_org", (q) => q.eq("source", args.source).eq("orgId", args.orgId))
+      .first();
+    const payload = {
+      orgId: args.orgId,
+      source: args.source,
+      fingerprint: args.fingerprint,
+      modelCount: args.modelCount,
+      includeEmbeddings: args.includeEmbeddings,
+      endpointStatsCount: args.endpointStatsCount,
+      lastSyncedAt: now,
+      updatedAt: now,
+    };
+    if (existing) {
+      await ctx.db.patch(existing._id, payload);
+      return { ok: true, created: false };
+    }
+    await ctx.db.insert("catalogSyncState", payload);
+    return { ok: true, created: true };
+  },
+});
+
 export const listModelUsageCounts = internalQuery({
   args: {},
   handler: async (ctx) => {
@@ -569,6 +637,28 @@ async function refreshCatalogBase(params: {
     endpointStatsByModelId,
     artificialAnalysisByKey,
   });
+  const catalogFingerprint = stableFingerprint(
+    mapped.map((model) => ({
+      modelId: model.modelId,
+      name: model.name,
+      provider: model.provider,
+      contextLength: model.contextLength,
+      inputCostPerM: model.inputCostPerM,
+      outputCostPerM: model.outputCostPerM,
+      supportedParameters: model.supportedParameters,
+      promptCachingSupported: model.promptCachingSupported,
+      cachePricingReadPerM: model.cachePricingReadPerM,
+      cachePricingWritePerM: model.cachePricingWritePerM,
+      endpointLatencyP50Ms: model.endpointLatencyP50Ms,
+      endpointUptimePercent: model.endpointUptimePercent,
+      inputModalities: model.inputModalities,
+      outputModalities: model.outputModalities,
+      releaseDate: model.releaseDate,
+      benchmarkArtificialAnalysisIntelligence: model.benchmarkArtificialAnalysisIntelligence,
+      benchmarkArtificialAnalysisCoding: model.benchmarkArtificialAnalysisCoding,
+      benchmarkArtificialAnalysisMath: model.benchmarkArtificialAnalysisMath,
+    })),
+  );
 
   if (params.includeEmbeddings) {
     for (const batch of chunkArray(mapped, 20)) {
@@ -594,16 +684,37 @@ async function refreshCatalogBase(params: {
   }
 
   const orgIds = (await params.ctx.runQuery(internal.catalogSync.listOrgIds, {})) as Id<"orgs">[];
+  let skippedOrgCount = 0;
+  let updatedOrgCount = 0;
   for (const orgId of orgIds) {
+    const state = (await params.ctx.runQuery(internal.catalogSync.getCatalogSyncState, {
+      orgId,
+      source: "openrouter",
+    })) as { fingerprint?: string; includeEmbeddings?: boolean } | null;
+    if (!params.includeEmbeddings && state?.fingerprint === catalogFingerprint) {
+      skippedOrgCount += 1;
+      continue;
+    }
     await params.ctx.runMutation(internal.models.upsertModelCatalogForOrg, {
       orgId,
       models: mapped,
     });
+    await params.ctx.runMutation(internal.catalogSync.upsertCatalogSyncState, {
+      orgId,
+      source: "openrouter",
+      fingerprint: catalogFingerprint,
+      modelCount: mapped.length,
+      includeEmbeddings: params.includeEmbeddings,
+      endpointStatsCount: endpointStatsByModelId.size,
+    });
+    updatedOrgCount += 1;
   }
 
   return {
     ok: true,
     orgCount: orgIds.length,
+    updatedOrgCount,
+    skippedOrgCount,
     modelCount: mapped.length,
     endpointStatsCount: endpointStatsByModelId.size,
   };

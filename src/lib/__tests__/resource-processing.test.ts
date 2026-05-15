@@ -131,11 +131,12 @@ describe("resource processing helpers", () => {
   });
 
   it("excludes failed and chat-only resources from usable limit counts", () => {
-    expect(isUsableResourceForLimit({ status: "processed" })).toBe(true);
-    expect(isUsableResourceForLimit({ status: "processing" })).toBe(true);
-    expect(isUsableResourceForLimit({ status: "uploaded" })).toBe(true);
-    expect(isUsableResourceForLimit({ status: "failed" })).toBe(false);
-    expect(isUsableResourceForLimit({ status: "processed", saveToLibrary: false })).toBe(false);
+    expect(isUsableResourceForLimit({ status: "processed", storageId: "storage_1" })).toBe(true);
+    expect(isUsableResourceForLimit({ status: "processing", storageId: "storage_1" })).toBe(true);
+    expect(isUsableResourceForLimit({ status: "uploaded", storageId: "storage_1" })).toBe(true);
+    expect(isUsableResourceForLimit({ status: "processed" })).toBe(false);
+    expect(isUsableResourceForLimit({ status: "failed", storageId: "storage_1" })).toBe(false);
+    expect(isUsableResourceForLimit({ status: "processed", storageId: "storage_1", saveToLibrary: false })).toBe(false);
   });
 
   it("returns runtime status fields for saved, failed, and missing-storage resources", () => {

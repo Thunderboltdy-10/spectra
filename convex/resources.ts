@@ -30,6 +30,7 @@ type ResourceLifecycleStatus = "uploaded" | "processing" | "processed" | "failed
 
 type ResourceLifecycleFields = {
   status: ResourceLifecycleStatus;
+  storageId?: Id<"_storage"> | string;
   saveToLibrary?: boolean;
 };
 
@@ -44,7 +45,7 @@ export function resourceRuntimeStatus(resource: {
 }
 
 export function isUsableResourceForLimit(resource: ResourceLifecycleFields) {
-  return resource.saveToLibrary !== false && resource.status !== "failed";
+  return resource.saveToLibrary !== false && resource.status !== "failed" && Boolean(resource.storageId);
 }
 
 function usableResourceCount(resources: ResourceLifecycleFields[]) {

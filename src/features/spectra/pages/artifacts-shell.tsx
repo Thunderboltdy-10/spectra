@@ -7,19 +7,14 @@ import {
   ChevronDown,
   FileText,
   HelpCircle,
-  Inbox,
-  Layers3,
-  Library,
   Loader2,
-  MessageSquare,
   Plus,
   Search,
-  Sparkles,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { ArtifactCard, blueprintMeta } from "../components/artifact-card";
+import { ArtifactCard } from "../components/artifact-card";
 import {
   getSpectraArtifacts,
   getSpectraOverview,
@@ -30,13 +25,13 @@ import {
   type SpectraWorkspace,
 } from "../data/api";
 
-const filters: Array<{ key: "all" | SpectraBlueprintKey; label: string; icon: LucideIcon }> = [
-  { key: "all", label: "All", icon: Layers3 },
-  { key: "document", label: "Document", icon: FileText },
-  { key: "flashcard_deck", label: "Deck", icon: BookOpen },
-  { key: "quiz", label: "Quiz", icon: HelpCircle },
-  { key: "planner_task", label: "Task", icon: CalendarCheck2 },
-  { key: "thread_reference", label: "Thread", icon: MessageSquare },
+const filters: Array<{ key: "all" | SpectraBlueprintKey; label: string }> = [
+  { key: "all", label: "All" },
+  { key: "document", label: "Docs" },
+  { key: "flashcard_deck", label: "Decks" },
+  { key: "quiz", label: "Quizzes" },
+  { key: "planner_task", label: "Tasks" },
+  { key: "thread_reference", label: "Threads" },
 ];
 
 const createTypes: Array<{ key: Exclude<SpectraBlueprintKey, "thread_reference">; label: string; icon: LucideIcon }> = [
@@ -46,23 +41,22 @@ const createTypes: Array<{ key: Exclude<SpectraBlueprintKey, "thread_reference">
   { key: "planner_task", label: "Task", icon: CalendarCheck2 },
 ];
 
-function actionButtonClass(tone: "quiet" | "primary" = "quiet") {
+function actionButtonClass(tone: "normal" | "primary" = "normal") {
   if (tone === "primary") {
-    return "inline-flex h-10 items-center gap-1.5 rounded-[14px] bg-[var(--accent-cyan)] px-3 text-[13px] font-semibold text-white shadow-[0_14px_30px_-20px_rgba(8,22,40,0.45)] transition-[filter,transform] hover:-translate-y-0.5 hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-45";
+    return "inline-flex h-9 items-center gap-1.5 rounded-[8px] bg-[var(--accent-cyan)] px-3 text-[13px] font-semibold text-white disabled:opacity-45";
   }
-  return "inline-flex h-8 items-center gap-1.5 rounded-[8px] border border-[color-mix(in_oklab,var(--border-default)_82%,transparent)] bg-[var(--bg-elevated)] px-2.5 text-[11.5px] font-semibold text-[var(--text-secondary)] transition-[background,transform,color] hover:-translate-y-0.5 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-45";
+  return "inline-flex h-8 items-center gap-1.5 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 text-[12px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-45";
 }
 
-function workspaceInitials(title: string) {
-  return title
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase())
-    .join("") || "S";
+function menuItemClass() {
+  return "flex w-full items-center gap-2 rounded-[8px] px-2.5 py-2 text-left text-[13px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-45";
 }
 
-function WorkspacePicker({
+function initials(title: string) {
+  return title.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "W";
+}
+
+function WorkspaceTarget({
   workspaces,
   selectedWorkspaceId,
   onSelect,
@@ -72,52 +66,34 @@ function WorkspacePicker({
   onSelect: (workspaceId: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const selected = workspaces.find((workspace) => workspace._id === selectedWorkspaceId) ?? workspaces[0];
+  const selected = workspaces.find((workspace) => workspace._id === selectedWorkspaceId);
 
   return (
     <div className="relative">
-      <button
-        type="button"
-        className="flex h-10 min-w-[220px] items-center gap-2 rounded-[15px] border border-[color-mix(in_oklab,var(--border-default)_78%,transparent)] bg-[color-mix(in_oklab,var(--bg-elevated)_92%,var(--bg-primary))] px-3 text-left text-[12px] font-semibold text-[var(--text-primary)] shadow-[0_12px_28px_-24px_rgba(8,22,40,0.45)] transition-[border-color,transform] hover:-translate-y-0.5 hover:border-[color-mix(in_oklab,var(--accent-cyan)_32%,var(--border-default))]"
-        onClick={() => setOpen((value) => !value)}
-        aria-expanded={open}
-      >
-        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[10px] bg-[var(--accent-cyan)] text-[10px] font-bold text-white">
-          {workspaceInitials(selected?.title ?? "Workspace")}
+      <button type="button" className={actionButtonClass()} onClick={() => setOpen((value) => !value)}>
+        <span className="flex h-5 w-5 items-center justify-center rounded-[6px] bg-[var(--bg-secondary)] text-[10px] font-semibold text-[var(--text-secondary)]">
+          {initials(selected?.title ?? "Workspace")}
         </span>
-        <span className="min-w-0 flex-1 truncate">{selected?.title ?? "Choose workspace"}</span>
-        <ChevronDown className="h-4 w-4 text-[var(--text-tertiary)]" />
+        <span className="max-w-[160px] truncate">{selected?.title ?? "Choose workspace"}</span>
+        <ChevronDown className="h-3.5 w-3.5" />
       </button>
-
       {open ? (
-        <div className="absolute right-0 top-[calc(100%+8px)] z-30 w-[300px] rounded-[22px] border border-[color-mix(in_oklab,var(--border-default)_80%,transparent)] bg-[color-mix(in_oklab,var(--bg-elevated)_96%,var(--bg-primary))] p-2 shadow-[0_26px_70px_-38px_rgba(8,22,40,0.68)] backdrop-blur-xl">
-          <div className="max-h-[260px] space-y-1 overflow-y-auto">
-            {workspaces.map((workspace) => {
-              const active = workspace._id === selectedWorkspaceId;
-              return (
-                <button
-                  key={workspace._id}
-                  type="button"
-                  className={`flex w-full items-center gap-2 rounded-[14px] px-2.5 py-2 text-left transition-colors ${
-                    active ? "bg-[color-mix(in_oklab,var(--accent-cyan)_10%,var(--bg-secondary))]" : "hover:bg-[var(--bg-hover)]"
-                  }`}
-                  onClick={() => {
-                    onSelect(workspace._id);
-                    setOpen(false);
-                  }}
-                >
-                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[11px] bg-[var(--accent-cyan)] text-[10px] font-bold text-white">
-                    {workspaceInitials(workspace.title)}
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[12.5px] font-semibold text-[var(--text-primary)]">{workspace.title}</span>
-                    <span className="block truncate text-[11px] text-[var(--text-tertiary)]">{workspace.description ?? "Active workspace"}</span>
-                  </span>
-                  {active ? <CheckCircle2 className="h-4 w-4 text-[var(--accent-cyan)]" /> : null}
-                </button>
-              );
-            })}
-          </div>
+        <div className="absolute right-0 top-[calc(100%+8px)] z-30 w-[260px] rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[0_6px_18px_rgba(0,0,0,0.10)]">
+          {workspaces.map((workspace) => (
+            <button
+              key={workspace._id}
+              type="button"
+              className={menuItemClass()}
+              onClick={() => {
+                onSelect(workspace._id);
+                setOpen(false);
+              }}
+            >
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px] bg-[var(--bg-secondary)] text-[11px] font-semibold text-[var(--text-secondary)]">{initials(workspace.title)}</span>
+              <span className="min-w-0 flex-1 truncate">{workspace.title}</span>
+              {workspace._id === selectedWorkspaceId ? <CheckCircle2 className="h-4 w-4 text-[var(--accent-cyan)]" /> : null}
+            </button>
+          ))}
         </div>
       ) : null}
     </div>
@@ -132,9 +108,10 @@ export function ArtifactsShell() {
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState("");
   const [newArtifactTitle, setNewArtifactTitle] = useState("");
   const [newArtifactType, setNewArtifactType] = useState<Exclude<SpectraBlueprintKey, "thread_reference">>("document");
+  const [newOpen, setNewOpen] = useState(false);
+  const [addMenuArtifactId, setAddMenuArtifactId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busyKey, setBusyKey] = useState<string | null>(null);
-  const [pickerArtifactId, setPickerArtifactId] = useState<string | null>(null);
   const seededRef = useRef(false);
 
   const load = useCallback(async () => {
@@ -181,7 +158,6 @@ export function ArtifactsShell() {
 
   const inbox = useMemo(() => artifacts.filter((artifact) => artifact.placementStatus === "inbox"), [artifacts]);
   const placed = useMemo(() => artifacts.filter((artifact) => artifact.placementStatus === "workspace"), [artifacts]);
-  const selectedWorkspace = workspaces.find((workspace) => workspace._id === selectedWorkspaceId);
 
   async function createArtifact() {
     if (!newArtifactTitle.trim()) return;
@@ -194,6 +170,7 @@ export function ArtifactsShell() {
         summary: `Unplaced ${newArtifactType.replaceAll("_", " ")} artifact.`,
       });
       setNewArtifactTitle("");
+      setNewOpen(false);
       toast.success("Artifact created in library inbox.");
       await load();
     } catch (error) {
@@ -213,7 +190,7 @@ export function ArtifactsShell() {
       });
       const workspaceTitle = workspaces.find((workspace) => workspace._id === workspaceId)?.title ?? "workspace";
       toast.success(`Added to ${workspaceTitle}.`);
-      setPickerArtifactId(null);
+      setAddMenuArtifactId(null);
       await load();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not add artifact to workspace.");
@@ -222,53 +199,29 @@ export function ArtifactsShell() {
     }
   }
 
-  function renderAddAction(artifact: SpectraArtifact) {
+  function addAction(artifact: SpectraArtifact) {
     const alreadyInSelected = Boolean(selectedWorkspaceId && artifact.placements.some((placement) => placement.workspaceId === selectedWorkspaceId));
-    const disabled = workspaces.length === 0 || busyKey === `add:${artifact._id}`;
-
     if (alreadyInSelected) {
-      return (
-        <span className="inline-flex h-8 items-center gap-1.5 rounded-[8px] bg-[color-mix(in_oklab,var(--success)_10%,var(--bg-secondary))] px-2.5 text-[11.5px] font-semibold text-[var(--success)]">
-          <CheckCircle2 className="h-3.5 w-3.5" />
-          Placed
-        </span>
-      );
+      return <span className="inline-flex h-8 items-center gap-1 rounded-[8px] bg-[var(--bg-secondary)] px-2 text-[12px] text-[var(--text-secondary)]"><CheckCircle2 className="h-3.5 w-3.5" />Placed</span>;
     }
-
     return (
       <div className="relative">
-        <button
-          type="button"
-          className={actionButtonClass()}
-          disabled={disabled}
-          onClick={() => setPickerArtifactId((current) => current === artifact._id ? null : artifact._id)}
-        >
+        <button type="button" className={actionButtonClass()} disabled={workspaces.length === 0 || busyKey === `add:${artifact._id}`} onClick={() => setAddMenuArtifactId((current) => current === artifact._id ? null : artifact._id)}>
           {busyKey === `add:${artifact._id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
           Add
         </button>
-        {pickerArtifactId === artifact._id ? (
-          <div className="absolute right-0 top-[calc(100%+8px)] z-30 w-[280px] rounded-[20px] border border-[color-mix(in_oklab,var(--border-default)_80%,transparent)] bg-[color-mix(in_oklab,var(--bg-elevated)_97%,var(--bg-primary))] p-2 shadow-[0_24px_64px_-38px_rgba(8,22,40,0.68)] backdrop-blur-xl">
-            <div className="mb-1 px-2 py-1 text-[11px] font-semibold text-[var(--text-tertiary)]">Add to workspace</div>
-            <div className="max-h-[220px] space-y-1 overflow-y-auto">
-              {workspaces.map((workspace) => {
-                const alreadyPlaced = artifact.placements.some((placement) => placement.workspaceId === workspace._id);
-                return (
-                  <button
-                    key={workspace._id}
-                    type="button"
-                    className="flex w-full items-center gap-2 rounded-[13px] px-2 py-2 text-left transition-colors hover:bg-[var(--bg-hover)] disabled:cursor-not-allowed disabled:opacity-45"
-                    disabled={alreadyPlaced || busyKey === `add:${artifact._id}`}
-                    onClick={() => void addToWorkspace(artifact._id, workspace._id)}
-                  >
-                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[9px] bg-[var(--accent-cyan)] text-[10px] font-bold text-white">
-                      {workspaceInitials(workspace.title)}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate text-[12px] font-semibold text-[var(--text-primary)]">{workspace.title}</span>
-                    {alreadyPlaced ? <CheckCircle2 className="h-3.5 w-3.5 text-[var(--success)]" /> : null}
-                  </button>
-                );
-              })}
-            </div>
+        {addMenuArtifactId === artifact._id ? (
+          <div className="absolute right-0 top-[calc(100%+8px)] z-30 w-[260px] rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[0_6px_18px_rgba(0,0,0,0.10)]">
+            {workspaces.map((workspace) => {
+              const alreadyPlaced = artifact.placements.some((placement) => placement.workspaceId === workspace._id);
+              return (
+                <button key={workspace._id} type="button" className={menuItemClass()} disabled={alreadyPlaced || busyKey === `add:${artifact._id}`} onClick={() => void addToWorkspace(artifact._id, workspace._id)}>
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px] bg-[var(--bg-secondary)] text-[11px] font-semibold text-[var(--text-secondary)]">{initials(workspace.title)}</span>
+                  <span className="min-w-0 flex-1 truncate">{workspace.title}</span>
+                  {alreadyPlaced ? <CheckCircle2 className="h-4 w-4 text-[var(--accent-cyan)]" /> : null}
+                </button>
+              );
+            })}
           </div>
         ) : null}
       </div>
@@ -281,151 +234,113 @@ export function ArtifactsShell() {
         key={artifact._id}
         artifact={toArtifactCardView(artifact)}
         selected={selected}
-        actions={renderAddAction(artifact)}
+        actions={addAction(artifact)}
       />
     );
   }
 
   return (
-    <div className="flex min-h-full flex-col bg-[radial-gradient(circle_at_18%_0%,color-mix(in_oklab,var(--accent-cyan)_9%,transparent),transparent_32%),var(--bg-primary)]">
-      <header className="px-5 pt-5 lg:px-6">
-        <div className="rounded-b-[34px] rounded-t-[22px] border border-[color-mix(in_oklab,var(--border-default)_74%,transparent)] bg-[color-mix(in_oklab,var(--bg-elevated)_84%,var(--bg-primary))] px-4 py-4 shadow-[0_22px_70px_-54px_rgba(8,22,40,0.72)] backdrop-blur-xl">
-          <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-            <div className="min-w-0">
-              <div className="mb-2 flex flex-wrap items-center gap-2 text-[11px] font-semibold text-[var(--text-tertiary)]">
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--bg-primary)]/70 px-2.5 py-1">
-                  <Library className="h-3.5 w-3.5 text-[var(--accent-cyan)]" />
-                  Artifact library
-                </span>
-                {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-              </div>
-              <h1 className="font-display text-[28px] font-semibold leading-tight text-[var(--text-primary)]">Artifacts</h1>
-              <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[12px] text-[var(--text-secondary)]">
-                <span>{artifacts.length} artifacts</span>
-                <span className="h-1 w-1 rounded-full bg-[var(--border-default)]" />
-                <span>{inbox.length} inbox</span>
-                <span className="h-1 w-1 rounded-full bg-[var(--border-default)]" />
-                <span>{placed.length} in workspaces</span>
-              </div>
-            </div>
-
-            <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-center">
-              <div className="relative min-w-[260px]">
-                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-tertiary)]" />
-                <input
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                  className="h-10 w-full rounded-[15px] border border-[color-mix(in_oklab,var(--border-default)_78%,transparent)] bg-[color-mix(in_oklab,var(--bg-elevated)_92%,var(--bg-primary))] pl-9 pr-3 text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[color-mix(in_oklab,var(--accent-cyan)_55%,var(--border-default))]"
-                  placeholder="Search artifacts"
-                />
-              </div>
-              <WorkspacePicker workspaces={workspaces} selectedWorkspaceId={selectedWorkspaceId} onSelect={setSelectedWorkspaceId} />
+    <div className="flex min-h-full flex-col bg-[var(--bg-primary)]">
+      <header className="border-b border-[var(--border-default)] px-6 py-5">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <h1 className="font-display text-[30px] font-semibold leading-tight text-[var(--text-primary)]">Artifacts</h1>
+            <div className="mt-1 flex items-center gap-2 text-[12px] text-[var(--text-secondary)]">
+              <span>{artifacts.length} artifacts</span>
+              <span>{inbox.length} inbox</span>
+              <span>{placed.length} in workspaces</span>
+              {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--text-tertiary)]" /> : null}
             </div>
           </div>
-
-          <div className="mt-4 grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(400px,560px)]">
-            <div className="flex gap-1 overflow-x-auto rounded-[18px] border border-[color-mix(in_oklab,var(--border-default)_74%,transparent)] bg-[var(--bg-primary)]/52 p-1">
-              {filters.map((filter) => {
-                const Icon = filter.icon;
-                const active = activeFilter === filter.key;
-                return (
-                  <button
-                    key={filter.key}
-                    type="button"
-                    onClick={() => setActiveFilter(filter.key)}
-                    className={`inline-flex h-9 shrink-0 items-center gap-1.5 rounded-[13px] px-3 text-[12px] font-semibold transition-[background,color,transform] hover:-translate-y-0.5 ${
-                      active ? "bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[0_10px_24px_-20px_rgba(8,22,40,0.45)]" : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-                    }`}
-                  >
-                    <Icon className="h-3.5 w-3.5" />
-                    {filter.label}
-                  </button>
-                );
-              })}
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <div className="relative w-[260px] max-w-full">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-tertiary)]" />
+              <input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                className="h-9 w-full rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] pl-9 pr-3 text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
+                placeholder="Search artifacts"
+              />
             </div>
-
-            <div className="rounded-[22px] border border-[color-mix(in_oklab,var(--border-default)_74%,transparent)] bg-[var(--bg-primary)]/52 p-2">
-              <div className="mb-2 flex flex-wrap gap-1">
-                {createTypes.map((type) => {
-                  const Icon = type.icon;
-                  const active = newArtifactType === type.key;
-                  return (
-                    <button
-                      key={type.key}
-                      type="button"
-                      onClick={() => setNewArtifactType(type.key)}
-                      className={`inline-flex h-8 items-center gap-1.5 rounded-[12px] px-2.5 text-[11.5px] font-semibold transition-colors ${
-                        active ? "bg-[var(--bg-elevated)] text-[var(--text-primary)]" : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-                      }`}
-                    >
-                      <Icon className="h-3.5 w-3.5" />
-                      {type.label}
+            <WorkspaceTarget workspaces={workspaces} selectedWorkspaceId={selectedWorkspaceId} onSelect={setSelectedWorkspaceId} />
+            <div className="relative">
+              <button type="button" className={actionButtonClass("primary")} onClick={() => setNewOpen((open) => !open)}>
+                <Plus className="h-4 w-4" />
+                New
+              </button>
+              {newOpen ? (
+                <div className="absolute right-0 top-[calc(100%+8px)] z-30 w-[320px] rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 shadow-[0_6px_18px_rgba(0,0,0,0.10)]">
+                  <div className="mb-2 flex flex-wrap gap-1">
+                    {createTypes.map((type) => {
+                      const Icon = type.icon;
+                      return (
+                        <button key={type.key} type="button" className={`inline-flex h-8 items-center gap-1.5 rounded-[8px] px-2 text-[12px] ${newArtifactType === type.key ? "bg-[var(--bg-secondary)] text-[var(--text-primary)]" : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`} onClick={() => setNewArtifactType(type.key)}>
+                          <Icon className="h-3.5 w-3.5" />
+                          {type.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="flex gap-2">
+                    <input
+                      value={newArtifactTitle}
+                      onChange={(event) => setNewArtifactTitle(event.target.value)}
+                      placeholder="Artifact title"
+                      className="h-9 min-w-0 flex-1 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 text-[13px] text-[var(--text-primary)] outline-none"
+                    />
+                    <button type="button" className={actionButtonClass()} disabled={!newArtifactTitle.trim() || busyKey === "artifact:create"} onClick={() => void createArtifact()}>
+                      {busyKey === "artifact:create" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
                     </button>
-                  );
-                })}
-              </div>
-              <div className="flex min-w-0 gap-2">
-                <input
-                  value={newArtifactTitle}
-                  onChange={(event) => setNewArtifactTitle(event.target.value)}
-                  placeholder={`New ${blueprintMeta[newArtifactType].shortLabel.toLowerCase()} title`}
-                  className="h-10 min-w-0 flex-1 rounded-[15px] border border-[color-mix(in_oklab,var(--border-default)_78%,transparent)] bg-[var(--bg-elevated)] px-3 text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[color-mix(in_oklab,var(--accent-cyan)_55%,var(--border-default))]"
-                />
-                <button
-                  type="button"
-                  className={actionButtonClass("primary")}
-                  disabled={!newArtifactTitle.trim() || busyKey === "artifact:create"}
-                  onClick={() => void createArtifact()}
-                >
-                  {busyKey === "artifact:create" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
-                  New
-                </button>
-              </div>
+                  </div>
+                </div>
+              ) : null}
             </div>
           </div>
         </div>
+        <div className="mt-4 flex flex-wrap gap-1 border-t border-[var(--border-default)] pt-3">
+          {filters.map((filter) => (
+            <button
+              key={filter.key}
+              type="button"
+              onClick={() => setActiveFilter(filter.key)}
+              className={`h-8 rounded-[7px] px-2.5 text-[12px] font-medium ${
+                activeFilter === filter.key ? "bg-[var(--bg-secondary)] text-[var(--text-primary)]" : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+              }`}
+            >
+              {filter.label}
+            </button>
+          ))}
+        </div>
       </header>
 
-      <main className="min-h-0 flex-1 px-5 py-5 lg:px-6">
-        <section className="rounded-[30px] border border-[color-mix(in_oklab,var(--border-default)_72%,transparent)] bg-[color-mix(in_oklab,var(--bg-elevated)_70%,var(--bg-primary))] p-4">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <h2 className="flex items-center gap-2 text-[14px] font-semibold text-[var(--text-primary)]">
-                <Inbox className="h-4 w-4 text-[var(--accent-cyan)]" />
-                Inbox
-              </h2>
-              <p className="mt-0.5 text-[12px] text-[var(--text-tertiary)]">Unplaced artifacts ready for {selectedWorkspace?.title ?? "a workspace"}.</p>
-            </div>
-            <span className="rounded-full bg-[var(--bg-primary)]/70 px-2.5 py-1 text-[11px] font-semibold text-[var(--text-tertiary)]">{inbox.length}</span>
+      <main className="min-h-0 flex-1 px-6 py-5">
+        <section>
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-[15px] font-semibold text-[var(--text-primary)]">Inbox</h2>
+            <span className="text-[12px] text-[var(--text-tertiary)]">{inbox.length}</span>
           </div>
           {inbox.length > 0 ? (
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
               {inbox.map((artifact, index) => renderArtifact(artifact, index === 0))}
             </div>
           ) : (
-            <div className="rounded-[24px] border border-dashed border-[color-mix(in_oklab,var(--border-default)_74%,transparent)] bg-[var(--bg-primary)]/45 px-4 py-8 text-center text-[13px] text-[var(--text-secondary)]">
-              No inbox artifacts match this view.
+            <div className="border-t border-[var(--border-default)] py-9 text-center text-[13px] text-[var(--text-secondary)]">
+              No unplaced artifacts match this view.
             </div>
           )}
         </section>
 
-        <section className="mt-5 rounded-[30px] border border-[color-mix(in_oklab,var(--border-default)_72%,transparent)] bg-[color-mix(in_oklab,var(--bg-elevated)_70%,var(--bg-primary))] p-4">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <h2 className="flex items-center gap-2 text-[14px] font-semibold text-[var(--text-primary)]">
-                <Sparkles className="h-4 w-4 text-[var(--accent-cyan)]" />
-                In workspaces
-              </h2>
-              <p className="mt-0.5 text-[12px] text-[var(--text-tertiary)]">Already placed artifacts stay connected to the library.</p>
-            </div>
-            <span className="rounded-full bg-[var(--bg-primary)]/70 px-2.5 py-1 text-[11px] font-semibold text-[var(--text-tertiary)]">{placed.length}</span>
+        <section className="mt-8">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-[15px] font-semibold text-[var(--text-primary)]">In workspaces</h2>
+            <span className="text-[12px] text-[var(--text-tertiary)]">{placed.length}</span>
           </div>
           {placed.length > 0 ? (
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
               {placed.map((artifact) => renderArtifact(artifact))}
             </div>
           ) : (
-            <div className="rounded-[24px] border border-dashed border-[color-mix(in_oklab,var(--border-default)_74%,transparent)] bg-[var(--bg-primary)]/45 px-4 py-8 text-center text-[13px] text-[var(--text-secondary)]">
+            <div className="border-t border-[var(--border-default)] py-9 text-center text-[13px] text-[var(--text-secondary)]">
               No workspace placements match this view.
             </div>
           )}

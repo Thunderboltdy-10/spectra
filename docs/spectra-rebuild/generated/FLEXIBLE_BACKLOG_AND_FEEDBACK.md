@@ -8,6 +8,25 @@ Feedback can move between waves if product logic changes. If something is wrong 
 
 ## Pablo's Current UI Complaints
 
+### Wave 2 Recovery Correction
+
+This correction supersedes the rejected Wave 2 visual direction from commit `e280602`.
+
+| Feedback | Current Wave Assignment | Notes |
+| --- | --- | --- |
+| `/workspace` needs a Workspace Home and must not automatically open Biology or the first workspace. | Recovery / Wave 2 | Workspace Home is the default state until the user intentionally opens a workspace. |
+| Workspace navigation should use a left-middle vertical rail with Home plus workspace icons. | Recovery / Wave 2 | It must feel like core navigation, not a form control or dropdown. |
+| There must always be an obvious way back to Workspace Home. | Recovery / Wave 2 | Home stays as the top rail item. |
+| Avoid cards inside cards and excessive roundness. | Recovery / Wave 2 and ongoing | Prefer plain page structure, spacing, typography, dividers, and object cards only where needed. |
+| Use progressive disclosure. | Recovery / Wave 2 and ongoing | Hide creation/filter controls behind New, plus menus, contextual panels, or compact controls. |
+| Use `/chat` visual language as inspiration. | Recovery / Wave 2 and ongoing | Borrow hierarchy, intentional composition, accent strips, and clearer primary/secondary information without copying it exactly. |
+| Command bar/result tray must be slim, grounded, and integrated. | Recovery / Wave 2 now, Wave 4 later | Do not put big labels inside the command field. Result cards default to compact one/two-line rows. |
+| Do not expose creation/filter controls everywhere. | Recovery / Wave 2 and ongoing | Workspace artifact creation belongs behind plus/menu. Artifact creation belongs behind New. |
+| Inspector should not dominate the page. | Recovery / Wave 2 and ongoing | Only show it when useful, such as when an object is selected. |
+| Fix core flows before visual redesign. | Recovery / Wave 2 and ongoing | Workspace creation/switching and artifact create/place flows must remain working. |
+
+### Original Wave 1 Feedback
+
 | Feedback | Current Wave Assignment | Notes |
 | --- | --- | --- |
 | `/workspace` drops directly into Biology with no serious workspace navigation. | Wave 2 | Add workspace overview/top rail and switcher. |

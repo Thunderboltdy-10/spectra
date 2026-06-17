@@ -63,28 +63,6 @@ export type SpectraRun = {
   updatedAt: number;
 };
 
-export type SpectraResultCard = {
-  _id: string;
-  runId: string;
-  surface: "chat" | "workspace" | "artifact";
-  workspaceId?: string;
-  artifactId?: string;
-  status: "queued" | "running" | "completed" | "failed" | "cancelled";
-  variant: "status" | "artifact" | "thread" | "operation" | "error";
-  title: string;
-  summary?: string;
-  actions: Array<{
-    key: string;
-    label: string;
-    targetType?: "artifact" | "thread" | "run" | "workspace";
-    targetId?: string;
-  }>;
-  hiddenAt?: number;
-  createdAt: number;
-  updatedAt: number;
-  run?: SpectraRun;
-};
-
 export type SpectraOverview = {
   workspaces: SpectraWorkspace[];
   selectedWorkspaceId?: string;
@@ -94,7 +72,6 @@ export type SpectraOverview = {
   } | null;
   artifacts: SpectraArtifact[];
   runs: SpectraRun[];
-  resultCards: SpectraResultCard[];
 };
 
 type JsonRecord = Record<string, unknown>;
@@ -160,6 +137,6 @@ export function workspaceItemToArtifactCardView(item: SpectraWorkspaceItem): Art
     summary: item.viewData.compactSummary ?? item.artifact.summary ?? "No summary yet.",
     meta: "Workspace card",
     placement: "workspace",
-    pinned: item.viewData.pinned,
   };
 }
+

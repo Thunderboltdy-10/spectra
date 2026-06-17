@@ -19,6 +19,22 @@ The Wave 1 UI is structurally useful but too generic. Wave 2 must spend design e
 
 Goal: turn the data-backed workspace into a real working environment.
 
+Recovery correction after rejected Wave 2 direction:
+
+- `/workspace` must default to Workspace Home when no workspace is explicitly selected.
+- Workspace Home should show all workspaces as a calm overview with recent workspaces, counts, recent activity, and continue/open actions.
+- Opening a workspace must be intentional.
+- A selected workspace must still have a clear route back to Workspace Home.
+- Workspace navigation should use a slim left-middle vertical rail with Home, workspace icons/avatars, and a subtle create action.
+- Do not use native/default workspace dropdowns in the main workspace or artifact surfaces.
+- Avoid cards-inside-cards and excessive roundness.
+- Use spacing, typography, subtle dividers, and layout hierarchy before adding containers.
+- Use `/chat` visual language as inspiration for hierarchy, accent strips, and intentional composition.
+- Use progressive disclosure: do not expose artifact creation, workspace creation, filters, search, and type controls all at once.
+- Command bar/result tray must be slim and integrated. Do not put large context labels inside the command field.
+- Inspector should be slim, collapsible, or only appear when useful.
+- Fix API/core flows before continuing visual redesign.
+
 Focus:
 
 - Workspace overview/navigation so users do not feel trapped in one Biology workspace.

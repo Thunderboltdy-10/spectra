@@ -1,56 +1,68 @@
 "use client";
 
-import { Plus, Sparkles } from "lucide-react";
+import type { ReactNode } from "react";
+import { Plus, ArrowUp } from "lucide-react";
 import { useState } from "react";
-import { QuickChat } from "@/components/shared/quick-chat";
 import { cn } from "@/lib/utils";
 
 type CommandBarProps = {
-  contextLabel: string;
   placeholder: string;
-  detail?: string;
+  menu?: ReactNode;
   className?: string;
   onSubmit?: (value: string) => void;
 };
 
-export function CommandBar({ contextLabel, placeholder, detail, className, onSubmit }: CommandBarProps) {
+export function CommandBar({ placeholder, menu, className, onSubmit }: CommandBarProps) {
   const [value, setValue] = useState("");
+  const [menuOpen, setMenuOpen] = useState(false);
 
   return (
-    <div className={cn("w-full", className)}>
-      <QuickChat
-        value={value}
-        onChange={setValue}
-        onSubmit={() => {
-          const next = value.trim();
-          if (!next) return;
-          onSubmit?.(next);
-          setValue("");
-        }}
-        showMic={false}
-        placeholder={placeholder}
-        className="w-full min-w-0"
-        leftContent={(
-          <button
-            type="button"
-            className="flex h-11 w-11 items-center justify-center rounded-[16px] border border-[color-mix(in_oklab,var(--accent-cyan)_28%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_10%,var(--bg-elevated))] text-[var(--accent-cyan)] shadow-[0_12px_28px_-22px_rgba(8,22,40,0.45)] transition-[background,transform] hover:-translate-y-0.5 hover:bg-[color-mix(in_oklab,var(--accent-cyan)_16%,var(--bg-elevated))]"
-            aria-label="Add context"
-          >
-            <Plus className="h-[18px] w-[18px]" />
-          </button>
-        )}
-        topContent={(
-          <div className="flex min-w-0 items-center justify-between gap-3">
-            <div className="flex min-w-0 items-center gap-2">
-              <span className="inline-flex h-5 items-center gap-1.5 rounded-full bg-[color-mix(in_oklab,var(--accent-cyan)_11%,var(--bg-secondary))] px-2 text-[10.5px] font-semibold text-[var(--accent-cyan)]">
-                <Sparkles className="h-3 w-3" />
-                {contextLabel}
-              </span>
-              {detail ? <span className="truncate text-[11px] font-medium text-[var(--text-tertiary)]">{detail}</span> : null}
-            </div>
-          </div>
-        )}
-      />
+    <div className={cn("relative", className)}>
+      {menuOpen && menu ? (
+        <div className="absolute bottom-[calc(100%+8px)] left-0 z-20 min-w-[220px] rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[0_6px_18px_rgba(0,0,0,0.10)]">
+          {menu}
+        </div>
+      ) : null}
+      <div className="flex min-h-12 items-end gap-2 rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 shadow-[0_3px_12px_rgba(0,0,0,0.08)]">
+        <button
+          type="button"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+          onClick={() => setMenuOpen((open) => !open)}
+          aria-label="Open actions"
+        >
+          <Plus className="h-4 w-4" />
+        </button>
+        <textarea
+          rows={1}
+          value={value}
+          onChange={(event) => setValue(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              const next = value.trim();
+              if (!next) return;
+              onSubmit?.(next);
+              setValue("");
+            }
+          }}
+          placeholder={placeholder}
+          className="max-h-[80px] min-h-9 min-w-0 flex-1 resize-none bg-transparent px-1 py-2 text-[14px] leading-5 text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
+        />
+        <button
+          type="button"
+          disabled={!value.trim()}
+          onClick={() => {
+            const next = value.trim();
+            if (!next) return;
+            onSubmit?.(next);
+            setValue("");
+          }}
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-[var(--accent-cyan)] text-white disabled:bg-[var(--bg-secondary)] disabled:text-[var(--text-tertiary)]"
+          aria-label="Send command"
+        >
+          <ArrowUp className="h-4 w-4" />
+        </button>
+      </div>
     </div>
   );
 }

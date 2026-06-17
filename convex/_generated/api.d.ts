@@ -48,6 +48,7 @@ import type * as schoolAdmin from "../schoolAdmin.js";
 import type * as seed from "../seed.js";
 import type * as shared from "../shared.js";
 import type * as soul from "../soul.js";
+import type * as spectraRuns from "../spectraRuns.js";
 import type * as streakLogic from "../streakLogic.js";
 import type * as superAdmin from "../superAdmin.js";
 import type * as usage from "../usage.js";
@@ -112,6 +113,7 @@ declare const fullApi: ApiFromModules<{
   seed: typeof seed;
   shared: typeof shared;
   soul: typeof soul;
+  spectraRuns: typeof spectraRuns;
   streakLogic: typeof streakLogic;
   superAdmin: typeof superAdmin;
   usage: typeof usage;

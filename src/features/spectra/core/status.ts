@@ -1,0 +1,27 @@
+export const WORKSPACE_STATUSES = ["active", "archived"] as const;
+export type WorkspaceStatus = (typeof WORKSPACE_STATUSES)[number];
+
+export const ARTIFACT_STATUSES = ["active", "draft", "archived", "deleted"] as const;
+export type ArtifactStatus = (typeof ARTIFACT_STATUSES)[number];
+
+export const THREAD_STATUSES = ["active", "archived", "deleted"] as const;
+export type ThreadStatus = (typeof THREAD_STATUSES)[number];
+
+export const AI_RUN_STATUSES = ["queued", "running", "completed", "failed", "cancelled"] as const;
+export type AIRunStatus = (typeof AI_RUN_STATUSES)[number];
+
+export const OPERATION_STATUSES = ["proposed", "executed", "failed", "cancelled"] as const;
+export type OperationStatus = (typeof OPERATION_STATUSES)[number];
+
+export const RESULT_CARD_STATUSES = ["queued", "running", "completed", "failed", "cancelled"] as const;
+export type ResultCardStatus = (typeof RESULT_CARD_STATUSES)[number];
+
+export const SURFACES = ["chat", "workspace", "artifact"] as const;
+export type SpectraSurface = (typeof SURFACES)[number];
+
+export const WORKSPACE_VIEWS = ["cards", "canvas", "timeline", "library"] as const;
+export type WorkspaceView = (typeof WORKSPACE_VIEWS)[number];
+
+export const ACTOR_TYPES = ["user", "ai", "system"] as const;
+export type ActorType = (typeof ACTOR_TYPES)[number];
+

@@ -1413,7 +1413,8 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_workspace", ["workspaceId"])
-    .index("by_workspace_source", ["workspaceId", "sourceType", "sourceId"]),
+    .index("by_workspace_source", ["workspaceId", "sourceType", "sourceId"])
+    .index("by_source", ["sourceType", "sourceId"]),
 
   spectraThreads: defineTable({
     ownerUserId: v.id("users"),

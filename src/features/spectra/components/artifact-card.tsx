@@ -1,4 +1,5 @@
 import type { LucideIcon } from "lucide-react";
+import type { ReactNode } from "react";
 import { BookOpen, CalendarCheck2, FileText, HelpCircle, MessageSquare } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -19,13 +20,21 @@ const blueprintMeta: Record<ArtifactCardView["blueprintKey"], { label: string; i
   planner_task: { label: "Task", icon: CalendarCheck2, color: "var(--success)" },
 };
 
-export function ArtifactCard({ artifact, selected = false }: { artifact: ArtifactCardView; selected?: boolean }) {
+export function ArtifactCard({
+  artifact,
+  selected = false,
+  actions,
+}: {
+  artifact: ArtifactCardView;
+  selected?: boolean;
+  actions?: ReactNode;
+}) {
   const meta = blueprintMeta[artifact.blueprintKey];
   const Icon = meta.icon;
   return (
     <article
       className={cn(
-        "rounded-[8px] border bg-[var(--bg-elevated)] p-4 transition-colors",
+        "rounded-[8px] border bg-[var(--bg-elevated)] p-3.5 transition-[background,border-color,transform] duration-200 hover:-translate-y-0.5",
         selected ? "border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))]" : "border-[var(--border-default)] hover:bg-[var(--bg-hover)]/35",
       )}
     >
@@ -49,10 +58,12 @@ export function ArtifactCard({ artifact, selected = false }: { artifact: Artifac
           </div>
           <h3 className="mt-1 truncate text-[14px] font-semibold text-[var(--text-primary)]">{artifact.title}</h3>
           <p className="mt-1 line-clamp-2 text-[12px] leading-5 text-[var(--text-secondary)]">{artifact.summary}</p>
-          <div className="mt-3 text-[11px] text-[var(--text-tertiary)]">{artifact.meta}</div>
+          <div className="mt-3 flex min-h-7 items-end justify-between gap-2">
+            <div className="min-w-0 truncate text-[11px] text-[var(--text-tertiary)]">{artifact.meta}</div>
+            {actions ? <div className="flex shrink-0 items-center gap-1.5">{actions}</div> : null}
+          </div>
         </div>
       </div>
     </article>
   );
 }
-

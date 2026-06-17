@@ -6,6 +6,35 @@ import { withRouteErrorHandling } from "@/lib/route-handler";
 
 const BLUEPRINTS = new Set(["document", "thread_reference", "flashcard_deck", "quiz", "planner_task"]);
 
+function withJsExtension(functionName: string) {
+  const [moduleName, exportName] = functionName.split(":");
+  if (!moduleName || !exportName || moduleName.endsWith(".js")) return functionName;
+  return `${moduleName}.js:${exportName}`;
+}
+
+function isFunctionPathNotFound(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes("FunctionPathNotFound") || message.includes("Could not find public function");
+}
+
+async function spectraQuery<TArgs extends object, TResult>(functionName: string, args: TArgs) {
+  try {
+    return await convexQuery<TArgs, TResult>(functionName, args);
+  } catch (error) {
+    if (!isFunctionPathNotFound(error)) throw error;
+    return convexQuery<TArgs, TResult>(withJsExtension(functionName), args);
+  }
+}
+
+async function spectraMutation<TArgs extends object, TResult>(functionName: string, args: TArgs) {
+  try {
+    return await convexMutation<TArgs, TResult>(functionName, args);
+  } catch (error) {
+    if (!isFunctionPathNotFound(error)) throw error;
+    return convexMutation<TArgs, TResult>(withJsExtension(functionName), args);
+  }
+}
+
 function requireString(value: unknown, name: string) {
   if (typeof value !== "string" || value.trim().length === 0) {
     throw new Error(`${name} is required`);
@@ -32,7 +61,7 @@ export async function GET(request: NextRequest) {
     const action = params.get("action") ?? "overview";
 
     if (action === "workspaces") {
-      const workspaces = await convexQuery("spectraWorkspaces:list", {
+      const workspaces = await spectraQuery("spectraWorkspaces:list", {
         actorClerkId: actor.clerkId,
         includeArchived: params.get("includeArchived") === "true",
       });
@@ -40,7 +69,7 @@ export async function GET(request: NextRequest) {
     }
 
     if (action === "artifacts") {
-      const artifacts = await convexQuery("spectraArtifacts:list", {
+      const artifacts = await spectraQuery("spectraArtifacts:list", {
         actorClerkId: actor.clerkId,
         status: params.get("status") ?? undefined,
         blueprintKey: params.get("blueprintKey") ?? undefined,
@@ -54,7 +83,7 @@ export async function GET(request: NextRequest) {
     if (action === "workspace") {
       const workspaceId = params.get("workspaceId");
       if (!workspaceId) return badRequest("workspaceId is required");
-      const workspace = await convexQuery("spectraWorkspaceItems:listForWorkspace", {
+      const workspace = await spectraQuery("spectraWorkspaceItems:listForWorkspace", {
         actorClerkId: actor.clerkId,
         workspaceId,
       });
@@ -62,7 +91,7 @@ export async function GET(request: NextRequest) {
     }
 
     if (action === "overview") {
-      const workspaces = await convexQuery("spectraWorkspaces:list", {
+      const workspaces = await spectraQuery("spectraWorkspaces:list", {
         actorClerkId: actor.clerkId,
         includeArchived: false,
         limit: 30,
@@ -71,17 +100,17 @@ export async function GET(request: NextRequest) {
       const selectedWorkspaceId = requestedWorkspaceId ?? workspaces[0]?._id;
       const [workspace, artifacts, runs] = await Promise.all([
         selectedWorkspaceId
-          ? convexQuery("spectraWorkspaceItems:listForWorkspace", {
+          ? spectraQuery("spectraWorkspaceItems:listForWorkspace", {
             actorClerkId: actor.clerkId,
             workspaceId: selectedWorkspaceId,
           })
           : Promise.resolve(null),
-        convexQuery("spectraArtifacts:list", {
+        spectraQuery("spectraArtifacts:list", {
           actorClerkId: actor.clerkId,
           placement: "all",
           limit: 100,
         }),
-        convexQuery("spectraRuns:listRecent", {
+        spectraQuery("spectraRuns:listRecent", {
           actorClerkId: actor.clerkId,
           limit: 12,
         }),
@@ -107,14 +136,14 @@ export async function POST(request: NextRequest) {
     const action = requireString(body.action, "action");
 
     if (action === "seed") {
-      const result = await convexMutation("spectraSeed:ensureDemoData", {
+      const result = await spectraMutation("spectraSeed:ensureDemoData", {
         actorClerkId: actor.clerkId,
       });
       return ok(result);
     }
 
     if (action === "createWorkspace") {
-      const workspaceId = await convexMutation("spectraWorkspaces:create", {
+      const workspaceId = await spectraMutation("spectraWorkspaces:create", {
         actorClerkId: actor.clerkId,
         title: requireString(body.title, "title"),
         description: optionalString(body.description),
@@ -123,7 +152,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === "updateWorkspace") {
-      const result = await convexMutation("spectraWorkspaces:update", {
+      const result = await spectraMutation("spectraWorkspaces:update", {
         actorClerkId: actor.clerkId,
         workspaceId: requireString(body.workspaceId, "workspaceId"),
         title: optionalString(body.title),
@@ -134,7 +163,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === "archiveWorkspace") {
-      const result = await convexMutation("spectraWorkspaces:archive", {
+      const result = await spectraMutation("spectraWorkspaces:archive", {
         actorClerkId: actor.clerkId,
         workspaceId: requireString(body.workspaceId, "workspaceId"),
       });
@@ -142,7 +171,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === "createArtifact") {
-      const result = await convexMutation("spectraArtifacts:create", {
+      const result = await spectraMutation("spectraArtifacts:create", {
         actorClerkId: actor.clerkId,
         blueprintKey: requireBlueprint(body.blueprintKey),
         title: requireString(body.title, "title"),
@@ -154,7 +183,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === "updateArtifact") {
-      const result = await convexMutation("spectraArtifacts:update", {
+      const result = await spectraMutation("spectraArtifacts:update", {
         actorClerkId: actor.clerkId,
         artifactId: requireString(body.artifactId, "artifactId"),
         title: optionalString(body.title),
@@ -165,7 +194,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === "archiveArtifact") {
-      const result = await convexMutation("spectraArtifacts:archive", {
+      const result = await spectraMutation("spectraArtifacts:archive", {
         actorClerkId: actor.clerkId,
         artifactId: requireString(body.artifactId, "artifactId"),
       });
@@ -173,7 +202,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === "addArtifactToWorkspace") {
-      const result = await convexMutation("spectraWorkspaceItems:addArtifact", {
+      const result = await spectraMutation("spectraWorkspaceItems:addArtifact", {
         actorClerkId: actor.clerkId,
         workspaceId: requireString(body.workspaceId, "workspaceId"),
         artifactId: requireString(body.artifactId, "artifactId"),
@@ -182,7 +211,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === "hideWorkspaceItem") {
-      const result = await convexMutation("spectraWorkspaceItems:hide", {
+      const result = await spectraMutation("spectraWorkspaceItems:hide", {
         actorClerkId: actor.clerkId,
         workspaceItemId: requireString(body.workspaceItemId, "workspaceItemId"),
       });
@@ -192,4 +221,3 @@ export async function POST(request: NextRequest) {
     return badRequest("Unknown Spectra action");
   }, request);
 }
-

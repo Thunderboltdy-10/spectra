@@ -3,6 +3,8 @@
 import {
   BookOpen,
   CalendarCheck2,
+  ChevronLeft,
+  ChevronRight,
   FileText,
   HelpCircle,
   Loader2,
@@ -26,8 +28,6 @@ import {
   type SpectraOverview,
   type SpectraWorkspaceItem,
 } from "../data/api";
-
-const viewTabs = ["Cards", "Canvas", "Timeline", "Library"];
 
 const createTypes: Array<{ key: Exclude<SpectraBlueprintKey, "thread_reference">; label: string; icon: typeof FileText }> = [
   { key: "document", label: "Document", icon: FileText },
@@ -56,6 +56,7 @@ export function WorkspaceShell() {
   const [loading, setLoading] = useState(true);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [workspaceTitle, setWorkspaceTitle] = useState("");
+  const [activityCollapsed, setActivityCollapsed] = useState(false);
   const seededRef = useRef(false);
 
   const load = useCallback(async (workspaceId?: string) => {
@@ -170,29 +171,19 @@ export function WorkspaceShell() {
           </div>
 
           <div className="flex min-w-0 items-center gap-2">
-            <select
-              value={selectedWorkspaceId ?? ""}
-              onChange={(event) => void load(event.target.value)}
-              className="h-9 max-w-[210px] rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 text-[12px] font-medium text-[var(--text-primary)] outline-none"
-            >
-              {(overview?.workspaces ?? []).map((item) => (
-                <option key={item._id} value={item._id}>{item.title}</option>
-              ))}
-            </select>
-            <div className="hidden items-center rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 xl:flex">
-              {viewTabs.map((view, index) => (
-                <button
-                  key={view}
-                  type="button"
-                  className={`h-8 rounded-[6px] px-3 text-[12px] font-medium transition-colors ${
-                    index === 0
-                      ? "bg-[var(--bg-secondary)] text-[var(--text-primary)]"
-                      : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-                  }`}
-                >
-                  {view}
-                </button>
-              ))}
+            {(overview?.workspaces.length ?? 0) > 0 ? (
+              <select
+                value={selectedWorkspaceId ?? ""}
+                onChange={(event) => void load(event.target.value)}
+                className="h-9 max-w-[210px] rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 text-[12px] font-medium text-[var(--text-primary)] outline-none"
+              >
+                {overview?.workspaces.map((item) => (
+                  <option key={item._id} value={item._id}>{item.title}</option>
+                ))}
+              </select>
+            ) : null}
+            <div className="hidden h-9 items-center rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[12px] font-semibold text-[var(--text-primary)] xl:flex">
+              Cards
             </div>
           </div>
         </header>
@@ -301,44 +292,58 @@ export function WorkspaceShell() {
           </div>
         </main>
 
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 bg-[linear-gradient(to_top,var(--bg-primary)_72%,transparent)] px-6 pb-5 pt-20">
-          <div className="pointer-events-auto mx-auto max-w-3xl">
-            <ResultCardStack className="mb-2" />
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 bg-[linear-gradient(to_top,var(--bg-primary)_70%,transparent)] px-6 pb-5 pt-20">
+          <div className="pointer-events-auto mx-auto w-full max-w-[860px]">
+            <ResultCardStack className="mb-2 w-full" />
             <CommandBar contextLabel={workspace ? `${workspace.title} workspace` : "Workspace"} placeholder="Work with this workspace..." />
           </div>
         </div>
       </section>
 
-      <aside className="hidden w-[300px] shrink-0 border-l border-[var(--border-default)] bg-[var(--bg-elevated)] lg:flex lg:flex-col">
-        <div className="flex items-center justify-between border-b border-[var(--border-default)] px-4 py-4">
-          <h2 className="text-[14px] font-semibold text-[var(--text-primary)]">Run hub</h2>
+      <aside
+        className={`hidden shrink-0 border-l border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-primary)_94%,var(--bg-elevated))] transition-[width] duration-300 lg:flex lg:flex-col ${
+          activityCollapsed ? "w-[56px]" : "w-[320px]"
+        }`}
+      >
+        <div className={`flex min-h-[56px] items-center border-b border-[var(--border-default)] ${activityCollapsed ? "justify-center px-2" : "justify-between px-4"}`}>
+          {!activityCollapsed ? (
+            <div className="min-w-0">
+              <p className="text-[9px] uppercase tracking-[0.14em] text-[var(--text-secondary)]">Workspace</p>
+              <h2 className="truncate text-[16px] font-semibold text-[var(--text-primary)]">Activity</h2>
+            </div>
+          ) : null}
           <button
             type="button"
             className="flex h-7 w-7 items-center justify-center rounded-[7px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-            onClick={() => void load(selectedWorkspaceId)}
-            aria-label="Refresh workspace"
+            onClick={() => setActivityCollapsed((value) => !value)}
+            aria-label={activityCollapsed ? "Expand activity panel" : "Collapse activity panel"}
           >
-            <RefreshCw className="h-3.5 w-3.5" />
+            {activityCollapsed ? <ChevronLeft className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
           </button>
         </div>
-        <div className="space-y-2 p-3">
+        <div className={`space-y-2 ${activityCollapsed ? "p-2" : "p-3"}`}>
           {[
             { label: "Running", value: String(overview?.runs.filter((run) => run.status === "running").length ?? 0), icon: Rows3 },
             { label: "Recent", value: String(recentRunCount), icon: PanelRight },
             { label: "Threads", value: "0", icon: MessageSquare },
+            { label: "Refresh", value: "", icon: RefreshCw, onClick: () => void load(selectedWorkspaceId) },
           ].map((section) => {
             const Icon = section.icon;
             return (
               <button
                 key={section.label}
                 type="button"
-                className="flex w-full items-center justify-between rounded-[8px] px-3 py-2 text-left transition-colors hover:bg-[var(--bg-hover)]"
+                onClick={section.onClick}
+                className={`flex w-full items-center rounded-[8px] text-left transition-colors hover:bg-[var(--bg-hover)] ${
+                  activityCollapsed ? "h-9 justify-center px-0" : "justify-between px-3 py-2"
+                }`}
+                title={section.label}
               >
-                <span className="flex items-center gap-2 text-[13px] font-medium text-[var(--text-secondary)]">
+                <span className={`flex items-center gap-2 text-[13px] font-medium text-[var(--text-secondary)] ${activityCollapsed ? "justify-center" : ""}`}>
                   <Icon className="h-4 w-4" />
-                  {section.label}
+                  {!activityCollapsed ? section.label : null}
                 </span>
-                <span className="text-[12px] text-[var(--text-tertiary)]">{section.value}</span>
+                {!activityCollapsed ? <span className="text-[12px] text-[var(--text-tertiary)]">{section.value}</span> : null}
               </button>
             );
           })}

@@ -1,4 +1,7 @@
+"use client";
+
 import { CheckCircle2, Clock3, ExternalLink, X } from "lucide-react";
+import { useEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
 
 type ResultCardView = {
@@ -57,6 +60,7 @@ export function ResultCard({ card }: { card: ResultCardView }) {
 }
 
 export function ResultCardStack({ className }: { className?: string }) {
+  const stackRef = useRef<HTMLDivElement | null>(null);
   const cards: ResultCardView[] = [
     {
       id: "seed-run-1",
@@ -74,8 +78,21 @@ export function ResultCardStack({ className }: { className?: string }) {
     },
   ];
 
+  useEffect(() => {
+    const node = stackRef.current;
+    if (!node) return;
+    node.scrollTop = node.scrollHeight;
+  }, [cards.length]);
+
   return (
-    <div className={cn("max-h-[92px] space-y-1.5 overflow-y-auto", className)}>
+    <div
+      ref={stackRef}
+      className={cn(
+        "relative max-h-[104px] space-y-1.5 overflow-y-auto rounded-[14px] border border-[var(--border-default)] bg-[var(--bg-primary)]/55 p-1.5 shadow-[0_10px_32px_-24px_rgba(8,22,40,0.35)]",
+        "after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:h-5 after:bg-[linear-gradient(to_top,var(--bg-primary),transparent)]",
+        className,
+      )}
+    >
       {cards.map((card) => (
         <ResultCard key={card.id} card={card} />
       ))}

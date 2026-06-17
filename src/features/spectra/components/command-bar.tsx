@@ -1,6 +1,6 @@
 "use client";
 
-import { Plus } from "lucide-react";
+import { Plus, Sparkles } from "lucide-react";
 import { useState } from "react";
 import { QuickChat } from "@/components/shared/quick-chat";
 import { cn } from "@/lib/utils";
@@ -8,10 +8,12 @@ import { cn } from "@/lib/utils";
 type CommandBarProps = {
   contextLabel: string;
   placeholder: string;
+  detail?: string;
   className?: string;
+  onSubmit?: (value: string) => void;
 };
 
-export function CommandBar({ contextLabel, placeholder, className }: CommandBarProps) {
+export function CommandBar({ contextLabel, placeholder, detail, className, onSubmit }: CommandBarProps) {
   const [value, setValue] = useState("");
 
   return (
@@ -20,7 +22,9 @@ export function CommandBar({ contextLabel, placeholder, className }: CommandBarP
         value={value}
         onChange={setValue}
         onSubmit={() => {
-          if (!value.trim()) return;
+          const next = value.trim();
+          if (!next) return;
+          onSubmit?.(next);
           setValue("");
         }}
         showMic={false}
@@ -29,14 +33,22 @@ export function CommandBar({ contextLabel, placeholder, className }: CommandBarP
         leftContent={(
           <button
             type="button"
-            className="flex h-10 w-10 items-center justify-center rounded-[14px] border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] shadow-[0_8px_24px_-18px_rgba(8,22,40,0.30)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+            className="flex h-11 w-11 items-center justify-center rounded-[16px] border border-[color-mix(in_oklab,var(--accent-cyan)_28%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_10%,var(--bg-elevated))] text-[var(--accent-cyan)] shadow-[0_12px_28px_-22px_rgba(8,22,40,0.45)] transition-[background,transform] hover:-translate-y-0.5 hover:bg-[color-mix(in_oklab,var(--accent-cyan)_16%,var(--bg-elevated))]"
             aria-label="Add context"
           >
-            <Plus className="h-4 w-4" />
+            <Plus className="h-[18px] w-[18px]" />
           </button>
         )}
         topContent={(
-          <div className="text-[11px] font-medium text-[var(--text-tertiary)]">{contextLabel}</div>
+          <div className="flex min-w-0 items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="inline-flex h-5 items-center gap-1.5 rounded-full bg-[color-mix(in_oklab,var(--accent-cyan)_11%,var(--bg-secondary))] px-2 text-[10.5px] font-semibold text-[var(--accent-cyan)]">
+                <Sparkles className="h-3 w-3" />
+                {contextLabel}
+              </span>
+              {detail ? <span className="truncate text-[11px] font-medium text-[var(--text-tertiary)]">{detail}</span> : null}
+            </div>
+          </div>
         )}
       />
     </div>

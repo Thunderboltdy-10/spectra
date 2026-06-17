@@ -143,6 +143,47 @@ export const listRecent = query({
   },
 });
 
+export const listResultCards = query({
+  args: {
+    actorClerkId: v.string(),
+    workspaceId: v.optional(v.id("spectraWorkspaces")),
+    artifactId: v.optional(v.id("spectraArtifacts")),
+    includeHidden: v.optional(v.boolean()),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx, args.actorClerkId);
+    const limit = Math.max(1, Math.min(args.limit ?? 12, 50));
+    const statuses = ["queued", "running", "completed", "failed", "cancelled"] as const;
+
+    const cards = args.workspaceId
+      ? (await Promise.all(statuses.map((status) => ctx.db
+        .query("spectraResultCards")
+        .withIndex("by_workspace_status", (q) => q.eq("workspaceId", args.workspaceId).eq("status", status))
+        .order("desc")
+        .take(limit)))).flat()
+      : args.artifactId
+        ? (await Promise.all(statuses.map((status) => ctx.db
+          .query("spectraResultCards")
+          .withIndex("by_artifact_status", (q) => q.eq("artifactId", args.artifactId).eq("status", status))
+          .order("desc")
+          .take(limit)))).flat()
+        : [];
+
+    const hydrated = await Promise.all(cards.map(async (card) => {
+      const run = await ctx.db.get(card.runId);
+      if (!run || run.ownerUserId !== actor._id || run.orgId !== actor.orgId) return null;
+      if (!args.includeHidden && card.hiddenAt) return null;
+      return { ...card, run };
+    }));
+
+    return hydrated
+      .filter((card): card is NonNullable<typeof card> => Boolean(card))
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .slice(0, limit);
+  },
+});
+
 export const hideResultCard = mutation({
   args: {
     actorClerkId: v.string(),

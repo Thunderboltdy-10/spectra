@@ -27,19 +27,21 @@ describe("Spectra API route", () => {
       .mockResolvedValueOnce([{ _id: "workspace_1", title: "Biology" }])
       .mockResolvedValueOnce({ workspace: { _id: "workspace_1" }, items: [] })
       .mockResolvedValueOnce([{ _id: "artifact_1", placementStatus: "inbox" }])
-      .mockResolvedValueOnce([{ _id: "run_1", status: "completed" }]);
+      .mockResolvedValueOnce([{ _id: "run_1", status: "completed" }])
+      .mockResolvedValueOnce([{ _id: "card_1", status: "completed" }]);
 
     vi.doMock("@/lib/auth-server", () => ({ requireActor }));
     vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation }));
 
     const route = await import("@/app/api/spectra/route");
     const response = await route.GET(new NextRequest("http://localhost/api/spectra?action=overview"));
-    const payload = await response.json() as { selectedWorkspaceId?: string; artifacts: unknown[]; runs: unknown[] };
+    const payload = await response.json() as { selectedWorkspaceId?: string; artifacts: unknown[]; runs: unknown[]; resultCards: unknown[] };
 
     expect(response.status).toBe(200);
     expect(payload.selectedWorkspaceId).toBe("workspace_1");
     expect(payload.artifacts).toHaveLength(1);
     expect(payload.runs).toHaveLength(1);
+    expect(payload.resultCards).toHaveLength(1);
     expect(convexQuery).toHaveBeenNthCalledWith(1, "spectraWorkspaces:list", {
       actorClerkId: "user_spectra",
       includeArchived: false,
@@ -48,6 +50,11 @@ describe("Spectra API route", () => {
     expect(convexQuery).toHaveBeenNthCalledWith(2, "spectraWorkspaceItems:listForWorkspace", {
       actorClerkId: "user_spectra",
       workspaceId: "workspace_1",
+    });
+    expect(convexQuery).toHaveBeenNthCalledWith(5, "spectraRuns:listResultCards", {
+      actorClerkId: "user_spectra",
+      workspaceId: "workspace_1",
+      limit: 8,
     });
   });
 
@@ -186,4 +193,3 @@ describe("Spectra API route", () => {
     });
   });
 });
-

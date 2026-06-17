@@ -98,7 +98,7 @@ export async function GET(request: NextRequest) {
       }) as Array<{ _id: string }>;
       const requestedWorkspaceId = params.get("workspaceId") ?? undefined;
       const selectedWorkspaceId = requestedWorkspaceId ?? workspaces[0]?._id;
-      const [workspace, artifacts, runs] = await Promise.all([
+      const [workspace, artifacts, runs, resultCards] = await Promise.all([
         selectedWorkspaceId
           ? spectraQuery("spectraWorkspaceItems:listForWorkspace", {
             actorClerkId: actor.clerkId,
@@ -114,6 +114,13 @@ export async function GET(request: NextRequest) {
           actorClerkId: actor.clerkId,
           limit: 12,
         }),
+        selectedWorkspaceId
+          ? spectraQuery("spectraRuns:listResultCards", {
+            actorClerkId: actor.clerkId,
+            workspaceId: selectedWorkspaceId,
+            limit: 8,
+          })
+          : Promise.resolve([]),
       ]);
       return ok({
         actor,
@@ -122,6 +129,7 @@ export async function GET(request: NextRequest) {
         workspace,
         artifacts,
         runs,
+        resultCards,
       });
     }
 

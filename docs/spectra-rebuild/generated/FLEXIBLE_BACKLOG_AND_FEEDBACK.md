@@ -22,6 +22,11 @@ This correction supersedes any Wave 2 implementation that does not match the app
 | Placed artifact actions must not show confusing generic Add. | Wave 2B | Placed rows/cards should use Open, Move, and remove-placement style actions. |
 | Seeded demo data must be rich enough to test immediately. | Wave 2B | Include five named workspaces, placed/unplaced artifacts, runs, timeline events, pinned/active examples, and canvas relation examples. |
 | Object/artifact links introduced by the canvas screenshot should become a planned real primitive. | Wave 2B plan, Wave 6+ implementation | In Wave 2B, only seeded relation display is required. AI-assisted relation suggestions are deferred. |
+| Clicking artifacts/runs must be safe even when placements, links, relations, or data are missing. | Wave 2B | Detail/editing can remain Wave 3, but Wave 2B must show safe inspector/placeholders instead of throwing. |
+| Creation flows are core, not optional polish. | Wave 2B | Workspace create/archive and artifact create/add/remove/move must remain wired after the visual rebuild. Dead create buttons are not acceptable. |
+| Popovers, dropdowns, and menus must close on outside click. | Wave 2B | Applies to New, command menus, artifact placement menus, workspace picker, and future overflow menus. |
+| No fake menus or fake action affordances. | Wave 2B | Three-dot buttons must open useful menus or be removed. Unsupported actions should be visibly disabled with the deferred wave. |
+| Workspace switching and create/delete feels too slow. | Wave 2B obvious fixes, Performance Wave deeper work | Avoid obvious over-fetching/repeated seeding now; create a later performance wave for backend/query/cache optimization. |
 
 ### Wave 2 Recovery Correction
 
@@ -71,6 +76,7 @@ This correction supersedes the rejected Wave 2 visual direction from commit `e28
 | Artifact open/detail surfaces should feel type-specific. | Wave 3 | Needs blueprint renderer work after workspace UX foundation. |
 | Document, flashcard deck, quiz, planner task, and thread reference should each have distinct experiences. | Wave 3 | Requires renderer/detail surfaces. |
 | Artifact creation should use blueprint-specific forms/defaults. | Wave 3 | Wave 2 can polish the creation strip, but full forms belong with blueprint UX. |
+| Artifact open/detail/editing can be deferred, but must have safe Wave 2B placeholders. | Wave 3 | Clicking an artifact should never error. Wave 3 replaces placeholders with real type-specific detail/edit surfaces. |
 | Command bar should perform real AI operations. | Wave 4 | Wave 2 designs the control surface; Wave 4 wires execution. |
 | Result cards should stream/update from real AI events. | Wave 4 | Requires AIRun/Operation engine. |
 | Risky/bulk AI actions require confirmation. | Wave 4 | Operation policy enforcement. |
@@ -85,6 +91,7 @@ This correction supersedes the rejected Wave 2 visual direction from commit `e28
 | Better flashcard learning loops and quiz grading. | Wave 7 | Study object quality wave. |
 | Educational skills/guides attached to blueprints. | Wave 7 | AI quality and object behavior. |
 | Advanced canvas, semantic zoom, focus spaces, lasso, spatial layout. | Wave 8 | Power layer only after object/UI foundation works. |
+| Spectra performance wave: workspace switching, artifact filtering, creation latency, seed idempotency, over-fetching, and backend indexes. | Performance Wave before/alongside Wave 4 | Treat as a major product-quality wave if simple Wave 2B client optimizations are insufficient. |
 
 ## Do Not Forget
 

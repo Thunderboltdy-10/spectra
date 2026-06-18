@@ -25,12 +25,12 @@ export type SpectraArtifact = {
   status: "active" | "draft" | "archived" | "deleted";
   createdAt: number;
   updatedAt: number;
-  placements: Array<{
+  placements?: Array<{
     workspaceId: string;
     workspaceTitle: string;
     workspaceItemId: string;
   }>;
-  placementStatus: "inbox" | "workspace";
+  placementStatus?: "inbox" | "workspace";
 };
 
 export type SpectraWorkspaceItem = {
@@ -103,6 +103,11 @@ export async function getSpectraOverview(workspaceId?: string) {
   return readJson<SpectraOverview>(await fetch(`/api/spectra?${params.toString()}`, { cache: "no-store" }));
 }
 
+export async function getSpectraWorkspace(workspaceId: string) {
+  const qs = new URLSearchParams({ action: "workspace", workspaceId });
+  return readJson<{ workspace: SpectraOverview["workspace"] }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+}
+
 export async function getSpectraArtifacts(params?: {
   placement?: "all" | "inbox" | "workspace";
   blueprintKey?: SpectraBlueprintKey | "all";
@@ -123,15 +128,16 @@ export async function postSpectra<T>(body: JsonRecord) {
 }
 
 export function toArtifactCardView(artifact: SpectraArtifact): ArtifactCardView {
+  const placements = artifact.placements ?? [];
   return {
     id: artifact._id,
     title: artifact.title,
     blueprintKey: artifact.blueprintKey,
     summary: artifact.summary ?? "No summary yet.",
-    meta: artifact.placements.length > 0
-      ? artifact.placements.map((placement) => placement.workspaceTitle).join(", ")
+    meta: placements.length > 0
+      ? placements.map((placement) => placement.workspaceTitle).join(", ")
       : "Inbox",
-    placement: artifact.placementStatus,
+    placement: artifact.placementStatus ?? (placements.length > 0 ? "workspace" : "inbox"),
   };
 }
 

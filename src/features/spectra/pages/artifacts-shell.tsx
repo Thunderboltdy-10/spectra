@@ -10,12 +10,10 @@ import {
   FileText,
   Grid2X2,
   HelpCircle,
-  Home,
   LayoutGrid,
   List,
   Loader2,
   MessageSquare,
-  MoreHorizontal,
   PanelTop,
   Plus,
   Search,
@@ -28,6 +26,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { toast } from "sonner";
 import { ArtifactCard, blueprintMeta } from "../components/artifact-card";
 import {
+  artifactPlacements,
   artifactToCard,
   formatRelativeTime,
   initials,
@@ -79,30 +78,63 @@ function menuItemClass() {
   return "flex w-full items-center gap-2 rounded-[7px] px-2.5 py-2 text-left text-[13px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-45";
 }
 
-function ArtifactsRail({ workspaces }: { workspaces: SpectraWorkspace[] }) {
+function useOutsideClick<T extends HTMLElement>(open: boolean, onClose: () => void) {
+  const ref = useRef<T | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    function onPointerDown(event: PointerEvent) {
+      if (!ref.current?.contains(event.target as Node)) onClose();
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [onClose, open]);
+  return ref;
+}
+
+function ArtifactsRail({
+  workspaces,
+  selectedWorkspaceId,
+  onSelect,
+}: {
+  workspaces: SpectraWorkspace[];
+  selectedWorkspaceId: string;
+  onSelect: (workspaceId: string) => void;
+}) {
   return (
     <aside className="flex w-[74px] shrink-0 flex-col items-center border-r border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-primary)_84%,var(--bg-elevated))] px-2.5 py-5">
-      <button type="button" className="flex h-14 w-14 flex-col items-center justify-center gap-1 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[11px] font-medium text-[var(--text-primary)] shadow-[0_2px_8px_rgba(27,20,12,0.05)]">
-        <Home className="h-4 w-4" />
-        Home
+      <button
+        type="button"
+        className={`flex h-14 w-14 flex-col items-center justify-center gap-1 rounded-[8px] border text-[11px] font-medium transition ${
+          !selectedWorkspaceId ? "border-transparent bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[0_2px_8px_rgba(27,20,12,0.06)]" : "border-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+        }`}
+        onClick={() => onSelect("")}
+      >
+        <LayoutGrid className="h-4 w-4" />
+        All
       </button>
       <div className="mt-4 flex min-h-0 flex-1 flex-col items-center gap-3 overflow-y-auto">
         {workspaces.map((workspace, index) => {
           const accent = workspaceAccent(workspace, index);
           const Icon = iconForWorkspace(workspace, index);
+          const selected = workspace._id === selectedWorkspaceId;
           return (
-            <div key={workspace._id} className="flex w-14 flex-col items-center gap-1 rounded-[8px] px-1.5 py-2 text-[11px] font-medium text-[var(--text-secondary)]">
+            <button
+              key={workspace._id}
+              type="button"
+              className={`flex w-14 flex-col items-center gap-1 rounded-[8px] border px-1.5 py-2 text-[11px] font-medium transition ${
+                selected ? "border-transparent bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[0_2px_8px_rgba(27,20,12,0.06)]" : "border-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+              }`}
+              onClick={() => onSelect(workspace._id)}
+              title={`Filter ${workspace.title}`}
+            >
               <span className="flex h-9 w-9 items-center justify-center rounded-[8px] text-white" style={{ background: accent.color }}>
                 <Icon className="h-4 w-4" />
               </span>
               <span className="max-w-full truncate">{workspace.title}</span>
-            </div>
+            </button>
           );
         })}
       </div>
-      <button type="button" className="mt-3 flex h-10 w-10 items-center justify-center rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-secondary)]">
-        <Plus className="h-4 w-4" />
-      </button>
     </aside>
   );
 }
@@ -122,6 +154,12 @@ export function ArtifactsShell() {
   const [loading, setLoading] = useState(true);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const seededRef = useRef(false);
+  const newMenuRef = useOutsideClick<HTMLDivElement>(newOpen, () => setNewOpen(false));
+  const placementMenuOpen = addMenuArtifactId !== null || moveMenuArtifactId !== null;
+  const placementMenuRef = useOutsideClick<HTMLDivElement>(placementMenuOpen, () => {
+    setAddMenuArtifactId(null);
+    setMoveMenuArtifactId(null);
+  });
 
   const load = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
@@ -158,16 +196,16 @@ export function ArtifactsShell() {
     const needle = search.trim().toLowerCase();
     return allArtifacts.filter((artifact) => {
       if (activeFilter !== "all" && artifact.blueprintKey !== activeFilter) return false;
-      if (selectedWorkspaceId && !artifact.placements.some((placement) => placement.workspaceId === selectedWorkspaceId)) return false;
+      if (selectedWorkspaceId && !artifactPlacements(artifact).some((placement) => placement.workspaceId === selectedWorkspaceId)) return false;
       if (!needle) return true;
       return `${artifact.title}\n${artifact.summary ?? ""}\n${artifact.tags.join(" ")}`.toLowerCase().includes(needle);
     });
   }, [activeFilter, allArtifacts, search, selectedWorkspaceId]);
-  const inbox = useMemo(() => artifacts.filter((artifact) => artifact.placementStatus === "inbox"), [artifacts]);
-  const placed = useMemo(() => artifacts.filter((artifact) => artifact.placementStatus === "workspace"), [artifacts]);
+  const inbox = useMemo(() => artifacts.filter((artifact) => artifact.placementStatus === "inbox" || artifactPlacements(artifact).length === 0), [artifacts]);
+  const placed = useMemo(() => artifacts.filter((artifact) => artifact.placementStatus === "workspace" || artifactPlacements(artifact).length > 0), [artifacts]);
   const byWorkspace = useMemo(() => workspaces.map((workspace) => ({
     workspace,
-    artifacts: placed.filter((artifact) => artifact.placements.some((placement) => placement.workspaceId === workspace._id)),
+    artifacts: placed.filter((artifact) => artifactPlacements(artifact).some((placement) => placement.workspaceId === workspace._id)),
   })), [placed, workspaces]);
 
   async function createArtifact() {
@@ -224,7 +262,7 @@ export function ArtifactsShell() {
     const menuOpen = variant === "add" ? addMenuArtifactId === artifact._id : moveMenuArtifactId === artifact._id;
     const setMenu = variant === "add" ? setAddMenuArtifactId : setMoveMenuArtifactId;
     return (
-      <div className="relative">
+      <div className="relative" ref={menuOpen ? placementMenuRef : undefined}>
         <button type="button" className={buttonClass()} disabled={workspaces.length === 0 || busyKey === `add:${artifact._id}`} onClick={() => setMenu(menuOpen ? null : artifact._id)}>
           {busyKey === `add:${artifact._id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : variant === "add" ? <Plus className="h-3.5 w-3.5" /> : <PanelTop className="h-3.5 w-3.5" />}
           {variant === "add" ? "Add to workspace" : "Move"}
@@ -232,7 +270,7 @@ export function ArtifactsShell() {
         {menuOpen ? (
           <div className="absolute right-0 top-[calc(100%+8px)] z-30 w-[260px] rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[0_6px_18px_rgba(0,0,0,0.10)]">
             {workspaces.map((workspace) => {
-              const alreadyPlaced = artifact.placements.some((placement) => placement.workspaceId === workspace._id);
+              const alreadyPlaced = artifactPlacements(artifact).some((placement) => placement.workspaceId === workspace._id);
               return (
                 <button key={workspace._id} type="button" className={menuItemClass()} disabled={alreadyPlaced || busyKey === `add:${artifact._id}`} onClick={() => void addToWorkspace(artifact._id, workspace._id)}>
                   <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px] bg-[var(--bg-secondary)] text-[11px] font-semibold text-[var(--text-secondary)]">{initials(workspace.title)}</span>
@@ -248,23 +286,22 @@ export function ArtifactsShell() {
   }
 
   function rowActions(artifact: SpectraArtifact) {
-    const firstPlacement = artifact.placements[0];
+    const firstPlacement = artifactPlacements(artifact)[0];
     if (!firstPlacement) return placementMenu(artifact, "add");
     return (
       <div className="flex items-center gap-2">
-        <button type="button" className={buttonClass()}><ExternalLink className="h-3.5 w-3.5" />Open</button>
+        <button type="button" className={buttonClass()} title="Artifact details open in Wave 3; this placeholder is intentionally safe." disabled><ExternalLink className="h-3.5 w-3.5" />Open</button>
         {placementMenu(artifact, "move")}
         <button type="button" className="flex h-8 w-8 items-center justify-center rounded-[7px] border border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[color-mix(in_oklab,var(--danger)_7%,var(--bg-elevated))] hover:text-[var(--danger)]" disabled={busyKey === `remove:${firstPlacement.workspaceItemId}`} onClick={() => void removePlacement(firstPlacement.workspaceItemId)}>
           {busyKey === `remove:${firstPlacement.workspaceItemId}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
         </button>
-        <button type="button" className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"><MoreHorizontal className="h-4 w-4" /></button>
       </div>
     );
   }
 
   return (
     <div className="flex h-full min-h-0 bg-[radial-gradient(circle_at_32%_-12%,color-mix(in_oklab,var(--bg-elevated)_70%,transparent),transparent_34%),var(--bg-primary)]">
-      <ArtifactsRail workspaces={workspaces} />
+      <ArtifactsRail workspaces={workspaces} selectedWorkspaceId={selectedWorkspaceId} onSelect={setSelectedWorkspaceId} />
       <section className="min-w-0 flex-1 overflow-y-auto px-8 py-7">
         <header>
           <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
@@ -284,7 +321,7 @@ export function ArtifactsShell() {
                 <span className="absolute right-2 top-1/2 -translate-y-1/2 rounded-[5px] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[10px] text-[var(--text-tertiary)]">⌘ K</span>
               </div>
               <WorkspacePicker workspaces={workspaces} selectedWorkspaceId={selectedWorkspaceId} onSelect={setSelectedWorkspaceId} />
-              <div className="relative">
+              <div className="relative" ref={newMenuRef}>
                 <button type="button" className={buttonClass("dark")} onClick={() => setNewOpen((open) => !open)}>
                   <Plus className="h-4 w-4" />
                   New artifact
@@ -328,8 +365,8 @@ export function ArtifactsShell() {
                     key={filter.key}
                     type="button"
                     onClick={() => setActiveFilter(filter.key)}
-                    className={`inline-flex h-9 items-center gap-2 rounded-[7px] border px-3 text-[13px] font-medium ${
-                      activeFilter === filter.key ? "border-[var(--text-primary)] bg-[var(--bg-elevated)] text-[var(--text-primary)]" : "border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                    className={`inline-flex h-9 items-center gap-2 rounded-[8px] border border-transparent px-3 text-[13px] font-medium transition-all duration-200 ${
+                      activeFilter === filter.key ? "bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[0_1px_7px_rgba(27,20,12,0.08)]" : "text-[var(--text-secondary)] hover:bg-[color-mix(in_oklab,var(--bg-elevated)_68%,transparent)] hover:text-[var(--text-primary)]"
                     }`}
                   >
                     <Icon className="h-4 w-4" />
@@ -338,7 +375,7 @@ export function ArtifactsShell() {
                 );
               })}
             </div>
-            <div className="flex rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1">
+            <div className="flex rounded-[10px] bg-[color-mix(in_oklab,var(--bg-elevated)_74%,transparent)] p-1 shadow-[inset_0_0_0_1px_var(--border-default)]">
               {[
                 { key: "grid" as const, label: "Grid", icon: Grid2X2 },
                 { key: "list" as const, label: "List", icon: List },
@@ -346,7 +383,7 @@ export function ArtifactsShell() {
               ].map((item) => {
                 const Icon = item.icon;
                 return (
-                  <button key={item.key} type="button" className={`inline-flex h-8 items-center gap-2 rounded-[6px] px-3 text-[12px] font-medium ${mode === item.key ? "bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-[0_1px_2px_rgba(27,20,12,0.06)]" : "text-[var(--text-secondary)]"}`} onClick={() => setMode(item.key)}>
+                  <button key={item.key} type="button" className={`inline-flex h-8 items-center gap-2 rounded-[7px] px-3 text-[12px] font-medium transition-all duration-200 ${mode === item.key ? "bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-[0_1px_6px_rgba(27,20,12,0.08)]" : "text-[var(--text-secondary)] hover:bg-[color-mix(in_oklab,var(--bg-primary)_52%,transparent)] hover:text-[var(--text-primary)]"}`} onClick={() => setMode(item.key)}>
                     <Icon className="h-4 w-4" />
                     {item.label}
                   </button>
@@ -379,9 +416,10 @@ function WorkspacePicker({
   onSelect: (workspaceId: string) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const pickerRef = useOutsideClick<HTMLDivElement>(open, () => setOpen(false));
   const selected = workspaces.find((workspace) => workspace._id === selectedWorkspaceId);
   return (
-    <div className="relative">
+    <div className="relative" ref={pickerRef}>
       <button type="button" className={buttonClass()} onClick={() => setOpen((value) => !value)}>
         <LayoutGrid className="h-4 w-4" />
         <span className="max-w-[150px] truncate">{selected?.title ?? "All workspaces"}</span>
@@ -437,7 +475,7 @@ function GroupedList({
             <h2 className="font-display text-[20px] font-semibold text-[var(--text-primary)]">In workspaces</h2>
             <p className="mt-1 text-[13px] text-[var(--text-secondary)]">Artifacts that have been added to your workspaces.</p>
           </div>
-          <button type="button" className="text-[12px] text-[var(--text-secondary)]">Sort: Recently updated <ChevronDown className="inline h-3 w-3" /></button>
+          <span className="text-[12px] text-[var(--text-secondary)]">Sort: Recently updated <ChevronDown className="inline h-3 w-3" /></span>
         </div>
         <div className="space-y-4">
           {groups.filter((group) => group.artifacts.length > 0).map((group, index) => (
@@ -469,7 +507,7 @@ function WorkspaceGroup({
           {workspace.title}
           <span className="rounded-[5px] bg-[color-mix(in_oklab,var(--bg-elevated)_70%,transparent)] px-1.5 text-[11px] text-[var(--text-secondary)]">{artifacts.length}</span>
         </div>
-        <button type="button" className="text-[12px] text-[var(--text-secondary)]">View workspace <ExternalLink className="inline h-3 w-3" /></button>
+        <span className="text-[12px] text-[var(--text-secondary)]">View workspace <ExternalLink className="inline h-3 w-3" /></span>
       </div>
       {artifacts.map((artifact) => {
         const meta = blueprintMeta[artifact.blueprintKey];
@@ -498,27 +536,27 @@ function BoardColumns({
 }: {
   groups: Array<{ workspace: SpectraWorkspace; artifacts: SpectraArtifact[] }>;
 }) {
+  const visibleGroups = groups.filter((group) => group.artifacts.length > 0);
   return (
-    <main className="mt-8 flex gap-4 overflow-x-auto pb-6 pr-2">
-      {groups.filter((group) => group.artifacts.length > 0).map((group, index) => {
+    <main className="mt-8 grid min-w-[980px] grid-cols-5 gap-4 pb-6 pr-2">
+      {visibleGroups.slice(0, 5).map((group, index) => {
         const accent = workspaceAccent(group.workspace, index);
         return (
-          <section key={group.workspace._id} className="w-[270px] shrink-0 rounded-[9px] border p-2.5" style={{ borderColor: accent.border, background: accent.soft }}>
+          <section key={group.workspace._id} className="min-h-[620px] rounded-[10px] border p-2.5 shadow-[0_10px_28px_rgba(27,20,12,0.04)]" style={{ borderColor: accent.border, background: accent.soft }}>
             <div className="mb-3 flex items-center justify-between px-1">
               <div className="flex items-center gap-2 text-[13px] font-semibold text-[var(--text-primary)]">
                 <span className="h-2 w-2 rounded-full" style={{ background: accent.color }} />
                 {group.workspace.title}
                 <span className="text-[12px] text-[var(--text-tertiary)]">{group.artifacts.length}</span>
               </div>
-              <MoreHorizontal className="h-4 w-4 text-[var(--text-secondary)]" />
             </div>
             <div className="space-y-2.5">
               {group.artifacts.map((artifact) => {
                 const card = artifactToCard(artifact);
-                return <ArtifactCard key={artifact._id} artifact={card} actions={<MoreHorizontal className="h-4 w-4 text-[var(--text-tertiary)]" />} quiet />;
+                return <ArtifactCard key={artifact._id} artifact={card} quiet />;
               })}
             </div>
-            <button type="button" className="mt-3 flex h-8 items-center gap-2 px-1 text-[13px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"><Plus className="h-4 w-4" />Add artifact</button>
+            <button type="button" className="mt-3 flex h-8 items-center gap-2 px-1 text-[13px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]" disabled title="Use list or grid actions to place existing artifacts."><Plus className="h-4 w-4" />Add artifact</button>
           </section>
         );
       })}

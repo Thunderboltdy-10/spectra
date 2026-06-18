@@ -67,7 +67,7 @@ export function sortSpectraWorkspaces(workspaces: SpectraWorkspace[]) {
 }
 
 export function workspaceArtifactCount(workspace: SpectraWorkspace, artifacts: SpectraArtifact[]) {
-  return artifacts.filter((artifact) => artifact.placements.some((placement) => placement.workspaceId === workspace._id)).length;
+  return artifacts.filter((artifact) => artifactPlacements(artifact).some((placement) => placement.workspaceId === workspace._id)).length;
 }
 
 export function workspaceThreadCount(items: SpectraWorkspaceItem[]) {
@@ -78,6 +78,15 @@ export function workspaceDocumentCount(items: SpectraWorkspaceItem[]) {
   return items.filter((item) => item.artifact?.blueprintKey === "document").length;
 }
 
+export function artifactPlacements(artifact?: SpectraArtifact | null): NonNullable<SpectraArtifact["placements"]> {
+  return artifact?.placements ?? [];
+}
+
+export function artifactPlacementStatus(artifact?: SpectraArtifact | null): "inbox" | "workspace" {
+  const placements = artifactPlacements(artifact);
+  return artifact?.placementStatus ?? (placements.length > 0 ? "workspace" : "inbox");
+}
+
 export function demoMeta(artifact?: SpectraArtifact | null): DemoMeta {
   const content = artifact?.content;
   if (!content || typeof content !== "object" || !("spectraDemo" in content)) return {};
@@ -86,15 +95,16 @@ export function demoMeta(artifact?: SpectraArtifact | null): DemoMeta {
   return spectraDemo as DemoMeta;
 }
 
-export function artifactToCard(artifact: SpectraArtifact, placement: "inbox" | "workspace" = artifact.placementStatus): ArtifactCardView {
+export function artifactToCard(artifact: SpectraArtifact, placement?: "inbox" | "workspace"): ArtifactCardView {
   const meta = demoMeta(artifact);
+  const placements = artifactPlacements(artifact);
   return {
     id: artifact._id,
     title: artifact.title,
     blueprintKey: artifact.blueprintKey,
     summary: artifact.summary ?? "No summary yet.",
-    meta: artifact.placements.length > 0 ? artifact.placements.map((item) => item.workspaceTitle).join(", ") : "Created recently",
-    placement,
+    meta: placements.length > 0 ? placements.map((item) => item.workspaceTitle).join(", ") : "Created recently",
+    placement: placement ?? artifactPlacementStatus(artifact),
     updatedAt: artifact.updatedAt,
     metrics: meta.metrics,
   };

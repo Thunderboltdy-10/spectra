@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { ArrowUp, Command, Plus } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 
 type CommandBarProps = {
@@ -16,9 +16,19 @@ type CommandBarProps = {
 export function CommandBar({ placeholder, menu, context, className, onSubmit }: CommandBarProps) {
   const [value, setValue] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    function onPointerDown(event: PointerEvent) {
+      if (!rootRef.current?.contains(event.target as Node)) setMenuOpen(false);
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [menuOpen]);
 
   return (
-    <div className={cn("relative flex items-center gap-2", className)}>
+    <div ref={rootRef} className={cn("relative flex items-center gap-2", className)}>
       {menuOpen && menu ? (
         <div className="absolute bottom-[calc(100%+8px)] left-0 z-20 min-w-[220px] rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[0_6px_18px_rgba(0,0,0,0.10)]">
           {menu}
@@ -45,6 +55,7 @@ export function CommandBar({ placeholder, menu, context, className, onSubmit }: 
               if (!next) return;
               onSubmit?.(next);
               setValue("");
+              setMenuOpen(false);
             }
           }}
           placeholder={placeholder}
@@ -62,6 +73,7 @@ export function CommandBar({ placeholder, menu, context, className, onSubmit }: 
             if (!next) return;
             onSubmit?.(next);
             setValue("");
+            setMenuOpen(false);
           }}
           className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] bg-[var(--text-primary)] text-[var(--bg-primary)] disabled:bg-[var(--bg-secondary)] disabled:text-[var(--text-tertiary)]"
           aria-label="Send command"

@@ -63,6 +63,10 @@ Focus:
 - Artifact library polish: clear Inbox vs In Workspaces, grouped/list mode, board mode, custom workspace picker, less clutter, no confusing Add action for already placed artifacts.
 - Seeded demo data for Biology, Maths EE, Spectra, Economics, English, including documents, decks, quizzes, tasks, thread references, runs, result cards, unplaced artifacts, placed artifacts, pinned/active items, timeline events, inspector examples, and canvas relation examples.
 - Basic object/artifact relation display for seeded Canvas and Inspector examples.
+- Runtime safety for incomplete data: missing placements, links, relations, runs, artifacts, and hidden workspace items must not crash selected states.
+- Creation flows are foundational: workspace create/archive and artifact create/add/remove/move must stay wired and synced between `/workspace` and `/artifacts`.
+- Popover/menu completeness: dropdowns close on outside click, three-dot menus either open real menus or are removed, and deferred actions are visibly disabled.
+- Obvious performance fixes: avoid unnecessary full overview reloads on workspace switching where a workspace-only fetch is enough; deeper backend/query/cache work is tracked as a separate performance wave.
 
 Non-goals:
 
@@ -71,6 +75,11 @@ Non-goals:
 - No advanced canvas/focus/semantic zoom.
 - No artifact deep editors.
 - No agents, ManageBac, admin analytics, or complex model routing.
+
+Stop condition before Wave 3:
+
+- Do not proceed to Wave 3 if Cards, Timeline, Library, Canvas, grouped/list artifacts, board artifacts, creation flows, and selected-state safety do not hold up under manual testing against the source-of-truth screenshots.
+- Wave 3 may replace safe placeholders with real artifact detail/editing, but Wave 2B must not leave clickable dead buttons or runtime errors.
 
 Manual test:
 
@@ -147,6 +156,26 @@ Manual test:
 - Does it avoid fake trace UI?
 - Does it ask confirmation before risky or bulk operations?
 - Does the generated object appear in the correct place?
+
+## Performance Wave - Spectra Responsiveness and Data Efficiency
+
+Goal: make workspace switching, artifact filtering, creation/deletion, seed idempotency, and result refreshes feel instant enough for daily use.
+
+This wave can happen before Wave 4 or alongside Wave 4 if Wave 2B client-side fixes are not enough.
+
+Focus:
+
+- Audit `/api/spectra` fetch patterns for over-fetching and repeated full overview reloads.
+- Add or verify Convex indexes for workspace/artifact placement queries.
+- Avoid repeated seeding and duplicate demo hydration during normal navigation.
+- Cache stable workspace/artifact metadata on the client where appropriate.
+- Profile create/archive/add/remove flows and eliminate avoidable refetch waterfalls.
+
+Manual test:
+
+- Switching between seeded workspaces should feel immediate.
+- Creating/removing artifacts and workspaces should update the current view without long blank loading gaps.
+- `/artifacts` filters should respond without a full visual reset.
 
 ## Wave 5 - Threads and Chat Convergence
 

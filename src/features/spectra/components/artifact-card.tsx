@@ -1,6 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
-import { BookOpen, CalendarCheck2, Check, FileText, HelpCircle, MessageSquare, MoreHorizontal } from "lucide-react";
+import { BookOpen, CalendarCheck2, Check, FileText, HelpCircle, MessageSquare } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export type ArtifactCardView = {
@@ -116,7 +116,6 @@ export function ArtifactCard({
           <div className="mt-3 flex min-h-7 items-end justify-between gap-2">
             <div className="min-w-0 truncate text-[11px] text-[var(--text-tertiary)]">{artifact.placement === "workspace" ? "In workspace" : "Inbox"}</div>
             {actions ? <div className="flex shrink-0 items-center gap-1.5" onClick={(event) => event.stopPropagation()}>{actions}</div> : null}
-            {!actions ? <MoreHorizontal className="h-4 w-4 shrink-0 text-[var(--text-tertiary)]" /> : null}
           </div>
         </div>
       </div>

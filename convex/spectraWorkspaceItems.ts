@@ -29,13 +29,21 @@ async function hydrateWorkspaceItem(ctx: Parameters<typeof requireSpectraActor>[
   };
   createdAt: number;
   updatedAt: number;
-}) {
+}, workspaceTitle?: string) {
   if (item.sourceType === "artifact") {
     const artifactId = normalizeArtifactId(ctx, item.sourceId);
     const artifact = artifactId ? await ctx.db.get(artifactId) : null;
     return {
       ...item,
-      artifact: artifact && artifact.status !== "deleted" ? artifact : null,
+      artifact: artifact && artifact.status !== "deleted" ? {
+        ...artifact,
+        placements: [{
+          workspaceId: item.workspaceId,
+          workspaceTitle: workspaceTitle ?? "Workspace",
+          workspaceItemId: item._id,
+        }],
+        placementStatus: "workspace" as const,
+      } : null,
     };
   }
   return {
@@ -60,7 +68,7 @@ export const listForWorkspace = query({
     const hydrated = await Promise.all(
       items
         .filter((item) => args.includeHidden || item.viewData.hidden !== true)
-        .map((item) => hydrateWorkspaceItem(ctx, item)),
+        .map((item) => hydrateWorkspaceItem(ctx, item, workspace.title)),
     );
     return {
       workspace,
@@ -159,4 +167,3 @@ export const hide = mutation({
     };
   },
 });
-

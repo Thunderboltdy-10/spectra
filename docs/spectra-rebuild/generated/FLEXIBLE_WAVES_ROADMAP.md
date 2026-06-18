@@ -15,9 +15,18 @@ Wave 1 made the foundation real enough to test:
 
 The Wave 1 UI is structurally useful but too generic. Wave 2 must spend design effort before adding more backend depth.
 
-## Wave 2 - Workspace UX Foundation / Make It Feel Like Spectra
+## Wave 2B - UI Source-of-Truth Foundation / Corrected Wave 2
 
-Goal: turn the data-backed workspace into a real working environment.
+Goal: implement the approved visual source of truth for `/workspace` and `/artifacts` before moving to the next functional wave. This is the corrected Wave 2 UI foundation, not Wave 3.
+
+The six screenshots in `docs/spectra-rebuild/ui-source-of-truth/` are now the visual contract:
+
+- workspace cards overview
+- workspace timeline with selected run inspector
+- artifacts grouped/list library
+- workspace selected artifact cards state
+- workspace canvas soft clusters
+- artifacts board columns
 
 Recovery correction after rejected Wave 2 direction:
 
@@ -41,21 +50,25 @@ Focus:
 - Strong top workspace rail/navbar or equivalent navigation model.
 - Custom Spectra workspace switcher and workspace creation entry, with no native dropdown in the main workspace surface.
 - Real view switching across Cards, Timeline, and Library using the same Wave 1 data.
-- Canvas disabled/coming-later unless a very lightweight placeholder is useful.
+- Canvas should be implemented only as the approved soft-cluster relation display. Advanced canvas behavior remains later.
 - Redesigned inspector/context panel replacing the weak focus pane.
 - Selected artifact inspector state with title, type, summary, placement, quick actions, and run/thread metadata where available.
 - No selection inspector state with workspace summary, recent runs/result cards, and useful quick actions.
+- Selected run/activity inspector state.
 - Command bar as the central control surface.
 - Result cards/activity tray compact, attached to command bar width, real-data driven, scrollable, and non-fake.
 - Card hierarchy with selected, pinned/important, normal, and type-accented states.
 - Better typography, icon treatment, spacing, hover/focus motion, and visual warmth.
 - Reduced redundant search/filter controls.
-- Artifact library polish: clear Inbox vs In Workspaces, custom workspace picker, less clutter, no confusing Add action for already placed artifacts.
+- Artifact library polish: clear Inbox vs In Workspaces, grouped/list mode, board mode, custom workspace picker, less clutter, no confusing Add action for already placed artifacts.
+- Seeded demo data for Biology, Maths EE, Spectra, Economics, English, including documents, decks, quizzes, tasks, thread references, runs, result cards, unplaced artifacts, placed artifacts, pinned/active items, timeline events, inspector examples, and canvas relation examples.
+- Basic object/artifact relation display for seeded Canvas and Inspector examples.
 
 Non-goals:
 
 - No real AI model execution.
-- No canvas rebuild.
+- No AI-assisted relation suggestions.
+- No advanced canvas/focus/semantic zoom.
 - No artifact deep editors.
 - No agents, ManageBac, admin analytics, or complex model routing.
 
@@ -70,6 +83,7 @@ Manual test:
 - Does the inspector feel useful?
 - Does `/artifacts` feel cleaner and less confusing?
 - Does the UI feel less generic?
+- Do the six approved screenshots have a represented working view?
 
 ## Wave 3 - Artifact Blueprint Experiences
 
@@ -174,6 +188,7 @@ Focus:
 - Workspace summary/context builder.
 - Search across artifacts/workspaces.
 - Basic related-artifact suggestions.
+- AI-assisted object/artifact relation suggestions and link creation.
 - Create from selection.
 - Better inspector intelligence.
 - Lightweight source/provenance display.
@@ -228,6 +243,7 @@ Focus:
 - Canvas as a secondary view.
 - Semantic zoom.
 - Spatial layout.
+- Durable object-link visual editing if Wave 6 relation primitives are ready.
 - Lasso/multi-select.
 - Possible diagram/whiteboard blueprint.
 - Smooth transitions between cards, focus, and canvas.

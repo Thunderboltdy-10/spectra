@@ -8,6 +8,21 @@ Feedback can move between waves if product logic changes. If something is wrong 
 
 ## Pablo's Current UI Complaints
 
+### Wave 2B Source-of-Truth Correction
+
+This correction supersedes any Wave 2 implementation that does not match the approved screenshots in `docs/spectra-rebuild/ui-source-of-truth/`.
+
+| Feedback | Current Wave Assignment | Notes |
+| --- | --- | --- |
+| The six approved screenshots are now the visual source of truth, not loose inspiration. | Wave 2B | `/workspace` and `/artifacts` should recreate their structure, density, hierarchy, command dock, rail, inspector, and artifact views closely. |
+| Wave 2B is corrected Wave 2 UI foundation, not Wave 3. | Wave 2B | Do not start artifact blueprint/detail work until this surface is stable. |
+| Workspace must support Cards, Timeline, Library, and Canvas view navigation. | Wave 2B | Canvas is a calm relation display only in this wave. |
+| Right inspector needs workspace/no-selection, selected artifact, and selected run/activity states. | Wave 2B | Selection should update inspector without modals. |
+| Artifact library must support grouped/list and board-column modes. | Wave 2B | Grid can remain secondary if useful. |
+| Placed artifact actions must not show confusing generic Add. | Wave 2B | Placed rows/cards should use Open, Move, and remove-placement style actions. |
+| Seeded demo data must be rich enough to test immediately. | Wave 2B | Include five named workspaces, placed/unplaced artifacts, runs, timeline events, pinned/active examples, and canvas relation examples. |
+| Object/artifact links introduced by the canvas screenshot should become a planned real primitive. | Wave 2B plan, Wave 6+ implementation | In Wave 2B, only seeded relation display is required. AI-assisted relation suggestions are deferred. |
+
 ### Wave 2 Recovery Correction
 
 This correction supersedes the rejected Wave 2 visual direction from commit `e280602`.
@@ -65,9 +80,11 @@ This correction supersedes the rejected Wave 2 visual direction from commit `e28
 | Multi-select selected artifact context. | Wave 6 | Context builder and selection model. |
 | Search across artifacts/workspaces. | Wave 6 | Broader context/search foundation. |
 | Related artifact suggestions. | Wave 6 | Useful after artifact/context quality improves. |
+| Durable object/artifact link primitive with provenance and relation types. | Wave 6 | Wave 2B only displays seeded relations in Canvas/Inspector. |
+| AI-assisted relation suggestions. | Wave 6 | Do not build autonomous relation generation in Wave 2B. |
 | Better flashcard learning loops and quiz grading. | Wave 7 | Study object quality wave. |
 | Educational skills/guides attached to blueprints. | Wave 7 | AI quality and object behavior. |
-| Canvas, semantic zoom, focus spaces, lasso, spatial layout. | Wave 8 | Power layer only after object/UI foundation works. |
+| Advanced canvas, semantic zoom, focus spaces, lasso, spatial layout. | Wave 8 | Power layer only after object/UI foundation works. |
 
 ## Do Not Forget
 
@@ -79,3 +96,4 @@ This correction supersedes the rejected Wave 2 visual direction from commit `e28
 - Do not rebuild agents, ManageBac, admin analytics, complex model routing, canvas, or custom blueprint builder yet.
 - Use fixed model config until the rebuild is ready for routing complexity.
 - Do not import old workspace/artifact/orchestrator systems into new Spectra code.
+- Do not proceed with later waves if the core Wave 2B UI foundation regresses away from the approved screenshots.

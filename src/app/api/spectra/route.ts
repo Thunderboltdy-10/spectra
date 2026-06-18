@@ -97,7 +97,7 @@ export async function GET(request: NextRequest) {
         limit: 30,
       }) as Array<{ _id: string }>;
       const requestedWorkspaceId = params.get("workspaceId") ?? undefined;
-      const selectedWorkspaceId = requestedWorkspaceId ?? workspaces[0]?._id;
+      const selectedWorkspaceId = requestedWorkspaceId;
       const [workspace, artifacts, runs] = await Promise.all([
         selectedWorkspaceId
           ? spectraQuery("spectraWorkspaceItems:listForWorkspace", {
@@ -136,6 +136,9 @@ export async function POST(request: NextRequest) {
     const action = requireString(body.action, "action");
 
     if (action === "seed") {
+      if (process.env.NODE_ENV === "production") {
+        return ok({ created: false, skipped: "production" });
+      }
       const result = await spectraMutation("spectraSeed:ensureDemoData", {
         actorClerkId: actor.clerkId,
       });

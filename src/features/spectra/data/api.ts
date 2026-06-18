@@ -20,6 +20,7 @@ export type SpectraArtifact = {
   blueprintKey: SpectraBlueprintKey;
   title: string;
   summary?: string;
+  content?: unknown;
   tags: string[];
   status: "active" | "draft" | "archived" | "deleted";
   createdAt: number;
@@ -46,6 +47,10 @@ export type SpectraWorkspaceItem = {
   };
   layout: {
     view: "cards" | "canvas" | "timeline";
+    position?: { x: number; y: number };
+    size?: { w: number; h: number };
+    zIndex?: number;
+    collapsed?: boolean;
   };
   artifact: SpectraArtifact | null;
   createdAt: number;
@@ -56,6 +61,8 @@ export type SpectraRun = {
   _id: string;
   status: "queued" | "running" | "completed" | "failed" | "cancelled";
   sourceSurface: "chat" | "workspace" | "artifact";
+  workspaceId?: string;
+  artifactId?: string;
   userPrompt: string;
   finalSummary?: string;
   error?: string;
@@ -139,4 +146,3 @@ export function workspaceItemToArtifactCardView(item: SpectraWorkspaceItem): Art
     placement: "workspace",
   };
 }
-

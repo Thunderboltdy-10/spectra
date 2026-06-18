@@ -25,6 +25,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
+import { ArtifactBlueprintSheet, type ArtifactPayload } from "../components/artifact-blueprint-sheet";
 import { ArtifactCard, blueprintMeta } from "../components/artifact-card";
 import { CommandBar } from "../components/command-bar";
 import { ResultCardStack, type ResultCardView } from "../components/result-card";
@@ -55,11 +56,12 @@ import {
 type ViewMode = "cards" | "timeline" | "library" | "canvas";
 type Selection = { type: "artifact"; itemId: string; artifactId: string } | { type: "run"; runId: string } | null;
 
-const createTypes: Array<{ key: Exclude<SpectraBlueprintKey, "thread_reference">; label: string; icon: LucideIcon }> = [
+const createTypes: Array<{ key: SpectraBlueprintKey; label: string; icon: LucideIcon }> = [
   { key: "document", label: "Document", icon: FileText },
   { key: "flashcard_deck", label: "Deck", icon: BookOpen },
   { key: "quiz", label: "Quiz", icon: HelpCircle },
   { key: "planner_task", label: "Task", icon: CalendarCheck2 },
+  { key: "thread_reference", label: "Thread reference", icon: MessageSquare },
 ];
 
 const viewModes: Array<{ key: ViewMode; label: string; icon: LucideIcon }> = [
@@ -263,7 +265,7 @@ function WorkspaceHeader({
   viewMode: ViewMode;
   setViewMode: (mode: ViewMode) => void;
   busy: string | null;
-  onCreateArtifact: (type: Exclude<SpectraBlueprintKey, "thread_reference">) => void;
+  onCreateArtifact: (type: SpectraBlueprintKey) => void;
 }) {
   const [createOpen, setCreateOpen] = useState(false);
   const createRef = useOutsideClick<HTMLDivElement>(createOpen, () => setCreateOpen(false));
@@ -308,11 +310,6 @@ function WorkspaceHeader({
                   </button>
                 );
               })}
-              <button type="button" className={menuItemClass()} disabled title="Thread references are added when thread support is wired.">
-                <MessageSquare className="h-4 w-4" />
-                Thread reference
-                <span className="ml-auto text-[10px] text-[var(--text-tertiary)]">Soon</span>
-              </button>
             </div>
           ) : null}
         </div>
@@ -702,6 +699,7 @@ function Inspector({
   onHide,
   onCreateArtifact,
   onArchiveWorkspace,
+  onOpenArtifact,
 }: {
   workspace: SpectraWorkspace | null;
   artifacts: SpectraArtifact[];
@@ -710,8 +708,9 @@ function Inspector({
   runs: SpectraRun[];
   onClose: () => void;
   onHide: () => void;
-  onCreateArtifact: (type: Exclude<SpectraBlueprintKey, "thread_reference">) => void;
+  onCreateArtifact: (type: SpectraBlueprintKey) => void;
   onArchiveWorkspace: () => void;
+  onOpenArtifact: (artifact: SpectraArtifact) => void;
 }) {
   if (selectedRun) {
     const affected = artifacts.find((artifact) => artifact._id === selectedRun.artifactId) ?? null;
@@ -770,7 +769,7 @@ function Inspector({
           </div>
         </InspectorSection>
         <InspectorSection title="Quick actions">
-          <ActionRow icon={ExternalLink} label="Open detail" disabled />
+          <ActionRow icon={ExternalLink} label="Open detail" onClick={() => onOpenArtifact(selectedArtifact)} />
           <ActionRow icon={FileText} label="Add note" disabled />
           <ActionRow icon={HelpCircle} label="Create quiz from this" disabled />
           <button type="button" className={smallButtonClass("danger")} onClick={onHide}><Trash2 className="h-4 w-4" />Remove from workspace</button>
@@ -864,6 +863,8 @@ export function WorkspaceShell() {
   const [workspaceCreateOpen, setWorkspaceCreateOpen] = useState(false);
   const [newWorkspaceTitle, setNewWorkspaceTitle] = useState("");
   const [newWorkspaceDescription, setNewWorkspaceDescription] = useState("");
+  const [createBlueprintKey, setCreateBlueprintKey] = useState<SpectraBlueprintKey | null>(null);
+  const [openArtifact, setOpenArtifact] = useState<SpectraArtifact | null>(null);
   const workspaceCreateRef = useOutsideClick<HTMLDivElement>(workspaceCreateOpen, () => setWorkspaceCreateOpen(false));
   const seededRef = useRef(false);
 
@@ -929,22 +930,51 @@ export function WorkspaceShell() {
     meta: formatRelativeTime(run.createdAt),
   }));
 
-  async function createArtifact(blueprintKey: Exclude<SpectraBlueprintKey, "thread_reference">) {
+  function openCreateArtifact(blueprintKey: SpectraBlueprintKey) {
     if (!selectedWorkspaceId) return;
-    const label = createTypes.find((type) => type.key === blueprintKey)?.label ?? "Artifact";
-    setBusyKey(`artifact:${blueprintKey}`);
+    setCreateBlueprintKey(blueprintKey);
+  }
+
+  async function createArtifact(payload: ArtifactPayload) {
+    if (!selectedWorkspaceId) return;
+    const label = blueprintMeta[payload.blueprintKey].label;
+    setBusyKey(`artifact:${payload.blueprintKey}`);
     try {
       await postSpectra({
         action: "createArtifact",
-        blueprintKey,
-        title: `New ${label}`,
-        summary: `Workspace-created ${label.toLowerCase()} artifact.`,
+        blueprintKey: payload.blueprintKey,
+        title: payload.title,
+        summary: payload.summary,
+        content: payload.content,
+        tags: payload.tags,
         workspaceId: selectedWorkspaceId,
       });
+      setCreateBlueprintKey(null);
       toast.success(`${label} created in workspace.`);
       await loadOverview(selectedWorkspaceId);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : `Could not create ${label.toLowerCase()}.`);
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  async function updateArtifact(artifactId: string, payload: ArtifactPayload) {
+    setBusyKey(`artifact:update:${artifactId}`);
+    try {
+      await postSpectra({
+        action: "updateArtifact",
+        artifactId,
+        title: payload.title,
+        summary: payload.summary,
+        content: payload.content,
+        tags: payload.tags,
+      });
+      toast.success("Artifact updated.");
+      setOpenArtifact(null);
+      await loadOverview(selectedWorkspaceId);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not update artifact.");
     } finally {
       setBusyKey(null);
     }
@@ -1053,7 +1083,7 @@ export function WorkspaceShell() {
       ) : (
         <section className="flex min-w-0 flex-1">
           <div className="flex min-w-0 flex-1 flex-col">
-            <WorkspaceHeader workspace={workspace} items={entries.map((entry) => entry.item)} runs={workspaceRuns} viewMode={viewMode} setViewMode={setViewMode} busy={busyKey} onCreateArtifact={(type) => void createArtifact(type)} />
+            <WorkspaceHeader workspace={workspace} items={entries.map((entry) => entry.item)} runs={workspaceRuns} viewMode={viewMode} setViewMode={setViewMode} busy={busyKey} onCreateArtifact={openCreateArtifact} />
             <main className="min-h-0 flex-1 overflow-y-auto px-8 pb-[150px] pt-6">
               {loading ? <div className="py-10 text-[13px] text-[var(--text-secondary)]">Loading workspace...</div> : null}
               {viewMode === "cards" ? (
@@ -1086,8 +1116,9 @@ export function WorkspaceShell() {
             runs={workspaceRuns}
             onClose={() => setSelection(null)}
             onHide={() => selectedArtifact && selection?.type === "artifact" ? void hideWorkspaceItem(selection.itemId) : undefined}
-            onCreateArtifact={(type) => void createArtifact(type)}
+            onCreateArtifact={openCreateArtifact}
             onArchiveWorkspace={() => void archiveWorkspace()}
+            onOpenArtifact={setOpenArtifact}
           />
           <div className="pointer-events-none absolute bottom-0 left-[74px] right-0 z-20 bg-[linear-gradient(to_top,var(--bg-primary)_72%,transparent)] px-8 pb-5 pt-12 xl:right-[318px]">
             <div className="pointer-events-auto mx-auto max-w-[880px]">
@@ -1101,7 +1132,7 @@ export function WorkspaceShell() {
                     {createTypes.map((type) => {
                       const Icon = type.icon;
                       return (
-                        <button key={type.key} type="button" className={menuItemClass()} disabled={busyKey === `artifact:${type.key}`} onClick={() => void createArtifact(type.key)}>
+                        <button key={type.key} type="button" className={menuItemClass()} disabled={busyKey === `artifact:${type.key}`} onClick={() => openCreateArtifact(type.key)}>
                           {busyKey === `artifact:${type.key}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <Icon className="h-4 w-4" />}
                           New {type.label}
                         </button>
@@ -1115,6 +1146,24 @@ export function WorkspaceShell() {
           </div>
         </section>
       )}
+      {createBlueprintKey ? (
+        <ArtifactBlueprintSheet
+          mode="create"
+          initialBlueprintKey={createBlueprintKey}
+          busy={busyKey === `artifact:${createBlueprintKey}`}
+          onClose={() => setCreateBlueprintKey(null)}
+          onSubmit={createArtifact}
+        />
+      ) : null}
+      {openArtifact ? (
+        <ArtifactBlueprintSheet
+          mode="edit"
+          artifact={openArtifact}
+          busy={busyKey === `artifact:update:${openArtifact._id}`}
+          onClose={() => setOpenArtifact(null)}
+          onSubmit={(payload) => updateArtifact(openArtifact._id, payload)}
+        />
+      ) : null}
     </div>
   );
 }

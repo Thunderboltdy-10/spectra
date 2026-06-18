@@ -179,6 +179,8 @@ export async function POST(request: NextRequest) {
         blueprintKey: requireBlueprint(body.blueprintKey),
         title: requireString(body.title, "title"),
         summary: optionalString(body.summary),
+        content: body.content,
+        tags: Array.isArray(body.tags) ? body.tags.filter((tag): tag is string => typeof tag === "string") : undefined,
         workspaceId: optionalString(body.workspaceId),
         source: optionalString(body.workspaceId) ? "workspace" : "manual",
       });
@@ -191,6 +193,7 @@ export async function POST(request: NextRequest) {
         artifactId: requireString(body.artifactId, "artifactId"),
         title: optionalString(body.title),
         summary: optionalString(body.summary),
+        content: body.content,
         tags: Array.isArray(body.tags) ? body.tags.filter((tag): tag is string => typeof tag === "string") : undefined,
       });
       return ok(result);

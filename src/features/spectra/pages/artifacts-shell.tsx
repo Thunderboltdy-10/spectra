@@ -24,6 +24,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
+import { ArtifactBlueprintSheet, type ArtifactPayload } from "../components/artifact-blueprint-sheet";
 import { ArtifactCard, blueprintMeta } from "../components/artifact-card";
 import {
   artifactPlacements,
@@ -51,13 +52,6 @@ const filters: Array<{ key: "all" | SpectraBlueprintKey; label: string; icon: Lu
   { key: "quiz", label: "Quizzes", icon: HelpCircle },
   { key: "planner_task", label: "Tasks", icon: CalendarCheck2 },
   { key: "thread_reference", label: "Threads", icon: MessageSquare },
-];
-
-const createTypes: Array<{ key: Exclude<SpectraBlueprintKey, "thread_reference">; label: string; icon: LucideIcon }> = [
-  { key: "document", label: "Document", icon: FileText },
-  { key: "flashcard_deck", label: "Deck", icon: BookOpen },
-  { key: "quiz", label: "Quiz", icon: HelpCircle },
-  { key: "planner_task", label: "Task", icon: CalendarCheck2 },
 ];
 
 function iconForWorkspace(workspace: SpectraWorkspace, index: number) {
@@ -146,15 +140,13 @@ export function ArtifactsShell() {
   const [mode, setMode] = useState<ArtifactMode>("list");
   const [search, setSearch] = useState("");
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState("");
-  const [newArtifactTitle, setNewArtifactTitle] = useState("");
-  const [newArtifactType, setNewArtifactType] = useState<Exclude<SpectraBlueprintKey, "thread_reference">>("document");
-  const [newOpen, setNewOpen] = useState(false);
+  const [createBlueprintKey, setCreateBlueprintKey] = useState<SpectraBlueprintKey | null>(null);
+  const [openArtifact, setOpenArtifact] = useState<SpectraArtifact | null>(null);
   const [addMenuArtifactId, setAddMenuArtifactId] = useState<string | null>(null);
   const [moveMenuArtifactId, setMoveMenuArtifactId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const seededRef = useRef(false);
-  const newMenuRef = useOutsideClick<HTMLDivElement>(newOpen, () => setNewOpen(false));
   const placementMenuOpen = addMenuArtifactId !== null || moveMenuArtifactId !== null;
   const placementMenuRef = useOutsideClick<HTMLDivElement>(placementMenuOpen, () => {
     setAddMenuArtifactId(null);
@@ -208,22 +200,43 @@ export function ArtifactsShell() {
     artifacts: placed.filter((artifact) => artifactPlacements(artifact).some((placement) => placement.workspaceId === workspace._id)),
   })), [placed, workspaces]);
 
-  async function createArtifact() {
-    if (!newArtifactTitle.trim()) return;
-    setBusyKey("artifact:create");
+  async function createArtifact(payload: ArtifactPayload) {
+    setBusyKey(`artifact:create:${payload.blueprintKey}`);
     try {
       await postSpectra({
         action: "createArtifact",
-        blueprintKey: newArtifactType,
-        title: newArtifactTitle,
-        summary: `Unplaced ${newArtifactType.replaceAll("_", " ")} artifact.`,
+        blueprintKey: payload.blueprintKey,
+        title: payload.title,
+        summary: payload.summary,
+        content: payload.content,
+        tags: payload.tags,
       });
-      setNewArtifactTitle("");
-      setNewOpen(false);
+      setCreateBlueprintKey(null);
       toast.success("Artifact created in library inbox.");
       await load(true);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not create artifact.");
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  async function updateArtifact(artifactId: string, payload: ArtifactPayload) {
+    setBusyKey(`artifact:update:${artifactId}`);
+    try {
+      await postSpectra({
+        action: "updateArtifact",
+        artifactId,
+        title: payload.title,
+        summary: payload.summary,
+        content: payload.content,
+        tags: payload.tags,
+      });
+      setOpenArtifact(null);
+      toast.success("Artifact updated.");
+      await load(true);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not update artifact.");
     } finally {
       setBusyKey(null);
     }
@@ -287,10 +300,23 @@ export function ArtifactsShell() {
 
   function rowActions(artifact: SpectraArtifact) {
     const firstPlacement = artifactPlacements(artifact)[0];
-    if (!firstPlacement) return placementMenu(artifact, "add");
+    const openButton = (
+      <button type="button" className={buttonClass()} onClick={() => setOpenArtifact(artifact)}>
+        <ExternalLink className="h-3.5 w-3.5" />
+        Open
+      </button>
+    );
+    if (!firstPlacement) {
+      return (
+        <div className="flex items-center gap-2">
+          {openButton}
+          {placementMenu(artifact, "add")}
+        </div>
+      );
+    }
     return (
       <div className="flex items-center gap-2">
-        <button type="button" className={buttonClass()} title="Artifact details open in Wave 3; this placeholder is intentionally safe." disabled><ExternalLink className="h-3.5 w-3.5" />Open</button>
+        {openButton}
         {placementMenu(artifact, "move")}
         <button type="button" className="flex h-8 w-8 items-center justify-center rounded-[7px] border border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[color-mix(in_oklab,var(--danger)_7%,var(--bg-elevated))] hover:text-[var(--danger)]" disabled={busyKey === `remove:${firstPlacement.workspaceItemId}`} onClick={() => void removePlacement(firstPlacement.workspaceItemId)}>
           {busyKey === `remove:${firstPlacement.workspaceItemId}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
@@ -321,38 +347,11 @@ export function ArtifactsShell() {
                 <span className="absolute right-2 top-1/2 -translate-y-1/2 rounded-[5px] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[10px] text-[var(--text-tertiary)]">⌘ K</span>
               </div>
               <WorkspacePicker workspaces={workspaces} selectedWorkspaceId={selectedWorkspaceId} onSelect={setSelectedWorkspaceId} />
-              <div className="relative" ref={newMenuRef}>
-                <button type="button" className={buttonClass("dark")} onClick={() => setNewOpen((open) => !open)}>
+              <div className="relative">
+                <button type="button" className={buttonClass("dark")} onClick={() => setCreateBlueprintKey("document")}>
                   <Plus className="h-4 w-4" />
                   New artifact
-                  <ChevronDown className="h-3.5 w-3.5" />
                 </button>
-                {newOpen ? (
-                  <div className="absolute right-0 top-[calc(100%+8px)] z-30 w-[320px] rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 shadow-[0_6px_18px_rgba(0,0,0,0.10)]">
-                    <div className="mb-2 flex flex-wrap gap-1">
-                      {createTypes.map((type) => {
-                        const Icon = type.icon;
-                        return (
-                          <button key={type.key} type="button" className={`inline-flex h-8 items-center gap-1.5 rounded-[7px] px-2 text-[12px] ${newArtifactType === type.key ? "bg-[var(--bg-secondary)] text-[var(--text-primary)]" : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`} onClick={() => setNewArtifactType(type.key)}>
-                            <Icon className="h-3.5 w-3.5" />
-                            {type.label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                    <div className="flex gap-2">
-                      <input
-                        value={newArtifactTitle}
-                        onChange={(event) => setNewArtifactTitle(event.target.value)}
-                        placeholder="Artifact title"
-                        className="h-9 min-w-0 flex-1 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 text-[13px] text-[var(--text-primary)] outline-none"
-                      />
-                      <button type="button" className={buttonClass()} disabled={!newArtifactTitle.trim() || busyKey === "artifact:create"} onClick={() => void createArtifact()}>
-                        {busyKey === "artifact:create" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
-                      </button>
-                    </div>
-                  </div>
-                ) : null}
               </div>
             </div>
           </div>
@@ -394,14 +393,32 @@ export function ArtifactsShell() {
         </header>
         {loading ? <ArtifactsSkeleton /> : null}
         {!loading && artifacts.length === 0 ? <EmptyArtifactsState /> : null}
-        {!loading && mode === "list" ? <GroupedList inbox={inbox} groups={byWorkspace} rowActions={rowActions} /> : null}
-        {!loading && mode === "board" ? <BoardColumns groups={byWorkspace} /> : null}
+        {!loading && mode === "list" ? <GroupedList inbox={inbox} groups={byWorkspace} rowActions={rowActions} onOpen={setOpenArtifact} /> : null}
+        {!loading && mode === "board" ? <BoardColumns groups={byWorkspace} onOpen={setOpenArtifact} /> : null}
         {mode === "grid" ? (
           <div className="mt-8 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {!loading ? artifacts.map((artifact) => <ArtifactCard key={artifact._id} artifact={artifactToCard(artifact)} actions={rowActions(artifact)} />) : null}
+            {!loading ? artifacts.map((artifact) => <ArtifactCard key={artifact._id} artifact={artifactToCard(artifact)} actions={rowActions(artifact)} onSelect={() => setOpenArtifact(artifact)} />) : null}
           </div>
         ) : null}
       </section>
+      {createBlueprintKey ? (
+        <ArtifactBlueprintSheet
+          mode="create"
+          initialBlueprintKey={createBlueprintKey}
+          busy={busyKey === `artifact:create:${createBlueprintKey}`}
+          onClose={() => setCreateBlueprintKey(null)}
+          onSubmit={createArtifact}
+        />
+      ) : null}
+      {openArtifact ? (
+        <ArtifactBlueprintSheet
+          mode="edit"
+          artifact={openArtifact}
+          busy={busyKey === `artifact:update:${openArtifact._id}`}
+          onClose={() => setOpenArtifact(null)}
+          onSubmit={(payload) => updateArtifact(openArtifact._id, payload)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -449,10 +466,12 @@ function GroupedList({
   inbox,
   groups,
   rowActions,
+  onOpen,
 }: {
   inbox: SpectraArtifact[];
   groups: Array<{ workspace: SpectraWorkspace; artifacts: SpectraArtifact[] }>;
   rowActions: (artifact: SpectraArtifact) => ReactNode;
+  onOpen: (artifact: SpectraArtifact) => void;
 }) {
   return (
     <main className="mt-8">
@@ -465,7 +484,7 @@ function GroupedList({
           <p className="mt-1 text-[13px] text-[var(--text-secondary)]">Artifacts not yet placed in a workspace.</p>
         </div>
         <div className="grid gap-3 xl:grid-cols-3">
-          {inbox.slice(0, 3).map((artifact) => <ArtifactCard key={artifact._id} artifact={artifactToCard(artifact)} actions={rowActions(artifact)} />)}
+          {inbox.slice(0, 3).map((artifact) => <ArtifactCard key={artifact._id} artifact={artifactToCard(artifact)} actions={rowActions(artifact)} onSelect={() => onOpen(artifact)} />)}
           {inbox.length === 0 ? <div className="rounded-[8px] border border-dashed border-[var(--border-default)] px-4 py-8 text-[13px] text-[var(--text-secondary)]">Inbox is clear for this scope.</div> : null}
         </div>
       </section>
@@ -533,8 +552,10 @@ function WorkspaceGroup({
 
 function BoardColumns({
   groups,
+  onOpen,
 }: {
   groups: Array<{ workspace: SpectraWorkspace; artifacts: SpectraArtifact[] }>;
+  onOpen: (artifact: SpectraArtifact) => void;
 }) {
   const visibleGroups = groups.filter((group) => group.artifacts.length > 0);
   return (
@@ -553,7 +574,7 @@ function BoardColumns({
             <div className="space-y-2.5">
               {group.artifacts.map((artifact) => {
                 const card = artifactToCard(artifact);
-                return <ArtifactCard key={artifact._id} artifact={card} quiet />;
+                return <ArtifactCard key={artifact._id} artifact={card} quiet onSelect={() => onOpen(artifact)} />;
               })}
             </div>
             <button type="button" className="mt-3 flex h-8 items-center gap-2 px-1 text-[13px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]" disabled title="Use list or grid actions to place existing artifacts."><Plus className="h-4 w-4" />Add artifact</button>

@@ -45,6 +45,7 @@ export function ArtifactCard({
   const Icon = meta.icon;
   const interactive = Boolean(onSelect);
   const metrics = Object.entries(artifact.metrics ?? {}).slice(0, size === "compact" ? 0 : 4);
+  const botanical = artifact.variant === "botanical" || artifact.variant === "flower";
 
   return (
     <article
@@ -58,9 +59,33 @@ export function ArtifactCard({
         quiet ? "shadow-none" : "shadow-[0_1px_2px_rgba(27,20,12,0.03)]",
         className,
       )}
-      style={artifact.variant === "botanical" || artifact.variant === "flower" ? { background: `linear-gradient(110deg, ${meta.soft}, var(--bg-elevated) 58%)` } : undefined}
+      style={botanical ? {
+        background: `
+          radial-gradient(circle at 84% 54%, color-mix(in oklab, ${meta.color} 16%, transparent) 0 24%, transparent 25%),
+          radial-gradient(circle at 92% 18%, color-mix(in oklab, ${meta.color} 10%, transparent) 0 18%, transparent 19%),
+          linear-gradient(110deg, ${meta.soft}, var(--bg-elevated) 58%)
+        `,
+      } : undefined}
       onClick={onSelect}
     >
+      {botanical ? (
+        <div className="pointer-events-none absolute -right-5 bottom-0 h-[72%] w-[38%] opacity-70">
+          <div className="absolute bottom-4 left-1/2 h-[88%] w-px -rotate-12" style={{ background: `color-mix(in oklab, ${meta.color} 35%, transparent)` }} />
+          {[0, 1, 2, 3, 4].map((leaf) => (
+            <span
+              key={leaf}
+              className="absolute h-10 w-5 rounded-[100%_0_100%_0] blur-[0.1px]"
+              style={{
+                right: `${18 + (leaf % 2) * 18}px`,
+                bottom: `${20 + leaf * 25}px`,
+                transform: `rotate(${leaf % 2 ? -36 : 26}deg)`,
+                background: `color-mix(in oklab, ${meta.color} 34%, transparent)`,
+              }}
+            />
+          ))}
+        </div>
+      ) : null}
+      <div className="pointer-events-none absolute inset-0 opacity-[0.22] [background-image:radial-gradient(color-mix(in_oklab,var(--text-primary)_18%,transparent)_0.45px,transparent_0.45px)] [background-size:7px_7px]" />
       {selected ? (
         <div className="absolute right-3 top-3 flex h-5 w-5 items-center justify-center rounded-full bg-[#8b6ff0] text-white">
           <Check className="h-3.5 w-3.5" />

@@ -34,7 +34,10 @@ import {
   formatRelativeTime,
   formatShortDate,
   linkedArtifacts,
+  sortSpectraWorkspaces,
   workspaceAccent,
+  workspaceArtifactCount,
+  workspaceThreadCount,
   workspaceItemToCard,
 } from "../components/spectra-view-model";
 import {
@@ -153,9 +156,10 @@ function WorkspaceHome({
 }) {
   const workspaces = overview?.workspaces ?? [];
   const artifacts = overview?.artifacts ?? [];
+  const recent = artifacts.slice(0, 5);
 
   return (
-    <main className="min-h-0 flex-1 overflow-y-auto bg-[var(--bg-primary)] px-8 py-8">
+    <main className="min-h-0 flex-1 overflow-y-auto bg-[radial-gradient(circle_at_34%_0%,color-mix(in_oklab,var(--bg-elevated)_68%,transparent),transparent_38%),var(--bg-primary)] px-8 py-8">
       <div className="mx-auto max-w-6xl">
         <div className="flex items-end justify-between gap-5">
           <div>
@@ -167,18 +171,20 @@ function WorkspaceHome({
             <span>{artifacts.length} artifacts</span>
           </div>
         </div>
-        <div className="mt-8 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <div className="mt-8 grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+          <div className="grid content-start gap-3 md:grid-cols-2">
           {workspaces.map((workspace, index) => {
             const accent = workspaceAccent(workspace, index);
             const Icon = iconForWorkspace(workspace, index);
-            const count = artifacts.filter((artifact) => artifact.placements.some((placement) => placement.workspaceId === workspace._id)).length;
+            const count = workspaceArtifactCount(workspace, artifacts);
             return (
               <button
                 key={workspace._id}
                 type="button"
-                className="group rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 text-left shadow-[0_1px_2px_rgba(27,20,12,0.03)] hover:border-[color-mix(in_oklab,var(--text-tertiary)_38%,var(--border-default))]"
+                className="group relative overflow-hidden rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 text-left shadow-[0_1px_2px_rgba(27,20,12,0.03)] transition duration-150 hover:-translate-y-0.5 hover:border-[color-mix(in_oklab,var(--text-tertiary)_38%,var(--border-default))]"
                 onClick={() => onSelect(workspace._id)}
               >
+                <div className="pointer-events-none absolute inset-x-0 top-0 h-1" style={{ background: accent.color }} />
                 <div className="flex items-start gap-3">
                   <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px] text-white" style={{ background: accent.color }}>
                     <Icon className="h-4 w-4" />
@@ -195,6 +201,29 @@ function WorkspaceHome({
               </button>
             );
           })}
+          </div>
+          <aside className="rounded-[8px] border border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_78%,transparent)] p-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-[14px] font-semibold text-[var(--text-primary)]">Recent activity</h2>
+              <span className="h-2 w-2 rounded-full bg-[var(--success)]" />
+            </div>
+            <div className="mt-4 space-y-3">
+              {recent.map((artifact) => {
+                const meta = blueprintMeta[artifact.blueprintKey];
+                const Icon = meta.icon;
+                return (
+                  <div key={artifact._id} className="flex items-center gap-3">
+                    <Icon className="h-4 w-4 shrink-0" style={{ color: meta.color }} />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-[12px] font-medium text-[var(--text-primary)]">{artifact.title}</div>
+                      <div className="text-[11px] text-[var(--text-secondary)]">{formatRelativeTime(artifact.updatedAt)}</div>
+                    </div>
+                  </div>
+                );
+              })}
+              {recent.length === 0 ? <div className="text-[13px] text-[var(--text-secondary)]">No recent artifacts yet.</div> : null}
+            </div>
+          </aside>
         </div>
       </div>
     </main>
@@ -219,9 +248,9 @@ function WorkspaceHeader({
   onCreateArtifact: (type: Exclude<SpectraBlueprintKey, "thread_reference">) => void;
 }) {
   const artifactCount = items.filter((item) => item.artifact).length;
-  const threadCount = items.filter((item) => item.artifact?.blueprintKey === "thread_reference").length;
+  const threadCount = workspaceThreadCount(items);
   const cardCount = items.filter((item) => item.viewData.pinned).length;
-  const activeRuns = runs.filter((run) => run.status === "running" || run.status === "queued").length || 3;
+  const activeRuns = runs.filter((run) => run.status === "running" || run.status === "queued").length;
 
   return (
     <header className="border-b border-[var(--border-default)] bg-[var(--bg-primary)] px-8 pb-3 pt-7">
@@ -281,6 +310,10 @@ function CardsView({
   onHide: (itemId: string) => void;
   busy: string | null;
 }) {
+  if (entries.length === 0) {
+    return <EmptyWorkspaceState title="No workspace cards yet" message="Create or add an artifact to start building this workspace." />;
+  }
+
   const pinned = entries.filter((entry) => entry.item.viewData.pinned).slice(0, 5);
   const documents = entries.filter((entry) => entry.artifact.blueprintKey === "document").slice(0, 4);
   const practice = entries.filter((entry) => entry.artifact.blueprintKey === "quiz" || entry.artifact.blueprintKey === "flashcard_deck" || entry.artifact.blueprintKey === "planner_task").slice(0, 4);
@@ -386,6 +419,10 @@ function TimelineView({
     entry: entries.find((candidate) => candidate.artifact._id === run.artifactId) ?? entries[index],
   }));
 
+  if (rows.length === 0) {
+    return <EmptyWorkspaceState title="No activity yet" message="Runs and object changes will appear here as the workspace becomes active." />;
+  }
+
   return (
     <div className="space-y-8">
       {["Today", "Yesterday", "Earlier this week"].map((group, groupIndex) => (
@@ -449,6 +486,10 @@ function LibraryView({
   selected: Selection;
   onSelect: (item: SpectraWorkspaceItem, artifact: SpectraArtifact) => void;
 }) {
+  if (entries.length === 0) {
+    return <EmptyWorkspaceState title="No library items here" message="Add artifacts to this workspace to group them by type." />;
+  }
+
   const groups = createTypes.map((type) => ({
     key: type.key,
     label: type.label,
@@ -558,11 +599,26 @@ function CanvasView({
   );
 }
 
+function EmptyWorkspaceState({ title, message }: { title: string; message: string }) {
+  return (
+    <div className="flex min-h-[360px] items-center justify-center rounded-[8px] border border-dashed border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_44%,transparent)]">
+      <div className="max-w-sm text-center">
+        <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-secondary)]">
+          <Sparkles className="h-4 w-4" />
+        </div>
+        <h2 className="mt-4 font-display text-[20px] font-semibold text-[var(--text-primary)]">{title}</h2>
+        <p className="mt-2 text-[13px] leading-6 text-[var(--text-secondary)]">{message}</p>
+      </div>
+    </div>
+  );
+}
+
 function Inspector({
   workspace,
   artifacts,
   selectedArtifact,
   selectedRun,
+  runs,
   onClose,
   onHide,
 }: {
@@ -570,6 +626,7 @@ function Inspector({
   artifacts: SpectraArtifact[];
   selectedArtifact: SpectraArtifact | null;
   selectedRun: SpectraRun | null;
+  runs: SpectraRun[];
   onClose: () => void;
   onHide: () => void;
 }) {
@@ -638,6 +695,9 @@ function Inspector({
     );
   }
 
+  const workspaceArtifacts = artifacts.filter((artifact) => !workspace || artifact.placements.some((placement) => placement.workspaceId === workspace._id));
+  const activeRuns = runs.filter((run) => run.status === "queued" || run.status === "running").length;
+
   return (
     <aside className="hidden w-[318px] shrink-0 border-l border-[var(--border-default)] bg-[var(--bg-primary)] px-5 py-6 xl:block">
       <div className="flex items-center justify-between">
@@ -646,10 +706,10 @@ function Inspector({
       </div>
       <InspectorSection title="Workspace">
         <div className="space-y-3 text-[13px]">
-          <MetricRow label="Artifacts" value="18" />
-          <MetricRow label="Cards" value="58" />
-          <MetricRow label="Documents" value="12" />
-          <MetricRow label="Active runs" value="7" />
+          <MetricRow label="Artifacts" value={String(workspaceArtifacts.length)} />
+          <MetricRow label="Cards" value={String(workspaceArtifacts.length)} />
+          <MetricRow label="Documents" value={String(workspaceArtifacts.filter((artifact) => artifact.blueprintKey === "document").length)} />
+          <MetricRow label="Active runs" value={String(activeRuns)} />
         </div>
       </InspectorSection>
       <InspectorSection title="Quick actions">
@@ -746,6 +806,8 @@ export function WorkspaceShell() {
   const workspace = selectedWorkspaceId ? overview?.workspace?.workspace ?? null : null;
   const allArtifacts = overview?.artifacts ?? [];
   const runs = overview?.runs ?? [];
+  const workspaceRuns = selectedWorkspaceId ? runs.filter((run) => run.workspaceId === selectedWorkspaceId) : runs;
+  const workspaces = useMemo(() => sortSpectraWorkspaces(overview?.workspaces ?? []), [overview?.workspaces]);
   const entries = useMemo(() => (overview?.workspace?.items ?? [])
     .map((item) => {
       const card = workspaceItemToCard(item);
@@ -753,12 +815,13 @@ export function WorkspaceShell() {
     })
     .filter((entry): entry is { item: SpectraWorkspaceItem; artifact: SpectraArtifact; card: NonNullable<ReturnType<typeof workspaceItemToCard>> } => Boolean(entry)), [overview?.workspace?.items]);
   const selectedArtifact = selection?.type === "artifact" ? entries.find((entry) => entry.item._id === selection.itemId)?.artifact ?? null : null;
-  const selectedRun = selection?.type === "run" ? runs.find((run) => run._id === selection.runId) ?? null : null;
-  const recentRunCards: ResultCardView[] = runs.slice(0, 2).map((run) => ({
+  const selectedRun = selection?.type === "run" ? workspaceRuns.find((run) => run._id === selection.runId) ?? null : null;
+  const recentRunCards: ResultCardView[] = workspaceRuns.slice(0, 2).map((run) => ({
     id: run._id,
     status: run.status,
     title: run.status === "completed" ? run.userPrompt : "Reviewing workspace context",
     summary: run.finalSummary ?? run.error ?? run.userPrompt,
+    meta: formatRelativeTime(run.createdAt),
   }));
 
   async function createArtifact(blueprintKey: Exclude<SpectraBlueprintKey, "thread_reference">) {
@@ -799,7 +862,7 @@ export function WorkspaceShell() {
   return (
     <div className="relative flex h-full min-h-0 bg-[var(--bg-primary)]">
       <WorkspaceRail
-        workspaces={overview?.workspaces ?? []}
+        workspaces={workspaces}
         selectedWorkspaceId={selectedWorkspaceId}
         onHome={() => {
           setSelection(null);
@@ -814,11 +877,11 @@ export function WorkspaceShell() {
         onCreateClick={() => toast.message("Workspace creation is available from the next command menu pass.")}
       />
       {!selectedWorkspaceId ? (
-        <WorkspaceHome overview={overview} onSelect={(workspaceId) => void load(workspaceId)} />
+        <WorkspaceHome overview={overview ? { ...overview, workspaces } : overview} onSelect={(workspaceId) => void load(workspaceId)} />
       ) : (
         <section className="flex min-w-0 flex-1">
           <div className="flex min-w-0 flex-1 flex-col">
-            <WorkspaceHeader workspace={workspace} items={entries.map((entry) => entry.item)} runs={runs} viewMode={viewMode} setViewMode={setViewMode} busy={busyKey} onCreateArtifact={(type) => void createArtifact(type)} />
+            <WorkspaceHeader workspace={workspace} items={entries.map((entry) => entry.item)} runs={workspaceRuns} viewMode={viewMode} setViewMode={setViewMode} busy={busyKey} onCreateArtifact={(type) => void createArtifact(type)} />
             <main className="min-h-0 flex-1 overflow-y-auto px-8 pb-[150px] pt-6">
               {loading ? <div className="py-10 text-[13px] text-[var(--text-secondary)]">Loading workspace...</div> : null}
               {viewMode === "cards" ? (
@@ -830,7 +893,7 @@ export function WorkspaceShell() {
                   busy={busyKey}
                 />
               ) : null}
-              {viewMode === "timeline" ? <TimelineView entries={entries} runs={runs} selected={selection} onSelectRun={(run) => setSelection({ type: "run", runId: run._id })} /> : null}
+              {viewMode === "timeline" ? <TimelineView entries={entries} runs={workspaceRuns} selected={selection} onSelectRun={(run) => setSelection({ type: "run", runId: run._id })} /> : null}
               {viewMode === "library" ? <LibraryView entries={entries} selected={selection} onSelect={(item, artifact) => setSelection({ type: "artifact", itemId: item._id, artifactId: artifact._id })} /> : null}
               {viewMode === "canvas" ? <CanvasView entries={entries} selectedArtifact={selectedArtifact} onSelect={(item, artifact) => setSelection({ type: "artifact", itemId: item._id, artifactId: artifact._id })} /> : null}
             </main>
@@ -840,6 +903,7 @@ export function WorkspaceShell() {
             artifacts={allArtifacts}
             selectedArtifact={selectedArtifact}
             selectedRun={selectedRun}
+            runs={workspaceRuns}
             onClose={() => setSelection(null)}
             onHide={() => selectedArtifact && selection?.type === "artifact" ? void hideWorkspaceItem(selection.itemId) : undefined}
           />

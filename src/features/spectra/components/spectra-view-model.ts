@@ -1,6 +1,8 @@
 import type { ArtifactCardView } from "./artifact-card";
 import type { SpectraArtifact, SpectraWorkspace, SpectraWorkspaceItem } from "../data/api";
 
+const demoWorkspaceOrder = ["Biology", "Maths EE", "Spectra", "Economics", "English"];
+
 export type DemoRelation = {
   targetKey: string;
   label: string;
@@ -49,6 +51,31 @@ export function formatRelativeTime(value: number) {
   if (hours < 24) return `${hours}h ago`;
   const days = Math.round(hours / 24);
   return `${days}d ago`;
+}
+
+export function sortSpectraWorkspaces(workspaces: SpectraWorkspace[]) {
+  return [...workspaces].sort((a, b) => {
+    const aIndex = demoWorkspaceOrder.indexOf(a.title);
+    const bIndex = demoWorkspaceOrder.indexOf(b.title);
+    if (aIndex !== -1 || bIndex !== -1) {
+      if (aIndex === -1) return 1;
+      if (bIndex === -1) return -1;
+      return aIndex - bIndex;
+    }
+    return b.lastActivityAt - a.lastActivityAt;
+  });
+}
+
+export function workspaceArtifactCount(workspace: SpectraWorkspace, artifacts: SpectraArtifact[]) {
+  return artifacts.filter((artifact) => artifact.placements.some((placement) => placement.workspaceId === workspace._id)).length;
+}
+
+export function workspaceThreadCount(items: SpectraWorkspaceItem[]) {
+  return items.filter((item) => item.artifact?.blueprintKey === "thread_reference").length;
+}
+
+export function workspaceDocumentCount(items: SpectraWorkspaceItem[]) {
+  return items.filter((item) => item.artifact?.blueprintKey === "document").length;
 }
 
 export function demoMeta(artifact?: SpectraArtifact | null): DemoMeta {

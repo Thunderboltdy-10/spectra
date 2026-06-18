@@ -31,6 +31,7 @@ import {
   artifactToCard,
   formatRelativeTime,
   initials,
+  sortSpectraWorkspaces,
   workspaceAccent,
 } from "../components/spectra-view-model";
 import {
@@ -107,7 +108,7 @@ function ArtifactsRail({ workspaces }: { workspaces: SpectraWorkspace[] }) {
 }
 
 export function ArtifactsShell() {
-  const [artifacts, setArtifacts] = useState<SpectraArtifact[]>([]);
+  const [allArtifacts, setAllArtifacts] = useState<SpectraArtifact[]>([]);
   const [workspaces, setWorkspaces] = useState<SpectraWorkspace[]>([]);
   const [activeFilter, setActiveFilter] = useState<"all" | SpectraBlueprintKey>("all");
   const [mode, setMode] = useState<ArtifactMode>("list");
@@ -122,26 +123,23 @@ export function ArtifactsShell() {
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const seededRef = useRef(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (quiet = false) => {
+    if (!quiet) setLoading(true);
     try {
       const [artifactResult, overview] = await Promise.all([
         getSpectraArtifacts({
           placement: "all",
-          blueprintKey: activeFilter,
-          search,
         }),
         getSpectraOverview(),
       ]);
-      setArtifacts(artifactResult.artifacts);
-      setWorkspaces(overview.workspaces);
-      setSelectedWorkspaceId((current) => current || overview.workspaces[0]?._id || "");
+      setAllArtifacts(artifactResult.artifacts);
+      setWorkspaces(sortSpectraWorkspaces(overview.workspaces));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not load artifacts.");
     } finally {
       setLoading(false);
     }
-  }, [activeFilter, search]);
+  }, []);
 
   useEffect(() => {
     if (seededRef.current) return;
@@ -156,12 +154,15 @@ export function ArtifactsShell() {
     })();
   }, [load]);
 
-  useEffect(() => {
-    if (!seededRef.current) return;
-    const timeout = window.setTimeout(() => void load(), 180);
-    return () => window.clearTimeout(timeout);
-  }, [load]);
-
+  const artifacts = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    return allArtifacts.filter((artifact) => {
+      if (activeFilter !== "all" && artifact.blueprintKey !== activeFilter) return false;
+      if (selectedWorkspaceId && !artifact.placements.some((placement) => placement.workspaceId === selectedWorkspaceId)) return false;
+      if (!needle) return true;
+      return `${artifact.title}\n${artifact.summary ?? ""}\n${artifact.tags.join(" ")}`.toLowerCase().includes(needle);
+    });
+  }, [activeFilter, allArtifacts, search, selectedWorkspaceId]);
   const inbox = useMemo(() => artifacts.filter((artifact) => artifact.placementStatus === "inbox"), [artifacts]);
   const placed = useMemo(() => artifacts.filter((artifact) => artifact.placementStatus === "workspace"), [artifacts]);
   const byWorkspace = useMemo(() => workspaces.map((workspace) => ({
@@ -182,7 +183,7 @@ export function ArtifactsShell() {
       setNewArtifactTitle("");
       setNewOpen(false);
       toast.success("Artifact created in library inbox.");
-      await load();
+      await load(true);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not create artifact.");
     } finally {
@@ -198,7 +199,7 @@ export function ArtifactsShell() {
       toast.success(`Added to ${workspaceTitle}.`);
       setAddMenuArtifactId(null);
       setMoveMenuArtifactId(null);
-      await load();
+      await load(true);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not place artifact.");
     } finally {
@@ -211,7 +212,7 @@ export function ArtifactsShell() {
     try {
       await postSpectra({ action: "hideWorkspaceItem", workspaceItemId });
       toast.success("Removed from workspace. Artifact remains in library.");
-      await load();
+      await load(true);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not remove placement.");
     } finally {
@@ -262,7 +263,7 @@ export function ArtifactsShell() {
   }
 
   return (
-    <div className="flex h-full min-h-0 bg-[var(--bg-primary)]">
+    <div className="flex h-full min-h-0 bg-[radial-gradient(circle_at_32%_-12%,color-mix(in_oklab,var(--bg-elevated)_70%,transparent),transparent_34%),var(--bg-primary)]">
       <ArtifactsRail workspaces={workspaces} />
       <section className="min-w-0 flex-1 overflow-y-auto px-8 py-7">
         <header>
@@ -354,12 +355,13 @@ export function ArtifactsShell() {
             </div>
           </div>
         </header>
-        {loading ? <div className="py-8 text-[13px] text-[var(--text-secondary)]">Loading artifacts...</div> : null}
-        {mode === "list" ? <GroupedList inbox={inbox} groups={byWorkspace} rowActions={rowActions} /> : null}
-        {mode === "board" ? <BoardColumns groups={byWorkspace} rowActions={rowActions} /> : null}
+        {loading ? <ArtifactsSkeleton /> : null}
+        {!loading && artifacts.length === 0 ? <EmptyArtifactsState /> : null}
+        {!loading && mode === "list" ? <GroupedList inbox={inbox} groups={byWorkspace} rowActions={rowActions} /> : null}
+        {!loading && mode === "board" ? <BoardColumns groups={byWorkspace} /> : null}
         {mode === "grid" ? (
           <div className="mt-8 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {artifacts.map((artifact) => <ArtifactCard key={artifact._id} artifact={artifactToCard(artifact)} actions={rowActions(artifact)} />)}
+            {!loading ? artifacts.map((artifact) => <ArtifactCard key={artifact._id} artifact={artifactToCard(artifact)} actions={rowActions(artifact)} />) : null}
           </div>
         ) : null}
       </section>
@@ -387,6 +389,11 @@ function WorkspacePicker({
       </button>
       {open ? (
         <div className="absolute right-0 top-[calc(100%+8px)] z-30 w-[260px] rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[0_6px_18px_rgba(0,0,0,0.10)]">
+          <button type="button" className={menuItemClass()} onClick={() => { onSelect(""); setOpen(false); }}>
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px] bg-[var(--bg-secondary)] text-[var(--text-secondary)]"><LayoutGrid className="h-3.5 w-3.5" /></span>
+            <span className="min-w-0 flex-1 truncate">All workspaces</span>
+            {!selectedWorkspaceId ? <CheckCircle2 className="h-4 w-4 text-[var(--success)]" /> : null}
+          </button>
           {workspaces.map((workspace) => (
             <button key={workspace._id} type="button" className={menuItemClass()} onClick={() => { onSelect(workspace._id); setOpen(false); }}>
               <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px] bg-[var(--bg-secondary)] text-[11px] font-semibold text-[var(--text-secondary)]">{initials(workspace.title)}</span>
@@ -421,6 +428,7 @@ function GroupedList({
         </div>
         <div className="grid gap-3 xl:grid-cols-3">
           {inbox.slice(0, 3).map((artifact) => <ArtifactCard key={artifact._id} artifact={artifactToCard(artifact)} actions={rowActions(artifact)} />)}
+          {inbox.length === 0 ? <div className="rounded-[8px] border border-dashed border-[var(--border-default)] px-4 py-8 text-[13px] text-[var(--text-secondary)]">Inbox is clear for this scope.</div> : null}
         </div>
       </section>
       <section className="mt-8 border-t border-[var(--border-default)] pt-7">
@@ -487,13 +495,11 @@ function WorkspaceGroup({
 
 function BoardColumns({
   groups,
-  rowActions,
 }: {
   groups: Array<{ workspace: SpectraWorkspace; artifacts: SpectraArtifact[] }>;
-  rowActions: (artifact: SpectraArtifact) => ReactNode;
 }) {
   return (
-    <main className="mt-8 flex gap-4 overflow-x-auto pb-6">
+    <main className="mt-8 flex gap-4 overflow-x-auto pb-6 pr-2">
       {groups.filter((group) => group.artifacts.length > 0).map((group, index) => {
         const accent = workspaceAccent(group.workspace, index);
         return (
@@ -509,7 +515,7 @@ function BoardColumns({
             <div className="space-y-2.5">
               {group.artifacts.map((artifact) => {
                 const card = artifactToCard(artifact);
-                return <ArtifactCard key={artifact._id} artifact={card} actions={rowActions(artifact)} quiet />;
+                return <ArtifactCard key={artifact._id} artifact={card} actions={<MoreHorizontal className="h-4 w-4 text-[var(--text-tertiary)]" />} quiet />;
               })}
             </div>
             <button type="button" className="mt-3 flex h-8 items-center gap-2 px-1 text-[13px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"><Plus className="h-4 w-4" />Add artifact</button>
@@ -517,5 +523,32 @@ function BoardColumns({
         );
       })}
     </main>
+  );
+}
+
+function ArtifactsSkeleton() {
+  return (
+    <div className="mt-8 space-y-7">
+      <div className="grid gap-3 xl:grid-cols-3">
+        {[0, 1, 2].map((item) => <div key={item} className="h-[116px] animate-pulse rounded-[8px] border border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_74%,transparent)]" />)}
+      </div>
+      <div className="space-y-3">
+        {[0, 1, 2, 3].map((item) => <div key={item} className="h-14 animate-pulse rounded-[8px] border border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_70%,transparent)]" />)}
+      </div>
+    </div>
+  );
+}
+
+function EmptyArtifactsState() {
+  return (
+    <div className="mt-10 flex min-h-[340px] items-center justify-center rounded-[8px] border border-dashed border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_42%,transparent)]">
+      <div className="max-w-sm text-center">
+        <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-secondary)]">
+          <Search className="h-4 w-4" />
+        </div>
+        <h2 className="mt-4 font-display text-[20px] font-semibold text-[var(--text-primary)]">No artifacts match</h2>
+        <p className="mt-2 text-[13px] leading-6 text-[var(--text-secondary)]">Adjust the search, type, or workspace scope.</p>
+      </div>
+    </div>
   );
 }

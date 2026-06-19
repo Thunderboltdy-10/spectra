@@ -17,6 +17,11 @@ function isFunctionPathNotFound(error: unknown) {
   return message.includes("FunctionPathNotFound") || message.includes("Could not find public function");
 }
 
+function isWorkspaceNotFound(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.toLowerCase().includes("workspace not found");
+}
+
 async function spectraQuery<TArgs extends object, TResult>(functionName: string, args: TArgs) {
   try {
     return await convexQuery<TArgs, TResult>(functionName, args);
@@ -98,13 +103,17 @@ export async function GET(request: NextRequest) {
       }) as Array<{ _id: string }>;
       const requestedWorkspaceId = params.get("workspaceId") ?? undefined;
       const selectedWorkspaceId = requestedWorkspaceId;
+      const workspacePromise = selectedWorkspaceId
+        ? spectraQuery("spectraWorkspaceItems:listForWorkspace", {
+          actorClerkId: actor.clerkId,
+          workspaceId: selectedWorkspaceId,
+        }).catch((error) => {
+          if (isWorkspaceNotFound(error)) return null;
+          throw error;
+        })
+        : Promise.resolve(null);
       const [workspace, artifacts, runs] = await Promise.all([
-        selectedWorkspaceId
-          ? spectraQuery("spectraWorkspaceItems:listForWorkspace", {
-            actorClerkId: actor.clerkId,
-            workspaceId: selectedWorkspaceId,
-          })
-          : Promise.resolve(null),
+        workspacePromise,
         spectraQuery("spectraArtifacts:list", {
           actorClerkId: actor.clerkId,
           placement: "all",
@@ -118,7 +127,7 @@ export async function GET(request: NextRequest) {
       return ok({
         actor,
         workspaces,
-        selectedWorkspaceId,
+        selectedWorkspaceId: workspace ? selectedWorkspaceId : undefined,
         workspace,
         artifacts,
         runs,

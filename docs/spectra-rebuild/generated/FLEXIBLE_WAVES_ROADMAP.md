@@ -123,6 +123,48 @@ Manual test:
 - Can I open and inspect or edit it?
 - Does `/artifacts` feel like a library of real objects?
 
+## Wave 3B - Artifact Studio / Split-View Tabs
+
+Goal: replace one-off artifact drawers with a shared Artifact Studio used from both `/workspace` and `/artifacts`.
+
+Product model:
+
+- Artifacts are shared objects.
+- Workspaces are contextual working lenses over those objects.
+- `/artifacts` is the global library/inventory.
+- `/workspace` is the working room/context.
+- Both surfaces use the same artifact opening/editing system without being merged.
+
+Focus:
+
+- Default artifact open behavior is a resizable right split panel, similar to a Notion side peek.
+- The old right inspector disappears while the artifact split is open.
+- Expand/open-as-tab creates or focuses a local artifact tab.
+- Full tab mode gives the artifact the main working area.
+- Tabs are local UI state, can be closed/switched, show active and saved/dirty state, and may restore from local storage.
+- Document detail moves toward a real TipTap-backed rich editor.
+- Flashcard deck detail supports section/card list plus front/back editing.
+- Quiz detail supports real question objects, options, correct-answer selection, add/remove question, and add/remove option.
+- Planner task is corrected to a task/calendar item, not a lesson-planning document.
+- Artifact detail views include the Spectra quick-chat bar with an artifact/context chip.
+
+Non-goals:
+
+- No real AI generation or operation planning.
+- No agents, ManageBac, complex routing, or advanced canvas editing.
+- No full spaced repetition engine.
+- No advanced quiz grading/responses.
+- No full chat/thread convergence.
+
+Manual test:
+
+- Clicking artifacts from `/workspace` and `/artifacts` opens the same split Studio.
+- Resizing the Studio leaves the source page usable.
+- Expanding opens/focuses a tab and full tab mode takes over the main route area.
+- Saved edits sync across `/workspace` and `/artifacts`.
+- Planner artifacts feel like tasks/calendar items.
+- Thread references remain visibly deferred to chat convergence.
+
 ## Wave 4 - AI Run / Operation Engine
 
 Goal: make the command bar do real controlled AI work through the new `AIRun`/`Operation`/`ResultCard` protocol.

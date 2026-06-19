@@ -26,6 +26,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { toast } from "sonner";
 import { ArtifactBlueprintSheet, type ArtifactPayload } from "../components/artifact-blueprint-sheet";
 import { ArtifactCard, blueprintMeta } from "../components/artifact-card";
+import { ArtifactStudio, useArtifactStudioState } from "../components/artifact-studio";
 import {
   artifactPlacements,
   artifactToCard,
@@ -98,8 +99,8 @@ function ArtifactsRail({
     <aside className="flex w-[74px] shrink-0 flex-col items-center border-r border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-primary)_84%,var(--bg-elevated))] px-2.5 py-5">
       <button
         type="button"
-        className={`flex h-14 w-14 flex-col items-center justify-center gap-1 rounded-[8px] border text-[11px] font-medium transition ${
-          !selectedWorkspaceId ? "border-transparent bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[0_2px_8px_rgba(27,20,12,0.06)]" : "border-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+        className={`flex h-14 w-14 flex-col items-center justify-center gap-1 rounded-[8px] text-[11px] font-medium transition ${
+          !selectedWorkspaceId ? "bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[0_2px_8px_rgba(27,20,12,0.04)]" : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
         }`}
         onClick={() => onSelect("")}
       >
@@ -115,8 +116,8 @@ function ArtifactsRail({
             <button
               key={workspace._id}
               type="button"
-              className={`flex w-14 flex-col items-center gap-1 rounded-[8px] border px-1.5 py-2 text-[11px] font-medium transition ${
-                selected ? "border-transparent bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[0_2px_8px_rgba(27,20,12,0.06)]" : "border-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+              className={`flex w-14 flex-col items-center gap-1 rounded-[8px] px-1.5 py-2 text-[11px] font-medium transition ${
+                selected ? "bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[0_2px_8px_rgba(27,20,12,0.04)]" : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
               }`}
               onClick={() => onSelect(workspace._id)}
               title={`Filter ${workspace.title}`}
@@ -141,7 +142,7 @@ export function ArtifactsShell() {
   const [search, setSearch] = useState("");
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState("");
   const [createBlueprintKey, setCreateBlueprintKey] = useState<SpectraBlueprintKey | null>(null);
-  const [openArtifact, setOpenArtifact] = useState<SpectraArtifact | null>(null);
+  const [studioPanelWidth, setStudioPanelWidth] = useState(760);
   const [addMenuArtifactId, setAddMenuArtifactId] = useState<string | null>(null);
   const [moveMenuArtifactId, setMoveMenuArtifactId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -152,6 +153,7 @@ export function ArtifactsShell() {
     setAddMenuArtifactId(null);
     setMoveMenuArtifactId(null);
   });
+  const studio = useArtifactStudioState("spectra.artifacts.artifactStudio", allArtifacts);
 
   const load = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
@@ -232,11 +234,24 @@ export function ArtifactsShell() {
         content: payload.content,
         tags: payload.tags,
       });
-      setOpenArtifact(null);
       toast.success("Artifact updated.");
       await load(true);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not update artifact.");
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  async function archiveArtifact(artifact: SpectraArtifact) {
+    setBusyKey(`artifact:archive:${artifact._id}`);
+    try {
+      await postSpectra({ action: "archiveArtifact", artifactId: artifact._id });
+      toast.success("Artifact archived.");
+      studio.closeStudio();
+      await load(true);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not archive artifact.");
     } finally {
       setBusyKey(null);
     }
@@ -301,7 +316,7 @@ export function ArtifactsShell() {
   function rowActions(artifact: SpectraArtifact) {
     const firstPlacement = artifactPlacements(artifact)[0];
     const openButton = (
-      <button type="button" className={buttonClass()} onClick={() => setOpenArtifact(artifact)}>
+      <button type="button" className={buttonClass()} onClick={() => studio.openSplit(artifact)}>
         <ExternalLink className="h-3.5 w-3.5" />
         Open
       </button>
@@ -328,6 +343,25 @@ export function ArtifactsShell() {
   return (
     <div className="flex h-full min-h-0 bg-[radial-gradient(circle_at_32%_-12%,color-mix(in_oklab,var(--bg-elevated)_70%,transparent),transparent_34%),var(--bg-primary)]">
       <ArtifactsRail workspaces={workspaces} selectedWorkspaceId={selectedWorkspaceId} onSelect={setSelectedWorkspaceId} />
+      {studio.mode === "tab" && studio.activeArtifact ? (
+        <ArtifactStudio
+          mode="tab"
+          artifact={studio.activeArtifact}
+          artifacts={allArtifacts}
+          tabs={studio.tabs}
+          dirtyIds={studio.dirtyIds}
+          busy={busyKey === `artifact:update:${studio.activeArtifact._id}`}
+          sourceLabel="Artifacts"
+          onClose={studio.closeStudio}
+          onExpand={studio.openTab}
+          onActivateTab={studio.activateTab}
+          onCloseTab={studio.closeTab}
+          onSave={updateArtifact}
+          onArchive={archiveArtifact}
+          onDirtyChange={studio.setDirty}
+        />
+      ) : (
+      <>
       <section className="min-w-0 flex-1 overflow-y-auto px-8 py-7">
         <header>
           <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
@@ -393,14 +427,36 @@ export function ArtifactsShell() {
         </header>
         {loading ? <ArtifactsSkeleton /> : null}
         {!loading && artifacts.length === 0 ? <EmptyArtifactsState /> : null}
-        {!loading && mode === "list" ? <GroupedList inbox={inbox} groups={byWorkspace} rowActions={rowActions} onOpen={setOpenArtifact} /> : null}
-        {!loading && mode === "board" ? <BoardColumns groups={byWorkspace} onOpen={setOpenArtifact} /> : null}
+        {!loading && mode === "list" ? <GroupedList inbox={inbox} groups={byWorkspace} rowActions={rowActions} onOpen={studio.openSplit} /> : null}
+        {!loading && mode === "board" ? <BoardColumns groups={byWorkspace} onOpen={studio.openSplit} /> : null}
         {mode === "grid" ? (
           <div className="mt-8 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {!loading ? artifacts.map((artifact) => <ArtifactCard key={artifact._id} artifact={artifactToCard(artifact)} actions={rowActions(artifact)} onSelect={() => setOpenArtifact(artifact)} />) : null}
+            {!loading ? artifacts.map((artifact) => <ArtifactCard key={artifact._id} artifact={artifactToCard(artifact)} actions={rowActions(artifact)} onSelect={() => studio.openSplit(artifact)} />) : null}
           </div>
         ) : null}
       </section>
+      {studio.mode === "split" && studio.activeArtifact ? (
+        <ArtifactStudio
+          mode="split"
+          artifact={studio.activeArtifact}
+          artifacts={allArtifacts}
+          tabs={studio.tabs}
+          dirtyIds={studio.dirtyIds}
+          busy={busyKey === `artifact:update:${studio.activeArtifact._id}`}
+          panelWidth={studioPanelWidth}
+          sourceLabel="Artifacts"
+          onPanelWidthChange={setStudioPanelWidth}
+          onClose={studio.closeStudio}
+          onExpand={studio.openTab}
+          onActivateTab={studio.activateTab}
+          onCloseTab={studio.closeTab}
+          onSave={updateArtifact}
+          onArchive={archiveArtifact}
+          onDirtyChange={studio.setDirty}
+        />
+      ) : null}
+      </>
+      )}
       {createBlueprintKey ? (
         <ArtifactBlueprintSheet
           mode="create"
@@ -408,15 +464,6 @@ export function ArtifactsShell() {
           busy={busyKey === `artifact:create:${createBlueprintKey}`}
           onClose={() => setCreateBlueprintKey(null)}
           onSubmit={createArtifact}
-        />
-      ) : null}
-      {openArtifact ? (
-        <ArtifactBlueprintSheet
-          mode="edit"
-          artifact={openArtifact}
-          busy={busyKey === `artifact:update:${openArtifact._id}`}
-          onClose={() => setOpenArtifact(null)}
-          onSubmit={(payload) => updateArtifact(openArtifact._id, payload)}
         />
       ) : null}
     </div>
@@ -498,7 +545,7 @@ function GroupedList({
         </div>
         <div className="space-y-4">
           {groups.filter((group) => group.artifacts.length > 0).map((group, index) => (
-            <WorkspaceGroup key={group.workspace._id} workspace={group.workspace} artifacts={group.artifacts} index={index} rowActions={rowActions} />
+            <WorkspaceGroup key={group.workspace._id} workspace={group.workspace} artifacts={group.artifacts} index={index} rowActions={rowActions} onOpen={onOpen} />
           ))}
         </div>
       </section>
@@ -511,11 +558,13 @@ function WorkspaceGroup({
   artifacts,
   index,
   rowActions,
+  onOpen,
 }: {
   workspace: SpectraWorkspace;
   artifacts: SpectraArtifact[];
   index: number;
   rowActions: (artifact: SpectraArtifact) => ReactNode;
+  onOpen: (artifact: SpectraArtifact) => void;
 }) {
   const accent = workspaceAccent(workspace, index);
   return (
@@ -532,7 +581,19 @@ function WorkspaceGroup({
         const meta = blueprintMeta[artifact.blueprintKey];
         const Icon = meta.icon;
         return (
-          <div key={artifact._id} className="grid min-h-[58px] grid-cols-[minmax(260px,1.2fr)_minmax(130px,0.6fr)_minmax(130px,0.5fr)_auto] items-center gap-4 border-b border-[var(--border-default)] px-4 py-2.5 last:border-b-0">
+          <div
+            key={artifact._id}
+            className="grid min-h-[58px] cursor-pointer grid-cols-[minmax(260px,1.2fr)_minmax(130px,0.6fr)_minmax(130px,0.5fr)_auto] items-center gap-4 border-b border-[var(--border-default)] px-4 py-2.5 last:border-b-0 hover:bg-[var(--bg-hover)]"
+            role="button"
+            tabIndex={0}
+            onClick={() => onOpen(artifact)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                onOpen(artifact);
+              }
+            }}
+          >
             <div className="flex min-w-0 items-center gap-3">
               <Icon className="h-5 w-5 shrink-0" style={{ color: meta.color }} />
               <div className="min-w-0">
@@ -542,7 +603,7 @@ function WorkspaceGroup({
             </div>
             <div className="flex items-center gap-2 text-[12px] text-[var(--text-secondary)]"><span className="h-1.5 w-1.5 rounded-full" style={{ background: accent.color }} />{workspace.title}</div>
             <div className="text-[12px] text-[var(--text-secondary)]">Updated {formatRelativeTime(artifact.updatedAt)}</div>
-            {rowActions(artifact)}
+            <div onClick={(event) => event.stopPropagation()}>{rowActions(artifact)}</div>
           </div>
         );
       })}
@@ -559,8 +620,11 @@ function BoardColumns({
 }) {
   const visibleGroups = groups.filter((group) => group.artifacts.length > 0);
   return (
-    <main className="mt-8 grid min-w-[980px] grid-cols-5 gap-4 pb-6 pr-2">
-      {visibleGroups.slice(0, 5).map((group, index) => {
+    <main
+      className="mt-8 grid w-full gap-4 overflow-x-auto pb-6 pr-2"
+      style={{ gridTemplateColumns: `repeat(${Math.max(visibleGroups.length, 1)}, minmax(280px, 1fr))` }}
+    >
+      {visibleGroups.map((group, index) => {
         const accent = workspaceAccent(group.workspace, index);
         return (
           <section key={group.workspace._id} className="min-h-[620px] rounded-[10px] border p-2.5 shadow-[0_10px_28px_rgba(27,20,12,0.04)]" style={{ borderColor: accent.border, background: accent.soft }}>

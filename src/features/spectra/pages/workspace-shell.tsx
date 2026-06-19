@@ -27,6 +27,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { toast } from "sonner";
 import { ArtifactBlueprintSheet, type ArtifactPayload } from "../components/artifact-blueprint-sheet";
 import { ArtifactCard, blueprintMeta } from "../components/artifact-card";
+import { ArtifactStudio, useArtifactStudioState } from "../components/artifact-studio";
 import { CommandBar } from "../components/command-bar";
 import { ResultCardStack, type ResultCardView } from "../components/result-card";
 import {
@@ -120,8 +121,8 @@ function WorkspaceRail({
     <aside className="flex w-[74px] shrink-0 flex-col items-center border-r border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-primary)_84%,var(--bg-elevated))] px-2.5 py-5">
       <button
         type="button"
-        className={`flex h-14 w-14 flex-col items-center justify-center gap-1 rounded-[8px] border text-[11px] font-medium ${
-          !selectedWorkspaceId ? "border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[0_2px_8px_rgba(27,20,12,0.05)]" : "border-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+        className={`flex h-14 w-14 flex-col items-center justify-center gap-1 rounded-[8px] text-[11px] font-medium ${
+          !selectedWorkspaceId ? "bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[0_2px_8px_rgba(27,20,12,0.04)]" : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
         }`}
         onClick={onHome}
       >
@@ -137,8 +138,8 @@ function WorkspaceRail({
             <button
               key={workspace._id}
               type="button"
-              className={`flex w-14 flex-col items-center gap-1 rounded-[8px] border px-1.5 py-2 text-[11px] font-medium ${
-                selected ? "border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[0_2px_8px_rgba(27,20,12,0.05)]" : "border-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+              className={`flex w-14 flex-col items-center gap-1 rounded-[8px] px-1.5 py-2 text-[11px] font-medium ${
+                selected ? "bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[0_2px_8px_rgba(27,20,12,0.04)]" : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
               }`}
               onClick={() => onSelect(workspace._id)}
               title={workspace.title}
@@ -864,7 +865,7 @@ export function WorkspaceShell() {
   const [newWorkspaceTitle, setNewWorkspaceTitle] = useState("");
   const [newWorkspaceDescription, setNewWorkspaceDescription] = useState("");
   const [createBlueprintKey, setCreateBlueprintKey] = useState<SpectraBlueprintKey | null>(null);
-  const [openArtifact, setOpenArtifact] = useState<SpectraArtifact | null>(null);
+  const [studioPanelWidth, setStudioPanelWidth] = useState(720);
   const workspaceCreateRef = useOutsideClick<HTMLDivElement>(workspaceCreateOpen, () => setWorkspaceCreateOpen(false));
   const seededRef = useRef(false);
 
@@ -873,9 +874,15 @@ export function WorkspaceShell() {
     try {
       const next = await getSpectraOverview(workspaceId);
       setOverview(next);
-      setSelectedWorkspaceId(workspaceId);
+      setSelectedWorkspaceId(next.workspace ? next.selectedWorkspaceId ?? workspaceId : undefined);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not load Spectra workspace.");
+      if (workspaceId) {
+        setSelectedWorkspaceId(undefined);
+        setSelection(null);
+        const fallback = await getSpectraOverview().catch(() => null);
+        if (fallback) setOverview(fallback);
+      }
     } finally {
       setLoading(false);
     }
@@ -883,14 +890,19 @@ export function WorkspaceShell() {
 
   const loadWorkspace = useCallback(async (workspaceId: string) => {
     setLoading(true);
-    setSelectedWorkspaceId(workspaceId);
     try {
       const result = await getSpectraWorkspace(workspaceId);
+      setSelectedWorkspaceId(workspaceId);
       setOverview((current) => current
         ? { ...current, selectedWorkspaceId: workspaceId, workspace: result.workspace }
         : { workspaces: [], selectedWorkspaceId: workspaceId, workspace: result.workspace, artifacts: [], runs: [] });
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not load workspace.");
+      setSelectedWorkspaceId(undefined);
+      setSelection(null);
+      const message = error instanceof Error ? error.message : "Could not load workspace.";
+      toast.error(message.includes("Workspace not found") ? "That workspace is no longer available. Refreshed workspace home." : message);
+      const fallback = await getSpectraOverview().catch(() => null);
+      if (fallback) setOverview(fallback);
     } finally {
       setLoading(false);
     }
@@ -912,6 +924,7 @@ export function WorkspaceShell() {
   const workspace = selectedWorkspaceId ? overview?.workspace?.workspace ?? null : null;
   const allArtifacts = overview?.artifacts ?? [];
   const runs = overview?.runs ?? [];
+  const studio = useArtifactStudioState("spectra.workspace.artifactStudio", allArtifacts);
   const workspaceRuns = selectedWorkspaceId ? runs.filter((run) => run.workspaceId === selectedWorkspaceId) : runs;
   const workspaces = useMemo(() => sortSpectraWorkspaces(overview?.workspaces ?? []), [overview?.workspaces]);
   const entries = useMemo(() => (overview?.workspace?.items ?? [])
@@ -921,6 +934,7 @@ export function WorkspaceShell() {
     })
     .filter((entry): entry is { item: SpectraWorkspaceItem; artifact: SpectraArtifact; card: NonNullable<ReturnType<typeof workspaceItemToCard>> } => Boolean(entry)), [overview?.workspace?.items]);
   const selectedArtifact = selection?.type === "artifact" ? entries.find((entry) => entry.item._id === selection.itemId)?.artifact ?? null : null;
+  const commandFocusArtifact = studio.mode === "split" ? studio.activeArtifact : selectedArtifact;
   const selectedRun = selection?.type === "run" ? workspaceRuns.find((run) => run._id === selection.runId) ?? null : null;
   const recentRunCards: ResultCardView[] = workspaceRuns.slice(0, 2).map((run) => ({
     id: run._id,
@@ -971,10 +985,23 @@ export function WorkspaceShell() {
         tags: payload.tags,
       });
       toast.success("Artifact updated.");
-      setOpenArtifact(null);
       await loadOverview(selectedWorkspaceId);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not update artifact.");
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  async function archiveArtifact(artifact: SpectraArtifact) {
+    setBusyKey(`artifact:archive:${artifact._id}`);
+    try {
+      await postSpectra({ action: "archiveArtifact", artifactId: artifact._id });
+      toast.success("Artifact archived.");
+      studio.closeStudio();
+      await loadOverview(selectedWorkspaceId);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not archive artifact.");
     } finally {
       setBusyKey(null);
     }
@@ -1082,6 +1109,25 @@ export function WorkspaceShell() {
         <WorkspaceHome overview={overview ? { ...overview, workspaces } : overview} onSelect={(workspaceId) => void loadWorkspace(workspaceId)} />
       ) : (
         <section className="flex min-w-0 flex-1">
+          {studio.mode === "tab" && studio.activeArtifact ? (
+            <ArtifactStudio
+              mode="tab"
+              artifact={studio.activeArtifact}
+              artifacts={allArtifacts}
+              tabs={studio.tabs}
+              dirtyIds={studio.dirtyIds}
+              busy={busyKey === `artifact:update:${studio.activeArtifact._id}`}
+              sourceLabel={workspace?.title ?? "Workspace"}
+              onClose={studio.closeStudio}
+              onExpand={studio.openTab}
+              onActivateTab={studio.activateTab}
+              onCloseTab={studio.closeTab}
+              onSave={updateArtifact}
+              onArchive={archiveArtifact}
+              onDirtyChange={studio.setDirty}
+            />
+          ) : (
+          <>
           <div className="flex min-w-0 flex-1 flex-col">
             <WorkspaceHeader workspace={workspace} items={entries.map((entry) => entry.item)} runs={workspaceRuns} viewMode={viewMode} setViewMode={setViewMode} busy={busyKey} onCreateArtifact={openCreateArtifact} />
             <main className="min-h-0 flex-1 overflow-y-auto px-8 pb-[150px] pt-6">
@@ -1090,7 +1136,10 @@ export function WorkspaceShell() {
                 <CardsView
                   entries={entries}
                   selected={selection}
-                  onSelect={(item, artifact) => setSelection({ type: "artifact", itemId: item._id, artifactId: artifact._id })}
+                  onSelect={(item, artifact) => {
+                    setSelection({ type: "artifact", itemId: item._id, artifactId: artifact._id });
+                    studio.openSplit(artifact);
+                  }}
                   onHide={(itemId) => void hideWorkspaceItem(itemId)}
                   busy={busyKey}
                 />
@@ -1101,14 +1150,23 @@ export function WorkspaceShell() {
                   runs={workspaceRuns}
                   selected={selection}
                   onSelectRun={(run) => setSelection({ type: "run", runId: run._id })}
-                  onSelectArtifact={(item, artifact) => setSelection({ type: "artifact", itemId: item._id, artifactId: artifact._id })}
+                  onSelectArtifact={(item, artifact) => {
+                    setSelection({ type: "artifact", itemId: item._id, artifactId: artifact._id });
+                    studio.openSplit(artifact);
+                  }}
                 />
               ) : null}
-              {viewMode === "library" ? <LibraryView entries={entries} selected={selection} onSelect={(item, artifact) => setSelection({ type: "artifact", itemId: item._id, artifactId: artifact._id })} /> : null}
-              {viewMode === "canvas" ? <CanvasView entries={entries} selectedArtifact={selectedArtifact} onSelect={(item, artifact) => setSelection({ type: "artifact", itemId: item._id, artifactId: artifact._id })} /> : null}
+              {viewMode === "library" ? <LibraryView entries={entries} selected={selection} onSelect={(item, artifact) => {
+                setSelection({ type: "artifact", itemId: item._id, artifactId: artifact._id });
+                studio.openSplit(artifact);
+              }} /> : null}
+              {viewMode === "canvas" ? <CanvasView entries={entries} selectedArtifact={selectedArtifact} onSelect={(item, artifact) => {
+                setSelection({ type: "artifact", itemId: item._id, artifactId: artifact._id });
+                studio.openSplit(artifact);
+              }} /> : null}
             </main>
           </div>
-          <Inspector
+          {!studio.isOpen ? <Inspector
             workspace={workspace}
             artifacts={allArtifacts}
             selectedArtifact={selectedArtifact}
@@ -1118,14 +1176,41 @@ export function WorkspaceShell() {
             onHide={() => selectedArtifact && selection?.type === "artifact" ? void hideWorkspaceItem(selection.itemId) : undefined}
             onCreateArtifact={openCreateArtifact}
             onArchiveWorkspace={() => void archiveWorkspace()}
-            onOpenArtifact={setOpenArtifact}
-          />
-          <div className="pointer-events-none absolute bottom-0 left-[74px] right-0 z-20 bg-[linear-gradient(to_top,var(--bg-primary)_72%,transparent)] px-8 pb-5 pt-12 xl:right-[318px]">
+            onOpenArtifact={studio.openSplit}
+          /> : null}
+          {studio.mode === "split" && studio.activeArtifact ? (
+            <ArtifactStudio
+              mode="split"
+              artifact={studio.activeArtifact}
+              artifacts={allArtifacts}
+              tabs={studio.tabs}
+              dirtyIds={studio.dirtyIds}
+              busy={busyKey === `artifact:update:${studio.activeArtifact._id}`}
+              panelWidth={studioPanelWidth}
+              sourceLabel={workspace?.title ?? "Workspace"}
+              onPanelWidthChange={setStudioPanelWidth}
+              onClose={studio.closeStudio}
+              onExpand={studio.openTab}
+              onActivateTab={studio.activateTab}
+              onCloseTab={studio.closeTab}
+              onSave={updateArtifact}
+              onArchive={archiveArtifact}
+              onDirtyChange={studio.setDirty}
+            />
+          ) : null}
+          <div
+            className="pointer-events-none absolute bottom-0 left-[74px] z-20 bg-[linear-gradient(to_top,var(--bg-primary)_72%,transparent)] px-8 pb-5 pt-12"
+            style={{ right: studio.mode === "split" ? studioPanelWidth : studio.isOpen ? 0 : 318 }}
+          >
             <div className="pointer-events-auto mx-auto max-w-[880px]">
               <ResultCardStack cards={recentRunCards} className="mb-2" />
               <CommandBar
-                placeholder={selectedArtifact ? `Act on ${selectedArtifact.title}...` : "Work with this workspace..."}
-                context={workspace ? <span className="flex items-center gap-2 text-[12px] font-medium text-[var(--text-primary)]"><Sprout className="h-4 w-4 text-[var(--mode-document)]" />{workspace.title}</span> : null}
+                placeholder={commandFocusArtifact ? `Act on ${commandFocusArtifact.title}...` : "Work with this workspace..."}
+                context={commandFocusArtifact ? (() => {
+                  const meta = blueprintMeta[commandFocusArtifact.blueprintKey];
+                  const Icon = meta.icon;
+                  return <span className="flex items-center gap-2 text-[12px] font-medium text-[var(--text-primary)]"><Icon className="h-4 w-4" style={{ color: meta.color }} />{meta.label}</span>;
+                })() : workspace ? <span className="flex items-center gap-2 text-[12px] font-medium text-[var(--text-primary)]"><Sprout className="h-4 w-4 text-[var(--mode-document)]" />{workspace.title}</span> : null}
                 onSubmit={() => toast.message("Real AI execution is reserved for the operation engine wave.")}
                 menu={(
                   <div>
@@ -1144,6 +1229,8 @@ export function WorkspaceShell() {
               />
             </div>
           </div>
+          </>
+          )}
         </section>
       )}
       {createBlueprintKey ? (
@@ -1153,15 +1240,6 @@ export function WorkspaceShell() {
           busy={busyKey === `artifact:${createBlueprintKey}`}
           onClose={() => setCreateBlueprintKey(null)}
           onSubmit={createArtifact}
-        />
-      ) : null}
-      {openArtifact ? (
-        <ArtifactBlueprintSheet
-          mode="edit"
-          artifact={openArtifact}
-          busy={busyKey === `artifact:update:${openArtifact._id}`}
-          onClose={() => setOpenArtifact(null)}
-          onSubmit={(payload) => updateArtifact(openArtifact._id, payload)}
         />
       ) : null}
     </div>

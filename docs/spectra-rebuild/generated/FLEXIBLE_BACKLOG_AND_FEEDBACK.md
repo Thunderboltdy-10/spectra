@@ -75,6 +75,13 @@ This correction supersedes the rejected Wave 2 visual direction from commit `e28
 | --- | --- | --- |
 | Artifact open/detail surfaces should feel type-specific. | Wave 3 | Needs blueprint renderer work after workspace UX foundation. |
 | Document, flashcard deck, quiz, planner task, and thread reference should each have distinct experiences. | Wave 3 | Requires renderer/detail surfaces. |
+| Artifact opening should use a shared Artifact Studio, not tiny route-specific drawers. | Wave 3B | `/workspace` and `/artifacts` keep different purposes but use the same split-panel/tab editing system. |
+| Artifact Studio should open as a resizable right split panel by default. | Wave 3B | The source view adapts to remaining width; old workspace inspector disappears while Studio is open. |
+| Artifact Studio should support local artifact tabs. | Wave 3B | Tabs are local UI state, not backend objects. Restore from local storage if straightforward. |
+| Planner artifacts are task/calendar items, not lesson-planning documents. | Wave 3B | Include status, priority, due/start/end time, subtasks, attachments, links, reminders, and archive/trash action direction. |
+| Thread reference detail should defer real conversation rendering. | Wave 5 | Real thread rendering belongs with chat convergence and should feel like normal `/chat`. |
+| Deeper blueprint engines can continue after the Studio shell. | Wave 7 | Rich document behaviors, full study loops, quiz grading, and stronger task workflows should build on the shared Studio. |
+| Command bar focus chip should become manually switchable. | Wave 4 / Wave 6 | Default to the active object context, such as open artifact or workspace, but let the user switch to no focus, workspace focus, or another artifact without moving the command bar. |
 | Artifact creation should use blueprint-specific forms/defaults. | Wave 3 | Wave 2 can polish the creation strip, but full forms belong with blueprint UX. |
 | Artifact open/detail/editing can be deferred, but must have safe Wave 2B placeholders. | Wave 3 | Clicking an artifact should never error. Wave 3 replaces placeholders with real type-specific detail/edit surfaces. |
 | Command bar should perform real AI operations. | Wave 4 | Wave 2 designs the control surface; Wave 4 wires execution. |

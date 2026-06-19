@@ -24,9 +24,10 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
-import { ArtifactBlueprintSheet, type ArtifactPayload } from "../components/artifact-blueprint-sheet";
+import { createDefaultArtifactPayload, type ArtifactPayload } from "../components/artifact-blueprint-sheet";
 import { ArtifactCard, blueprintMeta } from "../components/artifact-card";
-import { ArtifactStudio, useArtifactStudioState } from "../components/artifact-studio";
+import { ArtifactStudio, StudioTabRail, useArtifactStudioState } from "../components/artifact-studio";
+import { CommandBar } from "../components/command-bar";
 import {
   artifactPlacements,
   artifactToCard,
@@ -45,6 +46,11 @@ import {
 } from "../data/api";
 
 type ArtifactMode = "list" | "board" | "grid";
+type ArtifactHubTab = { id: string; label: string };
+
+function artifactHubTab(): ArtifactHubTab {
+  return { id: `artifact-hub-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, label: "All" };
+}
 
 const filters: Array<{ key: "all" | SpectraBlueprintKey; label: string; icon: LucideIcon }> = [
   { key: "all", label: "All", icon: LayoutGrid },
@@ -141,7 +147,9 @@ export function ArtifactsShell() {
   const [mode, setMode] = useState<ArtifactMode>("list");
   const [search, setSearch] = useState("");
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState("");
-  const [createBlueprintKey, setCreateBlueprintKey] = useState<SpectraBlueprintKey | null>(null);
+  const [createMenuOpen, setCreateMenuOpen] = useState(false);
+  const [hubTabs, setHubTabs] = useState<ArtifactHubTab[]>(() => [{ id: "artifacts-all-default", label: "All" }]);
+  const [activeHubTabId, setActiveHubTabId] = useState<string | null>("artifacts-all-default");
   const [studioPanelWidth, setStudioPanelWidth] = useState(760);
   const [addMenuArtifactId, setAddMenuArtifactId] = useState<string | null>(null);
   const [moveMenuArtifactId, setMoveMenuArtifactId] = useState<string | null>(null);
@@ -149,11 +157,70 @@ export function ArtifactsShell() {
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const seededRef = useRef(false);
   const placementMenuOpen = addMenuArtifactId !== null || moveMenuArtifactId !== null;
+  const createMenuRef = useOutsideClick<HTMLDivElement>(createMenuOpen, () => setCreateMenuOpen(false));
   const placementMenuRef = useOutsideClick<HTMLDivElement>(placementMenuOpen, () => {
     setAddMenuArtifactId(null);
     setMoveMenuArtifactId(null);
   });
   const studio = useArtifactStudioState("spectra.artifacts.artifactStudio", allArtifacts);
+
+  function activateAllHub(tabId: string) {
+    if (!hubTabs.some((tab) => tab.id === tabId)) return;
+    setActiveHubTabId(tabId);
+    studio.closeStudio();
+    setSelectedWorkspaceId("");
+    setActiveFilter("all");
+  }
+
+  function addAllHubTab() {
+    const next = artifactHubTab();
+    setHubTabs((current) => [...current, next]);
+    setActiveHubTabId(next.id);
+    studio.closeStudio();
+    setSelectedWorkspaceId("");
+    setActiveFilter("all");
+  }
+
+  function closeAllHubTab(tabId: string) {
+    const remaining = hubTabs.filter((tab) => tab.id !== tabId);
+    setHubTabs(remaining);
+    if (activeHubTabId !== tabId) return;
+    const fallbackHub = remaining[remaining.length - 1];
+    if (fallbackHub) {
+      activateAllHub(fallbackHub.id);
+      return;
+    }
+    const fallbackArtifact = studio.tabs[studio.tabs.length - 1];
+    if (fallbackArtifact) {
+      setActiveHubTabId(null);
+      studio.activateTab(fallbackArtifact.artifactId);
+      return;
+    }
+    const replacement = artifactHubTab();
+    setHubTabs([replacement]);
+    setActiveHubTabId(replacement.id);
+    studio.closeStudio();
+    setSelectedWorkspaceId("");
+    setActiveFilter("all");
+  }
+
+  function closeArtifactTab(artifactId: string) {
+    const closesFinalArtifact = studio.tabs.length === 1;
+    studio.closeTab(artifactId);
+    if (closesFinalArtifact && hubTabs.length === 0) {
+      const replacement = artifactHubTab();
+      setHubTabs([replacement]);
+      setActiveHubTabId(replacement.id);
+      setSelectedWorkspaceId("");
+      setActiveFilter("all");
+    }
+  }
+
+  function returnToAllHub() {
+    const target = hubTabs.find((tab) => tab.id === activeHubTabId) ?? hubTabs[hubTabs.length - 1];
+    if (target) activateAllHub(target.id);
+    else addAllHubTab();
+  }
 
   const load = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
@@ -166,8 +233,10 @@ export function ArtifactsShell() {
       ]);
       setAllArtifacts(artifactResult.artifacts);
       setWorkspaces(sortSpectraWorkspaces(overview.workspaces));
+      return artifactResult.artifacts;
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not load artifacts.");
+      return [];
     } finally {
       setLoading(false);
     }
@@ -205,7 +274,7 @@ export function ArtifactsShell() {
   async function createArtifact(payload: ArtifactPayload) {
     setBusyKey(`artifact:create:${payload.blueprintKey}`);
     try {
-      await postSpectra({
+      const result = await postSpectra<{ artifactId: string }>({
         action: "createArtifact",
         blueprintKey: payload.blueprintKey,
         title: payload.title,
@@ -213,9 +282,10 @@ export function ArtifactsShell() {
         content: payload.content,
         tags: payload.tags,
       });
-      setCreateBlueprintKey(null);
       toast.success("Artifact created in library inbox.");
-      await load(true);
+      const refreshed = await load(true);
+      const created = refreshed.find((artifact) => artifact._id === result.artifactId);
+      if (created) studio.openTab(created);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not create artifact.");
     } finally {
@@ -248,7 +318,7 @@ export function ArtifactsShell() {
     try {
       await postSpectra({ action: "archiveArtifact", artifactId: artifact._id });
       toast.success("Artifact archived.");
-      studio.closeStudio();
+      returnToAllHub();
       await load(true);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not archive artifact.");
@@ -343,6 +413,21 @@ export function ArtifactsShell() {
   return (
     <div className="flex h-full min-h-0 bg-[radial-gradient(circle_at_32%_-12%,color-mix(in_oklab,var(--bg-elevated)_70%,transparent),transparent_34%),var(--bg-primary)]">
       <ArtifactsRail workspaces={workspaces} selectedWorkspaceId={selectedWorkspaceId} onSelect={setSelectedWorkspaceId} />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <StudioTabRail
+          hubTabs={hubTabs}
+          activeHubTabId={studio.mode === "tab" ? null : activeHubTabId}
+          artifacts={allArtifacts}
+          tabs={studio.tabs}
+          activeArtifactId={studio.mode === "tab" ? studio.activeArtifactId : null}
+          dirtyIds={studio.dirtyIds}
+          onActivateHub={activateAllHub}
+          onCloseHub={closeAllHubTab}
+          onAddHub={addAllHubTab}
+          onActivateTab={studio.activateTab}
+          onCloseTab={closeArtifactTab}
+        />
+        <div className="relative flex min-h-0 flex-1">
       {studio.mode === "tab" && studio.activeArtifact ? (
         <ArtifactStudio
           mode="tab"
@@ -352,17 +437,17 @@ export function ArtifactsShell() {
           dirtyIds={studio.dirtyIds}
           busy={busyKey === `artifact:update:${studio.activeArtifact._id}`}
           sourceLabel="Artifacts"
-          onClose={studio.closeStudio}
+          onClose={returnToAllHub}
           onExpand={studio.openTab}
           onActivateTab={studio.activateTab}
-          onCloseTab={studio.closeTab}
+          onCloseTab={closeArtifactTab}
           onSave={updateArtifact}
           onArchive={archiveArtifact}
           onDirtyChange={studio.setDirty}
         />
       ) : (
       <>
-      <section className="min-w-0 flex-1 overflow-y-auto px-8 py-7">
+      <section className="min-w-0 flex-1 overflow-y-auto px-8 pb-[150px] pt-7">
         <header>
           <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
             <div>
@@ -381,11 +466,34 @@ export function ArtifactsShell() {
                 <span className="absolute right-2 top-1/2 -translate-y-1/2 rounded-[5px] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[10px] text-[var(--text-tertiary)]">⌘ K</span>
               </div>
               <WorkspacePicker workspaces={workspaces} selectedWorkspaceId={selectedWorkspaceId} onSelect={setSelectedWorkspaceId} />
-              <div className="relative">
-                <button type="button" className={buttonClass("dark")} onClick={() => setCreateBlueprintKey("document")}>
+              <div className="relative" ref={createMenuRef}>
+                <button type="button" className={buttonClass("dark")} onClick={() => setCreateMenuOpen((open) => !open)}>
                   <Plus className="h-4 w-4" />
                   New artifact
                 </button>
+                {createMenuOpen ? (
+                  <div className="absolute right-0 top-[calc(100%+8px)] z-30 w-[230px] rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[0_6px_18px_rgba(0,0,0,0.10)]">
+                    {filters.filter((filter) => filter.key !== "all").map((filter) => {
+                      const Icon = filter.icon;
+                      const key = filter.key as SpectraBlueprintKey;
+                      return (
+                        <button
+                          key={key}
+                          type="button"
+                          className={menuItemClass()}
+                          disabled={busyKey === `artifact:create:${key}`}
+                          onClick={() => {
+                            setCreateMenuOpen(false);
+                            void createArtifact(createDefaultArtifactPayload(key));
+                          }}
+                        >
+                          {busyKey === `artifact:create:${key}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <Icon className="h-4 w-4" />}
+                          New {blueprintMeta[key].label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : null}
               </div>
             </div>
           </div>
@@ -446,10 +554,10 @@ export function ArtifactsShell() {
           panelWidth={studioPanelWidth}
           sourceLabel="Artifacts"
           onPanelWidthChange={setStudioPanelWidth}
-          onClose={studio.closeStudio}
+          onClose={returnToAllHub}
           onExpand={studio.openTab}
           onActivateTab={studio.activateTab}
-          onCloseTab={studio.closeTab}
+          onCloseTab={closeArtifactTab}
           onSave={updateArtifact}
           onArchive={archiveArtifact}
           onDirtyChange={studio.setDirty}
@@ -457,15 +565,35 @@ export function ArtifactsShell() {
       ) : null}
       </>
       )}
-      {createBlueprintKey ? (
-        <ArtifactBlueprintSheet
-          mode="create"
-          initialBlueprintKey={createBlueprintKey}
-          busy={busyKey === `artifact:create:${createBlueprintKey}`}
-          onClose={() => setCreateBlueprintKey(null)}
-          onSubmit={createArtifact}
-        />
-      ) : null}
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 bg-[linear-gradient(to_top,var(--bg-primary)_72%,transparent)] px-8 pb-5 pt-12">
+          <div className="pointer-events-auto mx-auto max-w-[880px]">
+            <CommandBar
+              placeholder={studio.activeArtifact ? `Act on ${studio.activeArtifact.title}...` : "Ask across your artifacts..."}
+              context={studio.activeArtifact ? (() => {
+                const meta = blueprintMeta[studio.activeArtifact.blueprintKey];
+                const Icon = meta.icon;
+                return <span className="flex items-center gap-2 text-[12px] font-medium text-[var(--text-primary)]"><Icon className="h-4 w-4" style={{ color: meta.color }} />{meta.label}</span>;
+              })() : <span className="flex items-center gap-2 text-[12px] font-medium text-[var(--text-primary)]"><LayoutGrid className="h-4 w-4" />Artifacts</span>}
+              onSubmit={() => toast.message("Real AI execution is reserved for the operation engine wave.")}
+              menu={(
+                <div>
+                  {filters.filter((filter) => filter.key !== "all").map((filter) => {
+                    const Icon = filter.icon;
+                    const key = filter.key as SpectraBlueprintKey;
+                    return (
+                      <button key={key} type="button" className={menuItemClass()} disabled={busyKey === `artifact:create:${key}`} onClick={() => void createArtifact(createDefaultArtifactPayload(key))}>
+                        {busyKey === `artifact:create:${key}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <Icon className="h-4 w-4" />}
+                        New {blueprintMeta[key].label}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            />
+          </div>
+        </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -620,9 +748,10 @@ function BoardColumns({
 }) {
   const visibleGroups = groups.filter((group) => group.artifacts.length > 0);
   return (
+    <div className="mt-8 overflow-x-auto pb-6">
     <main
-      className="mt-8 grid w-full gap-4 overflow-x-auto pb-6 pr-2"
-      style={{ gridTemplateColumns: `repeat(${Math.max(visibleGroups.length, 1)}, minmax(280px, 1fr))` }}
+      className="grid gap-4 pr-2"
+      style={{ gridTemplateColumns: `repeat(${Math.max(visibleGroups.length, 1)}, clamp(340px, 30vw, 430px))`, width: "max-content" }}
     >
       {visibleGroups.map((group, index) => {
         const accent = workspaceAccent(group.workspace, index);
@@ -646,6 +775,7 @@ function BoardColumns({
         );
       })}
     </main>
+    </div>
   );
 }
 

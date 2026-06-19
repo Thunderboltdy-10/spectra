@@ -71,7 +71,7 @@ function id(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function defaultSummary(blueprintKey: EditableBlueprintKey) {
+export function defaultArtifactSummary(blueprintKey: EditableBlueprintKey) {
   switch (blueprintKey) {
     case "document":
       return "A structured document for notes, explanations, or drafts.";
@@ -86,8 +86,25 @@ function defaultSummary(blueprintKey: EditableBlueprintKey) {
   }
 }
 
-function defaultTitle(blueprintKey: EditableBlueprintKey) {
+export function defaultArtifactTitle(blueprintKey: EditableBlueprintKey) {
   return `New ${blueprintMeta[blueprintKey].label}`;
+}
+
+export function createDefaultArtifactPayload(blueprintKey: EditableBlueprintKey): ArtifactPayload {
+  const content: Record<EditableBlueprintKey, unknown> = {
+    document: { blocks: [{ id: "intro", type: "paragraph", text: "" }], outline: [] },
+    flashcard_deck: { cards: [{ id: "card-1", front: "", back: "", hint: "", confidence: "unknown", section: "Section 1" }], settings: { shuffle: true, revealMode: "click" } },
+    quiz: { questions: [{ id: "question-1", prompt: "", type: "multiple_choice", options: ["", "", "", ""], correctAnswer: "", explanation: "", difficulty: "medium", points: 1, timeLimitSeconds: 90 }], settings: { showAnswersImmediately: true, timed: false } },
+    planner_task: { description: "", status: "todo", priority: "medium", subtasks: [], attachments: [], linkedArtifactIds: [], reminders: [] },
+    thread_reference: { threadId: "", summary: "", linkedArtifactIds: [] },
+  };
+  return {
+    blueprintKey,
+    title: defaultArtifactTitle(blueprintKey),
+    summary: defaultArtifactSummary(blueprintKey),
+    content: content[blueprintKey],
+    tags: [],
+  };
 }
 
 function dateInputValue(value?: number) {
@@ -194,8 +211,8 @@ export function ArtifactBlueprintSheet({
   onSubmit: (payload: ArtifactPayload) => Promise<void> | void;
 }) {
   const [blueprintKey, setBlueprintKey] = useState<EditableBlueprintKey>(artifact?.blueprintKey ?? initialBlueprintKey);
-  const [title, setTitle] = useState(artifact?.title ?? defaultTitle(initialBlueprintKey));
-  const [summary, setSummary] = useState(artifact?.summary ?? defaultSummary(initialBlueprintKey));
+  const [title, setTitle] = useState(artifact?.title ?? defaultArtifactTitle(initialBlueprintKey));
+  const [summary, setSummary] = useState(artifact?.summary ?? defaultArtifactSummary(initialBlueprintKey));
   const [documentDraft, setDocumentDraft] = useState(documentText(artifact?.content) || "");
   const [cards, setCards] = useState<DeckCard[]>(deckCards(artifact?.content));
   const [questions, setQuestions] = useState<QuizQuestion[]>(quizQuestions(artifact?.content));
@@ -218,8 +235,8 @@ export function ArtifactBlueprintSheet({
   function selectBlueprint(nextKey: EditableBlueprintKey) {
     setBlueprintKey(nextKey);
     if (mode === "create") {
-      setTitle(defaultTitle(nextKey));
-      setSummary(defaultSummary(nextKey));
+      setTitle(defaultArtifactTitle(nextKey));
+      setSummary(defaultArtifactSummary(nextKey));
     }
   }
 

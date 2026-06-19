@@ -36,7 +36,17 @@ import type { JSONContent } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
 import Underline from "@tiptap/extension-underline";
+import { Table } from "@tiptap/extension-table";
+import { TableRow } from "@tiptap/extension-table-row";
+import { TableCell } from "@tiptap/extension-table-cell";
+import { TableHeader } from "@tiptap/extension-table-header";
+import { TaskList } from "@tiptap/extension-task-list";
+import { TaskItem } from "@tiptap/extension-task-item";
+import { Image } from "@tiptap/extension-image";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { SlashCommand } from "@/components/editor/slash-command-extension";
+import { createSlashCommandRenderer } from "@/components/editor/slash-command-renderer";
+import { Callout } from "@/components/editor/extensions/callout-node";
 import { blueprintMeta } from "./artifact-card";
 import {
   artifactPlacements,
@@ -348,16 +358,12 @@ export function ArtifactStudio({
   mode,
   artifact,
   artifacts,
-  tabs,
-  dirtyIds,
   busy = false,
   panelWidth,
   sourceLabel,
   onPanelWidthChange,
   onClose,
   onExpand,
-  onActivateTab,
-  onCloseTab,
   onSave,
   onArchive,
   onDirtyChange,
@@ -406,16 +412,6 @@ export function ArtifactStudio({
 
   const body = (
     <div className="flex h-full min-h-0 flex-col bg-[var(--bg-primary)]">
-      {mode === "tab" ? (
-        <StudioTabRail
-          artifacts={artifacts}
-          tabs={tabs}
-          activeArtifactId={artifact._id}
-          dirtyIds={dirtyIds}
-          onActivateTab={onActivateTab}
-          onCloseTab={onCloseTab}
-        />
-      ) : null}
       <ArtifactStudioEditor
         key={artifact._id}
         mode={mode}
@@ -439,11 +435,12 @@ export function ArtifactStudio({
   return (
     <aside
       className="relative hidden min-w-[520px] shrink-0 border-l border-[var(--border-default)] shadow-[-18px_0_40px_rgba(27,20,12,0.06)] xl:block"
-      style={{ width }}
+      style={{ width, containerType: "inline-size" }}
     >
       <button
         type="button"
-        className="absolute -left-1 top-0 z-20 h-full w-2 cursor-col-resize bg-transparent"
+        className="absolute -left-1 top-0 z-20 h-full w-2 cursor-col-resize bg-transparent hover:bg-[color-mix(in_oklab,var(--text-tertiary)_14%,transparent)]"
+        style={{ cursor: "col-resize" }}
         aria-label="Resize artifact studio"
         onPointerDown={(event) => {
           event.preventDefault();
@@ -457,23 +454,64 @@ export function ArtifactStudio({
   );
 }
 
-function StudioTabRail({
+export function StudioTabRail({
+  hubTabs,
+  activeHubTabId,
   artifacts,
   tabs,
-  activeArtifactId,
+  activeArtifactId = null,
   dirtyIds,
+  onActivateHub,
+  onCloseHub,
+  onAddHub,
   onActivateTab,
   onCloseTab,
 }: {
+  hubTabs: Array<{ id: string; label: string }>;
+  activeHubTabId: string | null;
   artifacts: SpectraArtifact[];
   tabs: StudioTab[];
-  activeArtifactId: string;
+  activeArtifactId?: string | null;
   dirtyIds: Set<string>;
+  onActivateHub: (hubTabId: string) => void;
+  onCloseHub: (hubTabId: string) => void;
+  onAddHub: () => void;
   onActivateTab: (artifactId: string) => void;
   onCloseTab: (artifactId: string) => void;
 }) {
   return (
-    <div className="flex h-11 shrink-0 items-center gap-1 border-b border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_60%,var(--bg-primary))] px-3">
+    <div className="flex h-12 shrink-0 items-center gap-1.5 overflow-x-auto border-b border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_60%,var(--bg-primary))] px-3.5">
+      {hubTabs.map((hubTab) => {
+        const active = activeHubTabId === hubTab.id;
+        return (
+          <button
+            key={hubTab.id}
+            type="button"
+            className={`group flex h-9 min-w-[112px] max-w-[250px] shrink-0 items-center gap-2 rounded-[8px] border px-2.5 text-[12px] transition ${
+              active ? "border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-[0_1px_6px_rgba(27,20,12,0.08)]" : "border-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+            }`}
+            onClick={() => onActivateHub(hubTab.id)}
+          >
+            <BookOpen className="h-3.5 w-3.5 shrink-0 text-[var(--text-secondary)]" />
+            <span className="min-w-0 flex-1 truncate text-left">{hubTab.label}</span>
+            <span
+              role="button"
+              tabIndex={0}
+              className="ml-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+              onClick={(event) => { event.stopPropagation(); onCloseHub(hubTab.id); }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onCloseHub(hubTab.id);
+                }
+              }}
+            >
+              <X className="h-3 w-3" />
+            </span>
+          </button>
+        );
+      })}
       {tabs.map((tab) => {
         const artifact = artifacts.find((item) => item._id === tab.artifactId);
         if (!artifact) return null;
@@ -484,14 +522,14 @@ function StudioTabRail({
           <button
             key={tab.artifactId}
             type="button"
-            className={`group flex h-8 max-w-[230px] items-center gap-2 rounded-[8px] border px-2 text-[12px] transition ${
+            className={`group flex h-9 min-w-[112px] max-w-[250px] shrink-0 items-center gap-2 rounded-[8px] border px-2.5 text-[12px] transition ${
               active ? "border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-[0_1px_6px_rgba(27,20,12,0.08)]" : "border-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
             }`}
             onClick={() => onActivateTab(artifact._id)}
           >
             <Icon className="h-3.5 w-3.5 shrink-0" style={{ color: meta.color }} />
             <span className="truncate">{artifact.title}</span>
-            {dirtyIds.has(artifact._id) ? <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#d88922]" title="Unsaved changes" /> : <Check className="h-3 w-3 shrink-0 text-[var(--success)]" />}
+            {dirtyIds.has(artifact._id) ? <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#d88922]" title="Unsaved changes" /> : null}
             <span
               role="button"
               tabIndex={0}
@@ -513,6 +551,15 @@ function StudioTabRail({
           </button>
         );
       })}
+      <button
+        type="button"
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+        onClick={onAddHub}
+        aria-label="Open a new home view"
+        title="Open a new home view"
+      >
+        <Plus className="h-3.5 w-3.5" />
+      </button>
     </div>
   );
 }
@@ -577,7 +624,7 @@ function ArtifactStudioEditor({
     setDirty(false);
   }
 
-  const showDetails = artifact.blueprintKey !== "document" || mode === "tab";
+  const showDetails = mode === "tab";
   const editorLayoutClass = showDetails
     ? mode === "tab"
       ? "mx-auto grid max-w-[1500px] gap-5 xl:grid-cols-[minmax(0,1fr)_300px]"
@@ -592,7 +639,7 @@ function ArtifactStudioEditor({
       <header className="shrink-0 border-b border-[var(--border-default)] bg-[var(--bg-primary)] px-5 py-4">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0 flex-1">
-            <div className="mb-3 flex items-center gap-2 text-[12px] text-[var(--text-secondary)]">
+            <div className={`${mode === "split" ? "hidden" : "mb-3 flex"} items-center gap-2 text-[12px] text-[var(--text-secondary)]`}>
               <span>{sourceLabel}</span>
               <span>/</span>
               <span className="flex items-center gap-1.5"><Icon className="h-3.5 w-3.5" style={{ color: meta.color }} />{meta.label}</span>
@@ -620,10 +667,10 @@ function ArtifactStudioEditor({
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <span className="hidden items-center gap-1.5 text-[12px] text-[var(--text-secondary)] md:flex">
+            {mode === "tab" ? <span className="hidden items-center gap-1.5 text-[12px] text-[var(--text-secondary)] md:flex">
               {dirty ? <Circle className="h-3 w-3 fill-[#d88922] text-[#d88922]" /> : <CheckCircle2 className="h-4 w-4 text-[var(--success)]" />}
               {dirty ? "Unsaved" : "Saved"}
-            </span>
+            </span> : null}
             <button
               type="button"
               className="inline-flex h-9 items-center gap-1.5 rounded-[8px] bg-[var(--text-primary)] px-3 text-[13px] font-medium text-[var(--bg-primary)] disabled:opacity-45"
@@ -631,7 +678,7 @@ function ArtifactStudioEditor({
               onClick={() => void save()}
             >
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              Save
+              {mode === "tab" ? "Save" : null}
             </button>
             {mode === "split" ? (
               <IconButton label="Open as tab" onClick={onExpand} icon={Maximize2} />
@@ -644,9 +691,9 @@ function ArtifactStudioEditor({
         <div className={editorLayoutClass}>
           <section className="min-w-0">
             {artifact.blueprintKey === "document" ? <DocumentStudio title={title} content={content} onChange={changeContent} /> : null}
-            {artifact.blueprintKey === "flashcard_deck" ? <FlashcardStudio content={content} onChange={changeContent} /> : null}
-            {artifact.blueprintKey === "quiz" ? <QuizStudio content={content} onChange={changeContent} /> : null}
-            {artifact.blueprintKey === "planner_task" ? <PlannerStudio artifact={artifact} artifacts={artifacts} title={title} content={content} onChange={changeContent} onArchive={onArchive} /> : null}
+            {artifact.blueprintKey === "flashcard_deck" ? <FlashcardStudio mode={mode} content={content} onChange={changeContent} /> : null}
+            {artifact.blueprintKey === "quiz" ? <QuizStudio mode={mode} content={content} onChange={changeContent} /> : null}
+            {artifact.blueprintKey === "planner_task" ? <PlannerStudio mode={mode} artifact={artifact} artifacts={artifacts} title={title} content={content} onChange={changeContent} onArchive={onArchive} /> : null}
             {artifact.blueprintKey === "thread_reference" ? <ThreadReferenceStudio content={content} onChange={changeContent} /> : null}
           </section>
           {showDetails ? <StudioDetails
@@ -667,7 +714,22 @@ function DocumentStudio({ title, content, onChange }: { title: string; content: 
     extensions: [
       StarterKit.configure({ heading: { levels: [1, 2, 3] } }),
       Underline,
+      Table.configure({ resizable: true, lastColumnResizable: true }),
+      TableRow,
+      TableCell,
+      TableHeader,
+      TaskList,
+      TaskItem.configure({ nested: true }),
+      Image.configure({ allowBase64: true, inline: false }),
+      Callout,
       Placeholder.configure({ placeholder: "Type / for commands" }),
+      SlashCommand.configure({
+        suggestion: {
+          char: "/",
+          startOfLine: false,
+          render: createSlashCommandRenderer,
+        },
+      }),
     ],
     content: initialContent,
     immediatelyRender: false,
@@ -697,14 +759,14 @@ function DocumentStudio({ title, content, onChange }: { title: string; content: 
       <div className="min-h-[680px] px-2 py-4 sm:px-6">
         <EditorContent
           editor={editor}
-          className="mx-auto max-w-[1040px] [&_.ProseMirror-focused]:outline-none [&_.ProseMirror]:outline-none [&_.ProseMirror_blockquote]:border-l-2 [&_.ProseMirror_blockquote]:border-[var(--border-default)] [&_.ProseMirror_blockquote]:pl-4 [&_.ProseMirror_h1]:font-display [&_.ProseMirror_h1]:text-[30px] [&_.ProseMirror_h1]:leading-tight [&_.ProseMirror_h2]:font-display [&_.ProseMirror_h2]:text-[23px] [&_.ProseMirror_h2]:leading-tight [&_.ProseMirror_li]:my-1 [&_.ProseMirror_p]:my-4"
+          className="tiptap-root mx-auto max-w-[1040px] [&_.ProseMirror-focused]:outline-none [&_.ProseMirror]:outline-none [&_.ProseMirror_blockquote]:border-l-2 [&_.ProseMirror_blockquote]:border-[var(--border-default)] [&_.ProseMirror_blockquote]:pl-4 [&_.ProseMirror_h1]:font-display [&_.ProseMirror_h1]:text-[30px] [&_.ProseMirror_h1]:leading-tight [&_.ProseMirror_h2]:font-display [&_.ProseMirror_h2]:text-[23px] [&_.ProseMirror_h2]:leading-tight [&_.ProseMirror_li]:my-1 [&_.ProseMirror_p]:my-4"
         />
       </div>
     </div>
   );
 }
 
-function FlashcardStudio({ content, onChange }: { content: unknown; onChange: (content: unknown) => void }) {
+function FlashcardStudio({ mode, content, onChange }: { mode: "split" | "tab"; content: unknown; onChange: (content: unknown) => void }) {
   const [cards, setCards] = useState(() => deckCards(content));
   const [activeCardId, setActiveCardId] = useState(cards[0]?.id ?? "");
   const [activeSection, setActiveSection] = useState(cards[0]?.section ?? "Section 1");
@@ -728,7 +790,7 @@ function FlashcardStudio({ content, onChange }: { content: unknown; onChange: (c
   }
 
   return (
-    <div className="grid min-h-[720px] gap-4 lg:grid-cols-[300px_minmax(0,1fr)]">
+    <div className={`grid min-h-[720px] gap-4 ${mode === "tab" ? "lg:grid-cols-[300px_minmax(0,1fr)]" : "grid-cols-1"}`}>
       <aside className="rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)]">
         <div className="flex items-center justify-between border-b border-[var(--border-default)] px-3 py-3">
           <div>
@@ -793,7 +855,7 @@ function FlashcardStudio({ content, onChange }: { content: unknown; onChange: (c
               <span className="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-secondary)]"><Copy className="h-4 w-4" /></span>
             </div>
             <CardFace label="Back" value={activeCard.back} placeholder="Answer" onChange={(value) => updateCard(activeCard.id, { back: value })} />
-            <div className="mt-4 grid gap-3 md:grid-cols-[1fr_180px]">
+            <div className={`mt-4 grid gap-3 ${mode === "tab" ? "md:grid-cols-[1fr_180px]" : "grid-cols-1"}`}>
               <Field label="Note or hint">
                 <input value={activeCard.hint ?? ""} onChange={(event) => updateCard(activeCard.id, { hint: event.target.value })} className={inputClass()} placeholder="Optional hint" />
               </Field>
@@ -813,7 +875,7 @@ function FlashcardStudio({ content, onChange }: { content: unknown; onChange: (c
   );
 }
 
-function QuizStudio({ content, onChange }: { content: unknown; onChange: (content: unknown) => void }) {
+function QuizStudio({ mode, content, onChange }: { mode: "split" | "tab"; content: unknown; onChange: (content: unknown) => void }) {
   const [questions, setQuestions] = useState(() => quizQuestions(content));
   const [activeQuestionId, setActiveQuestionId] = useState(questions[0]?.id ?? "");
   const [view, setView] = useState<"builder" | "preview">("builder");
@@ -866,8 +928,8 @@ function QuizStudio({ content, onChange }: { content: unknown; onChange: (conten
           </div>
         </div>
       ) : (
-        <div className="grid min-h-[680px] lg:grid-cols-[310px_minmax(0,1fr)_220px]">
-          <aside className="border-r border-[var(--border-default)] p-3">
+        <div className={`grid min-h-[680px] ${mode === "tab" ? "lg:grid-cols-[310px_minmax(0,1fr)_220px]" : "grid-cols-1"}`}>
+          <aside className={`${mode === "tab" ? "border-r" : "border-b"} border-[var(--border-default)] p-3`}>
             <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">Questions ({questions.length})</div>
             <div className="space-y-2">
               {questions.map((question, index) => (
@@ -889,7 +951,7 @@ function QuizStudio({ content, onChange }: { content: unknown; onChange: (conten
               ))}
             </div>
           </aside>
-          <section className="min-w-0 border-r border-[var(--border-default)] p-4">
+          <section className={`min-w-0 ${mode === "tab" ? "border-r" : "border-b"} border-[var(--border-default)] p-4`}>
             {activeQuestion ? (
               <QuestionEditor
                 question={activeQuestion}
@@ -933,6 +995,7 @@ function QuizStudio({ content, onChange }: { content: unknown; onChange: (conten
 }
 
 function PlannerStudio({
+  mode,
   artifact,
   artifacts,
   title,
@@ -940,6 +1003,7 @@ function PlannerStudio({
   onChange,
   onArchive,
 }: {
+  mode: "split" | "tab";
   artifact: SpectraArtifact;
   artifacts: SpectraArtifact[];
   title: string;
@@ -968,7 +1032,7 @@ function PlannerStudio({
     .filter((item): item is SpectraArtifact => Boolean(item));
 
   return (
-    <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_280px]">
+    <div className={`grid gap-5 ${mode === "tab" ? "lg:grid-cols-[minmax(0,1fr)_280px]" : "grid-cols-1"}`}>
       <section className="rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
         <div className="mb-5 flex items-center gap-3">
           <CalendarCheck2 className="h-8 w-8 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-1.5 text-[#d88922]" />
@@ -980,7 +1044,7 @@ function PlannerStudio({
         <Field label="Description">
           <textarea value={task.description ?? ""} onChange={(event) => commit({ ...task, description: event.target.value })} className={textareaClass("min-h-[136px]")} placeholder="What needs to happen?" />
         </Field>
-        <div className="mt-4 grid gap-3 md:grid-cols-4">
+        <div className={`mt-4 grid gap-3 ${mode === "tab" ? "md:grid-cols-4" : "grid-cols-1"}`}>
           <Field label="Status">
             <select value={task.status} onChange={(event) => commit({ ...task, status: event.target.value as PlannerTask["status"] })} className={inputClass()}>
               <option value="todo">Todo</option>
@@ -1005,15 +1069,15 @@ function PlannerStudio({
             </button>
           </Field>
         </div>
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <div className={`mt-4 grid gap-3 ${mode === "tab" ? "md:grid-cols-2" : "grid-cols-1"}`}>
           <Field label="Starts">
-            <div className="grid grid-cols-[1fr_110px] gap-2">
+            <div className={`grid gap-2 ${mode === "tab" ? "grid-cols-[1fr_110px]" : "grid-cols-1"}`}>
               <input type="date" value={startDate} onChange={(event) => { setStartDate(event.target.value); commit(task, { dueDate, startDate: event.target.value, startTime, endDate, endTime }); }} className={inputClass()} />
               <input type="time" value={startTime} onChange={(event) => { setStartTime(event.target.value); commit(task, { dueDate, startDate, startTime: event.target.value, endDate, endTime }); }} className={inputClass()} />
             </div>
           </Field>
           <Field label="Ends">
-            <div className="grid grid-cols-[1fr_110px] gap-2">
+            <div className={`grid gap-2 ${mode === "tab" ? "grid-cols-[1fr_110px]" : "grid-cols-1"}`}>
               <input type="date" value={endDate} onChange={(event) => { setEndDate(event.target.value); commit(task, { dueDate, startDate, startTime, endDate: event.target.value, endTime }); }} className={inputClass()} />
               <input type="time" value={endTime} onChange={(event) => { setEndTime(event.target.value); commit(task, { dueDate, startDate, startTime, endDate, endTime: event.target.value }); }} className={inputClass()} />
             </div>
@@ -1022,7 +1086,7 @@ function PlannerStudio({
         <TaskListEditor task={task} commit={commit} />
         <AttachmentEditor task={task} commit={commit} />
       </section>
-      <aside className="space-y-4">
+      {mode === "tab" ? <aside className="space-y-4">
         <SideCard title="Schedule">
           <MetricRow label="Starts" value={task.startAt ? formatShortDate(task.startAt) : "Not set"} />
           <MetricRow label="Ends" value={task.endAt ? formatShortDate(task.endAt) : "Not set"} />
@@ -1055,7 +1119,7 @@ function PlannerStudio({
         <button type="button" className="flex h-10 w-full items-center justify-center gap-2 rounded-[8px] border border-[color-mix(in_oklab,var(--danger)_28%,var(--border-default))] text-[13px] font-medium text-[var(--danger)] hover:bg-[color-mix(in_oklab,var(--danger)_7%,var(--bg-elevated))]" onClick={() => onArchive ? void onArchive() : undefined} disabled={!onArchive}>
           <Archive className="h-4 w-4" />Archive task
         </button>
-      </aside>
+      </aside> : null}
     </div>
   );
 }

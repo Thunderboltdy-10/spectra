@@ -25,9 +25,9 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
-import { ArtifactBlueprintSheet, type ArtifactPayload } from "../components/artifact-blueprint-sheet";
+import { createDefaultArtifactPayload, type ArtifactPayload } from "../components/artifact-blueprint-sheet";
 import { ArtifactCard, blueprintMeta } from "../components/artifact-card";
-import { ArtifactStudio, useArtifactStudioState } from "../components/artifact-studio";
+import { ArtifactStudio, StudioTabRail, useArtifactStudioState } from "../components/artifact-studio";
 import { CommandBar } from "../components/command-bar";
 import { ResultCardStack, type ResultCardView } from "../components/result-card";
 import {
@@ -56,6 +56,11 @@ import {
 
 type ViewMode = "cards" | "timeline" | "library" | "canvas";
 type Selection = { type: "artifact"; itemId: string; artifactId: string } | { type: "run"; runId: string } | null;
+type WorkspaceHubTab = { id: string; label: string; workspaceId?: string };
+
+function workspaceHubTab(label = "Home", workspaceId?: string): WorkspaceHubTab {
+  return { id: `workspace-hub-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, label, workspaceId };
+}
 
 const createTypes: Array<{ key: SpectraBlueprintKey; label: string; icon: LucideIcon }> = [
   { key: "document", label: "Document", icon: FileText },
@@ -176,7 +181,7 @@ function WorkspaceHome({
   const recent = artifacts.slice(0, 5);
 
   return (
-    <main className="min-h-0 flex-1 overflow-y-auto bg-[radial-gradient(circle_at_34%_0%,color-mix(in_oklab,var(--bg-elevated)_68%,transparent),transparent_38%),var(--bg-primary)] px-8 py-8">
+    <main className="min-h-0 flex-1 overflow-y-auto bg-[radial-gradient(circle_at_34%_0%,color-mix(in_oklab,var(--bg-elevated)_68%,transparent),transparent_38%),var(--bg-primary)] px-8 pb-[150px] pt-8">
       <div className="mx-auto max-w-6xl">
         <div className="flex items-end justify-between gap-5">
           <div>
@@ -864,7 +869,8 @@ export function WorkspaceShell() {
   const [workspaceCreateOpen, setWorkspaceCreateOpen] = useState(false);
   const [newWorkspaceTitle, setNewWorkspaceTitle] = useState("");
   const [newWorkspaceDescription, setNewWorkspaceDescription] = useState("");
-  const [createBlueprintKey, setCreateBlueprintKey] = useState<SpectraBlueprintKey | null>(null);
+  const [hubTabs, setHubTabs] = useState<WorkspaceHubTab[]>(() => [{ id: "workspace-home-default", label: "Home" }]);
+  const [activeHubTabId, setActiveHubTabId] = useState<string | null>("workspace-home-default");
   const [studioPanelWidth, setStudioPanelWidth] = useState(720);
   const workspaceCreateRef = useOutsideClick<HTMLDivElement>(workspaceCreateOpen, () => setWorkspaceCreateOpen(false));
   const seededRef = useRef(false);
@@ -875,6 +881,7 @@ export function WorkspaceShell() {
       const next = await getSpectraOverview(workspaceId);
       setOverview(next);
       setSelectedWorkspaceId(next.workspace ? next.selectedWorkspaceId ?? workspaceId : undefined);
+      return next;
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not load Spectra workspace.");
       if (workspaceId) {
@@ -883,6 +890,7 @@ export function WorkspaceShell() {
         const fallback = await getSpectraOverview().catch(() => null);
         if (fallback) setOverview(fallback);
       }
+      return null;
     } finally {
       setLoading(false);
     }
@@ -934,7 +942,7 @@ export function WorkspaceShell() {
     })
     .filter((entry): entry is { item: SpectraWorkspaceItem; artifact: SpectraArtifact; card: NonNullable<ReturnType<typeof workspaceItemToCard>> } => Boolean(entry)), [overview?.workspace?.items]);
   const selectedArtifact = selection?.type === "artifact" ? entries.find((entry) => entry.item._id === selection.itemId)?.artifact ?? null : null;
-  const commandFocusArtifact = studio.mode === "split" ? studio.activeArtifact : selectedArtifact;
+  const commandFocusArtifact = studio.isOpen ? studio.activeArtifact : selectedArtifact;
   const selectedRun = selection?.type === "run" ? workspaceRuns.find((run) => run._id === selection.runId) ?? null : null;
   const recentRunCards: ResultCardView[] = workspaceRuns.slice(0, 2).map((run) => ({
     id: run._id,
@@ -944,9 +952,99 @@ export function WorkspaceShell() {
     meta: formatRelativeTime(run.createdAt),
   }));
 
+  function setActiveHubDestination(label: string, workspaceId?: string) {
+    studio.closeStudio();
+    if (activeHubTabId && hubTabs.some((tab) => tab.id === activeHubTabId)) {
+      setHubTabs((current) => current.map((tab) => tab.id === activeHubTabId ? { ...tab, label, workspaceId } : tab));
+      return;
+    }
+    const next = workspaceHubTab(label, workspaceId);
+    setHubTabs((current) => [...current, next]);
+    setActiveHubTabId(next.id);
+  }
+
+  function goToWorkspaceHub(workspaceId: string) {
+    const target = workspaces.find((item) => item._id === workspaceId);
+    setActiveHubDestination(target?.title ?? "Workspace", workspaceId);
+    setSelection(null);
+    setViewMode("cards");
+    void loadWorkspace(workspaceId);
+  }
+
+  function goToHomeHub() {
+    setActiveHubDestination("Home");
+    setSelection(null);
+    setSelectedWorkspaceId(undefined);
+    void loadOverview();
+  }
+
+  function activateHubTab(tabId: string) {
+    const tab = hubTabs.find((item) => item.id === tabId);
+    if (!tab) return;
+    setActiveHubTabId(tabId);
+    studio.closeStudio();
+    setSelection(null);
+    if (tab.workspaceId) void loadWorkspace(tab.workspaceId);
+    else {
+      setSelectedWorkspaceId(undefined);
+      void loadOverview();
+    }
+  }
+
+  function addHomeHubTab() {
+    const next = workspaceHubTab();
+    setHubTabs((current) => [...current, next]);
+    setActiveHubTabId(next.id);
+    studio.closeStudio();
+    setSelection(null);
+    setSelectedWorkspaceId(undefined);
+    void loadOverview();
+  }
+
+  function closeHubTab(tabId: string) {
+    const remaining = hubTabs.filter((tab) => tab.id !== tabId);
+    setHubTabs(remaining);
+    if (activeHubTabId !== tabId) return;
+    const fallbackHub = remaining[remaining.length - 1];
+    if (fallbackHub) {
+      activateHubTab(fallbackHub.id);
+      return;
+    }
+    const fallbackArtifact = studio.tabs[studio.tabs.length - 1];
+    if (fallbackArtifact) {
+      setActiveHubTabId(null);
+      studio.activateTab(fallbackArtifact.artifactId);
+      return;
+    }
+    const replacement = workspaceHubTab();
+    setHubTabs([replacement]);
+    setActiveHubTabId(replacement.id);
+    studio.closeStudio();
+    setSelectedWorkspaceId(undefined);
+    void loadOverview();
+  }
+
+  function closeArtifactTab(artifactId: string) {
+    const closesFinalArtifact = studio.tabs.length === 1;
+    studio.closeTab(artifactId);
+    if (closesFinalArtifact && hubTabs.length === 0) {
+      const replacement = workspaceHubTab();
+      setHubTabs([replacement]);
+      setActiveHubTabId(replacement.id);
+      setSelectedWorkspaceId(undefined);
+      void loadOverview();
+    }
+  }
+
+  function returnToHub() {
+    const target = hubTabs.find((tab) => tab.id === activeHubTabId) ?? hubTabs[hubTabs.length - 1];
+    if (target) activateHubTab(target.id);
+    else addHomeHubTab();
+  }
+
   function openCreateArtifact(blueprintKey: SpectraBlueprintKey) {
     if (!selectedWorkspaceId) return;
-    setCreateBlueprintKey(blueprintKey);
+    void createArtifact(createDefaultArtifactPayload(blueprintKey));
   }
 
   async function createArtifact(payload: ArtifactPayload) {
@@ -954,7 +1052,7 @@ export function WorkspaceShell() {
     const label = blueprintMeta[payload.blueprintKey].label;
     setBusyKey(`artifact:${payload.blueprintKey}`);
     try {
-      await postSpectra({
+      const result = await postSpectra<{ artifactId: string }>({
         action: "createArtifact",
         blueprintKey: payload.blueprintKey,
         title: payload.title,
@@ -963,9 +1061,10 @@ export function WorkspaceShell() {
         tags: payload.tags,
         workspaceId: selectedWorkspaceId,
       });
-      setCreateBlueprintKey(null);
       toast.success(`${label} created in workspace.`);
-      await loadOverview(selectedWorkspaceId);
+      const refreshed = await loadOverview(selectedWorkspaceId);
+      const created = refreshed?.artifacts.find((artifact) => artifact._id === result.artifactId);
+      if (created) studio.openTab(created);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : `Could not create ${label.toLowerCase()}.`);
     } finally {
@@ -998,7 +1097,7 @@ export function WorkspaceShell() {
     try {
       await postSpectra({ action: "archiveArtifact", artifactId: artifact._id });
       toast.success("Artifact archived.");
-      studio.closeStudio();
+      returnToHub();
       await loadOverview(selectedWorkspaceId);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not archive artifact.");
@@ -1037,6 +1136,7 @@ export function WorkspaceShell() {
       setNewWorkspaceDescription("");
       setSelection(null);
       setViewMode("cards");
+      setActiveHubDestination(title, result.workspaceId);
       await loadOverview(result.workspaceId);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not create workspace.");
@@ -1053,6 +1153,7 @@ export function WorkspaceShell() {
       toast.success("Workspace archived.");
       setSelection(null);
       setViewMode("cards");
+      setActiveHubDestination("Home");
       await loadOverview();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not archive workspace.");
@@ -1067,19 +1168,30 @@ export function WorkspaceShell() {
         workspaces={workspaces}
         selectedWorkspaceId={selectedWorkspaceId}
         onHome={() => {
-          setSelection(null);
-          setSelectedWorkspaceId(undefined);
-          void loadOverview();
+          goToHomeHub();
         }}
         onSelect={(workspaceId) => {
-          setSelection(null);
-          setViewMode("cards");
-          void loadWorkspace(workspaceId);
+          goToWorkspaceHub(workspaceId);
         }}
         onCreateClick={() => setWorkspaceCreateOpen((open) => !open)}
       />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <StudioTabRail
+          hubTabs={hubTabs}
+          activeHubTabId={studio.mode === "tab" ? null : activeHubTabId}
+          artifacts={allArtifacts}
+          tabs={studio.tabs}
+          activeArtifactId={studio.mode === "tab" ? studio.activeArtifactId : null}
+          dirtyIds={studio.dirtyIds}
+          onActivateHub={activateHubTab}
+          onCloseHub={closeHubTab}
+          onAddHub={addHomeHubTab}
+          onActivateTab={studio.activateTab}
+          onCloseTab={closeArtifactTab}
+        />
+        <div className="relative flex min-h-0 flex-1">
       {workspaceCreateOpen ? (
-        <div ref={workspaceCreateRef} className="absolute left-[88px] top-5 z-40 w-[330px] rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 shadow-[0_18px_44px_rgba(27,20,12,0.16)]">
+        <div ref={workspaceCreateRef} className="absolute left-3 top-5 z-40 w-[330px] rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 shadow-[0_18px_44px_rgba(27,20,12,0.16)]">
           <div className="mb-3">
             <div className="font-display text-[18px] font-semibold text-[var(--text-primary)]">New workspace</div>
             <div className="mt-1 text-[12px] text-[var(--text-secondary)]">Create a subject space that stays synced with artifacts.</div>
@@ -1105,28 +1217,27 @@ export function WorkspaceShell() {
           </div>
         </div>
       ) : null}
-      {!selectedWorkspaceId ? (
-        <WorkspaceHome overview={overview ? { ...overview, workspaces } : overview} onSelect={(workspaceId) => void loadWorkspace(workspaceId)} />
+      {studio.mode === "tab" && studio.activeArtifact ? (
+        <ArtifactStudio
+          mode="tab"
+          artifact={studio.activeArtifact}
+          artifacts={allArtifacts}
+          tabs={studio.tabs}
+          dirtyIds={studio.dirtyIds}
+          busy={busyKey === `artifact:update:${studio.activeArtifact._id}`}
+          sourceLabel={workspace?.title ?? "Workspace"}
+          onClose={returnToHub}
+          onExpand={studio.openTab}
+          onActivateTab={studio.activateTab}
+          onCloseTab={closeArtifactTab}
+          onSave={updateArtifact}
+          onArchive={archiveArtifact}
+          onDirtyChange={studio.setDirty}
+        />
+      ) : !selectedWorkspaceId ? (
+        <WorkspaceHome overview={overview ? { ...overview, workspaces } : overview} onSelect={goToWorkspaceHub} />
       ) : (
         <section className="flex min-w-0 flex-1">
-          {studio.mode === "tab" && studio.activeArtifact ? (
-            <ArtifactStudio
-              mode="tab"
-              artifact={studio.activeArtifact}
-              artifacts={allArtifacts}
-              tabs={studio.tabs}
-              dirtyIds={studio.dirtyIds}
-              busy={busyKey === `artifact:update:${studio.activeArtifact._id}`}
-              sourceLabel={workspace?.title ?? "Workspace"}
-              onClose={studio.closeStudio}
-              onExpand={studio.openTab}
-              onActivateTab={studio.activateTab}
-              onCloseTab={studio.closeTab}
-              onSave={updateArtifact}
-              onArchive={archiveArtifact}
-              onDirtyChange={studio.setDirty}
-            />
-          ) : (
           <>
           <div className="flex min-w-0 flex-1 flex-col">
             <WorkspaceHeader workspace={workspace} items={entries.map((entry) => entry.item)} runs={workspaceRuns} viewMode={viewMode} setViewMode={setViewMode} busy={busyKey} onCreateArtifact={openCreateArtifact} />
@@ -1189,32 +1300,32 @@ export function WorkspaceShell() {
               panelWidth={studioPanelWidth}
               sourceLabel={workspace?.title ?? "Workspace"}
               onPanelWidthChange={setStudioPanelWidth}
-              onClose={studio.closeStudio}
+              onClose={returnToHub}
               onExpand={studio.openTab}
               onActivateTab={studio.activateTab}
-              onCloseTab={studio.closeTab}
+              onCloseTab={closeArtifactTab}
               onSave={updateArtifact}
               onArchive={archiveArtifact}
               onDirtyChange={studio.setDirty}
             />
           ) : null}
-          <div
-            className="pointer-events-none absolute bottom-0 left-[74px] z-20 bg-[linear-gradient(to_top,var(--bg-primary)_72%,transparent)] px-8 pb-5 pt-12"
-            style={{ right: studio.mode === "split" ? studioPanelWidth : studio.isOpen ? 0 : 318 }}
-          >
+          </>
+        </section>
+      )}
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 bg-[linear-gradient(to_top,var(--bg-primary)_72%,transparent)] px-8 pb-5 pt-12">
             <div className="pointer-events-auto mx-auto max-w-[880px]">
               <ResultCardStack cards={recentRunCards} className="mb-2" />
               <CommandBar
-                placeholder={commandFocusArtifact ? `Act on ${commandFocusArtifact.title}...` : "Work with this workspace..."}
+                placeholder={commandFocusArtifact ? `Act on ${commandFocusArtifact.title}...` : workspace ? "Work with this workspace..." : "Ask across your workspaces..."}
                 context={commandFocusArtifact ? (() => {
                   const meta = blueprintMeta[commandFocusArtifact.blueprintKey];
                   const Icon = meta.icon;
                   return <span className="flex items-center gap-2 text-[12px] font-medium text-[var(--text-primary)]"><Icon className="h-4 w-4" style={{ color: meta.color }} />{meta.label}</span>;
-                })() : workspace ? <span className="flex items-center gap-2 text-[12px] font-medium text-[var(--text-primary)]"><Sprout className="h-4 w-4 text-[var(--mode-document)]" />{workspace.title}</span> : null}
+                })() : <span className="flex items-center gap-2 text-[12px] font-medium text-[var(--text-primary)]"><Sprout className="h-4 w-4 text-[var(--mode-document)]" />{workspace?.title ?? "Workspaces"}</span>}
                 onSubmit={() => toast.message("Real AI execution is reserved for the operation engine wave.")}
                 menu={(
                   <div>
-                    {createTypes.map((type) => {
+                    {selectedWorkspaceId ? createTypes.map((type) => {
                       const Icon = type.icon;
                       return (
                         <button key={type.key} type="button" className={menuItemClass()} disabled={busyKey === `artifact:${type.key}`} onClick={() => openCreateArtifact(type.key)}>
@@ -1222,26 +1333,17 @@ export function WorkspaceShell() {
                           New {type.label}
                         </button>
                       );
-                    })}
-                    <button type="button" className={menuItemClass()}><Settings className="h-4 w-4" />Workspace settings</button>
+                    }) : (
+                      <button type="button" className={menuItemClass()} onClick={() => setWorkspaceCreateOpen(true)}><Plus className="h-4 w-4" />New workspace</button>
+                    )}
+                    {selectedWorkspaceId ? <button type="button" className={menuItemClass()}><Settings className="h-4 w-4" />Workspace settings</button> : null}
                   </div>
                 )}
               />
             </div>
           </div>
-          </>
-          )}
-        </section>
-      )}
-      {createBlueprintKey ? (
-        <ArtifactBlueprintSheet
-          mode="create"
-          initialBlueprintKey={createBlueprintKey}
-          busy={busyKey === `artifact:${createBlueprintKey}`}
-          onClose={() => setCreateBlueprintKey(null)}
-          onSubmit={createArtifact}
-        />
-      ) : null}
+        </div>
+      </div>
     </div>
   );
 }

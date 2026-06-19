@@ -91,6 +91,7 @@ This correction supersedes the rejected Wave 2 visual direction from commit `e28
 | Continue thread from workspace result card/right hub. | Wave 5 | Requires thread/message integration. |
 | Hidden result cards remain accessible. | Wave 5 | Right hub needs real thread/run history. |
 | Multi-select selected artifact context. | Wave 6 | Context builder and selection model. |
+| Artifact checkmarks should appear only after entering an explicit multi-select mode. | Wave 6 | A normal click opens the artifact with only a subtle border/background shift; it must not imply checkbox selection. Closing or opening an artifact should not enter multi-select. |
 | Search across artifacts/workspaces. | Wave 6 | Broader context/search foundation. |
 | Related artifact suggestions. | Wave 6 | Useful after artifact/context quality improves. |
 | Durable object/artifact link primitive with provenance and relation types. | Wave 6 | Wave 2B only displays seeded relations in Canvas/Inspector. |

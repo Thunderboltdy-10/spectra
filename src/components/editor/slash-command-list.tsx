@@ -28,6 +28,9 @@ import {
   Info,
   AlertTriangle,
   Lightbulb,
+  Bold,
+  Italic,
+  Underline,
 } from "lucide-react";
 
 const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -45,6 +48,9 @@ const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
   info: Info,
   "alert-triangle": AlertTriangle,
   lightbulb: Lightbulb,
+  bold: Bold,
+  italic: Italic,
+  underline: Underline,
 };
 
 export interface SlashCommandListRef {

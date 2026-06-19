@@ -21,6 +21,34 @@ export type SlashCommandItem = {
 };
 
 export const SLASH_COMMANDS: SlashCommandItem[] = [
+  // Inline formatting
+  {
+    id: "bold",
+    label: "Bold",
+    description: "Make the current text bold",
+    icon: "bold",
+    section: "Formatting",
+    aliases: ["strong"],
+    action: (editor) => editor.chain().focus().toggleBold().run(),
+  },
+  {
+    id: "italic",
+    label: "Italic",
+    description: "Italicize the current text",
+    icon: "italic",
+    section: "Formatting",
+    aliases: ["emphasis", "em"],
+    action: (editor) => editor.chain().focus().toggleItalic().run(),
+  },
+  {
+    id: "underline",
+    label: "Underline",
+    description: "Underline the current text",
+    icon: "underline",
+    section: "Formatting",
+    aliases: ["underlined"],
+    action: (editor) => editor.chain().focus().toggleUnderline().run(),
+  },
   // Text
   {
     id: "heading1",

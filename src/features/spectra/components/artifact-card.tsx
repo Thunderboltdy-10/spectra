@@ -1,6 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
-import { BookOpen, CalendarCheck2, Check, FileText, HelpCircle, MessageSquare } from "lucide-react";
+import { BookOpen, CalendarCheck2, FileText, HelpCircle, MessageSquare } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export type ArtifactCardView = {
@@ -86,11 +86,6 @@ export function ArtifactCard({
         </div>
       ) : null}
       <div className="pointer-events-none absolute inset-0 opacity-[0.22] [background-image:radial-gradient(color-mix(in_oklab,var(--text-primary)_18%,transparent)_0.45px,transparent_0.45px)] [background-size:7px_7px]" />
-      {selected ? (
-        <div className="absolute right-3 top-3 flex h-5 w-5 items-center justify-center rounded-full bg-[#8b6ff0] text-white">
-          <Check className="h-3.5 w-3.5" />
-        </div>
-      ) : null}
       <div className="flex items-start gap-3">
         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[7px] border border-[color-mix(in_oklab,currentColor_24%,transparent)] bg-[color-mix(in_oklab,currentColor_9%,var(--bg-elevated))]" style={{ color: meta.color }}>
           <Icon className="h-4 w-4" />

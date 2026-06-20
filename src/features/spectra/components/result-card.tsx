@@ -1,51 +1,73 @@
 "use client";
 
-import { AlertCircle, CheckCircle2, Clock3, X } from "lucide-react";
+import { AlertCircle, CheckCircle2, Clock3, Loader2, ShieldCheck, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import type { ResultCardStreamView } from "../ai/stream-events";
 
-export type ResultCardView = {
-  id: string;
-  status: "queued" | "running" | "completed" | "failed" | "cancelled";
-  title: string;
-  summary?: string;
-  meta?: string;
-};
+export type ResultCardView = ResultCardStreamView;
 
-function tone(status: ResultCardView["status"]) {
-  if (status === "failed" || status === "cancelled") return "var(--danger)";
-  if (status === "completed") return "var(--success)";
+function tone(card: ResultCardView) {
+  if (card.status === "failed" || card.status === "cancelled") return "var(--danger)";
+  if (card.status === "completed") return "var(--success)";
+  if (card.actions.some((action) => action.key === "confirm")) return "#d88922";
   return "var(--accent-cyan)";
 }
 
 export function ResultCardStack({
   cards,
   className,
+  onAction,
+  onOpen,
 }: {
   cards?: ResultCardView[];
   className?: string;
+  onAction?: (card: ResultCardView, actionKey: string, targetId?: string) => void;
+  onOpen?: (card: ResultCardView) => void;
 }) {
-  const visibleCards = cards?.slice(0, 3) ?? [];
+  const visibleCards = cards?.slice(0, 12) ?? [];
   if (visibleCards.length === 0) return null;
 
   return (
-    <div className={cn("relative max-h-[92px] space-y-1 overflow-y-auto rounded-[10px] [mask-image:linear-gradient(to_bottom,transparent,black_10px,black_calc(100%-10px),transparent)]", className)}>
-      {visibleCards.map((card) => (
-        <button
-          key={card.id}
-          type="button"
-          className="group flex w-full items-center gap-3 rounded-[8px] border border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_94%,var(--bg-primary))] px-3 py-2 text-left text-[12px] shadow-[0_2px_8px_rgba(27,20,12,0.04)] transition duration-150 hover:-translate-y-px hover:border-[color-mix(in_oklab,var(--text-tertiary)_35%,var(--border-default))]"
-        >
-          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[color-mix(in_oklab,currentColor_10%,var(--bg-elevated))]" style={{ color: tone(card.status) }}>
-            {card.status === "completed" ? <CheckCircle2 className="h-3.5 w-3.5" /> : card.status === "failed" || card.status === "cancelled" ? <AlertCircle className="h-3.5 w-3.5" /> : <Clock3 className="h-3.5 w-3.5" />}
-          </span>
-          <span className="grid min-w-0 flex-1 grid-cols-[minmax(130px,0.7fr)_minmax(180px,1fr)_auto] items-center gap-3">
-            <span className="truncate font-semibold text-[var(--text-primary)]">{card.title}</span>
-            {card.summary ? <span className="truncate text-[var(--text-secondary)]">{card.summary}</span> : <span />}
-            <span className="hidden text-[11px] text-[var(--text-tertiary)] sm:inline">{card.meta}</span>
-          </span>
-          <X className="h-3.5 w-3.5 shrink-0 text-[var(--text-tertiary)] opacity-55 transition group-hover:opacity-100" />
-        </button>
-      ))}
+    <div className={cn("relative max-h-[76px] overflow-y-auto rounded-[9px] border border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_96%,var(--bg-primary))] shadow-[0_2px_9px_rgba(27,20,12,0.05)] [scrollbar-width:thin]", className)}>
+      {visibleCards.map((card) => {
+        const awaitingApproval = card.actions.some((action) => action.key === "confirm");
+        return (
+          <div
+            key={card.id}
+            role="button"
+            tabIndex={0}
+            className="group flex min-h-[37px] w-full cursor-pointer items-center gap-2.5 border-b border-[var(--border-subtle)] px-2.5 py-1.5 text-left text-[12px] transition last:border-b-0 hover:bg-[var(--bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--accent-cyan)]"
+            onClick={() => onOpen?.(card)}
+            onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onOpen?.(card); }}
+          >
+            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[color-mix(in_oklab,currentColor_10%,var(--bg-elevated))]" style={{ color: tone(card) }}>
+              {card.status === "running" && !awaitingApproval ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : awaitingApproval ? <ShieldCheck className="h-3.5 w-3.5" /> : card.status === "completed" ? <CheckCircle2 className="h-3.5 w-3.5" /> : card.status === "failed" || card.status === "cancelled" ? <AlertCircle className="h-3.5 w-3.5" /> : <Clock3 className="h-3.5 w-3.5" />}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="flex items-baseline gap-2">
+                <span className="shrink-0 font-semibold text-[var(--text-primary)]">{card.title}</span>
+                {card.summary ? <span className="truncate text-[var(--text-secondary)]">{card.summary}</span> : null}
+              </span>
+            </span>
+            {card.actions.map((action) => (
+              <button
+                key={`${card.id}-${action.key}`}
+                type="button"
+                className={cn(
+                  "h-7 shrink-0 rounded-[6px] border border-[var(--border-default)] px-2.5 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
+                  action.key === "confirm" && "border-transparent bg-[var(--text-primary)] text-[var(--bg-primary)] hover:bg-[var(--text-primary)] hover:text-[var(--bg-primary)]",
+                )}
+                onClick={(event) => { event.stopPropagation(); onAction?.(card, action.key, action.targetId); }}
+              >
+                {action.label}
+              </button>
+            ))}
+            <button type="button" className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[5px] text-[var(--text-tertiary)] opacity-55 hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)] group-hover:opacity-100" aria-label="Hide result" onClick={(event) => { event.stopPropagation(); onAction?.(card, "hide"); }}>
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        );
+      })}
     </div>
   );
 }

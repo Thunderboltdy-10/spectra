@@ -115,6 +115,8 @@ export const create = mutation({
     tags: v.optional(v.array(v.string())),
     source: v.optional(vCreatedFromSource),
     workspaceId: v.optional(v.id("spectraWorkspaces")),
+    runId: v.optional(v.id("spectraAiRuns")),
+    threadId: v.optional(v.id("spectraThreads")),
   },
   handler: async (ctx, args) => {
     const actor = await requireSpectraActor(ctx, args.actorClerkId);
@@ -138,6 +140,8 @@ export const create = mutation({
       createdFrom: {
         source: args.source ?? (args.workspaceId ? "workspace" : "manual"),
         workspaceId: args.workspaceId,
+        runId: args.runId,
+        threadId: args.threadId,
       },
       createdAt: now,
       updatedAt: now,

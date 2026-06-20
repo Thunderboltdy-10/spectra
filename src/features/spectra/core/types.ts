@@ -129,6 +129,7 @@ export type AIRun = {
   error?: string;
   modelUsed?: string;
   sessionId?: string;
+  attemptCount?: number;
   createdAt: TimestampMs;
   updatedAt: TimestampMs;
   completedAt?: TimestampMs;
@@ -178,4 +179,3 @@ export type FocusSpace = {
   createdAt: TimestampMs;
   updatedAt: TimestampMs;
 };
-

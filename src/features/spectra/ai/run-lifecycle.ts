@@ -26,6 +26,7 @@ export function createQueuedRun(input: CreateRunInput): AIRun {
     status: "queued",
     userPrompt: input.userPrompt,
     modelUsed: getSpectraModelId(),
+    attemptCount: 1,
     createdAt: now,
     updatedAt: now,
   };
@@ -39,7 +40,7 @@ export function markRunRunning(run: AIRun, now = Date.now()): AIRun {
 }
 
 export function completeRun(run: AIRun, finalSummary: string, now = Date.now()): AIRun {
-  if (run.status !== "queued" && run.status !== "running") {
+  if (run.status !== "queued" && run.status !== "running" && run.status !== "awaiting_confirmation") {
     throw new Error(`Cannot complete ${run.status} run.`);
   }
   return {
@@ -99,4 +100,3 @@ export function createResultCardForRun(params: {
     updatedAt: now,
   };
 }
-

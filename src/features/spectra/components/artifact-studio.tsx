@@ -413,7 +413,7 @@ export function ArtifactStudio({
   const body = (
     <div className="flex h-full min-h-0 flex-col bg-[var(--bg-primary)]">
       <ArtifactStudioEditor
-        key={artifact._id}
+        key={`${artifact._id}:${artifact.updatedAt}`}
         mode={mode}
         artifact={artifact}
         artifacts={artifacts}

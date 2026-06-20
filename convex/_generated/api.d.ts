@@ -49,6 +49,7 @@ import type * as seed from "../seed.js";
 import type * as shared from "../shared.js";
 import type * as soul from "../soul.js";
 import type * as spectraArtifacts from "../spectraArtifacts.js";
+import type * as spectraOperations from "../spectraOperations.js";
 import type * as spectraRuns from "../spectraRuns.js";
 import type * as spectraSeed from "../spectraSeed.js";
 import type * as spectraShared from "../spectraShared.js";
@@ -119,6 +120,7 @@ declare const fullApi: ApiFromModules<{
   shared: typeof shared;
   soul: typeof soul;
   spectraArtifacts: typeof spectraArtifacts;
+  spectraOperations: typeof spectraOperations;
   spectraRuns: typeof spectraRuns;
   spectraSeed: typeof spectraSeed;
   spectraShared: typeof spectraShared;

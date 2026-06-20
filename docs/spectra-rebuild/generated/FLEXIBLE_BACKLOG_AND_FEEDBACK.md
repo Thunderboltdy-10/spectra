@@ -86,8 +86,16 @@ This correction supersedes the rejected Wave 2 visual direction from commit `e28
 | Artifact open/detail/editing can be deferred, but must have safe Wave 2B placeholders. | Wave 3 | Clicking an artifact should never error. Wave 3 replaces placeholders with real type-specific detail/edit surfaces. |
 | Command bar should perform real AI operations. | Wave 4 | Wave 2 designs the control surface; Wave 4 wires execution. |
 | Result cards should stream/update from real AI events. | Wave 4 | Requires AIRun/Operation engine. |
-| Risky/bulk AI actions require confirmation. | Wave 4 | Operation policy enforcement. |
-| `/chat` artifacts should land in library/inbox by default. | Wave 5 | Chat convergence work. |
+| Wave 4 blueprint/model content schemas diverged and broke flashcard deck generation. | Wave 4 stabilization | Model JSON schema, operation parser, blueprint validator, executor, and editor content must share one canonical shape for all five built-ins. |
+| Confirmation misfires and unrelated placement operations appeared for simple creation prompts. | Wave 4 stabilization | Separate interpreted intent/relevance validation from risk policy. Reject unrelated operations before persistence. |
+| Model-authored synthetic/composite ids reached Convex id validators. | Wave 4 stabilization | Resolve every artifact/workspace/workspace-item reference against owned context before persistence and again before execution. |
+| Retry created duplicate runs/cards and stale active UI returned after refresh. | Wave 4 stabilization | Retry the same run/card attempt; show only active or recently relevant rows in the compact unified tray. |
+| Active run rows need a temporary right detail panel. | Wave 4 stabilization | Show prompt, progress, operations, errors, affected objects, and actions. Keep local UI state unless explicitly saved. |
+| Focus must be clearly presented as a hint, not a forced target. | Wave 4 now, workspace intelligence later | Keep current focus visible now. Defer richer selectable focus controls. |
+| Full persistent thread artifact UI and chat convergence. | Wave 5 | Do not turn temporary run detail into a synced thread by default. |
+| `superAdmin:refreshPlatformStats` performed multiple paginated queries in one Convex function. | Fixed in Wave 4 stabilization | Rebuild now schedules a bounded background chain with one 16-row paginated page per function invocation; the final page publishes the aggregate snapshot. |
+| Risky/bulk AI actions require confirmation. | Wave 4 | Operation policy enforcement, durable proposals, and confirm/cancel handling ship with the engine. |
+| `/chat` artifacts should land in library/inbox by default. | Wave 4 engine, Wave 5 presentation convergence | Placement policy ships with the shared engine; richer chat artifact cards and Thread/Message convergence remain Wave 5. |
 | Continue thread from workspace result card/right hub. | Wave 5 | Requires thread/message integration. |
 | Hidden result cards remain accessible. | Wave 5 | Right hub needs real thread/run history. |
 | Multi-select selected artifact context. | Wave 6 | Context builder and selection model. |

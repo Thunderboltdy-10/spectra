@@ -96,7 +96,7 @@ export function createDefaultArtifactPayload(blueprintKey: EditableBlueprintKey)
     flashcard_deck: { cards: [{ id: "card-1", front: "", back: "", hint: "", confidence: "unknown", section: "Section 1" }], settings: { shuffle: true, revealMode: "click" } },
     quiz: { questions: [{ id: "question-1", prompt: "", type: "multiple_choice", options: ["", "", "", ""], correctAnswer: "", explanation: "", difficulty: "medium", points: 1, timeLimitSeconds: 90 }], settings: { showAnswersImmediately: true, timed: false } },
     planner_task: { description: "", status: "todo", priority: "medium", subtasks: [], attachments: [], linkedArtifactIds: [], reminders: [] },
-    thread_reference: { threadId: "", summary: "", linkedArtifactIds: [] },
+    thread_reference: { threadId: null, summary: "", linkedArtifactIds: [] },
   };
   return {
     blueprintKey,
@@ -181,7 +181,7 @@ function plannerTask(content: unknown): Required<Pick<PlannerTaskContent, "statu
 function threadReference(content: unknown): ThreadReferenceContent {
   const thread = record(content);
   return {
-    threadId: typeof thread.threadId === "string" ? thread.threadId : "",
+    threadId: typeof thread.threadId === "string" ? thread.threadId : null,
     summary: typeof thread.summary === "string" ? thread.summary : "",
     linkedArtifactIds: Array.isArray(thread.linkedArtifactIds) ? thread.linkedArtifactIds.filter((item): item is string => typeof item === "string") : [],
   };

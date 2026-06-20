@@ -40,6 +40,19 @@ async function spectraMutation<TArgs extends object, TResult>(functionName: stri
   }
 }
 
+async function optionalSpectraQuery<TArgs extends object, TResult>(
+  functionName: string,
+  args: TArgs,
+  fallback: TResult,
+) {
+  try {
+    return await spectraQuery<TArgs, TResult>(functionName, args);
+  } catch (error) {
+    if (isFunctionPathNotFound(error)) return fallback;
+    throw error;
+  }
+}
+
 function requireString(value: unknown, name: string) {
   if (typeof value !== "string" || value.trim().length === 0) {
     throw new Error(`${name} is required`);
@@ -95,6 +108,27 @@ export async function GET(request: NextRequest) {
       return ok({ workspace });
     }
 
+    if (action === "resultCards") {
+      const resultCards = await optionalSpectraQuery("spectraRuns:listResultCards", {
+        actorClerkId: actor.clerkId,
+        surface: params.get("surface") ?? undefined,
+        workspaceId: params.get("workspaceId") ?? undefined,
+        artifactId: params.get("artifactId") ?? undefined,
+        includeHidden: params.get("includeHidden") === "true",
+        limit: params.has("limit") ? Number(params.get("limit")) : undefined,
+      }, []);
+      return ok({ resultCards });
+    }
+
+    if (action === "runDetail") {
+      const runId = requireString(params.get("runId"), "runId");
+      const detail = await spectraQuery("spectraRuns:get", {
+        actorClerkId: actor.clerkId,
+        runId,
+      });
+      return ok(detail);
+    }
+
     if (action === "overview") {
       const workspaces = await spectraQuery("spectraWorkspaces:list", {
         actorClerkId: actor.clerkId,
@@ -112,7 +146,7 @@ export async function GET(request: NextRequest) {
           throw error;
         })
         : Promise.resolve(null);
-      const [workspace, artifacts, runs] = await Promise.all([
+      const [workspace, artifacts, runs, resultCards] = await Promise.all([
         workspacePromise,
         spectraQuery("spectraArtifacts:list", {
           actorClerkId: actor.clerkId,
@@ -123,6 +157,12 @@ export async function GET(request: NextRequest) {
           actorClerkId: actor.clerkId,
           limit: 12,
         }),
+        optionalSpectraQuery("spectraRuns:listResultCards", {
+          actorClerkId: actor.clerkId,
+          workspaceId: selectedWorkspaceId,
+          includeHidden: false,
+          limit: 20,
+        }, []),
       ]);
       return ok({
         actor,
@@ -131,6 +171,7 @@ export async function GET(request: NextRequest) {
         workspace,
         artifacts,
         runs,
+        resultCards,
       });
     }
 
@@ -183,6 +224,10 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === "createArtifact") {
+      const requestedSource = optionalString(body.source);
+      const source = requestedSource && ["chat", "workspace", "artifact", "manual", "ai"].includes(requestedSource)
+        ? requestedSource
+        : optionalString(body.workspaceId) ? "workspace" : "manual";
       const result = await spectraMutation("spectraArtifacts:create", {
         actorClerkId: actor.clerkId,
         blueprintKey: requireBlueprint(body.blueprintKey),
@@ -191,7 +236,7 @@ export async function POST(request: NextRequest) {
         content: body.content,
         tags: Array.isArray(body.tags) ? body.tags.filter((tag): tag is string => typeof tag === "string") : undefined,
         workspaceId: optionalString(body.workspaceId),
-        source: optionalString(body.workspaceId) ? "workspace" : "manual",
+        source,
       });
       return ok(result);
     }
@@ -229,6 +274,22 @@ export async function POST(request: NextRequest) {
       const result = await spectraMutation("spectraWorkspaceItems:hide", {
         actorClerkId: actor.clerkId,
         workspaceItemId: requireString(body.workspaceItemId, "workspaceItemId"),
+      });
+      return ok(result);
+    }
+
+    if (action === "hideResultCard") {
+      const result = await spectraMutation("spectraRuns:hideResultCard", {
+        actorClerkId: actor.clerkId,
+        resultCardId: requireString(body.resultCardId, "resultCardId"),
+      });
+      return ok(result);
+    }
+
+    if (action === "keepResultCard") {
+      const result = await spectraMutation("spectraRuns:keepResultCard", {
+        actorClerkId: actor.clerkId,
+        resultCardId: requireString(body.resultCardId, "resultCardId"),
       });
       return ok(result);
     }

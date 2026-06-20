@@ -3,12 +3,18 @@ import type { ArtifactBlueprint } from "../core";
 
 export const plannerTaskContentSchema = z.object({
   description: z.string().optional(),
-  dueAt: z.number().optional(),
+  dueAt: z.number().nullable().optional(),
+  startAt: z.number().nullable().optional(),
+  endAt: z.number().nullable().optional(),
+  allDay: z.boolean().optional(),
   status: z.enum(["todo", "doing", "done"]),
   priority: z.enum(["low", "medium", "high"]).optional(),
   linkedArtifactIds: z.array(z.string()).optional(),
   linkedThreadIds: z.array(z.string()).optional(),
-});
+  subtasks: z.array(z.unknown()).optional(),
+  attachments: z.array(z.unknown()).optional(),
+  reminders: z.array(z.unknown()).optional(),
+}).passthrough();
 
 export const plannerTaskBlueprint: ArtifactBlueprint = {
   key: "planner_task",
@@ -25,4 +31,3 @@ export const plannerTaskBlueprint: ArtifactBlueprint = {
   operations: ["create", "update_status", "link_artifact", "link_thread", "add_to_workspace"],
   searchableFields: ["description"],
 };
-

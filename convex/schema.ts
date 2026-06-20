@@ -1455,20 +1455,25 @@ export default defineSchema({
     status: v.union(
       v.literal("queued"),
       v.literal("running"),
+      v.literal("awaiting_confirmation"),
       v.literal("completed"),
       v.literal("failed"),
       v.literal("cancelled"),
     ),
     userPrompt: v.string(),
+    decision: v.optional(v.union(v.literal("answer"), v.literal("operate"), v.literal("clarify"), v.literal("refuse"))),
+    planIntent: v.optional(v.any()),
     finalSummary: v.optional(v.string()),
     error: v.optional(v.string()),
     modelUsed: v.optional(v.string()),
     sessionId: v.optional(v.string()),
+    attemptCount: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
     completedAt: v.optional(v.number()),
   })
     .index("by_owner_status", ["ownerUserId", "status"])
+    .index("by_owner_created", ["ownerUserId", "createdAt"])
     .index("by_workspace", ["workspaceId"])
     .index("by_thread", ["threadId"])
     .index("by_artifact", ["artifactId"]),
@@ -1479,6 +1484,7 @@ export default defineSchema({
     type: v.string(),
     status: v.union(
       v.literal("proposed"),
+      v.literal("executing"),
       v.literal("executed"),
       v.literal("failed"),
       v.literal("cancelled"),
@@ -1502,6 +1508,7 @@ export default defineSchema({
     status: v.union(
       v.literal("queued"),
       v.literal("running"),
+      v.literal("awaiting_confirmation"),
       v.literal("completed"),
       v.literal("failed"),
       v.literal("cancelled"),
@@ -1527,6 +1534,7 @@ export default defineSchema({
       targetId: v.optional(v.string()),
     })),
     hiddenAt: v.optional(v.number()),
+    keptAt: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })

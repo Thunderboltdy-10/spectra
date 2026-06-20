@@ -1,0 +1,113 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { NextRequest } from "next/server";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.resetModules();
+  delete process.env.OPENROUTER_API_KEY;
+});
+
+function deckPlan() {
+  return {
+    decision: "operate",
+    intent: { mode: "create", requestedArtifactTypes: ["flashcard_deck"], requestedVisibleArtifactCount: 1, targetArtifactId: null, targetWorkspaceId: "workspace-real" },
+    finalResponse: "Created a 6-card photosynthesis deck with memory cues.",
+    operations: [{
+      type: "artifact.create",
+      input: {
+        blueprintKey: "flashcard_deck",
+        title: "Photosynthesis memory cues",
+        summary: "Six recall cards.",
+        content: {
+          cards: Array.from({ length: 6 }, (_, index) => ({ id: `card-${index + 1}`, front: `Prompt ${index + 1}`, back: `Answer ${index + 1}`, hint: `Memory cue ${index + 1}`, sourceRefs: [], confidence: "unknown" })),
+          settings: { shuffle: true, revealMode: "click" },
+        },
+        tags: ["biology", "photosynthesis"],
+        workspaceId: "workspace-real",
+        placement: "context",
+      },
+    }],
+  };
+}
+
+function setup(plan: unknown, initialStatus: "queued" | "failed" = "queued") {
+  const card = { _id: "card-real", runId: "run-real", status: initialStatus, title: initialStatus === "failed" ? "Run failed" : "Queued", summary: "", variant: initialStatus === "failed" ? "error" : "status", actions: [] as Array<Record<string, unknown>>, updatedAt: 1 };
+  const run = { status: initialStatus, sourceSurface: "workspace", workspaceId: "workspace-real", userPrompt: "Create a flashcard deck about photosynthesis with 6 cards. Include memory cues.", attemptCount: 1 };
+  const operations: Array<Record<string, unknown>> = [];
+  const requireActor = vi.fn().mockResolvedValue({ clerkId: "actor" });
+  const convexQuery = vi.fn(async (name: string) => {
+    if (name.includes("spectraRuns:get")) return { run, cards: [card], operations };
+    if (name.includes("spectraArtifacts:list")) return [];
+    if (name.includes("spectraWorkspaces:list")) return [{ _id: "workspace-real", title: "Biology" }];
+    if (name.includes("spectraWorkspaceItems:listForWorkspace")) return { workspace: { _id: "workspace-real", title: "Biology" }, items: [] };
+    throw new Error(`Unexpected query: ${name}`);
+  });
+  const convexMutation = vi.fn(async (name: string, args: Record<string, unknown>) => {
+    if (name.includes("spectraRuns:create")) return { runId: "run-real", resultCardId: "card-real" };
+    if (name.includes("spectraRuns:resetForRetry")) {
+      run.status = "queued";
+      run.attemptCount = 2;
+      card.status = "queued";
+      return { runId: "run-real", resultCardId: "card-real", prompt: run.userPrompt, workspaceId: run.workspaceId, sourceSurface: "workspace" };
+    }
+    if (name.includes("spectraRuns:updateStatus")) {
+      run.status = args.status as typeof run.status;
+      card.status = args.status as typeof card.status;
+      card.title = typeof args.resultTitle === "string" ? args.resultTitle : card.title;
+      card.summary = typeof args.resultSummary === "string" ? args.resultSummary : card.summary;
+      card.variant = typeof args.resultVariant === "string" ? args.resultVariant : card.variant;
+      card.actions = Array.isArray(args.resultActions) ? args.resultActions : card.actions;
+      card.updatedAt += 1;
+      return { runId: "run-real" };
+    }
+    if (name.includes("spectraRuns:patchResultCard")) {
+      card.title = typeof args.title === "string" ? args.title : card.title;
+      card.summary = typeof args.summary === "string" ? args.summary : card.summary;
+      card.updatedAt += 1;
+      return { resultCardId: "card-real" };
+    }
+    if (name.includes("spectraOperations:recordPlan")) {
+      const next = args.operations as Array<Record<string, unknown>>;
+      operations.push(...next.map((operation, index) => ({ _id: `operation-${index + 1}`, runId: "run-real", status: "proposed", affected: [], ...operation })));
+      return { operationIds: next.map((_operation, index) => `operation-${index + 1}`) };
+    }
+    if (name.includes("spectraArtifacts:create")) return { artifactId: "artifact-real", workspaceItemId: "item-real" };
+    if (name.includes("spectraOperations:claim") || name.includes("spectraOperations:markExecuted") || name.includes("spectraOperations:cancelPending")) return {};
+    throw new Error(`Unexpected mutation: ${name}`);
+  });
+
+  vi.doMock("@/lib/auth-server", () => ({ requireActor }));
+  vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation }));
+  process.env.OPENROUTER_API_KEY = "test-key";
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(plan) } }] }), { status: 200 })));
+  return { convexMutation };
+}
+
+describe("Spectra run route", () => {
+  it("creates one six-card deck and does not emit unrelated placement removal", async () => {
+    const { convexMutation } = setup(deckPlan());
+    const route = await import("@/app/api/spectra/run/route");
+    const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", { method: "POST", body: JSON.stringify({ action: "run", surface: "workspace", workspaceId: "workspace-real", prompt: "Create a flashcard deck about photosynthesis with 6 cards. Include memory cues." }) }));
+    const events = (await response.text()).trim().split("\n").map((line) => JSON.parse(line) as { type: string; message?: string });
+
+    const createCall = convexMutation.mock.calls.find(([name]) => String(name).includes("spectraArtifacts:create"));
+    expect(createCall).toBeTruthy();
+    expect((createCall?.[1] as { content: { cards: unknown[] } }).content.cards).toHaveLength(6);
+    expect(convexMutation.mock.calls.some(([name]) => String(name).includes("spectraWorkspaceItems:hide"))).toBe(false);
+    expect(events.some((event) => event.type === "confirmation_required")).toBe(false);
+    expect(events.some((event) => event.message === "Validating 6 cards")).toBe(true);
+    expect(events.some((event) => event.message === "Saving deck to Biology")).toBe(true);
+  });
+
+  it("retries the same failed run and result card", async () => {
+    const answerPlan = { decision: "answer", intent: { mode: "answer", requestedArtifactTypes: [], requestedVisibleArtifactCount: 0, targetArtifactId: null, targetWorkspaceId: null }, finalResponse: "Here is the answer.", operations: [] };
+    const { convexMutation } = setup(answerPlan, "failed");
+    const route = await import("@/app/api/spectra/run/route");
+    const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", { method: "POST", body: JSON.stringify({ action: "retry", runId: "run-real" }) }));
+    const events = (await response.text()).trim().split("\n").map((line) => JSON.parse(line) as { type: string; runId?: string; card?: { id: string } });
+
+    expect(convexMutation.mock.calls.some(([name]) => String(name).includes("spectraRuns:resetForRetry"))).toBe(true);
+    expect(convexMutation.mock.calls.some(([name]) => String(name).includes("spectraRuns:create"))).toBe(false);
+    expect(events.find((event) => event.type === "run_created")).toMatchObject({ runId: "run-real", card: { id: "card-real" } });
+  });
+});

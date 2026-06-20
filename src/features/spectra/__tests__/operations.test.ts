@@ -30,7 +30,7 @@ describe("Spectra operation policy", () => {
     expect(operationRequiresConfirmation(operation)).toBe(true);
   });
 
-  it("requires confirmation for bulk creation", () => {
+  it("treats a generated card set as one artifact", () => {
     const operation = parseOperationInput({
       type: "flashcardDeck.create",
       input: { cardCount: 30 },
@@ -38,7 +38,6 @@ describe("Spectra operation policy", () => {
       bulkCount: 30,
     });
 
-    expect(operationRequiresConfirmation(operation)).toBe(true);
+    expect(operationRequiresConfirmation(operation)).toBe(false);
   });
 });
-

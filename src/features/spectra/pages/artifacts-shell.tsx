@@ -24,10 +24,13 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
+import { useSpectraRun } from "../ai/use-spectra-run";
 import { createDefaultArtifactPayload, type ArtifactPayload } from "../components/artifact-blueprint-sheet";
 import { ArtifactCard, blueprintMeta } from "../components/artifact-card";
 import { ArtifactStudio, StudioTabRail, useArtifactStudioState } from "../components/artifact-studio";
 import { CommandBar } from "../components/command-bar";
+import { ResultCardStack } from "../components/result-card";
+import { RunDetailPanel } from "../components/run-detail-panel";
 import {
   artifactPlacements,
   artifactToCard,
@@ -43,6 +46,7 @@ import {
   type SpectraArtifact,
   type SpectraBlueprintKey,
   type SpectraWorkspace,
+  type SpectraResultCard,
 } from "../data/api";
 
 type ArtifactMode = "list" | "board" | "grid";
@@ -143,6 +147,7 @@ function ArtifactsRail({
 export function ArtifactsShell() {
   const [allArtifacts, setAllArtifacts] = useState<SpectraArtifact[]>([]);
   const [workspaces, setWorkspaces] = useState<SpectraWorkspace[]>([]);
+  const [resultCards, setResultCards] = useState<SpectraResultCard[]>([]);
   const [activeFilter, setActiveFilter] = useState<"all" | SpectraBlueprintKey>("all");
   const [mode, setMode] = useState<ArtifactMode>("list");
   const [search, setSearch] = useState("");
@@ -233,6 +238,7 @@ export function ArtifactsShell() {
       ]);
       setAllArtifacts(artifactResult.artifacts);
       setWorkspaces(sortSpectraWorkspaces(overview.workspaces));
+      setResultCards((overview.resultCards ?? []).filter((card) => card.run?.sourceSurface === "artifact" && !card.run.workspaceId));
       return artifactResult.artifacts;
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not load artifacts.");
@@ -241,6 +247,19 @@ export function ArtifactsShell() {
       setLoading(false);
     }
   }, []);
+
+  const runEngine = useSpectraRun({
+    surface: studio.activeArtifact ? "artifact" : "artifacts",
+    workspaceId: selectedWorkspaceId || undefined,
+    artifactId: studio.activeArtifact?._id,
+    initialCards: resultCards,
+    onDataChanged: () => load(true),
+    onOpenArtifact: async (artifactId) => {
+      const refreshed = await load(true);
+      const artifact = refreshed.find((item) => item._id === artifactId);
+      if (artifact) studio.openSplit(artifact);
+    },
+  });
 
   useEffect(() => {
     if (seededRef.current) return;
@@ -567,14 +586,23 @@ export function ArtifactsShell() {
       )}
         <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 bg-[linear-gradient(to_top,var(--bg-primary)_72%,transparent)] px-8 pb-5 pt-12">
           <div className="pointer-events-auto mx-auto max-w-[880px]">
+            <ResultCardStack cards={runEngine.cards} className="mb-2" onOpen={runEngine.openDetails} onAction={(card, action, targetId) => void runEngine.onCardAction(card, action, targetId)} />
             <CommandBar
               placeholder={studio.activeArtifact ? `Act on ${studio.activeArtifact.title}...` : "Ask across your artifacts..."}
               context={studio.activeArtifact ? (() => {
                 const meta = blueprintMeta[studio.activeArtifact.blueprintKey];
                 const Icon = meta.icon;
-                return <span className="flex items-center gap-2 text-[12px] font-medium text-[var(--text-primary)]"><Icon className="h-4 w-4" style={{ color: meta.color }} />{meta.label}</span>;
-              })() : <span className="flex items-center gap-2 text-[12px] font-medium text-[var(--text-primary)]"><LayoutGrid className="h-4 w-4" />Artifacts</span>}
-              onSubmit={() => toast.message("Real AI execution is reserved for the operation engine wave.")}
+                return <span className="flex items-center gap-2 text-[12px] font-medium text-[var(--text-primary)]" title="Focus is a context hint; your prompt can override it."><Icon className="h-4 w-4" style={{ color: meta.color }} /><span className="text-[10px] uppercase tracking-[0.08em] text-[var(--text-tertiary)]">Hint</span>{studio.activeArtifact.title}</span>;
+              })() : <span className="flex items-center gap-2 text-[12px] font-medium text-[var(--text-primary)]" title="Library context is a hint; your prompt can override it."><LayoutGrid className="h-4 w-4" /><span className="text-[10px] uppercase tracking-[0.08em] text-[var(--text-tertiary)]">Context</span>Artifacts</span>}
+              onSubmit={(prompt) => {
+                if (studio.activeArtifact && studio.dirtyIds.has(studio.activeArtifact._id)) {
+                  toast.message("Save this artifact before asking Spectra to update it.");
+                  return false;
+                }
+                void runEngine.run(prompt);
+                return true;
+              }}
+              busy={runEngine.submitting}
               menu={(
                 <div>
                   {filters.filter((filter) => filter.key !== "all").map((filter) => {
@@ -592,6 +620,14 @@ export function ArtifactsShell() {
             />
           </div>
         </div>
+        {runEngine.selectedRunId && runEngine.cards.find((card) => card.runId === runEngine.selectedRunId) ? (
+          <RunDetailPanel
+            runId={runEngine.selectedRunId}
+            card={runEngine.cards.find((card) => card.runId === runEngine.selectedRunId)!}
+            onClose={runEngine.closeDetails}
+            onAction={(card, action, targetId) => void runEngine.onCardAction(card, action, targetId)}
+          />
+        ) : null}
         </div>
       </div>
     </div>

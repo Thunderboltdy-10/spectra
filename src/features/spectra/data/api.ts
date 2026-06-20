@@ -59,15 +59,59 @@ export type SpectraWorkspaceItem = {
 
 export type SpectraRun = {
   _id: string;
-  status: "queued" | "running" | "completed" | "failed" | "cancelled";
+  status: "queued" | "running" | "awaiting_confirmation" | "completed" | "failed" | "cancelled";
   sourceSurface: "chat" | "workspace" | "artifact";
   workspaceId?: string;
   artifactId?: string;
   userPrompt: string;
+  decision?: "answer" | "operate" | "clarify" | "refuse";
+  planIntent?: unknown;
   finalSummary?: string;
   error?: string;
+  attemptCount?: number;
   createdAt: number;
   updatedAt: number;
+};
+
+export type SpectraResultAction = {
+  key: string;
+  label: string;
+  targetType?: "artifact" | "thread" | "run" | "workspace";
+  targetId?: string;
+};
+
+export type SpectraResultCard = {
+  _id: string;
+  runId: string;
+  status: SpectraRun["status"];
+  variant: "status" | "artifact" | "thread" | "operation" | "error";
+  title: string;
+  summary?: string;
+  actions: SpectraResultAction[];
+  hiddenAt?: number;
+  keptAt?: number;
+  createdAt: number;
+  updatedAt: number;
+  run?: SpectraRun;
+};
+
+export type SpectraOperation = {
+  _id: string;
+  runId?: string;
+  type: string;
+  status: "proposed" | "executing" | "executed" | "failed" | "cancelled";
+  input: unknown;
+  output?: unknown;
+  affected: Array<{ type: string; id: string }>;
+  requiresConfirmation?: boolean;
+  createdAt: number;
+  executedAt?: number;
+};
+
+export type SpectraRunDetail = {
+  run: SpectraRun;
+  cards: SpectraResultCard[];
+  operations: SpectraOperation[];
 };
 
 export type SpectraOverview = {
@@ -79,6 +123,7 @@ export type SpectraOverview = {
   } | null;
   artifacts: SpectraArtifact[];
   runs: SpectraRun[];
+  resultCards: SpectraResultCard[];
 };
 
 type JsonRecord = Record<string, unknown>;
@@ -117,6 +162,27 @@ export async function getSpectraArtifacts(params?: {
   if (params?.blueprintKey && params.blueprintKey !== "all") qs.set("blueprintKey", params.blueprintKey);
   if (params?.search?.trim()) qs.set("search", params.search.trim());
   return readJson<{ artifacts: SpectraArtifact[] }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+}
+
+export async function getSpectraResultCards(params?: {
+  surface?: "chat" | "workspace" | "artifact";
+  workspaceId?: string;
+  artifactId?: string;
+  includeHidden?: boolean;
+  limit?: number;
+}) {
+  const qs = new URLSearchParams({ action: "resultCards" });
+  if (params?.surface) qs.set("surface", params.surface);
+  if (params?.workspaceId) qs.set("workspaceId", params.workspaceId);
+  if (params?.artifactId) qs.set("artifactId", params.artifactId);
+  if (params?.includeHidden) qs.set("includeHidden", "true");
+  if (params?.limit) qs.set("limit", String(params.limit));
+  return readJson<{ resultCards: SpectraResultCard[] }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+}
+
+export async function getSpectraRunDetail(runId: string) {
+  const qs = new URLSearchParams({ action: "runDetail", runId });
+  return readJson<SpectraRunDetail>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
 }
 
 export async function postSpectra<T>(body: JsonRecord) {

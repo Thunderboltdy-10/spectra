@@ -182,6 +182,9 @@ Focus:
 - Tool breaks only for real backend operations.
 - Confirmation gates for risky actions.
 - Object explosion protection.
+- Shared run execution across `/workspace`, `/artifacts`, and Artifact Studio. `/chat` Thread/Message/AIRun convergence remains Wave 5 rather than wrapping the legacy orchestrator.
+- Strict NDJSON progress events generated from real operational phases; progress never enters saved final content.
+- Confirmation execution/revalidation in Wave 4 rather than the later general polish wave.
 
 Non-goals:
 
@@ -198,6 +201,8 @@ Manual test:
 - Does it avoid fake trace UI?
 - Does it ask confirmation before risky or bulk operations?
 - Does the generated object appear in the correct place?
+- Does focused context remain a hint rather than an assumed target when the prompt says otherwise?
+- Do progress summaries stay in result cards and out of saved assistant/final text?
 
 ## Performance Wave - Spectra Responsiveness and Data Efficiency
 

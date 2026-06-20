@@ -3,18 +3,19 @@ import type { ArtifactBlueprint } from "../core";
 
 export const flashcardDeckContentSchema = z.object({
   cards: z.array(z.object({
-    id: z.string(),
-    front: z.string(),
-    back: z.string(),
+    id: z.string().trim().min(1),
+    front: z.string().trim().min(1),
+    back: z.string().trim().min(1),
     hint: z.string().optional(),
     sourceRefs: z.array(z.string()).optional(),
     confidence: z.enum(["unknown", "weak", "medium", "strong"]).optional(),
-  })),
+    section: z.string().optional(),
+  }).passthrough()).min(1),
   settings: z.object({
     shuffle: z.boolean().optional(),
     revealMode: z.enum(["click", "type"]).optional(),
-  }).optional(),
-});
+  }).passthrough().optional(),
+}).passthrough();
 
 export const flashcardDeckBlueprint: ArtifactBlueprint = {
   key: "flashcard_deck",
@@ -30,4 +31,3 @@ export const flashcardDeckBlueprint: ArtifactBlueprint = {
   operations: ["create", "generate_from_sources", "add_cards", "remove_cards", "improve_cards", "add_to_workspace"],
   searchableFields: ["cards.front", "cards.back", "cards.hint"],
 };
-

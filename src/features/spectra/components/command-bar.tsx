@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { ArrowUp, Command, Plus } from "lucide-react";
+import { ArrowUp, Command, Loader2, Plus } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 
@@ -10,10 +10,11 @@ type CommandBarProps = {
   menu?: ReactNode;
   context?: ReactNode;
   className?: string;
-  onSubmit?: (value: string) => void;
+  onSubmit?: (value: string) => void | boolean;
+  busy?: boolean;
 };
 
-export function CommandBar({ placeholder, menu, context, className, onSubmit }: CommandBarProps) {
+export function CommandBar({ placeholder, menu, context, className, onSubmit, busy = false }: CommandBarProps) {
   const [value, setValue] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -51,9 +52,10 @@ export function CommandBar({ placeholder, menu, context, className, onSubmit }: 
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault();
+              if (busy) return;
               const next = value.trim();
               if (!next) return;
-              onSubmit?.(next);
+              if (onSubmit?.(next) === false) return;
               setValue("");
               setMenuOpen(false);
             }
@@ -67,18 +69,18 @@ export function CommandBar({ placeholder, menu, context, className, onSubmit }: 
         </span>
         <button
           type="button"
-          disabled={!value.trim()}
+          disabled={!value.trim() || busy}
           onClick={() => {
             const next = value.trim();
             if (!next) return;
-            onSubmit?.(next);
+            if (onSubmit?.(next) === false) return;
             setValue("");
             setMenuOpen(false);
           }}
           className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] bg-[var(--text-primary)] text-[var(--bg-primary)] disabled:bg-[var(--bg-secondary)] disabled:text-[var(--text-tertiary)]"
           aria-label="Send command"
         >
-          <ArrowUp className="h-4 w-4" />
+          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowUp className="h-4 w-4" />}
         </button>
       </div>
     </div>

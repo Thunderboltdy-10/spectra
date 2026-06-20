@@ -25,11 +25,13 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
+import { useSpectraRun } from "../ai/use-spectra-run";
 import { createDefaultArtifactPayload, type ArtifactPayload } from "../components/artifact-blueprint-sheet";
 import { ArtifactCard, blueprintMeta } from "../components/artifact-card";
 import { ArtifactStudio, StudioTabRail, useArtifactStudioState } from "../components/artifact-studio";
 import { CommandBar } from "../components/command-bar";
-import { ResultCardStack, type ResultCardView } from "../components/result-card";
+import { ResultCardStack } from "../components/result-card";
+import { RunDetailPanel } from "../components/run-detail-panel";
 import {
   artifactsByDemoKey,
   formatRelativeTime,
@@ -903,7 +905,7 @@ export function WorkspaceShell() {
       setSelectedWorkspaceId(workspaceId);
       setOverview((current) => current
         ? { ...current, selectedWorkspaceId: workspaceId, workspace: result.workspace }
-        : { workspaces: [], selectedWorkspaceId: workspaceId, workspace: result.workspace, artifacts: [], runs: [] });
+        : { workspaces: [], selectedWorkspaceId: workspaceId, workspace: result.workspace, artifacts: [], runs: [], resultCards: [] });
     } catch (error) {
       setSelectedWorkspaceId(undefined);
       setSelection(null);
@@ -944,13 +946,22 @@ export function WorkspaceShell() {
   const selectedArtifact = selection?.type === "artifact" ? entries.find((entry) => entry.item._id === selection.itemId)?.artifact ?? null : null;
   const commandFocusArtifact = studio.isOpen ? studio.activeArtifact : selectedArtifact;
   const selectedRun = selection?.type === "run" ? workspaceRuns.find((run) => run._id === selection.runId) ?? null : null;
-  const recentRunCards: ResultCardView[] = workspaceRuns.slice(0, 2).map((run) => ({
-    id: run._id,
-    status: run.status,
-    title: run.status === "completed" ? run.userPrompt : "Reviewing workspace context",
-    summary: run.finalSummary ?? run.error ?? run.userPrompt,
-    meta: formatRelativeTime(run.createdAt),
-  }));
+  const initialResultCards = useMemo(
+    () => (overview?.resultCards ?? []).filter((card) => card.run?.sourceSurface !== "chat"),
+    [overview?.resultCards],
+  );
+  const runEngine = useSpectraRun({
+    surface: commandFocusArtifact ? "artifact" : "workspace",
+    workspaceId: selectedWorkspaceId,
+    artifactId: commandFocusArtifact?._id,
+    initialCards: initialResultCards,
+    onDataChanged: () => loadOverview(selectedWorkspaceId),
+    onOpenArtifact: async (artifactId) => {
+      const refreshed = await loadOverview(selectedWorkspaceId);
+      const artifact = refreshed?.artifacts.find((item) => item._id === artifactId);
+      if (artifact) studio.openSplit(artifact);
+    },
+  });
 
   function setActiveHubDestination(label: string, workspaceId?: string) {
     studio.closeStudio();
@@ -1314,15 +1325,23 @@ export function WorkspaceShell() {
       )}
           <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 bg-[linear-gradient(to_top,var(--bg-primary)_72%,transparent)] px-8 pb-5 pt-12">
             <div className="pointer-events-auto mx-auto max-w-[880px]">
-              <ResultCardStack cards={recentRunCards} className="mb-2" />
+              <ResultCardStack cards={runEngine.cards} className="mb-2" onOpen={runEngine.openDetails} onAction={(card, action, targetId) => void runEngine.onCardAction(card, action, targetId)} />
               <CommandBar
                 placeholder={commandFocusArtifact ? `Act on ${commandFocusArtifact.title}...` : workspace ? "Work with this workspace..." : "Ask across your workspaces..."}
                 context={commandFocusArtifact ? (() => {
                   const meta = blueprintMeta[commandFocusArtifact.blueprintKey];
                   const Icon = meta.icon;
-                  return <span className="flex items-center gap-2 text-[12px] font-medium text-[var(--text-primary)]"><Icon className="h-4 w-4" style={{ color: meta.color }} />{meta.label}</span>;
-                })() : <span className="flex items-center gap-2 text-[12px] font-medium text-[var(--text-primary)]"><Sprout className="h-4 w-4 text-[var(--mode-document)]" />{workspace?.title ?? "Workspaces"}</span>}
-                onSubmit={() => toast.message("Real AI execution is reserved for the operation engine wave.")}
+                  return <span className="flex items-center gap-2 text-[12px] font-medium text-[var(--text-primary)]" title="Focus is a context hint; your prompt can override it."><Icon className="h-4 w-4" style={{ color: meta.color }} /><span className="text-[10px] uppercase tracking-[0.08em] text-[var(--text-tertiary)]">Hint</span>{commandFocusArtifact.title}</span>;
+                })() : <span className="flex items-center gap-2 text-[12px] font-medium text-[var(--text-primary)]" title="Workspace context is a hint; your prompt can override it."><Sprout className="h-4 w-4 text-[var(--mode-document)]" /><span className="text-[10px] uppercase tracking-[0.08em] text-[var(--text-tertiary)]">Context</span>{workspace?.title ?? "Workspaces"}</span>}
+                onSubmit={(prompt) => {
+                  if (commandFocusArtifact && studio.dirtyIds.has(commandFocusArtifact._id)) {
+                    toast.message("Save this artifact before asking Spectra to update it.");
+                    return false;
+                  }
+                  void runEngine.run(prompt);
+                  return true;
+                }}
+                busy={runEngine.submitting}
                 menu={(
                   <div>
                     {selectedWorkspaceId ? createTypes.map((type) => {
@@ -1342,6 +1361,14 @@ export function WorkspaceShell() {
               />
             </div>
           </div>
+          {runEngine.selectedRunId && runEngine.cards.find((card) => card.runId === runEngine.selectedRunId) ? (
+            <RunDetailPanel
+              runId={runEngine.selectedRunId}
+              card={runEngine.cards.find((card) => card.runId === runEngine.selectedRunId)!}
+              onClose={runEngine.closeDetails}
+              onAction={(card, action, targetId) => void runEngine.onCardAction(card, action, targetId)}
+            />
+          ) : null}
         </div>
       </div>
     </div>

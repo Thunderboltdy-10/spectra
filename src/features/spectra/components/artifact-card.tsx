@@ -109,7 +109,7 @@ export function ArtifactCard({
             </div>
           ) : null}
           <div className="mt-3 flex min-h-7 items-end justify-between gap-2">
-            <div className="min-w-0 truncate text-[11px] text-[var(--text-tertiary)]">{artifact.placement === "workspace" ? "In workspace" : "Inbox"}</div>
+            <div className="min-w-0 truncate text-[11px] text-[var(--text-tertiary)]">{artifact.placement === "workspace" ? "In workspace" : "Unplaced"}</div>
             {actions ? <div className="flex shrink-0 items-center gap-1.5" onClick={(event) => event.stopPropagation()}>{actions}</div> : null}
           </div>
         </div>

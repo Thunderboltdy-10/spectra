@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { ArrowUp, Command, Loader2, Plus } from "lucide-react";
+import { ArrowUp, Loader2, Plus } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 
@@ -63,10 +63,6 @@ export function CommandBar({ placeholder, menu, context, className, onSubmit, bu
           placeholder={placeholder}
           className="max-h-[80px] min-h-9 min-w-0 flex-1 resize-none bg-transparent px-1 py-2 text-[14px] leading-5 text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
         />
-        <span className="hidden h-7 items-center gap-1 rounded-[6px] bg-[var(--bg-secondary)] px-2 text-[11px] text-[var(--text-tertiary)] sm:flex">
-          <Command className="h-3 w-3" />
-          K
-        </span>
         <button
           type="button"
           disabled={!value.trim() || busy}

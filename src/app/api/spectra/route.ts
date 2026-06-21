@@ -278,6 +278,15 @@ export async function POST(request: NextRequest) {
       return ok(result);
     }
 
+    if (action === "setWorkspaceItemPinned") {
+      const result = await spectraMutation("spectraWorkspaceItems:setPinned", {
+        actorClerkId: actor.clerkId,
+        workspaceItemId: requireString(body.workspaceItemId, "workspaceItemId"),
+        pinned: body.pinned === true,
+      });
+      return ok(result);
+    }
+
     if (action === "hideResultCard") {
       const result = await spectraMutation("spectraRuns:hideResultCard", {
         actorClerkId: actor.clerkId,

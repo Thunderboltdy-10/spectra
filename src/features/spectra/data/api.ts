@@ -202,7 +202,7 @@ export function toArtifactCardView(artifact: SpectraArtifact): ArtifactCardView 
     summary: artifact.summary ?? "No summary yet.",
     meta: placements.length > 0
       ? placements.map((placement) => placement.workspaceTitle).join(", ")
-      : "Inbox",
+      : "Unplaced",
     placement: artifact.placementStatus ?? (placements.length > 0 ? "workspace" : "inbox"),
   };
 }

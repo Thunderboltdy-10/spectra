@@ -53,7 +53,7 @@ export const create = mutation({
       icon: args.icon?.trim() || "Sparkles",
       color: args.color?.trim() || "cyan",
       status: "active",
-      defaultView: args.defaultView ?? "cards",
+      defaultView: args.defaultView ?? "library",
       createdAt: now,
       updatedAt: now,
       lastActivityAt: now,
@@ -110,4 +110,3 @@ export const archive = mutation({
     return { workspaceId: args.workspaceId };
   },
 });
-

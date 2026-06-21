@@ -167,3 +167,27 @@ export const hide = mutation({
     };
   },
 });
+
+export const setPinned = mutation({
+  args: {
+    actorClerkId: v.string(),
+    workspaceItemId: v.id("spectraWorkspaceItems"),
+    pinned: v.boolean(),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireSpectraActor(ctx, args.actorClerkId);
+    const item = await ctx.db.get(args.workspaceItemId);
+    if (!item) throw new Error("Workspace item not found");
+    const workspace = await ctx.db.get(item.workspaceId);
+    if (!workspace || workspace.ownerUserId !== actor._id || workspace.orgId !== actor.orgId) {
+      throw new Error("Workspace item not found");
+    }
+    const now = Date.now();
+    await ctx.db.patch(args.workspaceItemId, {
+      viewData: { ...item.viewData, pinned: args.pinned },
+      updatedAt: now,
+    });
+    await ctx.db.patch(item.workspaceId, { updatedAt: now, lastActivityAt: now });
+    return { workspaceItemId: args.workspaceItemId, pinned: args.pinned };
+  },
+});

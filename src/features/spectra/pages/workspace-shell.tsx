@@ -10,10 +10,11 @@ import {
   FileText,
   HelpCircle,
   Home,
-  LayoutGrid,
   List,
   Loader2,
   MessageSquare,
+  MoreHorizontal,
+  Pin,
   Plus,
   Rows3,
   Settings,
@@ -32,8 +33,8 @@ import { ArtifactStudio, StudioTabRail, useArtifactStudioState } from "../compon
 import { CommandBar } from "../components/command-bar";
 import { ResultCardStack } from "../components/result-card";
 import { RunDetailPanel } from "../components/run-detail-panel";
+import { ObjectLibrary } from "../components/object-library";
 import {
-  artifactsByDemoKey,
   formatRelativeTime,
   formatShortDate,
   artifactPlacements,
@@ -56,7 +57,7 @@ import {
   type SpectraWorkspaceItem,
 } from "../data/api";
 
-type ViewMode = "cards" | "timeline" | "library" | "canvas";
+type ViewMode = "timeline" | "library" | "canvas";
 type Selection = { type: "artifact"; itemId: string; artifactId: string } | { type: "run"; runId: string } | null;
 type WorkspaceHubTab = { id: string; label: string; workspaceId?: string };
 
@@ -73,9 +74,8 @@ const createTypes: Array<{ key: SpectraBlueprintKey; label: string; icon: Lucide
 ];
 
 const viewModes: Array<{ key: ViewMode; label: string; icon: LucideIcon }> = [
-  { key: "cards", label: "Cards", icon: LayoutGrid },
-  { key: "timeline", label: "Timeline", icon: Rows3 },
   { key: "library", label: "Library", icon: BookOpen },
+  { key: "timeline", label: "Timeline", icon: Rows3 },
   { key: "canvas", label: "Canvas", icon: Sparkles },
 ];
 
@@ -174,43 +174,57 @@ function WorkspaceRail({
 function WorkspaceHome({
   overview,
   onSelect,
+  onOpenArtifact,
+  onAddArtifactToWorkspace,
+  onCreateArtifact,
 }: {
   overview: SpectraOverview | null;
   onSelect: (workspaceId: string) => void;
+  onOpenArtifact: (artifact: SpectraArtifact) => void;
+  onAddArtifactToWorkspace: (artifact: SpectraArtifact, workspaceId: string) => void;
+  onCreateArtifact: (blueprintKey: SpectraBlueprintKey, workspaceId?: string) => void;
 }) {
   const workspaces = overview?.workspaces ?? [];
   const artifacts = overview?.artifacts ?? [];
-  const recent = artifacts.slice(0, 5);
+  const unplacedCount = artifacts.filter((artifact) => artifactPlacements(artifact).length === 0).length;
+  const activity = artifacts
+    .map((artifact) => ({ id: artifact._id, time: artifact.updatedAt, title: artifact.title, detail: Math.abs(artifact.updatedAt - artifact.createdAt) < 1_000 ? "Created" : "Updated", artifact }))
+    .sort((a, b) => b.time - a.time)
+    .slice(0, 8);
 
   return (
-    <main className="min-h-0 flex-1 overflow-y-auto bg-[radial-gradient(circle_at_34%_0%,color-mix(in_oklab,var(--bg-elevated)_68%,transparent),transparent_38%),var(--bg-primary)] px-8 pb-[150px] pt-8">
-      <div className="mx-auto max-w-6xl">
+    <main className="min-h-0 flex-1 overflow-y-auto bg-[radial-gradient(circle_at_22%_-5%,color-mix(in_oklab,var(--accent-cyan)_7%,transparent),transparent_34%),var(--bg-primary)] px-8 pb-[150px] pt-8">
+      <div className="mx-auto max-w-[1320px]">
         <div className="flex items-end justify-between gap-5">
           <div>
-            <h1 className="font-display text-[34px] font-semibold leading-none text-[var(--text-primary)]">Workspace Home</h1>
-            <p className="mt-3 text-[14px] text-[var(--text-secondary)]">Choose a workspace to continue your school work.</p>
+            <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-tertiary)]">Spectra / Workspace</div>
+            <h1 className="font-display text-[36px] font-semibold leading-[1.15] text-[var(--text-primary)]">Mission control</h1>
+            <p className="mt-2 text-[14px] text-[var(--text-secondary)]">Every workspace and object, from one working surface.</p>
           </div>
-          <div className="hidden items-center gap-5 text-[12px] text-[var(--text-secondary)] md:flex">
-            <span>{workspaces.length} workspaces</span>
-            <span>{artifacts.length} artifacts</span>
+          <div className="hidden items-center gap-2 text-[11px] text-[var(--text-secondary)] md:flex">
+            <span className="rounded-full border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-1.5">{workspaces.length} workspaces</span>
+            <span className="rounded-full border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-1.5">{artifacts.length} objects</span>
+            <span className="rounded-full border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-1.5">{unplacedCount} unplaced</span>
           </div>
         </div>
-        <div className="mt-8 grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
-          <div className="grid content-start gap-4 md:grid-cols-2">
+
+        <div className="mt-8 grid gap-6 xl:grid-cols-[minmax(0,1fr)_330px]">
+          <section>
+            <div className="mb-3 flex items-center justify-between"><div><h2 className="font-display text-[20px] font-semibold text-[var(--text-primary)]">Workspaces</h2><p className="mt-1 text-[12px] text-[var(--text-secondary)]">Enter a focused working room</p></div></div>
+            <div className="grid content-start gap-3 md:grid-cols-2">
           {workspaces.map((workspace, index) => {
             const accent = workspaceAccent(workspace, index);
             const Icon = iconForWorkspace(workspace, index);
             const count = workspaceArtifactCount(workspace, artifacts);
             return (
-              <button
+              <div
                 key={workspace._id}
-                type="button"
-                className="group relative min-h-[182px] overflow-hidden rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5 text-left shadow-[0_12px_32px_rgba(27,20,12,0.045)] transition duration-200 hover:-translate-y-0.5 hover:border-[color-mix(in_oklab,var(--text-tertiary)_38%,var(--border-default))]"
+                className="group relative min-h-[142px] overflow-hidden rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 text-left shadow-[0_8px_24px_rgba(27,20,12,0.035)] transition duration-200 hover:-translate-y-0.5 hover:border-[color-mix(in_oklab,var(--text-tertiary)_38%,var(--border-default))]"
                 style={{
                   background: `radial-gradient(circle at 88% 20%, color-mix(in oklab, ${accent.color} 15%, transparent) 0 20%, transparent 21%), linear-gradient(135deg, ${accent.soft}, var(--bg-elevated) 62%)`,
                 }}
-                onClick={() => onSelect(workspace._id)}
               >
+                <button type="button" className="absolute inset-0 z-[1]" onClick={() => onSelect(workspace._id)} aria-label={`Open ${workspace.title} workspace`} />
                 <div className="pointer-events-none absolute inset-x-0 top-0 h-1" style={{ background: accent.color }} />
                 <div className="pointer-events-none absolute inset-0 opacity-[0.18] [background-image:radial-gradient(color-mix(in_oklab,var(--text-primary)_16%,transparent)_0.45px,transparent_0.45px)] [background-size:7px_7px]" />
                 <div className="flex items-start gap-3">
@@ -220,38 +234,41 @@ function WorkspaceHome({
                   <span className="min-w-0 flex-1">
                     <span className="block truncate font-display text-[22px] font-semibold leading-tight text-[var(--text-primary)]">{workspace.title}</span>
                     <span className="mt-1 line-clamp-2 block text-[12px] leading-5 text-[var(--text-secondary)]">{workspace.description}</span>
-                    <span className="mt-6 flex items-center gap-3 text-[11px] text-[var(--text-tertiary)]">
+                    <span className="mt-4 flex items-center gap-3 text-[11px] text-[var(--text-tertiary)]">
                       <span className="rounded-[7px] border border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_70%,transparent)] px-2 py-1">{count} artifacts</span>
                       <span>Updated {formatRelativeTime(workspace.lastActivityAt)}</span>
                     </span>
                   </span>
                 </div>
-              </button>
+              </div>
             );
           })}
-          </div>
-          <aside className="rounded-[8px] border border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_78%,transparent)] p-4">
+            </div>
+          </section>
+          <aside className="self-start rounded-[10px] border border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_78%,transparent)] p-4">
             <div className="flex items-center justify-between">
               <h2 className="text-[14px] font-semibold text-[var(--text-primary)]">Recent activity</h2>
               <span className="h-2 w-2 rounded-full bg-[var(--success)]" />
             </div>
             <div className="mt-4 space-y-3">
-              {recent.map((artifact) => {
-                const meta = blueprintMeta[artifact.blueprintKey];
-                const Icon = meta.icon;
+              {activity.map((entry) => {
                 return (
-                  <div key={artifact._id} className="flex items-center gap-3">
-                    <Icon className="h-4 w-4 shrink-0" style={{ color: meta.color }} />
+                  <button key={entry.id} type="button" className="flex w-full items-center gap-3 rounded-[7px] p-1.5 text-left hover:bg-[var(--bg-hover)]" onClick={() => onOpenArtifact(entry.artifact)}>
+                    <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--accent-cyan)]" />
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-[12px] font-medium text-[var(--text-primary)]">{artifact.title}</div>
-                      <div className="text-[11px] text-[var(--text-secondary)]">{formatRelativeTime(artifact.updatedAt)}</div>
+                      <div className="truncate text-[12px] font-medium text-[var(--text-primary)]">{entry.title}</div>
+                      <div className="text-[11px] text-[var(--text-secondary)]">{entry.detail} · {formatRelativeTime(entry.time)}</div>
                     </div>
-                  </div>
+                  </button>
                 );
               })}
-              {recent.length === 0 ? <div className="text-[13px] text-[var(--text-secondary)]">No recent artifacts yet.</div> : null}
+              {activity.length === 0 ? <div className="text-[13px] text-[var(--text-secondary)]">No activity yet.</div> : null}
             </div>
           </aside>
+        </div>
+
+        <div className="mt-10 border-t border-[var(--border-default)] pt-7">
+          <ObjectLibrary entries={artifacts.map((artifact) => ({ artifact }))} workspaces={workspaces} groupBy="workspace" title="Global object library" subtitle="All objects, ordered by workspace" onOpen={(entry) => onOpenArtifact(entry.artifact)} onAddToWorkspace={(entry, workspaceId) => onAddArtifactToWorkspace(entry.artifact, workspaceId)} onCreateArtifact={onCreateArtifact} />
         </div>
       </div>
     </main>
@@ -266,6 +283,7 @@ function WorkspaceHeader({
   setViewMode,
   busy,
   onCreateArtifact,
+  onArchiveWorkspace,
 }: {
   workspace: SpectraWorkspace | null;
   items: SpectraWorkspaceItem[];
@@ -274,9 +292,12 @@ function WorkspaceHeader({
   setViewMode: (mode: ViewMode) => void;
   busy: string | null;
   onCreateArtifact: (type: SpectraBlueprintKey) => void;
+  onArchiveWorkspace: () => void;
 }) {
   const [createOpen, setCreateOpen] = useState(false);
+  const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
   const createRef = useOutsideClick<HTMLDivElement>(createOpen, () => setCreateOpen(false));
+  const workspaceMenuRef = useOutsideClick<HTMLDivElement>(workspaceMenuOpen, () => setWorkspaceMenuOpen(false));
   const artifactCount = items.filter((item) => item.artifact).length;
   const threadCount = workspaceThreadCount(items);
   const cardCount = items.filter((item) => item.viewData.pinned).length;
@@ -286,9 +307,14 @@ function WorkspaceHeader({
     <header className="border-b border-[var(--border-default)] bg-[var(--bg-primary)] px-8 pb-3 pt-7">
       <div className="flex items-start justify-between gap-5">
         <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <h1 className="truncate font-display text-[34px] font-semibold leading-none text-[var(--text-primary)]">{workspace?.title ?? "Workspace"}</h1>
-            <ChevronDown className="h-4 w-4 text-[var(--text-secondary)]" />
+          <div className="flex items-center gap-2" ref={workspaceMenuRef}>
+            <h1 className="truncate pb-1 font-display text-[34px] font-semibold leading-[1.15] text-[var(--text-primary)]">{workspace?.title ?? "Workspace"}</h1>
+            <div className="relative">
+              <button type="button" className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" onClick={() => setWorkspaceMenuOpen((open) => !open)} aria-label="Workspace menu"><MoreHorizontal className="h-4 w-4" /></button>
+              {workspaceMenuOpen ? <div className="absolute left-0 top-[calc(100%+6px)] z-30 w-[210px] rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 shadow-[0_16px_36px_rgba(27,20,12,0.14)]">
+                <button type="button" className={`${menuItemClass()} text-[var(--danger)]`} onClick={() => { setWorkspaceMenuOpen(false); onArchiveWorkspace(); }}><Trash2 className="h-4 w-4" />Archive workspace</button>
+              </div> : null}
+            </div>
           </div>
           <p className="mt-3 text-[14px] text-[var(--text-secondary)]">{workspace?.description ?? "All your work, organized and ready."}</p>
         </div>
@@ -325,7 +351,7 @@ function WorkspaceHeader({
       <div className="mt-6 flex flex-wrap items-center gap-8 text-[12px] text-[var(--text-secondary)]">
         <div className="flex items-center gap-2"><FileText className="h-4 w-4" /><strong className="text-[var(--text-primary)]">{artifactCount}</strong><span>Artifacts</span></div>
         <div className="flex items-center gap-2"><MessageSquare className="h-4 w-4" /><strong className="text-[var(--text-primary)]">{threadCount}</strong><span>Threads</span></div>
-        <div className="flex items-center gap-2"><BookOpen className="h-4 w-4" /><strong className="text-[var(--text-primary)]">{cardCount || 4}</strong><span>Cards</span></div>
+        <div className="flex items-center gap-2"><Pin className="h-4 w-4" /><strong className="text-[var(--text-primary)]">{cardCount}</strong><span>Pinned</span></div>
         <div className="flex items-center gap-2"><Sparkles className="h-4 w-4" /><strong className="text-[var(--text-primary)]">{activeRuns}</strong><span>Active runs</span></div>
       </div>
       <nav className="mt-6 flex items-center gap-1 rounded-[10px] bg-[color-mix(in_oklab,var(--bg-elevated)_56%,transparent)] p-1">
@@ -468,134 +494,170 @@ function TimelineView({
   onSelectRun: (run: SpectraRun) => void;
   onSelectArtifact: (item: SpectraWorkspaceItem, artifact: SpectraArtifact) => void;
 }) {
-  const runRows = runs.slice(0, 5).map((run, index) => ({
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [containerWidth, setContainerWidth] = useState(900);
+  const runRows = runs.slice(0, 8).map((run) => ({
     id: `run:${run._id}`,
     kind: "run" as const,
     run,
-    entry: entries.find((candidate) => candidate.artifact._id === run.artifactId) ?? entries[index],
-    title: run.userPrompt,
+    entry: entries.find((candidate) => candidate.artifact._id === run.artifactId),
+    title: run.status === "completed" ? "AI run completed" : `AI run ${run.status.replace("_", " ")}`,
     summary: run.finalSummary ?? run.error ?? "Workspace run activity.",
     time: run.createdAt,
   }));
-  const artifactRows = entries.slice(0, 6).map((entry) => ({
+  const artifactRows = entries.slice(0, 12).map((entry) => ({
     id: `artifact:${entry.item._id}`,
     kind: "artifact" as const,
     entry,
-    title: `${entry.card ? blueprintMeta[entry.card.blueprintKey].label : "Artifact"} updated: ${entry.artifact.title}`,
+    title: entry.artifact.createdAt === entry.artifact.updatedAt ? `${blueprintMeta[entry.artifact.blueprintKey].label} created` : `${blueprintMeta[entry.artifact.blueprintKey].label} updated`,
     summary: entry.artifact.summary ?? entry.card?.summary ?? "Object updated in this workspace.",
     time: entry.item.updatedAt,
   }));
-  const rows = (runRows.length > 0 ? runRows : artifactRows).sort((a, b) => b.time - a.time);
+  const rows = [...runRows, ...artifactRows].sort((a, b) => b.time - a.time);
+  const selectedId = selected?.type === "artifact" ? `artifact:${selected.itemId}` : selected?.type === "run" ? `run:${selected.runId}` : null;
+  const cardWidth = containerWidth < 720 ? 178 : 208;
+  const sidePadding = Math.max(28, Math.min(52, containerWidth * 0.05));
+  const columnCount = Math.max(2, Math.min(5, Math.floor((containerWidth - sidePadding * 2) / (cardWidth + 28))));
+  const rowHeight = 142;
+  const groupGap = 92;
+  const firstLineY = 142;
+  const centerLeft = sidePadding + cardWidth / 2;
+  const centerRight = containerWidth - sidePadding - cardWidth / 2;
+  const lineLeft = Math.max(14, centerLeft - 18);
+  const lineRight = Math.min(containerWidth - 14, centerRight + 18);
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const dateGroups = rows.reduce<Array<{ key: string; label: string; rows: typeof rows }>>((groups, row) => {
+    const date = new Date(row.time);
+    date.setHours(0, 0, 0, 0);
+    const days = Math.max(0, Math.round((todayStart.getTime() - date.getTime()) / 86_400_000));
+    const key = String(date.getTime());
+    const label = days === 0 ? "Today" : days === 1 ? "Yesterday" : days < 7 ? `${days} days ago` : date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    const group = groups.find((candidate) => candidate.key === key);
+    if (group) group.rows.push(row);
+    else groups.push({ key, label, rows: [row] });
+    return groups;
+  }, []);
+  let laneCursor = 0;
+  const dayLayouts = dateGroups.map((group, groupIndex) => {
+    const laneCount = Math.max(1, Math.ceil(group.rows.length / columnCount));
+    const startLane = laneCursor;
+    const startY = firstLineY + startLane * rowHeight + groupIndex * groupGap;
+    laneCursor += laneCount;
+    return { ...group, groupIndex, laneCount, startLane, startY };
+  });
+  const nodes = dayLayouts.flatMap((group) => group.rows.map((row, groupItemIndex) => {
+    const localLane = Math.floor(groupItemIndex / columnCount);
+    const lane = group.startLane + localLane;
+    const laneIndex = groupItemIndex % columnCount;
+    const laneSize = Math.min(columnCount, group.rows.length - localLane * columnCount);
+    const progress = laneSize === 1 ? 0.5 : laneIndex / (laneSize - 1);
+    const directionProgress = lane % 2 === 0 ? 1 - progress : progress;
+    const x = centerLeft + directionProgress * Math.max(0, centerRight - centerLeft);
+    const lineY = group.startY + localLane * rowHeight;
+    return { ...row, lane, x, lineY, top: lineY - 88, dayKey: group.key };
+  }));
+  const laneYs = Array.from(new Set(nodes.map((node) => node.lineY))).sort((a, b) => a - b);
+  const canvasHeight = (laneYs[laneYs.length - 1] ?? firstLineY) + 64;
+  let path = `M ${lineRight} ${laneYs[0] ?? firstLineY} H ${lineLeft}`;
+  for (let lane = 1; lane < laneYs.length; lane += 1) {
+    const previousY = laneYs[lane - 1];
+    const nextY = laneYs[lane];
+    const atLeft = lane % 2 === 1;
+    const edge = atLeft ? lineLeft : lineRight;
+    const bulge = atLeft ? edge - 22 : edge + 22;
+    path += ` C ${bulge} ${previousY + 48}, ${bulge} ${nextY - 48}, ${edge} ${nextY}`;
+    path += atLeft ? ` H ${lineRight}` : ` H ${lineLeft}`;
+  }
+
+  useEffect(() => {
+    const element = containerRef.current;
+    if (!element) return;
+    const observer = new ResizeObserver(([entry]) => setContainerWidth(Math.max(420, Math.round(entry.contentRect.width))));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!selectedId) return;
+    const timer = window.setTimeout(() => {
+      const target = containerRef.current?.querySelector<HTMLElement>(`[data-timeline-id="${selectedId}"]`);
+      target?.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+    }, 140);
+    return () => window.clearTimeout(timer);
+  }, [containerWidth, selectedId]);
 
   if (rows.length === 0) {
     return <EmptyWorkspaceState title="No activity yet" message="Runs and object changes will appear here as the workspace becomes active." />;
   }
 
   return (
-    <div className="space-y-8">
-      {["Today", "Yesterday", "Earlier this week"].map((group, groupIndex) => (
-        <section key={group}>
-          <h2 className="mb-3 font-display text-[17px] font-semibold text-[var(--text-primary)]">{group}</h2>
-          <div className="relative space-y-3 pl-24 before:absolute before:left-[13px] before:top-0 before:h-full before:w-px before:bg-[var(--border-default)]">
-            {rows.slice(groupIndex * 2, groupIndex * 2 + 2).map((row) => {
-              const entry = row.entry;
-              const selectedRun = row.kind === "run" && selected?.type === "run" && selected.runId === row.run._id;
-              const selectedArtifact = row.kind === "artifact" && selected?.type === "artifact" && selected.itemId === entry.item._id;
-              const card = entry?.card;
-              return (
-                <button
-                  key={row.id}
-                  type="button"
-                  className={`relative w-full rounded-[8px] border bg-[var(--bg-elevated)] p-4 text-left ${
-                    selectedRun || selectedArtifact ? "border-[#8b6ff0]" : "border-[var(--border-default)] hover:bg-[color-mix(in_oklab,var(--bg-hover)_55%,var(--bg-elevated))]"
-                  }`}
-                  onClick={() => row.kind === "run" ? onSelectRun(row.run) : onSelectArtifact(entry.item, entry.artifact)}
-                >
-                  <span className="absolute -left-[91px] top-4 flex items-center gap-3 text-[12px] text-[var(--text-secondary)]">
-                    <CheckCircle2 className="h-4 w-4 text-[var(--success)]" />
-                    {formatRelativeTime(row.time)}
-                  </span>
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0 flex-1">
-                      <div className="text-[14px] font-semibold text-[var(--text-primary)]">{row.title}</div>
-                      <p className="mt-1 line-clamp-2 text-[12px] text-[var(--text-secondary)]">{row.summary}</p>
-                      {card ? (
-                        <div className="mt-4 max-w-[520px] rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-3">
-                          <div className="flex items-center gap-3">
-                            {(() => {
-                              const meta = blueprintMeta[card.blueprintKey];
-                              const Icon = meta.icon;
-                              return <Icon className="h-5 w-5" style={{ color: meta.color }} />;
-                            })()}
-                            <div>
-                              <div className="text-[12px] text-[var(--text-secondary)]">{blueprintMeta[card.blueprintKey].label}</div>
-                              <div className="text-[14px] font-semibold text-[var(--text-primary)]">{card.title}</div>
-                            </div>
-                          </div>
-                        </div>
-                      ) : null}
-                    </div>
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] border border-[var(--border-default)]">→</span>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </section>
-      ))}
+    <div ref={containerRef} className="relative min-w-0 overflow-hidden rounded-[12px] border border-[var(--border-default)] bg-[radial-gradient(circle_at_50%_0%,color-mix(in_oklab,var(--accent-cyan)_5%,transparent),transparent_34%),radial-gradient(var(--border-default)_0.55px,transparent_0.55px)] [background-size:auto,12px_12px]" style={{ height: canvasHeight }}>
+      <svg className="pointer-events-none absolute inset-0 h-full w-full overflow-visible" viewBox={`0 0 ${containerWidth} ${canvasHeight}`} preserveAspectRatio="none" aria-hidden="true">
+        <defs><linearGradient id="spectra-timeline-flow" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="var(--accent-cyan)" stopOpacity="0.78" /><stop offset="0.55" stopColor="#8b6ff0" stopOpacity="0.64" /><stop offset="1" stopColor="#d88922" stopOpacity="0.58" /></linearGradient></defs>
+        <path d={path} fill="none" stroke="var(--bg-elevated)" strokeWidth="9" strokeLinecap="round" strokeLinejoin="round" />
+        <path d={path} fill="none" stroke="url(#spectra-timeline-flow)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+      {dayLayouts.map((group) => <div key={group.key} className="absolute inset-x-5 z-[2] flex items-center gap-3" style={{ top: group.startY - 124 }}><span className="rounded-full border border-[color-mix(in_oklab,var(--accent-cyan)_24%,var(--border-default))] bg-[color-mix(in_oklab,var(--bg-elevated)_96%,transparent)] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--text-secondary)] shadow-[0_3px_10px_rgba(27,20,12,0.06)]">{group.label}</span><span className="h-px flex-1 bg-[linear-gradient(to_right,color-mix(in_oklab,var(--accent-cyan)_34%,var(--border-default)),transparent)]" /><span className="text-[10px] text-[var(--text-tertiary)]">{group.rows.length} event{group.rows.length === 1 ? "" : "s"}</span></div>)}
+      {nodes.map((node) => {
+        const entry = node.entry;
+        const active = node.id === selectedId;
+        const meta = entry ? blueprintMeta[entry.artifact.blueprintKey] : null;
+        const NodeIcon = meta?.icon;
+        return <div key={node.id} className="absolute z-[3]" style={{ width: cardWidth, left: node.x - cardWidth / 2, top: node.top }}>
+          <span className="absolute left-1/2 top-[66px] h-4 w-px -translate-x-1/2 bg-[color-mix(in_oklab,var(--accent-cyan)_42%,var(--border-default))]" />
+          <span className={`absolute left-1/2 top-[82px] h-3 w-3 -translate-x-1/2 rounded-full border-[3px] border-[var(--bg-primary)] shadow-[0_1px_5px_rgba(27,20,12,0.16)] ${active ? "bg-[#8b6ff0] ring-4 ring-[color-mix(in_oklab,#8b6ff0_16%,transparent)]" : "bg-[var(--accent-cyan)]"}`} />
+          <button data-timeline-id={node.id} type="button" className={`group flex min-h-[66px] w-full items-center gap-2.5 overflow-hidden rounded-[9px] border bg-[color-mix(in_oklab,var(--bg-elevated)_96%,transparent)] px-2.5 py-2 text-left shadow-[0_7px_20px_rgba(27,20,12,0.07)] backdrop-blur-sm transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_10px_25px_rgba(27,20,12,0.11)] ${active ? "border-[#8b6ff0] ring-2 ring-[color-mix(in_oklab,#8b6ff0_12%,transparent)]" : "border-[var(--border-default)]"}`} onClick={() => entry ? onSelectArtifact(entry.item, entry.artifact) : node.kind === "run" ? onSelectRun(node.run) : undefined}>
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[7px] bg-[var(--bg-primary)]">{NodeIcon && meta ? <NodeIcon className="h-4 w-4" style={{ color: meta.color }} /> : <Sparkles className="h-4 w-4 text-[var(--accent-cyan)]" />}</span>
+            <span className="min-w-0 flex-1"><span className="block truncate text-[12px] font-semibold text-[var(--text-primary)]">{entry?.artifact.title ?? node.title}</span><span className="mt-0.5 block truncate text-[10px] text-[var(--text-secondary)]">{node.title} · {formatRelativeTime(node.time)}</span></span>
+          </button>
+        </div>;
+      })}
     </div>
   );
 }
 
 function LibraryView({
   entries,
+  workspaceTitle,
   selected,
   onSelect,
+  onTogglePin,
+  onRemove,
+  busy,
+  onCreateArtifact,
 }: {
   entries: Array<{ item: SpectraWorkspaceItem; artifact: SpectraArtifact; card: ReturnType<typeof workspaceItemToCard> }>;
+  workspaceTitle: string;
   selected: Selection;
   onSelect: (item: SpectraWorkspaceItem, artifact: SpectraArtifact) => void;
+  onTogglePin: (item: SpectraWorkspaceItem) => void;
+  onRemove: (item: SpectraWorkspaceItem) => void;
+  busy: string | null;
+  onCreateArtifact: (blueprintKey: SpectraBlueprintKey) => void;
 }) {
   if (entries.length === 0) {
     return <EmptyWorkspaceState title="No library items here" message="Add artifacts to this workspace to group them by type." />;
   }
 
-  const groups = createTypes.map((type) => ({
-    key: type.key,
-    label: type.label,
-    icon: type.icon,
-    entries: entries.filter((entry) => entry.artifact.blueprintKey === type.key),
-  }));
-
   return (
-    <div className="grid gap-5 lg:grid-cols-2">
-      {groups.map((group) => {
-        const Icon = group.icon;
-        return (
-          <section key={group.key} className="rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)]">
-            <div className="flex h-11 items-center justify-between border-b border-[var(--border-default)] px-3">
-              <div className="flex items-center gap-2 text-[13px] font-semibold text-[var(--text-primary)]"><Icon className="h-4 w-4" />{group.label}</div>
-              <span className="text-[12px] text-[var(--text-tertiary)]">{group.entries.length}</span>
-            </div>
-            {group.entries.map((entry) => entry.card ? (
-              <button
-                key={entry.item._id}
-                type="button"
-                className={`flex w-full items-center justify-between gap-3 border-b border-[var(--border-default)] px-3 py-3 text-left last:border-b-0 ${
-                  selected?.type === "artifact" && selected.itemId === entry.item._id ? "bg-[color-mix(in_oklab,#8b6ff0_5%,var(--bg-elevated))]" : "hover:bg-[var(--bg-hover)]"
-                }`}
-                onClick={() => onSelect(entry.item, entry.artifact)}
-              >
-                <span className="min-w-0">
-                  <span className="block truncate text-[13px] font-medium text-[var(--text-primary)]">{entry.card.title}</span>
-                  <span className="block truncate text-[11px] text-[var(--text-secondary)]">{entry.card.summary}</span>
-                </span>
-                <span className="shrink-0 text-[11px] text-[var(--text-tertiary)]">{formatShortDate(entry.item.updatedAt)}</span>
-              </button>
-            ) : null)}
-          </section>
-        );
-      })}
+    <div className="space-y-7">
+      {entries.some((entry) => entry.item.viewData.pinned) ? <section>
+        <div className="mb-3 flex items-center gap-2 text-[12px] font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)]"><Pin className="h-3.5 w-3.5 text-[#b67616]" />Pinned in {workspaceTitle}</div>
+        <div className="flex gap-3 overflow-x-auto pb-2">{entries.filter((entry) => entry.item.viewData.pinned).map((entry) => { const meta = blueprintMeta[entry.artifact.blueprintKey]; const Icon = meta.icon; return <button key={entry.item._id} type="button" className="group relative min-h-[130px] min-w-[350px] max-w-[390px] overflow-hidden rounded-[12px] border border-[color-mix(in_oklab,#b67616_24%,var(--border-default))] bg-[linear-gradient(118deg,color-mix(in_oklab,#b67616_8%,var(--bg-elevated)),var(--bg-elevated)_68%)] p-4 text-left shadow-[0_10px_28px_rgba(27,20,12,0.065)] transition hover:-translate-y-0.5 hover:shadow-[0_14px_34px_rgba(27,20,12,0.09)]" onClick={() => onSelect(entry.item, entry.artifact)}><span className="pointer-events-none absolute bottom-0 right-0 h-full w-[48%] opacity-30 [background-image:radial-gradient(color-mix(in_oklab,#b67616_40%,transparent)_0.6px,transparent_0.6px)] [background-size:7px_7px] [mask-image:linear-gradient(to_left,black,transparent)]" /><span className="relative flex items-start gap-3"><span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[9px] border border-[color-mix(in_oklab,currentColor_20%,transparent)] bg-[var(--bg-primary)]" style={{ color: meta.color }}><Icon className="h-5 w-5" /></span><span className="min-w-0 flex-1"><span className="block truncate font-display text-[16px] font-semibold text-[var(--text-primary)]">{entry.artifact.title}</span><span className="mt-1 block line-clamp-2 text-[11px] leading-[1.45] text-[var(--text-secondary)]">{entry.artifact.summary ?? "No summary yet."}</span><span className="mt-2 flex items-center gap-1.5 text-[10px] text-[var(--text-tertiary)]"><span className="rounded-[5px] bg-[var(--bg-secondary)] px-1.5 py-0.5">{meta.label}</span>{entry.artifact.tags.slice(0, 2).map((tag) => <span key={tag} className="max-w-[88px] truncate rounded-[5px] border border-[var(--border-default)] px-1.5 py-0.5">{tag}</span>)}<span className="ml-auto shrink-0">{formatRelativeTime(entry.item.updatedAt)}</span></span></span></span></button>; })}</div>
+      </section> : null}
+      <ObjectLibrary
+        entries={entries}
+        groupBy="type"
+        title="Workspace library"
+        subtitle="Objects ordered by type"
+        selectedArtifactId={selected?.type === "artifact" ? selected.artifactId : undefined}
+        busyKey={busy}
+        onOpen={(entry) => entry.item && onSelect(entry.item, entry.artifact)}
+        onTogglePin={(entry) => entry.item && onTogglePin(entry.item)}
+        onRemove={(entry) => entry.item && onRemove(entry.item)}
+        onCreateArtifact={(blueprintKey) => onCreateArtifact(blueprintKey)}
+      />
     </div>
   );
 }
@@ -609,76 +671,13 @@ function CanvasView({
   selectedArtifact: SpectraArtifact | null;
   onSelect: (item: SpectraWorkspaceItem, artifact: SpectraArtifact) => void;
 }) {
-  const byKey = artifactsByDemoKey(entries.map((entry) => entry.artifact));
-  const centerEntry = entries.find((entry) => entry.artifact._id === selectedArtifact?._id)
-    ?? entries.find((entry) => entry.artifact.title === "Photosynthesis comparison")
-    ?? entries[0];
-  const clusters = [
-    { title: "Photosynthesis & Light", keys: ["photosynthesis-overview", "light-dependent-reactions", "calvin-cycle-summary"], x: "3%", y: "4%", color: "#2fa66f" },
-    { title: "Cellular Respiration", keys: ["cell-respiration-notes", "glycolysis-summary", "krebs-cycle-overview"], x: "3%", y: "44%", color: "#d88922" },
-    { title: "Assessment", keys: ["respiration-check"], x: "70%", y: "5%", color: "#8b6ff0" },
-    { title: "Practice & Review", keys: ["chapter-5-flashcards", "biology-midterm-deck"], x: "70%", y: "36%", color: "#2f95d8" },
-    { title: "Analysis", keys: ["respiration-data-analysis"], x: "38%", y: "68%", color: "#2fa698" },
-    { title: "Next Steps", keys: ["enzyme-activity-factors"], x: "72%", y: "65%", color: "#42a875" },
-  ];
+  const groups = createTypes.map((type) => ({ ...type, entries: entries.filter((entry) => entry.artifact.blueprintKey === type.key) })).filter((group) => group.entries.length > 0);
 
   return (
-    <div className="relative min-h-[640px] overflow-hidden rounded-[8px] border border-[var(--border-default)] bg-[radial-gradient(var(--border-default)_0.7px,transparent_0.7px)] [background-size:18px_18px]">
-      <svg className="pointer-events-none absolute inset-0 h-full w-full text-[var(--border-default)]" aria-hidden="true">
-        <path d="M 330 150 C 430 150 430 245 535 245" fill="none" stroke="currentColor" strokeDasharray="4 5" />
-        <path d="M 330 365 C 430 365 430 285 535 285" fill="none" stroke="currentColor" strokeDasharray="4 5" />
-        <path d="M 660 245 C 770 245 770 155 895 155" fill="none" stroke="currentColor" strokeDasharray="4 5" />
-        <path d="M 620 390 C 630 470 635 500 645 552" fill="none" stroke="currentColor" strokeDasharray="4 5" />
-      </svg>
-      {clusters.map((cluster) => {
-        const keyed = cluster.keys
-          .map((key) => {
-            const artifact = byKey.get(key);
-            return artifact ? entries.find((candidate) => candidate.artifact._id === artifact._id) : undefined;
-          })
-          .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
-        const fallback = entries.filter((entry) => {
-          if (cluster.title.includes("Assessment")) return entry.artifact.blueprintKey === "quiz";
-          if (cluster.title.includes("Practice")) return entry.artifact.blueprintKey === "flashcard_deck" || entry.artifact.blueprintKey === "planner_task";
-          if (cluster.title.includes("Analysis")) return entry.artifact.blueprintKey === "thread_reference";
-          if (cluster.title.includes("Next")) return entry.artifact.blueprintKey === "planner_task" || entry.artifact.blueprintKey === "document";
-          return entry.artifact.blueprintKey === "document" || entry.artifact.blueprintKey === "thread_reference";
-        });
-        const clusterEntries = (keyed.length > 0 ? keyed : fallback).filter((entry) => entry.item._id !== centerEntry?.item._id).slice(0, 3);
-        return (
-          <div
-            key={cluster.title}
-            className="absolute w-[280px] rounded-[14px] border p-4 shadow-[0_10px_28px_rgba(27,20,12,0.05)]"
-            style={{ left: cluster.x, top: cluster.y, borderColor: `color-mix(in oklab, ${cluster.color} 20%, var(--border-default))`, background: `linear-gradient(135deg,color-mix(in oklab, ${cluster.color} 10%, var(--bg-elevated)),color-mix(in oklab,var(--bg-elevated)_76%,transparent))` }}
-          >
-            <div className="mb-3 flex items-center gap-2 text-[13px] font-semibold" style={{ color: cluster.color }}>
-              <span className="h-7 w-7 rounded-[8px] bg-[color-mix(in_oklab,currentColor_12%,white)]" />
-              {cluster.title}
-            </div>
-            <div className="grid gap-2">
-              {clusterEntries.map((entry) => {
-                const meta = blueprintMeta[entry.artifact.blueprintKey];
-                const Icon = meta.icon;
-                return (
-                  <button key={entry.item._id} type="button" className="rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 text-left shadow-[0_2px_8px_rgba(27,20,12,0.04)] transition hover:-translate-y-0.5" onClick={() => onSelect(entry.item, entry.artifact)}>
-                    <div className="flex items-center gap-2">
-                      <Icon className="h-4 w-4" style={{ color: meta.color }} />
-                      <span className="truncate text-[13px] font-semibold text-[var(--text-primary)]">{entry.artifact.title}</span>
-                    </div>
-                    <div className="mt-1 text-[11px] text-[var(--text-secondary)]">{meta.label}</div>
-                  </button>
-                );
-              })}
-              {clusterEntries.length === 0 ? <div className="rounded-[8px] border border-dashed border-[var(--border-default)] px-3 py-4 text-[12px] text-[var(--text-secondary)]">No matching objects yet.</div> : null}
-            </div>
-          </div>
-        );
-      })}
-      {centerEntry?.card ? (
-        <div className="absolute left-[38%] top-[25%] w-[320px]">
-          <ArtifactCard artifact={centerEntry.card} selected size="large" onSelect={() => onSelect(centerEntry.item, centerEntry.artifact)} />
-        </div>
-      ) : null}
+    <div className="h-full min-h-full overflow-auto rounded-[8px] border border-[var(--border-default)] bg-[radial-gradient(var(--border-default)_0.7px,transparent_0.7px)] p-4 [background-size:18px_18px]">
+      <div className="grid min-h-full auto-rows-min gap-4 lg:grid-cols-2 2xl:grid-cols-3">
+        {groups.map((group) => { const meta = blueprintMeta[group.key]; const Icon = meta.icon; return <section key={group.key} className="self-start rounded-[12px] border p-3 shadow-[0_8px_24px_rgba(27,20,12,0.04)]" style={{ borderColor: `color-mix(in oklab, ${meta.color} 20%, var(--border-default))`, background: meta.soft }}><header className="mb-3 flex items-center gap-2 px-1"><Icon className="h-4 w-4" style={{ color: meta.color }} /><span className="text-[13px] font-semibold text-[var(--text-primary)]">{group.label}</span><span className="ml-auto text-[11px] text-[var(--text-tertiary)]">{group.entries.length}</span></header><div className="grid gap-2 sm:grid-cols-2">{group.entries.map((entry) => <ArtifactCard key={entry.item._id} artifact={entry.card!} selected={selectedArtifact?._id === entry.artifact._id} quiet className="bg-[var(--bg-elevated)]" onSelect={() => onSelect(entry.item, entry.artifact)} />)}</div></section>; })}
+      </div>
     </div>
   );
 }
@@ -766,7 +765,7 @@ function Inspector({
         </InspectorSection>
         <InspectorSection title="Placement">
           <div className="rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 text-[13px] font-medium text-[var(--text-primary)]">
-            {selectedPlacements[0]?.workspaceTitle ?? workspace?.title ?? "Library inbox"}
+            {selectedPlacements[0]?.workspaceTitle ?? workspace?.title ?? "Unplaced"}
             <div className="mt-1 text-[11px] font-normal text-[var(--text-secondary)]">Workspace card</div>
           </div>
         </InspectorSection>
@@ -865,7 +864,7 @@ export function WorkspaceShell() {
   const [overview, setOverview] = useState<SpectraOverview | null>(null);
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | undefined>();
   const [selection, setSelection] = useState<Selection>(null);
-  const [viewMode, setViewMode] = useState<ViewMode>("cards");
+  const [viewMode, setViewMode] = useState<ViewMode>("library");
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [workspaceCreateOpen, setWorkspaceCreateOpen] = useState(false);
@@ -945,7 +944,6 @@ export function WorkspaceShell() {
     .filter((entry): entry is { item: SpectraWorkspaceItem; artifact: SpectraArtifact; card: NonNullable<ReturnType<typeof workspaceItemToCard>> } => Boolean(entry)), [overview?.workspace?.items]);
   const selectedArtifact = selection?.type === "artifact" ? entries.find((entry) => entry.item._id === selection.itemId)?.artifact ?? null : null;
   const commandFocusArtifact = studio.isOpen ? studio.activeArtifact : selectedArtifact;
-  const selectedRun = selection?.type === "run" ? workspaceRuns.find((run) => run._id === selection.runId) ?? null : null;
   const initialResultCards = useMemo(
     () => (overview?.resultCards ?? []).filter((card) => card.run?.sourceSurface !== "chat"),
     [overview?.resultCards],
@@ -978,7 +976,7 @@ export function WorkspaceShell() {
     const target = workspaces.find((item) => item._id === workspaceId);
     setActiveHubDestination(target?.title ?? "Workspace", workspaceId);
     setSelection(null);
-    setViewMode("cards");
+    setViewMode("library");
     void loadWorkspace(workspaceId);
   }
 
@@ -1013,10 +1011,11 @@ export function WorkspaceShell() {
   }
 
   function closeHubTab(tabId: string) {
+    const closingIndex = hubTabs.findIndex((tab) => tab.id === tabId);
     const remaining = hubTabs.filter((tab) => tab.id !== tabId);
     setHubTabs(remaining);
     if (activeHubTabId !== tabId) return;
-    const fallbackHub = remaining[remaining.length - 1];
+    const fallbackHub = remaining[Math.min(closingIndex > 0 ? closingIndex - 1 : 0, remaining.length - 1)];
     if (fallbackHub) {
       activateHubTab(fallbackHub.id);
       return;
@@ -1054,12 +1053,10 @@ export function WorkspaceShell() {
   }
 
   function openCreateArtifact(blueprintKey: SpectraBlueprintKey) {
-    if (!selectedWorkspaceId) return;
     void createArtifact(createDefaultArtifactPayload(blueprintKey));
   }
 
-  async function createArtifact(payload: ArtifactPayload) {
-    if (!selectedWorkspaceId) return;
+  async function createArtifact(payload: ArtifactPayload, targetWorkspaceId = selectedWorkspaceId) {
     const label = blueprintMeta[payload.blueprintKey].label;
     setBusyKey(`artifact:${payload.blueprintKey}`);
     try {
@@ -1070,9 +1067,9 @@ export function WorkspaceShell() {
         summary: payload.summary,
         content: payload.content,
         tags: payload.tags,
-        workspaceId: selectedWorkspaceId,
+        workspaceId: targetWorkspaceId,
       });
-      toast.success(`${label} created in workspace.`);
+      toast.success(targetWorkspaceId ? `${label} created in workspace.` : `${label} created as unplaced.`);
       const refreshed = await loadOverview(selectedWorkspaceId);
       const created = refreshed?.artifacts.find((artifact) => artifact._id === result.artifactId);
       if (created) studio.openTab(created);
@@ -1119,13 +1116,41 @@ export function WorkspaceShell() {
 
   async function hideWorkspaceItem(workspaceItemId: string) {
     setBusyKey(`hide:${workspaceItemId}`);
+    const previousOverview = overview;
+    setOverview((current) => current?.workspace ? { ...current, workspace: { ...current.workspace, items: current.workspace.items.filter((item) => item._id !== workspaceItemId) } } : current);
     try {
       await postSpectra({ action: "hideWorkspaceItem", workspaceItemId });
       toast.success("Removed from workspace. Artifact remains in library.");
       setSelection((current) => current?.type === "artifact" && current.itemId === workspaceItemId ? null : current);
       await loadOverview(selectedWorkspaceId);
     } catch (error) {
+      setOverview(previousOverview);
       toast.error(error instanceof Error ? error.message : "Could not remove workspace card.");
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  async function addArtifactToWorkspace(artifact: SpectraArtifact, workspaceId: string) {
+    setBusyKey(`add:${artifact._id}`);
+    try {
+      await postSpectra({ action: "addArtifactToWorkspace", artifactId: artifact._id, workspaceId });
+      toast.success("Added to workspace.");
+      await loadOverview(selectedWorkspaceId);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not add object to workspace.");
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  async function toggleWorkspaceItemPin(item: SpectraWorkspaceItem) {
+    setBusyKey(`pin:item:${item._id}`);
+    try {
+      await postSpectra({ action: "setWorkspaceItemPinned", workspaceItemId: item._id, pinned: !item.viewData.pinned });
+      await loadOverview(selectedWorkspaceId);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not update pin.");
     } finally {
       setBusyKey(null);
     }
@@ -1146,7 +1171,7 @@ export function WorkspaceShell() {
       setNewWorkspaceTitle("");
       setNewWorkspaceDescription("");
       setSelection(null);
-      setViewMode("cards");
+      setViewMode("library");
       setActiveHubDestination(title, result.workspaceId);
       await loadOverview(result.workspaceId);
     } catch (error) {
@@ -1163,7 +1188,7 @@ export function WorkspaceShell() {
       await postSpectra({ action: "archiveWorkspace", workspaceId: selectedWorkspaceId });
       toast.success("Workspace archived.");
       setSelection(null);
-      setViewMode("cards");
+      setViewMode("library");
       setActiveHubDestination("Home");
       await loadOverview();
     } catch (error) {
@@ -1246,60 +1271,62 @@ export function WorkspaceShell() {
           onDirtyChange={studio.setDirty}
         />
       ) : !selectedWorkspaceId ? (
-        <WorkspaceHome overview={overview ? { ...overview, workspaces } : overview} onSelect={goToWorkspaceHub} />
+        <section className="flex min-w-0 flex-1">
+          <WorkspaceHome overview={overview ? { ...overview, workspaces } : overview} onSelect={goToWorkspaceHub} onOpenArtifact={studio.openSplit} onAddArtifactToWorkspace={(artifact, workspaceId) => void addArtifactToWorkspace(artifact, workspaceId)} onCreateArtifact={(blueprintKey, workspaceId) => void createArtifact(createDefaultArtifactPayload(blueprintKey), workspaceId)} />
+          {studio.mode === "split" && studio.activeArtifact ? (
+            <ArtifactStudio
+              mode="split"
+              artifact={studio.activeArtifact}
+              artifacts={allArtifacts}
+              tabs={studio.tabs}
+              dirtyIds={studio.dirtyIds}
+              busy={busyKey === `artifact:update:${studio.activeArtifact._id}`}
+              panelWidth={studioPanelWidth}
+              sourceLabel="Workspace Home"
+              onPanelWidthChange={setStudioPanelWidth}
+              onClose={returnToHub}
+              onExpand={studio.openTab}
+              onActivateTab={studio.activateTab}
+              onCloseTab={closeArtifactTab}
+              onSave={updateArtifact}
+              onArchive={archiveArtifact}
+              onDirtyChange={studio.setDirty}
+            />
+          ) : null}
+        </section>
       ) : (
         <section className="flex min-w-0 flex-1">
           <>
           <div className="flex min-w-0 flex-1 flex-col">
-            <WorkspaceHeader workspace={workspace} items={entries.map((entry) => entry.item)} runs={workspaceRuns} viewMode={viewMode} setViewMode={setViewMode} busy={busyKey} onCreateArtifact={openCreateArtifact} />
-            <main className="min-h-0 flex-1 overflow-y-auto px-8 pb-[150px] pt-6">
-              {loading ? <div className="py-10 text-[13px] text-[var(--text-secondary)]">Loading workspace...</div> : null}
-              {viewMode === "cards" ? (
-                <CardsView
-                  entries={entries}
-                  selected={selection}
-                  onSelect={(item, artifact) => {
-                    setSelection({ type: "artifact", itemId: item._id, artifactId: artifact._id });
-                    studio.openSplit(artifact);
-                  }}
-                  onHide={(itemId) => void hideWorkspaceItem(itemId)}
-                  busy={busyKey}
-                />
-              ) : null}
+            <WorkspaceHeader workspace={workspace} items={entries.map((entry) => entry.item)} runs={workspaceRuns} viewMode={viewMode} setViewMode={setViewMode} busy={busyKey} onCreateArtifact={openCreateArtifact} onArchiveWorkspace={() => void archiveWorkspace()} />
+            <main className={viewMode === "canvas" ? "min-h-0 flex-1 overflow-hidden px-8 pb-[110px] pt-6" : "min-h-0 flex-1 overflow-y-auto px-8 pb-[150px] pt-6"}>
+              {loading && !workspace ? <div className="py-10 text-[13px] text-[var(--text-secondary)]">Loading workspace...</div> : null}
               {viewMode === "timeline" ? (
                 <TimelineView
                   entries={entries}
                   runs={workspaceRuns}
                   selected={selection}
-                  onSelectRun={(run) => setSelection({ type: "run", runId: run._id })}
+                  onSelectRun={(run) => {
+                    const card = runEngine.cards.find((candidate) => candidate.runId === run._id);
+                    if (card) runEngine.openDetails(card);
+                    else setSelection({ type: "run", runId: run._id });
+                  }}
                   onSelectArtifact={(item, artifact) => {
                     setSelection({ type: "artifact", itemId: item._id, artifactId: artifact._id });
                     studio.openSplit(artifact);
                   }}
                 />
               ) : null}
-              {viewMode === "library" ? <LibraryView entries={entries} selected={selection} onSelect={(item, artifact) => {
+              {viewMode === "library" ? <LibraryView entries={entries} workspaceTitle={workspace?.title ?? "Workspace"} selected={selection} onSelect={(item, artifact) => {
                 setSelection({ type: "artifact", itemId: item._id, artifactId: artifact._id });
                 studio.openSplit(artifact);
-              }} /> : null}
+              }} onTogglePin={(item) => void toggleWorkspaceItemPin(item)} onRemove={(item) => void hideWorkspaceItem(item._id)} busy={busyKey} onCreateArtifact={openCreateArtifact} /> : null}
               {viewMode === "canvas" ? <CanvasView entries={entries} selectedArtifact={selectedArtifact} onSelect={(item, artifact) => {
                 setSelection({ type: "artifact", itemId: item._id, artifactId: artifact._id });
                 studio.openSplit(artifact);
               }} /> : null}
             </main>
           </div>
-          {!studio.isOpen ? <Inspector
-            workspace={workspace}
-            artifacts={allArtifacts}
-            selectedArtifact={selectedArtifact}
-            selectedRun={selectedRun}
-            runs={workspaceRuns}
-            onClose={() => setSelection(null)}
-            onHide={() => selectedArtifact && selection?.type === "artifact" ? void hideWorkspaceItem(selection.itemId) : undefined}
-            onCreateArtifact={openCreateArtifact}
-            onArchiveWorkspace={() => void archiveWorkspace()}
-            onOpenArtifact={studio.openSplit}
-          /> : null}
           {studio.mode === "split" && studio.activeArtifact ? (
             <ArtifactStudio
               mode="split"
@@ -1325,14 +1352,9 @@ export function WorkspaceShell() {
       )}
           <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 bg-[linear-gradient(to_top,var(--bg-primary)_72%,transparent)] px-8 pb-5 pt-12">
             <div className="pointer-events-auto mx-auto max-w-[880px]">
-              <ResultCardStack cards={runEngine.cards} className="mb-2" onOpen={runEngine.openDetails} onAction={(card, action, targetId) => void runEngine.onCardAction(card, action, targetId)} />
+              <ResultCardStack cards={runEngine.cards} className="mb-1.5 ml-[52px]" onOpen={runEngine.openDetails} onAction={(card, action, targetId) => void runEngine.onCardAction(card, action, targetId)} />
               <CommandBar
-                placeholder={commandFocusArtifact ? `Act on ${commandFocusArtifact.title}...` : workspace ? "Work with this workspace..." : "Ask across your workspaces..."}
-                context={commandFocusArtifact ? (() => {
-                  const meta = blueprintMeta[commandFocusArtifact.blueprintKey];
-                  const Icon = meta.icon;
-                  return <span className="flex items-center gap-2 text-[12px] font-medium text-[var(--text-primary)]" title="Focus is a context hint; your prompt can override it."><Icon className="h-4 w-4" style={{ color: meta.color }} /><span className="text-[10px] uppercase tracking-[0.08em] text-[var(--text-tertiary)]">Hint</span>{commandFocusArtifact.title}</span>;
-                })() : <span className="flex items-center gap-2 text-[12px] font-medium text-[var(--text-primary)]" title="Workspace context is a hint; your prompt can override it."><Sprout className="h-4 w-4 text-[var(--mode-document)]" /><span className="text-[10px] uppercase tracking-[0.08em] text-[var(--text-tertiary)]">Context</span>{workspace?.title ?? "Workspaces"}</span>}
+                placeholder={commandFocusArtifact ? `Act on ${commandFocusArtifact.title}...` : workspace ? `Work with ${workspace.title}...` : "Ask across all workspaces and objects..."}
                 onSubmit={(prompt) => {
                   if (commandFocusArtifact && studio.dirtyIds.has(commandFocusArtifact._id)) {
                     toast.message("Save this artifact before asking Spectra to update it.");
@@ -1344,7 +1366,7 @@ export function WorkspaceShell() {
                 busy={runEngine.submitting}
                 menu={(
                   <div>
-                    {selectedWorkspaceId ? createTypes.map((type) => {
+                    {createTypes.map((type) => {
                       const Icon = type.icon;
                       return (
                         <button key={type.key} type="button" className={menuItemClass()} disabled={busyKey === `artifact:${type.key}`} onClick={() => openCreateArtifact(type.key)}>
@@ -1352,9 +1374,8 @@ export function WorkspaceShell() {
                           New {type.label}
                         </button>
                       );
-                    }) : (
-                      <button type="button" className={menuItemClass()} onClick={() => setWorkspaceCreateOpen(true)}><Plus className="h-4 w-4" />New workspace</button>
-                    )}
+                    })}
+                    {!selectedWorkspaceId ? <button type="button" className={menuItemClass()} onClick={() => setWorkspaceCreateOpen(true)}><Plus className="h-4 w-4" />New workspace</button> : null}
                     {selectedWorkspaceId ? <button type="button" className={menuItemClass()}><Settings className="h-4 w-4" />Workspace settings</button> : null}
                   </div>
                 )}

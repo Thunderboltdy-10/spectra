@@ -187,10 +187,11 @@ export function ArtifactsShell() {
   }
 
   function closeAllHubTab(tabId: string) {
+    const closingIndex = hubTabs.findIndex((tab) => tab.id === tabId);
     const remaining = hubTabs.filter((tab) => tab.id !== tabId);
     setHubTabs(remaining);
     if (activeHubTabId !== tabId) return;
-    const fallbackHub = remaining[remaining.length - 1];
+    const fallbackHub = remaining[Math.min(closingIndex > 0 ? closingIndex - 1 : 0, remaining.length - 1)];
     if (fallbackHub) {
       activateAllHub(fallbackHub.id);
       return;
@@ -301,7 +302,7 @@ export function ArtifactsShell() {
         content: payload.content,
         tags: payload.tags,
       });
-      toast.success("Artifact created in library inbox.");
+      toast.success("Artifact created as unplaced.");
       const refreshed = await load(true);
       const created = refreshed.find((artifact) => artifact._id === result.artifactId);
       if (created) studio.openTab(created);
@@ -586,14 +587,9 @@ export function ArtifactsShell() {
       )}
         <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 bg-[linear-gradient(to_top,var(--bg-primary)_72%,transparent)] px-8 pb-5 pt-12">
           <div className="pointer-events-auto mx-auto max-w-[880px]">
-            <ResultCardStack cards={runEngine.cards} className="mb-2" onOpen={runEngine.openDetails} onAction={(card, action, targetId) => void runEngine.onCardAction(card, action, targetId)} />
+            <ResultCardStack cards={runEngine.cards} className="mb-1.5 ml-[52px]" onOpen={runEngine.openDetails} onAction={(card, action, targetId) => void runEngine.onCardAction(card, action, targetId)} />
             <CommandBar
-              placeholder={studio.activeArtifact ? `Act on ${studio.activeArtifact.title}...` : "Ask across your artifacts..."}
-              context={studio.activeArtifact ? (() => {
-                const meta = blueprintMeta[studio.activeArtifact.blueprintKey];
-                const Icon = meta.icon;
-                return <span className="flex items-center gap-2 text-[12px] font-medium text-[var(--text-primary)]" title="Focus is a context hint; your prompt can override it."><Icon className="h-4 w-4" style={{ color: meta.color }} /><span className="text-[10px] uppercase tracking-[0.08em] text-[var(--text-tertiary)]">Hint</span>{studio.activeArtifact.title}</span>;
-              })() : <span className="flex items-center gap-2 text-[12px] font-medium text-[var(--text-primary)]" title="Library context is a hint; your prompt can override it."><LayoutGrid className="h-4 w-4" /><span className="text-[10px] uppercase tracking-[0.08em] text-[var(--text-tertiary)]">Context</span>Artifacts</span>}
+              placeholder={studio.activeArtifact ? `Act on ${studio.activeArtifact.title}...` : "Ask across all objects..."}
               onSubmit={(prompt) => {
                 if (studio.activeArtifact && studio.dirtyIds.has(studio.activeArtifact._id)) {
                   toast.message("Save this artifact before asking Spectra to update it.");
@@ -689,14 +685,14 @@ function GroupedList({
       <section>
         <div className="mb-4">
           <div className="flex items-center gap-2">
-            <h2 className="font-display text-[20px] font-semibold text-[var(--text-primary)]">Inbox</h2>
+            <h2 className="font-display text-[20px] font-semibold text-[var(--text-primary)]">Unplaced</h2>
             <span className="rounded-[6px] bg-[var(--bg-secondary)] px-1.5 text-[12px] text-[var(--text-secondary)]">{inbox.length}</span>
           </div>
           <p className="mt-1 text-[13px] text-[var(--text-secondary)]">Artifacts not yet placed in a workspace.</p>
         </div>
         <div className="grid gap-3 xl:grid-cols-3">
           {inbox.slice(0, 3).map((artifact) => <ArtifactCard key={artifact._id} artifact={artifactToCard(artifact)} actions={rowActions(artifact)} onSelect={() => onOpen(artifact)} />)}
-          {inbox.length === 0 ? <div className="rounded-[8px] border border-dashed border-[var(--border-default)] px-4 py-8 text-[13px] text-[var(--text-secondary)]">Inbox is clear for this scope.</div> : null}
+          {inbox.length === 0 ? <div className="rounded-[8px] border border-dashed border-[var(--border-default)] px-4 py-8 text-[13px] text-[var(--text-secondary)]">No unplaced artifacts in this scope.</div> : null}
         </div>
       </section>
       <section className="mt-8 border-t border-[var(--border-default)] pt-7">

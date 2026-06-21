@@ -21,7 +21,6 @@ import {
   MessageSquare,
   Minus,
   MoreHorizontal,
-  PanelRightClose,
   Plus,
   Radio,
   Save,
@@ -305,10 +304,13 @@ export function useArtifactStudioState(storageKey: string, artifacts: SpectraArt
 
   const closeTab = useCallback((artifactId: string) => {
     setTabs((current) => {
+      const closingIndex = current.findIndex((tab) => tab.artifactId === artifactId);
       const next = current.filter((tab) => tab.artifactId !== artifactId);
       setActiveArtifactId((active) => {
         if (active !== artifactId) return active;
-        return next[next.length - 1]?.artifactId ?? null;
+        if (next.length === 0) return null;
+        const nearestIndex = closingIndex > 0 ? closingIndex - 1 : 0;
+        return next[Math.min(nearestIndex, next.length - 1)]?.artifactId ?? null;
       });
       if (next.length === 0) setMode("closed");
       return next;
@@ -683,7 +685,7 @@ function ArtifactStudioEditor({
             {mode === "split" ? (
               <IconButton label="Open as tab" onClick={onExpand} icon={Maximize2} />
             ) : null}
-            <IconButton label="Close" onClick={onClose} icon={mode === "split" ? PanelRightClose : X} />
+            <IconButton label="Close" onClick={onClose} icon={X} />
           </div>
         </div>
       </header>

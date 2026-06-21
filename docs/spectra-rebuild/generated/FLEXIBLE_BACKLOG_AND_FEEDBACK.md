@@ -58,6 +58,7 @@ This correction supersedes the rejected Wave 2 visual direction from commit `e28
 | Plus button alignment/styling is poor. | Wave 2 | Make it polished and aligned with the command surface. |
 | Tip/help text near quick chat floats separately and is not connected to command bar. | Wave 2 | Integrate context/tip into the command surface. |
 | Cards are too blocky and equally weighted. | Wave 2 | Add hierarchy, accent, selection, pinned treatment. |
+| Workspace ordering should be user-controlled without introducing global workspace pinning. | Later workspace UI wave | Add a persisted manual workspace order and reorder interaction; keep Wave 4.5 ordering activity-based until then. |
 | Nothing stands out. | Wave 2 | Make hierarchy visible without making everything loud. |
 | Icons feel generic. | Wave 2 now, Wave 3 later | Wave 2 improves treatment; Wave 3 makes blueprint-specific object identity deeper. |
 | Text hierarchy is weak; no text feels more important than other text. | Wave 2 | Redo headings, meta, chips, and card typography. |

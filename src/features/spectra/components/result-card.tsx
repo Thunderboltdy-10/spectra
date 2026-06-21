@@ -36,7 +36,7 @@ export function ResultCardStack({
             key={card.id}
             role="button"
             tabIndex={0}
-            className="group flex min-h-[37px] w-full cursor-pointer items-center gap-2.5 border-b border-[var(--border-subtle)] px-2.5 py-1.5 text-left text-[12px] transition last:border-b-0 hover:bg-[var(--bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--accent-cyan)]"
+            className="group my-0.5 flex min-h-[35px] w-full cursor-pointer items-center gap-2.5 rounded-[7px] px-2.5 py-1 text-left text-[12px] transition hover:bg-[var(--bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--accent-cyan)]"
             onClick={() => onOpen?.(card)}
             onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onOpen?.(card); }}
           >

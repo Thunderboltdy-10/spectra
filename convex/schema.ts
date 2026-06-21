@@ -1394,6 +1394,19 @@ export default defineSchema({
       filterFields: ["ownerUserId", "blueprintKey", "status"],
     }),
 
+  spectraArtifactVersions: defineTable({
+    artifactId: v.id("spectraArtifacts"),
+    ownerUserId: v.id("users"),
+    source: v.union(v.literal("manual"), v.literal("ai"), v.literal("revert")),
+    runId: v.optional(v.id("spectraAiRuns")),
+    before: v.any(),
+    after: v.any(),
+    summary: v.optional(v.string()),
+    createdAt: v.number(),
+  })
+    .index("by_artifact_created", ["artifactId", "createdAt"])
+    .index("by_run", ["runId"]),
+
   spectraWorkspaceItems: defineTable({
     workspaceId: v.id("spectraWorkspaces"),
     sourceType: v.union(
@@ -1435,6 +1448,9 @@ export default defineSchema({
     origin: v.union(v.literal("chat"), v.literal("workspace"), v.literal("artifact")),
     workspaceId: v.optional(v.id("spectraWorkspaces")),
     artifactId: v.optional(v.id("spectraArtifacts")),
+    pinned: v.optional(v.boolean()),
+    messageCount: v.optional(v.number()),
+    lastRunId: v.optional(v.id("spectraAiRuns")),
     status: v.union(v.literal("active"), v.literal("archived"), v.literal("deleted")),
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -1449,10 +1465,13 @@ export default defineSchema({
     role: v.union(v.literal("user"), v.literal("assistant"), v.literal("system"), v.literal("tool")),
     content: v.string(),
     runId: v.optional(v.id("spectraAiRuns")),
+    clientMessageId: v.optional(v.string()),
     metadata: v.optional(v.any()),
     createdAt: v.number(),
   })
     .index("by_thread", ["threadId"])
+    .index("by_thread_created", ["threadId", "createdAt"])
+    .index("by_thread_client", ["threadId", "clientMessageId"])
     .index("by_run", ["runId"]),
 
   spectraAiRuns: defineTable({
@@ -1476,7 +1495,10 @@ export default defineSchema({
     finalSummary: v.optional(v.string()),
     error: v.optional(v.string()),
     modelUsed: v.optional(v.string()),
+    providerUsed: v.optional(v.string()),
+    usage: v.optional(v.any()),
     sessionId: v.optional(v.string()),
+    contextSnapshot: v.optional(v.any()),
     attemptCount: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),

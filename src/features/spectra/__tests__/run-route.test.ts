@@ -32,7 +32,7 @@ function deckPlan() {
 
 function setup(plan: unknown, initialStatus: "queued" | "failed" = "queued") {
   const card = { _id: "card-real", runId: "run-real", status: initialStatus, title: initialStatus === "failed" ? "Run failed" : "Queued", summary: "", variant: initialStatus === "failed" ? "error" : "status", actions: [] as Array<Record<string, unknown>>, updatedAt: 1 };
-  const run = { status: initialStatus, sourceSurface: "workspace", workspaceId: "workspace-real", userPrompt: "Create a flashcard deck about photosynthesis with 6 cards. Include memory cues.", attemptCount: 1 };
+  const run: Record<string, unknown> & { status: string; sourceSurface: "workspace" | "chat"; workspaceId?: string; userPrompt: string; attemptCount: number } = { status: initialStatus, sourceSurface: "workspace", workspaceId: "workspace-real", userPrompt: "Create a flashcard deck about photosynthesis with 6 cards. Include memory cues.", attemptCount: 1 };
   const operations: Array<Record<string, unknown>> = [];
   const requireActor = vi.fn().mockResolvedValue({ clerkId: "actor" });
   const convexQuery = vi.fn(async (name: string) => {
@@ -40,10 +40,18 @@ function setup(plan: unknown, initialStatus: "queued" | "failed" = "queued") {
     if (name.includes("spectraArtifacts:list")) return [];
     if (name.includes("spectraWorkspaces:list")) return [{ _id: "workspace-real", title: "Biology" }];
     if (name.includes("spectraWorkspaceItems:listForWorkspace")) return { workspace: { _id: "workspace-real", title: "Biology" }, items: [] };
+    if (name.includes("spectraThreads:get")) return { thread: { _id: "thread-real", title: "New thread" }, messages: [], traces: [] };
     throw new Error(`Unexpected query: ${name}`);
   });
   const convexMutation = vi.fn(async (name: string, args: Record<string, unknown>) => {
-    if (name.includes("spectraRuns:create")) return { runId: "run-real", resultCardId: "card-real" };
+    if (name.includes("spectraThreads:create")) return "thread-real";
+    if (name.includes("spectraThreads:appendMessage")) return "message-real";
+    if (name.includes("spectraRuns:create")) {
+      run.sourceSurface = args.sourceSurface as "workspace" | "chat";
+      run.threadId = args.threadId;
+      return { runId: "run-real", resultCardId: "card-real" };
+    }
+    if (name.includes("spectraRuns:setContextSnapshot")) return { runId: "run-real" };
     if (name.includes("spectraRuns:resetForRetry")) {
       run.status = "queued";
       run.attemptCount = 2;
@@ -99,9 +107,10 @@ describe("Spectra run route", () => {
     expect(events.some((event) => event.message === "Validating 6 cards")).toBe(true);
     expect(events.some((event) => event.message === "Saving deck to Biology")).toBe(true);
     const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
-    const payload = JSON.parse(String(request.body)) as { model: string; provider: { order: string[]; allow_fallbacks: boolean } };
+    const payload = JSON.parse(String(request.body)) as { model: string; provider: { order: string[]; allow_fallbacks: boolean }; stream: boolean };
     expect(payload.model).toBe("deepseek/deepseek-v4-pro");
-    expect(payload.provider).toEqual({ order: ["deepseek"], allow_fallbacks: true });
+    expect(payload.provider).toEqual({ order: ["deepseek"], allow_fallbacks: false });
+    expect(payload.stream).toBe(true);
     expect(new Headers(request.headers).get("X-OpenRouter-Title")).toBe("Spectra AI Operation Engine");
   });
 
@@ -115,5 +124,20 @@ describe("Spectra run route", () => {
     expect(convexMutation.mock.calls.some(([name]) => String(name).includes("spectraRuns:resetForRetry"))).toBe(true);
     expect(convexMutation.mock.calls.some(([name]) => String(name).includes("spectraRuns:create"))).toBe(false);
     expect(events.find((event) => event.type === "run_created")).toMatchObject({ runId: "run-real", card: { id: "card-real" } });
+  });
+
+  it("creates a durable chat thread and persists only clean user-facing messages", async () => {
+    const answerPlan = { decision: "answer", intent: { mode: "answer", requestedArtifactTypes: [], requestedVisibleArtifactCount: 0, targetArtifactId: null, targetWorkspaceId: null }, finalResponse: "Photosynthesis stores light energy as chemical energy.", operations: [] };
+    const { convexMutation } = setup(answerPlan);
+    const route = await import("@/app/api/spectra/run/route");
+    const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", { method: "POST", body: JSON.stringify({ action: "run", surface: "chat", prompt: "Explain photosynthesis simply." }) }));
+    const events = (await response.text()).trim().split("\n").map((line) => JSON.parse(line) as { type: string; threadId?: string });
+
+    expect(events).toContainEqual(expect.objectContaining({ type: "thread_ready", threadId: "thread-real" }));
+    const messageCalls = convexMutation.mock.calls.filter(([name]) => String(name).includes("spectraThreads:appendMessage"));
+    expect(messageCalls).toHaveLength(2);
+    expect(messageCalls[0]?.[1]).toMatchObject({ role: "user", content: "Explain photosynthesis simply.", runId: "run-real" });
+    expect(messageCalls[1]?.[1]).toMatchObject({ role: "assistant", content: answerPlan.finalResponse, runId: "run-real" });
+    expect(JSON.stringify(messageCalls)).not.toContain("Analysing request");
   });
 });

@@ -232,9 +232,11 @@ Manual test:
 
 Goal: unify `/chat` and workspace AI primitives without destroying normal chat UX.
 
+Completed on 2026-06-21. See `WAVE_5_THREADS_CHAT_CONVERGENCE.md` for the implemented lifecycle, UI contract, verification, and deferred migration/memory work.
+
 Focus:
 
-- New `Thread`/`Message` integration.
+- Convex-backed `spectraThreads`/`spectraMessages` integration with refresh recovery and clean message persistence.
 - Every chat/workspace command creates `AIRun`.
 - Workspace runs may or may not create threads.
 - Threads can be pinned/referenced in workspaces.
@@ -243,12 +245,15 @@ Focus:
 - Chat artifact cards have Open / Add to workspace.
 - Continue thread from result card/right hub.
 - Hidden result cards remain accessible.
+- Shared conversation rendering across `/chat`, temporary run detail, and real thread-reference artifacts.
+- Structured run context snapshots and artifact provenance provide hooks for later memory without implementing memory in this wave.
 
 Non-goals:
 
 - No agents.
 - No full router.
 - No canvas.
+- No long-term memory, automatic memory extraction, sub-agents, autonomous orchestration, or historical legacy-chat migration UI.
 
 Manual test:
 
@@ -256,6 +261,22 @@ Manual test:
 - Can I add it to a workspace manually?
 - Can I continue a thread from workspace?
 - Can workspace show selected thread references without showing every thread?
+
+## Wave 5.5 - Conversation / Workspace UX Stabilization
+
+Started on 2026-06-21 before Wave 6. This is a product-quality correction over the Wave 5 worktree, not a conceptual wave.
+
+Focus:
+
+- real public assistant text streaming with optimistic messages, smart scroll following, cancellation, retry/recovery, provider/model/usage metadata, and generated titles/summaries;
+- polished `/chat` welcome, messages, traces, recent navigation, run hub, rename/pin actions, and a working attachment menu;
+- one shared conversation/composer for `/chat` and real thread-reference artifacts;
+- explicit global/workspace/artifact/thread composer targets and one main side panel at a time;
+- compact artifact proposals/actions and Inbox-by-default chat creation;
+- persisted Inbox/Pinned disclosure state, pinned work in every workspace view, list limiting, calmer actions/hover states, and loading improvements;
+- artifact baseline-aware dirty state, save/discard close handling, and manual/AI/revert version provenance.
+
+Boundaries remain unchanged: no memory, agents, complex routing, ManageBac, advanced canvas, or relation intelligence. See `WAVE_5_5_CONVERSATION_WORKSPACE_STABILIZATION.md`.
 
 ## Wave 6 - Workspace Intelligence and Context
 

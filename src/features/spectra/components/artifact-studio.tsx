@@ -55,6 +55,7 @@ import {
 } from "./spectra-view-model";
 import type { ArtifactPayload } from "./artifact-blueprint-sheet";
 import type { SpectraArtifact } from "../data/api";
+import { ThreadConversation } from "./conversation-surface";
 
 type StudioMode = "closed" | "split" | "tab";
 type StudioTab = { artifactId: string; openedAt: number };
@@ -538,13 +539,19 @@ export function StudioTabRail({
               className="ml-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
               onClick={(event) => {
                 event.stopPropagation();
-                onCloseTab(artifact._id);
+                if (dirtyIds.has(artifact._id)) {
+                  onActivateTab(artifact._id);
+                  window.dispatchEvent(new CustomEvent("spectra:request-artifact-close", { detail: { artifactId: artifact._id } }));
+                } else onCloseTab(artifact._id);
               }}
               onKeyDown={(event) => {
                 if (event.key === "Enter" || event.key === " ") {
                   event.preventDefault();
                   event.stopPropagation();
-                  onCloseTab(artifact._id);
+                  if (dirtyIds.has(artifact._id)) {
+                    onActivateTab(artifact._id);
+                    window.dispatchEvent(new CustomEvent("spectra:request-artifact-close", { detail: { artifactId: artifact._id } }));
+                  } else onCloseTab(artifact._id);
                 }
               }}
             >
@@ -594,23 +601,44 @@ function ArtifactStudioEditor({
   const [tagDraft, setTagDraft] = useState((artifact.tags ?? []).join(", "));
   const [content, setContent] = useState<unknown>(artifact.content);
   const [dirty, setDirty] = useState(false);
+  const [closeDecisionOpen, setCloseDecisionOpen] = useState(false);
   const meta = blueprintMeta[artifact.blueprintKey];
   const Icon = meta.icon;
+  const baseline = useMemo(() => JSON.stringify({ title: artifact.title, summary: artifact.summary ?? "", tagDraft: (artifact.tags ?? []).join(", "), content: artifact.content }), [artifact]);
 
   useEffect(() => {
     onDirtyChange(dirty);
   }, [dirty, onDirtyChange]);
 
+  useEffect(() => {
+    setDirty(JSON.stringify({ title, summary, tagDraft, content }) !== baseline);
+  }, [baseline, content, summary, tagDraft, title]);
+
+  useEffect(() => {
+    function requestClose(event: Event) {
+      const artifactId = (event as CustomEvent<{ artifactId?: string }>).detail?.artifactId;
+      if (artifactId === artifact._id) setCloseDecisionOpen(true);
+    }
+    function beforeUnload(event: BeforeUnloadEvent) {
+      if (!dirty) return;
+      event.preventDefault();
+    }
+    window.addEventListener("spectra:request-artifact-close", requestClose);
+    window.addEventListener("beforeunload", beforeUnload);
+    return () => {
+      window.removeEventListener("spectra:request-artifact-close", requestClose);
+      window.removeEventListener("beforeunload", beforeUnload);
+    };
+  }, [artifact._id, dirty]);
+
   function changeBase(next: Partial<{ title: string; summary: string; tagDraft: string }>) {
     if (next.title !== undefined) setTitle(next.title);
     if (next.summary !== undefined) setSummary(next.summary);
     if (next.tagDraft !== undefined) setTagDraft(next.tagDraft);
-    setDirty(true);
   }
 
   function changeContent(next: unknown) {
     setContent(next);
-    setDirty(true);
   }
 
   async function save() {
@@ -637,7 +665,7 @@ function ArtifactStudioEditor({
     : "min-h-0 flex-1 overflow-y-auto px-5 pb-5 pt-5";
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="relative flex h-full min-h-0 flex-col">
       <header className="shrink-0 border-b border-[var(--border-default)] bg-[var(--bg-primary)] px-5 py-4">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0 flex-1">
@@ -685,7 +713,7 @@ function ArtifactStudioEditor({
             {mode === "split" ? (
               <IconButton label="Open as tab" onClick={onExpand} icon={Maximize2} />
             ) : null}
-            <IconButton label="Close" onClick={onClose} icon={X} />
+            <IconButton label="Close" onClick={() => dirty ? setCloseDecisionOpen(true) : onClose()} icon={X} />
           </div>
         </div>
       </header>
@@ -706,6 +734,7 @@ function ArtifactStudioEditor({
           /> : null}
         </div>
       </main>
+      {closeDecisionOpen ? <div className="absolute inset-0 z-[120] flex items-center justify-center bg-[color-mix(in_oklab,var(--bg-primary)_70%,transparent)] p-5 backdrop-blur-[2px]" onPointerDown={() => setCloseDecisionOpen(false)}><div className="w-full max-w-[420px] rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5 shadow-[0_24px_70px_rgba(27,20,12,0.2)]" onPointerDown={(event) => event.stopPropagation()}><h2 className="font-display text-[20px] font-semibold text-[var(--text-primary)]">Save changes to {artifact.title}?</h2><p className="mt-2 text-[12px] leading-5 text-[var(--text-secondary)]">This artifact has edits that have not been saved.</p><div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setCloseDecisionOpen(false)} className="h-9 px-3 text-[12px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]">Keep editing</button><button type="button" onClick={onClose} className="h-9 rounded-[8px] px-3 text-[12px] font-medium text-[var(--danger)] hover:bg-[color-mix(in_oklab,var(--danger)_8%,transparent)]">Discard</button><button type="button" disabled={busy || !title.trim()} onClick={() => void save().then(onClose)} className="h-9 rounded-[8px] bg-[var(--text-primary)] px-3 text-[12px] font-medium text-[var(--bg-primary)] disabled:opacity-45">Save & close</button></div></div></div> : null}
     </div>
   );
 }
@@ -1135,13 +1164,20 @@ function ThreadReferenceStudio({ content, onChange }: { content: unknown; onChan
     setSummary(merged.summary ?? "");
     onChange(merged);
   }
+  if (threadId.trim()) {
+    return (
+      <div className="h-[min(760px,calc(100vh-230px))] min-h-[460px] overflow-hidden border border-[var(--border-default)] bg-[var(--bg-primary)]">
+        <ThreadConversation threadId={threadId.trim()} compact showComposer />
+      </div>
+    );
+  }
   return (
     <div className="rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5">
       <div className="mb-5 flex items-center gap-3">
         <MessageSquare className="h-9 w-9 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-2 text-[#8b6ff0]" />
         <div>
           <h3 className="font-display text-[24px] font-semibold text-[var(--text-primary)]">Thread reference</h3>
-          <p className="text-[13px] text-[var(--text-secondary)]">Real conversation rendering is deferred to chat convergence.</p>
+          <p className="text-[13px] text-[var(--text-secondary)]">Connect this reference to a durable Spectra thread.</p>
         </div>
       </div>
       <div className="grid gap-4">
@@ -1152,7 +1188,7 @@ function ThreadReferenceStudio({ content, onChange }: { content: unknown; onChan
           <textarea value={summary} onChange={(event) => commit({ summary: event.target.value })} className={textareaClass("min-h-[220px]")} placeholder="What should this conversation card remind you of?" />
         </Field>
         <div className="rounded-[8px] border border-dashed border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-primary)_60%,transparent)] p-4 text-[13px] leading-6 text-[var(--text-secondary)]">
-          This is a safe placeholder for Wave 3B. The final thread view should reuse the normal chat conversation surface when `/chat` and workspace threads converge.
+          Kept conversations open here with the same messages, operational traces, and artifact results as normal chat. Continue them from the page command bar or open them in Chat.
         </div>
       </div>
     </div>

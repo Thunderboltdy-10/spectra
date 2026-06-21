@@ -54,10 +54,18 @@ export const create = mutation({
     workspaceId: v.optional(v.id("spectraWorkspaces")),
     artifactId: v.optional(v.id("spectraArtifacts")),
     modelUsed: v.optional(v.string()),
+    providerUsed: v.optional(v.string()),
+    usage: v.optional(v.any()),
     sessionId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx, args.actorClerkId);
+    if (args.threadId) {
+      const thread = await ctx.db.get(args.threadId);
+      if (!thread || thread.ownerUserId !== actor._id || thread.orgId !== actor.orgId || thread.status !== "active") {
+        throw new Error("Thread not found");
+      }
+    }
     const now = Date.now();
     const runId = await ctx.db.insert("spectraAiRuns", {
       ownerUserId: actor._id,
@@ -103,6 +111,8 @@ export const updateStatus = mutation({
     resultVariant: v.optional(vResultVariant),
     resultActions: v.optional(v.array(vResultAction)),
     modelUsed: v.optional(v.string()),
+    providerUsed: v.optional(v.string()),
+    usage: v.optional(v.any()),
     decision: v.optional(v.union(v.literal("answer"), v.literal("operate"), v.literal("clarify"), v.literal("refuse"))),
     planIntent: v.optional(v.any()),
   },
@@ -117,6 +127,8 @@ export const updateStatus = mutation({
       updatedAt: now,
       completedAt: terminal ? now : run.completedAt,
       modelUsed: args.modelUsed ?? run.modelUsed,
+      providerUsed: args.providerUsed ?? run.providerUsed,
+      usage: args.usage ?? run.usage,
       decision: args.decision ?? run.decision,
       planIntent: args.planIntent ?? run.planIntent,
     });
@@ -307,5 +319,14 @@ export const keepResultCard = mutation({
     const now = Date.now();
     await ctx.db.patch(args.resultCardId, { keptAt: now, hiddenAt: undefined, updatedAt: now });
     return { resultCardId: args.resultCardId };
+  },
+});
+
+export const setContextSnapshot = mutation({
+  args: { actorClerkId: v.string(), runId: v.id("spectraAiRuns"), contextSnapshot: v.any() },
+  handler: async (ctx, args) => {
+    await requireOwnedRun(ctx, args.actorClerkId, args.runId);
+    await ctx.db.patch(args.runId, { contextSnapshot: args.contextSnapshot, updatedAt: Date.now() });
+    return { runId: args.runId };
   },
 });

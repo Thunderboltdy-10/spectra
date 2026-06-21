@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
-import { ChatLayout } from "@/components/chat/chat-layout";
+import { AppShell } from "@/components/layout/app-shell";
+import { ChatShell } from "@/features/spectra/pages/chat-shell";
 import { requireActor } from "@/lib/auth-server";
 
 export const dynamic = "force-dynamic";
@@ -18,5 +19,5 @@ export default async function ChatPage() {
     throw error;
   }
 
-  return <ChatLayout />;
+  return <AppShell fullBleed noScroll contentClassName="!p-0"><ChatShell /></AppShell>;
 }

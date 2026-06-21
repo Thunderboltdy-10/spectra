@@ -174,8 +174,9 @@ Message fields:
 
 Repo mapping:
 
-- old `chats` and `messages` tables should be replaced or wrapped.
-- old `messages` is keyed to `chatId`, not new `threadId`.
+- active `/chat` uses `convex/spectraThreads.ts`, `spectraThreads`, and `spectraMessages`.
+- old `chats` and `messages` remain migration compatibility only; they are not the active Spectra conversation foundation.
+- `ConversationSurface` renders normal chat, temporary run detail, and real thread-reference artifacts from the same message/run/operation data.
 
 ### AIRun
 
@@ -465,4 +466,3 @@ Wave 0 tests should prove:
 - operation schema validates allowed operations
 - AIRun lifecycle stub transitions through queued/running/completed/failed
 - legacy import ban passes
-

@@ -53,6 +53,7 @@ import type * as spectraOperations from "../spectraOperations.js";
 import type * as spectraRuns from "../spectraRuns.js";
 import type * as spectraSeed from "../spectraSeed.js";
 import type * as spectraShared from "../spectraShared.js";
+import type * as spectraThreads from "../spectraThreads.js";
 import type * as spectraWorkspaceItems from "../spectraWorkspaceItems.js";
 import type * as spectraWorkspaces from "../spectraWorkspaces.js";
 import type * as streakLogic from "../streakLogic.js";
@@ -124,6 +125,7 @@ declare const fullApi: ApiFromModules<{
   spectraRuns: typeof spectraRuns;
   spectraSeed: typeof spectraSeed;
   spectraShared: typeof spectraShared;
+  spectraThreads: typeof spectraThreads;
   spectraWorkspaceItems: typeof spectraWorkspaceItems;
   spectraWorkspaces: typeof spectraWorkspaces;
   streakLogic: typeof streakLogic;

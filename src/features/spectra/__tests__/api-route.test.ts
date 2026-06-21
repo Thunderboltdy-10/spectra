@@ -49,7 +49,7 @@ describe("Spectra API route", () => {
     expect(convexQuery).toHaveBeenNthCalledWith(2, "spectraArtifacts:list", {
       actorClerkId: "user_spectra",
       placement: "all",
-      limit: 100,
+      limit: 60,
     });
   });
 
@@ -139,7 +139,10 @@ describe("Spectra API route", () => {
       artifactId: "artifact_1",
       title: "Essay plan revised",
       summary: undefined,
+      content: undefined,
       tags: undefined,
+      source: "manual",
+      runId: undefined,
     });
     expect(convexMutation).toHaveBeenNthCalledWith(3, "spectraArtifacts:archive", {
       actorClerkId: "user_spectra",

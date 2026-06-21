@@ -62,6 +62,7 @@ export type SpectraRun = {
   _id: string;
   status: "queued" | "running" | "awaiting_confirmation" | "completed" | "failed" | "cancelled";
   sourceSurface: "chat" | "workspace" | "artifact";
+  threadId?: string;
   workspaceId?: string;
   artifactId?: string;
   userPrompt: string;
@@ -69,9 +70,57 @@ export type SpectraRun = {
   planIntent?: unknown;
   finalSummary?: string;
   error?: string;
+  modelUsed?: string;
+  providerUsed?: string;
+  usage?: {
+    promptTokens?: number;
+    completionTokens?: number;
+    reasoningTokens?: number;
+    totalTokens?: number;
+    elapsedMs?: number;
+  };
   attemptCount?: number;
   createdAt: number;
   updatedAt: number;
+};
+
+export type SpectraThread = {
+  _id: string;
+  title: string;
+  summaryShort?: string;
+  origin: "chat" | "workspace" | "artifact";
+  workspaceId?: string;
+  artifactId?: string;
+  pinned?: boolean;
+  messageCount?: number;
+  status: "active" | "archived" | "deleted";
+  createdAt: number;
+  updatedAt: number;
+  lastMessageAt?: number;
+};
+
+export type SpectraMessage = {
+  _id: string;
+  threadId: string;
+  role: "user" | "assistant" | "system" | "tool";
+  content: string;
+  runId?: string;
+  metadata?: Record<string, unknown>;
+  createdAt: number;
+};
+
+export type SpectraThreadTrace = {
+  run: SpectraRun;
+  operations: SpectraOperation[];
+  cards: SpectraResultCard[];
+  artifacts: SpectraArtifact[];
+};
+
+export type SpectraThreadDetail = {
+  thread: SpectraThread;
+  messages: SpectraMessage[];
+  traces: SpectraThreadTrace[];
+  viewerName?: string;
 };
 
 export type SpectraResultAction = {
@@ -204,6 +253,18 @@ export async function getSpectraResultCards(params?: {
 export async function getSpectraRunDetail(runId: string) {
   const qs = new URLSearchParams({ action: "runDetail", runId });
   return readJson<SpectraRunDetail>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+}
+
+export async function getSpectraThreads(params?: { includeArchived?: boolean; limit?: number }) {
+  const qs = new URLSearchParams({ action: "threads" });
+  if (params?.includeArchived) qs.set("includeArchived", "true");
+  if (params?.limit) qs.set("limit", String(params.limit));
+  return readJson<{ threads: SpectraThread[] }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+}
+
+export async function getSpectraThread(threadId: string) {
+  const qs = new URLSearchParams({ action: "thread", threadId });
+  return readJson<SpectraThreadDetail>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
 }
 
 export async function postSpectra<T>(body: JsonRecord) {

@@ -80,7 +80,7 @@ This correction supersedes the rejected Wave 2 visual direction from commit `e28
 | Artifact Studio should open as a resizable right split panel by default. | Wave 3B | The source view adapts to remaining width; old workspace inspector disappears while Studio is open. |
 | Artifact Studio should support local artifact tabs. | Wave 3B | Tabs are local UI state, not backend objects. Restore from local storage if straightforward. |
 | Planner artifacts are task/calendar items, not lesson-planning documents. | Wave 3B | Include status, priority, due/start/end time, subtasks, attachments, links, reminders, and archive/trash action direction. |
-| Thread reference detail should defer real conversation rendering. | Wave 5 | Real thread rendering belongs with chat convergence and should feel like normal `/chat`. |
+| Thread reference detail should render real conversations. | Completed Wave 5 | Artifact Studio now uses the shared conversation/trace renderer for real Spectra thread ids. |
 | Deeper blueprint engines can continue after the Studio shell. | Wave 7 | Rich document behaviors, full study loops, quiz grading, and stronger task workflows should build on the shared Studio. |
 | Command bar focus chip should become manually switchable. | Wave 4 / Wave 6 | Default to the active object context, such as open artifact or workspace, but let the user switch to no focus, workspace focus, or another artifact without moving the command bar. |
 | Artifact creation should use blueprint-specific forms/defaults. | Wave 3 | Wave 2 can polish the creation strip, but full forms belong with blueprint UX. |
@@ -93,12 +93,17 @@ This correction supersedes the rejected Wave 2 visual direction from commit `e28
 | Retry created duplicate runs/cards and stale active UI returned after refresh. | Wave 4 stabilization | Retry the same run/card attempt; show only active or recently relevant rows in the compact unified tray. |
 | Active run rows need a temporary right detail panel. | Wave 4 stabilization | Show prompt, progress, operations, errors, affected objects, and actions. Keep local UI state unless explicitly saved. |
 | Focus must be clearly presented as a hint, not a forced target. | Wave 4 now, workspace intelligence later | Keep current focus visible now. Defer richer selectable focus controls. |
-| Full persistent thread artifact UI and chat convergence. | Wave 5 | Do not turn temporary run detail into a synced thread by default. |
+| Full persistent thread artifact UI and chat convergence. | Completed Wave 5 | Temporary runs stay unsaved by default and convert only through Keep/Continue. |
 | `superAdmin:refreshPlatformStats` performed multiple paginated queries in one Convex function. | Fixed in Wave 4 stabilization | Rebuild now schedules a bounded background chain with one 16-row paginated page per function invocation; the final page publishes the aggregate snapshot. |
 | Risky/bulk AI actions require confirmation. | Wave 4 | Operation policy enforcement, durable proposals, and confirm/cancel handling ship with the engine. |
-| `/chat` artifacts should land in library/inbox by default. | Wave 4 engine, Wave 5 presentation convergence | Placement policy ships with the shared engine; richer chat artifact cards and Thread/Message convergence remain Wave 5. |
-| Continue thread from workspace result card/right hub. | Wave 5 | Requires thread/message integration. |
-| Hidden result cards remain accessible. | Wave 5 | Right hub needs real thread/run history. |
+| `/chat` artifacts should land in library/inbox by default. | Completed Wave 5 | Chat artifact cards now provide Open and explicit Add to workspace actions. |
+| Continue thread from workspace result card/right hub. | Completed Wave 5 | Temporary run detail supports Keep as thread and Continue in chat. |
+| Hidden result cards remain accessible. | Completed Wave 5 | `/chat` includes a lightweight Run & thread hub with hidden history. |
+| Import historical legacy chats into Spectra threads. | Later migration pass | Active `/chat` uses Spectra threads; old chat rows remain migration-only and are not silently copied. |
+| Token-stream clean assistant prose alongside structured events. | Wave 5.5 | Implemented by incrementally exposing only the strict plan's public `finalResponse`; operational JSON and private reasoning remain hidden. |
+| Model-generated thread titles and summaries. | Wave 5.5 | Added to the strict plan with short UI caps and deterministic fallback. |
+| Chat/workspace attachments. | Wave 5.5 foundation | PDF uses OpenRouter file input; DOCX/text are extracted Spectra-side; unsafe binaries are rejected and unsupported image understanding is explicit. Permanent raw-file storage remains deferred. |
+| Reversible artifact history and dirty-close safety. | Wave 5.5 foundation | Manual/AI/revert provenance and version snapshots are durable; full visual block-diff review remains later. |
 | Multi-select selected artifact context. | Wave 6 | Context builder and selection model. |
 | Artifact checkmarks should appear only after entering an explicit multi-select mode. | Wave 6 | A normal click opens the artifact with only a subtle border/background shift; it must not imply checkbox selection. Closing or opening an artifact should not enter multi-select. |
 | Search across artifacts/workspaces. | Wave 6 | Broader context/search foundation. |

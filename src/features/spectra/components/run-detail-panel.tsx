@@ -1,132 +1,106 @@
 "use client";
 
-import { AlertCircle, ArrowUpRight, CheckCircle2, Clock3, Loader2, Pin, RotateCcw, ShieldCheck, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import { getSpectraRunDetail, type SpectraOperation, type SpectraRunDetail } from "../data/api";
+import { ArrowUpRight, Loader2, MessageSquare, MessageSquarePlus, Pin, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import { ConversationSurface } from "./conversation-surface";
+import { CommandBar } from "./command-bar";
+import { useSpectraRun } from "../ai/use-spectra-run";
+import { useSpectraSession } from "@/context/spectra-session-context";
+import { getSpectraRunDetail, postSpectra, type SpectraRunDetail, type SpectraThreadDetail } from "../data/api";
 import type { ResultCardStreamView } from "../ai/stream-events";
 
-function operationSummary(operation: SpectraOperation) {
-  const input = operation.input && typeof operation.input === "object" ? operation.input as Record<string, unknown> : {};
-  if (operation.type === "artifact.create") {
-    const content = input.content && typeof input.content === "object" ? input.content as Record<string, unknown> : {};
-    const count = Array.isArray(content.cards) ? `${content.cards.length} cards` : Array.isArray(content.questions) ? `${content.questions.length} questions` : Array.isArray(content.blocks) ? `${content.blocks.length} blocks` : null;
-    return `${String(input.title ?? "New artifact")}${count ? ` · ${count}` : ""}`;
-  }
-  if (operation.type === "artifact.update") return `Update ${String(input.artifactId ?? "artifact")}`;
-  if (operation.type === "workspaceItem.add") return "Add artifact to workspace";
-  if (operation.type === "workspaceItem.hide") return "Remove requested workspace placement";
-  if (operation.type === "workspace.create") return `Create ${String(input.title ?? "workspace")}`;
-  return operation.type;
+function temporaryDetail(detail: SpectraRunDetail): SpectraThreadDetail {
+  const run = detail.run;
+  const assistantContent = run.finalSummary ?? run.error ?? detail.cards[0]?.summary ?? "Spectra is working on this request.";
+  return {
+    thread: {
+      _id: `temporary:${run._id}`,
+      title: run.userPrompt.split(/\s+/).slice(0, 8).join(" "),
+      origin: run.sourceSurface,
+      workspaceId: run.workspaceId,
+      artifactId: run.artifactId,
+      status: "active",
+      messageCount: 2,
+      createdAt: run.createdAt,
+      updatedAt: run.updatedAt,
+    },
+    messages: [
+      { _id: `temporary:user:${run._id}`, threadId: `temporary:${run._id}`, role: "user", content: run.userPrompt, runId: run._id, createdAt: run.createdAt },
+      { _id: `temporary:assistant:${run._id}`, threadId: `temporary:${run._id}`, role: "assistant", content: assistantContent, runId: run._id, createdAt: run.updatedAt },
+    ],
+    traces: [{ run, operations: detail.operations, cards: detail.cards, artifacts: [] }],
+    viewerName: "You",
+  };
 }
 
-function statusIcon(status: ResultCardStreamView["status"]) {
-  if (status === "running" || status === "queued") return <Loader2 className="h-4 w-4 animate-spin text-[var(--accent-cyan)]" />;
-  if (status === "awaiting_confirmation") return <ShieldCheck className="h-4 w-4 text-amber-600" />;
-  if (status === "completed") return <CheckCircle2 className="h-4 w-4 text-[var(--success)]" />;
-  if (status === "failed") return <AlertCircle className="h-4 w-4 text-[var(--danger)]" />;
-  return <Clock3 className="h-4 w-4 text-[var(--text-tertiary)]" />;
-}
-
-export function RunDetailPanel({
-  runId,
-  card,
-  onClose,
-  onAction,
-}: {
+export function RunDetailPanel({ runId, card, onClose, onAction, onUseThread, onSaved }: {
   runId: string;
-  card: ResultCardStreamView;
+  card?: ResultCardStreamView;
   onClose: () => void;
-  onAction: (card: ResultCardStreamView, actionKey: string, targetId?: string) => void;
+  onAction?: (card: ResultCardStreamView, actionKey: string, targetId?: string) => void;
+  onUseThread?: (threadId: string, title: string) => void;
+  onSaved?: (threadId: string) => void;
 }) {
+  const router = useRouter();
+  const spectraSession = useSpectraSession();
   const [detail, setDetail] = useState<SpectraRunDetail | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
+  const [busy, setBusy] = useState<"keep" | "continue" | null>(null);
   useEffect(() => {
     let active = true;
-    setDetail(null);
-    setError(null);
-    void getSpectraRunDetail(runId)
-      .then((value) => { if (active) setDetail(value); })
-      .catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : "Could not load run details."); });
+    void getSpectraRunDetail(runId).then((value) => { if (active) setDetail(value); }).catch((error) => toast.error(error instanceof Error ? error.message : "Could not load run."));
     return () => { active = false; };
-  }, [runId, card.updatedAt]);
+  }, [runId, card?.updatedAt]);
+  const localArtifact = spectraSession.localThreads.find((thread) => thread.runId === runId);
+  const conversation = useMemo(() => {
+    if (!detail) return null;
+    const base = temporaryDetail(detail);
+    return { ...base, messages: [...base.messages, ...(localArtifact?.messages ?? []).map((message) => ({ _id: message.id, threadId: `temporary:${runId}`, role: message.role, content: message.content, runId: message.runId, createdAt: message.createdAt }))] } satisfies SpectraThreadDetail;
+  }, [detail, localArtifact?.messages, runId]);
+  const pendingPrompt = useRef("");
+  const localRun = useSpectraRun({
+    surface: detail?.run.sourceSurface === "chat" ? "chat" : detail?.run.sourceSurface ?? "workspace",
+    workspaceId: detail?.run.workspaceId,
+    artifactId: detail?.run.artifactId,
+    localConversation: conversation?.messages.filter((message) => message.role === "user" || message.role === "assistant").map((message) => ({ role: message.role as "user" | "assistant", content: message.content })),
+    onFinal: ({ runId: childRunId, summary }) => {
+      if (pendingPrompt.current) spectraSession.appendLocalExchange(runId, pendingPrompt.current, summary, childRunId);
+      pendingPrompt.current = "";
+    },
+  });
+  const persistedCard = detail?.cards[0];
+  const displayCard: ResultCardStreamView | undefined = card ?? (persistedCard ? { id: persistedCard._id, runId: persistedCard.runId, status: persistedCard.status, title: persistedCard.title, summary: persistedCard.summary, variant: persistedCard.variant, actions: persistedCard.actions, updatedAt: persistedCard.updatedAt } : undefined);
 
-  const affected = useMemo(() => {
-    const values = detail?.operations.flatMap((operation) => operation.affected ?? []) ?? [];
-    return [...new Map(values.map((item) => [`${item.type}:${item.id}`, item])).values()];
-  }, [detail]);
+  async function keep(placeInWorkspace: boolean, navigate: boolean) {
+    setBusy(navigate ? "continue" : "keep");
+    try {
+      const result = await postSpectra<{ threadId: string }>({ action: "keepRunAsThread", runId, placeInWorkspace, createReference: true, localMessages: localArtifact?.messages ?? [] });
+      window.dispatchEvent(new Event("spectra:threads-changed"));
+      if (navigate) router.push(`/chat?threadId=${encodeURIComponent(result.threadId)}`);
+      else toast.success(placeInWorkspace ? "Thread kept and pinned to this workspace." : "Thread kept.");
+      onSaved?.(result.threadId);
+      return result.threadId;
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not keep thread.");
+    } finally { setBusy(null); }
+    return null;
+  }
 
-  return (
-    <aside className="absolute inset-y-0 right-0 z-50 flex w-[min(390px,92vw)] flex-col border-l border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-primary)_97%,var(--bg-elevated))] shadow-[-14px_0_36px_rgba(22,18,13,0.10)]" aria-label="Run details">
-      <header className="flex h-14 shrink-0 items-center justify-between border-b border-[var(--border-subtle)] px-4">
-        <div className="flex items-center gap-2.5">
-          {statusIcon(card.status)}
-          <div>
-            <div className="text-[13px] font-semibold text-[var(--text-primary)]">Run details</div>
-            <div className="text-[11px] capitalize text-[var(--text-tertiary)]">{card.status.replaceAll("_", " ")}</div>
-          </div>
-        </div>
-        <button type="button" onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" aria-label="Close run details"><X className="h-4 w-4" /></button>
-      </header>
-
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-        {!detail && !error ? <div className="flex items-center gap-2 py-8 text-[12px] text-[var(--text-secondary)]"><Loader2 className="h-4 w-4 animate-spin" />Loading run…</div> : null}
-        {error ? <div className="rounded-[8px] border border-[color-mix(in_oklab,var(--danger)_30%,var(--border-default))] bg-[color-mix(in_oklab,var(--danger)_7%,transparent)] p-3 text-[12px] text-[var(--danger)]">{error}</div> : null}
-        {detail ? (
-          <div className="space-y-5">
-            <section>
-              <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.11em] text-[var(--text-tertiary)]">Prompt</div>
-              <p className="text-[13px] leading-5 text-[var(--text-primary)]">{detail.run.userPrompt}</p>
-              {detail.run.attemptCount && detail.run.attemptCount > 1 ? <p className="mt-1 text-[11px] text-[var(--text-tertiary)]">Attempt {detail.run.attemptCount}</p> : null}
-            </section>
-
-            <section className="rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
-              <div className="text-[12px] font-semibold text-[var(--text-primary)]">{card.title}</div>
-              {card.summary ? <p className="mt-1 text-[12px] leading-5 text-[var(--text-secondary)]">{card.summary}</p> : null}
-              {detail.run.error ? <p className="mt-2 rounded-[6px] bg-[color-mix(in_oklab,var(--danger)_8%,transparent)] px-2.5 py-2 text-[11px] leading-4 text-[var(--danger)]">{detail.run.error}</p> : null}
-            </section>
-
-            <section>
-              <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.11em] text-[var(--text-tertiary)]">Operations</div>
-              {detail.operations.length === 0 ? <p className="text-[12px] text-[var(--text-secondary)]">Answer only — no data changes.</p> : (
-                <div className="overflow-hidden rounded-[8px] border border-[var(--border-default)]">
-                  {detail.operations.map((operation) => (
-                    <div key={operation._id} className="flex items-start gap-2 border-b border-[var(--border-subtle)] px-3 py-2.5 last:border-b-0">
-                      <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--text-tertiary)]" />
-                      <div className="min-w-0 flex-1">
-                        <div className="text-[11px] font-medium text-[var(--text-primary)]">{operationSummary(operation)}</div>
-                        <div className="mt-0.5 text-[10px] text-[var(--text-tertiary)]">{operation.type} · {operation.status}</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </section>
-
-            <section>
-              <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.11em] text-[var(--text-tertiary)]">Affected objects</div>
-              {affected.length === 0 ? <p className="text-[12px] text-[var(--text-secondary)]">No objects changed.</p> : (
-                <div className="space-y-1.5">
-                  {affected.map((item) => <div key={`${item.type}:${item.id}`} className="flex items-center justify-between rounded-[7px] border border-[var(--border-default)] px-3 py-2 text-[11px]"><span className="capitalize text-[var(--text-secondary)]">{item.type}</span><span className="max-w-[210px] truncate font-mono text-[10px] text-[var(--text-tertiary)]">{item.id}</span></div>)}
-                </div>
-              )}
-            </section>
-          </div>
-        ) : null}
+  return <aside className="absolute inset-y-0 right-0 z-50 flex w-[min(620px,94vw)] flex-col border-l border-[var(--border-default)] bg-[var(--bg-primary)] shadow-[-16px_0_40px_rgba(22,18,13,0.10)]" aria-label="Local thread artifact">
+    <header className="flex min-h-16 shrink-0 items-center justify-between border-b border-[var(--border-subtle)] px-5 py-3">
+      <div className="flex min-w-0 items-center gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] bg-[color-mix(in_oklab,#8b6ff0_10%,var(--bg-elevated))] text-[#8b6ff0]"><MessageSquare className="h-4 w-4" /></span><div className="min-w-0"><div className="truncate font-display text-[17px] font-semibold">{conversation?.thread.title ?? "Conversation"}</div><div className="text-[10px] uppercase tracking-[0.11em] text-[var(--text-tertiary)]">Local thread · {displayCard?.status.replaceAll("_", " ") ?? "loading"} · not saved</div></div></div>
+      <button type="button" onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]" aria-label="Close"><X className="h-4 w-4" /></button>
+    </header>
+    <div className="min-h-0 flex-1">{conversation ? <ConversationSurface detail={conversation} compact liveExchange={localRun.liveExchange} composer={<CommandBar placeholder="Continue locally…" busy={localRun.submitting} allowAttachments onStop={localRun.stop} onSubmit={(prompt, attachments) => { pendingPrompt.current = prompt; void localRun.run(prompt, attachments); return true; }} context={<span className="flex items-center gap-1.5 text-[11px] text-[var(--text-secondary)]"><MessageSquare className="h-3.5 w-3.5" />Local thread</span>} />} /> : <div className="flex h-full items-center justify-center gap-2 text-[12px] text-[var(--text-tertiary)]"><Loader2 className="h-4 w-4 animate-spin" />Loading conversation</div>}</div>
+    <footer className="shrink-0 border-t border-[var(--border-subtle)] bg-[var(--bg-primary)] p-3">
+      <div className="grid grid-cols-2 gap-2">
+        {displayCard?.actions.map((action) => <button key={action.key} type="button" onClick={() => onAction?.(displayCard, action.key, action.targetId)} className="flex h-9 items-center justify-center gap-1.5 rounded-[7px] text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]"><ArrowUpRight className="h-3.5 w-3.5" />{action.label}</button>)}
+        <button type="button" disabled={busy !== null} onClick={() => void keep(Boolean(detail?.run.workspaceId), false)} className="flex h-9 items-center justify-center gap-1.5 rounded-[7px] border border-[var(--border-default)] text-[11px] font-medium hover:bg-[var(--bg-hover)] disabled:opacity-50">{busy === "keep" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Pin className="h-3.5 w-3.5" />}Keep as thread</button>
+        {onUseThread ? <button type="button" disabled={busy !== null} onClick={() => void keep(false, false).then((threadId) => { if (!threadId) return; onUseThread(threadId, conversation?.thread.title ?? "Conversation"); onClose(); })} className="flex h-9 items-center justify-center gap-1.5 rounded-[7px] text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] disabled:opacity-50"><MessageSquarePlus className="h-3.5 w-3.5" />Use in composer</button> : null}
+        <button type="button" disabled={busy !== null} onClick={() => void keep(false, true)} className="flex h-9 items-center justify-center gap-1.5 rounded-[7px] bg-[var(--text-primary)] text-[11px] font-medium text-[var(--bg-primary)] disabled:opacity-50">{busy === "continue" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MessageSquarePlus className="h-3.5 w-3.5" />}Continue in chat</button>
       </div>
-
-      <footer className="shrink-0 border-t border-[var(--border-subtle)] p-3">
-        <div className="grid grid-cols-2 gap-2">
-          {card.actions.map((action) => (
-            <button key={action.key} type="button" onClick={() => onAction(card, action.key, action.targetId)} className="flex h-9 items-center justify-center gap-2 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[11px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)]">
-              {action.key === "retry" ? <RotateCcw className="h-3.5 w-3.5" /> : action.key === "confirm" ? <ShieldCheck className="h-3.5 w-3.5" /> : <ArrowUpRight className="h-3.5 w-3.5" />}{action.label}
-            </button>
-          ))}
-          <button type="button" onClick={() => onAction(card, "keep")} className="flex h-9 items-center justify-center gap-2 rounded-[7px] border border-[var(--border-default)] text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><Pin className="h-3.5 w-3.5" />Keep in activity</button>
-          <button type="button" onClick={() => onAction(card, "hide")} className="flex h-9 items-center justify-center gap-2 rounded-[7px] border border-[var(--border-default)] text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><X className="h-3.5 w-3.5" />Hide</button>
-        </div>
-        <p className="mt-2 text-[10px] leading-4 text-[var(--text-tertiary)]">Runs remain in history. Persistent thread conversion is deferred to Wave 5.</p>
-      </footer>
-    </aside>
-  );
+      <p className="mt-2 text-[10px] leading-4 text-[var(--text-tertiary)]">The workspace command bar remains the composer here. Keep explicitly creates a durable thread reference; ordinary runs remain compact.</p>
+    </footer>
+  </aside>;
 }

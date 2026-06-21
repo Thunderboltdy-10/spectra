@@ -102,6 +102,8 @@ export type RequestIntent = z.infer<typeof requestIntentSchema>;
 export const spectraPlanSchema = z.object({
   decision: z.enum(PLAN_DECISIONS),
   intent: requestIntentSchema,
+  conversationTitle: z.string().trim().min(1).max(64).nullable().optional(),
+  conversationSummary: z.string().trim().min(1).max(320).nullable().optional(),
   finalResponse: z.string().trim().min(1).max(4_000),
   operations: z.array(modelOperationSchema).max(8),
 }).strict().superRefine((plan, ctx) => {
@@ -213,10 +215,12 @@ function artifactUpdateVariant(blueprintKey: (typeof SPECTRA_BLUEPRINT_KEYS)[num
 export const SPECTRA_PLAN_JSON_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["decision", "intent", "finalResponse", "operations"],
+  required: ["decision", "intent", "conversationTitle", "conversationSummary", "finalResponse", "operations"],
   properties: {
     decision: { enum: PLAN_DECISIONS },
     intent: { type: "object", additionalProperties: false, required: ["mode", "requestedArtifactTypes", "requestedVisibleArtifactCount", "targetArtifactId", "targetWorkspaceId"], properties: { mode: { enum: REQUEST_INTENT_MODES }, requestedArtifactTypes: { type: "array", items: { enum: SPECTRA_BLUEPRINT_KEYS }, maxItems: 5 }, requestedVisibleArtifactCount: { type: "integer", minimum: 0, maximum: 1000 }, targetArtifactId: nullableString, targetWorkspaceId: nullableString } },
+    conversationTitle: nullableString,
+    conversationSummary: nullableString,
     finalResponse: { type: "string", minLength: 1, maxLength: 4000 },
     operations: {
       type: "array", maxItems: 8,

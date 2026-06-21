@@ -137,7 +137,6 @@ export const create = mutation({
     if (args.workspaceId) {
       await requireOwnedWorkspace(ctx, args.actorClerkId, args.workspaceId);
     }
-
     const now = Date.now();
     const title = args.title.trim() || "Untitled artifact";
     const summary = args.summary?.trim() || fallbackArtifactSummary(args.blueprintKey as BlueprintKey);
@@ -187,6 +186,46 @@ export const create = mutation({
   },
 });
 
+export const listVersions = query({
+  args: { actorClerkId: v.string(), artifactId: v.id("spectraArtifacts"), limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    await requireOwnedArtifact(ctx, args.actorClerkId, args.artifactId);
+    return ctx.db.query("spectraArtifactVersions")
+      .withIndex("by_artifact_created", (q) => q.eq("artifactId", args.artifactId))
+      .order("desc")
+      .take(Math.max(1, Math.min(args.limit ?? 30, 100)));
+  },
+});
+
+export const revertVersion = mutation({
+  args: { actorClerkId: v.string(), artifactId: v.id("spectraArtifacts"), versionId: v.id("spectraArtifactVersions") },
+  handler: async (ctx, args) => {
+    const { artifact } = await requireOwnedArtifact(ctx, args.actorClerkId, args.artifactId);
+    const version = await ctx.db.get(args.versionId);
+    if (!version || version.artifactId !== args.artifactId || version.ownerUserId !== artifact.ownerUserId) throw new Error("Artifact version not found");
+    const target = version.before as { title: string; summary?: string; content: unknown; tags: string[] };
+    const now = Date.now();
+    await ctx.db.insert("spectraArtifactVersions", {
+      artifactId: args.artifactId,
+      ownerUserId: artifact.ownerUserId,
+      source: "revert",
+      before: { title: artifact.title, summary: artifact.summary, content: artifact.content, tags: artifact.tags },
+      after: target,
+      summary: `Reverted change from ${new Date(version.createdAt).toISOString()}`,
+      createdAt: now,
+    });
+    await ctx.db.patch(args.artifactId, {
+      title: target.title,
+      summary: target.summary,
+      content: target.content,
+      tags: target.tags,
+      textIndex: buildArtifactTextIndex(target),
+      updatedAt: now,
+    });
+    return { artifactId: args.artifactId };
+  },
+});
+
 export const update = mutation({
   args: {
     actorClerkId: v.string(),
@@ -195,6 +234,8 @@ export const update = mutation({
     summary: v.optional(v.string()),
     content: v.optional(v.any()),
     tags: v.optional(v.array(v.string())),
+    source: v.optional(v.union(v.literal("manual"), v.literal("ai"), v.literal("revert"))),
+    runId: v.optional(v.id("spectraAiRuns")),
   },
   handler: async (ctx, args) => {
     const { artifact } = await requireOwnedArtifact(ctx, args.actorClerkId, args.artifactId);
@@ -202,6 +243,19 @@ export const update = mutation({
     const summary = args.summary === undefined ? artifact.summary : args.summary.trim() || undefined;
     const tags = args.tags ?? artifact.tags;
     const now = Date.now();
+    const before = { title: artifact.title, summary: artifact.summary, content: artifact.content, tags: artifact.tags };
+    const after = { title, summary, content: args.content === undefined ? artifact.content : args.content, tags };
+    if (JSON.stringify(before) === JSON.stringify(after)) return { artifactId: args.artifactId };
+    await ctx.db.insert("spectraArtifactVersions", {
+      artifactId: args.artifactId,
+      ownerUserId: artifact.ownerUserId,
+      source: args.source ?? "manual",
+      runId: args.runId,
+      before,
+      after,
+      summary: args.source === "ai" ? "AI-applied artifact edit" : args.source === "revert" ? "Reverted artifact version" : "Manual artifact edit",
+      createdAt: now,
+    });
     await ctx.db.patch(args.artifactId, {
       title,
       summary,
@@ -250,6 +304,9 @@ export const permanentlyDelete = mutation({
       .withIndex("by_source", (q) => q.eq("sourceType", "artifact").eq("sourceId", args.artifactId))
       .collect();
     await Promise.all(placements.map((placement) => ctx.db.delete(placement._id)));
+
+    const versions = await ctx.db.query("spectraArtifactVersions").withIndex("by_artifact_created", (q) => q.eq("artifactId", args.artifactId)).collect();
+    await Promise.all(versions.map((version) => ctx.db.delete(version._id)));
 
     const runs = await ctx.db
       .query("spectraAiRuns")

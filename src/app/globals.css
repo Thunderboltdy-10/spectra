@@ -1557,7 +1557,13 @@ button:disabled {
 
 /* Selection highlight */
 .tiptap-root .ProseMirror ::selection {
-  background: var(--accent-cyan)25;
+  background: color-mix(in oklab, var(--accent-cyan) 24%, transparent);
+}
+
+.tiptap-root,
+.tiptap-root .ProseMirror {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 /* ── Tables ─────────────────────────────────────────────────────────── */

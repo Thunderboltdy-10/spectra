@@ -129,6 +129,27 @@ export async function GET(request: NextRequest) {
       return ok(detail);
     }
 
+    if (action === "artifactVersions") {
+      const artifactId = requireString(params.get("artifactId"), "artifactId");
+      const versions = await spectraQuery("spectraArtifacts:listVersions", { actorClerkId: actor.clerkId, artifactId, limit: params.has("limit") ? Number(params.get("limit")) : undefined });
+      return ok({ versions });
+    }
+
+    if (action === "threads") {
+      const threads = await spectraQuery("spectraThreads:list", {
+        actorClerkId: actor.clerkId,
+        includeArchived: params.get("includeArchived") === "true",
+        limit: params.has("limit") ? Number(params.get("limit")) : undefined,
+      });
+      return ok({ threads });
+    }
+
+    if (action === "thread") {
+      const threadId = requireString(params.get("threadId"), "threadId");
+      const thread = await spectraQuery("spectraThreads:get", { actorClerkId: actor.clerkId, threadId });
+      return ok(thread);
+    }
+
     if (action === "overview") {
       const workspaces = await spectraQuery("spectraWorkspaces:list", {
         actorClerkId: actor.clerkId,
@@ -151,7 +172,7 @@ export async function GET(request: NextRequest) {
         spectraQuery("spectraArtifacts:list", {
           actorClerkId: actor.clerkId,
           placement: "all",
-          limit: 100,
+          limit: 60,
         }),
         spectraQuery("spectraRuns:listRecent", {
           actorClerkId: actor.clerkId,
@@ -251,6 +272,8 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === "updateArtifact") {
+      const requestedEditSource = optionalString(body.source);
+      const editSource = requestedEditSource && ["manual", "ai", "revert"].includes(requestedEditSource) ? requestedEditSource : "manual";
       const result = await spectraMutation("spectraArtifacts:update", {
         actorClerkId: actor.clerkId,
         artifactId: requireString(body.artifactId, "artifactId"),
@@ -258,6 +281,17 @@ export async function POST(request: NextRequest) {
         summary: optionalString(body.summary),
         content: body.content,
         tags: Array.isArray(body.tags) ? body.tags.filter((tag): tag is string => typeof tag === "string") : undefined,
+        source: editSource,
+        runId: optionalString(body.runId),
+      });
+      return ok(result);
+    }
+
+    if (action === "revertArtifactVersion") {
+      const result = await spectraMutation("spectraArtifacts:revertVersion", {
+        actorClerkId: actor.clerkId,
+        artifactId: requireString(body.artifactId, "artifactId"),
+        versionId: requireString(body.versionId, "versionId"),
       });
       return ok(result);
     }
@@ -318,6 +352,55 @@ export async function POST(request: NextRequest) {
         resultCardId: requireString(body.resultCardId, "resultCardId"),
       });
       return ok(result);
+    }
+
+    if (action === "createThread") {
+      const threadId = await spectraMutation("spectraThreads:create", {
+        actorClerkId: actor.clerkId,
+        title: optionalString(body.title),
+        origin: optionalString(body.origin) ?? "chat",
+        workspaceId: optionalString(body.workspaceId),
+        artifactId: optionalString(body.artifactId),
+      });
+      return ok({ threadId });
+    }
+
+    if (action === "updateThread") {
+      const result = await spectraMutation("spectraThreads:update", {
+        actorClerkId: actor.clerkId,
+        threadId: requireString(body.threadId, "threadId"),
+        title: optionalString(body.title),
+        pinned: typeof body.pinned === "boolean" ? body.pinned : undefined,
+        status: optionalString(body.status),
+      });
+      return ok(result);
+    }
+
+    if (action === "keepRunAsThread") {
+      const localMessages = Array.isArray(body.localMessages) ? body.localMessages.slice(0, 60).flatMap((message) => {
+        if (!message || typeof message !== "object") return [];
+        const row = message as Record<string, unknown>;
+        if ((row.role !== "user" && row.role !== "assistant") || typeof row.id !== "string" || typeof row.content !== "string" || typeof row.createdAt !== "number") return [];
+        return [{ id: row.id, role: row.role, content: row.content, runId: optionalString(row.runId), createdAt: row.createdAt }];
+      }) : undefined;
+      const result = await spectraMutation("spectraThreads:createFromRun", {
+        actorClerkId: actor.clerkId,
+        runId: requireString(body.runId, "runId"),
+        placeInWorkspace: body.placeInWorkspace === true,
+        createReference: body.createReference !== false,
+        localMessages,
+      });
+      return ok(result);
+    }
+
+    if (action === "addThreadToWorkspace") {
+      const kept = await spectraMutation("spectraThreads:createFromRun", {
+        actorClerkId: actor.clerkId,
+        runId: requireString(body.runId, "runId"),
+        placeInWorkspace: true,
+        createReference: true,
+      });
+      return ok(kept);
     }
 
     return badRequest("Unknown Spectra action");

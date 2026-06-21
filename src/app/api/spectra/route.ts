@@ -223,6 +223,15 @@ export async function POST(request: NextRequest) {
       return ok(result);
     }
 
+    if (action === "deleteWorkspace") {
+      const result = await spectraMutation("spectraWorkspaces:permanentlyDelete", {
+        actorClerkId: actor.clerkId,
+        workspaceId: requireString(body.workspaceId, "workspaceId"),
+        confirmation: requireString(body.confirmation, "confirmation"),
+      });
+      return ok(result);
+    }
+
     if (action === "createArtifact") {
       const requestedSource = optionalString(body.source);
       const source = requestedSource && ["chat", "workspace", "artifact", "manual", "ai"].includes(requestedSource)
@@ -255,6 +264,14 @@ export async function POST(request: NextRequest) {
 
     if (action === "archiveArtifact") {
       const result = await spectraMutation("spectraArtifacts:archive", {
+        actorClerkId: actor.clerkId,
+        artifactId: requireString(body.artifactId, "artifactId"),
+      });
+      return ok(result);
+    }
+
+    if (action === "deleteArtifact") {
+      const result = await spectraMutation("spectraArtifacts:permanentlyDelete", {
         actorClerkId: actor.clerkId,
         artifactId: requireString(body.artifactId, "artifactId"),
       });

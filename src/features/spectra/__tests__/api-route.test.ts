@@ -189,4 +189,35 @@ describe("Spectra API route", () => {
       workspaceItemId: "item_1",
     });
   });
+
+  it("routes permanent artifact and strongly confirmed workspace deletion", async () => {
+    const requireActor = vi.fn().mockResolvedValue(mockActor());
+    const convexQuery = vi.fn();
+    const convexMutation = vi.fn()
+      .mockResolvedValueOnce({ artifactId: "artifact_1" })
+      .mockResolvedValueOnce({ workspaceId: "workspace_1" });
+
+    vi.doMock("@/lib/auth-server", () => ({ requireActor }));
+    vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation }));
+
+    const route = await import("@/app/api/spectra/route");
+    await route.POST(new NextRequest("http://localhost/api/spectra", {
+      method: "POST",
+      body: JSON.stringify({ action: "deleteArtifact", artifactId: "artifact_1" }),
+    }));
+    await route.POST(new NextRequest("http://localhost/api/spectra", {
+      method: "POST",
+      body: JSON.stringify({ action: "deleteWorkspace", workspaceId: "workspace_1", confirmation: "Remove Biology permanently" }),
+    }));
+
+    expect(convexMutation).toHaveBeenNthCalledWith(1, "spectraArtifacts:permanentlyDelete", {
+      actorClerkId: "user_spectra",
+      artifactId: "artifact_1",
+    });
+    expect(convexMutation).toHaveBeenNthCalledWith(2, "spectraWorkspaces:permanentlyDelete", {
+      actorClerkId: "user_spectra",
+      workspaceId: "workspace_1",
+      confirmation: "Remove Biology permanently",
+    });
+  });
 });

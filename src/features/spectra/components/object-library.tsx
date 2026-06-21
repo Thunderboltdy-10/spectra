@@ -1,15 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, CheckCircle2, ChevronDown, ExternalLink, List, Loader2, PanelTop, Pin, PinOff, Plus, Search, X } from "lucide-react";
+import { Check, CheckCircle2, ChevronDown, ExternalLink, List, Loader2, PanelTop, Pin, PinOff, Plus, Search, Trash2, X } from "lucide-react";
 import { blueprintMeta } from "./artifact-card";
+import { FloatingMenu } from "./floating-menu";
 import { artifactPlacements, formatRelativeTime, workspaceAccent } from "./spectra-view-model";
 import type { SpectraArtifact, SpectraBlueprintKey, SpectraWorkspace, SpectraWorkspaceItem } from "../data/api";
 
 export type ObjectLibraryEntry = { artifact: SpectraArtifact; item?: SpectraWorkspaceItem };
 type GroupBy = "workspace" | "type";
 type LibraryMode = "list" | "board";
-type SortMode = "updated" | "created" | "alphabetical" | "type";
+type SortMode = "updated" | "created" | "alphabetical" | "type" | "pinned" | "workspace" | "activity";
 
 const types: Array<{ key: "all" | SpectraBlueprintKey; label: string }> = [
   { key: "all", label: "All" },
@@ -35,6 +36,7 @@ export function ObjectLibrary({
   onOpen,
   onTogglePin,
   onRemove,
+  onDelete,
   onAddToWorkspace,
   onCreateArtifact,
 }: {
@@ -48,6 +50,7 @@ export function ObjectLibrary({
   onOpen: (entry: ObjectLibraryEntry) => void;
   onTogglePin?: (entry: ObjectLibraryEntry) => void;
   onRemove?: (entry: ObjectLibraryEntry) => void;
+  onDelete?: (entry: ObjectLibraryEntry) => void;
   onAddToWorkspace?: (entry: ObjectLibraryEntry, workspaceId: string) => void;
   onCreateArtifact?: (blueprintKey: SpectraBlueprintKey, workspaceId?: string) => void;
 }) {
@@ -57,6 +60,7 @@ export function ObjectLibrary({
   const [sort, setSort] = useState<SortMode>("updated");
   const [sortOpen, setSortOpen] = useState(false);
   const [placementMenuId, setPlacementMenuId] = useState<string | null>(null);
+  const [placementAnchor, setPlacementAnchor] = useState<DOMRect | null>(null);
   const [createMenuKey, setCreateMenuKey] = useState<string | null>(null);
   const sortRef = useRef<HTMLDivElement | null>(null);
 
@@ -73,6 +77,9 @@ export function ObjectLibrary({
       .filter((entry) => activeType === "all" || entry.artifact.blueprintKey === activeType)
       .filter((entry) => !needle || `${entry.artifact.title} ${entry.artifact.summary ?? ""} ${entry.artifact.tags.join(" ")}`.toLowerCase().includes(needle))
       .sort((a, b) => {
+        if (sort === "pinned") return Number(Boolean(b.item?.viewData.pinned)) - Number(Boolean(a.item?.viewData.pinned)) || b.artifact.updatedAt - a.artifact.updatedAt;
+        if (sort === "workspace") return (artifactPlacements(a.artifact)[0]?.workspaceTitle ?? "Unplaced").localeCompare(artifactPlacements(b.artifact)[0]?.workspaceTitle ?? "Unplaced");
+        if (sort === "activity") return (b.item?.updatedAt ?? b.artifact.updatedAt) - (a.item?.updatedAt ?? a.artifact.updatedAt);
         if (sort === "alphabetical") return a.artifact.title.localeCompare(b.artifact.title);
         if (sort === "created") return b.artifact.createdAt - a.artifact.createdAt;
         if (sort === "type") return a.artifact.blueprintKey.localeCompare(b.artifact.blueprintKey) || a.artifact.title.localeCompare(b.artifact.title);
@@ -111,6 +118,7 @@ export function ObjectLibrary({
       <button type="button" className={actionButtonClass()} onClick={() => onOpen(entry)}><ExternalLink className="h-3.5 w-3.5" />Open</button>
       {onTogglePin ? <button type="button" className="flex h-8 w-8 items-center justify-center rounded-[7px] border border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" onClick={() => onTogglePin(entry)} aria-label={pinned ? "Unpin" : "Pin"}>{pinned ? <PinOff className="h-3.5 w-3.5 text-[#b67616]" /> : <Pin className="h-3.5 w-3.5" />}</button> : null}
       {onRemove && entry.item ? <button type="button" className="flex h-8 w-8 items-center justify-center rounded-[7px] border border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--danger)]" disabled={busyKey === `hide:${entry.item._id}`} onClick={() => onRemove(entry)} aria-label="Remove from workspace" title="Remove from workspace; the artifact remains available">{busyKey === `hide:${entry.item._id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />}</button> : null}
+      {onDelete ? <button type="button" className="flex h-8 w-8 items-center justify-center text-[var(--text-secondary)] hover:text-[var(--danger)]" disabled={busyKey === `delete:${entry.artifact._id}`} onClick={() => onDelete(entry)} aria-label="Delete artifact permanently" title="Delete artifact permanently">{busyKey === `delete:${entry.artifact._id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}</button> : null}
     </div>;
   }
 
@@ -119,14 +127,14 @@ export function ObjectLibrary({
     const open = placementMenuId === entry.artifact._id;
     return <div className="flex items-center gap-2">
       {actions(entry)}
-      <div className="relative">
-        <button type="button" className={actionButtonClass()} onClick={() => setPlacementMenuId(open ? null : entry.artifact._id)}><Plus className="h-3.5 w-3.5" />Add to workspace</button>
-        {open ? <div className="absolute right-0 top-[calc(100%+8px)] z-30 w-[250px] rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[0_6px_18px_rgba(0,0,0,0.10)]">
+      <div>
+        <button type="button" className={actionButtonClass()} onClick={(event) => { setPlacementAnchor(event.currentTarget.getBoundingClientRect()); setPlacementMenuId(open ? null : entry.artifact._id); }}><Plus className="h-3.5 w-3.5" />Add to workspace</button>
+        <FloatingMenu open={open} anchor={placementAnchor} onClose={() => setPlacementMenuId(null)}>
           {workspaces.map((workspace) => {
             const alreadyPlaced = artifactPlacements(entry.artifact).some((placement) => placement.workspaceId === workspace._id);
             return <button key={workspace._id} type="button" className="flex w-full items-center gap-2 rounded-[7px] px-2.5 py-2 text-left text-[13px] text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-45" disabled={alreadyPlaced} onClick={() => { setPlacementMenuId(null); onAddToWorkspace(entry, workspace._id); }}><span className="min-w-0 flex-1 truncate">{workspace.title}</span>{alreadyPlaced ? <CheckCircle2 className="h-4 w-4 text-[var(--success)]" /> : null}</button>;
           })}
-        </div> : null}
+        </FloatingMenu>
       </div>
     </div>;
   }
@@ -146,14 +154,12 @@ export function ObjectLibrary({
   return <section>
     <div><h2 className="font-display text-[20px] font-semibold text-[var(--text-primary)]">{title}</h2>{subtitle ? <p className="mt-1 text-[13px] text-[var(--text-secondary)]">{subtitle}</p> : null}</div>
 
-    <div className="mt-5 flex items-center gap-2 overflow-x-auto pb-1"><div className="flex shrink-0 gap-1">{types.map((type) => <button key={type.key} type="button" onClick={() => setActiveType(type.key)} className={`inline-flex h-9 items-center rounded-[8px] border px-3 text-[13px] font-medium transition-all ${activeType === type.key ? "border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[0_1px_7px_rgba(27,20,12,0.08)]" : "border-transparent text-[var(--text-secondary)] hover:bg-[color-mix(in_oklab,var(--bg-elevated)_68%,transparent)]"}`}>{type.label}</button>)}</div><div className="relative w-[210px] shrink-0"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-tertiary)]" /><input value={search} onChange={(event) => setSearch(event.target.value)} className="h-9 w-full rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] pl-9 pr-3 text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]" placeholder="Search objects" /></div><div className="relative shrink-0" ref={sortRef}><button type="button" className="flex h-9 min-w-[174px] items-center justify-between gap-3 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-primary)] shadow-[0_1px_4px_rgba(27,20,12,0.04)] hover:bg-[var(--bg-hover)]" onClick={() => setSortOpen((open) => !open)}><span>{sort === "updated" ? "Recently updated" : sort === "created" ? "Recently created" : sort === "alphabetical" ? "Alphabetical" : "Artifact type"}</span><ChevronDown className={`h-3.5 w-3.5 text-[var(--text-tertiary)] transition ${sortOpen ? "rotate-180" : ""}`} /></button>{sortOpen ? <div className="absolute right-0 top-[calc(100%+7px)] z-30 w-[190px] rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 shadow-[0_14px_32px_rgba(27,20,12,0.13)]">{([['updated','Recently updated'],['created','Recently created'],['alphabetical','Alphabetical'],['type','Artifact type']] as Array<[SortMode,string]>).map(([key,label]) => <button key={key} type="button" className="flex w-full items-center justify-between rounded-[7px] px-2.5 py-2 text-left text-[12px] text-[var(--text-primary)] hover:bg-[var(--bg-hover)]" onClick={() => { setSort(key); setSortOpen(false); }}><span>{label}</span>{sort === key ? <Check className="h-3.5 w-3.5 text-[var(--success)]" /> : null}</button>)}</div> : null}</div>{groupBy === "type" ? <div className="flex shrink-0 rounded-[10px] bg-[color-mix(in_oklab,var(--bg-elevated)_74%,transparent)] p-1 shadow-[inset_0_0_0_1px_var(--border-default)]">{[{ key: "list" as const, label: "List", icon: List }, { key: "board" as const, label: "Board", icon: PanelTop }].map((option) => { const Icon = option.icon; return <button key={option.key} type="button" className={`inline-flex h-8 items-center gap-2 rounded-[7px] px-3 text-[12px] font-medium transition-all duration-200 ${mode === option.key ? "bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-[0_1px_6px_rgba(27,20,12,0.08)]" : "text-[var(--text-secondary)] hover:bg-[color-mix(in_oklab,var(--bg-primary)_52%,transparent)] hover:text-[var(--text-primary)]"}`} onClick={() => setMode(option.key)}><Icon className="h-4 w-4" />{option.label}</button>; })}</div> : null}</div>
+    <div className="mt-5 flex flex-wrap items-center gap-2 pb-1"><div className="flex shrink-0 gap-1 overflow-x-auto">{types.map((type) => <button key={type.key} type="button" onClick={() => setActiveType(type.key)} className={`inline-flex h-9 items-center rounded-[8px] border px-3 text-[13px] font-medium transition-all ${activeType === type.key ? "border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[0_1px_7px_rgba(27,20,12,0.08)]" : "border-transparent text-[var(--text-secondary)] hover:bg-[color-mix(in_oklab,var(--bg-elevated)_68%,transparent)]"}`}>{type.label}</button>)}</div><div className="ml-auto flex items-center gap-2"><div className="relative w-[210px] shrink-0"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-tertiary)]" /><input value={search} onChange={(event) => setSearch(event.target.value)} className="h-9 w-full rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] pl-9 pr-3 text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]" placeholder="Search objects" /></div><div className="relative shrink-0" ref={sortRef}><button type="button" className="flex h-9 min-w-[164px] items-center justify-between gap-3 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-primary)] shadow-[0_1px_4px_rgba(27,20,12,0.04)] hover:bg-[var(--bg-hover)]" onClick={() => setSortOpen((open) => !open)}><span>{sort === "updated" ? "Recently updated" : sort === "created" ? "Recently created" : sort === "alphabetical" ? "Title A–Z" : sort === "type" ? "Artifact type" : sort === "pinned" ? "Pinned first" : sort === "workspace" ? "Workspace" : "Activity"}</span><ChevronDown className={`h-3.5 w-3.5 text-[var(--text-tertiary)] transition ${sortOpen ? "rotate-180" : ""}`} /></button>{sortOpen ? <div className="absolute right-0 top-[calc(100%+7px)] z-30 w-[190px] rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 shadow-[0_14px_32px_rgba(27,20,12,0.13)]">{([['updated','Recently updated'],['created','Recently created'],['alphabetical','Title A–Z'],['type','Artifact type'],['pinned','Pinned first'],['workspace','Workspace'],['activity','Activity']] as Array<[SortMode,string]>).map(([key,label]) => <button key={key} type="button" className="flex w-full items-center justify-between rounded-[7px] px-2.5 py-2 text-left text-[12px] text-[var(--text-primary)] hover:bg-[var(--bg-hover)]" onClick={() => { setSort(key); setSortOpen(false); }}><span>{label}</span>{sort === key ? <Check className="h-3.5 w-3.5 text-[var(--success)]" /> : null}</button>)}</div> : null}</div><div className="flex shrink-0 rounded-[10px] bg-[color-mix(in_oklab,var(--bg-elevated)_74%,transparent)] p-1 shadow-[inset_0_0_0_1px_var(--border-default)]">{[{ key: "list" as const, label: "List", icon: List }, { key: "board" as const, label: "Board", icon: PanelTop }].map((option) => { const Icon = option.icon; return <button key={option.key} type="button" className={`inline-flex h-8 items-center gap-2 rounded-[7px] px-3 text-[12px] font-medium transition-all duration-200 ${mode === option.key ? "bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-[0_1px_6px_rgba(27,20,12,0.08)]" : "text-[var(--text-secondary)] hover:bg-[color-mix(in_oklab,var(--bg-primary)_52%,transparent)] hover:text-[var(--text-primary)]"}`} onClick={() => setMode(option.key)}><Icon className="h-4 w-4" />{option.label}</button>; })}</div></div></div>
 
     {groupBy === "workspace" ? <section className="mt-7">
       <div className="mb-4"><div className="flex items-center gap-2"><h3 className="font-display text-[20px] font-semibold text-[var(--text-primary)]">Unplaced</h3><span className="rounded-[6px] bg-[var(--bg-secondary)] px-1.5 text-[12px] text-[var(--text-secondary)]">{unplaced.length}</span></div><p className="mt-1 text-[13px] text-[var(--text-secondary)]">Objects that have not been added to a workspace.</p></div>
       <div className="grid gap-3 xl:grid-cols-3">{unplaced.slice(0, 6).map(unplacedCard)}{unplaced.length === 0 ? <div className="rounded-[8px] border border-dashed border-[var(--border-default)] px-4 py-7 text-[13px] text-[var(--text-secondary)]">No unplaced objects.</div> : null}</div>
     </section> : null}
-
-    {groupBy === "workspace" ? <div className="mt-7 flex justify-end border-t border-[var(--border-default)] pt-5"><div className="flex rounded-[10px] bg-[color-mix(in_oklab,var(--bg-elevated)_74%,transparent)] p-1 shadow-[inset_0_0_0_1px_var(--border-default)]">{[{ key: "list" as const, label: "List", icon: List }, { key: "board" as const, label: "Board", icon: PanelTop }].map((option) => { const Icon = option.icon; return <button key={option.key} type="button" className={`inline-flex h-8 items-center gap-2 rounded-[7px] px-3 text-[12px] font-medium transition-all duration-200 ${mode === option.key ? "bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-[0_1px_6px_rgba(27,20,12,0.08)]" : "text-[var(--text-secondary)] hover:bg-[color-mix(in_oklab,var(--bg-primary)_52%,transparent)] hover:text-[var(--text-primary)]"}`} onClick={() => setMode(option.key)}><Icon className="h-4 w-4" />{option.label}</button>; })}</div></div> : null}
 
     {mode === "list" ? <main className="mt-8">
       <section>

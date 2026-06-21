@@ -675,7 +675,7 @@ function ArtifactStudioEditor({
             </span> : null}
             <button
               type="button"
-              className="inline-flex h-9 items-center gap-1.5 rounded-[8px] bg-[var(--text-primary)] px-3 text-[13px] font-medium text-[var(--bg-primary)] disabled:opacity-45"
+              className="inline-flex h-9 items-center gap-1.5 px-1.5 text-[13px] font-medium text-[var(--text-primary)] hover:text-[var(--accent-cyan)] disabled:opacity-45"
               disabled={!dirty || busy || !title.trim()}
               onClick={() => void save()}
             >
@@ -1402,7 +1402,7 @@ function textareaClass(extra = "") {
 }
 
 function iconButtonClass() {
-  return "flex h-9 w-9 items-center justify-center rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-45";
+  return "flex h-9 w-9 items-center justify-center text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:opacity-45";
 }
 
 function smallActionClass() {

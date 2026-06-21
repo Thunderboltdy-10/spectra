@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { ZodError } from "zod";
 import { requireActor } from "@/lib/auth-server";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
-import { getSpectraModelId } from "@/features/spectra/ai/model-config";
+import { getSpectraModelId, SPECTRA_OPENROUTER_PROVIDER_ROUTING } from "@/features/spectra/ai/model-config";
 import { evaluatePlanPolicy } from "@/features/spectra/operations/policy";
 import {
   parseModelOperation,
@@ -155,10 +155,11 @@ async function callModel(surface: Surface, prompt: string, context: unknown) {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
       "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
-      "X-Title": "Spectra AI Operation Engine",
+      "X-OpenRouter-Title": "Spectra AI Operation Engine",
     },
     body: JSON.stringify({
       model: getSpectraModelId(),
+      provider: SPECTRA_OPENROUTER_PROVIDER_ROUTING,
       temperature: 0.1,
       messages: [
         { role: "system", content: systemPrompt(surface) },

@@ -79,13 +79,14 @@ function setup(plan: unknown, initialStatus: "queued" | "failed" = "queued") {
   vi.doMock("@/lib/auth-server", () => ({ requireActor }));
   vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation }));
   process.env.OPENROUTER_API_KEY = "test-key";
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(plan) } }] }), { status: 200 })));
-  return { convexMutation };
+  const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(plan) } }] }), { status: 200 }));
+  vi.stubGlobal("fetch", fetchMock);
+  return { convexMutation, fetchMock };
 }
 
 describe("Spectra run route", () => {
   it("creates one six-card deck and does not emit unrelated placement removal", async () => {
-    const { convexMutation } = setup(deckPlan());
+    const { convexMutation, fetchMock } = setup(deckPlan());
     const route = await import("@/app/api/spectra/run/route");
     const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", { method: "POST", body: JSON.stringify({ action: "run", surface: "workspace", workspaceId: "workspace-real", prompt: "Create a flashcard deck about photosynthesis with 6 cards. Include memory cues." }) }));
     const events = (await response.text()).trim().split("\n").map((line) => JSON.parse(line) as { type: string; message?: string });
@@ -97,6 +98,11 @@ describe("Spectra run route", () => {
     expect(events.some((event) => event.type === "confirmation_required")).toBe(false);
     expect(events.some((event) => event.message === "Validating 6 cards")).toBe(true);
     expect(events.some((event) => event.message === "Saving deck to Biology")).toBe(true);
+    const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    const payload = JSON.parse(String(request.body)) as { model: string; provider: { order: string[]; allow_fallbacks: boolean } };
+    expect(payload.model).toBe("deepseek/deepseek-v4-pro");
+    expect(payload.provider).toEqual({ order: ["deepseek"], allow_fallbacks: true });
+    expect(new Headers(request.headers).get("X-OpenRouter-Title")).toBe("Spectra AI Operation Engine");
   });
 
   it("retries the same failed run and result card", async () => {

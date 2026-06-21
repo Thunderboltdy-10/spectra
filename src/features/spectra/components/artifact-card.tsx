@@ -54,7 +54,9 @@ export function ArtifactCard({
         size === "large" ? "min-h-[216px] rounded-[9px] p-4" : "rounded-[8px] p-3.5",
         selected
           ? "border-[#8b6ff0] bg-[color-mix(in_oklab,#8b6ff0_4%,var(--bg-elevated))] shadow-[0_2px_8px_rgba(68,45,123,0.10)]"
-          : "border-[var(--border-default)] hover:border-[color-mix(in_oklab,var(--text-tertiary)_36%,var(--border-default))]",
+          : artifact.pinned
+            ? "border-[color-mix(in_oklab,#b67616_22%,var(--border-default))] shadow-[0_7px_20px_rgba(54,38,18,0.065)] hover:border-[color-mix(in_oklab,#b67616_35%,var(--border-default))]"
+            : "border-[var(--border-default)] hover:border-[color-mix(in_oklab,var(--text-tertiary)_36%,var(--border-default))]",
         interactive ? "cursor-pointer" : "",
         quiet ? "shadow-none" : "shadow-[0_1px_2px_rgba(27,20,12,0.03)]",
         className,
@@ -85,6 +87,7 @@ export function ArtifactCard({
           ))}
         </div>
       ) : null}
+      {artifact.pinned && !botanical ? <div className="pointer-events-none absolute bottom-0 right-0 h-[72%] w-[46%] bg-[linear-gradient(145deg,transparent_18%,color-mix(in_oklab,#b67616_7%,transparent))] opacity-80 [mask-image:linear-gradient(to_bottom_right,transparent,black)]" /> : null}
       <div className="pointer-events-none absolute inset-0 opacity-[0.22] [background-image:radial-gradient(color-mix(in_oklab,var(--text-primary)_18%,transparent)_0.45px,transparent_0.45px)] [background-size:7px_7px]" />
       <div className="flex items-start gap-3">
         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[7px] border border-[color-mix(in_oklab,currentColor_24%,transparent)] bg-[color-mix(in_oklab,currentColor_9%,var(--bg-elevated))]" style={{ color: meta.color }}>

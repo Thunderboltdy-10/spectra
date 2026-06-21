@@ -29,6 +29,7 @@ export type SpectraArtifact = {
     workspaceId: string;
     workspaceTitle: string;
     workspaceItemId: string;
+    pinned?: boolean;
   }>;
   placementStatus?: "inbox" | "workspace";
 };
@@ -128,6 +129,16 @@ export type SpectraOverview = {
 
 type JsonRecord = Record<string, unknown>;
 
+const overviewCache = new Map<string, { value: SpectraOverview; cachedAt: number }>();
+const workspaceCache = new Map<string, { value: SpectraOverview["workspace"]; cachedAt: number }>();
+const CACHE_TTL = 45_000;
+
+export function invalidateSpectraCache(scope?: { workspaceId?: string }) {
+  overviewCache.clear();
+  if (scope?.workspaceId) workspaceCache.delete(scope.workspaceId);
+  else workspaceCache.clear();
+}
+
 async function readJson<T>(response: Response): Promise<T> {
   const payload = await response.json().catch(() => null) as T | { error?: { message?: string } } | { error?: string } | null;
   if (!response.ok) {
@@ -142,15 +153,25 @@ async function readJson<T>(response: Response): Promise<T> {
   return payload as T;
 }
 
-export async function getSpectraOverview(workspaceId?: string) {
+export async function getSpectraOverview(workspaceId?: string, force = false) {
+  const key = workspaceId ?? "home";
+  const cached = overviewCache.get(key);
+  if (!force && cached && Date.now() - cached.cachedAt < CACHE_TTL) return cached.value;
   const params = new URLSearchParams({ action: "overview" });
   if (workspaceId) params.set("workspaceId", workspaceId);
-  return readJson<SpectraOverview>(await fetch(`/api/spectra?${params.toString()}`, { cache: "no-store" }));
+  const value = await readJson<SpectraOverview>(await fetch(`/api/spectra?${params.toString()}`, { cache: "no-store" }));
+  overviewCache.set(key, { value, cachedAt: Date.now() });
+  if (workspaceId && value.workspace) workspaceCache.set(workspaceId, { value: value.workspace, cachedAt: Date.now() });
+  return value;
 }
 
-export async function getSpectraWorkspace(workspaceId: string) {
+export async function getSpectraWorkspace(workspaceId: string, force = false) {
+  const cached = workspaceCache.get(workspaceId);
+  if (!force && cached && Date.now() - cached.cachedAt < CACHE_TTL) return { workspace: cached.value };
   const qs = new URLSearchParams({ action: "workspace", workspaceId });
-  return readJson<{ workspace: SpectraOverview["workspace"] }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+  const value = await readJson<{ workspace: SpectraOverview["workspace"] }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+  workspaceCache.set(workspaceId, { value: value.workspace, cachedAt: Date.now() });
+  return value;
 }
 
 export async function getSpectraArtifacts(params?: {
@@ -186,11 +207,15 @@ export async function getSpectraRunDetail(runId: string) {
 }
 
 export async function postSpectra<T>(body: JsonRecord) {
-  return readJson<T>(await fetch("/api/spectra", {
+  const value = await readJson<T>(await fetch("/api/spectra", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   }));
+  if (body.action !== "hideResultCard" && body.action !== "keepResultCard") {
+    invalidateSpectraCache({ workspaceId: typeof body.workspaceId === "string" ? body.workspaceId : undefined });
+  }
+  return value;
 }
 
 export function toArtifactCardView(artifact: SpectraArtifact): ArtifactCardView {

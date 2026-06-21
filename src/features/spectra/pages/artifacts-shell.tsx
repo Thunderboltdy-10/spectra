@@ -20,6 +20,7 @@ import {
   Sparkles,
   Sprout,
   Trash2,
+  X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -29,6 +30,7 @@ import { createDefaultArtifactPayload, type ArtifactPayload } from "../component
 import { ArtifactCard, blueprintMeta } from "../components/artifact-card";
 import { ArtifactStudio, StudioTabRail, useArtifactStudioState } from "../components/artifact-studio";
 import { CommandBar } from "../components/command-bar";
+import { FloatingMenu } from "../components/floating-menu";
 import { ResultCardStack } from "../components/result-card";
 import { RunDetailPanel } from "../components/run-detail-panel";
 import {
@@ -50,6 +52,7 @@ import {
 } from "../data/api";
 
 type ArtifactMode = "list" | "board" | "grid";
+type ArtifactSort = "updated" | "created" | "title" | "type" | "workspace" | "activity";
 type ArtifactHubTab = { id: string; label: string };
 
 function artifactHubTab(): ArtifactHubTab {
@@ -151,6 +154,8 @@ export function ArtifactsShell() {
   const [activeFilter, setActiveFilter] = useState<"all" | SpectraBlueprintKey>("all");
   const [mode, setMode] = useState<ArtifactMode>("list");
   const [search, setSearch] = useState("");
+  const [sortMode, setSortMode] = useState<ArtifactSort>("updated");
+  const [sortOpen, setSortOpen] = useState(false);
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState("");
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
   const [hubTabs, setHubTabs] = useState<ArtifactHubTab[]>(() => [{ id: "artifacts-all-default", label: "All" }]);
@@ -160,13 +165,11 @@ export function ArtifactsShell() {
   const [moveMenuArtifactId, setMoveMenuArtifactId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busyKey, setBusyKey] = useState<string | null>(null);
-  const seededRef = useRef(false);
-  const placementMenuOpen = addMenuArtifactId !== null || moveMenuArtifactId !== null;
+  const metadataLoadedRef = useRef(false);
+  const [placementAnchor, setPlacementAnchor] = useState<DOMRect | null>(null);
+  const [pendingCreateType, setPendingCreateType] = useState<SpectraBlueprintKey | null>(null);
   const createMenuRef = useOutsideClick<HTMLDivElement>(createMenuOpen, () => setCreateMenuOpen(false));
-  const placementMenuRef = useOutsideClick<HTMLDivElement>(placementMenuOpen, () => {
-    setAddMenuArtifactId(null);
-    setMoveMenuArtifactId(null);
-  });
+  const sortMenuRef = useOutsideClick<HTMLDivElement>(sortOpen, () => setSortOpen(false));
   const studio = useArtifactStudioState("spectra.artifacts.artifactStudio", allArtifacts);
 
   function activateAllHub(tabId: string) {
@@ -235,11 +238,14 @@ export function ArtifactsShell() {
         getSpectraArtifacts({
           placement: "all",
         }),
-        getSpectraOverview(),
+        metadataLoadedRef.current ? Promise.resolve(null) : getSpectraOverview(),
       ]);
       setAllArtifacts(artifactResult.artifacts);
-      setWorkspaces(sortSpectraWorkspaces(overview.workspaces));
-      setResultCards((overview.resultCards ?? []).filter((card) => card.run?.sourceSurface === "artifact" && !card.run.workspaceId));
+      if (overview) {
+        metadataLoadedRef.current = true;
+        setWorkspaces(sortSpectraWorkspaces(overview.workspaces));
+        setResultCards((overview.resultCards ?? []).filter((card) => card.run?.sourceSurface === "artifact" && !card.run.workspaceId));
+      }
       return artifactResult.artifacts;
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not load artifacts.");
@@ -263,16 +269,7 @@ export function ArtifactsShell() {
   });
 
   useEffect(() => {
-    if (seededRef.current) return;
-    seededRef.current = true;
-    void (async () => {
-      try {
-        await postSpectra({ action: "seed" });
-      } catch {
-        // Loading below handles auth/config failures. Seed is dev-only and idempotent.
-      }
-      await load();
-    })();
+    void load();
   }, [load]);
 
   const artifacts = useMemo(() => {
@@ -282,8 +279,14 @@ export function ArtifactsShell() {
       if (selectedWorkspaceId && !artifactPlacements(artifact).some((placement) => placement.workspaceId === selectedWorkspaceId)) return false;
       if (!needle) return true;
       return `${artifact.title}\n${artifact.summary ?? ""}\n${artifact.tags.join(" ")}`.toLowerCase().includes(needle);
+    }).sort((a, b) => {
+      if (sortMode === "created") return b.createdAt - a.createdAt;
+      if (sortMode === "title") return a.title.localeCompare(b.title);
+      if (sortMode === "type") return a.blueprintKey.localeCompare(b.blueprintKey) || a.title.localeCompare(b.title);
+      if (sortMode === "workspace") return (artifactPlacements(a)[0]?.workspaceTitle ?? "Unplaced").localeCompare(artifactPlacements(b)[0]?.workspaceTitle ?? "Unplaced");
+      return b.updatedAt - a.updatedAt;
     });
-  }, [activeFilter, allArtifacts, search, selectedWorkspaceId]);
+  }, [activeFilter, allArtifacts, search, selectedWorkspaceId, sortMode]);
   const inbox = useMemo(() => artifacts.filter((artifact) => artifact.placementStatus === "inbox" || artifactPlacements(artifact).length === 0), [artifacts]);
   const placed = useMemo(() => artifacts.filter((artifact) => artifact.placementStatus === "workspace" || artifactPlacements(artifact).length > 0), [artifacts]);
   const byWorkspace = useMemo(() => workspaces.map((workspace) => ({
@@ -291,7 +294,15 @@ export function ArtifactsShell() {
     artifacts: placed.filter((artifact) => artifactPlacements(artifact).some((placement) => placement.workspaceId === workspace._id)),
   })), [placed, workspaces]);
 
-  async function createArtifact(payload: ArtifactPayload) {
+  function requestCreateArtifact(blueprintKey: SpectraBlueprintKey) {
+    if (!selectedWorkspaceId) {
+      setPendingCreateType(blueprintKey);
+      return;
+    }
+    void createArtifact(createDefaultArtifactPayload(blueprintKey), selectedWorkspaceId);
+  }
+
+  async function createArtifact(payload: ArtifactPayload, targetWorkspaceId?: string) {
     setBusyKey(`artifact:create:${payload.blueprintKey}`);
     try {
       const result = await postSpectra<{ artifactId: string }>({
@@ -301,8 +312,9 @@ export function ArtifactsShell() {
         summary: payload.summary,
         content: payload.content,
         tags: payload.tags,
+        workspaceId: targetWorkspaceId,
       });
-      toast.success("Artifact created as unplaced.");
+      toast.success(targetWorkspaceId ? "Artifact created in workspace." : "Artifact created as unplaced.");
       const refreshed = await load(true);
       const created = refreshed.find((artifact) => artifact._id === result.artifactId);
       if (created) studio.openTab(created);
@@ -347,6 +359,21 @@ export function ArtifactsShell() {
     }
   }
 
+  async function permanentlyDeleteArtifact(artifact: SpectraArtifact) {
+    if (!window.confirm(`Delete “${artifact.title}” permanently? This cannot be undone.`)) return;
+    setBusyKey(`delete:${artifact._id}`);
+    try {
+      await postSpectra({ action: "deleteArtifact", artifactId: artifact._id });
+      toast.success("Artifact permanently deleted.");
+      if (studio.activeArtifact?._id === artifact._id) returnToAllHub();
+      await load(true);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not delete artifact.");
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
   async function addToWorkspace(artifactId: string, workspaceId: string) {
     setBusyKey(`add:${artifactId}`);
     try {
@@ -380,13 +407,12 @@ export function ArtifactsShell() {
     const menuOpen = variant === "add" ? addMenuArtifactId === artifact._id : moveMenuArtifactId === artifact._id;
     const setMenu = variant === "add" ? setAddMenuArtifactId : setMoveMenuArtifactId;
     return (
-      <div className="relative" ref={menuOpen ? placementMenuRef : undefined}>
-        <button type="button" className={buttonClass()} disabled={workspaces.length === 0 || busyKey === `add:${artifact._id}`} onClick={() => setMenu(menuOpen ? null : artifact._id)}>
+      <div>
+        <button type="button" className={buttonClass()} disabled={workspaces.length === 0 || busyKey === `add:${artifact._id}`} onClick={(event) => { setPlacementAnchor(event.currentTarget.getBoundingClientRect()); setMenu(menuOpen ? null : artifact._id); }}>
           {busyKey === `add:${artifact._id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : variant === "add" ? <Plus className="h-3.5 w-3.5" /> : <PanelTop className="h-3.5 w-3.5" />}
           {variant === "add" ? "Add to workspace" : "Move"}
         </button>
-        {menuOpen ? (
-          <div className="absolute right-0 top-[calc(100%+8px)] z-30 w-[260px] rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[0_6px_18px_rgba(0,0,0,0.10)]">
+        <FloatingMenu open={menuOpen} anchor={placementAnchor} onClose={() => setMenu(null)} width={260}>
             {workspaces.map((workspace) => {
               const alreadyPlaced = artifactPlacements(artifact).some((placement) => placement.workspaceId === workspace._id);
               return (
@@ -397,8 +423,7 @@ export function ArtifactsShell() {
                 </button>
               );
             })}
-          </div>
-        ) : null}
+        </FloatingMenu>
       </div>
     );
   }
@@ -416,6 +441,7 @@ export function ArtifactsShell() {
         <div className="flex items-center gap-2">
           {openButton}
           {placementMenu(artifact, "add")}
+          <button type="button" className="flex h-8 w-8 items-center justify-center text-[var(--text-secondary)] hover:text-[var(--danger)]" onClick={() => void permanentlyDeleteArtifact(artifact)} aria-label="Delete permanently"><Trash2 className="h-3.5 w-3.5" /></button>
         </div>
       );
     }
@@ -424,8 +450,9 @@ export function ArtifactsShell() {
         {openButton}
         {placementMenu(artifact, "move")}
         <button type="button" className="flex h-8 w-8 items-center justify-center rounded-[7px] border border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[color-mix(in_oklab,var(--danger)_7%,var(--bg-elevated))] hover:text-[var(--danger)]" disabled={busyKey === `remove:${firstPlacement.workspaceItemId}`} onClick={() => void removePlacement(firstPlacement.workspaceItemId)}>
-          {busyKey === `remove:${firstPlacement.workspaceItemId}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+          {busyKey === `remove:${firstPlacement.workspaceItemId}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />}
         </button>
+        <button type="button" className="flex h-8 w-8 items-center justify-center text-[var(--text-secondary)] hover:text-[var(--danger)]" onClick={() => void permanentlyDeleteArtifact(artifact)} aria-label="Delete permanently"><Trash2 className="h-3.5 w-3.5" /></button>
       </div>
     );
   }
@@ -448,6 +475,7 @@ export function ArtifactsShell() {
           onCloseTab={closeArtifactTab}
         />
         <div className="relative flex min-h-0 flex-1">
+      {pendingCreateType ? <div className="absolute inset-0 z-[90] flex items-center justify-center bg-[color-mix(in_oklab,var(--bg-primary)_72%,transparent)] backdrop-blur-[2px]" onPointerDown={() => setPendingCreateType(null)}><div className="w-[390px] rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[0_24px_70px_rgba(27,20,12,0.2)]" onPointerDown={(event) => event.stopPropagation()}><h2 className="font-display text-[19px] font-semibold text-[var(--text-primary)]">Choose a destination</h2><p className="mt-1 text-[12px] text-[var(--text-secondary)]">Create this {blueprintMeta[pendingCreateType].label.toLowerCase()} in a workspace or keep it unplaced.</p><div className="mt-4 max-h-[300px] space-y-1 overflow-y-auto"><button type="button" className={menuItemClass()} onClick={() => { const type = pendingCreateType; setPendingCreateType(null); void createArtifact(createDefaultArtifactPayload(type)); }}><LayoutGrid className="h-4 w-4" />Unplaced / inbox</button>{workspaces.map((target) => <button key={target._id} type="button" className={menuItemClass()} onClick={() => { const type = pendingCreateType; setPendingCreateType(null); void createArtifact(createDefaultArtifactPayload(type), target._id); }}>{target.title}</button>)}</div></div></div> : null}
       {studio.mode === "tab" && studio.activeArtifact ? (
         <ArtifactStudio
           mode="tab"
@@ -504,7 +532,7 @@ export function ArtifactsShell() {
                           disabled={busyKey === `artifact:create:${key}`}
                           onClick={() => {
                             setCreateMenuOpen(false);
-                            void createArtifact(createDefaultArtifactPayload(key));
+                            requestCreateArtifact(key);
                           }}
                         >
                           {busyKey === `artifact:create:${key}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <Icon className="h-4 w-4" />}
@@ -536,6 +564,8 @@ export function ArtifactsShell() {
                 );
               })}
             </div>
+            <div className="ml-auto flex items-center gap-2">
+            <div className="relative" ref={sortMenuRef}><button type="button" className={buttonClass()} onClick={() => setSortOpen((open) => !open)}>{sortMode === "updated" ? "Recently updated" : sortMode === "created" ? "Recently created" : sortMode === "title" ? "Title A–Z" : sortMode === "type" ? "Artifact type" : sortMode === "workspace" ? "Workspace" : "Activity"}<ChevronDown className="h-3.5 w-3.5" /></button>{sortOpen ? <div className="absolute right-0 top-[calc(100%+7px)] z-40 w-[190px] rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 shadow-[0_14px_32px_rgba(27,20,12,0.13)]">{([['updated','Recently updated'],['created','Recently created'],['title','Title A–Z'],['type','Artifact type'],['workspace','Workspace'],['activity','Activity']] as Array<[ArtifactSort,string]>).map(([key,label]) => <button key={key} type="button" className={menuItemClass()} onClick={() => { setSortMode(key); setSortOpen(false); }}>{label}{sortMode === key ? <CheckCircle2 className="ml-auto h-4 w-4 text-[var(--success)]" /> : null}</button>)}</div> : null}</div>
             <div className="flex rounded-[10px] bg-[color-mix(in_oklab,var(--bg-elevated)_74%,transparent)] p-1 shadow-[inset_0_0_0_1px_var(--border-default)]">
               {[
                 { key: "grid" as const, label: "Grid", icon: Grid2X2 },
@@ -550,6 +580,7 @@ export function ArtifactsShell() {
                   </button>
                 );
               })}
+            </div>
             </div>
           </div>
         </header>
@@ -605,7 +636,7 @@ export function ArtifactsShell() {
                     const Icon = filter.icon;
                     const key = filter.key as SpectraBlueprintKey;
                     return (
-                      <button key={key} type="button" className={menuItemClass()} disabled={busyKey === `artifact:create:${key}`} onClick={() => void createArtifact(createDefaultArtifactPayload(key))}>
+                      <button key={key} type="button" className={menuItemClass()} disabled={busyKey === `artifact:create:${key}`} onClick={() => requestCreateArtifact(key)}>
                         {busyKey === `artifact:create:${key}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <Icon className="h-4 w-4" />}
                         New {blueprintMeta[key].label}
                       </button>
@@ -640,17 +671,16 @@ function WorkspacePicker({
   onSelect: (workspaceId: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const pickerRef = useOutsideClick<HTMLDivElement>(open, () => setOpen(false));
+  const [anchor, setAnchor] = useState<DOMRect | null>(null);
   const selected = workspaces.find((workspace) => workspace._id === selectedWorkspaceId);
   return (
-    <div className="relative" ref={pickerRef}>
-      <button type="button" className={buttonClass()} onClick={() => setOpen((value) => !value)}>
+    <div>
+      <button type="button" className={buttonClass()} onClick={(event) => { setAnchor(event.currentTarget.getBoundingClientRect()); setOpen((value) => !value); }}>
         <LayoutGrid className="h-4 w-4" />
         <span className="max-w-[150px] truncate">{selected?.title ?? "All workspaces"}</span>
         <ChevronDown className="h-3.5 w-3.5" />
       </button>
-      {open ? (
-        <div className="absolute right-0 top-[calc(100%+8px)] z-30 w-[260px] rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[0_6px_18px_rgba(0,0,0,0.10)]">
+      <FloatingMenu open={open} anchor={anchor} onClose={() => setOpen(false)} width={260}>
           <button type="button" className={menuItemClass()} onClick={() => { onSelect(""); setOpen(false); }}>
             <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px] bg-[var(--bg-secondary)] text-[var(--text-secondary)]"><LayoutGrid className="h-3.5 w-3.5" /></span>
             <span className="min-w-0 flex-1 truncate">All workspaces</span>
@@ -663,8 +693,7 @@ function WorkspacePicker({
               {workspace._id === selectedWorkspaceId ? <CheckCircle2 className="h-4 w-4 text-[var(--success)]" /> : null}
             </button>
           ))}
-        </div>
-      ) : null}
+      </FloatingMenu>
     </div>
   );
 }

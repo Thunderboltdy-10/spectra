@@ -110,3 +110,75 @@ export const archive = mutation({
     return { workspaceId: args.workspaceId };
   },
 });
+
+export const permanentlyDelete = mutation({
+  args: {
+    actorClerkId: v.string(),
+    workspaceId: v.id("spectraWorkspaces"),
+    confirmation: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const { workspace } = await requireOwnedWorkspace(ctx, args.actorClerkId, args.workspaceId);
+    const expected = `Remove ${workspace.title} permanently`;
+    if (args.confirmation !== expected) throw new Error(`Type “${expected}” to confirm`);
+
+    const items = await ctx.db
+      .query("spectraWorkspaceItems")
+      .withIndex("by_workspace", (q) => q.eq("workspaceId", args.workspaceId))
+      .collect();
+    const artifactIds = Array.from(new Set(items.filter((item) => item.sourceType === "artifact").map((item) => item.sourceId)));
+
+    let deletedArtifactCount = 0;
+    for (const sourceId of artifactIds) {
+      const allPlacements = await ctx.db
+        .query("spectraWorkspaceItems")
+        .withIndex("by_source", (q) => q.eq("sourceType", "artifact").eq("sourceId", sourceId))
+        .collect();
+      const otherVisiblePlacements = allPlacements.filter((placement) => placement.workspaceId !== args.workspaceId && placement.viewData.hidden !== true);
+      const artifact = ctx.db.normalizeId("spectraArtifacts", sourceId);
+      if (artifact && otherVisiblePlacements.length === 0) {
+        const document = await ctx.db.get(artifact);
+        if (document) {
+          const artifactRuns = await ctx.db.query("spectraAiRuns").withIndex("by_artifact", (q) => q.eq("artifactId", artifact)).collect();
+          for (const run of artifactRuns) {
+            const [operations, cards] = await Promise.all([
+              ctx.db.query("spectraOperations").withIndex("by_run", (q) => q.eq("runId", run._id)).collect(),
+              ctx.db.query("spectraResultCards").withIndex("by_run", (q) => q.eq("runId", run._id)).collect(),
+            ]);
+            await Promise.all([...operations.map((operation) => ctx.db.delete(operation._id)), ...cards.map((card) => ctx.db.delete(card._id))]);
+            await ctx.db.delete(run._id);
+          }
+          await Promise.all(allPlacements.map((placement) => ctx.db.delete(placement._id)));
+          await ctx.db.delete(artifact);
+          deletedArtifactCount += 1;
+        }
+      } else if (artifact) {
+        const document = await ctx.db.get(artifact);
+        if (document?.createdFrom?.workspaceId === args.workspaceId) {
+          await ctx.db.patch(artifact, { createdFrom: { ...document.createdFrom, workspaceId: undefined } });
+        }
+      }
+    }
+
+    await Promise.all(items.map(async (item) => {
+      const current = await ctx.db.get(item._id);
+      if (current) await ctx.db.delete(item._id);
+    }));
+
+    const runs = await ctx.db
+      .query("spectraAiRuns")
+      .withIndex("by_workspace", (q) => q.eq("workspaceId", args.workspaceId))
+      .collect();
+    for (const run of runs) {
+      const [operations, cards] = await Promise.all([
+        ctx.db.query("spectraOperations").withIndex("by_run", (q) => q.eq("runId", run._id)).collect(),
+        ctx.db.query("spectraResultCards").withIndex("by_run", (q) => q.eq("runId", run._id)).collect(),
+      ]);
+      await Promise.all([...operations.map((operation) => ctx.db.delete(operation._id)), ...cards.map((card) => ctx.db.delete(card._id))]);
+      await ctx.db.delete(run._id);
+    }
+
+    await ctx.db.delete(args.workspaceId);
+    return { workspaceId: args.workspaceId, deletedArtifactCount, deletedRunCount: runs.length };
+  },
+});

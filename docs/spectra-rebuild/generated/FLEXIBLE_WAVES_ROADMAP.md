@@ -204,7 +204,11 @@ Manual test:
 - Does focused context remain a hint rather than an assumed target when the prompt says otherwise?
 - Do progress summaries stay in result cards and out of saved assistant/final text?
 
-## Performance Wave - Spectra Responsiveness and Data Efficiency
+## Wave 4.5 - Pre-Wave 5 Polish and Performance
+
+Completed on 2026-06-21. This pass consolidated workspace/object UI polish, redesigned Timeline, corrected creation/removal/deletion semantics, fixed timestamp and schema drift, and completed the responsiveness work below without changing the Wave 4 execution engine. See `WAVE_4_5_WORKSPACE_OBJECT_SURFACE.md` for the implementation record and manual acceptance checklist.
+
+## Performance Wave - Spectra Responsiveness and Data Efficiency (absorbed into Wave 4.5)
 
 Goal: make workspace switching, artifact filtering, creation/deletion, seed idempotency, and result refreshes feel instant enough for daily use.
 

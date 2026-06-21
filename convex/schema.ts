@@ -550,6 +550,7 @@ export default defineSchema({
     .index("by_owner", ["ownerUserId"])
     .index("by_owner_status", ["ownerUserId", "status"])
     .index("by_owner_updated", ["ownerUserId", "updatedAt"])
+    .index("by_owner_status_updated", ["ownerUserId", "status", "updatedAt"])
     .index("by_org", ["orgId"])
     .searchIndex("search_title", {
       searchField: "title",
@@ -1332,6 +1333,9 @@ export default defineSchema({
     description: v.optional(v.string()),
     icon: v.optional(v.string()),
     color: v.optional(v.string()),
+    // Transitional compatibility for documents written before workspace pinning
+    // moved to spectraWorkspaceItems.viewData. Seed repair removes this field.
+    pinned: v.optional(v.boolean()),
     status: v.union(v.literal("active"), v.literal("archived")),
     defaultView: v.union(
       v.literal("cards"),
@@ -1356,6 +1360,9 @@ export default defineSchema({
     content: v.any(),
     textIndex: v.optional(v.string()),
     tags: v.array(v.string()),
+    // Transitional compatibility for legacy object-level pinning. Pin state
+    // now belongs to spectraWorkspaceItems.viewData.
+    pinned: v.optional(v.boolean()),
     status: v.union(
       v.literal("active"),
       v.literal("draft"),
@@ -1378,6 +1385,8 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_owner_status", ["ownerUserId", "status"])
+    .index("by_owner_updated", ["ownerUserId", "updatedAt"])
+    .index("by_owner_status_updated", ["ownerUserId", "status", "updatedAt"])
     .index("by_owner_blueprint", ["ownerUserId", "blueprintKey"])
     .index("by_created_workspace", ["createdFrom.workspaceId"])
     .searchIndex("search_text", {
@@ -1413,6 +1422,7 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_workspace", ["workspaceId"])
+    .index("by_workspace_updated", ["workspaceId", "updatedAt"])
     .index("by_workspace_source", ["workspaceId", "sourceType", "sourceId"])
     .index("by_source", ["sourceType", "sourceId"]),
 

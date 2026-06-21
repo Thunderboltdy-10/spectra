@@ -439,18 +439,20 @@ export const ensureDemoData = mutation({
       .collect();
     const workspaceIds = new Map<string, Id<"spectraWorkspaces">>();
 
-    for (const demo of demoWorkspaces) {
+    for (const [workspaceIndex, demo] of demoWorkspaces.entries()) {
       const existing = existingWorkspaces.find((workspace) => workspace.title === demo.title && workspace.orgId === actor.orgId);
       if (existing) {
         workspaceIds.set(demo.key, existing._id);
-        await ctx.db.patch(existing._id, {
+        const needsRepair = existing.pinned !== undefined || !existing.description || !existing.icon || !existing.color;
+        if (needsRepair) await ctx.db.patch(existing._id, {
+          pinned: undefined,
           description: existing.description ?? demo.description,
           icon: existing.icon ?? demo.icon,
           color: existing.color ?? demo.color,
-          updatedAt: now,
         });
         continue;
       }
+      const workspaceTime = now - (demoWorkspaces.length - workspaceIndex) * 26 * 60 * 60 * 1000;
       const workspaceId = await ctx.db.insert("spectraWorkspaces", {
         ownerUserId: actor._id,
         orgId: actor.orgId,
@@ -460,9 +462,9 @@ export const ensureDemoData = mutation({
         color: demo.color,
         status: "active",
         defaultView: demo.key === "biology" ? "cards" : "library",
-        createdAt: now,
-        updatedAt: now,
-        lastActivityAt: now,
+        createdAt: workspaceTime,
+        updatedAt: workspaceTime,
+        lastActivityAt: workspaceTime,
       });
       workspaceIds.set(demo.key, workspaceId);
     }
@@ -474,9 +476,10 @@ export const ensureDemoData = mutation({
     const artifactIds = new Map<string, Id<"spectraArtifacts">>();
 
     let placedCount = 0;
-    for (const demo of demoArtifacts) {
+    for (const [artifactIndex, demo] of demoArtifacts.entries()) {
       const workspaceId = demo.workspaceKey ? workspaceIds.get(demo.workspaceKey) : undefined;
       const existing = existingArtifacts.find((artifact) => artifact.title === demo.title && artifact.blueprintKey === demo.blueprintKey && artifact.orgId === actor.orgId);
+      const artifactTime = now - (artifactIndex + 2) * 43 * 60 * 1000;
       const content = artifactContent(demo.blueprintKey, {
         key: demo.key,
         metrics: demo.metrics,
@@ -500,19 +503,13 @@ export const ensureDemoData = mutation({
           source: workspaceId ? "workspace" : "chat",
           workspaceId,
         },
-        createdAt: now,
-        updatedAt: now,
+        createdAt: artifactTime,
+        updatedAt: artifactTime,
       });
       artifactIds.set(demo.key, artifactId);
 
-      if (existing) {
-        await ctx.db.patch(existing._id, {
-          summary: demo.summary,
-          content,
-          tags: demo.tags,
-          textIndex: buildArtifactTextIndex({ title: demo.title, summary: demo.summary, tags: demo.tags }),
-          updatedAt: now,
-        });
+      if (existing?.pinned !== undefined) {
+        await ctx.db.patch(existing._id, { pinned: undefined });
       }
 
       if (workspaceId) {
@@ -521,16 +518,19 @@ export const ensureDemoData = mutation({
           .withIndex("by_workspace_source", (q) => q.eq("workspaceId", workspaceId).eq("sourceType", "artifact").eq("sourceId", artifactId))
           .first();
         if (existingItem) {
-          await ctx.db.patch(existingItem._id, {
-            viewData: {
-              ...existingItem.viewData,
-              compactSummary: demo.summary,
-              pinned: demo.pinned ?? existingItem.viewData.pinned,
-              cardVariant: demo.cardVariant ?? existingItem.viewData.cardVariant,
-              hidden: false,
-            },
-            updatedAt: now + placedCount,
-          });
+          const desiredPinned = demo.pinned ?? existingItem.viewData.pinned;
+          const desiredVariant = demo.cardVariant ?? existingItem.viewData.cardVariant;
+          if (existingItem.viewData.hidden === true || existingItem.viewData.pinned !== desiredPinned || existingItem.viewData.cardVariant !== desiredVariant) {
+            await ctx.db.patch(existingItem._id, {
+              viewData: {
+                ...existingItem.viewData,
+                compactSummary: existingItem.viewData.compactSummary ?? demo.summary,
+                pinned: desiredPinned,
+                cardVariant: desiredVariant,
+                hidden: false,
+              },
+            });
+          }
           continue;
         }
         placedCount += 1;
@@ -549,8 +549,8 @@ export const ensureDemoData = mutation({
               y: placedCount * 24,
             },
           },
-          createdAt: now + placedCount,
-          updatedAt: now + placedCount,
+          createdAt: artifactTime,
+          updatedAt: artifactTime,
         });
       }
     }

@@ -12,6 +12,7 @@ import {
   Copy,
   FileText,
   GripVertical,
+  History,
   ImageIcon,
   Italic,
   Link2,
@@ -19,18 +20,20 @@ import {
   Loader2,
   Maximize2,
   MessageSquare,
+  MessageSquarePlus,
   Minus,
   MoreHorizontal,
   Plus,
   Radio,
+  RotateCcw,
   Save,
-  Sparkles,
   Trash2,
   Underline as UnderlineIcon,
   X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { EditorContent, useEditor } from "@tiptap/react";
+import { useRouter } from "next/navigation";
 import type { JSONContent } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
@@ -54,7 +57,7 @@ import {
   linkedArtifacts,
 } from "./spectra-view-model";
 import type { ArtifactPayload } from "./artifact-blueprint-sheet";
-import type { SpectraArtifact } from "../data/api";
+import { getSpectraArtifactVersions, type SpectraArtifact, type SpectraArtifactVersion } from "../data/api";
 import { ThreadConversation } from "./conversation-surface";
 
 type StudioMode = "closed" | "split" | "tab";
@@ -251,6 +254,7 @@ export function useArtifactStudioState(storageKey: string, artifacts: SpectraArt
   const restoredStorageKeyRef = useRef<string | null>(null);
   const artifactIdSignature = useMemo(() => artifacts.map((artifact) => artifact._id).sort().join("|"), [artifacts]);
   const artifactIds = useMemo(() => new Set(artifactIdSignature ? artifactIdSignature.split("|") : []), [artifactIdSignature]);
+  const threadArtifactIds = useMemo(() => new Set(artifacts.filter((artifact) => artifact.blueprintKey === "thread_reference").map((artifact) => artifact._id)), [artifacts]);
 
   useEffect(() => {
     if (!artifactIdSignature || restoredStorageKeyRef.current === storageKey) return;
@@ -260,16 +264,16 @@ export function useArtifactStudioState(storageKey: string, artifacts: SpectraArt
       if (!raw) return;
       const parsed = JSON.parse(raw) as { version?: number; tabs?: StudioTab[]; activeArtifactId?: string | null; mode?: StudioMode };
       if (parsed.version !== storageVersion) return;
-      const restoredTabs = (parsed.tabs ?? []).filter((tab) => artifactIds.has(tab.artifactId));
+      const restoredTabs = (parsed.tabs ?? []).filter((tab) => artifactIds.has(tab.artifactId) && !threadArtifactIds.has(tab.artifactId));
       setTabs((current) => sameTabs(current, restoredTabs) ? current : restoredTabs);
       if (parsed.mode === "tab" && parsed.activeArtifactId && artifactIds.has(parsed.activeArtifactId)) {
-        setMode("tab");
+        setMode(threadArtifactIds.has(parsed.activeArtifactId) ? "split" : "tab");
         setActiveArtifactId(parsed.activeArtifactId);
       }
     } catch {
       window.localStorage.removeItem(storageKey);
     }
-  }, [artifactIdSignature, artifactIds, storageKey]);
+  }, [artifactIdSignature, artifactIds, storageKey, threadArtifactIds]);
 
   useEffect(() => {
     try {
@@ -281,11 +285,11 @@ export function useArtifactStudioState(storageKey: string, artifacts: SpectraArt
 
   useEffect(() => {
     setTabs((current) => {
-      const next = current.filter((tab) => artifactIds.has(tab.artifactId));
+      const next = current.filter((tab) => artifactIds.has(tab.artifactId) && !threadArtifactIds.has(tab.artifactId));
       return sameTabs(current, next) ? current : next;
     });
     setActiveArtifactId((current) => current && artifactIds.has(current) ? current : null);
-  }, [artifactIds]);
+  }, [artifactIds, threadArtifactIds]);
 
   const openSplit = useCallback((artifact: SpectraArtifact) => {
     setActiveArtifactId(artifact._id);
@@ -293,6 +297,11 @@ export function useArtifactStudioState(storageKey: string, artifacts: SpectraArt
   }, []);
 
   const openTab = useCallback((artifact: SpectraArtifact) => {
+    if (artifact.blueprintKey === "thread_reference") {
+      setActiveArtifactId(artifact._id);
+      setMode("split");
+      return;
+    }
     setTabs((current) => current.some((tab) => tab.artifactId === artifact._id) ? current : [...current, { artifactId: artifact._id, openedAt: Date.now() }]);
     setActiveArtifactId(artifact._id);
     setMode("tab");
@@ -300,8 +309,8 @@ export function useArtifactStudioState(storageKey: string, artifacts: SpectraArt
 
   const activateTab = useCallback((artifactId: string) => {
     setActiveArtifactId(artifactId);
-    setMode("tab");
-  }, []);
+    setMode(threadArtifactIds.has(artifactId) ? "split" : "tab");
+  }, [threadArtifactIds]);
 
   const closeTab = useCallback((artifactId: string) => {
     setTabs((current) => {
@@ -366,10 +375,14 @@ export function ArtifactStudio({
   sourceLabel,
   onPanelWidthChange,
   onClose,
+  onCloseTab,
   onExpand,
   onSave,
+  onRevert,
   onArchive,
   onDirtyChange,
+  onContinueThread,
+  continuedThreadId,
 }: {
   mode: "split" | "tab";
   artifact: SpectraArtifact;
@@ -385,35 +398,37 @@ export function ArtifactStudio({
   onActivateTab: (artifactId: string) => void;
   onCloseTab: (artifactId: string) => void;
   onSave: (artifactId: string, payload: ArtifactPayload) => Promise<void> | void;
+  onRevert: (artifactId: string, versionId: string) => Promise<void> | void;
   onArchive?: (artifact: SpectraArtifact) => Promise<void> | void;
   onDirtyChange: (artifactId: string, dirty: boolean) => void;
+  onContinueThread?: (threadId: string, title: string) => void;
+  continuedThreadId?: string | null;
 }) {
-  const resizingRef = useRef(false);
+  const router = useRouter();
   const width = panelWidth ?? Math.round(typeof window === "undefined" ? 720 : window.innerWidth * 0.5);
   const handleSave = useCallback((payload: ArtifactPayload) => onSave(artifact._id, payload), [artifact._id, onSave]);
+  const handleRevert = useCallback((versionId: string) => onRevert(artifact._id, versionId), [artifact._id, onRevert]);
+  const handleClose = useCallback(() => mode === "tab" ? onCloseTab(artifact._id) : onClose(), [artifact._id, mode, onClose, onCloseTab]);
   const handleArchive = useMemo(() => onArchive ? () => onArchive(artifact) : undefined, [artifact, onArchive]);
   const handleDirtyChange = useCallback((dirty: boolean) => onDirtyChange(artifact._id, dirty), [artifact._id, onDirtyChange]);
 
-  useEffect(() => {
-    function onMove(event: PointerEvent) {
-      if (!resizingRef.current || !onPanelWidthChange) return;
-      const next = Math.round(window.innerWidth - event.clientX);
-      onPanelWidthChange(Math.max(560, Math.min(next, Math.min(1120, window.innerWidth - 360))));
-    }
-    function onUp() {
-      resizingRef.current = false;
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-    }
-    document.addEventListener("pointermove", onMove);
-    document.addEventListener("pointerup", onUp);
-    return () => {
-      document.removeEventListener("pointermove", onMove);
-      document.removeEventListener("pointerup", onUp);
-    };
-  }, [onPanelWidthChange]);
-
-  const body = (
+  const threadId = artifact.blueprintKey === "thread_reference" && typeof record(artifact.content).threadId === "string" ? String(record(artifact.content).threadId).trim() : "";
+  const body = artifact.blueprintKey === "thread_reference" ? (
+    <div className="flex h-full min-h-0 flex-col bg-[var(--bg-primary)]">
+      <header className="flex min-h-[78px] shrink-0 items-center justify-between gap-4 border-b border-[var(--border-subtle)] px-5 py-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[9px] bg-[color-mix(in_oklab,#8b6ff0_10%,var(--bg-elevated))] text-[#8b6ff0]"><MessageSquare className="h-5 w-5" /></span>
+          <div className="min-w-0"><div className="truncate font-display text-[20px] font-semibold text-[var(--text-primary)]">{artifact.title}</div><div className="mt-0.5 text-[10px] uppercase tracking-[0.11em] text-[var(--text-tertiary)]">Conversation · {sourceLabel}</div></div>
+        </div>
+        <div className="flex items-center gap-1">
+          {threadId && onContinueThread ? <button type="button" onClick={() => onContinueThread(threadId, artifact.title)} className={`flex h-8 w-8 items-center justify-center rounded-[7px] transition ${continuedThreadId === threadId ? "bg-[color-mix(in_oklab,#8b6ff0_14%,var(--bg-hover))] text-[#7256dc]" : "text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"}`} aria-label={continuedThreadId === threadId ? "Stop continuing this chat" : "Continue chat"} title={continuedThreadId === threadId ? "Stop continuing chat" : "Continue chat"} aria-pressed={continuedThreadId === threadId}><MessageSquarePlus className="h-4 w-4" /></button> : null}
+          <IconButton label="Open conversation in Chat" onClick={() => { if (threadId) router.push(`/chat?threadId=${encodeURIComponent(threadId)}`); }} icon={Maximize2} />
+          <IconButton label="Close" onClick={handleClose} icon={X} />
+        </div>
+      </header>
+      <div className="min-h-0 flex-1">{threadId ? <ThreadConversation threadId={threadId} compact showComposer={false} /> : <ThreadReferenceStudio content={artifact.content} />}</div>
+    </div>
+  ) : (
     <div className="flex h-full min-h-0 flex-col bg-[var(--bg-primary)]">
       <ArtifactStudioEditor
         key={`${artifact._id}:${artifact.updatedAt}`}
@@ -422,9 +437,10 @@ export function ArtifactStudio({
         artifacts={artifacts}
         busy={busy}
         sourceLabel={sourceLabel}
-        onClose={onClose}
+        onClose={handleClose}
         onExpand={() => onExpand(artifact)}
         onSave={handleSave}
+        onRevert={handleRevert}
         onArchive={handleArchive}
         onDirtyChange={handleDirtyChange}
       />
@@ -435,26 +451,56 @@ export function ArtifactStudio({
     return <section className="min-w-0 flex-1 border-l border-[var(--border-default)]">{body}</section>;
   }
 
-  return (
-    <aside
-      className="relative hidden min-w-[520px] shrink-0 border-l border-[var(--border-default)] shadow-[-18px_0_40px_rgba(27,20,12,0.06)] xl:block"
-      style={{ width, containerType: "inline-size" }}
-    >
-      <button
-        type="button"
-        className="absolute -left-1 top-0 z-20 h-full w-2 cursor-col-resize bg-transparent hover:bg-[color-mix(in_oklab,var(--text-tertiary)_14%,transparent)]"
-        style={{ cursor: "col-resize" }}
-        aria-label="Resize artifact studio"
-        onPointerDown={(event) => {
-          event.preventDefault();
-          resizingRef.current = true;
-          document.body.style.cursor = "col-resize";
-          document.body.style.userSelect = "none";
-        }}
-      />
-      {body}
-    </aside>
-  );
+  return <StudioSplitShell width={width} onWidthChange={onPanelWidthChange} ariaLabel="Artifact Studio">{body}</StudioSplitShell>;
+}
+
+export function StudioSplitShell({ width, onWidthChange, ariaLabel, cssWidthVariable, children }: { width: number; onWidthChange?: (width: number) => void; ariaLabel: string; cssWidthVariable?: string; children: ReactNode }) {
+  const resizingRef = useRef(false);
+  const panelRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    const parent = panelRef.current?.parentElement;
+    if (cssWidthVariable) parent?.style.setProperty(cssWidthVariable, `${width}px`);
+    return () => { if (cssWidthVariable) parent?.style.removeProperty(cssWidthVariable); };
+  }, [cssWidthVariable, width]);
+  useEffect(() => {
+    if (!onWidthChange) return;
+    const updateWidth = onWidthChange;
+    function fitPanel() {
+      const panel = panelRef.current;
+      const parent = panel?.parentElement;
+      if (!panel || !parent) return;
+      const siblingWidth = Array.from(parent.querySelectorAll<HTMLElement>(":scope > [data-studio-panel]"))
+        .filter((candidate) => candidate !== panel)
+        .reduce((total, candidate) => total + candidate.getBoundingClientRect().width, 0);
+      const maximum = Math.max(360, Math.min(1120, parent.clientWidth - siblingWidth - 320));
+      if (width > maximum) updateWidth(maximum);
+    }
+    const frame = window.requestAnimationFrame(fitPanel);
+    const parent = panelRef.current?.parentElement;
+    const observer = parent ? new ResizeObserver(fitPanel) : null;
+    if (parent) observer?.observe(parent);
+    window.addEventListener("resize", fitPanel);
+    return () => { window.cancelAnimationFrame(frame); observer?.disconnect(); window.removeEventListener("resize", fitPanel); };
+  }, [onWidthChange, width]);
+  useEffect(() => {
+    function onMove(event: PointerEvent) {
+      if (!resizingRef.current || !onWidthChange) return;
+      const panel = panelRef.current;
+      const parent = panel?.parentElement;
+      const panelLeft = panel?.getBoundingClientRect().left ?? 0;
+      const siblings = parent ? Array.from(parent.querySelectorAll<HTMLElement>(":scope > [data-studio-panel]")).filter((candidate) => candidate !== panel) : [];
+      const rightSiblingWidth = siblings.filter((candidate) => candidate.getBoundingClientRect().left > panelLeft).reduce((total, candidate) => total + candidate.getBoundingClientRect().width, 0);
+      const allSiblingWidth = siblings.reduce((total, candidate) => total + candidate.getBoundingClientRect().width, 0);
+      const parentRight = parent?.getBoundingClientRect().right ?? window.innerWidth;
+      const available = Math.max(360, (parent?.clientWidth ?? window.innerWidth) - allSiblingWidth - 320);
+      onWidthChange(Math.max(360, Math.min(Math.round(parentRight - event.clientX - rightSiblingWidth), Math.min(1120, available))));
+    }
+    function onUp() { resizingRef.current = false; document.body.style.cursor = ""; document.body.style.userSelect = ""; }
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+    return () => { document.removeEventListener("pointermove", onMove); document.removeEventListener("pointerup", onUp); };
+  }, [onWidthChange]);
+  return <aside ref={panelRef} data-studio-panel className="relative z-40 hidden h-full min-w-[360px] max-w-[94vw] shrink-0 border-l border-[var(--border-default)] bg-[var(--bg-primary)] shadow-[-18px_0_40px_rgba(27,20,12,0.06)] xl:block" style={{ width, containerType: "inline-size" }} aria-label={ariaLabel}><button type="button" className="absolute -left-1 top-0 z-20 h-full w-2 cursor-ew-resize bg-transparent transition-colors hover:bg-[color-mix(in_oklab,var(--text-tertiary)_18%,transparent)]" aria-label={`Resize ${ariaLabel}`} onPointerDown={(event) => { event.preventDefault(); resizingRef.current = true; document.body.style.cursor = "ew-resize"; document.body.style.userSelect = "none"; }} />{children}</aside>;
 }
 
 export function StudioTabRail({
@@ -541,7 +587,7 @@ export function StudioTabRail({
                 event.stopPropagation();
                 if (dirtyIds.has(artifact._id)) {
                   onActivateTab(artifact._id);
-                  window.dispatchEvent(new CustomEvent("spectra:request-artifact-close", { detail: { artifactId: artifact._id } }));
+                  requestAnimationFrame(() => window.dispatchEvent(new CustomEvent("spectra:request-artifact-close", { detail: { artifactId: artifact._id } })));
                 } else onCloseTab(artifact._id);
               }}
               onKeyDown={(event) => {
@@ -550,7 +596,7 @@ export function StudioTabRail({
                   event.stopPropagation();
                   if (dirtyIds.has(artifact._id)) {
                     onActivateTab(artifact._id);
-                    window.dispatchEvent(new CustomEvent("spectra:request-artifact-close", { detail: { artifactId: artifact._id } }));
+                    requestAnimationFrame(() => window.dispatchEvent(new CustomEvent("spectra:request-artifact-close", { detail: { artifactId: artifact._id } })));
                   } else onCloseTab(artifact._id);
                 }
               }}
@@ -582,6 +628,7 @@ function ArtifactStudioEditor({
   onClose,
   onExpand,
   onSave,
+  onRevert,
   onArchive,
   onDirtyChange,
 }: {
@@ -593,6 +640,7 @@ function ArtifactStudioEditor({
   onClose: () => void;
   onExpand: () => void;
   onSave: (payload: ArtifactPayload) => Promise<void> | void;
+  onRevert: (versionId: string) => Promise<void> | void;
   onArchive?: () => Promise<void> | void;
   onDirtyChange: (dirty: boolean) => void;
 }) {
@@ -602,6 +650,9 @@ function ArtifactStudioEditor({
   const [content, setContent] = useState<unknown>(artifact.content);
   const [dirty, setDirty] = useState(false);
   const [closeDecisionOpen, setCloseDecisionOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [versions, setVersions] = useState<SpectraArtifactVersion[]>([]);
+  const [historyBusy, setHistoryBusy] = useState<string | null>(null);
   const meta = blueprintMeta[artifact.blueprintKey];
   const Icon = meta.icon;
   const baseline = useMemo(() => JSON.stringify({ title: artifact.title, summary: artifact.summary ?? "", tagDraft: (artifact.tags ?? []).join(", "), content: artifact.content }), [artifact]);
@@ -713,6 +764,7 @@ function ArtifactStudioEditor({
             {mode === "split" ? (
               <IconButton label="Open as tab" onClick={onExpand} icon={Maximize2} />
             ) : null}
+            <IconButton label="Version history" onClick={() => { setHistoryOpen(true); void getSpectraArtifactVersions(artifact._id).then((result) => setVersions(result.versions)); }} icon={History} />
             <IconButton label="Close" onClick={() => dirty ? setCloseDecisionOpen(true) : onClose()} icon={X} />
           </div>
         </div>
@@ -724,7 +776,7 @@ function ArtifactStudioEditor({
             {artifact.blueprintKey === "flashcard_deck" ? <FlashcardStudio mode={mode} content={content} onChange={changeContent} /> : null}
             {artifact.blueprintKey === "quiz" ? <QuizStudio mode={mode} content={content} onChange={changeContent} /> : null}
             {artifact.blueprintKey === "planner_task" ? <PlannerStudio mode={mode} artifact={artifact} artifacts={artifacts} title={title} content={content} onChange={changeContent} onArchive={onArchive} /> : null}
-            {artifact.blueprintKey === "thread_reference" ? <ThreadReferenceStudio content={content} onChange={changeContent} /> : null}
+            {artifact.blueprintKey === "thread_reference" ? <ThreadReferenceStudio content={content} /> : null}
           </section>
           {showDetails ? <StudioDetails
             artifact={artifact}
@@ -735,6 +787,7 @@ function ArtifactStudioEditor({
         </div>
       </main>
       {closeDecisionOpen ? <div className="absolute inset-0 z-[120] flex items-center justify-center bg-[color-mix(in_oklab,var(--bg-primary)_70%,transparent)] p-5 backdrop-blur-[2px]" onPointerDown={() => setCloseDecisionOpen(false)}><div className="w-full max-w-[420px] rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5 shadow-[0_24px_70px_rgba(27,20,12,0.2)]" onPointerDown={(event) => event.stopPropagation()}><h2 className="font-display text-[20px] font-semibold text-[var(--text-primary)]">Save changes to {artifact.title}?</h2><p className="mt-2 text-[12px] leading-5 text-[var(--text-secondary)]">This artifact has edits that have not been saved.</p><div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setCloseDecisionOpen(false)} className="h-9 px-3 text-[12px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]">Keep editing</button><button type="button" onClick={onClose} className="h-9 rounded-[8px] px-3 text-[12px] font-medium text-[var(--danger)] hover:bg-[color-mix(in_oklab,var(--danger)_8%,transparent)]">Discard</button><button type="button" disabled={busy || !title.trim()} onClick={() => void save().then(onClose)} className="h-9 rounded-[8px] bg-[var(--text-primary)] px-3 text-[12px] font-medium text-[var(--bg-primary)] disabled:opacity-45">Save & close</button></div></div></div> : null}
+      {historyOpen ? <div className="absolute inset-0 z-[119] flex items-center justify-center bg-[color-mix(in_oklab,var(--bg-primary)_70%,transparent)] p-5 backdrop-blur-[2px]" onPointerDown={() => setHistoryOpen(false)}><div className="w-full max-w-[520px] rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5 shadow-[0_24px_70px_rgba(27,20,12,0.2)]" onPointerDown={(event) => event.stopPropagation()}><div className="flex items-start justify-between gap-4"><div><h2 className="font-display text-[20px] font-semibold text-[var(--text-primary)]">Version history</h2><p className="mt-1 text-[11px] text-[var(--text-secondary)]">Manual, AI, and revert snapshots.</p></div><IconButton label="Close history" onClick={() => setHistoryOpen(false)} icon={X} /></div><div className="mt-4 max-h-[420px] space-y-1.5 overflow-y-auto">{versions.map((version) => <div key={version._id} className="flex items-center gap-3 rounded-[8px] bg-[var(--bg-primary)] px-3 py-2.5"><span className={`h-2 w-2 shrink-0 rounded-full ${version.source === "ai" ? "bg-[var(--accent-cyan)]" : version.source === "revert" ? "bg-[#d88922]" : "bg-[var(--text-tertiary)]"}`} /><div className="min-w-0 flex-1"><div className="truncate text-[12px] font-medium text-[var(--text-primary)]">{version.summary ?? `${version.source} edit`}</div><div className="mt-0.5 text-[10px] capitalize text-[var(--text-tertiary)]">{version.source} · {formatRelativeTime(version.createdAt)}</div></div><button type="button" disabled={Boolean(historyBusy) || dirty} onClick={() => { setHistoryBusy(version._id); void Promise.resolve(onRevert(version._id)).then(() => setHistoryOpen(false)).finally(() => setHistoryBusy(null)); }} className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-35" aria-label="Revert to before this change" title={dirty ? "Save or discard current edits before reverting" : "Revert this change"}>{historyBusy === version._id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}</button></div>)}{versions.length === 0 ? <div className="py-8 text-center text-[12px] text-[var(--text-tertiary)]">No saved versions yet.</div> : null}</div></div></div> : null}
     </div>
   );
 }
@@ -873,7 +926,6 @@ function FlashcardStudio({ mode, content, onChange }: { mode: "split" | "tab"; c
             <div className="mb-4 flex items-center justify-between">
               <div className="text-[12px] text-[var(--text-secondary)]">Card {cards.findIndex((card) => card.id === activeCard.id) + 1} of {cards.length}</div>
               <div className="flex items-center gap-2">
-                <button type="button" className={smallActionClass()} disabled title="Study mode lands in a later study-quality wave."><Sparkles className="h-3.5 w-3.5" />Study</button>
                 <button type="button" className={iconButtonClass()} onClick={() => {
                   const next = cards.filter((card) => card.id !== activeCard.id);
                   commit(next.length > 0 ? next : [{ id: id("card"), front: "", back: "", hint: "", section: activeSection, confidence: "unknown" }]);
@@ -933,11 +985,9 @@ function QuizStudio({ mode, content, onChange }: { mode: "split" | "tab"; conten
         <div className="flex items-center gap-3">
           <button type="button" className={tabButtonClass(view === "builder")} onClick={() => setView("builder")}>Builder</button>
           <button type="button" className={tabButtonClass(view === "preview")} onClick={() => setView("preview")}>Preview</button>
-          <button type="button" className={tabButtonClass(false)} disabled title="Responses are deferred.">Responses</button>
         </div>
         <div className="flex items-center gap-2">
           <button type="button" className={smallActionClass()} onClick={addQuestion}><Plus className="h-3.5 w-3.5" />Add question</button>
-          <button type="button" className={primaryMiniClass()} disabled title="Publishing belongs to a later grading wave.">Publish</button>
         </div>
       </div>
       {view === "preview" ? (
@@ -1155,40 +1205,22 @@ function PlannerStudio({
   );
 }
 
-function ThreadReferenceStudio({ content, onChange }: { content: unknown; onChange: (content: unknown) => void }) {
-  const [threadId, setThreadId] = useState(typeof record(content).threadId === "string" ? record(content).threadId as string : "");
-  const [summary, setSummary] = useState(typeof record(content).summary === "string" ? record(content).summary as string : "");
-  function commit(next: { threadId?: string; summary?: string }) {
-    const merged = { ...record(content), threadId, summary, ...next };
-    setThreadId(merged.threadId ?? "");
-    setSummary(merged.summary ?? "");
-    onChange(merged);
-  }
+function ThreadReferenceStudio({ content }: { content: unknown }) {
+  const threadId = typeof record(content).threadId === "string" ? record(content).threadId as string : "";
   if (threadId.trim()) {
     return (
-      <div className="h-[min(760px,calc(100vh-230px))] min-h-[460px] overflow-hidden border border-[var(--border-default)] bg-[var(--bg-primary)]">
-        <ThreadConversation threadId={threadId.trim()} compact showComposer />
+      <div className="h-[min(760px,calc(100vh-230px))] min-h-[460px] overflow-hidden bg-[var(--bg-primary)]">
+        <ThreadConversation threadId={threadId.trim()} compact showComposer={false} />
       </div>
     );
   }
   return (
-    <div className="rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5">
-      <div className="mb-5 flex items-center gap-3">
-        <MessageSquare className="h-9 w-9 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-2 text-[#8b6ff0]" />
+    <div className="flex min-h-[420px] items-center justify-center bg-[var(--bg-primary)] p-8 text-center">
+      <div className="max-w-[420px]">
+        <MessageSquare className="mx-auto h-10 w-10 rounded-[10px] bg-[color-mix(in_oklab,#8b6ff0_10%,var(--bg-elevated))] p-2.5 text-[#8b6ff0]" />
         <div>
-          <h3 className="font-display text-[24px] font-semibold text-[var(--text-primary)]">Thread reference</h3>
-          <p className="text-[13px] text-[var(--text-secondary)]">Connect this reference to a durable Spectra thread.</p>
-        </div>
-      </div>
-      <div className="grid gap-4">
-        <Field label="Thread id or reference">
-          <input value={threadId} onChange={(event) => commit({ threadId: event.target.value })} className={inputClass()} placeholder="Thread id, URL, or short reference" />
-        </Field>
-        <Field label="Reference summary">
-          <textarea value={summary} onChange={(event) => commit({ summary: event.target.value })} className={textareaClass("min-h-[220px]")} placeholder="What should this conversation card remind you of?" />
-        </Field>
-        <div className="rounded-[8px] border border-dashed border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-primary)_60%,transparent)] p-4 text-[13px] leading-6 text-[var(--text-secondary)]">
-          Kept conversations open here with the same messages, operational traces, and artifact results as normal chat. Continue them from the page command bar or open them in Chat.
+          <h3 className="mt-4 font-display text-[22px] font-semibold text-[var(--text-primary)]">Conversation unavailable</h3>
+          <p className="mt-2 text-[13px] leading-6 text-[var(--text-secondary)]">This older artifact is a disconnected reference, not a conversation. Keep a current run or place a chat thread to create a working thread artifact.</p>
         </div>
       </div>
     </div>
@@ -1443,10 +1475,6 @@ function iconButtonClass() {
 
 function smallActionClass() {
   return "inline-flex h-8 items-center gap-1.5 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 text-[12px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-45";
-}
-
-function primaryMiniClass() {
-  return "inline-flex h-8 items-center gap-1.5 rounded-[7px] bg-[#8b6ff0] px-3 text-[12px] font-medium text-white disabled:opacity-45";
 }
 
 function toolbarClass(active?: boolean) {

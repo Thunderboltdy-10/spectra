@@ -100,10 +100,11 @@ export function CommandBar({ placeholder, menu, context, className, onSubmit, bu
       ) : null}
       <button
         type="button"
-        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] shadow-[0_2px_8px_rgba(27,20,12,0.05)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[8px] bg-[color-mix(in_oklab,var(--bg-elevated)_82%,transparent)] text-[var(--text-secondary)] shadow-[0_2px_8px_rgba(27,20,12,0.04)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-35"
         onClick={() => hasMenu && setMenuOpen((open) => !open)}
         disabled={!hasMenu}
         aria-label="Open actions"
+        title="Add or attach"
       >
         <Plus className="h-4 w-4" />
       </button>

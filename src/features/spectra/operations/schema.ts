@@ -150,8 +150,28 @@ export function parseModelOperation(value: unknown) {
   return operation;
 }
 
+function normalizePlanIntentMode(value: unknown) {
+  if (!value || typeof value !== "object") return value;
+  const plan = value as Record<string, unknown>;
+  if (!plan.intent || typeof plan.intent !== "object") return value;
+  const intent = plan.intent as Record<string, unknown>;
+  if (typeof intent.mode === "string" && REQUEST_INTENT_MODES.includes(intent.mode as (typeof REQUEST_INTENT_MODES)[number])) return value;
+  const operations = Array.isArray(plan.operations) ? plan.operations as Array<Record<string, unknown>> : [];
+  const types = new Set(operations.map((operation) => operation.type));
+  let mode: (typeof REQUEST_INTENT_MODES)[number] = "answer";
+  if (plan.decision === "operate") {
+    if (types.size > 1) mode = "mixed";
+    else if (types.has("artifact.create")) mode = "create";
+    else if (types.has("artifact.update")) mode = "update";
+    else if (types.has("workspaceItem.add")) mode = "place";
+    else if (types.has("workspaceItem.hide")) mode = "remove_placement";
+    else if (types.has("workspace.create")) mode = "create_workspace";
+  }
+  return { ...plan, intent: { ...intent, mode } };
+}
+
 export function parseSpectraPlan(value: unknown) {
-  const plan = spectraPlanSchema.parse(value);
+  const plan = spectraPlanSchema.parse(normalizePlanIntentMode(value));
   return { ...plan, operations: plan.operations.map(parseModelOperation) };
 }
 

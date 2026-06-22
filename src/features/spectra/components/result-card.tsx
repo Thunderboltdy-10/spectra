@@ -1,6 +1,7 @@
 "use client";
 
-import { AlertCircle, CheckCircle2, Clock3, Loader2, ShieldCheck, X } from "lucide-react";
+import { AlertCircle, Check, CheckCircle2, Clock3, ExternalLink, FolderPlus, Loader2, MessageSquarePlus, RotateCcw, ShieldCheck, X } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ResultCardStreamView } from "../ai/stream-events";
 
@@ -11,6 +12,15 @@ function tone(card: ResultCardView) {
   if (card.status === "completed") return "var(--success)";
   if (card.actions.some((action) => action.key === "confirm")) return "#d88922";
   return "var(--accent-cyan)";
+}
+
+function actionIcon(key: string): LucideIcon {
+  if (key === "retry") return RotateCcw;
+  if (key === "confirm") return Check;
+  if (key === "cancel" || key === "reject") return X;
+  if (key === "continue" || key === "continue_thread") return MessageSquarePlus;
+  if (key === "add_to_workspace") return FolderPlus;
+  return ExternalLink;
 }
 
 export function ResultCardStack({
@@ -49,19 +59,22 @@ export function ResultCardStack({
                 {card.summary ? <span className="truncate text-[var(--text-secondary)]">{card.summary}</span> : null}
               </span>
             </span>
-            {card.actions.map((action) => (
-              <button
+            {card.actions.map((action) => {
+              const ActionIcon = actionIcon(action.key);
+              return <button
                 key={`${card.id}-${action.key}`}
                 type="button"
                 className={cn(
-                  "h-7 shrink-0 rounded-[6px] border border-[var(--border-default)] px-2.5 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
-                  action.key === "confirm" && "border-transparent bg-[var(--text-primary)] text-[var(--bg-primary)] hover:bg-[var(--text-primary)] hover:text-[var(--bg-primary)]",
+                  "flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
+                  action.key === "confirm" && "bg-[var(--text-primary)] text-[var(--bg-primary)] hover:bg-[var(--text-primary)] hover:text-[var(--bg-primary)]",
                 )}
                 onClick={(event) => { event.stopPropagation(); onAction?.(card, action.key, action.targetId); }}
+                aria-label={action.label}
+                title={action.label}
               >
-                {action.label}
-              </button>
-            ))}
+                <ActionIcon className="h-3.5 w-3.5" />
+              </button>;
+            })}
             <button type="button" className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[5px] text-[var(--text-tertiary)] opacity-55 hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)] group-hover:opacity-100" aria-label="Hide result" onClick={(event) => { event.stopPropagation(); onAction?.(card, "hide"); }}>
               <X className="h-3.5 w-3.5" />
             </button>

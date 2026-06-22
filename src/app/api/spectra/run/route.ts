@@ -131,7 +131,7 @@ function prepareLocalConversation(input: Body["localConversation"]) {
   return (Array.isArray(input) ? input : []).slice(-30).flatMap((message) => {
     if ((message.role !== "user" && message.role !== "assistant") || typeof message.content !== "string") return [];
     const content = message.content.replace(/\u0000/g, "").trim().slice(0, 8_000);
-    return content ? [{ role: message.role, content }] : [];
+    return content ? [{ role: message.role as "user" | "assistant", content }] : [];
   });
 }
 
@@ -142,7 +142,7 @@ Available actions in this wave:\n${activeToolContractPrompt()}\nUse an action on
 
 First classify the request as answer, operate, clarify, or refuse. The intent mode must describe the requested operation; focus is only a hint. Advice, explanation, and questions use decision=answer with zero operations. Ambiguous targets use clarify with zero operations. Unsupported or unsafe work uses refuse with zero operations.
 
-For chat, provide a specific conversationTitle of at most 7 words and a one-sentence conversationSummary. Avoid generic titles such as "Biology Question" or "New Conversation". For non-chat compact runs, both fields may be null.
+For chat, the first exchange (one user message and no prior assistant message in owned context) MUST provide a specific AI-written conversationTitle of at most 7 words and a one-sentence conversationSummary. Avoid generic titles such as "Biology Question" or "New Conversation". On later exchanges conversationTitle must be null; conversationSummary may be refreshed. For a non-chat compact run, provide the same title and summary as hidden candidates; the provisional UI will not use them, but they become the permanent thread name only if the user explicitly keeps or continues that run.
 
 Use operation ids only when the exact id is present in owned context. Never invent, combine, prefix, suffix, or transform an id. Never use an operation key as a database id. A flashcard deck is ONE artifact with content.cards[]. A quiz is ONE artifact with content.questions[]. Memory cues belong in each flashcard's hint. Multiple-choice correctAnswer must exactly match one option. Planner tasks use one planner_task artifact. Thread references use threadId=null when no real owned thread id exists.
 
@@ -437,6 +437,9 @@ async function runAttempt(params: { actorClerkId: string; runId: string; resultC
       params.signal,
     );
     const plan = validatePlanAgainstIntent(modelResult.plan, ownedReferences(context));
+    if (!params.threadId && (plan.conversationTitle || plan.conversationSummary)) {
+      await mutate("spectraRuns:setSuggestedThreadMetadata", { actorClerkId: params.actorClerkId, runId: params.runId, title: plan.conversationTitle ?? undefined, summary: plan.conversationSummary ?? undefined });
+    }
     if (params.threadId && (plan.conversationTitle || plan.conversationSummary)) {
       await mutate("spectraThreads:applyGeneratedMetadata", {
         actorClerkId: params.actorClerkId,
@@ -534,11 +537,11 @@ export async function POST(request: NextRequest) {
     const localConversation = prepareLocalConversation(body.localConversation);
     let threadId = body.threadId?.trim() || undefined;
     if (!threadId && surface === "chat") {
-      threadId = await mutate<unknown & object, string>("spectraThreads:create", { actorClerkId: actor.clerkId, origin: "chat" });
+      threadId = await mutate<unknown & object, string>("spectraThreads:create", { actorClerkId: actor.clerkId, origin: "chat", workspaceId: body.workspaceId, artifactId: body.artifactId });
     }
     const created = await mutate<unknown & object, { runId: string; resultCardId: string }>("spectraRuns:create", { actorClerkId: actor.clerkId, sourceSurface, userPrompt: prompt, threadId, workspaceId: body.workspaceId, artifactId: body.artifactId, modelUsed: getSpectraModelId() });
     if (threadId) {
-      await mutate("spectraThreads:appendMessage", { actorClerkId: actor.clerkId, threadId, role: "user", content: prompt, runId: created.runId, clientMessageId: `user:${created.runId}`, metadata: { attachments: attachments.map(({ data: _data, extractedText: _text, ...attachment }) => attachment) } });
+      await mutate("spectraThreads:appendMessage", { actorClerkId: actor.clerkId, threadId, role: "user", content: prompt, runId: created.runId, clientMessageId: `user:${created.runId}`, metadata: { attachments: attachments.map(({ name, mimeType, size, handling }) => ({ name, mimeType, size, handling })) } });
     }
     return ndjson((emit) => runAttempt({ actorClerkId: actor.clerkId, runId: created.runId, resultCardId: created.resultCardId, prompt, surface, threadId, workspaceId: body.workspaceId, artifactId: body.artifactId, attachments, localConversation, signal: request.signal }, emit));
   }

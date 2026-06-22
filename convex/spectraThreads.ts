@@ -173,13 +173,19 @@ export const update = mutation({
   args: {
     actorClerkId: v.string(), threadId: v.id("spectraThreads"),
     title: v.optional(v.string()), pinned: v.optional(v.boolean()),
+    workspaceId: v.optional(v.id("spectraWorkspaces")),
     status: v.optional(v.union(v.literal("active"), v.literal("archived"))),
   },
   handler: async (ctx, args) => {
-    const { thread } = await requireOwnedThread(ctx, args.actorClerkId, args.threadId);
+    const { actor, thread } = await requireOwnedThread(ctx, args.actorClerkId, args.threadId);
+    if (args.workspaceId) {
+      const workspace = await ctx.db.get(args.workspaceId);
+      if (!workspace || workspace.ownerUserId !== actor._id || workspace.orgId !== actor.orgId || workspace.status !== "active") throw new Error("Workspace not found");
+    }
     await ctx.db.patch(args.threadId, {
       title: args.title === undefined ? thread.title : cleanTitle(args.title),
       pinned: args.pinned ?? thread.pinned,
+      workspaceId: args.workspaceId ?? thread.workspaceId,
       status: args.status ?? thread.status,
       updatedAt: Date.now(),
     });
@@ -226,7 +232,7 @@ export const createFromRun = mutation({
     const now = Date.now();
     if (!threadId) {
       threadId = await ctx.db.insert("spectraThreads", {
-        ownerUserId: actor._id, orgId: actor.orgId, title: cleanTitle(run.userPrompt),
+        ownerUserId: actor._id, orgId: actor.orgId, title: cleanTitle(run.suggestedThreadTitle ?? run.userPrompt),
         origin: run.sourceSurface, workspaceId: run.workspaceId, artifactId: run.artifactId,
         status: "active", messageCount: run.finalSummary ? 2 : 1,
         createdAt: run.createdAt, updatedAt: now, lastMessageAt: now, lastRunId: run._id,
@@ -267,7 +273,7 @@ export const createFromRun = mutation({
       if (!referenceArtifactId) {
         referenceArtifactId = await ctx.db.insert("spectraArtifacts", {
           ownerUserId: actor._id, orgId: actor.orgId, blueprintKey: "thread_reference",
-          title: cleanTitle(run.userPrompt), summary: run.finalSummary?.slice(0, 240),
+          title: cleanTitle(run.suggestedThreadTitle ?? run.userPrompt), summary: (run.suggestedThreadSummary ?? run.finalSummary)?.slice(0, 240),
           content: { threadId, summary: run.finalSummary ?? "", linkedArtifactIds: [] },
           textIndex: `${run.userPrompt} ${run.finalSummary ?? ""}`.slice(0, 8_000), tags: ["thread"], status: "active",
           createdFrom: { source: run.sourceSurface, threadId, runId: run._id, workspaceId: run.workspaceId },

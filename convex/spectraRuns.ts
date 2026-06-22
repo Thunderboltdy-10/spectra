@@ -150,6 +150,19 @@ export const updateStatus = mutation({
   },
 });
 
+export const setSuggestedThreadMetadata = mutation({
+  args: { actorClerkId: v.string(), runId: v.id("spectraAiRuns"), title: v.optional(v.string()), summary: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    await requireOwnedRun(ctx, args.actorClerkId, args.runId);
+    await ctx.db.patch(args.runId, {
+      suggestedThreadTitle: args.title?.trim().slice(0, 88),
+      suggestedThreadSummary: args.summary?.replace(/\s+/g, " ").trim().slice(0, 320),
+      updatedAt: Date.now(),
+    });
+    return { runId: args.runId };
+  },
+});
+
 export const patchResultCard = mutation({
   args: {
     actorClerkId: v.string(),

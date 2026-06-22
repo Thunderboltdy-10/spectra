@@ -4,6 +4,7 @@ import {
   operationRequiresConfirmation,
   parseOperationInput,
 } from "@/features/spectra/operations";
+import { parseSpectraPlan } from "@/features/spectra/operations/schema";
 
 describe("Spectra operation policy", () => {
   it("allows safe direct artifact creation", () => {
@@ -39,5 +40,17 @@ describe("Spectra operation policy", () => {
     });
 
     expect(operationRequiresConfirmation(operation)).toBe(false);
+  });
+
+  it("normalizes conversational provider intent values to answer", () => {
+    const plan = parseSpectraPlan({
+      decision: "answer",
+      intent: { mode: "respond", requestedArtifactTypes: [], requestedVisibleArtifactCount: 0, targetArtifactId: null, targetWorkspaceId: null },
+      conversationTitle: "Quick confirmation",
+      conversationSummary: "A brief affirmative follow-up.",
+      finalResponse: "Yes!",
+      operations: [],
+    });
+    expect(plan.intent.mode).toBe("answer");
   });
 });

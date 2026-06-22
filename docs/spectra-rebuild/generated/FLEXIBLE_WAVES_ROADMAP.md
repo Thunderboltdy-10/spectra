@@ -264,7 +264,7 @@ Manual test:
 
 ## Wave 5.5 - Conversation / Workspace UX Stabilization
 
-Started on 2026-06-21 before Wave 6. This is a product-quality correction over the Wave 5 worktree, not a conceptual wave.
+Completed with a correction pass on 2026-06-22 before Wave 6. This is a product-quality correction over the Wave 5 worktree, not a conceptual wave. The correction fixed same-model DeepSeek provider fallback, thread-artifact continuation, temporary-run/context conflicts, workspace caching/skeletons/toolbars, compact actions, the chat welcome, timeline routing/hierarchy, and visible artifact-version revert controls.
 
 Focus:
 

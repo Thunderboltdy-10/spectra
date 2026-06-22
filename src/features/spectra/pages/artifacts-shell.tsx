@@ -8,6 +8,8 @@ import {
   ChevronDown,
   ExternalLink,
   FileText,
+  FolderInput,
+  FolderPlus,
   Grid2X2,
   HelpCircle,
   LayoutGrid,
@@ -371,6 +373,15 @@ export function ArtifactsShell() {
     }
   }
 
+  async function revertArtifactVersion(artifactId: string, versionId: string) {
+    setBusyKey(`artifact:revert:${artifactId}`);
+    try {
+      await postSpectra({ action: "revertArtifactVersion", artifactId, versionId });
+      toast.success("Artifact restored to the selected version.");
+      await load(true);
+    } finally { setBusyKey(null); }
+  }
+
   async function archiveArtifact(artifact: SpectraArtifact) {
     setBusyKey(`artifact:archive:${artifact._id}`);
     try {
@@ -435,9 +446,8 @@ export function ArtifactsShell() {
     const setMenu = variant === "add" ? setAddMenuArtifactId : setMoveMenuArtifactId;
     return (
       <div>
-        <button type="button" className={buttonClass()} disabled={workspaces.length === 0 || busyKey === `add:${artifact._id}`} onClick={(event) => { setPlacementAnchor(event.currentTarget.getBoundingClientRect()); setMenu(menuOpen ? null : artifact._id); }}>
-          {busyKey === `add:${artifact._id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : variant === "add" ? <Plus className="h-3.5 w-3.5" /> : <PanelTop className="h-3.5 w-3.5" />}
-          {variant === "add" ? "Add to workspace" : "Move"}
+        <button type="button" className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-45" disabled={workspaces.length === 0 || busyKey === `add:${artifact._id}`} onClick={(event) => { setPlacementAnchor(event.currentTarget.getBoundingClientRect()); setMenu(menuOpen ? null : artifact._id); }} aria-label={variant === "add" ? "Add to workspace" : "Move to workspace"} title={variant === "add" ? "Add to workspace" : "Move to workspace"}>
+          {busyKey === `add:${artifact._id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : variant === "add" ? <FolderPlus className="h-3.5 w-3.5" /> : <FolderInput className="h-3.5 w-3.5" />}
         </button>
         <FloatingMenu open={menuOpen} anchor={placementAnchor} onClose={() => setMenu(null)} width={260}>
             {workspaces.map((workspace) => {
@@ -458,9 +468,8 @@ export function ArtifactsShell() {
   function rowActions(artifact: SpectraArtifact) {
     const firstPlacement = artifactPlacements(artifact)[0];
     const openButton = (
-      <button type="button" className={buttonClass()} onClick={() => studio.openSplit(artifact)}>
+      <button type="button" className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" onClick={() => studio.openSplit(artifact)} aria-label="Open artifact" title="Open artifact">
         <ExternalLink className="h-3.5 w-3.5" />
-        Open
       </button>
     );
     if (!firstPlacement) {
@@ -476,7 +485,7 @@ export function ArtifactsShell() {
       <div className="flex items-center gap-2">
         {openButton}
         {placementMenu(artifact, "move")}
-        <button type="button" className="flex h-8 w-8 items-center justify-center rounded-[7px] border border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[color-mix(in_oklab,var(--danger)_7%,var(--bg-elevated))] hover:text-[var(--danger)]" disabled={busyKey === `remove:${firstPlacement.workspaceItemId}`} onClick={() => void removePlacement(firstPlacement.workspaceItemId)}>
+        <button type="button" className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[color-mix(in_oklab,var(--danger)_7%,var(--bg-elevated))] hover:text-[var(--danger)]" disabled={busyKey === `remove:${firstPlacement.workspaceItemId}`} onClick={() => void removePlacement(firstPlacement.workspaceItemId)} aria-label="Remove from workspace" title="Remove from workspace">
           {busyKey === `remove:${firstPlacement.workspaceItemId}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />}
         </button>
         <button type="button" className="flex h-8 w-8 items-center justify-center text-[var(--text-secondary)] hover:text-[var(--danger)]" onClick={() => void permanentlyDeleteArtifact(artifact)} aria-label="Delete permanently"><Trash2 className="h-3.5 w-3.5" /></button>
@@ -518,6 +527,7 @@ export function ArtifactsShell() {
           onActivateTab={studio.activateTab}
           onCloseTab={closeArtifactTab}
           onSave={updateArtifact}
+          onRevert={revertArtifactVersion}
           onArchive={archiveArtifact}
           onDirtyChange={studio.setDirty}
         />
@@ -549,7 +559,7 @@ export function ArtifactsShell() {
                 </button>
                 {createMenuOpen ? (
                   <div className="absolute right-0 top-[calc(100%+8px)] z-30 w-[230px] rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[0_6px_18px_rgba(0,0,0,0.10)]">
-                    {filters.filter((filter) => filter.key !== "all").map((filter) => {
+                    {filters.filter((filter) => filter.key !== "all" && filter.key !== "thread_reference").map((filter) => {
                       const Icon = filter.icon;
                       const key = filter.key as SpectraBlueprintKey;
                       return (
@@ -638,13 +648,14 @@ export function ArtifactsShell() {
           onActivateTab={studio.activateTab}
           onCloseTab={closeArtifactTab}
           onSave={updateArtifact}
+          onRevert={revertArtifactVersion}
           onArchive={archiveArtifact}
           onDirtyChange={studio.setDirty}
         />
       ) : null}
       </>
       )}
-        {studio.activeArtifact?.blueprintKey !== "thread_reference" ? <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 bg-[linear-gradient(to_top,var(--bg-primary)_72%,transparent)] px-8 pb-5 pt-12">
+        {studio.activeArtifact?.blueprintKey !== "thread_reference" ? <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 bg-[linear-gradient(to_top,var(--bg-primary)_72%,transparent)] px-8 pb-5 pt-12" style={spectraSession.activeLocalThreadRunId ? { right: "var(--spectra-run-panel-width, 680px)" } : undefined}>
           <div className="pointer-events-auto mx-auto max-w-[880px]">
             <LocalThreadTabs />
             <ResultCardStack cards={runEngine.cards} className="mb-1.5 ml-[52px]" onOpen={(card) => spectraSession.openLocalThread(card.runId, card.summary ?? card.title)} onAction={(card, action, targetId) => void runEngine.onCardAction(card, action, targetId)} />
@@ -663,7 +674,7 @@ export function ArtifactsShell() {
               context={<span className="flex max-w-[190px] items-center gap-1.5 text-[11px] text-[var(--text-secondary)]" title={studio.activeArtifact?.title ?? "Artifact library"}>{studio.activeArtifact ? <FileText className="h-3.5 w-3.5 shrink-0" /> : <Sparkles className="h-3.5 w-3.5 shrink-0" />}<span className="truncate">{studio.activeArtifact?.title ?? "Library"}</span></span>}
               menu={(
                 <div>
-                  {filters.filter((filter) => filter.key !== "all").map((filter) => {
+                  {filters.filter((filter) => filter.key !== "all" && filter.key !== "thread_reference").map((filter) => {
                     const Icon = filter.icon;
                     const key = filter.key as SpectraBlueprintKey;
                     return (
@@ -682,7 +693,7 @@ export function ArtifactsShell() {
           <RunDetailPanel
             runId={spectraSession.activeLocalThreadRunId}
             card={runEngine.cards.find((card) => card.runId === spectraSession.activeLocalThreadRunId)}
-            onClose={() => spectraSession.closeLocalThread(spectraSession.activeLocalThreadRunId!)}
+            onClose={spectraSession.clearActivePanel}
             onSaved={() => spectraSession.closeLocalThread(spectraSession.activeLocalThreadRunId!)}
             onAction={(card, action, targetId) => void runEngine.onCardAction(card, action, targetId)}
           />
@@ -741,6 +752,7 @@ function GroupedList({
   rowActions: (artifact: SpectraArtifact) => ReactNode;
   onOpen: (artifact: SpectraArtifact) => void;
 }) {
+  const [inboxExpanded, setInboxExpanded] = useState(false);
   return (
     <main className="mt-8">
       <section>
@@ -752,9 +764,10 @@ function GroupedList({
           <p className="mt-1 text-[13px] text-[var(--text-secondary)]">Artifacts not yet placed in a workspace.</p>
         </div>
         <div className="grid gap-3 xl:grid-cols-3">
-          {inbox.slice(0, 3).map((artifact) => <ArtifactCard key={artifact._id} artifact={artifactToCard(artifact)} actions={rowActions(artifact)} onSelect={() => onOpen(artifact)} />)}
+          {inbox.slice(0, inboxExpanded ? inbox.length : 6).map((artifact) => <ArtifactCard key={artifact._id} artifact={artifactToCard(artifact)} actions={rowActions(artifact)} onSelect={() => onOpen(artifact)} />)}
           {inbox.length === 0 ? <div className="rounded-[8px] border border-dashed border-[var(--border-default)] px-4 py-8 text-[13px] text-[var(--text-secondary)]">No unplaced artifacts in this scope.</div> : null}
         </div>
+        {inbox.length > 6 ? <button type="button" className="mt-3 h-8 text-[11px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)]" onClick={() => setInboxExpanded((value) => !value)}>{inboxExpanded ? "Show fewer" : `Show ${inbox.length - 6} more`}</button> : null}
       </section>
       <section className="mt-8 border-t border-[var(--border-default)] pt-7">
         <div className="mb-4 flex items-center justify-between">
@@ -788,6 +801,7 @@ function WorkspaceGroup({
   onOpen: (artifact: SpectraArtifact) => void;
 }) {
   const accent = workspaceAccent(workspace, index);
+  const [expanded, setExpanded] = useState(false);
   return (
     <section className="overflow-hidden rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)]">
       <div className="flex h-11 items-center justify-between border-b border-[var(--border-default)] px-4" style={{ background: accent.soft }}>
@@ -798,7 +812,7 @@ function WorkspaceGroup({
         </div>
         <span className="text-[12px] text-[var(--text-secondary)]">View workspace <ExternalLink className="inline h-3 w-3" /></span>
       </div>
-      {artifacts.map((artifact) => {
+      {artifacts.slice(0, expanded ? artifacts.length : 6).map((artifact) => {
         const meta = blueprintMeta[artifact.blueprintKey];
         const Icon = meta.icon;
         return (
@@ -828,6 +842,7 @@ function WorkspaceGroup({
           </div>
         );
       })}
+      {artifacts.length > 6 ? <button type="button" className="m-2 h-8 px-2 text-[11px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)]" onClick={() => setExpanded((value) => !value)}>{expanded ? "Show fewer" : `Show ${artifacts.length - 6} more`}</button> : null}
     </section>
   );
 }
@@ -840,6 +855,7 @@ function BoardColumns({
   onOpen: (artifact: SpectraArtifact) => void;
 }) {
   const visibleGroups = groups.filter((group) => group.artifacts.length > 0);
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set());
   return (
     <div className="mt-8 overflow-x-auto pb-6">
     <main
@@ -848,6 +864,7 @@ function BoardColumns({
     >
       {visibleGroups.map((group, index) => {
         const accent = workspaceAccent(group.workspace, index);
+        const expanded = expandedGroups.has(group.workspace._id);
         return (
           <section key={group.workspace._id} className="min-h-[620px] rounded-[10px] border p-2.5 shadow-[0_10px_28px_rgba(27,20,12,0.04)]" style={{ borderColor: accent.border, background: accent.soft }}>
             <div className="mb-3 flex items-center justify-between px-1">
@@ -858,12 +875,12 @@ function BoardColumns({
               </div>
             </div>
             <div className="space-y-2.5">
-              {group.artifacts.map((artifact) => {
+              {group.artifacts.slice(0, expanded ? group.artifacts.length : 6).map((artifact) => {
                 const card = artifactToCard(artifact);
                 return <ArtifactCard key={artifact._id} artifact={card} quiet onSelect={() => onOpen(artifact)} />;
               })}
             </div>
-            <button type="button" className="mt-3 flex h-8 items-center gap-2 px-1 text-[13px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]" disabled title="Use list or grid actions to place existing artifacts."><Plus className="h-4 w-4" />Add artifact</button>
+            {group.artifacts.length > 6 ? <button type="button" className="mt-3 h-8 px-1 text-[11px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)]" onClick={() => setExpandedGroups((current) => { const next = new Set(current); if (expanded) next.delete(group.workspace._id); else next.add(group.workspace._id); return next; })}>{expanded ? "Show fewer" : `Show ${group.artifacts.length - 6} more`}</button> : null}
           </section>
         );
       })}

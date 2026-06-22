@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Check, Clock3, History, MessageSquare, Pencil, Pin, Plus, Sparkles, X } from "lucide-react";
+import { ArrowRight, Check, CheckCircle2, Clock3, FolderPlus, History, MessageSquare, Pencil, Pin, Plus, Sparkles, X } from "lucide-react";
 import { toast } from "sonner";
 import { useSpectraRun } from "../ai/use-spectra-run";
 import { ConversationSurface } from "../components/conversation-surface";
@@ -29,7 +29,17 @@ export function ChatShell() {
   const [loading, setLoading] = useState(Boolean(requestedThreadId));
   const [renaming, setRenaming] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
+  const [chatWorkspaceId, setChatWorkspaceId] = useState<string | null>(null);
+  const [welcome, setWelcome] = useState("Welcome back.");
+  const [studioPanelWidth, setStudioPanelWidth] = useState(700);
+  const [threadPanelWidth, setThreadPanelWidth] = useState(560);
+  const [threadPanelArtifactId, setThreadPanelArtifactId] = useState<string | null>(null);
   const activeThreadRef = useRef<string | null>(requestedThreadId);
+
+  useEffect(() => {
+    const hour = new Date().getHours();
+    setWelcome(hour < 5 ? "Still thinking? Let’s make it lighter." : hour < 12 ? "Good morning. Let’s get one thing moving." : hour < 18 ? "Good afternoon. What can we make clearer?" : "Good evening. Let’s finish something worthwhile.");
+  }, []);
 
   const refresh = useCallback(async (nextThreadId?: string | null) => {
     const [threadRows, overview, selected] = await Promise.all([
@@ -55,25 +65,44 @@ export function ChatShell() {
     setThreadId(id);
     activeThreadRef.current = id;
     setDetail(null);
+    setChatWorkspaceId(null);
     router.replace(id ? `/chat?threadId=${encodeURIComponent(id)}` : "/chat?new=1");
   }, [router]);
 
+  const selectWorkspaceContext = useCallback((workspaceId: string | null) => {
+    setChatWorkspaceId(workspaceId);
+    if (threadId && workspaceId) void postSpectra({ action: "updateThread", threadId, workspaceId }).then(() => refresh(threadId));
+  }, [refresh, threadId]);
+
   const studio = useArtifactStudioState("spectra.shared.artifactStudio", artifacts);
+  const threadPanelArtifact = artifacts.find((artifact) => artifact._id === threadPanelArtifactId && artifact.blueprintKey === "thread_reference") ?? null;
   const openArtifact = useCallback((artifactId: string) => {
     const artifact = artifacts.find((item) => item._id === artifactId);
     if (!artifact) { toast.error("That artifact is no longer available."); return; }
     setHistoryOpen(false);
+    if (artifact.blueprintKey === "thread_reference") {
+      spectraSession.clearActivePanel();
+      setThreadPanelArtifactId(artifact._id);
+      return;
+    }
     studio.openSplit(artifact);
-  }, [artifacts, studio]);
+  }, [artifacts, spectraSession, studio]);
 
   const updateArtifact = useCallback(async (artifactId: string, payload: ArtifactPayload) => {
     await postSpectra({ action: "updateArtifact", artifactId, title: payload.title, summary: payload.summary, content: payload.content, tags: payload.tags, source: "manual" });
     toast.success("Artifact updated.");
     await refresh(activeThreadRef.current);
   }, [refresh]);
+  const revertArtifactVersion = useCallback(async (artifactId: string, versionId: string) => {
+    await postSpectra({ action: "revertArtifactVersion", artifactId, versionId });
+    toast.success("Artifact restored to the selected version.");
+    await refresh(activeThreadRef.current);
+  }, [refresh]);
 
   const runEngine = useSpectraRun({
     surface: "chat",
+    workspaceId: chatWorkspaceId ?? detail?.thread.workspaceId,
+    artifactId: studio.activeArtifact?._id ?? threadPanelArtifact?._id,
     threadId: threadId ?? undefined,
     initialCards: [],
     onThreadReady: async (id) => {
@@ -89,7 +118,9 @@ export function ChatShell() {
   });
 
   const title = detail?.thread.title ?? "New conversation";
+  const activeWorkspace = workspaces.find((workspace) => workspace._id === (chatWorkspaceId ?? detail?.thread.workspaceId));
   const activeCards = useMemo(() => runEngine.cards.filter((card) => card.status !== "completed"), [runEngine.cards]);
+  const pageComposer = <div><LocalThreadTabs activeThreadId={threadId} onContinue={(thread) => selectThread(thread?.threadId ?? null)} onOpen={(runId) => { setThreadPanelArtifactId(null); spectraSession.activateLocalThread(runId); }} /><CommandBar placeholder={activeWorkspace ? `Ask with ${activeWorkspace.title} context…` : "Ask Spectra anything…"} busy={runEngine.submitting} allowAttachments onStop={runEngine.stop} onSubmit={(value, attachments) => { void runEngine.run(value, attachments); return true; }} menu={<><button type="button" onClick={() => selectThread(null)} className="flex w-full items-center gap-2 rounded-[6px] px-2.5 py-2 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"><Plus className="h-4 w-4" />New conversation</button><div className="my-1 h-px bg-[var(--border-subtle)]" />{workspaces.slice(0, 6).map((workspace) => <button key={workspace._id} type="button" onClick={() => selectWorkspaceContext(workspace._id)} className="flex w-full items-center gap-2 rounded-[6px] px-2.5 py-2 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"><FolderPlus className="h-4 w-4" /><span className="min-w-0 flex-1 truncate">Use {workspace.title}</span>{activeWorkspace?._id === workspace._id ? <Check className="h-3.5 w-3.5 text-[var(--success)]" /> : null}</button>)}</>} context={<span className="flex items-center gap-1.5 text-[11px] text-[var(--text-secondary)]"><MessageSquare className="h-3.5 w-3.5" />{activeWorkspace?.title ?? (threadId ? "Continue chat" : "New chat")}</span>} /></div>;
 
   return (
     <div className="relative flex h-full min-h-0 bg-[var(--bg-primary)]">
@@ -101,14 +132,15 @@ export function ChatShell() {
           </div>
           <div className="flex items-center gap-1">
             {threadId ? <button type="button" onClick={() => { setTitleDraft(title); setRenaming(true); }} className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]" aria-label="Rename thread" title="Rename thread"><Pencil className="h-3.5 w-3.5" /></button> : null}
-            {threadId ? <button type="button" onClick={() => void postSpectra({ action: "updateThread", threadId, pinned: !detail?.thread.pinned }).then(() => refresh(threadId))} className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]" aria-label={detail?.thread.pinned ? "Unpin thread" : "Pin thread"}><Pin className={`h-3.5 w-3.5 ${detail?.thread.pinned ? "fill-current text-[var(--accent-cyan)]" : ""}`} /></button> : null}
-            <button type="button" onClick={() => selectThread(null)} className="flex h-8 items-center gap-1.5 rounded-[7px] px-2.5 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"><Plus className="h-3.5 w-3.5" />New</button>
+            {threadId ? <button type="button" onClick={() => void postSpectra({ action: "updateThread", threadId, pinned: !detail?.thread.pinned }).then(() => refresh(threadId))} className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]" aria-label={detail?.thread.pinned ? "Unpin thread" : "Pin thread"} title={detail?.thread.pinned ? "Unpin thread" : "Pin thread"}><Pin className={`h-3.5 w-3.5 ${detail?.thread.pinned ? "fill-current text-[var(--accent-cyan)]" : ""}`} /></button> : null}
+            <button type="button" onClick={() => selectThread(null)} className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" aria-label="New chat" title="New chat"><Plus className="h-3.5 w-3.5" /></button>
             <button type="button" onClick={() => {
               if (studio.activeArtifact && studio.dirtyIds.has(studio.activeArtifact._id)) { toast.message("Save or discard the open artifact before opening Runs."); return; }
               studio.closeStudio();
+              setThreadPanelArtifactId(null);
               setHistoryOpen((value) => !value);
               if (!historyOpen) void getSpectraResultCards({ includeHidden: true, limit: 50 }).then((result) => setHistory(result.resultCards));
-            }} className="flex h-8 items-center gap-1.5 rounded-[7px] px-2.5 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"><History className="h-3.5 w-3.5" />Runs</button>
+            }} className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" aria-label="Open runs" title="Runs"><History className="h-3.5 w-3.5" /></button>
           </div>
         </header>
         {renaming && threadId ? <div className="absolute left-5 top-12 z-50 flex w-[min(420px,calc(100vw-40px))] items-center gap-1.5 rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2 shadow-[0_16px_40px_rgba(27,20,12,0.14)] sm:left-7"><input autoFocus value={titleDraft} maxLength={64} onChange={(event) => setTitleDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") setRenaming(false); if (event.key === "Enter" && titleDraft.trim()) void postSpectra({ action: "updateThread", threadId, title: titleDraft.trim() }).then(() => refresh(threadId)).then(() => setRenaming(false)); }} className="h-9 min-w-0 flex-1 bg-transparent px-2 text-[13px] font-medium text-[var(--text-primary)] outline-none" /><button type="button" onClick={() => void postSpectra({ action: "updateThread", threadId, title: titleDraft.trim() }).then(() => refresh(threadId)).then(() => setRenaming(false))} className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--success)] hover:bg-[var(--bg-hover)]" aria-label="Save title"><Check className="h-4 w-4" /></button><button type="button" onClick={() => setRenaming(false)} className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]" aria-label="Cancel rename"><X className="h-4 w-4" /></button></div> : null}
@@ -119,30 +151,30 @@ export function ChatShell() {
           workspaces={workspaces}
           onOpenArtifact={openArtifact}
           activeCards={activeCards}
-          onCardOpen={(card) => { if (studio.activeArtifact && studio.dirtyIds.has(studio.activeArtifact._id)) { toast.message("Save or discard the open artifact before opening run details."); return; } studio.closeStudio(); spectraSession.openLocalThread(card.runId, card.summary ?? card.title); }}
+          onCardOpen={(card) => { setThreadPanelArtifactId(null); spectraSession.openLocalThread(card.runId, card.summary ?? card.title); }}
           onCardAction={(card, action, target) => void runEngine.onCardAction(card, action, target)}
-          empty={<div className="flex min-h-[58vh] flex-col items-center justify-center text-center">
-            <span className="mb-6 flex h-12 w-12 items-center justify-center rounded-full border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--accent-cyan)] shadow-[0_8px_28px_rgba(24,20,14,0.08)]"><Sparkles className="h-5 w-5" /></span>
-            <h1 className="font-display text-[34px] font-semibold tracking-[-0.025em] text-[var(--text-primary)]">What are you working through?</h1>
-            <p className="mt-3 max-w-[520px] text-[13px] leading-6 text-[var(--text-secondary)]">Ask a question, develop an idea, or create a study object. Conversations persist as threads; artifacts stay in your library until you place them.</p>
-            {threads.length > 0 ? <div className="mt-8 grid w-full max-w-[680px] gap-2 text-left sm:grid-cols-2">{threads.slice(0, 4).map((thread) => <button key={thread._id} type="button" onClick={() => selectThread(thread._id)} className="group rounded-[10px] bg-[color-mix(in_oklab,var(--bg-elevated)_72%,transparent)] px-3.5 py-3 transition hover:bg-[var(--bg-hover)]"><span className="block truncate text-[12px] font-semibold text-[var(--text-primary)]">{thread.title}</span><span className="mt-1 block truncate text-[10px] text-[var(--text-tertiary)]">{thread.summaryShort ?? `${thread.messageCount ?? 0} messages`}</span></button>)}</div> : null}
-            {workspaces.length > 0 ? <div className="mt-5 flex flex-wrap justify-center gap-2">{workspaces.slice(0, 5).map((workspace) => <button key={workspace._id} type="button" onClick={() => router.push(`/workspace?workspaceId=${encodeURIComponent(workspace._id)}`)} className="rounded-full bg-[var(--bg-secondary)] px-3 py-1.5 text-[10px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]">{workspace.title}</button>)}</div> : null}
+          empty={<div className="mx-auto flex min-h-[58vh] w-full max-w-[820px] flex-col justify-center py-10 text-left">
+            <span className="flex h-11 w-11 items-center justify-center rounded-[11px] bg-[color-mix(in_oklab,var(--accent-cyan)_9%,var(--bg-elevated))] text-[var(--accent-cyan)] shadow-[0_8px_28px_rgba(24,20,14,0.06)]"><Sparkles className="h-5 w-5" /></span>
+            <h1 className="mt-5 font-display text-[36px] font-semibold tracking-[-0.025em] text-[var(--text-primary)]">{welcome}</h1>
+            <p className="mt-2 max-w-[560px] text-[14px] leading-6 text-[var(--text-secondary)]">Ask directly, or choose a room to give Spectra the right objects and subject context from the first message.</p>
+            {workspaces.length > 0 ? <div className="mt-8 grid gap-3 sm:grid-cols-2">{workspaces.slice(0, 6).map((workspace) => { const selected = chatWorkspaceId === workspace._id; const count = artifacts.filter((artifact) => artifact.placements?.some((placement) => placement.workspaceId === workspace._id)).length; return <button key={workspace._id} type="button" onClick={() => selectWorkspaceContext(selected ? null : workspace._id)} className={`group relative min-h-[112px] overflow-hidden rounded-[10px] p-4 text-left shadow-[0_4px_16px_rgba(27,20,12,0.05)] transition hover:-translate-y-0.5 ${selected ? "bg-[color-mix(in_oklab,var(--accent-cyan)_8%,var(--bg-elevated))] ring-1 ring-[color-mix(in_oklab,var(--accent-cyan)_34%,transparent)]" : "bg-[var(--bg-elevated)] hover:bg-[var(--bg-hover)]"}`}><span className="pointer-events-none absolute -bottom-14 -right-10 h-28 w-28 rounded-full border border-[color-mix(in_oklab,var(--accent-cyan)_12%,transparent)]" /><span className="relative flex items-start gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] bg-[var(--bg-primary)] text-[var(--accent-cyan)]"><FolderPlus className="h-4 w-4" /></span><span className="min-w-0 flex-1"><span className="flex items-center gap-2 text-[14px] font-semibold text-[var(--text-primary)]">{workspace.title}{selected ? <CheckCircle2 className="h-4 w-4 text-[var(--success)]" /> : null}</span><span className="mt-1 line-clamp-2 text-[11px] leading-5 text-[var(--text-secondary)]">{workspace.description ?? `${count} objects ready as context`}</span><span className="mt-2 flex items-center gap-1 text-[10px] font-medium text-[var(--text-tertiary)]">{selected ? "Context selected" : `Start here · ${count} objects`}<ArrowRight className="h-3 w-3 transition group-hover:translate-x-0.5" /></span></span></span></button>; })}</div> : null}
           </div>}
-          composer={studio.activeArtifact?.blueprintKey === "thread_reference" ? undefined : <div><LocalThreadTabs /><CommandBar placeholder="Ask Spectra anything…" busy={runEngine.submitting} allowAttachments onStop={runEngine.stop} onSubmit={(value, attachments) => { void runEngine.run(value, attachments); return true; }} menu={<button type="button" onClick={() => selectThread(null)} className="flex w-full items-center gap-2 rounded-[6px] px-2.5 py-2 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"><Plus className="h-4 w-4" />New conversation</button>} context={<span className="flex items-center gap-1.5 text-[11px] text-[var(--text-secondary)]"><MessageSquare className="h-3.5 w-3.5" />{threadId ? "Continue" : "New thread"}</span>} /></div>}
         />
       </section>
 
-      {studio.isOpen && studio.activeArtifact ? <ArtifactStudio mode={studio.mode === "tab" ? "tab" : "split"} artifact={studio.activeArtifact} artifacts={artifacts} tabs={studio.tabs} dirtyIds={studio.dirtyIds} panelWidth={700} sourceLabel="Chat" onClose={studio.closeStudio} onExpand={studio.openTab} onActivateTab={studio.activateTab} onCloseTab={studio.closeTab} onSave={updateArtifact} onDirtyChange={studio.setDirty} /> : null}
+      {studio.isOpen && studio.activeArtifact ? <ArtifactStudio mode={studio.mode === "tab" ? "tab" : "split"} artifact={studio.activeArtifact} artifacts={artifacts} tabs={studio.tabs} dirtyIds={studio.dirtyIds} panelWidth={studioPanelWidth} sourceLabel="Chat" onPanelWidthChange={setStudioPanelWidth} onClose={studio.closeStudio} onExpand={studio.openTab} onActivateTab={studio.activateTab} onCloseTab={studio.closeTab} onSave={updateArtifact} onRevert={revertArtifactVersion} onDirtyChange={studio.setDirty} /> : null}
+      {threadPanelArtifact ? <ArtifactStudio mode="split" artifact={threadPanelArtifact} artifacts={artifacts} tabs={[]} dirtyIds={new Set()} panelWidth={threadPanelWidth} sourceLabel="Chat" onPanelWidthChange={setThreadPanelWidth} onClose={() => setThreadPanelArtifactId(null)} onExpand={() => undefined} onActivateTab={() => undefined} onCloseTab={() => setThreadPanelArtifactId(null)} onSave={updateArtifact} onRevert={revertArtifactVersion} onDirtyChange={() => undefined} onContinueThread={(continuedId) => selectThread(continuedId === threadId ? null : continuedId)} continuedThreadId={threadId} /> : null}
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-50 bg-[linear-gradient(to_top,var(--bg-primary)_76%,transparent)] px-4 pb-5 pt-14 sm:px-8"><div className="pointer-events-auto mx-auto max-w-[820px]">{pageComposer}</div></div>
 
       {historyOpen ? <aside className="absolute inset-y-14 right-0 z-40 w-[min(360px,92vw)] overflow-y-auto border-l border-[var(--border-default)] bg-[var(--bg-primary)] p-4 shadow-[-12px_0_30px_rgba(22,18,13,0.08)]">
-        <div className="mb-4 flex items-center justify-between"><div><h2 className="text-[13px] font-semibold">Run & thread hub</h2><p className="text-[11px] text-[var(--text-tertiary)]">Hidden results remain inspectable.</p></div><button type="button" onClick={() => setHistoryOpen(false)} className="text-[11px] text-[var(--text-secondary)]">Close</button></div>
+        <div className="mb-4 flex items-center justify-between"><div><h2 className="text-[13px] font-semibold">Run & thread hub</h2><p className="text-[11px] text-[var(--text-tertiary)]">Hidden results remain inspectable.</p></div><button type="button" onClick={() => setHistoryOpen(false)} className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" aria-label="Close runs" title="Close"><X className="h-4 w-4" /></button></div>
         <div className="mb-5 space-y-1">
           {threads.slice(0, 12).map((thread) => <button type="button" key={thread._id} onClick={() => { selectThread(thread._id); setHistoryOpen(false); }} className="flex w-full items-center gap-2 rounded-[7px] px-2 py-2 text-left hover:bg-[var(--bg-hover)]"><MessageSquare className="h-3.5 w-3.5 text-[var(--accent-cyan)]" /><span className="min-w-0 flex-1 truncate text-[11px] font-medium">{thread.title}</span><span className="text-[9px] text-[var(--text-tertiary)]">{thread.messageCount ?? 0}</span></button>)}
         </div>
         <div className="border-t border-[var(--border-subtle)] pt-3 text-[10px] font-semibold uppercase tracking-[0.11em] text-[var(--text-tertiary)]">All runs</div>
         <div className="mt-2 space-y-1.5">{history.map((card) => <div key={card._id} className="rounded-[7px] border border-[var(--border-default)] px-3 py-2"><div className="flex items-center gap-2 text-[11px] font-medium"><Clock3 className="h-3 w-3" />{card.title}</div><div className="mt-1 line-clamp-2 text-[10px] leading-4 text-[var(--text-tertiary)]">{card.summary}</div></div>)}</div>
       </aside> : null}
-      {spectraSession.activeLocalThreadRunId ? <RunDetailPanel runId={spectraSession.activeLocalThreadRunId} card={runEngine.cards.find((card) => card.runId === spectraSession.activeLocalThreadRunId)} onClose={() => spectraSession.closeLocalThread(spectraSession.activeLocalThreadRunId!)} onSaved={() => spectraSession.closeLocalThread(spectraSession.activeLocalThreadRunId!)} onAction={(card, action, target) => { if (action === "open") spectraSession.clearActivePanel(); void runEngine.onCardAction(card, action, target); }} /> : null}
+      {spectraSession.activeLocalThreadRunId ? <RunDetailPanel runId={spectraSession.activeLocalThreadRunId} card={runEngine.cards.find((card) => card.runId === spectraSession.activeLocalThreadRunId)} onClose={spectraSession.clearActivePanel} onUseThread={(continuedId) => selectThread(continuedId)} onAction={(card, action, target) => { void runEngine.onCardAction(card, action, target); }} /> : null}
     </div>
   );
 }

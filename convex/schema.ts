@@ -1493,6 +1493,8 @@ export default defineSchema({
     decision: v.optional(v.union(v.literal("answer"), v.literal("operate"), v.literal("clarify"), v.literal("refuse"))),
     planIntent: v.optional(v.any()),
     finalSummary: v.optional(v.string()),
+    suggestedThreadTitle: v.optional(v.string()),
+    suggestedThreadSummary: v.optional(v.string()),
     error: v.optional(v.string()),
     modelUsed: v.optional(v.string()),
     providerUsed: v.optional(v.string()),

@@ -9,8 +9,11 @@ export function getSpectraModelId() {
 export function getSpectraProviderRouting() {
   return {
     order: ["deepseek"],
-    // Fallback is an explicit deployment policy, never OpenRouter's implicit default.
-    allow_fallbacks: process.env.SPECTRA_ALLOW_PROVIDER_FALLBACKS === "true",
+    // DeepSeek is preferred, but a temporary native endpoint outage must not make
+    // the entire product unavailable. Set the variable to "false" only for
+    // diagnostics that intentionally require the native endpoint.
+    allow_fallbacks: process.env.SPECTRA_ALLOW_PROVIDER_FALLBACKS !== "false",
+    require_parameters: true,
   } as const;
 }
 

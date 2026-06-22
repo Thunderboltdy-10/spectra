@@ -371,6 +371,7 @@ export async function POST(request: NextRequest) {
         threadId: requireString(body.threadId, "threadId"),
         title: optionalString(body.title),
         pinned: typeof body.pinned === "boolean" ? body.pinned : undefined,
+        workspaceId: optionalString(body.workspaceId),
         status: optionalString(body.status),
       });
       return ok(result);

@@ -223,4 +223,33 @@ describe("Spectra API route", () => {
       confirmation: "Remove Biology permanently",
     });
   });
+
+  it("lists and reverts durable artifact versions", async () => {
+    const requireActor = vi.fn().mockResolvedValue(mockActor());
+    const convexQuery = vi.fn().mockResolvedValue([{ _id: "version_1", artifactId: "artifact_1", source: "ai" }]);
+    const convexMutation = vi.fn().mockResolvedValue({ artifactId: "artifact_1" });
+    vi.doMock("@/lib/auth-server", () => ({ requireActor }));
+    vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation }));
+
+    const route = await import("@/app/api/spectra/route");
+    const versionsResponse = await route.GET(new NextRequest("http://localhost/api/spectra?action=artifactVersions&artifactId=artifact_1&limit=20"));
+    const revertResponse = await route.POST(new NextRequest("http://localhost/api/spectra", { method: "POST", body: JSON.stringify({ action: "revertArtifactVersion", artifactId: "artifact_1", versionId: "version_1" }) }));
+
+    expect(versionsResponse.status).toBe(200);
+    expect(revertResponse.status).toBe(200);
+    expect(convexQuery).toHaveBeenCalledWith("spectraArtifacts:listVersions", { actorClerkId: "user_spectra", artifactId: "artifact_1", limit: 20 });
+    expect(convexMutation).toHaveBeenCalledWith("spectraArtifacts:revertVersion", { actorClerkId: "user_spectra", artifactId: "artifact_1", versionId: "version_1" });
+  });
+
+  it("assigns a permanent chat thread only when a workspace is explicitly selected", async () => {
+    const requireActor = vi.fn().mockResolvedValue(mockActor());
+    const convexQuery = vi.fn();
+    const convexMutation = vi.fn().mockResolvedValue({ threadId: "thread_1" });
+    vi.doMock("@/lib/auth-server", () => ({ requireActor }));
+    vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation }));
+    const route = await import("@/app/api/spectra/route");
+    const response = await route.POST(new NextRequest("http://localhost/api/spectra", { method: "POST", body: JSON.stringify({ action: "updateThread", threadId: "thread_1", workspaceId: "workspace_1" }) }));
+    expect(response.status).toBe(200);
+    expect(convexMutation).toHaveBeenCalledWith("spectraThreads:update", { actorClerkId: "user_spectra", threadId: "thread_1", title: undefined, pinned: undefined, workspaceId: "workspace_1", status: undefined });
+  });
 });

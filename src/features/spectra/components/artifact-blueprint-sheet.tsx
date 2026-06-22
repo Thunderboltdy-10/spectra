@@ -56,7 +56,6 @@ export const blueprintChoices: Array<{ key: EditableBlueprintKey; label: string;
   { key: "flashcard_deck", label: "Flashcard deck", icon: BookOpen, description: "A real deck with editable cards." },
   { key: "quiz", label: "Quiz", icon: HelpCircle, description: "Questions, answers, and review notes." },
   { key: "planner_task", label: "Planner task", icon: CalendarCheck2, description: "Status, due date, and priority." },
-  { key: "thread_reference", label: "Thread reference", icon: MessageSquare, description: "A pinned conversation reference." },
 ];
 
 function record(value: unknown): Record<string, unknown> {
@@ -218,7 +217,7 @@ export function ArtifactBlueprintSheet({
   const [questions, setQuestions] = useState<QuizQuestion[]>(quizQuestions(artifact?.content));
   const [task, setTask] = useState(plannerTask(artifact?.content));
   const [taskDueDate, setTaskDueDate] = useState(dateInputValue(plannerTask(artifact?.content).dueAt));
-  const [thread, setThread] = useState(threadReference(artifact?.content));
+  const [thread] = useState(threadReference(artifact?.content));
   const [tagDraft, setTagDraft] = useState((artifact?.tags ?? []).join(", "));
 
   const meta = blueprintMeta[blueprintKey];
@@ -277,7 +276,7 @@ export function ArtifactBlueprintSheet({
             </button>
           </div>
           {mode === "create" ? (
-            <div className="mt-5 grid gap-2 sm:grid-cols-5">
+            <div className="mt-5 grid gap-2 sm:grid-cols-4">
               {blueprintChoices.map((choice) => {
                 const ChoiceIcon = choice.icon;
                 const selected = blueprintKey === choice.key;
@@ -310,7 +309,7 @@ export function ArtifactBlueprintSheet({
               {blueprintKey === "flashcard_deck" ? <DeckEditor cards={cards} setCards={setCards} /> : null}
               {blueprintKey === "quiz" ? <QuizEditor questions={questions} setQuestions={setQuestions} /> : null}
               {blueprintKey === "planner_task" ? <TaskEditor task={task} setTask={setTask} dueDate={taskDueDate} setDueDate={setTaskDueDate} /> : null}
-              {blueprintKey === "thread_reference" ? <ThreadEditor thread={thread} setThread={setThread} /> : null}
+              {blueprintKey === "thread_reference" ? <div className="flex min-h-[220px] items-center justify-center rounded-[9px] bg-[var(--bg-elevated)] p-6 text-center"><div><MessageSquare className="mx-auto h-8 w-8 text-[#8b6ff0]" /><p className="mt-3 text-[13px] leading-6 text-[var(--text-secondary)]">Thread artifacts are created from real conversations and continue in the shared conversation view.</p></div></div> : null}
             </section>
             <aside className="space-y-4">
               <div className="rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
@@ -448,22 +447,6 @@ function TaskEditor({
           <input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} className={inputClass()} />
         </Field>
       </div>
-    </section>
-  );
-}
-
-function ThreadEditor({ thread, setThread }: { thread: ThreadReferenceContent; setThread: (thread: ThreadReferenceContent) => void }) {
-  return (
-    <section className="space-y-4">
-      <Field label="Thread id or reference">
-        <input value={thread.threadId ?? ""} onChange={(event) => setThread({ ...thread, threadId: event.target.value })} className={inputClass()} placeholder="Thread id, URL, or short reference" />
-      </Field>
-      <Field label="Reference summary">
-        <textarea value={thread.summary ?? ""} onChange={(event) => setThread({ ...thread, summary: event.target.value })} className={textareaClass("min-h-[170px]")} placeholder="What should this conversation card remind you of?" />
-      </Field>
-      <Field label="Linked artifact ids">
-        <input value={(thread.linkedArtifactIds ?? []).join(", ")} onChange={(event) => setThread({ ...thread, linkedArtifactIds: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) })} className={inputClass()} placeholder="Optional artifact ids" />
-      </Field>
     </section>
   );
 }

@@ -127,6 +127,45 @@ Manual:
 - `spectraArtifactVersions` records manual, AI, and revert snapshots. AI artifact updates carry run provenance and versions can be reverted through the Spectra API foundation.
 - Artifact deletion uses Spectra modals rather than browser confirmation dialogs.
 
+## Correction pass — 2026-06-22
+
+The first Wave 5.5 implementation was committed as baseline `b97b56c`, then corrected without starting a new product wave.
+
+- OpenRouter remains fixed to `deepseek/deepseek-v4-pro`. Provider routing now prefers the native `deepseek` provider but allows OpenRouter to fall back to another provider hosting that exact model. No alternate model fallback is configured. `require_parameters` keeps strict structured-output requirements intact. This follows OpenRouter's current [provider routing contract](https://openrouter.ai/docs/guides/routing/provider-selection); the live model/endpoint catalog was also checked before the change.
+- The chat welcome no longer duplicates sidebar thread history. It presents a short welcome and substantial workspace context cards. Choosing one scopes the first message and stores that workspace on the new thread; it does not silently place a thread artifact.
+- The composer `+` menu now consistently exposes attachments, new chat, and workspace-context selection. Manual creation of empty/disconnected thread-reference artifacts has been removed.
+- A valid thread artifact renders `ThreadConversation` inside the same resizable Artifact Studio used by every other artifact and continues the exact persisted thread. The obsolete thread-id/reference/summary editor is gone. Legacy disconnected references render a non-editable unavailable state until migrated or replaced.
+- Temporary run detail no longer has a competing composer. It is resizable, uses `ConversationSurface`, and relies on the page composer. Compact run tabs can explicitly convert a run to a durable thread and select it as context without first opening the panel.
+- Artifact/thread context conflicts block send and present explicit choices. Clearing thread context returns the composer to the visibly open artifact or workspace.
+- Result-card actions including retry/confirm/cancel/open are icon controls with accessible labels/tooltips. Open, placement, remove, close, and other compact workspace/chat actions follow the same borderless treatment.
+- Workspace List, Board, Timeline, and Canvas controls now sit beside the real `Recently updated` sort control in one workspace toolbar. Sorting affects all views.
+- Workspace detail data uses a five-minute bounded in-memory cache and synchronous cache peeking. Switching uses the workspace-only endpoint, keeps stable metadata visible, and shows content skeletons only when the target workspace is genuinely missing. The stalled progress strip and empty-content flash were removed.
+- Inbox and both pinned surfaces now share the same compact object-card density. Pinned remains warmer and slightly more prominent without becoming a separate oversized card system.
+- List and board groups render six objects initially and reveal the remainder on demand. Thread views fetch the small workspace catalog rather than the full overview.
+- Timeline run events now keep run identity and open the run/conversation; artifact events open the artifact. Run, pinned, and ordinary artifact activity have different visual weight.
+- Dirty tab close now defers its close request until the target editor is active and Save, Discard, and Keep editing act on the correct tab. Version history is visible from Artifact Studio, labels manual/AI/revert records, and can revert an AI or manual change when no unsaved local edit conflicts.
+
+Still deliberately deferred: migration/deletion tooling for old disconnected seeded thread references, server-cursor pagination beyond the bounded current artifact query, permanent raw attachment storage, full visual block diffs/branching, and the larger memory/agent/routing/canvas scopes already excluded from Wave 5.5.
+
+### Screenshot-led refinement — 2026-06-22
+
+- Home and workspace Pinned now use the same three-column object-card structure, count badge, density, and heading hierarchy as Home Inbox. Pinned keeps only a restrained warm accent.
+- The duplicate top-level workspace sort row was removed. The existing library toolbar now owns type filtering, the original `Recently updated` sort, and List/Board/Timeline/Canvas immediately to its right. Extra vertical separation keeps Pinned distinct from the workspace header.
+- Permanent thread artifacts bypass editable artifact fields but reuse the same `StudioSplitShell`, resizer, occupied layout space, header proportions, and close behavior as normal artifacts. Their expand action opens the exact thread in `/chat`; they never become local artifact tabs.
+- Temporary conversations reuse `StudioSplitShell`, while their long mini-tabs remain visible above the page composer. Each tab has separate borderless Continue chat and Close icon actions; selecting Continue chat highlights the tab and selecting it again returns the composer to independent runs.
+- Temporary-panel lifecycle actions are compact icon controls with tooltips: Keep permanently, Continue chat, Open in Chat, and Close. Continuing creates a durable conversation without an Inbox artifact; only an explicit workspace keep creates and places a thread-reference artifact.
+- Chat welcome copy now responds to the browser's local time of day. Workspace selection remains explicit; an ordinary `/chat` thread is permanent but unplaced.
+- First-exchange AI titles are applied only to durable chat threads. Provisional runs keep plain local labels while retaining a hidden AI title candidate that is applied if the user later makes the run permanent.
+- Unknown provider intent labels such as `respond` are normalized from the decision and actual operation set before strict plan validation, preventing conversational replies such as “yes!” from failing on `intent.mode`.
+
+### Focused workspace/chat correction — 2026-06-22
+
+- Continue chat is an explicit conversation-history selection on each original run tab. It no longer changes the normal send affordance or requires the temporary conversation panel to be open.
+- The selected continued chat takes precedence for history while the visible non-thread artifact remains attached as working focus. Clearing Continue chat restores the natural artifact/workspace target. Thread panels no longer contain a second composer.
+- The page quick chat is centred independently of side-panel width. Normal artifacts replace normal artifacts; thread artifacts replace thread artifacts; one thread and one non-thread artifact may coexist. Temporary conversations follow the same thread-panel slot rule.
+- Coexisting thread and non-thread panels use independent resize handles with an `ew-resize` cursor and width clamping that preserves a usable main surface.
+- Home and workspace type filters now share the same borderless treatment. Workspace-name actions are reduced to one direct red delete icon, and compact chat/workspace actions use icons with tooltips.
+
 ## Verification completed
 
 Run with the repository's Linux Node runtime:
@@ -141,3 +180,5 @@ npm run build
 ```
 
 Results on 2026-06-21: Convex schema/function upload and generated bindings passed; TypeScript passed; ESLint passed with zero warnings; 69 Vitest files passed with 366 tests passed and 3 live tests skipped; the Next.js production build compiled, type-checked, generated all static pages, and completed successfully.
+
+Correction-pass verification on 2026-06-22: Convex codegen/function upload passed; TypeScript and ESLint passed with zero warnings; 69 Vitest files passed with 369 tests passed and 3 live tests skipped; the production build generated 107 routes successfully. A live OpenRouter probe using the production request policy returned `OK` from model `deepseek/deepseek-v4-pro-20260423` through provider `DeepSeek`, confirming that the original forced-provider 404 is resolved while same-model provider fallback remains available.

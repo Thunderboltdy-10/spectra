@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { RichText } from "@/components/chat/rich-text";
 import { cn } from "@/lib/utils";
 import { useSpectraRun, type SpectraLiveExchange } from "../ai/use-spectra-run";
-import { getSpectraOverview, getSpectraThread, postSpectra, type SpectraArtifact, type SpectraThreadDetail, type SpectraThreadTrace, type SpectraWorkspace } from "../data/api";
+import { getSpectraThread, getSpectraWorkspaces, postSpectra, type SpectraArtifact, type SpectraThreadDetail, type SpectraThreadTrace, type SpectraWorkspace } from "../data/api";
 import { CommandBar } from "./command-bar";
 import { ResultCardStack } from "./result-card";
 
@@ -74,7 +74,7 @@ function ArtifactResult({ artifact, workspaces, onOpen }: { artifact: SpectraArt
             .then(() => { toast.success(`Added to ${workspace.title}`); setChoosing(false); })
             .catch((error) => toast.error(error instanceof Error ? error.message : "Could not add artifact."))
             .finally(() => setBusy(false));
-        }} className="rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 py-1.5 text-[10px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]">{workspace.title}</button>)}
+        }} className="rounded-[6px] bg-[var(--bg-primary)] px-2.5 py-1.5 text-[10px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">{workspace.title}</button>)}
         {workspaces.length === 0 ? <span className="text-[11px] text-[var(--text-tertiary)]">Create a workspace first.</span> : null}
       </div> : null}
     </div>
@@ -117,6 +117,7 @@ export function ConversationSurface({
     const frame = requestAnimationFrame(() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: liveExchange?.content ? "auto" : "smooth" }));
     return () => cancelAnimationFrame(frame);
   }, [detail?.messages.length, following, liveExchange?.content]);
+  useEffect(() => setFollowing(true), [detail?.thread._id]);
   const messageMeta = useCallback((message: NonNullable<SpectraThreadDetail>["messages"][number], trace?: SpectraThreadTrace) => {
     const run = message.role === "assistant" ? trace?.run : undefined;
     const usage = run?.usage;
@@ -163,7 +164,7 @@ export function ConversationSurface({
           {activeCards?.length ? <ResultCardStack cards={activeCards.slice(0, 2)} className="mt-5" onOpen={onCardOpen} onAction={onCardAction} /> : null}
         </div>
       </div>
-      {!following ? <button type="button" onClick={() => { setFollowing(true); scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" }); }} className="absolute bottom-28 left-1/2 z-20 flex h-9 -translate-x-1/2 items-center gap-1.5 rounded-full border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[11px] font-medium text-[var(--text-secondary)] shadow-[0_8px_24px_rgba(27,20,12,0.12)] hover:text-[var(--text-primary)]"><ArrowDown className="h-3.5 w-3.5" />Latest</button> : null}
+      {!following ? <button type="button" onClick={() => { setFollowing(true); scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" }); }} className="absolute bottom-28 left-1/2 z-20 flex h-9 -translate-x-1/2 items-center gap-1.5 rounded-full bg-[var(--bg-elevated)] px-3 text-[11px] font-medium text-[var(--text-secondary)] shadow-[0_8px_24px_rgba(27,20,12,0.12)] hover:text-[var(--text-primary)]"><ArrowDown className="h-3.5 w-3.5" />Latest</button> : null}
       {composer ? <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-[linear-gradient(to_top,var(--bg-primary)_76%,transparent)] px-4 pb-5 pt-14 sm:px-8"><div className={cn("pointer-events-auto mx-auto", compact ? "max-w-[760px]" : "max-w-[820px]")}>{composer}</div></div> : null}
     </div>
   );
@@ -174,9 +175,9 @@ export function ThreadConversation({ threadId, compact = false, showComposer = t
   const [workspaces, setWorkspaces] = useState<SpectraWorkspace[]>([]);
   const [loading, setLoading] = useState(true);
   const refresh = useCallback(async () => {
-    const [thread, overview] = await Promise.all([getSpectraThread(threadId), getSpectraOverview()]);
+    const [thread, workspaceRows] = await Promise.all([getSpectraThread(threadId), getSpectraWorkspaces()]);
     setDetail(thread);
-    setWorkspaces(overview.workspaces);
+    setWorkspaces(workspaceRows);
   }, [threadId]);
   useEffect(() => { setLoading(true); void refresh().catch((error) => toast.error(error instanceof Error ? error.message : "Could not load thread.")).finally(() => setLoading(false)); }, [refresh]);
   const runEngine = useSpectraRun({ surface: "chat", threadId, onDataChanged: refresh, onOpenArtifact });

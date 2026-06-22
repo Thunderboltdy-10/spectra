@@ -103,7 +103,7 @@ This correction supersedes the rejected Wave 2 visual direction from commit `e28
 | Token-stream clean assistant prose alongside structured events. | Wave 5.5 | Implemented by incrementally exposing only the strict plan's public `finalResponse`; operational JSON and private reasoning remain hidden. |
 | Model-generated thread titles and summaries. | Wave 5.5 | Added to the strict plan with short UI caps and deterministic fallback. |
 | Chat/workspace attachments. | Wave 5.5 foundation | PDF uses OpenRouter file input; DOCX/text are extracted Spectra-side; unsafe binaries are rejected and unsupported image understanding is explicit. Permanent raw-file storage remains deferred. |
-| Reversible artifact history and dirty-close safety. | Wave 5.5 foundation | Manual/AI/revert provenance and version snapshots are durable; full visual block-diff review remains later. |
+| Reversible artifact history and dirty-close safety. | Wave 5.5 foundation | Manual/AI/revert snapshots are durable and visible in Artifact Studio with revert controls; full visual block-diff review remains later. |
 | Multi-select selected artifact context. | Wave 6 | Context builder and selection model. |
 | Artifact checkmarks should appear only after entering an explicit multi-select mode. | Wave 6 | A normal click opens the artifact with only a subtle border/background shift; it must not imply checkbox selection. Closing or opening an artifact should not enter multi-select. |
 | Search across artifacts/workspaces. | Wave 6 | Broader context/search foundation. |

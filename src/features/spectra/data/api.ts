@@ -34,6 +34,17 @@ export type SpectraArtifact = {
   placementStatus?: "inbox" | "workspace";
 };
 
+export type SpectraArtifactVersion = {
+  _id: string;
+  artifactId: string;
+  source: "manual" | "ai" | "revert";
+  runId?: string;
+  before: { title: string; summary?: string; content: unknown; tags: string[] };
+  after: { title: string; summary?: string; content: unknown; tags: string[] };
+  summary?: string;
+  createdAt: number;
+};
+
 export type SpectraWorkspaceItem = {
   _id: string;
   workspaceId: string;
@@ -180,10 +191,17 @@ type JsonRecord = Record<string, unknown>;
 
 const overviewCache = new Map<string, { value: SpectraOverview; cachedAt: number }>();
 const workspaceCache = new Map<string, { value: SpectraOverview["workspace"]; cachedAt: number }>();
-const CACHE_TTL = 45_000;
+let workspacesCache: { value: SpectraWorkspace[]; cachedAt: number } | null = null;
+const CACHE_TTL = 5 * 60_000;
+
+export function peekSpectraWorkspace(workspaceId: string) {
+  const cached = workspaceCache.get(workspaceId);
+  return cached && Date.now() - cached.cachedAt < CACHE_TTL ? cached.value : null;
+}
 
 export function invalidateSpectraCache(scope?: { workspaceId?: string }) {
   overviewCache.clear();
+  workspacesCache = null;
   if (scope?.workspaceId) workspaceCache.delete(scope.workspaceId);
   else workspaceCache.clear();
 }
@@ -223,6 +241,13 @@ export async function getSpectraWorkspace(workspaceId: string, force = false) {
   return value;
 }
 
+export async function getSpectraWorkspaces(force = false) {
+  if (!force && workspacesCache && Date.now() - workspacesCache.cachedAt < CACHE_TTL) return workspacesCache.value;
+  const value = await readJson<{ workspaces: SpectraWorkspace[] }>(await fetch("/api/spectra?action=workspaces", { cache: "no-store" }));
+  workspacesCache = { value: value.workspaces, cachedAt: Date.now() };
+  return value.workspaces;
+}
+
 export async function getSpectraArtifacts(params?: {
   placement?: "all" | "inbox" | "workspace";
   blueprintKey?: SpectraBlueprintKey | "all";
@@ -253,6 +278,11 @@ export async function getSpectraResultCards(params?: {
 export async function getSpectraRunDetail(runId: string) {
   const qs = new URLSearchParams({ action: "runDetail", runId });
   return readJson<SpectraRunDetail>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+}
+
+export async function getSpectraArtifactVersions(artifactId: string, limit = 20) {
+  const qs = new URLSearchParams({ action: "artifactVersions", artifactId, limit: String(limit) });
+  return readJson<{ versions: SpectraArtifactVersion[] }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
 }
 
 export async function getSpectraThreads(params?: { includeArchived?: boolean; limit?: number }) {

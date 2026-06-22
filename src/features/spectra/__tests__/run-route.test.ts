@@ -46,6 +46,7 @@ function setup(plan: unknown, initialStatus: "queued" | "failed" = "queued") {
   const convexMutation = vi.fn(async (name: string, args: Record<string, unknown>) => {
     if (name.includes("spectraThreads:create")) return "thread-real";
     if (name.includes("spectraThreads:appendMessage")) return "message-real";
+    if (name.includes("spectraThreads:applyGeneratedMetadata")) return { threadId: "thread-real" };
     if (name.includes("spectraRuns:create")) {
       run.sourceSurface = args.sourceSurface as "workspace" | "chat";
       run.threadId = args.threadId;
@@ -107,9 +108,9 @@ describe("Spectra run route", () => {
     expect(events.some((event) => event.message === "Validating 6 cards")).toBe(true);
     expect(events.some((event) => event.message === "Saving deck to Biology")).toBe(true);
     const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
-    const payload = JSON.parse(String(request.body)) as { model: string; provider: { order: string[]; allow_fallbacks: boolean }; stream: boolean };
+    const payload = JSON.parse(String(request.body)) as { model: string; provider: { order: string[]; allow_fallbacks: boolean; require_parameters: boolean }; stream: boolean };
     expect(payload.model).toBe("deepseek/deepseek-v4-pro");
-    expect(payload.provider).toEqual({ order: ["deepseek"], allow_fallbacks: false });
+    expect(payload.provider).toEqual({ order: ["deepseek"], allow_fallbacks: true, require_parameters: true });
     expect(payload.stream).toBe(true);
     expect(new Headers(request.headers).get("X-OpenRouter-Title")).toBe("Spectra AI Operation Engine");
   });
@@ -127,13 +128,17 @@ describe("Spectra run route", () => {
   });
 
   it("creates a durable chat thread and persists only clean user-facing messages", async () => {
-    const answerPlan = { decision: "answer", intent: { mode: "answer", requestedArtifactTypes: [], requestedVisibleArtifactCount: 0, targetArtifactId: null, targetWorkspaceId: null }, finalResponse: "Photosynthesis stores light energy as chemical energy.", operations: [] };
+    const answerPlan = { decision: "answer", intent: { mode: "answer", requestedArtifactTypes: [], requestedVisibleArtifactCount: 0, targetArtifactId: null, targetWorkspaceId: null }, conversationTitle: "Photosynthesis in plain language", conversationSummary: "A simple explanation of how plants store light energy.", finalResponse: "Photosynthesis stores light energy as chemical energy.", operations: [] };
     const { convexMutation } = setup(answerPlan);
     const route = await import("@/app/api/spectra/run/route");
-    const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", { method: "POST", body: JSON.stringify({ action: "run", surface: "chat", prompt: "Explain photosynthesis simply." }) }));
+    const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", { method: "POST", body: JSON.stringify({ action: "run", surface: "chat", workspaceId: "workspace-real", prompt: "Explain photosynthesis simply." }) }));
     const events = (await response.text()).trim().split("\n").map((line) => JSON.parse(line) as { type: string; threadId?: string });
 
     expect(events).toContainEqual(expect.objectContaining({ type: "thread_ready", threadId: "thread-real" }));
+    const createThreadCall = convexMutation.mock.calls.find(([name]) => String(name).includes("spectraThreads:create"));
+    expect(createThreadCall?.[1]).toMatchObject({ origin: "chat", workspaceId: "workspace-real" });
+    const metadataCall = convexMutation.mock.calls.find(([name]) => String(name).includes("spectraThreads:applyGeneratedMetadata"));
+    expect(metadataCall?.[1]).toMatchObject({ title: "Photosynthesis in plain language", summary: "A simple explanation of how plants store light energy." });
     const messageCalls = convexMutation.mock.calls.filter(([name]) => String(name).includes("spectraThreads:appendMessage"));
     expect(messageCalls).toHaveLength(2);
     expect(messageCalls[0]?.[1]).toMatchObject({ role: "user", content: "Explain photosynthesis simply.", runId: "run-real" });

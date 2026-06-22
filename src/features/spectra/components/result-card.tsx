@@ -1,7 +1,8 @@
 "use client";
 
-import { AlertCircle, Check, CheckCircle2, Clock3, ExternalLink, FolderPlus, Loader2, MessageSquarePlus, RotateCcw, ShieldCheck, X } from "lucide-react";
+import { AlertCircle, Check, CheckCircle2, ChevronDown, Clock3, ExternalLink, FolderPlus, Loader2, MessageSquarePlus, RotateCcw, ShieldCheck, X } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { useState } from "react";
 import { cn } from "@/lib/utils";
 import type { ResultCardStreamView } from "../ai/stream-events";
 
@@ -21,6 +22,29 @@ function actionIcon(key: string): LucideIcon {
   if (key === "continue" || key === "continue_thread") return MessageSquarePlus;
   if (key === "add_to_workspace") return FolderPlus;
   return ExternalLink;
+}
+
+function ProvenanceLine({ card }: { card: ResultCardView }) {
+  const [open, setOpen] = useState(false);
+  const provenance = card.provenance;
+  if (!provenance) return null;
+  const artifactCount = provenance.artifactIds?.length ?? 0;
+  const threadCount = provenance.threadId ? 1 : 0;
+  const attachmentCount = provenance.attachmentNames?.length ?? 0;
+  const parts = [artifactCount ? `${artifactCount} artifact${artifactCount === 1 ? "" : "s"}` : "", threadCount ? "1 thread" : "", attachmentCount ? `${attachmentCount} attachment${attachmentCount === 1 ? "" : "s"}` : ""].filter(Boolean);
+  if (parts.length === 0 && !provenance.workspaceTitle) return null;
+  return <div className="col-start-2 col-end-[-1] -mt-1 mb-1 text-[10px] text-[var(--text-tertiary)]">
+    <button type="button" className="inline-flex items-center gap-1 rounded-[5px] px-1 py-0.5 hover:bg-[var(--bg-secondary)] hover:text-[var(--text-secondary)]" onClick={(event) => { event.stopPropagation(); setOpen((value) => !value); }}>
+      Based on {parts.join(" and ") || provenance.workspaceTitle}
+      <ChevronDown className={`h-3 w-3 transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
+    </button>
+    {open ? <div className="mt-1 flex flex-wrap gap-1.5 px-1 animate-[spectra-fade-up_180ms_ease-out]">
+      {provenance.artifactTitles?.map((title) => <span key={title} className="rounded-[5px] bg-[var(--bg-secondary)] px-1.5 py-0.5">{title}</span>)}
+      {provenance.workspaceTitle ? <span className="rounded-[5px] bg-[var(--bg-secondary)] px-1.5 py-0.5">{provenance.workspaceTitle}</span> : null}
+      {provenance.attachmentNames?.map((name) => <span key={name} className="rounded-[5px] bg-[var(--bg-secondary)] px-1.5 py-0.5">{name}</span>)}
+      {provenance.threadId ? <span className="rounded-[5px] bg-[var(--bg-secondary)] px-1.5 py-0.5">Continued conversation</span> : null}
+    </div> : null}
+  </div>;
 }
 
 export function ResultCardStack({
@@ -46,7 +70,7 @@ export function ResultCardStack({
             key={card.id}
             role="button"
             tabIndex={0}
-            className="group my-0.5 flex min-h-[35px] w-full cursor-pointer items-center gap-2.5 rounded-[7px] px-2.5 py-1 text-left text-[12px] transition hover:bg-[var(--bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--accent-cyan)]"
+            className="group my-0.5 grid min-h-[35px] w-full cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2.5 rounded-[7px] px-2.5 py-1 text-left text-[12px] transition hover:bg-[var(--bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--accent-cyan)]"
             onClick={() => onOpen?.(card)}
             onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onOpen?.(card); }}
           >
@@ -59,7 +83,7 @@ export function ResultCardStack({
                 {card.summary ? <span className="truncate text-[var(--text-secondary)]">{card.summary}</span> : null}
               </span>
             </span>
-            {card.actions.map((action) => {
+            <div className="flex items-center">{card.actions.map((action) => {
               const ActionIcon = actionIcon(action.key);
               return <button
                 key={`${card.id}-${action.key}`}
@@ -78,6 +102,8 @@ export function ResultCardStack({
             <button type="button" className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[5px] text-[var(--text-tertiary)] opacity-55 hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)] group-hover:opacity-100" aria-label="Hide result" onClick={(event) => { event.stopPropagation(); onAction?.(card, "hide"); }}>
               <X className="h-3.5 w-3.5" />
             </button>
+            </div>
+            <ProvenanceLine card={card} />
           </div>
         );
       })}

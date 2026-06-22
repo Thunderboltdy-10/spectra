@@ -27,6 +27,7 @@ function persistedToStream(card: SpectraResultCard): ResultCardStreamView {
     summary: card.summary,
     variant: card.variant,
     actions: card.actions,
+    provenance: card.provenance,
     updatedAt: card.updatedAt,
   };
 }
@@ -72,6 +73,9 @@ export function useSpectraRun({
   onThreadReady,
   localConversation,
   onFinal,
+  focusMode,
+  selectedArtifactIds = [],
+  currentView,
 }: {
   surface: SpectraRunSurface;
   workspaceId?: string;
@@ -83,6 +87,9 @@ export function useSpectraRun({
   onThreadReady?: (threadId: string) => Promise<unknown> | unknown;
   localConversation?: Array<{ role: "user" | "assistant"; content: string }>;
   onFinal?: (result: { runId: string; summary: string }) => Promise<unknown> | unknown;
+  focusMode?: "global" | "workspace" | "artifact" | "selection" | "thread";
+  selectedArtifactIds?: string[];
+  currentView?: string;
 }) {
   const [cards, setCards] = useState<ResultCardStreamView[]>(() => initialCards.map(persistedToStream));
   const [submitting, setSubmitting] = useState(false);
@@ -91,7 +98,8 @@ export function useSpectraRun({
   const promptByRun = useRef(new Map<string, string>());
   const activeRequest = useRef<AbortController | null>(null);
   const activeRunId = useRef<string | null>(null);
-  const scopeKey = `${surface}:${workspaceId ?? ""}:${artifactId ?? ""}:${threadId ?? ""}`;
+  const selectedKey = selectedArtifactIds.join(",");
+  const scopeKey = `${surface}:${workspaceId ?? ""}:${artifactId ?? ""}:${threadId ?? ""}:${focusMode ?? ""}:${selectedKey}`;
   const previousScopeKey = useRef(scopeKey);
 
   useEffect(() => {
@@ -172,7 +180,7 @@ export function useSpectraRun({
     setSubmitting(true);
     setLiveExchange({ id: crypto.randomUUID(), prompt: clean, content: "", status: "starting", startedAt: Date.now() });
     try {
-      await consume({ action: "run", prompt: clean, surface, workspaceId, artifactId, threadId, attachments, localConversation });
+      await consume({ action: "run", prompt: clean, surface, workspaceId, artifactId, threadId, focusMode, selectedArtifactIds, currentView, attachments, localConversation });
     } catch (error) {
       if (!(error instanceof DOMException && error.name === "AbortError")) {
         toast.error(error instanceof Error ? error.message : "Could not start Spectra run.");
@@ -181,7 +189,7 @@ export function useSpectraRun({
       setSubmitting(false);
       setLiveExchange(null);
     }
-  }, [artifactId, consume, localConversation, submitting, surface, threadId, workspaceId]);
+  }, [artifactId, consume, currentView, focusMode, localConversation, selectedArtifactIds, submitting, surface, threadId, workspaceId]);
 
   const keepAsThread = useCallback(async (runId: string, placeInWorkspace = false) => {
     const result = await postSpectra<{ threadId: string }>({ action: "keepRunAsThread", runId, placeInWorkspace, createReference: true });

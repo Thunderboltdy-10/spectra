@@ -32,6 +32,31 @@ export type SpectraArtifact = {
     pinned?: boolean;
   }>;
   placementStatus?: "inbox" | "workspace";
+  createdFrom?: {
+    source: "chat" | "workspace" | "artifact" | "manual" | "ai";
+    threadId?: string;
+    runId?: string;
+    workspaceId?: string;
+    sourceArtifactIds?: string[];
+    sourceThreadIds?: string[];
+    sourceAttachmentNames?: string[];
+    contextSummary?: string;
+  };
+};
+
+export type SpectraArtifactLink = {
+  _id: string;
+  sourceArtifactId: string;
+  targetArtifactId: string;
+  relationType: "related" | "supports" | "contradicts" | "source_for" | "generated_from" | "follow_up" | "belongs_with";
+  label?: string;
+  explanation?: string;
+  createdBy: "user" | "ai" | "system";
+  workspaceId?: string;
+  direction: "incoming" | "outgoing";
+  artifact: { id: string; title: string; summary?: string; blueprintKey: SpectraBlueprintKey; updatedAt: number } | null;
+  createdAt: number;
+  updatedAt: number;
 };
 
 export type SpectraArtifactVersion = {
@@ -154,6 +179,15 @@ export type SpectraResultCard = {
   createdAt: number;
   updatedAt: number;
   run?: SpectraRun;
+  provenance?: {
+    artifactIds?: string[];
+    artifactTitles?: string[];
+    threadId?: string;
+    workspaceId?: string;
+    workspaceTitle?: string;
+    attachmentNames?: string[];
+    focusMode?: "global" | "workspace" | "artifact" | "selection" | "thread";
+  };
 };
 
 export type SpectraOperation = {
@@ -259,6 +293,11 @@ export async function getSpectraArtifacts(params?: {
   return readJson<{ artifacts: SpectraArtifact[] }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
 }
 
+export async function searchSpectra(query: string) {
+  const qs = new URLSearchParams({ action: "search", search: query });
+  return readJson<{ artifacts: SpectraArtifact[]; workspaces: SpectraWorkspace[] }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+}
+
 export async function getSpectraResultCards(params?: {
   surface?: "chat" | "workspace" | "artifact";
   workspaceId?: string;
@@ -283,6 +322,11 @@ export async function getSpectraRunDetail(runId: string) {
 export async function getSpectraArtifactVersions(artifactId: string, limit = 20) {
   const qs = new URLSearchParams({ action: "artifactVersions", artifactId, limit: String(limit) });
   return readJson<{ versions: SpectraArtifactVersion[] }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+}
+
+export async function getSpectraArtifactLinks(artifactId: string) {
+  const qs = new URLSearchParams({ action: "artifactLinks", artifactId });
+  return readJson<{ links: SpectraArtifactLink[] }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
 }
 
 export async function getSpectraThreads(params?: { includeArchived?: boolean; limit?: number }) {

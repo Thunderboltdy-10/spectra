@@ -282,6 +282,8 @@ Boundaries remain unchanged: no memory, agents, complex routing, ManageBac, adva
 
 Goal: make the system feel aware of selected artifacts and workspace context.
 
+Completed on 2026-06-22. See `WAVE_6_WORKSPACE_INTELLIGENCE_CONTEXT.md` for the effective-focus model, bounded context packet, explicit multi-select, global search, durable links, related suggestions, provenance, verification, and deferred memory/agent/RAG scope.
+
 Focus:
 
 - Selected artifact context.

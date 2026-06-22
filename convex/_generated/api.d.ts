@@ -48,6 +48,7 @@ import type * as schoolAdmin from "../schoolAdmin.js";
 import type * as seed from "../seed.js";
 import type * as shared from "../shared.js";
 import type * as soul from "../soul.js";
+import type * as spectraArtifactLinks from "../spectraArtifactLinks.js";
 import type * as spectraArtifacts from "../spectraArtifacts.js";
 import type * as spectraOperations from "../spectraOperations.js";
 import type * as spectraRuns from "../spectraRuns.js";
@@ -120,6 +121,7 @@ declare const fullApi: ApiFromModules<{
   seed: typeof seed;
   shared: typeof shared;
   soul: typeof soul;
+  spectraArtifactLinks: typeof spectraArtifactLinks;
   spectraArtifacts: typeof spectraArtifacts;
   spectraOperations: typeof spectraOperations;
   spectraRuns: typeof spectraRuns;

@@ -137,10 +137,13 @@ export function buildArtifactTextIndex(params: {
   title: string;
   summary?: string;
   tags?: string[];
+  content?: unknown;
 }) {
-  return [params.title, params.summary, ...(params.tags ?? [])]
+  const contentText = JSON.stringify(params.content ?? "", (_key, value) => typeof value === "string" ? value : value)
+    .replace(/[{}\[\]",:]/g, " ")
+    .replace(/\s+/g, " ");
+  return [params.title, params.summary, ...(params.tags ?? []), contentText]
     .filter(Boolean)
     .join("\n")
     .slice(0, 4000);
 }
-

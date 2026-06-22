@@ -36,6 +36,26 @@ export type ArtifactCreatedFrom = {
   threadId?: SpectraId<"threads">;
   runId?: SpectraId<"aiRuns">;
   workspaceId?: SpectraId<"workspaces">;
+  sourceArtifactIds?: SpectraId<"artifacts">[];
+  sourceThreadIds?: SpectraId<"threads">[];
+  sourceAttachmentNames?: string[];
+  contextSummary?: string;
+};
+
+export type ArtifactRelationType = "related" | "supports" | "contradicts" | "source_for" | "generated_from" | "follow_up" | "belongs_with";
+
+export type ArtifactLink = {
+  id: SpectraId<"artifactLinks">;
+  sourceArtifactId: SpectraId<"artifacts">;
+  targetArtifactId: SpectraId<"artifacts">;
+  relationType: ArtifactRelationType;
+  label?: string;
+  explanation?: string;
+  provenance: { source: "user" | "ai" | "system"; runId?: SpectraId<"aiRuns">; reason?: string };
+  createdBy: "user" | "ai" | "system";
+  workspaceId?: SpectraId<"workspaces">;
+  createdAt: TimestampMs;
+  updatedAt: TimestampMs;
 };
 
 export type Artifact = {

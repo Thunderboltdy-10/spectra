@@ -82,7 +82,7 @@ export const list = query({
     const artifacts = rows
         .filter((artifact) => artifact.orgId === actor.orgId)
         .filter((artifact) => artifact.status === baseStatus)
-        .filter((artifact) => !needle || `${artifact.title}\n${artifact.summary ?? ""}\n${artifact.textIndex ?? ""}`.toLowerCase().includes(needle))
+        .filter((artifact) => !needle || `${artifact.title}\n${artifact.summary ?? ""}\n${artifact.blueprintKey}\n${artifact.textIndex ?? ""}\n${(placementsByArtifact.get(artifact._id) ?? []).map((placement) => placement.workspaceTitle).join("\n")}`.toLowerCase().includes(needle))
         .map((artifact) => {
           const placements = placementsByArtifact.get(artifact._id) ?? [];
           return {
@@ -131,12 +131,17 @@ export const create = mutation({
     workspaceId: v.optional(v.id("spectraWorkspaces")),
     runId: v.optional(v.id("spectraAiRuns")),
     threadId: v.optional(v.id("spectraThreads")),
+    sourceArtifactIds: v.optional(v.array(v.id("spectraArtifacts"))),
+    sourceThreadIds: v.optional(v.array(v.id("spectraThreads"))),
+    sourceAttachmentNames: v.optional(v.array(v.string())),
+    contextSummary: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const actor = await requireSpectraActor(ctx, args.actorClerkId);
     if (args.workspaceId) {
       await requireOwnedWorkspace(ctx, args.actorClerkId, args.workspaceId);
     }
+    for (const sourceArtifactId of args.sourceArtifactIds ?? []) await requireOwnedArtifact(ctx, args.actorClerkId, sourceArtifactId);
     const now = Date.now();
     const title = args.title.trim() || "Untitled artifact";
     const summary = args.summary?.trim() || fallbackArtifactSummary(args.blueprintKey as BlueprintKey);
@@ -147,7 +152,7 @@ export const create = mutation({
       title,
       summary,
       content: args.content ?? defaultArtifactContent(args.blueprintKey as BlueprintKey),
-      textIndex: buildArtifactTextIndex({ title, summary, tags: args.tags }),
+      textIndex: buildArtifactTextIndex({ title, summary, content: args.content, tags: args.tags }),
       tags: args.tags ?? [],
       status: "active",
       createdFrom: {
@@ -155,6 +160,10 @@ export const create = mutation({
         workspaceId: args.workspaceId,
         runId: args.runId,
         threadId: args.threadId,
+        sourceArtifactIds: args.sourceArtifactIds?.slice(0, 12),
+        sourceThreadIds: args.sourceThreadIds?.slice(0, 4),
+        sourceAttachmentNames: args.sourceAttachmentNames?.map((name) => name.slice(0, 180)).slice(0, 8),
+        contextSummary: args.contextSummary?.slice(0, 400),
       },
       createdAt: now,
       updatedAt: now,
@@ -261,7 +270,7 @@ export const update = mutation({
       summary,
       content: args.content === undefined ? artifact.content : args.content,
       tags,
-      textIndex: buildArtifactTextIndex({ title, summary, tags }),
+      textIndex: buildArtifactTextIndex({ title, summary, content: after.content, tags }),
       updatedAt: now,
     });
     const placements = await ctx.db
@@ -306,7 +315,12 @@ export const permanentlyDelete = mutation({
     await Promise.all(placements.map((placement) => ctx.db.delete(placement._id)));
 
     const versions = await ctx.db.query("spectraArtifactVersions").withIndex("by_artifact_created", (q) => q.eq("artifactId", args.artifactId)).collect();
-    await Promise.all(versions.map((version) => ctx.db.delete(version._id)));
+    const [outgoingLinks, incomingLinks] = await Promise.all([
+      ctx.db.query("spectraArtifactLinks").withIndex("by_source", (q) => q.eq("sourceArtifactId", args.artifactId)).collect(),
+      ctx.db.query("spectraArtifactLinks").withIndex("by_target", (q) => q.eq("targetArtifactId", args.artifactId)).collect(),
+    ]);
+    const linkRows = [...new Map([...outgoingLinks, ...incomingLinks].map((link) => [link._id, link])).values()];
+    await Promise.all([...versions.map((version) => ctx.db.delete(version._id)), ...linkRows.map((link) => ctx.db.delete(link._id))]);
 
     const runs = await ctx.db
       .query("spectraAiRuns")

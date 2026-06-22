@@ -1,6 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
-import { BookOpen, CalendarCheck2, FileText, HelpCircle, MessageSquare } from "lucide-react";
+import { BookOpen, CalendarCheck2, Check, FileText, HelpCircle, MessageSquare } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export type ArtifactCardView = {
@@ -32,6 +32,9 @@ export function ArtifactCard({
   className,
   size = "normal",
   quiet = false,
+  selectionMode = false,
+  contextSelected = false,
+  onToggleContext,
 }: {
   artifact: ArtifactCardView;
   selected?: boolean;
@@ -40,6 +43,9 @@ export function ArtifactCard({
   className?: string;
   size?: "compact" | "normal" | "large";
   quiet?: boolean;
+  selectionMode?: boolean;
+  contextSelected?: boolean;
+  onToggleContext?: () => void;
 }) {
   const meta = blueprintMeta[artifact.blueprintKey];
   const Icon = meta.icon;
@@ -52,7 +58,7 @@ export function ArtifactCard({
       className={cn(
         "relative overflow-hidden border bg-[var(--bg-elevated)] text-left transition-colors duration-150",
         size === "large" ? "min-h-[216px] rounded-[9px] p-4" : "rounded-[8px] p-3.5",
-        selected
+        selected || contextSelected
           ? "border-[#8b6ff0] bg-[color-mix(in_oklab,#8b6ff0_4%,var(--bg-elevated))] shadow-[0_2px_8px_rgba(68,45,123,0.10)]"
           : artifact.pinned
             ? "border-[color-mix(in_oklab,#b67616_22%,var(--border-default))] shadow-[0_7px_20px_rgba(54,38,18,0.065)] hover:border-[color-mix(in_oklab,#b67616_35%,var(--border-default))]"
@@ -68,8 +74,9 @@ export function ArtifactCard({
           linear-gradient(110deg, ${meta.soft}, var(--bg-elevated) 58%)
         `,
       } : undefined}
-      onClick={onSelect}
+      onClick={selectionMode && onToggleContext ? onToggleContext : onSelect}
     >
+      {selectionMode ? <button type="button" onClick={(event) => { event.stopPropagation(); onToggleContext?.(); }} className={`absolute right-2.5 top-2.5 z-20 flex h-6 w-6 items-center justify-center rounded-[6px] border transition-all duration-200 ${contextSelected ? "scale-100 border-[var(--accent-cyan)] bg-[var(--accent-cyan)] text-white shadow-[0_4px_12px_color-mix(in_oklab,var(--accent-cyan)_28%,transparent)]" : "border-[var(--border-default)] bg-[var(--bg-elevated)] text-transparent hover:border-[var(--accent-cyan)]"}`} aria-label={contextSelected ? "Remove from context" : "Add to context"}><Check className="h-3.5 w-3.5" /></button> : null}
       {botanical ? (
         <div className="pointer-events-none absolute -right-5 bottom-0 h-[72%] w-[38%] opacity-70">
           <div className="absolute bottom-4 left-1/2 h-[88%] w-px -rotate-12" style={{ background: `color-mix(in oklab, ${meta.color} 35%, transparent)` }} />

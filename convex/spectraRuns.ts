@@ -115,6 +115,7 @@ export const updateStatus = mutation({
     usage: v.optional(v.any()),
     decision: v.optional(v.union(v.literal("answer"), v.literal("operate"), v.literal("clarify"), v.literal("refuse"))),
     planIntent: v.optional(v.any()),
+    provenance: v.optional(v.any()),
   },
   handler: async (ctx, args) => {
     const { run } = await requireOwnedRun(ctx, args.actorClerkId, args.runId);
@@ -143,6 +144,7 @@ export const updateStatus = mutation({
       title: args.resultTitle ?? card.title,
       summary: args.resultSummary ?? args.finalSummary ?? args.error ?? card.summary,
       actions: args.resultActions ?? card.actions,
+      provenance: args.provenance ?? card.provenance,
       updatedAt: now,
     })));
 
@@ -171,6 +173,7 @@ export const patchResultCard = mutation({
     summary: v.optional(v.string()),
     variant: v.optional(vResultVariant),
     actions: v.optional(v.array(vResultAction)),
+    provenance: v.optional(v.any()),
   },
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx, args.actorClerkId);
@@ -183,6 +186,7 @@ export const patchResultCard = mutation({
       summary: args.summary ?? card.summary,
       variant: args.variant ?? card.variant,
       actions: args.actions ?? card.actions,
+      provenance: args.provenance ?? card.provenance,
       updatedAt: Date.now(),
     });
     return { resultCardId: args.resultCardId };
@@ -227,7 +231,7 @@ export const resetForRetry = mutation({
       hiddenAt: undefined,
       updatedAt: now,
     })));
-    return { runId: args.runId, resultCardId: cards[0]?._id, prompt: run.userPrompt, workspaceId: run.workspaceId, artifactId: run.artifactId, sourceSurface: run.sourceSurface };
+    return { runId: args.runId, resultCardId: cards[0]?._id, prompt: run.userPrompt, workspaceId: run.workspaceId, artifactId: run.artifactId, sourceSurface: run.sourceSurface, contextSnapshot: run.contextSnapshot };
   },
 });
 

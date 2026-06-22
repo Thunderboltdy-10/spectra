@@ -57,7 +57,7 @@ import {
   linkedArtifacts,
 } from "./spectra-view-model";
 import type { ArtifactPayload } from "./artifact-blueprint-sheet";
-import { getSpectraArtifactVersions, type SpectraArtifact, type SpectraArtifactVersion } from "../data/api";
+import { getSpectraArtifactLinks, getSpectraArtifactVersions, postSpectra, type SpectraArtifact, type SpectraArtifactLink, type SpectraArtifactVersion } from "../data/api";
 import { ThreadConversation } from "./conversation-surface";
 
 type StudioMode = "closed" | "split" | "tab";
@@ -1360,6 +1360,28 @@ function StudioDetails({ artifact, artifacts, tagDraft, onTagDraftChange }: { ar
   const Icon = meta.icon;
   const placements = artifactPlacements(artifact);
   const links = linkedArtifacts(artifact, artifacts);
+  const [durableLinks, setDurableLinks] = useState<SpectraArtifactLink[]>([]);
+  const [linkingId, setLinkingId] = useState<string | null>(null);
+  useEffect(() => {
+    void getSpectraArtifactLinks(artifact._id).then((result) => setDurableLinks(result.links)).catch(() => setDurableLinks([]));
+  }, [artifact._id]);
+  const linkedIds = new Set(durableLinks.flatMap((link) => link.artifact?.id ? [link.artifact.id] : []));
+  const suggestions = artifacts.filter((candidate) => candidate._id !== artifact._id && !linkedIds.has(candidate._id)).map((candidate) => {
+    const sharedWorkspace = artifactPlacements(candidate).some((placement) => placements.some((source) => source.workspaceId === placement.workspaceId));
+    const sharedTags = candidate.tags.filter((tag) => artifact.tags.includes(tag)).length;
+    const titleWords = artifact.title.toLowerCase().split(/\W+/).filter((word) => word.length > 3);
+    const titleMatch = titleWords.some((word) => `${candidate.title} ${candidate.summary ?? ""}`.toLowerCase().includes(word));
+    return { candidate, score: Number(sharedWorkspace) * 5 + sharedTags * 3 + Number(titleMatch) * 2 + Number(candidate.blueprintKey === artifact.blueprintKey) };
+  }).filter((item) => item.score > 0).sort((a, b) => b.score - a.score || b.candidate.updatedAt - a.candidate.updatedAt).slice(0, 3);
+
+  async function confirmLink(target: SpectraArtifact) {
+    setLinkingId(target._id);
+    try {
+      await postSpectra({ action: "createArtifactLink", sourceArtifactId: artifact._id, targetArtifactId: target._id, relationType: "related", workspaceId: placements[0]?.workspaceId, explanation: "Confirmed from a related-artifact suggestion" });
+      const result = await getSpectraArtifactLinks(artifact._id);
+      setDurableLinks(result.links);
+    } finally { setLinkingId(null); }
+  }
   return (
     <aside className="space-y-4">
       <SideCard title="Details">
@@ -1381,6 +1403,7 @@ function StudioDetails({ artifact, artifacts, tagDraft, onTagDraftChange }: { ar
       </SideCard>
       <SideCard title="Linked artifacts">
         <div className="space-y-2">
+          {durableLinks.slice(0, 5).map((link) => link.artifact ? <div key={link._id} className="flex items-center gap-2 rounded-[7px] bg-[var(--bg-primary)] px-2 py-1.5 text-[11px] text-[var(--text-primary)]"><span className="h-1.5 w-1.5 rounded-full bg-[var(--accent-cyan)]" /><span className="min-w-0 flex-1 truncate">{link.artifact.title}</span><span className="text-[9px] text-[var(--text-tertiary)]">{link.relationType.replace("_", " ")}</span></div> : null)}
           {links.slice(0, 4).map(({ artifact: linked }) => {
             const linkedMeta = blueprintMeta[linked.blueprintKey];
             const LinkedIcon = linkedMeta.icon;
@@ -1391,9 +1414,11 @@ function StudioDetails({ artifact, artifacts, tagDraft, onTagDraftChange }: { ar
               </div>
             );
           })}
-          {links.length === 0 ? <div className="text-[12px] text-[var(--text-secondary)]">No seeded links yet.</div> : null}
+          {links.length === 0 && durableLinks.length === 0 ? <div className="text-[12px] text-[var(--text-secondary)]">No confirmed links yet.</div> : null}
         </div>
       </SideCard>
+      {suggestions.length > 0 ? <SideCard title="Related suggestions"><div className="space-y-1.5">{suggestions.map(({ candidate }) => <div key={candidate._id} className="group flex items-center gap-2 rounded-[7px] px-1.5 py-1.5 hover:bg-[var(--bg-primary)]"><span className="min-w-0 flex-1 truncate text-[11px] text-[var(--text-secondary)]">{candidate.title}</span><button type="button" disabled={linkingId === candidate._id} onClick={() => void confirmLink(candidate)} className="rounded-[5px] px-1.5 py-1 text-[9px] font-medium text-[var(--accent-cyan)] opacity-70 hover:bg-[var(--bg-hover)] group-hover:opacity-100">{linkingId === candidate._id ? "Linking…" : "Confirm link"}</button></div>)}</div></SideCard> : null}
+      {artifact.createdFrom ? <SideCard title="Provenance"><div className="text-[11px] leading-5 text-[var(--text-secondary)]"><div className="font-medium text-[var(--text-primary)]">{artifact.createdFrom.contextSummary ?? `Created from ${artifact.createdFrom.source}`}</div>{artifact.createdFrom.sourceArtifactIds?.length ? <div className="mt-1">Used {artifact.createdFrom.sourceArtifactIds.length} source artifact{artifact.createdFrom.sourceArtifactIds.length === 1 ? "" : "s"}</div> : null}{artifact.createdFrom.threadId ? <div>Includes conversation context</div> : null}{artifact.createdFrom.sourceAttachmentNames?.length ? <div>{artifact.createdFrom.sourceAttachmentNames.length} attachment{artifact.createdFrom.sourceAttachmentNames.length === 1 ? "" : "s"}</div> : null}</div></SideCard> : null}
       <SideCard title="Tags">
         <input value={tagDraft} onChange={(event) => onTagDraftChange(event.target.value)} className={inputClass()} placeholder="biology, revision" />
       </SideCard>

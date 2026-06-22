@@ -15,6 +15,15 @@ export const resultCardStreamViewSchema = z.object({
   summary: z.string().optional(),
   variant: z.enum(["status", "artifact", "thread", "operation", "error"]),
   actions: z.array(resultCardActionSchema).default([]),
+  provenance: z.object({
+    artifactIds: z.array(z.string()).optional(),
+    artifactTitles: z.array(z.string()).optional(),
+    threadId: z.string().optional(),
+    workspaceId: z.string().optional(),
+    workspaceTitle: z.string().optional(),
+    attachmentNames: z.array(z.string()).optional(),
+    focusMode: z.enum(["global", "workspace", "artifact", "selection", "thread"]).optional(),
+  }).optional(),
   updatedAt: z.number(),
 }).strict();
 

@@ -135,6 +135,25 @@ export async function GET(request: NextRequest) {
       return ok({ versions });
     }
 
+    if (action === "artifactLinks") {
+      const artifactId = requireString(params.get("artifactId"), "artifactId");
+      const links = await spectraQuery("spectraArtifactLinks:listForArtifact", { actorClerkId: actor.clerkId, artifactId, limit: 24 });
+      return ok({ links });
+    }
+
+    if (action === "search") {
+      const search = requireString(params.get("search"), "search").slice(0, 160);
+      const [artifacts, workspaces] = await Promise.all([
+        spectraQuery("spectraArtifacts:list", { actorClerkId: actor.clerkId, placement: "all", search, limit: 30 }),
+        spectraQuery("spectraWorkspaces:list", { actorClerkId: actor.clerkId, includeArchived: false, limit: 60 }) as Promise<Array<{ title?: string; description?: string }>>,
+      ]);
+      const needle = search.toLowerCase();
+      return ok({
+        artifacts,
+        workspaces: workspaces.filter((workspace) => `${workspace.title ?? ""} ${workspace.description ?? ""}`.toLowerCase().includes(needle)).slice(0, 12),
+      });
+    }
+
     if (action === "threads") {
       const threads = await spectraQuery("spectraThreads:list", {
         actorClerkId: actor.clerkId,
@@ -334,6 +353,28 @@ export async function POST(request: NextRequest) {
         actorClerkId: actor.clerkId,
         workspaceItemId: requireString(body.workspaceItemId, "workspaceItemId"),
         pinned: body.pinned === true,
+      });
+      return ok(result);
+    }
+
+    if (action === "createArtifactLink") {
+      const result = await spectraMutation("spectraArtifactLinks:create", {
+        actorClerkId: actor.clerkId,
+        sourceArtifactId: requireString(body.sourceArtifactId, "sourceArtifactId"),
+        targetArtifactId: requireString(body.targetArtifactId, "targetArtifactId"),
+        relationType: optionalString(body.relationType) ?? "related",
+        label: optionalString(body.label),
+        explanation: optionalString(body.explanation),
+        workspaceId: optionalString(body.workspaceId),
+        createdBy: "user",
+      });
+      return ok(result);
+    }
+
+    if (action === "removeArtifactLink") {
+      const result = await spectraMutation("spectraArtifactLinks:remove", {
+        actorClerkId: actor.clerkId,
+        linkId: requireString(body.linkId, "linkId"),
       });
       return ok(result);
     }

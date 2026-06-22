@@ -8,6 +8,7 @@ import {
   ChevronDown,
   ExternalLink,
   FileText,
+  Files,
   FolderInput,
   FolderPlus,
   Grid2X2,
@@ -33,6 +34,7 @@ import { createDefaultArtifactPayload, type ArtifactPayload } from "../component
 import { ArtifactCard, blueprintMeta } from "../components/artifact-card";
 import { ArtifactStudio, StudioTabRail, useArtifactStudioState } from "../components/artifact-studio";
 import { CommandBar } from "../components/command-bar";
+import { ContextFocusControl, GlobalSearch, SelectionActionBar, type ComposerFocusMode } from "../components/context-controls";
 import { FloatingMenu } from "../components/floating-menu";
 import { ResultCardStack } from "../components/result-card";
 import { RunDetailPanel } from "../components/run-detail-panel";
@@ -165,6 +167,9 @@ export function ArtifactsShell() {
   const [sortMode, setSortMode] = useState<ArtifactSort>("updated");
   const [sortOpen, setSortOpen] = useState(false);
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState("");
+  const [multiSelectMode, setMultiSelectMode] = useState(false);
+  const [selectedContextIds, setSelectedContextIds] = useState<Set<string>>(() => new Set());
+  const [focusModeOverride, setFocusModeOverride] = useState<ComposerFocusMode | null>(null);
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
   const [hubTabs, setHubTabs] = useState<ArtifactHubTab[]>(() => [{ id: "artifacts-all-default", label: "All" }]);
   const [activeHubTabId, setActiveHubTabId] = useState<string | null>("artifacts-all-default");
@@ -182,6 +187,9 @@ export function ArtifactsShell() {
   const createMenuRef = useOutsideClick<HTMLDivElement>(createMenuOpen, () => setCreateMenuOpen(false));
   const sortMenuRef = useOutsideClick<HTMLDivElement>(sortOpen, () => setSortOpen(false));
   const studio = useArtifactStudioState("spectra.shared.artifactStudio", allArtifacts);
+  const selectedWorkspace = workspaces.find((item) => item._id === selectedWorkspaceId) ?? null;
+  const naturalFocusMode: ComposerFocusMode = selectedContextIds.size ? "selection" : studio.activeArtifact ? "artifact" : selectedWorkspace ? "workspace" : "global";
+  const effectiveFocusMode = focusModeOverride === "selection" && selectedContextIds.size === 0 ? naturalFocusMode : focusModeOverride === "artifact" && !studio.activeArtifact ? naturalFocusMode : focusModeOverride === "workspace" && !selectedWorkspace ? naturalFocusMode : focusModeOverride ?? naturalFocusMode;
 
   useEffect(() => {
     try {
@@ -279,6 +287,9 @@ export function ArtifactsShell() {
     surface: studio.activeArtifact ? "artifact" : "artifacts",
     workspaceId: selectedWorkspaceId || undefined,
     artifactId: studio.activeArtifact?._id,
+    focusMode: effectiveFocusMode,
+    selectedArtifactIds: [...selectedContextIds],
+    currentView: mode,
     initialCards: resultCards,
     onDataChanged: () => load(true),
     onOpenArtifact: async (artifactId) => {
@@ -287,6 +298,17 @@ export function ArtifactsShell() {
       if (artifact) studio.openSplit(artifact);
     },
   });
+
+  function toggleContextArtifact(artifact: SpectraArtifact) {
+    setMultiSelectMode(true);
+    setMode("grid");
+    setSelectedContextIds((current) => {
+      const next = new Set(current);
+      if (next.has(artifact._id)) next.delete(artifact._id); else if (next.size < 12) next.add(artifact._id);
+      return next;
+    });
+    setFocusModeOverride("selection");
+  }
 
   useEffect(() => {
     void load();
@@ -551,6 +573,7 @@ export function ArtifactsShell() {
                 />
                 <span className="absolute right-2 top-1/2 -translate-y-1/2 rounded-[5px] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[10px] text-[var(--text-tertiary)]">⌘ K</span>
               </div>
+              <GlobalSearch onOpenArtifact={studio.openSplit} onOpenWorkspace={(target) => setSelectedWorkspaceId(target._id)} selectedIds={selectedContextIds} onToggleSelected={toggleContextArtifact} placementWorkspaceId={selectedWorkspace?._id} placementLabel={selectedWorkspace?.title} onPlaceArtifact={selectedWorkspace ? (artifact) => void addToWorkspace(artifact._id, selectedWorkspace._id) : undefined} />
               <WorkspacePicker workspaces={workspaces} selectedWorkspaceId={selectedWorkspaceId} onSelect={setSelectedWorkspaceId} />
               <div className="relative" ref={createMenuRef}>
                 <button type="button" className={buttonClass("dark")} onClick={() => setCreateMenuOpen((open) => !open)}>
@@ -603,6 +626,7 @@ export function ArtifactsShell() {
               })}
             </div>
             <div className="ml-auto flex items-center gap-2">
+            <button type="button" onClick={() => { setMultiSelectMode((value) => !value); setMode("grid"); }} className={`flex h-9 w-9 items-center justify-center rounded-[8px] transition ${multiSelectMode ? "bg-[var(--text-primary)] text-[var(--bg-primary)]" : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`} title={multiSelectMode ? "Finish selecting" : "Select objects for AI context"} aria-label={multiSelectMode ? "Finish selecting" : "Select multiple artifacts"}><Files className="h-4 w-4" /></button>
             <div className="relative" ref={sortMenuRef}><button type="button" className={buttonClass()} onClick={() => setSortOpen((open) => !open)}>{sortMode === "updated" ? "Recently updated" : sortMode === "created" ? "Recently created" : sortMode === "title" ? "Title A–Z" : sortMode === "type" ? "Artifact type" : sortMode === "workspace" ? "Workspace" : "Activity"}<ChevronDown className="h-3.5 w-3.5" /></button>{sortOpen ? <div className="absolute right-0 top-[calc(100%+7px)] z-40 w-[190px] rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 shadow-[0_14px_32px_rgba(27,20,12,0.13)]">{([['updated','Recently updated'],['created','Recently created'],['title','Title A–Z'],['type','Artifact type'],['workspace','Workspace'],['activity','Activity']] as Array<[ArtifactSort,string]>).map(([key,label]) => <button key={key} type="button" className={menuItemClass()} onClick={() => { setSortMode(key); setSortOpen(false); }}>{label}{sortMode === key ? <CheckCircle2 className="ml-auto h-4 w-4 text-[var(--success)]" /> : null}</button>)}</div> : null}</div>
             <div className="flex rounded-[10px] bg-[color-mix(in_oklab,var(--bg-elevated)_74%,transparent)] p-1 shadow-[inset_0_0_0_1px_var(--border-default)]">
               {[
@@ -628,7 +652,7 @@ export function ArtifactsShell() {
         {!loading && mode === "board" ? <BoardColumns groups={byWorkspace} onOpen={studio.openSplit} /> : null}
         {mode === "grid" ? (
           <div className="mt-8 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {!loading ? artifacts.map((artifact) => <ArtifactCard key={artifact._id} artifact={artifactToCard(artifact)} actions={rowActions(artifact)} onSelect={() => studio.openSplit(artifact)} />) : null}
+            {!loading ? artifacts.map((artifact) => <ArtifactCard key={artifact._id} artifact={artifactToCard(artifact)} actions={multiSelectMode ? undefined : rowActions(artifact)} onSelect={() => studio.openSplit(artifact)} selectionMode={multiSelectMode} contextSelected={selectedContextIds.has(artifact._id)} onToggleContext={() => toggleContextArtifact(artifact)} />) : null}
           </div>
         ) : null}
       </section>
@@ -658,20 +682,21 @@ export function ArtifactsShell() {
         {studio.activeArtifact?.blueprintKey !== "thread_reference" ? <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 bg-[linear-gradient(to_top,var(--bg-primary)_72%,transparent)] px-8 pb-5 pt-12" style={spectraSession.activeLocalThreadRunId ? { right: "var(--spectra-run-panel-width, 680px)" } : undefined}>
           <div className="pointer-events-auto mx-auto max-w-[880px]">
             <LocalThreadTabs />
+            {multiSelectMode ? <SelectionActionBar count={selectedContextIds.size} onClear={() => { setSelectedContextIds(new Set()); setFocusModeOverride(null); }} onExit={() => { setMultiSelectMode(false); if (selectedContextIds.size === 0) setFocusModeOverride(null); }} onRun={(prompt) => void runEngine.run(prompt)} /> : null}
             <ResultCardStack cards={runEngine.cards} className="mb-1.5 ml-[52px]" onOpen={(card) => spectraSession.openLocalThread(card.runId, card.summary ?? card.title)} onAction={(card, action, targetId) => void runEngine.onCardAction(card, action, targetId)} />
             <CommandBar
               placeholder={studio.activeArtifact ? `Act on ${studio.activeArtifact.title}...` : "Ask across all objects..."}
-              onSubmit={(prompt) => {
+              onSubmit={(prompt, attachments) => {
                 if (studio.activeArtifact && studio.dirtyIds.has(studio.activeArtifact._id)) {
                   toast.message("Save this artifact before asking Spectra to update it.");
                   return false;
                 }
-                void runEngine.run(prompt);
+                void runEngine.run(prompt, attachments);
                 return true;
               }}
               busy={runEngine.submitting}
               onStop={runEngine.stop}
-              context={<span className="flex max-w-[190px] items-center gap-1.5 text-[11px] text-[var(--text-secondary)]" title={studio.activeArtifact?.title ?? "Artifact library"}>{studio.activeArtifact ? <FileText className="h-3.5 w-3.5 shrink-0" /> : <Sparkles className="h-3.5 w-3.5 shrink-0" />}<span className="truncate">{studio.activeArtifact?.title ?? "Library"}</span></span>}
+              context={<ContextFocusControl mode={effectiveFocusMode} onModeChange={setFocusModeOverride} workspace={selectedWorkspace} artifact={studio.activeArtifact} selectedCount={selectedContextIds.size} />}
               menu={(
                 <div>
                   {filters.filter((filter) => filter.key !== "all" && filter.key !== "thread_reference").map((filter) => {
@@ -684,6 +709,7 @@ export function ArtifactsShell() {
                       </button>
                     );
                   })}
+                  <button type="button" className={menuItemClass()} onClick={() => { setMultiSelectMode(true); setMode("grid"); }}><Files className="h-4 w-4" />Select objects for context</button>
                 </div>
               )}
             />

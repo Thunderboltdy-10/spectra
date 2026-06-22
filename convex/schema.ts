@@ -1380,6 +1380,10 @@ export default defineSchema({
       threadId: v.optional(v.id("spectraThreads")),
       runId: v.optional(v.id("spectraAiRuns")),
       workspaceId: v.optional(v.id("spectraWorkspaces")),
+      sourceArtifactIds: v.optional(v.array(v.id("spectraArtifacts"))),
+      sourceThreadIds: v.optional(v.array(v.id("spectraThreads"))),
+      sourceAttachmentNames: v.optional(v.array(v.string())),
+      contextSummary: v.optional(v.string()),
     })),
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -1402,10 +1406,42 @@ export default defineSchema({
     before: v.any(),
     after: v.any(),
     summary: v.optional(v.string()),
+    provenance: v.optional(v.any()),
     createdAt: v.number(),
   })
     .index("by_artifact_created", ["artifactId", "createdAt"])
     .index("by_run", ["runId"]),
+
+  spectraArtifactLinks: defineTable({
+    ownerUserId: v.id("users"),
+    orgId: v.optional(v.id("orgs")),
+    sourceArtifactId: v.id("spectraArtifacts"),
+    targetArtifactId: v.id("spectraArtifacts"),
+    relationType: v.union(
+      v.literal("related"),
+      v.literal("supports"),
+      v.literal("contradicts"),
+      v.literal("source_for"),
+      v.literal("generated_from"),
+      v.literal("follow_up"),
+      v.literal("belongs_with"),
+    ),
+    label: v.optional(v.string()),
+    explanation: v.optional(v.string()),
+    provenance: v.object({
+      source: v.union(v.literal("user"), v.literal("ai"), v.literal("system")),
+      runId: v.optional(v.id("spectraAiRuns")),
+      reason: v.optional(v.string()),
+    }),
+    createdBy: v.union(v.literal("user"), v.literal("ai"), v.literal("system")),
+    workspaceId: v.optional(v.id("spectraWorkspaces")),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_source", ["sourceArtifactId", "createdAt"])
+    .index("by_target", ["targetArtifactId", "createdAt"])
+    .index("by_workspace", ["workspaceId", "createdAt"])
+    .index("by_pair", ["sourceArtifactId", "targetArtifactId"]),
 
   spectraWorkspaceItems: defineTable({
     workspaceId: v.id("spectraWorkspaces"),
@@ -1567,6 +1603,7 @@ export default defineSchema({
       )),
       targetId: v.optional(v.string()),
     })),
+    provenance: v.optional(v.any()),
     hiddenAt: v.optional(v.number()),
     keptAt: v.optional(v.number()),
     createdAt: v.number(),

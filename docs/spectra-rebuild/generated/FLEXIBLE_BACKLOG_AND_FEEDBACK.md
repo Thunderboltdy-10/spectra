@@ -104,12 +104,12 @@ This correction supersedes the rejected Wave 2 visual direction from commit `e28
 | Model-generated thread titles and summaries. | Wave 5.5 | Added to the strict plan with short UI caps and deterministic fallback. |
 | Chat/workspace attachments. | Wave 5.5 foundation | PDF uses OpenRouter file input; DOCX/text are extracted Spectra-side; unsafe binaries are rejected and unsupported image understanding is explicit. Permanent raw-file storage remains deferred. |
 | Reversible artifact history and dirty-close safety. | Wave 5.5 foundation | Manual/AI/revert snapshots are durable and visible in Artifact Studio with revert controls; full visual block-diff review remains later. |
-| Multi-select selected artifact context. | Wave 6 | Context builder and selection model. |
-| Artifact checkmarks should appear only after entering an explicit multi-select mode. | Wave 6 | A normal click opens the artifact with only a subtle border/background shift; it must not imply checkbox selection. Closing or opening an artifact should not enter multi-select. |
-| Search across artifacts/workspaces. | Wave 6 | Broader context/search foundation. |
-| Related artifact suggestions. | Wave 6 | Useful after artifact/context quality improves. |
-| Durable object/artifact link primitive with provenance and relation types. | Wave 6 | Wave 2B only displays seeded relations in Canvas/Inspector. |
-| AI-assisted relation suggestions. | Wave 6 | Do not build autonomous relation generation in Wave 2B. |
+| Multi-select selected artifact context. | Wave 6 — completed | Explicit mode, 12-object cap, bounded server-owned bundle, and create-from-selection actions. |
+| Artifact checkmarks should appear only after entering an explicit multi-select mode. | Wave 6 — completed | Normal clicks open; checkmarks exist only in selection mode. Closing/opening never starts selection. |
+| Search across artifacts/workspaces. | Wave 6 — completed | Grouped global search with bounded server query, open, and Add to context actions. |
+| Related artifact suggestions. | Wave 6 — completed | Restrained Artifact Studio suggestions require explicit confirmation. |
+| Durable object/artifact link primitive with provenance and relation types. | Wave 6 — completed | `spectraArtifactLinks` is durable and feeds artifact context. Advanced canvas editing remains deferred. |
+| AI-assisted relation suggestions. | Wave 6 — foundation completed | Deterministic generated-from links and safe heuristic suggestions; autonomous link mutation remains deferred. |
 | Better flashcard learning loops and quiz grading. | Wave 7 | Study object quality wave. |
 | Educational skills/guides attached to blueprints. | Wave 7 | AI quality and object behavior. |
 | Advanced canvas, semantic zoom, focus spaces, lasso, spatial layout. | Wave 8 | Power layer only after object/UI foundation works. |

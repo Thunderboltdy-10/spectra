@@ -149,6 +149,13 @@ export const permanentlyDelete = mutation({
             await ctx.db.delete(run._id);
           }
           await Promise.all(allPlacements.map((placement) => ctx.db.delete(placement._id)));
+          const [outgoingLinks, incomingLinks, versions] = await Promise.all([
+            ctx.db.query("spectraArtifactLinks").withIndex("by_source", (q) => q.eq("sourceArtifactId", artifact)).collect(),
+            ctx.db.query("spectraArtifactLinks").withIndex("by_target", (q) => q.eq("targetArtifactId", artifact)).collect(),
+            ctx.db.query("spectraArtifactVersions").withIndex("by_artifact_created", (q) => q.eq("artifactId", artifact)).collect(),
+          ]);
+          const linkedRows = [...new Map([...outgoingLinks, ...incomingLinks].map((link) => [link._id, link])).values()];
+          await Promise.all([...linkedRows.map((link) => ctx.db.delete(link._id)), ...versions.map((version) => ctx.db.delete(version._id))]);
           await ctx.db.delete(artifact);
           deletedArtifactCount += 1;
         }

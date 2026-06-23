@@ -88,7 +88,7 @@ function setup(plan: unknown, initialStatus: "queued" | "failed" = "queued") {
   vi.doMock("@/lib/auth-server", () => ({ requireActor }));
   vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation }));
   process.env.OPENROUTER_API_KEY = "test-key";
-  const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(plan) } }] }), { status: 200 }));
+  const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ model: "deepseek/deepseek-v4-pro-20260423", provider: "DeepSeek", choices: [{ message: { content: JSON.stringify(plan) } }] }), { status: 200 }));
   vi.stubGlobal("fetch", fetchMock);
   return { convexMutation, fetchMock };
 }
@@ -108,11 +108,33 @@ describe("Spectra run route", () => {
     expect(events.some((event) => event.message === "Validating 6 cards")).toBe(true);
     expect(events.some((event) => event.message === "Saving deck to Biology")).toBe(true);
     const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
-    const payload = JSON.parse(String(request.body)) as { model: string; provider: { order: string[]; allow_fallbacks: boolean; require_parameters: boolean }; stream: boolean };
+    const payload = JSON.parse(String(request.body)) as { model: string; provider: { order: string[]; only: string[]; allow_fallbacks: boolean }; stream: boolean; response_format?: unknown };
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://openrouter.ai/api/v1/chat/completions");
     expect(payload.model).toBe("deepseek/deepseek-v4-pro");
-    expect(payload.provider).toEqual({ order: ["deepseek"], allow_fallbacks: true, require_parameters: true });
+    expect(payload.provider).toEqual({ order: ["deepseek"], only: ["deepseek"], allow_fallbacks: false });
+    expect(payload.response_format).toBeUndefined();
     expect(payload.stream).toBe(true);
     expect(new Headers(request.headers).get("X-OpenRouter-Title")).toBe("Spectra AI Operation Engine");
+    const completedCall = convexMutation.mock.calls.find(([name, args]) => String(name).includes("spectraRuns:updateStatus") && (args as { status?: string }).status === "completed");
+    expect(completedCall?.[1]).toMatchObject({ providerUsed: "DeepSeek", modelUsed: "deepseek/deepseek-v4-pro-20260423" });
+  });
+
+  it("uses the explicit structured-output fallback only after the native DeepSeek call fails", async () => {
+    const answerPlan = { decision: "answer", intent: { mode: "answer", requestedArtifactTypes: [], requestedVisibleArtifactCount: 0, targetArtifactId: null, targetWorkspaceId: null }, finalResponse: "Fallback worked.", operations: [] };
+    const { fetchMock } = setup(answerPlan);
+    fetchMock.mockReset()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: "native unavailable" } }), { status: 503 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ model: "deepseek/deepseek-v4-pro-20260423", provider: "Baidu", choices: [{ message: { content: JSON.stringify(answerPlan) } }] }), { status: 200 }));
+    const route = await import("@/app/api/spectra/run/route");
+    const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", { method: "POST", body: JSON.stringify({ action: "run", surface: "workspace", workspaceId: "workspace-real", prompt: "Answer briefly." }) }));
+    expect(response.status).toBe(200);
+    await response.text();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const primary = JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body)) as Record<string, unknown>;
+    const fallback = JSON.parse(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body)) as { provider: unknown; response_format?: unknown };
+    expect(primary).not.toHaveProperty("response_format");
+    expect(fallback.provider).toEqual({ order: ["baidu", "streamlake", "deepinfra"], only: ["baidu", "streamlake", "deepinfra"], allow_fallbacks: true, require_parameters: true });
+    expect(fallback.response_format).toBeTruthy();
   });
 
   it("retries the same failed run and result card", async () => {

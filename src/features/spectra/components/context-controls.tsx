@@ -250,6 +250,7 @@ export function GlobalSearch({
   onPlaceArtifact,
   placementLabel,
   placementWorkspaceId,
+  trigger = "button",
 }: {
   onOpenArtifact: (artifact: SpectraArtifact) => void;
   onOpenWorkspace: (workspace: SpectraWorkspace) => void;
@@ -258,6 +259,7 @@ export function GlobalSearch({
   onPlaceArtifact?: (artifact: SpectraArtifact) => void;
   placementLabel?: string;
   placementWorkspaceId?: string;
+  trigger?: "button" | "icon";
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -269,12 +271,14 @@ export function GlobalSearch({
     const onKey = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation();
         setOpen(true);
       }
       if (event.key === "Escape") setOpen(false);
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKey, { capture: true });
+    return () => window.removeEventListener("keydown", onKey, { capture: true });
   }, []);
   useEffect(() => {
     if (!open || query.trim().length < 2) {
@@ -295,16 +299,17 @@ export function GlobalSearch({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="flex h-9 w-9 items-center justify-center rounded-[8px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-        title="Search everything (⌘K)"
+        className={trigger === "icon" ? "flex h-9 w-9 items-center justify-center rounded-[8px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" : "flex h-9 items-center gap-2 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"}
+        title="Search Spectra (⌘K)"
         aria-label="Search artifacts and workspaces"
       >
         <Search className="h-4 w-4" />
+        {trigger === "button" ? <><span>Search</span><kbd className="ml-2 text-[10px] font-normal text-[var(--text-tertiary)]">⌘K</kbd></> : null}
       </button>
       <AnimatePresence>
         {open ? (
           <motion.div
-            className="fixed inset-0 z-[120] flex items-start justify-center bg-[color-mix(in_oklab,var(--bg-primary)_70%,transparent)] px-4 pt-[12vh] backdrop-blur-[5px]"
+            className="fixed inset-0 z-[120] flex items-start justify-center bg-black/20 px-4 pt-[12vh]"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -315,7 +320,7 @@ export function GlobalSearch({
               animate={{ y: 0, opacity: 1, scale: 1 }}
               exit={{ y: -8, opacity: 0, scale: 0.99 }}
               transition={{ type: "spring", stiffness: 420, damping: 34 }}
-              className="w-full max-w-[680px] overflow-hidden rounded-[13px] border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[0_30px_90px_rgba(27,20,12,0.22)]"
+              className="w-full max-w-[680px] overflow-hidden rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[0_16px_48px_rgba(27,20,12,0.18)]"
               onPointerDown={(event) => event.stopPropagation()}
             >
               <div className="flex items-center gap-3 border-b border-[var(--border-default)] px-4">
@@ -407,7 +412,7 @@ export function GlobalSearch({
                           <button
                             type="button"
                             onClick={() => onToggleSelected(artifact)}
-                            className={`mr-2 flex h-7 w-7 items-center justify-center rounded-[6px] ${selected ? "bg-[var(--accent-cyan)] text-white" : "text-[var(--text-tertiary)] opacity-0 hover:bg-[var(--bg-secondary)] group-hover:opacity-100"}`}
+                            className={`mr-2 flex h-7 shrink-0 items-center gap-1.5 rounded-[6px] px-2 text-[10px] font-medium ${selected ? "bg-[var(--accent-cyan)] text-white" : "text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]"}`}
                             title={
                               selected
                                 ? "Remove from context"
@@ -424,6 +429,7 @@ export function GlobalSearch({
                             ) : (
                               <PlusIcon />
                             )}
+                            {selected ? "Added" : "Add context"}
                           </button>
                         </div>
                       );

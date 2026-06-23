@@ -89,6 +89,14 @@ Wave 6 keeps the refined editorial-minimal Spectra language: warm paper surfaces
 - ManageBac and the full study-object quality wave;
 - legacy disconnected seeded thread-reference migration.
 
+## Recovery pass — 2026-06-24
+
+Manual testing exposed that the first hooked-up pass did not make several Wave 6 paths usable. Workspace selection existed only in the composer menu, temporary conversation mini-tabs duplicated the real result rows, open conversations were not the natural page-composer target, dismissed rows could return from stale state, search lost the global shortcut conflict, and timeline event cards had weak hierarchy. The recovery pass adds visible **Select objects** controls to Biology/workspace and Artifacts toolbars; keeps normal clicks free of checkmarks; moves **Continue chat** onto the normal result row beside Close; automatically continues the open saved or temporary conversation unless another conversation is explicitly selected; adds a labeled **Save conversation / Save to workspace** action; tombstones dismissed rows; captures `Cmd/Ctrl+K` before the legacy command handler; and makes search available in the workspace and artifact toolbars with open/add-context actions. A new result row now animates in optimistically as soon as a prompt is submitted, and the composer retains its Send action so additional prompts can be submitted while earlier runs are active.
+
+OpenRouter routing was also wrong in practice even though the model id and `provider.order` looked correct. The native DeepSeek endpoint currently rejects OpenRouter's strict `json_schema` response mode; `require_parameters: true` therefore filtered DeepSeek out and consistently selected another host. Spectra now sends a provider-locked primary request with `order` and `only` set to `deepseek`, validates the returned JSON itself, logs the requested and returned provider, and uses a separate explicit structured-output fallback request only after a real native-provider failure. A live request returned provider `DeepSeek`, model `deepseek/deepseek-v4-pro-20260423`, and valid JSON.
+
+Timeline remains date-grouped and tiled, but created artifacts, edits, saved conversations, ordinary runs, and important/failed/active runs now have different density, color, span, and icon hierarchy. Run cards always open run conversation detail; artifact/edit/thread cards open their corresponding artifact surface.
+
 ## Manual acceptance tests
 
 1. In Workspace List, click an artifact normally: it opens and no checkmark appears. Close it and confirm selection mode did not start.

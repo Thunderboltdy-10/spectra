@@ -3,8 +3,11 @@
 import { AlertCircle, Check, CheckCircle2, ChevronDown, Clock3, ExternalLink, FolderPlus, Loader2, MessageSquarePlus, RotateCcw, ShieldCheck, X } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useState } from "react";
+import { toast } from "sonner";
+import { useSpectraSession } from "@/context/spectra-session-context";
 import { cn } from "@/lib/utils";
 import type { ResultCardStreamView } from "../ai/stream-events";
+import { postSpectra } from "../data/api";
 
 export type ResultCardView = ResultCardStreamView;
 
@@ -52,27 +55,62 @@ export function ResultCardStack({
   className,
   onAction,
   onOpen,
+  activeThreadId,
+  activeRunId,
+  onContinue,
 }: {
   cards?: ResultCardView[];
   className?: string;
   onAction?: (card: ResultCardView, actionKey: string, targetId?: string) => void;
   onOpen?: (card: ResultCardView) => void;
+  activeThreadId?: string | null;
+  activeRunId?: string | null;
+  onContinue?: (thread: { threadId: string; title: string; runId: string } | null) => void;
 }) {
+  const session = useSpectraSession();
+  const [busyRunId, setBusyRunId] = useState<string | null>(null);
+  const [threadIds, setThreadIds] = useState<Record<string, string>>({});
   const visibleCards = cards?.slice(0, 12) ?? [];
   if (visibleCards.length === 0) return null;
+
+  async function toggleContinuation(card: ResultCardView) {
+    const knownThreadId = threadIds[card.runId];
+    if (activeRunId === card.runId || (knownThreadId && activeThreadId === knownThreadId)) {
+      onContinue?.(null);
+      return;
+    }
+    setBusyRunId(card.runId);
+    try {
+      const threadId = knownThreadId ?? (await postSpectra<{ threadId: string }>({
+        action: "keepRunAsThread",
+        runId: card.runId,
+        placeInWorkspace: false,
+        createReference: false,
+        localMessages: session.localThreads.find((thread) => thread.runId === card.runId)?.messages ?? [],
+      })).threadId;
+      setThreadIds((current) => ({ ...current, [card.runId]: threadId }));
+      onContinue?.({ threadId, title: card.summary || card.title || "Conversation", runId: card.runId });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not continue this chat.");
+    } finally {
+      setBusyRunId(null);
+    }
+  }
 
   return (
     <div className={cn("relative max-h-[76px] overflow-y-auto rounded-[9px] border border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_96%,var(--bg-primary))] shadow-[0_2px_9px_rgba(27,20,12,0.05)] [scrollbar-width:thin]", className)}>
       {visibleCards.map((card) => {
         const awaitingApproval = card.actions.some((action) => action.key === "confirm");
+        const optimistic = card.id.startsWith("optimistic:") || card.runId.startsWith("pending:");
+        const continued = activeRunId === card.runId || Boolean(threadIds[card.runId] && threadIds[card.runId] === activeThreadId);
         return (
           <div
             key={card.id}
             role="button"
             tabIndex={0}
-            className="group my-0.5 grid min-h-[35px] w-full cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2.5 rounded-[7px] px-2.5 py-1 text-left text-[12px] transition hover:bg-[var(--bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--accent-cyan)]"
-            onClick={() => onOpen?.(card)}
-            onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onOpen?.(card); }}
+            className={cn("group my-0.5 grid min-h-[35px] w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2.5 rounded-[7px] px-2.5 py-1 text-left text-[12px] transition animate-[spectra-fade-up_180ms_ease-out] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--accent-cyan)]", optimistic ? "cursor-default" : "cursor-pointer hover:bg-[var(--bg-hover)]", continued && "bg-[color-mix(in_oklab,#8b6ff0_9%,var(--bg-elevated))] shadow-[inset_3px_0_0_#8b6ff0]")}
+            onClick={() => { if (!optimistic) onOpen?.(card); }}
+            onKeyDown={(event) => { if (!optimistic && (event.key === "Enter" || event.key === " ")) onOpen?.(card); }}
           >
             <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[color-mix(in_oklab,currentColor_10%,var(--bg-elevated))]" style={{ color: tone(card) }}>
               {card.status === "running" && !awaitingApproval ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : awaitingApproval ? <ShieldCheck className="h-3.5 w-3.5" /> : card.status === "completed" ? <CheckCircle2 className="h-3.5 w-3.5" /> : card.status === "failed" || card.status === "cancelled" ? <AlertCircle className="h-3.5 w-3.5" /> : <Clock3 className="h-3.5 w-3.5" />}
@@ -99,9 +137,21 @@ export function ResultCardStack({
                 <ActionIcon className="h-3.5 w-3.5" />
               </button>;
             })}
-            <button type="button" className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[5px] text-[var(--text-tertiary)] opacity-55 hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)] group-hover:opacity-100" aria-label="Hide result" onClick={(event) => { event.stopPropagation(); onAction?.(card, "hide"); }}>
+            {onContinue && !optimistic ? <button
+              type="button"
+              disabled={busyRunId === card.runId}
+              className={cn("flex h-7 shrink-0 items-center gap-1.5 rounded-[6px] px-2 text-[10px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-50", continued && "bg-[color-mix(in_oklab,#8b6ff0_12%,transparent)] text-[#7256dc]")}
+              onClick={(event) => { event.stopPropagation(); void toggleContinuation(card); }}
+              aria-label={continued ? "Stop continuing this chat" : "Continue chat"}
+              aria-pressed={continued}
+              title={continued ? "Stop continuing chat" : "Continue chat"}
+            >
+              {busyRunId === card.runId ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MessageSquarePlus className="h-3.5 w-3.5" />}
+              <span className="hidden sm:inline">{continued ? "Continuing" : "Continue chat"}</span>
+            </button> : null}
+            {!optimistic ? <button type="button" className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[5px] text-[var(--text-tertiary)] opacity-55 hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)] group-hover:opacity-100" aria-label="Hide result" onClick={(event) => { event.stopPropagation(); onAction?.(card, "hide"); }}>
               <X className="h-3.5 w-3.5" />
-            </button>
+            </button> : null}
             </div>
             <ProvenanceLine card={card} />
           </div>

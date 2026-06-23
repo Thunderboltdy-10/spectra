@@ -3,12 +3,10 @@ import { extractPartialJsonStringField, readOpenRouterResponse } from "../ai/ope
 import { getSpectraProviderRouting } from "../ai/model-config";
 
 describe("OpenRouter public response streaming", () => {
-  it("prefers native DeepSeek while keeping same-model provider fallbacks available", () => {
+  it("restricts the primary call to native DeepSeek and keeps fallback routing explicit", () => {
     delete process.env.SPECTRA_ALLOW_PROVIDER_FALLBACKS;
-    expect(getSpectraProviderRouting()).toEqual({ order: ["deepseek"], allow_fallbacks: true, require_parameters: true });
-    process.env.SPECTRA_ALLOW_PROVIDER_FALLBACKS = "false";
-    expect(getSpectraProviderRouting().allow_fallbacks).toBe(false);
-    delete process.env.SPECTRA_ALLOW_PROVIDER_FALLBACKS;
+    expect(getSpectraProviderRouting("primary")).toEqual({ order: ["deepseek"], only: ["deepseek"], allow_fallbacks: false });
+    expect(getSpectraProviderRouting("fallback")).toEqual({ order: ["baidu", "streamlake", "deepinfra"], only: ["baidu", "streamlake", "deepinfra"], allow_fallbacks: true, require_parameters: true });
   });
   it("decodes only the public finalResponse JSON string", () => {
     expect(extractPartialJsonStringField('{"decision":"answer","finalResponse":"Line one\\nLine \\"two', "finalResponse"))

@@ -14,6 +14,7 @@ type CommandBarProps = {
   busy?: boolean;
   allowAttachments?: boolean;
   onStop?: () => void;
+  allowConcurrent?: boolean;
 };
 
 export type CommandAttachment = {
@@ -38,7 +39,7 @@ function readFile(file: File, mode: "text" | "data-url") {
   });
 }
 
-export function CommandBar({ placeholder, menu, context, className, onSubmit, busy = false, allowAttachments = false, onStop }: CommandBarProps) {
+export function CommandBar({ placeholder, menu, context, className, onSubmit, busy = false, allowAttachments = false, onStop, allowConcurrent = false }: CommandBarProps) {
   const [value, setValue] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [attachments, setAttachments] = useState<CommandAttachment[]>([]);
@@ -119,7 +120,7 @@ export function CommandBar({ placeholder, menu, context, className, onSubmit, bu
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault();
-              if (busy) return;
+              if (busy && !allowConcurrent) return;
               submit();
             }
           }}
@@ -128,15 +129,15 @@ export function CommandBar({ placeholder, menu, context, className, onSubmit, bu
         />
         <button
           type="button"
-          disabled={busy ? !onStop : !value.trim() || attachments.some((attachment) => Boolean(attachment.error))}
+          disabled={busy && !allowConcurrent ? !onStop : !value.trim() || attachments.some((attachment) => Boolean(attachment.error))}
           onClick={() => {
-            if (busy && onStop) onStop();
+            if (busy && !allowConcurrent && onStop) onStop();
             else submit();
           }}
           className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] bg-[var(--text-primary)] text-[var(--bg-primary)] disabled:bg-[var(--bg-secondary)] disabled:text-[var(--text-tertiary)]"
           aria-label="Send command"
         >
-          {busy ? onStop ? <X className="h-4 w-4" /> : <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowUp className="h-4 w-4" />}
+          {busy && !allowConcurrent ? onStop ? <X className="h-4 w-4" /> : <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowUp className="h-4 w-4" />}
         </button>
         </div>
       </div>

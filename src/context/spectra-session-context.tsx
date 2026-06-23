@@ -12,7 +12,7 @@ export type LocalThreadArtifact = {
 type SpectraSessionValue = {
   localThreads: LocalThreadArtifact[];
   activeLocalThreadRunId: string | null;
-  openLocalThread: (runId: string, title: string) => void;
+  openLocalThread: (runId: string, title: string, messages?: LocalThreadArtifact["messages"]) => void;
   activateLocalThread: (runId: string) => void;
   closeLocalThread: (runId: string) => void;
   appendLocalExchange: (rootRunId: string, prompt: string, response: string, runId?: string) => void;
@@ -37,8 +37,10 @@ export function SpectraSessionProvider({ children }: { children: React.ReactNode
     window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(localThreads));
   }, [localThreads]);
 
-  const openLocalThread = useCallback((runId: string, title: string) => {
-    setLocalThreads((current) => current.some((item) => item.runId === runId) ? current : [...current, { runId, title: title.trim().slice(0, 64) || "Conversation", createdAt: Date.now(), messages: [] }].slice(-20));
+  const openLocalThread = useCallback((runId: string, title: string, messages: LocalThreadArtifact["messages"] = []) => {
+    setLocalThreads((current) => current.some((item) => item.runId === runId)
+      ? current.map((item) => item.runId === runId && item.messages.length === 0 && messages.length > 0 ? { ...item, messages } : item)
+      : [...current, { runId, title: title.trim().slice(0, 64) || "Conversation", createdAt: Date.now(), messages }].slice(-20));
     setActiveLocalThreadRunId(runId);
   }, []);
   const activateLocalThread = useCallback((runId: string) => setActiveLocalThreadRunId(runId), []);

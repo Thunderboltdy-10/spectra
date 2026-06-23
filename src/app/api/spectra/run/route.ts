@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { ZodError } from "zod";
 import { requireActor } from "@/lib/auth-server";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
-import { getSpectraModelId, getSpectraProviderRouting } from "@/features/spectra/ai/model-config";
+import { allowSpectraProviderFallbacks, assertPrimarySpectraRouting, getSpectraModelId, getSpectraProviderRouting } from "@/features/spectra/ai/model-config";
 import { readOpenRouterResponse, type OpenRouterUsage } from "@/features/spectra/ai/openrouter-stream";
 import { buildBoundedContextPacket, type EffectiveFocusMode } from "@/features/spectra/ai/context-builder";
 import { activeToolContractPrompt } from "@/features/spectra/ai/tool-contract";
@@ -272,7 +272,20 @@ async function callModel(surface: Surface, prompt: string, context: unknown, att
     { type: "text", text: userText },
     ...pdfs.map((attachment) => ({ type: "file", file: { filename: attachment.name, file_data: attachment.data } })),
   ];
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+  const primaryRouting = getSpectraProviderRouting("primary");
+  assertPrimarySpectraRouting(primaryRouting);
+  const baseBody = {
+    model: getSpectraModelId(),
+    temperature: 0.1,
+    stream: true,
+    stream_options: { include_usage: true },
+    messages: [
+      { role: "system", content: systemPrompt(surface) },
+      { role: "user", content: userContent },
+    ],
+    ...(pdfs.length > 0 ? { plugins: [{ id: "file-parser", pdf: { engine: "cloudflare-ai" } }] } : {}),
+  };
+  const request = (provider: ReturnType<typeof getSpectraProviderRouting>, strictOutput: boolean) => fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -281,28 +294,34 @@ async function callModel(surface: Surface, prompt: string, context: unknown, att
       "X-OpenRouter-Title": "Spectra AI Operation Engine",
     },
     body: JSON.stringify({
-      model: getSpectraModelId(),
-      provider: getSpectraProviderRouting(),
-      temperature: 0.1,
-      stream: true,
-      stream_options: { include_usage: true },
-      messages: [
-        { role: "system", content: systemPrompt(surface) },
-        { role: "user", content: userContent },
-      ],
-      ...(pdfs.length > 0 ? { plugins: [{ id: "file-parser", pdf: { engine: "cloudflare-ai" } }] } : {}),
-      response_format: { type: "json_schema", json_schema: { name: "spectra_operation_plan", strict: true, schema: SPECTRA_PLAN_JSON_SCHEMA } },
+      ...baseBody,
+      provider,
+      ...(strictOutput ? { response_format: { type: "json_schema", json_schema: { name: "spectra_operation_plan", strict: true, schema: SPECTRA_PLAN_JSON_SCHEMA } } } : {}),
     }),
     signal,
   });
+  console.info("[spectra.openrouter.request]", { model: baseBody.model, provider: primaryRouting, mode: "native-primary" });
+  let response = await request(primaryRouting, false);
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
-    throw new Error(`OpenRouter request failed (${response.status})${detail ? `: ${detail.slice(0, 240)}` : ""}`);
+    if (!allowSpectraProviderFallbacks()) throw new Error(`DeepSeek provider request failed (${response.status})${detail ? `: ${detail.slice(0, 240)}` : ""}`);
+    const fallbackRouting = getSpectraProviderRouting("fallback");
+    console.warn("[spectra.openrouter.fallback]", { model: baseBody.model, primaryStatus: response.status, provider: fallbackRouting });
+    response = await request(fallbackRouting, true);
+    if (!response.ok) {
+      const fallbackDetail = await response.text().catch(() => "");
+      throw new Error(`OpenRouter fallback request failed (${response.status})${fallbackDetail ? `: ${fallbackDetail.slice(0, 240)}` : ""}`);
+    }
   }
   const result = await readOpenRouterResponse(response, onPublicText);
+  const usedProvider = result.provider?.toLowerCase();
+  const usedFallback = usedProvider && usedProvider !== "deepseek";
+  if (usedFallback && !allowSpectraProviderFallbacks()) throw new Error(`Unexpected OpenRouter provider: ${result.provider}`);
+  console.info("[spectra.openrouter.response]", { model: result.model, provider: result.provider, fallback: Boolean(usedFallback) });
   const text = result.text;
   if (!text.trim()) throw new Error("The Spectra model returned an empty plan.");
-  return { plan: parseSpectraPlan(JSON.parse(text)), model: result.model, provider: result.provider, usage: result.usage };
+  const normalizedText = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  return { plan: parseSpectraPlan(JSON.parse(normalizedText)), model: result.model, provider: result.provider, usage: result.usage };
 }
 
 function operationLabel(operation: ModelOperation) {

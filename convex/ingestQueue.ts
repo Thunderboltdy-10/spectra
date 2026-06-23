@@ -180,7 +180,6 @@ async function parseFileBytes(
     const loadingTask = pdfjs.getDocument({
       data: new Uint8Array(bytes),
       useWorkerFetch: false,
-      isEvalSupported: false,
       disableFontFace: true,
     });
     const document = await loadingTask.promise;

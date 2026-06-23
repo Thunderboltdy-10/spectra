@@ -26,7 +26,6 @@ async function parsePdf(bytes: ArrayBuffer): Promise<ParsedFile> {
   const loadingTask = pdfjs.getDocument({
     data: new Uint8Array(bytes),
     useWorkerFetch: false,
-    isEvalSupported: false,
     disableFontFace: true,
   });
 

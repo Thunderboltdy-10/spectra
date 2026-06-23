@@ -81,7 +81,7 @@ describe("proxy invitation handling", () => {
     restore();
   });
 
-  it("redirects signed-in users without access back to /join when the cookie is set", async () => {
+  it("routes signed-in users without access to the stable access page instead of trusting a stale invite cookie", async () => {
     mockClerk("user_1");
     const restore = mockAccessStateFetch({ status: 403, body: { status: "no_access" } });
 
@@ -92,7 +92,7 @@ describe("proxy invitation handling", () => {
     const response = await proxy(request, {} as never);
 
     expect(response).toBeDefined();
-    expect(response!.headers.get("location")).toBe("http://localhost/join?token=tok_cookie_1");
+    expect(response!.headers.get("location")).toBe("http://localhost/request-access?return_url=%2Fchat");
 
     restore();
   });

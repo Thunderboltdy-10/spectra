@@ -104,6 +104,7 @@ export default defineSchema({
     invitedAt: v.optional(v.number()),
     lastActiveAt: v.optional(v.number()),
     onboardingComplete: v.optional(v.boolean()),
+    starterWorkspaceCreatedAt: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
@@ -1256,9 +1257,18 @@ export default defineSchema({
     email: v.string(),
     role: vRole,
     invitedBy: v.id("users"),
-    status: v.union(v.literal("pending"), v.literal("accepted"), v.literal("expired")),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("accepted"),
+      v.literal("expired"),
+      v.literal("revoked"),
+    ),
     token: v.string(),
+    acceptedBy: v.optional(v.id("users")),
+    acceptedAt: v.optional(v.number()),
+    revokedAt: v.optional(v.number()),
     createdAt: v.number(),
+    updatedAt: v.optional(v.number()),
     expiresAt: v.number(),
   })
     .index("by_org", ["orgId"])
@@ -1286,10 +1296,12 @@ export default defineSchema({
     status: v.union(
       v.literal("pending"),
       v.literal("invited"),
+      v.literal("approved"),
       v.literal("rejected"),
     ),
     resolvedRole: v.optional(vRole),
     resolvedBy: v.optional(v.id("users")),
+    resolvedAt: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
@@ -1333,6 +1345,7 @@ export default defineSchema({
     description: v.optional(v.string()),
     icon: v.optional(v.string()),
     color: v.optional(v.string()),
+    starterKey: v.optional(v.string()),
     // Transitional compatibility for documents written before workspace pinning
     // moved to spectraWorkspaceItems.viewData. Seed repair removes this field.
     pinned: v.optional(v.boolean()),
@@ -1348,6 +1361,7 @@ export default defineSchema({
     lastActivityAt: v.number(),
   })
     .index("by_owner_status", ["ownerUserId", "status"])
+    .index("by_owner_starter", ["ownerUserId", "starterKey"])
     .index("by_org_status", ["orgId", "status"])
     .index("by_owner_activity", ["ownerUserId", "lastActivityAt"]),
 

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { requireActor } from '@/lib/auth-server';
 import { clearInvitationTracking, getInvitationCookies } from '@/lib/invitation-flow';
+import { convexQuery } from '@/lib/convex-server';
 
 export async function GET(request: NextRequest) {
   const includeIdentity = new URL(request.url).searchParams.get("includeIdentity") === "1";
@@ -45,7 +46,28 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     const message = error instanceof Error ? error.message : '';
     if (message.startsWith('AUTH_NO_ACCESS')) {
-      return NextResponse.json({ status: 'no_access' as const, expected: true }, { status: 200 });
+      const { userId } = await auth();
+      const profile = userId ? await currentUser().catch(() => null) : null;
+      const emails = (profile?.emailAddresses ?? [])
+        .map((entry) => entry.emailAddress?.trim().toLowerCase())
+        .filter((value): value is string => Boolean(value));
+      const invitationLists = await Promise.all(
+        emails.map((email) => convexQuery("users:pendingInvitationsForEmail", { email }).catch(() => [])),
+      );
+      const requestState = userId
+        ? await convexQuery("accessRequests:getRequesterState", { requesterClerkId: userId }).catch(() => null)
+        : null;
+      const pendingInvitations = Array.from(
+        new Map(invitationLists.flat().map((invite) => [(invite as { token: string }).token, invite])).values(),
+      );
+      return NextResponse.json({
+        status: 'no_access' as const,
+        expected: true,
+        email: emails[0] ?? null,
+        emails,
+        pendingInvitations,
+        request: requestState,
+      }, { status: 200 });
     }
     if (message.startsWith('AUTH_ORG_INACTIVE')) {
       return NextResponse.json({ status: 'org_inactive' as const, expected: true }, { status: 200 });

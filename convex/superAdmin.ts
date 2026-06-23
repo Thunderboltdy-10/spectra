@@ -8,18 +8,14 @@ import { internal } from "./_generated/api";
 import { purgeUserData } from "./userLifecycle";
 import {
   addOrgToPlatformStats,
+  addUserToPlatformStats,
   countPlatformStats,
   rebuildPlatformStatsAggregates,
   removeOrgFromPlatformStats,
   updateUserInPlatformStats,
 } from "./platformStatsAggregates";
-
-const SUPER_ADMIN_EMAILS = new Set(
-  (process.env.SUPER_ADMIN_EMAILS ?? "pablo.martinez.dovale@gmail.com")
-    .split(/[,\s;]+/)
-    .map((email) => email.trim().toLowerCase())
-    .filter(Boolean),
-);
+import { ensureStarterWorkspace, getCapacitySnapshot, requireCapacity } from "./accessControl";
+import { isSuperAdminEmail } from "./constants";
 
 const DEFAULT_MAX_RESOURCE_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 const MIN_RESOURCE_FILE_SIZE_BYTES = 1 * 1024 * 1024;
@@ -45,30 +41,12 @@ function normalizeMaxResourceFileSizeBytes(value: number | undefined) {
   );
 }
 
-function isSeatCountedMember(email: string) {
-  void email;
-  return true;
-}
-
 async function getOrgMemberCapacity(
   ctx: Parameters<typeof getUserByClerkId>[0],
   orgId: Id<"orgs">,
 ) {
-  const [org, members] = await Promise.all([
-    ctx.db.get(orgId),
-    ctx.db
-      .query("users")
-      .withIndex("by_org", (q) => q.eq("orgId", orgId))
-      .collect(),
-  ]);
-  const maxMembers =
-    typeof org?.maxStudents === "number" && Number.isFinite(org.maxStudents) && org.maxStudents > 0
-      ? Math.floor(org.maxStudents)
-      : null;
-  return {
-    maxMembers,
-    memberCount: members.filter((member) => isSeatCountedMember(member.email)).length,
-  };
+  const capacity = await getCapacitySnapshot(ctx, orgId);
+  return { maxMembers: capacity.maxMembers, memberCount: capacity.memberCount, used: capacity.used };
 }
 
 async function computePlatformStats(ctx: QueryCtx | MutationCtx) {
@@ -80,32 +58,13 @@ async function ensureOrgHasCapacityForMember(
   orgId: Id<"orgs">,
   options?: { excludingUserId?: Id<"users"> },
 ) {
-  const [org, members] = await Promise.all([
-    ctx.db.get(orgId),
-    ctx.db
-      .query("users")
-      .withIndex("by_org", (q) => q.eq("orgId", orgId))
-      .collect(),
-  ]);
-  const maxMembers =
-    typeof org?.maxStudents === "number" && Number.isFinite(org.maxStudents) && org.maxStudents > 0
-      ? Math.floor(org.maxStudents)
-      : null;
-  if (!maxMembers) {
-    return;
-  }
-  const currentMembers = options?.excludingUserId
-    ? members.filter((member) => member._id !== options.excludingUserId && isSeatCountedMember(member.email)).length
-    : members.filter((member) => isSeatCountedMember(member.email)).length;
-  if (currentMembers >= maxMembers) {
-    throw new Error("SEAT_LIMIT_REACHED: School member allocation is full.");
-  }
+  await requireCapacity(ctx, orgId, { excludeMemberId: options?.excludingUserId });
 }
 
 async function requireSuperAdmin(ctx: Parameters<typeof getUserByClerkId>[0], actorClerkId: string) {
   const actor = await getUserByClerkId(ctx, actorClerkId);
   if (!actor) throw new Error("Unauthorized");
-  if (!SUPER_ADMIN_EMAILS.has(actor.email.trim().toLowerCase())) {
+  if (!isSuperAdminEmail(actor.email)) {
     throw new Error("Super admin access required");
   }
   return actor;
@@ -127,9 +86,11 @@ export const listAllOrgs = query({
           .query("users")
           .withIndex("by_org", (q) => q.eq("orgId", org._id))
           .collect();
+        const capacity = await getCapacitySnapshot(ctx, org._id);
         return {
           ...org,
           memberCount: members.length,
+          capacity,
         };
       }),
     );
@@ -162,9 +123,17 @@ export const getOrgDetail = query({
         ? await ctx.storage.getUrl(org.logoStorageId).catch(() => null)
         : null;
 
+    const [invitations, accessRequests, capacity] = await Promise.all([
+      ctx.db.query("schoolInvitations").withIndex("by_org", (q) => q.eq("orgId", args.orgId)).collect(),
+      ctx.db.query("accessRequests").withIndex("by_org_status", (q) => q.eq("orgId", args.orgId).eq("status", "pending")).collect(),
+      getCapacitySnapshot(ctx, args.orgId),
+    ]);
     return {
       org: { ...org, logoUrl: logoUrl ?? undefined },
       members,
+      invitations,
+      accessRequests,
+      capacity,
     };
   },
 });
@@ -877,6 +846,18 @@ export const createOrg = mutation({
     });
     await addOrgToPlatformStats(ctx, orgId);
 
+    const superAdminMembershipId = await ctx.db.insert("users", {
+      clerkId: actor.clerkId,
+      email: actor.email.trim().toLowerCase(),
+      name: actor.name,
+      role: "admin",
+      orgId,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await addUserToPlatformStats(ctx, { _id: superAdminMembershipId, role: "admin" });
+    await ensureStarterWorkspace(ctx, superAdminMembershipId, orgId);
+
     await ctx.runMutation(internal.auditLog.logAction, {
       actorUserId: actor._id as Id<"users">,
       action: "super_admin.create_org",
@@ -945,10 +926,9 @@ export const updateOrg = mutation({
     if (typeof requestedMaxMembers === "number") {
       const capacity = await getOrgMemberCapacity(ctx, args.orgId);
       if (
-        typeof capacity.maxMembers === "number"
-        && requestedMaxMembers < capacity.memberCount
+        requestedMaxMembers < capacity.used
       ) {
-        throw new Error(`Member allocation cannot be below current member count (${capacity.memberCount}).`);
+        throw new Error(`Member allocation cannot be below used/reserved seats (${capacity.used}).`);
       }
       patch.maxStudents = requestedMaxMembers;
     }
@@ -1216,39 +1196,7 @@ export const assignOrgAdmin = mutation({
     const allOrgUsers = await ctx.db.query("users").collect();
     const existingAnywhere = allOrgUsers.find((u) => u.email.toLowerCase() === normalizedEmail);
 
-    if (existingAnywhere) {
-      if (existingAnywhere.orgId !== args.orgId) {
-        await ensureOrgHasCapacityForMember(ctx, args.orgId);
-        if (existingAnywhere.role === "admin") {
-          const sourceAdmins = await ctx.db
-            .query("users")
-            .withIndex("by_org_role", (q) => q.eq("orgId", existingAnywhere.orgId).eq("role", "admin"))
-            .collect();
-          if (sourceAdmins.length <= 1) {
-            throw new Error("Source school must keep at least one admin");
-          }
-        }
-      }
-      const previous = { _id: existingAnywhere._id, role: existingAnywhere.role };
-      await ctx.db.patch(existingAnywhere._id, {
-        orgId: args.orgId,
-        role: "admin",
-        updatedAt: Date.now(),
-      });
-      await updateUserInPlatformStats(
-        ctx,
-        previous,
-        { _id: existingAnywhere._id, role: "admin" },
-      );
-      await ctx.runMutation(internal.auditLog.logAction, {
-        actorUserId: actor._id as Id<"users">,
-        action: "super_admin.assign_org_admin",
-        targetType: "user",
-        targetId: existingAnywhere._id,
-        details: `orgId=${args.orgId};email=${normalizedEmail};path=transfer_existing_user`,
-      });
-      return { userId: existingAnywhere._id, transferred: true };
-    }
+    if (existingAnywhere) throw new Error("ALREADY_IN_ANOTHER_SCHOOL: This user belongs to another school and cannot be moved implicitly.");
 
     const now = Date.now();
     const existingInvitation = await ctx.db
@@ -1289,6 +1237,7 @@ export const assignOrgAdmin = mutation({
     }
 
     const token = randomToken();
+    await requireCapacity(ctx, args.orgId);
 
     const invitationId = await ctx.db.insert("schoolInvitations", {
       orgId: args.orgId,
@@ -1298,6 +1247,7 @@ export const assignOrgAdmin = mutation({
       status: "pending",
       token,
       createdAt: now,
+      updatedAt: now,
       expiresAt: now + 7 * 24 * 60 * 60 * 1000,
     });
 
@@ -1310,6 +1260,20 @@ export const assignOrgAdmin = mutation({
     });
 
     return { invitationId, invitationCreated: true, token };
+  },
+});
+
+export const revokeOrgInvitation = mutation({
+  args: { actorClerkId: v.string(), orgId: v.id("orgs"), invitationId: v.id("schoolInvitations") },
+  handler: async (ctx, args) => {
+    await requireSuperAdmin(ctx, args.actorClerkId);
+    const invitation = await ctx.db.get(args.invitationId);
+    if (!invitation || invitation.orgId !== args.orgId) throw new Error("Invitation not found");
+    if (invitation.status === "revoked") return { ok: true };
+    if (invitation.status !== "pending") throw new Error("Only pending invitations can be revoked");
+    const now = Date.now();
+    await ctx.db.patch(invitation._id, { status: "revoked", revokedAt: now, updatedAt: now });
+    return { ok: true };
   },
 });
 

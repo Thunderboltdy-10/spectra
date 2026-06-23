@@ -56,15 +56,21 @@ export async function POST(request: NextRequest) {
       return badRequest("Invitation not found", 404);
     }
 
-    if (invitation.status === "expired" || Date.now() > invitation.expiresAt) {
+    if (invitation.status === "expired" || (invitation.status === "pending" && Date.now() > invitation.expiresAt)) {
       await clearInvitationTracking();
       return badRequest("This invitation has expired", 410);
+    }
+
+    if (invitation.status === "revoked") {
+      await clearInvitationTracking();
+      return badRequest("This invitation was revoked. Ask a school admin for a new invitation.", 410);
     }
 
     if (invitation.status === "accepted") {
       const normalizedInvitationEmail = invitation.email.toLowerCase();
       const matchingEmail = emails.find((value) => value === normalizedInvitationEmail);
-      if (matchingEmail) {
+      const access = await convexQuery<{ clerkId: string }, { orgId?: string } | null>("users:accessState", { clerkId: userId });
+      if (matchingEmail && access?.orgId === invitation.orgId) {
         await clearInvitationTracking();
         return ok({ alreadyAccepted: true, sameUser: true, orgName: invitation.orgName });
       }
@@ -79,12 +85,20 @@ export async function POST(request: NextRequest) {
       return badRequest("This invitation was sent to a different email address", 403);
     }
 
-    await convexMutation("users:acceptInvitationByToken", {
-      clerkId: userId,
-      email: matchingEmail,
-      name,
-      token,
-    });
+    try {
+      await convexMutation("users:acceptInvitationByToken", {
+        clerkId: userId,
+        email: matchingEmail,
+        name,
+        token,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not accept invitation.";
+      if (message.includes("ALREADY_IN_ANOTHER_SCHOOL")) return badRequest("Your account already belongs to another school.", 409);
+      if (message.includes("SEAT_LIMIT_REACHED")) return badRequest("This school has no available seats. Ask an admin to revoke another invitation or free a seat.", 409);
+      if (message.includes("INVITATION_EMAIL_MISMATCH")) return badRequest("This invitation was sent to a different email address.", 403);
+      throw error;
+    }
 
     await clearInvitationTracking();
 

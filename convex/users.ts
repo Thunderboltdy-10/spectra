@@ -5,77 +5,20 @@ import { getOrCreateDefaultOrg, getUserByClerkId } from "./helpers";
 import type { Role } from "./helpers";
 import { api } from "./_generated/api";
 import { addUserToPlatformStats, updateUserInPlatformStats } from "./platformStatsAggregates";
-const SUPER_ADMIN_EMAILS = new Set(
-  (process.env.SUPER_ADMIN_EMAILS ?? "pablo.martinez.dovale@gmail.com")
-    .split(/[,\s;]+/)
-    .map((email) => email.trim().toLowerCase())
-    .filter(Boolean),
-);
+import { ensureStarterWorkspace, normalizeAccessEmail, requireCapacity } from "./accessControl";
+import { isSuperAdminEmail } from "./constants";
 
 function isAdminLike(actor: { role: Role; email: string }) {
-  return actor.role === "admin" || SUPER_ADMIN_EMAILS.has(actor.email.trim().toLowerCase());
+  return actor.role === "admin" || isSuperAdminEmail(actor.email);
 }
 
-function normalizeEmail(value: string) {
-  return value.trim().toLowerCase();
-}
+const normalizeEmail = normalizeAccessEmail;
 
 function normalizeRole(inputRole?: string): "student" | "teacher" | "admin" {
   if (inputRole === "teacher" || inputRole === "admin") {
     return inputRole;
   }
   return "student";
-}
-
-async function countStudentSeats(
-  ctx: MutationCtx,
-  orgId: Id<"orgs">,
-  excludeUserId?: Id<"users">,
-) {
-  const students = await ctx.db
-    .query("users")
-    .withIndex("by_org_role", (q) => q.eq("orgId", orgId).eq("role", "student"))
-    .collect();
-
-  if (!excludeUserId) {
-    return students.length;
-  }
-
-  return students.filter((student) => student._id !== excludeUserId).length;
-}
-
-async function ensureSeatAvailableForRole(
-  ctx: MutationCtx,
-  orgId: Id<"orgs">,
-  role: "student" | "teacher" | "admin",
-  excludeUserId?: Id<"users">,
-) {
-  const org = await ctx.db.get(orgId);
-  const maxMembers =
-    typeof org?.maxStudents === "number" && Number.isFinite(org.maxStudents) && org.maxStudents > 0
-      ? Math.floor(org.maxStudents)
-      : null;
-
-  if (!maxMembers) return;
-
-  if (role === "student") {
-    const currentStudents = await countStudentSeats(ctx, orgId, excludeUserId);
-    if (currentStudents >= maxMembers) {
-      throw new Error("SEAT_LIMIT_REACHED: No member seats are currently available for this school.");
-    }
-    return;
-  }
-
-  const members = await ctx.db
-    .query("users")
-    .withIndex("by_org", (q) => q.eq("orgId", orgId))
-    .collect();
-  const currentMembers = excludeUserId
-    ? members.filter((member) => member._id !== excludeUserId).length
-    : members.length;
-  if (currentMembers >= maxMembers) {
-    throw new Error("SEAT_LIMIT_REACHED: No member seats are currently available for this school.");
-  }
 }
 
 async function expireSiblingPendingInvitations(params: {
@@ -126,7 +69,22 @@ async function upsertUserFromInvitation(params: {
     throw new Error("INVITATION_ACCOUNT_CONFLICT: This email already belongs to another account in the school.");
   }
 
-  await ensureSeatAvailableForRole(ctx, invitation.orgId, invitation.role, targetUser?._id);
+  if (existing && existing.orgId !== invitation.orgId) {
+    throw new Error("ALREADY_IN_ANOTHER_SCHOOL: This account already belongs to another school.");
+  }
+
+  if (targetUser?.orgId === invitation.orgId) {
+    await ctx.db.patch(invitation._id, {
+      status: "accepted",
+      acceptedBy: targetUser._id,
+      acceptedAt: now,
+      updatedAt: now,
+    });
+    await ensureStarterWorkspace(ctx, targetUser._id, invitation.orgId);
+    return { userId: targetUser._id, orgId: invitation.orgId, role: targetUser.role, alreadyMember: true };
+  }
+
+  await requireCapacity(ctx, invitation.orgId, { excludeInvitationId: invitation._id });
 
   let userId = targetUser?._id;
   if (targetUser) {
@@ -157,6 +115,9 @@ async function upsertUserFromInvitation(params: {
 
   await ctx.db.patch(invitation._id, {
     status: "accepted",
+    acceptedBy: userId,
+    acceptedAt: now,
+    updatedAt: now,
   });
   await expireSiblingPendingInvitations({
     ctx,
@@ -166,6 +127,7 @@ async function upsertUserFromInvitation(params: {
   });
 
   if (userId) {
+    await ensureStarterWorkspace(ctx, userId, invitation.orgId);
     await ctx.runMutation(api.seed.seedDefaultAgents, {
       orgId: invitation.orgId,
       creatorUserId: userId,
@@ -186,7 +148,7 @@ export const ensureUser = mutation({
   },
   handler: async (ctx, args) => {
     const normalizedEmail = normalizeEmail(args.email);
-    const isSuperAdmin = SUPER_ADMIN_EMAILS.has(normalizedEmail);
+    const isSuperAdmin = isSuperAdminEmail(normalizedEmail);
     
     // If orgId is provided, we look for the user in THAT specific org.
     // If not, we fall back to any existing record (usually for non-super-admins who have only one).
@@ -248,15 +210,11 @@ export const ensureUser = mutation({
       });
       await updateUserInPlatformStats(ctx, previous, { _id: existing._id, role: nextRole });
 
-      await ctx.runMutation(api.seed.seedDemoPack, {
-        orgId,
-        ownerUserId: existing._id,
-      });
       await ctx.runMutation(api.seed.seedDefaultAgents, {
         orgId,
         creatorUserId: existing._id,
       });
-      await ctx.runMutation(api.seed.migrateLegacyDemoCopy, { orgId });
+      await ensureStarterWorkspace(ctx, existing._id, orgId);
 
       return { ...existing, role: nextRole, orgId, clerkId: args.clerkId };
     }
@@ -289,15 +247,11 @@ export const ensureUser = mutation({
     });
     await addUserToPlatformStats(ctx, { _id: userId, role });
 
-    await ctx.runMutation(api.seed.seedDemoPack, {
-      orgId,
-      ownerUserId: userId,
-    });
     await ctx.runMutation(api.seed.seedDefaultAgents, {
       orgId,
       creatorUserId: userId,
     });
-    await ctx.runMutation(api.seed.migrateLegacyDemoCopy, { orgId });
+    await ensureStarterWorkspace(ctx, userId, orgId);
 
     return {
       _id: userId,
@@ -351,6 +305,30 @@ export const accessState = query({
   },
 });
 
+export const pendingInvitationsForEmail = query({
+  args: { email: v.string() },
+  handler: async (ctx, args) => {
+    const email = normalizeEmail(args.email);
+    const now = Date.now();
+    const invitations = await ctx.db
+      .query("schoolInvitations")
+      .withIndex("by_email", (q) => q.eq("email", email))
+      .collect();
+    const active = invitations.filter((invitation) => invitation.status === "pending" && invitation.expiresAt > now);
+    return Promise.all(active.map(async (invitation) => {
+      const org = await ctx.db.get(invitation.orgId);
+      return {
+        token: invitation.token,
+        email: invitation.email,
+        role: invitation.role,
+        orgId: invitation.orgId,
+        orgName: org?.name ?? "School",
+        expiresAt: invitation.expiresAt,
+      };
+    }));
+  },
+});
+
 export const syncFromWebhook = mutation({
   args: {
     clerkId: v.string(),
@@ -400,7 +378,14 @@ export const acceptInvitationByToken = mutation({
       throw new Error("INVITATION_NOT_FOUND: Invitation not found.");
     }
     if (invitation.status !== "pending") {
-      throw new Error("INVITATION_NOT_PENDING: This invitation is no longer pending.");
+      if (invitation.status === "accepted") {
+        const existing = await getUserByClerkId(ctx, args.clerkId);
+        if (existing?.orgId === invitation.orgId && normalizeEmail(existing.email) === normalizeEmail(args.email)) {
+          await ensureStarterWorkspace(ctx, existing._id, existing.orgId);
+          return { userId: existing._id, orgId: existing.orgId, role: existing.role, alreadyMember: true };
+        }
+      }
+      throw new Error(`INVITATION_${invitation.status.toUpperCase()}: This invitation is ${invitation.status}.`);
     }
     if (invitation.expiresAt <= Date.now()) {
       await ctx.db.patch(invitation._id, { status: "expired" });
@@ -453,6 +438,9 @@ export const updateRole = mutation({
     const target = await ctx.db.get(args.targetUserId);
     if (!target || target.orgId !== actor.orgId) {
       throw new Error("Invalid target user");
+    }
+    if (target.role === "admin") {
+      throw new Error("Only super admin can demote an admin");
     }
 
     await ctx.db.patch(args.targetUserId, { role: args.role, updatedAt: Date.now() });

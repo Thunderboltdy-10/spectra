@@ -2,7 +2,6 @@ import { NextFetchEvent, NextRequest, NextResponse } from "next/server";
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { hasClerkServerConfig } from "@/lib/clerk-config";
 import { INVITATION_HANDOFF_COOKIE, INVITATION_TOKEN_COOKIE, INVITATION_TOKEN_MAX_AGE } from "@/lib/invitation-flow";
-import { getAppUrl } from "@/lib/app-url";
 
 const isPublicRoute = createRouteMatcher([
   "/",
@@ -35,7 +34,9 @@ type AccessStatePayload = {
   expected?: boolean;
 };
 
-const ACCESS_STATE_CACHE_TTL_MS = 15_000;
+// Membership changes must be visible on the very next navigation. Caching this
+// state caused approved users to bounce back to request-access until a cookie expired.
+const ACCESS_STATE_CACHE_TTL_MS = 0;
 const ACCESS_STATE_COOKIE = "ai-school-access-state";
 const ACCESS_STATE_AT_COOKIE = "ai-school-access-state-at";
 
@@ -99,8 +100,9 @@ const ACCESS_STATE_PATH_PREFIX = "/api/auth/access-state";
 
 const authMiddleware = clerkMiddleware(async (auth, req) => {
   const url = new URL(req.url);
-  const invitationToken = url.searchParams.get("token") ?? url.searchParams.get("invitation");
-  const cookieToken = req.cookies.get(INVITATION_TOKEN_COOKIE)?.value;
+  const invitationToken = url.pathname.startsWith("/join")
+    ? (url.searchParams.get("token") ?? url.searchParams.get("invitation"))
+    : null;
   const isApiRoute = url.pathname.startsWith("/api/") || url.pathname.startsWith("/trpc");
 
   // Skip access-state check for the access-state route itself to prevent
@@ -112,17 +114,10 @@ const authMiddleware = clerkMiddleware(async (auth, req) => {
 
   const { userId } = await auth();
 
-  // 1. Persist ?token=... into a cookie and shepherd to join/signup.
+  // 1. Persist an invite token, but always keep /join stable. The page owns the
+  // explicit sign-in, switch-account, and accept actions.
   if (invitationToken) {
-    const appUrl = getAppUrl(req.url);
-    const redirect = encodeURIComponent(`${appUrl}/join?token=${encodeURIComponent(invitationToken)}`);
-    const destination = userId
-      ? new URL(`/join?token=${invitationToken}`, req.url)
-      : new URL(`/sign-up?redirect_url=${redirect}`, req.url);
-
-    const response = (url.pathname.startsWith("/join") && !userId)
-      ? NextResponse.next()
-      : NextResponse.redirect(destination);
+    const response = NextResponse.next();
 
     clearAccessState(response);
     response.cookies.set(INVITATION_TOKEN_COOKIE, invitationToken, {
@@ -143,7 +138,7 @@ const authMiddleware = clerkMiddleware(async (auth, req) => {
 
   // 3. Seamlessly redirect authorized users from public/auth pages to the workspace.
   if (userId && access?.payload?.status === "ok") {
-    const shouldRedirectToApp = isLandingPageRoute(req) || isAuthRoute(req) || url.pathname.startsWith("/join") || url.pathname.startsWith("/no-access") || url.pathname.startsWith("/request-access");
+    const shouldRedirectToApp = isLandingPageRoute(req) || isAuthRoute(req) || url.pathname.startsWith("/no-access");
     if (shouldRedirectToApp) {
       const response = NextResponse.redirect(new URL("/chat", req.url));
       response.cookies.delete(INVITATION_TOKEN_COOKIE);
@@ -190,14 +185,9 @@ const authMiddleware = clerkMiddleware(async (auth, req) => {
   }
 
   if (access?.payload?.status === "no_access") {
-    // If they have an invitation token, send them to /join to accept it.
-    if (cookieToken) {
-      const response = NextResponse.redirect(new URL(`/join?token=${cookieToken}`, req.url));
-      persistAccessState(response, "no_access");
-      return response;
-    }
-    // Otherwise, send them to request access.
-    const response = NextResponse.redirect(new URL("/request-access", req.url));
+    const destination = new URL("/request-access", req.url);
+    destination.searchParams.set("return_url", `${url.pathname}${url.search}`);
+    const response = NextResponse.redirect(destination);
     persistAccessState(response, "no_access");
     return response;
   }

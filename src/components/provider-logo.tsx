@@ -2,36 +2,34 @@
 
 import { memo, useEffect, useState } from "react";
 import type { CSSProperties, ComponentType } from "react";
-import {
-  Ai21,
-  Anthropic,
-  Arcee,
-  ByteDance,
-  Cerebras,
-  Cohere,
-  Dbrx,
-  DeepInfra,
-  DeepSeek,
-  Fireworks,
-  Google,
-  Groq,
-  Meta,
-  Minimax,
-  Mistral,
-  Moonshot,
-  NousResearch,
-  Nvidia,
-  OpenAI,
-  OpenRouter,
-  Perplexity,
-  Qwen,
-  SambaNova,
-  Stepfun,
-  Together,
-  XAI,
-  ZAI,
-  ZeroOne,
-} from "@lobehub/icons";
+import Ai21 from "@lobehub/icons/es/Ai21/components/Mono";
+import Anthropic from "@lobehub/icons/es/Anthropic/components/Mono";
+import Arcee from "@lobehub/icons/es/Arcee/components/Mono";
+import ByteDance from "@lobehub/icons/es/ByteDance/components/Mono";
+import Cerebras from "@lobehub/icons/es/Cerebras/components/Mono";
+import Cohere from "@lobehub/icons/es/Cohere/components/Mono";
+import Dbrx from "@lobehub/icons/es/Dbrx/components/Mono";
+import DeepInfra from "@lobehub/icons/es/DeepInfra/components/Mono";
+import DeepSeek from "@lobehub/icons/es/DeepSeek/components/Mono";
+import Fireworks from "@lobehub/icons/es/Fireworks/components/Mono";
+import Google from "@lobehub/icons/es/Google/components/Mono";
+import Groq from "@lobehub/icons/es/Groq/components/Mono";
+import Meta from "@lobehub/icons/es/Meta/components/Mono";
+import Minimax from "@lobehub/icons/es/Minimax/components/Mono";
+import Mistral from "@lobehub/icons/es/Mistral/components/Mono";
+import Moonshot from "@lobehub/icons/es/Moonshot/components/Mono";
+import NousResearch from "@lobehub/icons/es/NousResearch/components/Mono";
+import Nvidia from "@lobehub/icons/es/Nvidia/components/Mono";
+import OpenAI from "@lobehub/icons/es/OpenAI/components/Mono";
+import OpenRouter from "@lobehub/icons/es/OpenRouter/components/Mono";
+import Perplexity from "@lobehub/icons/es/Perplexity/components/Mono";
+import Qwen from "@lobehub/icons/es/Qwen/components/Mono";
+import SambaNova from "@lobehub/icons/es/SambaNova/components/Mono";
+import Stepfun from "@lobehub/icons/es/Stepfun/components/Mono";
+import Together from "@lobehub/icons/es/Together/components/Mono";
+import XAI from "@lobehub/icons/es/XAI/components/Mono";
+import ZAI from "@lobehub/icons/es/ZAI/components/Mono";
+import ZeroOne from "@lobehub/icons/es/ZeroOne/components/Mono";
 import { getProviderPresentation } from "@/lib/provider-icons";
 import { cn } from "@/lib/utils";
 

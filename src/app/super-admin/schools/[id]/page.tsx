@@ -58,6 +58,9 @@ type OrgDetail = {
     logoUrl?: string;
   };
   members: Member[];
+  invitations: Array<{ _id: string; email: string; role: string; status: string; expiresAt: number }>;
+  accessRequests: Array<{ _id: string; email: string; name: string; status: string }>;
+  capacity: { maxMembers: number | null; memberCount: number; reservedInvitations: number; used: number; available: number | null; full: boolean };
 };
 
 type OrgUsageOverview = {
@@ -142,25 +145,33 @@ function formatUsdCents(cents?: number) {
 
 // ---- Overview Tab ----
 function OverviewTab({ data }: { data: OrgDetail }) {
-  const { org, members } = data;
-  const students = members.filter((m) => m.role === "student").length;
-  const teachers = members.filter((m) => m.role === "teacher").length;
-  const admins = members.filter((m) => m.role === "admin").length;
+  const { org } = data;
 
   return (
     <div className="space-y-5">
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {[
-          { label: "Total Members", value: members.length },
-          { label: "Students", value: students },
-          { label: "Teachers", value: teachers },
-          { label: "Admins", value: admins },
+          { label: "Members", value: data.members.length },
+          { label: "Reserved invites", value: data.capacity.reservedInvitations },
+          { label: "Seats used", value: data.capacity.maxMembers ? `${data.capacity.used}/${data.capacity.maxMembers}` : data.capacity.used },
+          { label: "Available", value: data.capacity.available ?? "Unlimited" },
         ].map((stat) => (
           <div key={stat.label} className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
             <p className="text-xs font-semibold uppercase tracking-[0.1em] text-[var(--text-secondary)]">{stat.label}</p>
             <p className="mt-1 font-display text-2xl text-[var(--text-primary)]">{stat.value}</p>
           </div>
         ))}
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-5">
+          <h3 className="text-sm font-semibold text-[var(--text-primary)]">Active invitations</h3>
+          <p className="mt-1 text-xs text-[var(--text-secondary)]">{data.capacity.reservedInvitations} seats currently reserved</p>
+        </div>
+        <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-5">
+          <h3 className="text-sm font-semibold text-[var(--text-primary)]">Access requests</h3>
+          <p className="mt-1 text-xs text-[var(--text-secondary)]">{data.accessRequests.length} waiting for a school admin decision</p>
+        </div>
       </div>
 
       <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-5">

@@ -40,6 +40,13 @@ describe("auth access-state route integration", () => {
   });
 
   it("marks expected no-access states without throwing", async () => {
+    vi.doMock("@clerk/nextjs/server", () => ({
+      auth: vi.fn().mockResolvedValue({ userId: "clerk_1" }),
+      currentUser: vi.fn().mockResolvedValue({ emailAddresses: [{ emailAddress: "student@example.com" }] }),
+    }));
+    vi.doMock("@/lib/convex-server", () => ({
+      convexQuery: vi.fn((name: string) => Promise.resolve(name.includes("getRequesterState") ? null : [])),
+    }));
     vi.doMock("@/lib/auth-server", () => authServerMock({
       requireActor: vi.fn().mockRejectedValue(new Error("AUTH_NO_ACCESS: missing org")),
     }));
@@ -49,7 +56,13 @@ describe("auth access-state route integration", () => {
     const payload = await response.json();
 
     expect(response.status).toBe(200);
-    expect(payload).toEqual({ status: "no_access", expected: true });
+    expect(payload).toMatchObject({
+      status: "no_access",
+      expected: true,
+      email: "student@example.com",
+      pendingInvitations: [],
+      request: null,
+    });
   });
 });
 
@@ -864,10 +877,10 @@ describe("request access route email selection", () => {
 });
 
 describe("join page guarded redeem flow", () => {
-  it("uses the explicit invitation state machine with auto redirect and redeem flow", async () => {
+  it("uses an explicit invitation state machine without automatic navigation", async () => {
     const source = await import("node:fs/promises").then((fs) => fs.readFile("src/app/join/page.tsx", "utf8"));
-    expect(source).toContain("payload.shouldAutoRedirectToAuth");
-    expect(source).toContain("payload.canRedeemNow");
+    expect(source).not.toContain("payload.shouldAutoRedirectToAuth");
+    expect(source).toContain("payload?.canRedeemNow");
     expect(source).toMatch(/fetch\(\s*["']\/api\/invitations\/redeem["']/);
   });
 });

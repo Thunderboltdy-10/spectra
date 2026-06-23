@@ -23,9 +23,10 @@ type OrgSettingsEnvelope = {
   openRouterWarnings?: string[];
 };
 type Member = { _id: string; clerkId: string; name: string; email: string; role: "student" | "teacher" | "admin"; createdAt: number };
-type Invitation = { _id: string; email: string; role: "student" | "teacher" | "admin"; status: "pending" | "accepted" | "expired" | "cancelled"; expiresAt: number };
+type Invitation = { _id: string; email: string; role: "student" | "teacher" | "admin"; status: "pending" | "accepted" | "expired" | "revoked"; expiresAt: number };
 type AccessRequest = { _id: string; email: string; name: string; message?: string; createdAt: number };
-type SchoolDashboard = { memberCount: number; studentCount: number; teacherCount: number; adminCount: number; messagesToday: number; pendingInvitations: number; orgName?: string };
+type Capacity = { maxMembers: number | null; memberCount: number; reservedInvitations: number; used: number; available: number | null; full: boolean };
+type SchoolDashboard = { memberCount: number; studentCount: number; teacherCount: number; adminCount: number; messagesToday: number; pendingInvitations: number; orgName?: string; capacity: Capacity };
 type UsageRow = { day: string; inputTokens: number; outputTokens: number; totalTokens: number };
 type SchoolAnalytics = { avgQuizScore?: number; totalQuizAttempts: number };
 type LeaderboardEntry = { modelId: string; provider: string; name: string; totalTokens: number; usageCount: number };
@@ -172,8 +173,9 @@ function AdminPageContent() {
     const needle = memberSearch.trim().toLowerCase();
     return needle ? members.filter((member) => (member.name?.toLowerCase() ?? "").includes(needle) || (member.email?.toLowerCase() ?? "").includes(needle)) : members;
   }, [memberSearch, members]);
-  const seatUsed = members.length;
+  const seatUsed = dashboard?.capacity.used ?? members.length;
   const pendingInvites = invitations.filter((item) => item.status === "pending").length;
+  const capacityFull = dashboard?.capacity.full ?? false;
 
   async function switchOrg(orgId: string) {
     if (switchingOrg) return;
@@ -256,6 +258,16 @@ function AdminPageContent() {
     }
   }
 
+  async function resendInvite(invitationId: string) {
+    try {
+      await loadJson("/api/school-admin/members", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ invitationId, action: "resendInvite" }) });
+      toast.success("Invitation resent");
+      await refresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to resend invitation");
+    }
+  }
+
   async function approveAccessRequest(requestId: string, role: "student" | "teacher") {
     try {
       await loadJson("/api/school-admin/members", {
@@ -263,7 +275,7 @@ function AdminPageContent() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ requestId, role, action: "approveAccessRequest" }),
       });
-      toast.success("Invite sent");
+      toast.success("Access approved");
       await refresh();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to approve access request");
@@ -650,9 +662,13 @@ function AdminPageContent() {
             <div className="px-4 py-2.5">
               <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">Allocation</p>
               <p className="mt-0.5 font-medium">
-                {org?.maxStudents ? `${seatUsed}/${org.maxStudents}` : seatUsed}
+                {dashboard?.capacity.maxMembers ? `${seatUsed}/${dashboard.capacity.maxMembers}` : seatUsed}
                 {pendingInvites > 0 && <span className="ml-1.5 text-xs font-normal text-[var(--text-tertiary)]">({pendingInvites} pending)</span>}
               </p>
+            </div>
+            <div className="px-4 py-2.5">
+              <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">Available</p>
+              <p className={`mt-0.5 font-medium ${capacityFull ? "text-[var(--danger)]" : ""}`}>{dashboard?.capacity.available ?? "Unlimited"}</p>
             </div>
           </div>
 
@@ -671,8 +687,9 @@ function AdminPageContent() {
                   <SelectItem value="teacher">Teacher</SelectItem>
                 </SelectContent>
               </Select>
-              <Button onClick={() => void inviteMember()}>Invite</Button>
+              <Button onClick={() => void inviteMember()} disabled={capacityFull}>Invite</Button>
             </div>
+            {capacityFull ? <p className="mt-2 text-xs text-[var(--danger)]">No seats available. Revoke an invitation or remove a member before inviting or approving someone.</p> : null}
 
             {invitations.length > 0 && (
               <div className="mt-3 space-y-1">
@@ -682,7 +699,10 @@ function AdminPageContent() {
                       <span className="text-sm font-medium">{item.email}</span>
                       <span className="ml-2 text-xs text-[var(--text-secondary)]">{item.role} &middot; expires {new Date(item.expiresAt).toLocaleDateString()}</span>
                     </div>
-                    <Button variant="ghost" size="sm" onClick={() => void cancelInvite(item._id)}>Cancel</Button>
+                    <div className="flex gap-1">
+                      <Button variant="ghost" size="sm" onClick={() => void resendInvite(item._id)}>Resend</Button>
+                      <Button variant="ghost" size="sm" onClick={() => void cancelInvite(item._id)}>Revoke</Button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -705,14 +725,14 @@ function AdminPageContent() {
                           ) : null}
                         </div>
                         <div className="flex flex-wrap gap-2">
-                          <Button size="sm" variant="secondary" onClick={() => void approveAccessRequest(request._id, "student")}>
-                            Invite student
+                          <Button size="sm" variant="secondary" disabled={capacityFull} onClick={() => void approveAccessRequest(request._id, "student")}>
+                            Approve student
                           </Button>
-                          <Button size="sm" variant="secondary" onClick={() => void approveAccessRequest(request._id, "teacher")}>
-                            Invite teacher
+                          <Button size="sm" variant="secondary" disabled={capacityFull} onClick={() => void approveAccessRequest(request._id, "teacher")}>
+                            Approve teacher
                           </Button>
                           <Button size="sm" variant="ghost" onClick={() => void rejectAccessRequest(request._id)}>
-                            Dismiss
+                            Reject
                           </Button>
                         </div>
                       </div>

@@ -1,7 +1,10 @@
 import { DirectAggregate } from "@convex-dev/aggregate";
 import { components } from "./_generated/api";
+import { internalMutation } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
+import { v } from "convex/values";
+import { makeFunctionReference } from "convex/server";
 
 type PlatformStatsNamespace = "orgs" | "users" | "messages" | "admins";
 
@@ -123,42 +126,53 @@ export async function clearPlatformStatsAggregates(ctx: MutationCtx) {
   ]);
 }
 
-async function paginateTable<T extends "orgs" | "users" | "messages">(
-  ctx: MutationCtx,
-  tableName: T,
-  onPage: (docs: Array<Doc<T>>) => Promise<void>,
-) {
-  let cursor: string | null = null;
-  let isDone = false;
-  while (!isDone) {
-    const result = await ctx.db.query(tableName).paginate({ cursor, numItems: 256 });
-    await onPage(result.page);
-    cursor = result.continueCursor;
-    isDone = result.isDone;
-  }
-}
+type RebuildTable = "orgs" | "users" | "messages";
+type RebuildPageResult = { continueCursor: string; isDone: boolean };
+const REBUILD_PAGE_SIZE = 16;
+const PLATFORM_STATS_SINGLETON = "global";
+const rebuildPageReference = makeFunctionReference<"mutation", { tableName: RebuildTable; cursor: string | null }, RebuildPageResult>("platformStatsAggregates:rebuildPlatformStatsPage");
+
+// Convex permits one paginated query per function invocation. Each page is
+// therefore isolated in its own internal mutation and the coordinator below
+// only loops over child mutations; it never paginates directly.
+export const rebuildPlatformStatsPage = internalMutation({
+  args: {
+    tableName: v.union(v.literal("orgs"), v.literal("users"), v.literal("messages")),
+    cursor: v.union(v.string(), v.null()),
+  },
+  handler: async (ctx, args): Promise<RebuildPageResult> => {
+    if (args.tableName === "orgs") {
+      const result = await ctx.db.query("orgs").paginate({ cursor: args.cursor, numItems: REBUILD_PAGE_SIZE });
+      for (const org of result.page) await addOrgToPlatformStats(ctx, org._id);
+      if (result.isDone) await ctx.scheduler.runAfter(0, rebuildPageReference, { tableName: "users", cursor: null });
+      else await ctx.scheduler.runAfter(0, rebuildPageReference, { tableName: "orgs", cursor: result.continueCursor });
+      return { continueCursor: result.continueCursor, isDone: result.isDone };
+    }
+    if (args.tableName === "users") {
+      const result = await ctx.db.query("users").paginate({ cursor: args.cursor, numItems: REBUILD_PAGE_SIZE });
+      for (const user of result.page) await addUserToPlatformStats(ctx, user);
+      if (result.isDone) await ctx.scheduler.runAfter(0, rebuildPageReference, { tableName: "messages", cursor: null });
+      else await ctx.scheduler.runAfter(0, rebuildPageReference, { tableName: "users", cursor: result.continueCursor });
+      return { continueCursor: result.continueCursor, isDone: result.isDone };
+    }
+    const result = await ctx.db.query("messages").paginate({ cursor: args.cursor, numItems: REBUILD_PAGE_SIZE });
+    for (const message of result.page) await addMessageToPlatformStats(ctx, message._id);
+    if (!result.isDone) {
+      await ctx.scheduler.runAfter(0, rebuildPageReference, { tableName: "messages", cursor: result.continueCursor });
+    } else {
+      const counts = await countPlatformStats(ctx);
+      const now = Date.now();
+      const existing = await ctx.db.query("platformStats").withIndex("by_singleton", (q) => q.eq("singletonKey", PLATFORM_STATS_SINGLETON)).unique();
+      if (existing) await ctx.db.patch(existing._id, { ...counts, lastComputedAt: now });
+      else await ctx.db.insert("platformStats", { singletonKey: PLATFORM_STATS_SINGLETON, ...counts, lastComputedAt: now });
+    }
+    return { continueCursor: result.continueCursor, isDone: result.isDone };
+  },
+});
 
 export async function rebuildPlatformStatsAggregates(ctx: MutationCtx) {
   await clearPlatformStatsAggregates(ctx);
-
-  await paginateTable(ctx, "orgs", async (orgs) => {
-    for (const org of orgs) {
-      await addOrgToPlatformStats(ctx, org._id);
-    }
-  });
-
-  await paginateTable(ctx, "users", async (users) => {
-    for (const user of users) {
-      await addUserToPlatformStats(ctx, user);
-    }
-  });
-
-  await paginateTable(ctx, "messages", async (messages) => {
-    for (const message of messages) {
-      await addMessageToPlatformStats(ctx, message._id);
-    }
-  });
-
+  await ctx.scheduler.runAfter(0, rebuildPageReference, { tableName: "orgs", cursor: null });
   return countPlatformStats(ctx);
 }
 

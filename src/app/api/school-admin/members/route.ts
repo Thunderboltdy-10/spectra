@@ -84,7 +84,7 @@ export async function POST(request: NextRequest) {
     }
 
     const orgSettings = await loadOrgSettingsName(actor.clerkId);
-    let result: { invitationId: string; token?: string };
+    let result: { invitationId: string; token?: string; alreadyPending?: boolean };
     try {
       result = await convexMutation<{
         actorClerkId: string;
@@ -101,7 +101,7 @@ export async function POST(request: NextRequest) {
         return badRequest("This email is already a member of the school.", 409);
       }
       if (msg.includes("SEAT_LIMIT_REACHED")) {
-        return badRequest("Student seat limit reached for this school. Please upgrade your plan.", 402);
+        return badRequest("No seats are available. Revoke an active invitation or remove a member first.", 409);
       }
       throw err;
     }
@@ -116,6 +116,12 @@ export async function POST(request: NextRequest) {
         })
       : { status: "skipped" as const, reason: "Invitation token was not generated." };
     if (emailResult.status !== "sent") {
+      if (!result.alreadyPending) {
+        await convexMutation("schoolAdmin:cancelInvitation", {
+          actorClerkId: actor.clerkId,
+          invitationId: result.invitationId,
+        }).catch(() => undefined);
+      }
       return badRequest(inviteDeliveryErrorMessage(emailResult.reason), 502);
     }
 
@@ -167,7 +173,7 @@ export async function PATCH(request: NextRequest) {
       const result = await convexMutation<{
         actorClerkId: string;
         invitationId: string;
-      }, { ok: boolean; token?: string; email?: string; role?: string }>("schoolAdmin:resendInvitation", {
+      }, { ok: boolean; token?: string; email?: string; role?: string; reactivated?: boolean }>("schoolAdmin:resendInvitation", {
         actorClerkId: actor.clerkId,
         invitationId: body.invitationId,
       });
@@ -182,6 +188,12 @@ export async function PATCH(request: NextRequest) {
              })
            : { status: "skipped" as const, reason: "Invitation token was not generated." };
        if (emailResult.status !== "sent") {
+         if (result.reactivated) {
+           await convexMutation("schoolAdmin:cancelInvitation", {
+             actorClerkId: actor.clerkId,
+             invitationId: body.invitationId,
+           }).catch(() => undefined);
+         }
          return badRequest(inviteDeliveryErrorMessage(emailResult.reason), 502);
        }
       return ok({
@@ -196,53 +208,18 @@ export async function PATCH(request: NextRequest) {
         return badRequest("School admins can only invite student or teacher roles");
       }
 
-      const accessRequest = await convexQuery<{
-        actorClerkId: string;
-        requestId: string;
-      }, { email: string }>("accessRequests:getOrgAccessRequest", {
+      const result = await convexMutation("accessRequests:approveAccessRequest", {
         actorClerkId: actor.clerkId,
         requestId: body.requestId,
-      });
-
-      const orgSettings = await loadOrgSettingsName(actor.clerkId);
-      const result = await convexMutation<{
-        actorClerkId: string;
-        email: string;
-        role: string;
-      }, { invitationId: string; token?: string }>("schoolAdmin:inviteMember", {
-        actorClerkId: actor.clerkId,
-        email: accessRequest.email,
         role: body.role,
       });
-
-       const joinUrl = result.token ? buildJoinUrl(result.token, new URL(request.url).origin) : undefined;
-      const emailResult = joinUrl
-        ? await sendInvitationEmail({
-            to: accessRequest.email,
-            role: body.role,
-            joinUrl,
-            orgName: orgSettings.org?.name,
-          })
-        : { status: "skipped" as const, reason: "Invitation token was not generated." };
-       if (emailResult.status !== "sent") {
-         return badRequest(inviteDeliveryErrorMessage(emailResult.reason), 502);
-       }
-
-      await convexMutation("accessRequests:resolveAccessRequest", {
-        actorClerkId: actor.clerkId,
-        requestId: body.requestId,
-        status: "invited",
-        role: body.role,
-      });
-
-      return ok({ ok: true, invitationId: result.invitationId, joinUrl, ...inviteDeliveryMetadata(emailResult) });
+      return ok(result);
     }
 
     if (body.action === "rejectAccessRequest" && body.requestId) {
-      await convexMutation("accessRequests:resolveAccessRequest", {
+      await convexMutation("accessRequests:rejectAccessRequest", {
         actorClerkId: actor.clerkId,
         requestId: body.requestId,
-        status: "rejected",
       });
       return ok({ ok: true });
     }

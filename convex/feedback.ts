@@ -3,18 +3,12 @@ import { v } from "convex/values";
 import { getUserByClerkId } from "./helpers";
 import { vFeedbackCategory, vFeedbackStatus } from "./shared";
 import type { Id } from "./_generated/dataModel";
-
-const SUPER_ADMIN_EMAILS = new Set(
-  (process.env.SUPER_ADMIN_EMAILS ?? "pablo.martinez.dovale@gmail.com")
-    .split(/[,\s;]+/)
-    .map((email) => email.trim().toLowerCase())
-    .filter(Boolean),
-);
+import { isSuperAdminEmail } from "./constants";
 
 async function requireSuperAdmin(ctx: Parameters<typeof getUserByClerkId>[0], actorClerkId: string) {
   const actor = await getUserByClerkId(ctx, actorClerkId);
   if (!actor) throw new Error("Unauthorized");
-  if (!SUPER_ADMIN_EMAILS.has(actor.email.trim().toLowerCase())) {
+  if (!isSuperAdminEmail(actor.email)) {
     throw new Error("Super admin access required");
   }
   return actor;
@@ -61,7 +55,7 @@ export const submitFeedback = mutation({
     });
 
     const superAdmins = (await ctx.db.query("users").collect()).filter((user) =>
-      SUPER_ADMIN_EMAILS.has(user.email.trim().toLowerCase()),
+      isSuperAdminEmail(user.email),
     );
     const preview = trimmedMessage.length > 140 ? `${trimmedMessage.slice(0, 137).trimEnd()}...` : trimmedMessage;
     for (const admin of superAdmins) {

@@ -8,6 +8,7 @@ import { decryptManagebacToken } from "../shared/managebac-crypto";
 import { fetchManagebacJson } from "../src/lib/managebac/client";
 import { normalizeManagebacStudentProfile } from "../src/lib/managebac/normalizer";
 import { prepareManagebacSyncPayload } from "../src/lib/managebac/sync";
+import { isSuperAdminEmail } from "./constants";
 import {
   mapAnnouncementsToCache,
   mapManagebacAssignmentToPlanner,
@@ -17,15 +18,8 @@ import {
   matchManagebacTimetableForClass,
   shouldCreateCasReflectionNote,
 } from "../src/lib/managebac/mapper";
-const SUPER_ADMIN_EMAILS = new Set(
-  (process.env.SUPER_ADMIN_EMAILS ?? "pablo.martinez.dovale@gmail.com")
-    .split(/[,\s;]+/)
-    .map((email) => email.trim().toLowerCase())
-    .filter(Boolean),
-);
-
 function requireAdmin(actor: Doc<"users"> | null) {
-  if (!actor || (actor.role !== "admin" && !SUPER_ADMIN_EMAILS.has(actor.email.trim().toLowerCase()))) {
+  if (!actor || (actor.role !== "admin" && !isSuperAdminEmail(actor.email))) {
     throw new Error("Only admin can manage ManageBac integration");
   }
   return actor;
@@ -403,7 +397,7 @@ export const manualSync = action({
   args: { actorClerkId: v.string() },
   handler: async (ctx, args): Promise<unknown> => {
     const actor = await ctx.runQuery(internal.managebacSync.getSyncActor, { actorClerkId: args.actorClerkId });
-    if (!actor || (actor.role !== "admin" && !SUPER_ADMIN_EMAILS.has(actor.email.trim().toLowerCase()))) {
+    if (!actor || (actor.role !== "admin" && !isSuperAdminEmail(actor.email))) {
       throw new Error("Only admin can trigger manual sync");
     }
     return ctx.runAction(internal.managebacSync.runOrgSyncInternal, { orgId: actor.orgId });

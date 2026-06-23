@@ -101,6 +101,13 @@ export async function PATCH(
         orgName: detail?.org?.name,
       });
       if (emailResult.status !== "sent") {
+        if (result.invitationCreated && typeof result.invitationId === "string") {
+          await convexMutation("superAdmin:revokeOrgInvitation", {
+            actorClerkId: actor.clerkId,
+            orgId: id,
+            invitationId: result.invitationId,
+          }).catch(() => undefined);
+        }
         throw new Error(`INVITATION_EMAIL_FAILED: ${emailResult.reason}`);
       }
       return ok({ ...result, joinUrl, ...inviteDeliveryMetadata(emailResult) });

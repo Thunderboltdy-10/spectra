@@ -306,7 +306,7 @@ function AppShellInner({
 
   const selectedChatId =
     pathname === "/chat"
-      ? (searchParams.get("chatId") ?? "")
+      ? (searchParams.get("threadId") ?? "")
       : "";
   const pageTourSteps = useMemo(
     () => PAGE_TOUR_STEPS[pathname] ?? BASE_TOUR_STEPS,
@@ -373,7 +373,7 @@ function AppShellInner({
           collapsed={!sidebar.sidebarOpen}
           onToggleCollapse={() => sidebar.setSidebarOpen((prev) => !prev)}
           onSearchChange={sidebar.setSearch}
-          onSelectChat={(chatId) => router.push(`/chat?chatId=${encodeURIComponent(chatId)}`)}
+          onSelectChat={(chatId) => router.push(`/chat?threadId=${encodeURIComponent(chatId)}`)}
           onNewChat={() => {
             try {
               window.localStorage.removeItem("ai-school:lastActiveChatId");

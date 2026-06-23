@@ -21,6 +21,9 @@ export async function GET(request: NextRequest) {
     const emails = (profile?.emailAddresses ?? [])
       .map((entry) => entry.emailAddress?.trim().toLowerCase())
       .filter((value): value is string => Boolean(value));
+    const viewerAccess = userId
+      ? await convexQuery<{ clerkId: string }, { orgId?: string } | null>("users:accessState", { clerkId: userId }).catch(() => null)
+      : null;
 
     if (!token) {
       return ok(deriveInvitationAuthState({
@@ -29,6 +32,7 @@ export async function GET(request: NextRequest) {
         emails,
         handoffToken,
         tokenProvided: false,
+        viewerOrgId: viewerAccess?.orgId,
       }));
     }
 
@@ -41,6 +45,7 @@ export async function GET(request: NextRequest) {
       orgName?: string;
       orgWelcomeMessage?: string;
       orgLogoUrl?: string;
+      capacityFull?: boolean;
     } | null>("schoolAdmin:getInvitationByToken", { token });
 
     if (!invitation) {
@@ -50,6 +55,7 @@ export async function GET(request: NextRequest) {
         emails,
         handoffToken,
         tokenProvided: true,
+        viewerOrgId: viewerAccess?.orgId,
       }));
     }
 
@@ -62,6 +68,7 @@ export async function GET(request: NextRequest) {
       emails,
       handoffToken,
       tokenProvided: true,
+      viewerOrgId: viewerAccess?.orgId,
     }));
   });
 }

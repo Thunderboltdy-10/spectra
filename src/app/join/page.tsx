@@ -1,438 +1,164 @@
 "use client";
 
-import { useEffect, useState, Suspense } from "react";
+import { Suspense, useEffect, useState } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useAuth } from "@clerk/nextjs";
-import Image from "next/image";
-import { CheckCircle2 } from "lucide-react";
+import { useAuth, useClerk } from "@clerk/nextjs";
+import { ArrowRight, Check, CircleAlert, Loader2, LogOut, School, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SpectraLogo } from "@/components/spectra-logo";
 import { hasClerkPublishableKey } from "@/lib/clerk-config";
-import { getAppUrl } from "@/lib/app-url";
 
-type InvitationData = {
-  token: string;
-  email: string;
-  role: string;
-  status: string;
-  orgId: string;
-  expiresAt: number;
-  orgName?: string;
-  orgWelcomeMessage?: string;
-  orgLogoUrl?: string;
-  alreadyAccepted?: boolean;
-};
+type InviteState =
+  | "token_missing" | "token_invalid" | "token_expired" | "token_revoked" | "token_over_capacity"
+  | "token_valid_signed_out" | "token_valid_signed_in_wrong_identity"
+  | "token_valid_signed_in_other_school" | "token_valid_signed_in_match_pending_redeem"
+  | "token_redeemed" | "token_already_redeemed_same_user" | "token_already_redeemed_other_user";
 
-type InvitationMachineState =
-  | "token_missing"
-  | "token_invalid"
-  | "token_expired"
-  | "token_valid_signed_out"
-  | "token_valid_signed_in_wrong_identity"
-  | "token_valid_signed_in_match_pending_redeem"
-  | "token_redeemed"
-  | "token_already_redeemed_same_user"
-  | "token_already_redeemed_other_user";
-
-type JoinStateResponse = {
-  state: InvitationMachineState;
-  invitation: InvitationData | null;
+type JoinPayload = {
+  state: InviteState;
   invitedEmail: string | null;
-  viewer: {
-    userId: string | null;
-    primaryEmail: string | null;
-    emails: string[];
-  };
-  shouldAutoRedirectToAuth: boolean;
+  invitation: null | { token: string; orgName?: string; role: string; orgLogoUrl?: string; expiresAt: number };
+  viewer: { userId: string | null; primaryEmail: string | null; emails: string[] };
   canRedeemNow: boolean;
 };
 
-type PageState =
-  | { status: "loading" }
-  | { status: "resolved"; payload: JoinStateResponse }
-  | { status: "error"; message: string };
-
-type JoinPageContentProps = {
-  isLoaded: boolean;
-  userId: string | null;
+const copy: Record<InviteState, { title: string; body: string; tone: "ok" | "warn" | "neutral" }> = {
+  token_missing: { title: "Invitation link missing", body: "Open the complete link from your invitation email, or request access to your school.", tone: "warn" },
+  token_invalid: { title: "Invitation not found", body: "This link is not valid. Ask a school admin to send a new invitation.", tone: "warn" },
+  token_expired: { title: "Invitation expired", body: "This invitation is no longer active. A school admin can resend it without changing your account.", tone: "warn" },
+  token_revoked: { title: "Invitation revoked", body: "A school admin cancelled this invitation. Contact them if you still need access.", tone: "warn" },
+  token_over_capacity: { title: "School is at capacity", body: "Your invitation is valid, but no seat is currently available. An admin must free a seat before you can join.", tone: "warn" },
+  token_valid_signed_out: { title: "Your place is reserved", body: "Sign in or create an account with the invited email. You will return here to accept access.", tone: "neutral" },
+  token_valid_signed_in_wrong_identity: { title: "This invitation is for another account", body: "Nothing is wrong with the link. Switch to the invited email to continue.", tone: "warn" },
+  token_valid_signed_in_other_school: { title: "Already connected to another school", body: "Spectra accounts can belong to one school. Contact an administrator if your membership should be changed.", tone: "warn" },
+  token_valid_signed_in_match_pending_redeem: { title: "Ready to join", body: "Your identity matches this invitation. Accept to activate your school access.", tone: "ok" },
+  token_redeemed: { title: "Access activated", body: "Your membership is ready.", tone: "ok" },
+  token_already_redeemed_same_user: { title: "You already have access", body: "This invitation was accepted previously. Continue to Spectra.", tone: "ok" },
+  token_already_redeemed_other_user: { title: "Invitation already used", body: "This invitation has already been accepted. Ask an admin for help if you believe this is incorrect.", tone: "warn" },
 };
 
-type RedeemState = { message: string | null };
-
-// Fire-and-forget: tell the server to drop the invitation cookie so the user
-// can navigate away from /join without the middleware snapping them back.
-async function clearInvitationCookie() {
-  try {
-    await fetch("/api/invitations/redeem", { method: "DELETE" });
-  } catch {
-    // Best-effort. The access-state endpoint also clears the cookie whenever
-    // the user has access, so a missed DELETE isn't catastrophic.
-  }
-}
-
-function JoinPageContent({ isLoaded, userId }: JoinPageContentProps) {
-  const searchParams = useSearchParams();
-  const token = searchParams.get("token");
-
-  const [state, setState] = useState<PageState>({ status: "loading" });
-  const [redeeming] = useState(false);
-  const [redeemState, setRedeemState] = useState<RedeemState>({ message: null });
+function JoinContent() {
+  const search = useSearchParams();
+  const { isLoaded } = useAuth();
+  const clerk = useClerk();
+  const token = search.get("token");
+  const [payload, setPayload] = useState<JoinPayload | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    void (async () => {
-      try {
-        const path = token ? `/api/join?token=${encodeURIComponent(token)}` : "/api/join";
-        const response = await fetch(path, { cache: "no-store" });
-        if (!response.ok) {
-          const text = await response.text();
-          let errorMessage = text || "Failed to load invitation.";
-          try {
-            const json = JSON.parse(text);
-            errorMessage = json.error?.message || json.message || errorMessage;
-          } catch {
-            // Keep original text if not JSON
-          }
-          setState({ status: "error", message: errorMessage });
-          return;
-        }
+    if (!isLoaded) return;
+    let cancelled = false;
+    void fetch(token ? `/api/join?token=${encodeURIComponent(token)}` : "/api/join", { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Invitation status could not be loaded.");
+        return response.json() as Promise<JoinPayload>;
+      })
+      .then((result) => { if (!cancelled) setPayload(result); })
+      .catch((reason) => { if (!cancelled) setError(reason instanceof Error ? reason.message : "Invitation status could not be loaded."); });
+    return () => { cancelled = true; };
+  }, [isLoaded, token]);
 
-        const data = (await response.json()) as JoinStateResponse;
-        setRedeemState({ message: null });
-        setState({ status: "resolved", payload: data });
-      } catch {
-        setState({ status: "error", message: "Could not verify invitation. Please try again." });
-      }
-    })();
-  }, [token]);
+  const returnPath = `/join${token ? `?token=${encodeURIComponent(token)}` : ""}`;
+  const authReturn = encodeURIComponent(returnPath);
 
-  // Whenever we land on a state where the invitation can't help the current
-  // user anymore, proactively clear the cookie so any subsequent navigation
-  // (Continue, Switch account, manual URL change) isn't redirected back here.
-  useEffect(() => {
-    if (state.status === "error") {
-      void clearInvitationCookie();
-    }
-  }, [state.status]);
-
-  useEffect(() => {
-    if (!isLoaded || state.status !== "resolved") {
-      return;
-    }
-
-    const { payload } = state;
-    const invitationToRedeem = payload.invitation;
-
-    if (payload.shouldAutoRedirectToAuth) {
-      if (payload.state === "token_valid_signed_in_wrong_identity") {
-        // We do NOT clear the cookie here, because the user needs it to
-        // switch to the correct account.
-        const signInUrl = process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL ?? "/sign-in";
-        const appUrl = getAppUrl(typeof window !== "undefined" ? window.location.origin : undefined);
-        const redirect = encodeURIComponent(`${appUrl}/join${token ? `?token=${encodeURIComponent(token)}` : ""}`);
-        window.location.href = `${signInUrl}?redirect_url=${redirect}`;
-        return;
-      }
-      if (payload.state === "token_valid_signed_out" || payload.state === "token_already_redeemed_other_user") {
-        const signInUrl = process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL ?? "/sign-in";
-        const appUrl = getAppUrl(typeof window !== "undefined" ? window.location.origin : undefined);
-        const redirect = encodeURIComponent(`${appUrl}/join${token ? `?token=${encodeURIComponent(token)}` : ""}`);
-        window.location.href = `${signInUrl}?redirect_url=${redirect}`;
-        return;
-      }
-      return;
-    }
-
-    if (payload.state === "token_already_redeemed_same_user" || payload.state === "token_redeemed") {
-      void clearInvitationCookie();
-      window.location.replace("/chat");
-      return;
-    }
-
-    // Auto-redirect if token is missing or invalid and user is signed out
-    if (!userId && (payload.state === "token_missing" || payload.state === "token_invalid")) {
-      void clearInvitationCookie();
-      const signInUrl = process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL ?? "/sign-in";
-      window.location.href = signInUrl;
-      return;
-    }
-
-    // Auto-redirect to request-access if token is missing/invalid and user is signed in
-    if (userId && (payload.state === "token_missing" || payload.state === "token_invalid")) {
-      void clearInvitationCookie();
-      window.location.replace("/request-access");
-      return;
-    }
-
-    // If we have an invitation and a matching user, but we haven't redeemed it yet,
-    // we show the "Join" button instead of auto-redeeming immediately.
-    // This gives the user a moment to see the school branding and confirm their entry.
-    if (!userId || redeeming || !payload.canRedeemNow || !invitationToRedeem) {
-      return;
-    }
-  }, [isLoaded, redeeming, state, token, userId]);
-
-  const resolvedPayload = state.status === "resolved" ? state.payload : null;
-  const invitation = resolvedPayload?.invitation ?? null;
-  const viewerEmail = resolvedPayload?.viewer.primaryEmail ?? null;
-  const viewerEmails = resolvedPayload?.viewer.emails ?? [];
-  const viewerHasMatchingEmail = invitation
-    ? viewerEmails.some((email) => email.toLowerCase() === invitation.email.toLowerCase())
-    : false;
-
-  const shouldAutoRedirect = resolvedPayload && (
-    resolvedPayload.shouldAutoRedirectToAuth ||
-    (!userId && (resolvedPayload.state === "token_missing" || resolvedPayload.state === "token_invalid")) ||
-    (userId && (resolvedPayload.state === "token_missing" || resolvedPayload.state === "token_invalid")) ||
-    (resolvedPayload.state === "token_already_redeemed_same_user" || resolvedPayload.state === "token_redeemed")
-  );
-
-  async function goToSignIn() {
-    // Only clear cookie if it's genuinely invalid/expired.
-    // Mismatch scenarios should PRESERVE the cookie.
-    await clearInvitationCookie();
-    const signInUrl = process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL ?? "/sign-in";
-    window.location.assign(signInUrl);
-  }
-
-  if (state.status === "loading" || shouldAutoRedirect) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-[var(--bg-primary)]">
-        <div className="flex flex-col items-center gap-4">
-          <SpectraLogo size={56} showTile className="animate-pulse" />
-          <p className="text-sm text-[var(--text-secondary)]">
-            {state.status === "loading" ? "Verifying invitation..." : "Redirecting you..."}
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  // If we reach here and status is error, it means the API call failed entirely.
-  // In that case, we should try to redirect them to /chat if they are signed in,
-  // or /sign-in if they are not, instead of showing an error.
-  if (state.status === "error") {
-    if (isLoaded) {
-      if (userId) {
-        window.location.replace("/chat");
-      } else {
-        void goToSignIn();
-      }
-    }
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-[var(--bg-primary)]">
-        <div className="flex flex-col items-center gap-4">
-          <SpectraLogo size={56} showTile className="animate-pulse" />
-          <p className="text-sm text-[var(--text-secondary)]">Redirecting you...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (state.status === "resolved" && state.payload.state === "token_expired") {
-    // Instead of showing an expired screen, let's also just try to get them in
-    // if they already have access, or send them to sign-in if not.
-    if (userId) {
-      window.location.replace("/chat");
-    } else {
-      void goToSignIn();
-    }
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-[var(--bg-primary)]">
-        <div className="flex flex-col items-center gap-4">
-          <SpectraLogo size={56} showTile className="animate-pulse" />
-          <p className="text-sm text-[var(--text-secondary)]">Redirecting you...</p>
-        </div>
-      </div>
-    );
-  }
-
-  // Final fallback: if somehow we are in a state that doesn't render above
-  // (like token_invalid while signed in), force a redirect to /chat.
-  if (state.status === "resolved" && (state.payload.state === "token_invalid" || state.payload.state === "token_missing")) {
-    if (userId) {
-      window.location.replace("/chat");
-    } else {
-      void goToSignIn();
-    }
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-[var(--bg-primary)]">
-        <div className="flex flex-col items-center gap-4">
-          <SpectraLogo size={56} showTile className="animate-pulse" />
-          <p className="text-sm text-[var(--text-secondary)]">Redirecting you...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (state.status === "resolved" && state.payload.state === "token_already_redeemed_same_user") {
-    if (viewerHasMatchingEmail) {
-      return (
-        <div className="flex min-h-screen items-center justify-center bg-[var(--bg-primary)]">
-          <div className="flex flex-col items-center gap-4">
-            <SpectraLogo size={56} showTile className="animate-pulse" />
-            <p className="text-sm text-[var(--text-secondary)]">Redirecting you to your workspace...</p>
-          </div>
-        </div>
-      );
+  async function accept() {
+    if (!payload?.invitation || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/invitations/redeem", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: payload.invitation.token }),
+      });
+      const result = await response.json().catch(() => null) as { error?: { message?: string } } | null;
+      if (!response.ok) throw new Error(result?.error?.message ?? "Invitation could not be accepted.");
+      window.location.replace("/onboarding");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Invitation could not be accepted.");
+      setBusy(false);
     }
   }
 
-  if (!invitation) {
-    return null;
+  async function switchAccount() {
+    await fetch("/api/invitations/redeem", { method: "DELETE" }).catch(() => undefined);
+    await clerk.signOut({ redirectUrl: `/sign-in?redirect_url=${authReturn}` });
   }
 
-  const resolvedInvitation = invitation;
+  if (!payload && !error) return <div className="flex min-h-screen items-center justify-center bg-[#f2f0e9]"><Loader2 className="h-6 w-6 animate-spin text-[#315c56]" /></div>;
 
-  const expiryDate = new Date(resolvedInvitation.expiresAt).toLocaleDateString("en-GB", {
-    day: "2-digit",
-    month: "long",
-    year: "numeric",
-  });
-
-  function handleJoin() {
-    const signUpUrl = process.env.NEXT_PUBLIC_CLERK_SIGN_UP_URL ?? "/sign-up";
-    const appUrl = getAppUrl(typeof window !== "undefined" ? window.location.origin : undefined);
-    const redirect = encodeURIComponent(`${appUrl}/join?token=${encodeURIComponent(resolvedInvitation.token)}`);
-    const emailParam = `email_address=${encodeURIComponent(resolvedInvitation.email)}`;
-    window.location.href = `${signUpUrl}?${emailParam}&redirect_url=${redirect}`;
-  }
-
-  function handleSignIn() {
-    const signInUrl = process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL ?? "/sign-in";
-    const appUrl = getAppUrl(typeof window !== "undefined" ? window.location.origin : undefined);
-    const redirect = encodeURIComponent(`${appUrl}/join?token=${encodeURIComponent(resolvedInvitation.token)}`);
-    window.location.href = `${signInUrl}?redirect_url=${redirect}`;
-  }
-
-  async function handleSwitchAccount() {
-    // The user needs to leave /join and authenticate as someone else.
-    // Clear the cookie first so the middleware doesn't drag them back.
-    await clearInvitationCookie();
-    handleSignIn();
-  }
+  const state = payload?.state ?? "token_invalid";
+  const message = copy[state];
+  const signedOut = state === "token_valid_signed_out";
+  const switchNeeded = state === "token_valid_signed_in_wrong_identity";
+  const canEnter = state === "token_already_redeemed_same_user" || state === "token_redeemed";
+  const icon = message.tone === "ok" ? <Check className="h-5 w-5" /> : message.tone === "warn" ? <CircleAlert className="h-5 w-5" /> : <ShieldCheck className="h-5 w-5" />;
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[var(--bg-primary)] px-4">
-      {/* Background accent */}
-      <div
-        className="pointer-events-none absolute inset-0 overflow-hidden"
-        aria-hidden="true"
-      >
-        <div className="absolute -top-32 left-1/2 h-96 w-96 -translate-x-1/2 rounded-full bg-[color-mix(in_oklab,var(--accent-cyan)_8%,transparent)] blur-3xl" />
+    <main className="relative min-h-screen overflow-hidden bg-[#f2f0e9] px-5 py-8 text-[#182522] sm:px-8 sm:py-12">
+      <div className="pointer-events-none absolute inset-0 opacity-[0.28]" style={{ backgroundImage: "linear-gradient(#9ba8a2 1px, transparent 1px), linear-gradient(90deg, #9ba8a2 1px, transparent 1px)", backgroundSize: "38px 38px" }} />
+      <div className="relative mx-auto flex min-h-[calc(100vh-6rem)] max-w-5xl flex-col">
+        <header className="flex items-center justify-between border-b border-[#aab4ae] pb-5">
+          <SpectraLogo size={30} />
+          <Link href="/landing" className="text-xs font-semibold uppercase tracking-[0.18em] text-[#53635e] hover:text-[#182522]">Home</Link>
+        </header>
+
+        <section className="grid flex-1 items-center gap-10 py-12 lg:grid-cols-[1.05fr_.95fr]">
+          <div>
+            <p className="mb-5 text-xs font-bold uppercase tracking-[0.24em] text-[#b15136]">School access / verified handoff</p>
+            <h1 className="max-w-2xl font-display text-5xl leading-[0.98] tracking-[-0.045em] sm:text-7xl">{message.title}</h1>
+            <p className="mt-6 max-w-xl text-lg leading-8 text-[#52615d]">{message.body}</p>
+          </div>
+
+          <div className="border border-[#899890] bg-[#fbfaf5] shadow-[12px_12px_0_#cad0ca]">
+            <div className="flex items-center gap-3 border-b border-[#b5beb8] px-6 py-5">
+              <span className={`flex h-10 w-10 items-center justify-center rounded-full ${message.tone === "ok" ? "bg-[#d9eadc] text-[#236142]" : message.tone === "warn" ? "bg-[#f4dfd5] text-[#9b432e]" : "bg-[#d9e5e2] text-[#315c56]"}`}>{icon}</span>
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#66736f]">Invitation status</p>
+                <p className="mt-0.5 font-semibold">{message.tone === "ok" ? "Eligible" : message.tone === "warn" ? "Action needed" : "Identity required"}</p>
+              </div>
+            </div>
+
+            <div className="space-y-5 p-6">
+              {payload?.invitation ? (
+                <div className="space-y-3 border-l-2 border-[#315c56] pl-4">
+                  <div className="flex items-center gap-2"><School className="h-4 w-4 text-[#315c56]" /><span className="font-semibold">{payload.invitation.orgName ?? "Your school"}</span></div>
+                  <p className="text-sm text-[#5e6b67]">Invited as <span className="font-medium text-[#182522]">{payload.invitation.role}</span></p>
+                  <p className="break-all text-sm text-[#5e6b67]">For <span className="font-medium text-[#182522]">{payload.invitedEmail}</span></p>
+                </div>
+              ) : null}
+              {switchNeeded ? <p className="rounded-sm bg-[#f3e7df] px-4 py-3 text-sm text-[#704133]">Currently signed in as {payload?.viewer.primaryEmail ?? "another account"}.</p> : null}
+              {error ? <p role="alert" className="border border-[#cf8f7e] bg-[#fff1eb] px-4 py-3 text-sm text-[#8f3521]">{error}</p> : null}
+
+              <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+                {payload?.canRedeemNow ? <Button onClick={() => void accept()} disabled={busy} className="gap-2">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}Accept and enter Spectra</Button> : null}
+                {signedOut ? <><Button asChild><Link href={`/sign-in?redirect_url=${authReturn}`}>Sign in <ArrowRight className="ml-2 h-4 w-4" /></Link></Button><Button asChild variant="outline"><Link href={`/sign-up?redirect_url=${authReturn}`}>Create account</Link></Button></> : null}
+                {switchNeeded ? <Button onClick={() => void switchAccount()} variant="outline" className="gap-2"><LogOut className="h-4 w-4" />Switch account</Button> : null}
+                {canEnter ? <Button asChild><Link href="/chat">Continue to Spectra <ArrowRight className="ml-2 h-4 w-4" /></Link></Button> : null}
+                {!signedOut && !switchNeeded && !payload?.canRedeemNow && !canEnter ? <Button asChild variant="outline"><Link href="/request-access">Request access</Link></Button> : null}
+              </div>
+            </div>
+          </div>
+        </section>
       </div>
-
-      <div className="relative w-full max-w-md">
-        <div className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-8 shadow-[var(--shadow-hover)]">
-          {/* School branding */}
-          <div className="mb-6 flex flex-col items-center text-center">
-            {invitation.orgLogoUrl ? (
-              <Image
-                src={invitation.orgLogoUrl}
-                alt={invitation.orgName ?? "School"}
-                width={64}
-                height={64}
-                className="mb-3 h-16 w-16 rounded-2xl border border-[var(--border-default)] object-cover shadow-[var(--shadow-card)]"
-              />
-            ) : (
-              <SpectraLogo size={64} showTile className="mb-3" />
-            )}
-            <h1 className="font-display text-2xl text-[var(--text-primary)]">
-              {invitation.orgName ?? "Spectra"}
-            </h1>
-            <p className="mt-1 text-sm text-[var(--text-secondary)]">
-              You&apos;ve been invited to join
-            </p>
-          </div>
-
-          {/* Welcome message */}
-          {invitation.orgWelcomeMessage && (
-            <div className="mb-5 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3">
-              <p className="text-sm text-[var(--text-primary)]">{invitation.orgWelcomeMessage}</p>
-            </div>
-          )}
-
-          {/* Invitation details */}
-          <div className="mb-6 space-y-2 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-[var(--text-secondary)]">Invited as</span>
-              <span className="font-medium capitalize text-[var(--text-primary)]">{invitation.role}</span>
-            </div>
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-[var(--text-secondary)]">Email</span>
-              <span className="font-medium text-[var(--text-primary)]">{invitation.email}</span>
-            </div>
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-[var(--text-secondary)]">Expires</span>
-              <span className="text-[var(--text-secondary)]">{expiryDate}</span>
-            </div>
-          </div>
-
-          {/* Accepted indicator */}
-          <div className="mb-4 flex items-center gap-2 rounded-xl border border-[color-mix(in_oklab,var(--success)_30%,var(--border-default))] bg-[color-mix(in_oklab,var(--success)_6%,transparent)] px-4 py-3">
-            <CheckCircle2 className="h-4 w-4 shrink-0 text-[var(--success)]" />
-            <p className="text-xs text-[var(--success)]">
-              {userId ? "This invitation will only be accepted by the invited email address." : "Redirecting you to sign in or sign up with the invited email address."}
-            </p>
-          </div>
-
-          {userId && viewerEmail && !viewerHasMatchingEmail ? (
-            <div className="mb-4 rounded-xl border border-[color-mix(in_oklab,var(--warning)_28%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_8%,transparent)] px-4 py-3 text-xs text-[var(--warning)]">
-              You are signed in as {viewerEmail}, but this invitation is for {invitation.email}. Switch to an account that has that email attached.
-            </div>
-          ) : null}
-
-          {/* CTA */}
-          <div className="space-y-3">
-            <Button
-              onClick={userId ? undefined : handleJoin}
-              className="w-full cursor-pointer"
-              disabled={redeeming || Boolean(userId)}
-            >
-              {redeeming ? "Joining..." : userId ? "Checking invitation..." : `Continue to join ${invitation.orgName ?? "School"}`}
-            </Button>
-            {!userId ? (
-              <Button onClick={handleSignIn} variant="secondary" className="w-full cursor-pointer">
-                Sign in with existing account
-              </Button>
-            ) : viewerEmail && !viewerHasMatchingEmail ? (
-              <Button
-                variant="secondary"
-                className="w-full cursor-pointer"
-                onClick={() => void handleSwitchAccount()}
-              >
-                Switch account
-              </Button>
-            ) : null}
-          </div>
-
-          {redeemState.message ? (
-            <div className="mt-4 rounded-xl border border-[color-mix(in_oklab,var(--warning)_28%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_8%,transparent)] px-4 py-3 text-xs text-[var(--warning)]">
-              {redeemState.message}
-            </div>
-          ) : null}
-        </div>
-      </div>
-    </div>
+    </main>
   );
-}
-
-function JoinPageContentWithClerk() {
-  const { isLoaded, userId } = useAuth();
-  return <JoinPageContent isLoaded={isLoaded} userId={userId ?? null} />;
 }
 
 export default function JoinPage() {
-  return (
-    <Suspense fallback={
-      <div className="flex min-h-screen items-center justify-center bg-[var(--bg-primary)]">
-        <SpectraLogo size={32} className="animate-pulse" />
-      </div>
-    }>
-      {hasClerkPublishableKey() ? (
-        <JoinPageContentWithClerk />
-      ) : (
-        <JoinPageContent isLoaded userId={null} />
-      )}
-    </Suspense>
-  );
+  const clerkEnabled = hasClerkPublishableKey();
+  if (!clerkEnabled) {
+    return (
+      <main className="grid min-h-screen place-items-center bg-[#f2f0e9] px-6 text-[#182522]">
+        <div className="max-w-md border border-[#899890] bg-[#fbfaf5] p-8 shadow-[10px_10px_0_#cad0ca]">
+          <h1 className="font-display text-3xl">Authentication is not configured</h1>
+          <p className="mt-3 text-sm leading-6 text-[#52615d]">Configure Clerk to test invitation handoffs. The rest of the local Spectra demo remains available.</p>
+          <Button asChild variant="outline" className="mt-5"><Link href="/">Go home</Link></Button>
+        </div>
+      </main>
+    );
+  }
+  return <Suspense fallback={<div className="min-h-screen bg-[#f2f0e9]" />}><JoinContent /></Suspense>;
 }

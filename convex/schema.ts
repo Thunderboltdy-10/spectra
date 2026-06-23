@@ -104,6 +104,7 @@ export default defineSchema({
     invitedAt: v.optional(v.number()),
     lastActiveAt: v.optional(v.number()),
     onboardingComplete: v.optional(v.boolean()),
+    starterWorkspaceCreatedAt: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
@@ -550,6 +551,7 @@ export default defineSchema({
     .index("by_owner", ["ownerUserId"])
     .index("by_owner_status", ["ownerUserId", "status"])
     .index("by_owner_updated", ["ownerUserId", "updatedAt"])
+    .index("by_owner_status_updated", ["ownerUserId", "status", "updatedAt"])
     .index("by_org", ["orgId"])
     .searchIndex("search_title", {
       searchField: "title",
@@ -1255,9 +1257,18 @@ export default defineSchema({
     email: v.string(),
     role: vRole,
     invitedBy: v.id("users"),
-    status: v.union(v.literal("pending"), v.literal("accepted"), v.literal("expired")),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("accepted"),
+      v.literal("expired"),
+      v.literal("revoked"),
+    ),
     token: v.string(),
+    acceptedBy: v.optional(v.id("users")),
+    acceptedAt: v.optional(v.number()),
+    revokedAt: v.optional(v.number()),
     createdAt: v.number(),
+    updatedAt: v.optional(v.number()),
     expiresAt: v.number(),
   })
     .index("by_org", ["orgId"])
@@ -1285,10 +1296,12 @@ export default defineSchema({
     status: v.union(
       v.literal("pending"),
       v.literal("invited"),
+      v.literal("approved"),
       v.literal("rejected"),
     ),
     resolvedRole: v.optional(vRole),
     resolvedBy: v.optional(v.id("users")),
+    resolvedAt: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
@@ -1324,4 +1337,305 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index("by_created", ["createdAt"]),
+
+  spectraWorkspaces: defineTable({
+    ownerUserId: v.id("users"),
+    orgId: v.optional(v.id("orgs")),
+    title: v.string(),
+    description: v.optional(v.string()),
+    icon: v.optional(v.string()),
+    color: v.optional(v.string()),
+    starterKey: v.optional(v.string()),
+    // Transitional compatibility for documents written before workspace pinning
+    // moved to spectraWorkspaceItems.viewData. Seed repair removes this field.
+    pinned: v.optional(v.boolean()),
+    status: v.union(v.literal("active"), v.literal("archived")),
+    defaultView: v.union(
+      v.literal("cards"),
+      v.literal("canvas"),
+      v.literal("timeline"),
+      v.literal("library"),
+    ),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    lastActivityAt: v.number(),
+  })
+    .index("by_owner_status", ["ownerUserId", "status"])
+    .index("by_owner_starter", ["ownerUserId", "starterKey"])
+    .index("by_org_status", ["orgId", "status"])
+    .index("by_owner_activity", ["ownerUserId", "lastActivityAt"]),
+
+  spectraArtifacts: defineTable({
+    ownerUserId: v.id("users"),
+    orgId: v.optional(v.id("orgs")),
+    blueprintKey: v.string(),
+    title: v.string(),
+    summary: v.optional(v.string()),
+    content: v.any(),
+    textIndex: v.optional(v.string()),
+    tags: v.array(v.string()),
+    // Transitional compatibility for legacy object-level pinning. Pin state
+    // now belongs to spectraWorkspaceItems.viewData.
+    pinned: v.optional(v.boolean()),
+    status: v.union(
+      v.literal("active"),
+      v.literal("draft"),
+      v.literal("archived"),
+      v.literal("deleted"),
+    ),
+    createdFrom: v.optional(v.object({
+      source: v.union(
+        v.literal("chat"),
+        v.literal("workspace"),
+        v.literal("artifact"),
+        v.literal("manual"),
+        v.literal("ai"),
+      ),
+      threadId: v.optional(v.id("spectraThreads")),
+      runId: v.optional(v.id("spectraAiRuns")),
+      workspaceId: v.optional(v.id("spectraWorkspaces")),
+      sourceArtifactIds: v.optional(v.array(v.id("spectraArtifacts"))),
+      sourceThreadIds: v.optional(v.array(v.id("spectraThreads"))),
+      sourceAttachmentNames: v.optional(v.array(v.string())),
+      contextSummary: v.optional(v.string()),
+    })),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_owner_status", ["ownerUserId", "status"])
+    .index("by_owner_updated", ["ownerUserId", "updatedAt"])
+    .index("by_owner_status_updated", ["ownerUserId", "status", "updatedAt"])
+    .index("by_owner_blueprint", ["ownerUserId", "blueprintKey"])
+    .index("by_created_workspace", ["createdFrom.workspaceId"])
+    .searchIndex("search_text", {
+      searchField: "textIndex",
+      filterFields: ["ownerUserId", "blueprintKey", "status"],
+    }),
+
+  spectraArtifactVersions: defineTable({
+    artifactId: v.id("spectraArtifacts"),
+    ownerUserId: v.id("users"),
+    source: v.union(v.literal("manual"), v.literal("ai"), v.literal("revert")),
+    runId: v.optional(v.id("spectraAiRuns")),
+    before: v.any(),
+    after: v.any(),
+    summary: v.optional(v.string()),
+    provenance: v.optional(v.any()),
+    createdAt: v.number(),
+  })
+    .index("by_artifact_created", ["artifactId", "createdAt"])
+    .index("by_run", ["runId"]),
+
+  spectraArtifactLinks: defineTable({
+    ownerUserId: v.id("users"),
+    orgId: v.optional(v.id("orgs")),
+    sourceArtifactId: v.id("spectraArtifacts"),
+    targetArtifactId: v.id("spectraArtifacts"),
+    relationType: v.union(
+      v.literal("related"),
+      v.literal("supports"),
+      v.literal("contradicts"),
+      v.literal("source_for"),
+      v.literal("generated_from"),
+      v.literal("follow_up"),
+      v.literal("belongs_with"),
+    ),
+    label: v.optional(v.string()),
+    explanation: v.optional(v.string()),
+    provenance: v.object({
+      source: v.union(v.literal("user"), v.literal("ai"), v.literal("system")),
+      runId: v.optional(v.id("spectraAiRuns")),
+      reason: v.optional(v.string()),
+    }),
+    createdBy: v.union(v.literal("user"), v.literal("ai"), v.literal("system")),
+    workspaceId: v.optional(v.id("spectraWorkspaces")),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_source", ["sourceArtifactId", "createdAt"])
+    .index("by_target", ["targetArtifactId", "createdAt"])
+    .index("by_workspace", ["workspaceId", "createdAt"])
+    .index("by_pair", ["sourceArtifactId", "targetArtifactId"]),
+
+  spectraWorkspaceItems: defineTable({
+    workspaceId: v.id("spectraWorkspaces"),
+    sourceType: v.union(
+      v.literal("artifact"),
+      v.literal("thread"),
+      v.literal("task"),
+      v.literal("widget"),
+      v.literal("custom"),
+    ),
+    sourceId: v.string(),
+    viewData: v.object({
+      titleOverride: v.optional(v.string()),
+      compactSummary: v.optional(v.string()),
+      cardVariant: v.optional(v.string()),
+      pinned: v.optional(v.boolean()),
+      hidden: v.optional(v.boolean()),
+    }),
+    layout: v.object({
+      view: v.union(v.literal("cards"), v.literal("canvas"), v.literal("timeline")),
+      position: v.optional(v.object({ x: v.number(), y: v.number() })),
+      size: v.optional(v.object({ w: v.number(), h: v.number() })),
+      zIndex: v.optional(v.number()),
+      collapsed: v.optional(v.boolean()),
+    }),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_workspace", ["workspaceId"])
+    .index("by_workspace_updated", ["workspaceId", "updatedAt"])
+    .index("by_workspace_source", ["workspaceId", "sourceType", "sourceId"])
+    .index("by_source", ["sourceType", "sourceId"]),
+
+  spectraThreads: defineTable({
+    ownerUserId: v.id("users"),
+    orgId: v.optional(v.id("orgs")),
+    title: v.string(),
+    summaryShort: v.optional(v.string()),
+    summaryLong: v.optional(v.string()),
+    origin: v.union(v.literal("chat"), v.literal("workspace"), v.literal("artifact")),
+    workspaceId: v.optional(v.id("spectraWorkspaces")),
+    artifactId: v.optional(v.id("spectraArtifacts")),
+    pinned: v.optional(v.boolean()),
+    messageCount: v.optional(v.number()),
+    lastRunId: v.optional(v.id("spectraAiRuns")),
+    status: v.union(v.literal("active"), v.literal("archived"), v.literal("deleted")),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    lastMessageAt: v.optional(v.number()),
+  })
+    .index("by_owner_status", ["ownerUserId", "status"])
+    .index("by_workspace", ["workspaceId"])
+    .index("by_artifact", ["artifactId"]),
+
+  spectraMessages: defineTable({
+    threadId: v.id("spectraThreads"),
+    role: v.union(v.literal("user"), v.literal("assistant"), v.literal("system"), v.literal("tool")),
+    content: v.string(),
+    runId: v.optional(v.id("spectraAiRuns")),
+    clientMessageId: v.optional(v.string()),
+    metadata: v.optional(v.any()),
+    createdAt: v.number(),
+  })
+    .index("by_thread", ["threadId"])
+    .index("by_thread_created", ["threadId", "createdAt"])
+    .index("by_thread_client", ["threadId", "clientMessageId"])
+    .index("by_run", ["runId"]),
+
+  spectraAiRuns: defineTable({
+    ownerUserId: v.id("users"),
+    orgId: v.optional(v.id("orgs")),
+    sourceSurface: v.union(v.literal("chat"), v.literal("workspace"), v.literal("artifact")),
+    threadId: v.optional(v.id("spectraThreads")),
+    workspaceId: v.optional(v.id("spectraWorkspaces")),
+    artifactId: v.optional(v.id("spectraArtifacts")),
+    status: v.union(
+      v.literal("queued"),
+      v.literal("running"),
+      v.literal("awaiting_confirmation"),
+      v.literal("completed"),
+      v.literal("failed"),
+      v.literal("cancelled"),
+    ),
+    userPrompt: v.string(),
+    decision: v.optional(v.union(v.literal("answer"), v.literal("operate"), v.literal("clarify"), v.literal("refuse"))),
+    planIntent: v.optional(v.any()),
+    finalSummary: v.optional(v.string()),
+    suggestedThreadTitle: v.optional(v.string()),
+    suggestedThreadSummary: v.optional(v.string()),
+    error: v.optional(v.string()),
+    modelUsed: v.optional(v.string()),
+    providerUsed: v.optional(v.string()),
+    usage: v.optional(v.any()),
+    sessionId: v.optional(v.string()),
+    contextSnapshot: v.optional(v.any()),
+    attemptCount: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    completedAt: v.optional(v.number()),
+  })
+    .index("by_owner_status", ["ownerUserId", "status"])
+    .index("by_owner_created", ["ownerUserId", "createdAt"])
+    .index("by_workspace", ["workspaceId"])
+    .index("by_thread", ["threadId"])
+    .index("by_artifact", ["artifactId"]),
+
+  spectraOperations: defineTable({
+    runId: v.optional(v.id("spectraAiRuns")),
+    actorType: v.union(v.literal("user"), v.literal("ai"), v.literal("system")),
+    type: v.string(),
+    status: v.union(
+      v.literal("proposed"),
+      v.literal("executing"),
+      v.literal("executed"),
+      v.literal("failed"),
+      v.literal("cancelled"),
+    ),
+    input: v.any(),
+    output: v.optional(v.any()),
+    affected: v.array(v.object({ type: v.string(), id: v.string() })),
+    requiresConfirmation: v.optional(v.boolean()),
+    undoData: v.optional(v.any()),
+    createdAt: v.number(),
+    executedAt: v.optional(v.number()),
+  })
+    .index("by_run", ["runId"])
+    .index("by_type_status", ["type", "status"]),
+
+  spectraResultCards: defineTable({
+    runId: v.id("spectraAiRuns"),
+    surface: v.union(v.literal("chat"), v.literal("workspace"), v.literal("artifact")),
+    workspaceId: v.optional(v.id("spectraWorkspaces")),
+    artifactId: v.optional(v.id("spectraArtifacts")),
+    status: v.union(
+      v.literal("queued"),
+      v.literal("running"),
+      v.literal("awaiting_confirmation"),
+      v.literal("completed"),
+      v.literal("failed"),
+      v.literal("cancelled"),
+    ),
+    variant: v.union(
+      v.literal("status"),
+      v.literal("artifact"),
+      v.literal("thread"),
+      v.literal("operation"),
+      v.literal("error"),
+    ),
+    title: v.string(),
+    summary: v.optional(v.string()),
+    actions: v.array(v.object({
+      key: v.string(),
+      label: v.string(),
+      targetType: v.optional(v.union(
+        v.literal("artifact"),
+        v.literal("thread"),
+        v.literal("run"),
+        v.literal("workspace"),
+      )),
+      targetId: v.optional(v.string()),
+    })),
+    provenance: v.optional(v.any()),
+    hiddenAt: v.optional(v.number()),
+    keptAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_run", ["runId"])
+    .index("by_workspace_status", ["workspaceId", "status"])
+    .index("by_artifact_status", ["artifactId", "status"]),
+
+  spectraFocusSpaces: defineTable({
+    workspaceId: v.optional(v.id("spectraWorkspaces")),
+    title: v.string(),
+    selected: v.array(v.object({
+      type: v.union(v.literal("artifact"), v.literal("thread"), v.literal("workspaceItem")),
+      id: v.string(),
+    })),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_workspace", ["workspaceId"]),
 });

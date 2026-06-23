@@ -28,7 +28,6 @@ import {
   Star,
   Timer,
   Trash2,
-  StickyNote,
   UserRound,
 } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -57,8 +56,6 @@ const EMPTY_PINNED_IDS = new Set<string>();
 const BASE_PRIMARY_NAV_ITEMS = [
   { href: "/chat", label: "Chat", icon: Sparkles },
   { href: "/workspace", label: "Workspace", icon: Layers },
-  { href: "/artifacts", label: "Artifacts", icon: StickyNote },
-  { href: "/agents", label: "Agents", icon: Bot },
 ];
 
 type ChatSidebarProps = {
@@ -242,7 +239,8 @@ function ChatSidebarImpl({
   const canAccessSchoolAdmin = role === "admin" || isSuperAdmin;
   const canAccessAdminConsole = role === "admin" || isSuperAdmin;
   const primaryNavItems = BASE_PRIMARY_NAV_ITEMS;
-  const secondaryNavItems = [
+  const deferredNavItems = [
+    { href: "/agents", label: "Agents", icon: Bot },
     { href: "/models", label: "Models", icon: Compass },
     { href: "/analytics", label: "Analytics", icon: BarChart3 },
     ...(canAccessAdminConsole || canAccessSchoolAdmin ? [{ href: "/admin", label: "Admin", icon: LayoutDashboard }] : []),
@@ -253,8 +251,7 @@ function ChatSidebarImpl({
         ]
       : []),
   ];
-  const orderedPrimaryNavItems = primaryNavItems;
-  const allNavItems = [...orderedPrimaryNavItems, ...secondaryNavItems].filter(
+  const secondaryNavItems = deferredNavItems.filter(
     (item, index, all) => all.findIndex((candidate) => candidate.href === item.href) === index,
   );
   const refreshGamification = useCallback(async () => {
@@ -375,7 +372,7 @@ function ChatSidebarImpl({
         </div>
 
         <div data-tour="sidebar-pages" className="mx-auto flex min-h-0 w-full flex-1 flex-col items-center gap-1 overflow-y-auto pr-0.5">
-          {allNavItems.map((item) => {
+          {primaryNavItems.map((item) => {
             const Icon = item.icon;
             const active = isNavActive(pathname, item.href);
             return (
@@ -398,6 +395,32 @@ function ChatSidebarImpl({
               </div>
             );
           })}
+          <div className="my-2 h-px w-6 bg-[var(--border-default)]" />
+          <div className="flex flex-col items-center gap-1">
+            {secondaryNavItems.map((item) => {
+              const Icon = item.icon;
+              const active = isNavActive(pathname, item.href);
+              return (
+                <div key={item.href} className="relative flex flex-col items-center">
+                  <Link
+                    href={item.href}
+                    title={item.label}
+                    className={cn(
+                      "inline-flex h-9.5 w-9.5 items-center justify-center rounded-xl transition-colors",
+                      active
+                        ? "bg-[color-mix(in_oklab,var(--accent-cyan)_12%,transparent)] text-[var(--text-primary)]"
+                        : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
+                    )}
+                  >
+                    <Icon className="h-4 w-4" />
+                  </Link>
+                  {active && (
+                    <span className="mt-0.5 h-1 w-1 rounded-full bg-[var(--accent-cyan)]" />
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
 
         <div className="mt-3 flex min-h-0 flex-col items-center gap-2 overflow-visible">
@@ -489,8 +512,30 @@ function ChatSidebarImpl({
 
       <div className="mb-3" data-tour="sidebar-pages">
         <p className="mb-1 px-3 text-[9px] uppercase tracking-[0.2em] text-[var(--text-tertiary)]">Navigation</p>
-        <div ref={pageNavScrollRef} className="overflow-y-auto max-h-[192px] pb-4 [mask-image:linear-gradient(to_bottom,black_85%,transparent)]">
-          {allNavItems.map((item) => {
+        <div ref={pageNavScrollRef} className="space-y-1">
+          {primaryNavItems.map((item) => {
+            const Icon = item.icon;
+            const active = isNavActive(pathname, item.href);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                title={item.label}
+                data-nav-active={active ? "true" : "false"}
+                className={cn(
+                  "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors",
+                  active
+                    ? "bg-[color-mix(in_oklab,var(--accent-cyan)_12%,transparent)] text-[var(--text-primary)]"
+                    : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
+                )}
+              >
+                <Icon className="h-4 w-4 shrink-0" />
+                <span>{item.label}</span>
+              </Link>
+            );
+          })}
+          <div className="my-2 h-px bg-[var(--border-default)]" />
+          {secondaryNavItems.map((item) => {
             const Icon = item.icon;
             const active = isNavActive(pathname, item.href);
             return (

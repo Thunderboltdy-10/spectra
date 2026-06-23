@@ -1,18 +1,12 @@
 import { internalMutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { getUserByClerkId } from "./helpers";
-
-const SUPER_ADMIN_EMAILS = new Set(
-  (process.env.SUPER_ADMIN_EMAILS ?? "pablo.martinez.dovale@gmail.com")
-    .split(/[,\s;]+/)
-    .map((email) => email.trim().toLowerCase())
-    .filter(Boolean),
-);
+import { isSuperAdminEmail } from "./constants";
 
 async function requireSuperAdmin(ctx: Parameters<typeof getUserByClerkId>[0], actorClerkId: string) {
   const actor = await getUserByClerkId(ctx, actorClerkId);
   if (!actor) throw new Error("Unauthorized");
-  if (!SUPER_ADMIN_EMAILS.has(actor.email.trim().toLowerCase())) {
+  if (!isSuperAdminEmail(actor.email)) {
     throw new Error("Super admin access required");
   }
   return actor;

@@ -18,7 +18,6 @@ export async function importPdfFile(file: File): Promise<ImportedDocument> {
   const loadingTask = pdfjs.getDocument({
     data: new Uint8Array(bytes),
     useWorkerFetch: false,
-    isEvalSupported: false,
     disableFontFace: true,
   });
   const pdf = await loadingTask.promise;

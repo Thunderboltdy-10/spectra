@@ -123,6 +123,23 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   const breakpointTierRef = useRef<"mobile" | "tablet" | "desktop">("desktop");
   const [pinnedChatIds, setPinnedChatIds] = useState<Set<string>>(new Set());
 
+  const refreshSpectraThreads = useCallback(async () => {
+    try {
+      const threadResponse = await fetch("/api/spectra?action=threads&limit=120", { headers: { Accept: "application/json" }, cache: "no-store" });
+      if (!threadResponse.ok) return false;
+      const threadData = await threadResponse.json() as { threads?: Array<{ _id: string; title: string; updatedAt: number; lastMessageAt?: number }> };
+      setChats((threadData.threads ?? []).map((thread) => ({
+        _id: thread._id,
+        title: thread.title,
+        mode: "tutor" as StudyMode,
+        updatedAt: thread.lastMessageAt ?? thread.updatedAt,
+      })));
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
+
   const refreshBootstrap = useCallback(async () => {
     const response = await fetch("/api/bootstrap", {
       headers: { Accept: "application/json" },
@@ -150,7 +167,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
     setRole(data.actor?.role ?? "student");
     setUserId(data.actor?.userId);
     setIsSuperAdmin(data.isSuperAdmin ?? false);
-    setChats(data.chats ?? []);
+    if (!await refreshSpectraThreads()) setChats(data.chats ?? []);
     setModels(data.models ?? []);
     setAgents(data.agents ?? []);
     setUserSpending(data.userSpending ?? null);
@@ -169,7 +186,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
         root.style.setProperty("--brand-accent", data.orgSettings.org.accentColor);
       }
     }
-  }, []);
+  }, [refreshSpectraThreads]);
 
   useEffect(() => {
     const tierForWidth = (width: number): "mobile" | "tablet" | "desktop" => {
@@ -230,6 +247,12 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   }, [refreshBootstrap]);
 
   useEffect(() => {
+    const refreshThreads = () => { void refreshSpectraThreads(); };
+    window.addEventListener("spectra:threads-changed", refreshThreads);
+    return () => window.removeEventListener("spectra:threads-changed", refreshThreads);
+  }, [refreshSpectraThreads]);
+
+  useEffect(() => {
     try {
       const raw = window.localStorage.getItem(PINNED_KEY);
       if (!raw) return;
@@ -262,7 +285,10 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const deleteChat = useCallback(async (chatId: string) => {
-    const response = await fetch(`/api/chats/${chatId}`, { method: "DELETE" });
+    const response = await fetch("/api/spectra", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "updateThread", threadId: chatId, status: "archived" }),
+    });
     if (!response.ok) {
       throw new Error(await response.text());
     }
@@ -272,10 +298,10 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
   const renameChat = useCallback(async (chatId: string, title: string) => {
     const clean = title.trim();
     if (!clean) return;
-    const response = await fetch(`/api/chats/${chatId}`, {
-      method: "PATCH",
+    const response = await fetch("/api/spectra", {
+      method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title: clean }),
+      body: JSON.stringify({ action: "updateThread", threadId: chatId, title: clean }),
     });
     if (!response.ok) {
       throw new Error(await response.text());

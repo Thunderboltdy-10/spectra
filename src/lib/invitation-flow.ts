@@ -15,14 +15,18 @@ export type InvitationSnapshot = {
   orgName?: string;
   orgWelcomeMessage?: string;
   orgLogoUrl?: string;
+  capacityFull?: boolean;
 };
 
 export type InvitationAuthState =
   | "token_missing"
   | "token_invalid"
   | "token_expired"
+  | "token_revoked"
+  | "token_over_capacity"
   | "token_valid_signed_out"
   | "token_valid_signed_in_wrong_identity"
+  | "token_valid_signed_in_other_school"
   | "token_valid_signed_in_match_pending_redeem"
   | "token_redeemed"
   | "token_already_redeemed_same_user"
@@ -58,6 +62,7 @@ export function normalizeInvitation(input: Omit<InvitationSnapshot, "token"> | I
     orgName: input.orgName,
     orgWelcomeMessage: input.orgWelcomeMessage,
     orgLogoUrl: input.orgLogoUrl,
+    capacityFull: input.capacityFull,
   };
 }
 
@@ -67,6 +72,7 @@ export function deriveInvitationAuthState(params: {
   emails: string[];
   handoffToken?: string | null;
   tokenProvided?: boolean;
+  viewerOrgId?: string | null;
 }): InvitationAuthStatePayload {
   const invitation = params.invitation;
   const emails = params.emails.map(normalizeEmail);
@@ -89,18 +95,6 @@ export function deriveInvitationAuthState(params: {
     };
   }
 
-  if (Date.now() > invitation.expiresAt || invitation.status === "expired") {
-    return {
-      state: "token_expired",
-      invitation,
-      invitedEmail: invitation.email,
-      viewer,
-      handoffToken,
-      shouldAutoRedirectToAuth: false,
-      canRedeemNow: false,
-    };
-  }
-
   const hasMatchingEmail = emails.includes(invitation.email);
 
   if (invitation.status === "accepted") {
@@ -111,6 +105,30 @@ export function deriveInvitationAuthState(params: {
       viewer,
       handoffToken,
       shouldAutoRedirectToAuth: Boolean(params.userId) ? false : true,
+      canRedeemNow: false,
+    };
+  }
+
+  if (invitation.status === "revoked") {
+    return {
+      state: "token_revoked",
+      invitation,
+      invitedEmail: invitation.email,
+      viewer,
+      handoffToken,
+      shouldAutoRedirectToAuth: false,
+      canRedeemNow: false,
+    };
+  }
+
+  if (Date.now() > invitation.expiresAt || invitation.status === "expired") {
+    return {
+      state: "token_expired",
+      invitation,
+      invitedEmail: invitation.email,
+      viewer,
+      handoffToken,
+      shouldAutoRedirectToAuth: false,
       canRedeemNow: false,
     };
   }
@@ -135,6 +153,30 @@ export function deriveInvitationAuthState(params: {
       viewer,
       handoffToken,
       shouldAutoRedirectToAuth: true,
+      canRedeemNow: false,
+    };
+  }
+
+  if (params.viewerOrgId && params.viewerOrgId !== invitation.orgId) {
+    return {
+      state: "token_valid_signed_in_other_school",
+      invitation,
+      invitedEmail: invitation.email,
+      viewer,
+      handoffToken,
+      shouldAutoRedirectToAuth: false,
+      canRedeemNow: false,
+    };
+  }
+
+  if (invitation.capacityFull) {
+    return {
+      state: "token_over_capacity",
+      invitation,
+      invitedEmail: invitation.email,
+      viewer,
+      handoffToken,
+      shouldAutoRedirectToAuth: false,
       canRedeemNow: false,
     };
   }

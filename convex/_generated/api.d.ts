@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as accessControl from "../accessControl.js";
 import type * as accessRequests from "../accessRequests.js";
 import type * as admin from "../admin.js";
 import type * as agents from "../agents.js";
@@ -48,6 +49,15 @@ import type * as schoolAdmin from "../schoolAdmin.js";
 import type * as seed from "../seed.js";
 import type * as shared from "../shared.js";
 import type * as soul from "../soul.js";
+import type * as spectraArtifactLinks from "../spectraArtifactLinks.js";
+import type * as spectraArtifacts from "../spectraArtifacts.js";
+import type * as spectraOperations from "../spectraOperations.js";
+import type * as spectraRuns from "../spectraRuns.js";
+import type * as spectraSeed from "../spectraSeed.js";
+import type * as spectraShared from "../spectraShared.js";
+import type * as spectraThreads from "../spectraThreads.js";
+import type * as spectraWorkspaceItems from "../spectraWorkspaceItems.js";
+import type * as spectraWorkspaces from "../spectraWorkspaces.js";
 import type * as streakLogic from "../streakLogic.js";
 import type * as superAdmin from "../superAdmin.js";
 import type * as usage from "../usage.js";
@@ -72,6 +82,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  accessControl: typeof accessControl;
   accessRequests: typeof accessRequests;
   admin: typeof admin;
   agents: typeof agents;
@@ -112,6 +123,15 @@ declare const fullApi: ApiFromModules<{
   seed: typeof seed;
   shared: typeof shared;
   soul: typeof soul;
+  spectraArtifactLinks: typeof spectraArtifactLinks;
+  spectraArtifacts: typeof spectraArtifacts;
+  spectraOperations: typeof spectraOperations;
+  spectraRuns: typeof spectraRuns;
+  spectraSeed: typeof spectraSeed;
+  spectraShared: typeof spectraShared;
+  spectraThreads: typeof spectraThreads;
+  spectraWorkspaceItems: typeof spectraWorkspaceItems;
+  spectraWorkspaces: typeof spectraWorkspaces;
   streakLogic: typeof streakLogic;
   superAdmin: typeof superAdmin;
   usage: typeof usage;

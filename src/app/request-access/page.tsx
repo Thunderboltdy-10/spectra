@@ -28,9 +28,18 @@ type RequestAccessFormProps = {
   userEmails: string[];
 };
 
+type AccessOverview = {
+  pendingInvitations?: Array<{ token: string; orgName: string; role: string; email: string }>;
+  request?: { status: "pending" | "approved" | "rejected" | "invited"; orgName: string } | null;
+};
+
 function RequestAccessForm({ isLoaded, userId, userEmail, userEmails }: RequestAccessFormProps) {
   const searchParams = useSearchParams();
   const reason = searchParams.get("reason");
+  const requestedReturnUrl = searchParams.get("return_url");
+  const safeReturnUrl = requestedReturnUrl?.startsWith("/") && !requestedReturnUrl.startsWith("//")
+    ? requestedReturnUrl
+    : "/chat";
   const [query, setQuery] = useState("");
   const [schools, setSchools] = useState<SchoolMatch[]>([]);
   const [selectedOrgId, setSelectedOrgId] = useState("");
@@ -40,6 +49,7 @@ function RequestAccessForm({ isLoaded, userId, userEmail, userEmails }: RequestA
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<RequestResult | null>(null);
   const [selectedEmail, setSelectedEmail] = useState<string>(userEmail ?? userEmails[0] ?? "");
+  const [accessOverview, setAccessOverview] = useState<AccessOverview | null>(null);
 
   // Smart re-check: if the user is signed in but stuck here, periodically
   // check if they've been granted access yet (e.g. admin approved request).
@@ -68,11 +78,12 @@ function RequestAccessForm({ isLoaded, userId, userEmail, userEmails }: RequestA
       try {
         const response = await fetch("/api/auth/access-state", { cache: "no-store" });
         if (cancelled || !response.ok) return;
-        const payload = (await response.json().catch(() => null)) as { status?: string } | null;
+        const payload = (await response.json().catch(() => null)) as ({ status?: string } & AccessOverview) | null;
         if (payload?.status === "ok") {
-          window.location.replace("/chat");
+          window.location.replace(safeReturnUrl);
           return;
         }
+        if (payload?.status === "no_access") setAccessOverview(payload);
       } catch {
         // Best effort.
       }
@@ -85,7 +96,7 @@ function RequestAccessForm({ isLoaded, userId, userEmail, userEmails }: RequestA
       cancelled = true;
       window.clearTimeout(timeoutId);
     };
-  }, [isLoaded, userId]);
+  }, [isLoaded, safeReturnUrl, userId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -193,7 +204,7 @@ function RequestAccessForm({ isLoaded, userId, userEmail, userEmails }: RequestA
                 <p className="text-sm text-[var(--text-secondary)]">
                   {reason === "inactive"
                     ? "Your school's workspace is currently disabled. Contact your administrator or find another school."
-                    : "Ask a school admin to review your request and send you an invitation."}
+                    : "Ask a school admin to review your request. Approval activates access directly."}
                 </p>
               </div>
             </div>
@@ -231,6 +242,30 @@ function RequestAccessForm({ isLoaded, userId, userEmail, userEmails }: RequestA
                 <Link href="/sign-in" className="text-[var(--accent-cyan)] hover:underline">
                   Sign in
                 </Link>
+              </div>
+            ) : (accessOverview?.pendingInvitations?.length ?? 0) > 0 ? (
+              <div className="mt-6 rounded-xl border border-[color-mix(in_oklab,var(--accent-cyan)_35%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_8%,transparent)] p-4">
+                <p className="text-sm font-semibold text-[var(--text-primary)]">You already have an invitation</p>
+                <p className="mt-1 text-sm text-[var(--text-secondary)]">
+                  {accessOverview?.pendingInvitations?.[0]?.orgName} has reserved a seat for {accessOverview?.pendingInvitations?.[0]?.email}.
+                </p>
+                <Button asChild className="mt-4">
+                  <Link href={`/join?token=${encodeURIComponent(accessOverview?.pendingInvitations?.[0]?.token ?? "")}`}>Review invitation</Link>
+                </Button>
+              </div>
+            ) : accessOverview?.request ? (
+              <div className="mt-6 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4">
+                <p className="text-sm font-semibold text-[var(--text-primary)]">
+                  {accessOverview.request.status === "pending" ? "Waiting for approval" : accessOverview.request.status === "rejected" ? "Request not approved" : "Access update"}
+                </p>
+                <p className="mt-1 text-sm text-[var(--text-secondary)]">
+                  {accessOverview.request.status === "pending"
+                    ? `${accessOverview.request.orgName} is reviewing your request. This page will update automatically.`
+                    : accessOverview.request.status === "rejected"
+                      ? `${accessOverview.request.orgName} rejected the request. You can submit a new request or contact an admin.`
+                      : "Your membership is being activated. Refresh if you are not redirected shortly."}
+                </p>
+                {accessOverview.request.status === "rejected" ? <Button variant="outline" className="mt-4" onClick={() => setAccessOverview(null)}>Submit another request</Button> : null}
               </div>
             ) : result ? (
               <div className="mt-6 rounded-xl border border-[color-mix(in_oklab,var(--success)_28%,var(--border-default))] bg-[color-mix(in_oklab,var(--success)_8%,transparent)] p-4">
@@ -343,8 +378,8 @@ function RequestAccessForm({ isLoaded, userId, userEmail, userEmails }: RequestA
             <div className="mt-4 space-y-3 text-sm text-[var(--text-secondary)]">
               <p>1. Search for your school and submit a short access request.</p>
               <p>2. A school admin receives a notification inside Spectra.</p>
-              <p>3. Once approved, they send you a normal invitation email with your join link.</p>
-              <p>4. Use that invitation to finish joining the workspace.</p>
+              <p>3. Approval activates your membership immediately—no second link required.</p>
+              <p>4. This page detects the change and takes you into Spectra.</p>
             </div>
           </section>
         </div>

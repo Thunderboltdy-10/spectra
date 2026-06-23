@@ -3,9 +3,12 @@ import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { getUserByClerkId } from "./helpers";
 import { vRole } from "./shared";
+import { api } from "./_generated/api";
+import { addUserToPlatformStats } from "./platformStatsAggregates";
+import { ensureStarterWorkspace, normalizeAccessEmail, requireCapacity } from "./accessControl";
 
 function normalizeEmail(value: string) {
-  return value.trim().toLowerCase();
+  return normalizeAccessEmail(value);
 }
 
 function normalizeName(value: string) {
@@ -80,11 +83,12 @@ export const createAccessRequest = mutation({
       };
     }
 
+    const now = Date.now();
     const existingInvite = await ctx.db
       .query("schoolInvitations")
       .withIndex("by_org", (q) => q.eq("orgId", args.orgId))
       .collect()
-      .then((rows) => rows.find((row) => normalizeEmail(row.email) === email && row.status === "pending"));
+      .then((rows) => rows.find((row) => normalizeEmail(row.email) === email && row.status === "pending" && row.expiresAt > now));
     if (existingInvite) {
       return {
         status: "invite_pending" as const,
@@ -92,7 +96,6 @@ export const createAccessRequest = mutation({
       };
     }
 
-    const now = Date.now();
     const existingRequest = await ctx.db
       .query("accessRequests")
       .withIndex("by_org_email", (q) => q.eq("orgId", args.orgId).eq("email", email))
@@ -158,7 +161,7 @@ export const listOrgAccessRequests = query({
   args: {
     actorClerkId: v.string(),
     orgId: v.optional(v.id("orgs")),
-    status: v.optional(v.union(v.literal("pending"), v.literal("invited"), v.literal("rejected"))),
+    status: v.optional(v.union(v.literal("pending"), v.literal("invited"), v.literal("approved"), v.literal("rejected"))),
   },
   handler: async (ctx, args) => {
     const actor = await requireAdmin(ctx, args.actorClerkId, args.orgId);
@@ -171,44 +174,117 @@ export const listOrgAccessRequests = query({
   },
 });
 
-export const getOrgAccessRequest = query({
+export const approveAccessRequest = mutation({
   args: {
     actorClerkId: v.string(),
     orgId: v.optional(v.id("orgs")),
     requestId: v.id("accessRequests"),
+    role: vRole,
   },
   handler: async (ctx, args) => {
     const actor = await requireAdmin(ctx, args.actorClerkId, args.orgId);
+    if (args.role === "admin") throw new Error("Only the superadmin can promote school admins.");
     const request = await ctx.db.get(args.requestId);
-    if (!request || request.orgId !== actor.orgId) {
-      throw new Error("Access request not found");
+    if (!request || request.orgId !== actor.orgId) throw new Error("Access request not found");
+    if (request.status === "rejected") throw new Error("This request was rejected. Ask the user to submit a new request.");
+    if (!request.requesterClerkId) throw new Error("REQUEST_IDENTITY_MISSING: The requester must sign in and submit again.");
+
+    const now = Date.now();
+    const existing = await getUserByClerkId(ctx, request.requesterClerkId);
+    if (existing && existing.orgId !== request.orgId) {
+      throw new Error("ALREADY_IN_ANOTHER_SCHOOL: This user already belongs to another school.");
     }
-    return request;
+    if (existing?.orgId === request.orgId) {
+      await ctx.db.patch(request._id, {
+        status: "approved",
+        resolvedRole: existing.role,
+        resolvedBy: actor._id,
+        resolvedAt: now,
+        updatedAt: now,
+      });
+      await ensureStarterWorkspace(ctx, existing._id, existing.orgId);
+      return { ok: true, alreadyMember: true, userId: existing._id };
+    }
+
+    const activeInvitation = await ctx.db
+      .query("schoolInvitations")
+      .withIndex("by_email", (q) => q.eq("email", normalizeEmail(request.email)))
+      .collect()
+      .then((rows) => rows.find((row) => row.orgId === request.orgId && row.status === "pending" && row.expiresAt > now));
+    await requireCapacity(ctx, request.orgId, { excludeInvitationId: activeInvitation?._id });
+
+    const userId = await ctx.db.insert("users", {
+      clerkId: request.requesterClerkId,
+      email: normalizeEmail(request.email),
+      name: request.name,
+      role: args.role,
+      orgId: request.orgId,
+      invitedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    });
+    await addUserToPlatformStats(ctx, { _id: userId, role: args.role });
+    if (activeInvitation) {
+      await ctx.db.patch(activeInvitation._id, {
+        status: "accepted",
+        acceptedBy: userId,
+        acceptedAt: now,
+        updatedAt: now,
+      });
+    }
+    await ctx.db.patch(request._id, {
+      status: "approved",
+      resolvedRole: args.role,
+      resolvedBy: actor._id,
+      resolvedAt: now,
+      updatedAt: now,
+    });
+    await ensureStarterWorkspace(ctx, userId, request.orgId);
+    await ctx.runMutation(api.seed.seedDefaultAgents, { orgId: request.orgId, creatorUserId: userId });
+    return { ok: true, userId };
   },
 });
 
-export const resolveAccessRequest = mutation({
+export const rejectAccessRequest = mutation({
   args: {
     actorClerkId: v.string(),
     orgId: v.optional(v.id("orgs")),
     requestId: v.id("accessRequests"),
-    status: v.union(v.literal("invited"), v.literal("rejected")),
-    role: v.optional(vRole),
   },
   handler: async (ctx, args) => {
     const actor = await requireAdmin(ctx, args.actorClerkId, args.orgId);
     const request = await ctx.db.get(args.requestId);
-    if (!request || request.orgId !== actor.orgId) {
-      throw new Error("Access request not found");
-    }
-
-    await ctx.db.patch(args.requestId, {
-      status: args.status,
-      resolvedRole: args.status === "invited" ? (args.role ?? "student") : undefined,
+    if (!request || request.orgId !== actor.orgId) throw new Error("Access request not found");
+    if (request.status === "approved") throw new Error("An approved request cannot be rejected.");
+    if (request.status === "rejected") return { ok: true, alreadyRejected: true };
+    const now = Date.now();
+    await ctx.db.patch(request._id, {
+      status: "rejected",
+      resolvedRole: undefined,
       resolvedBy: actor._id,
-      updatedAt: Date.now(),
+      resolvedAt: now,
+      updatedAt: now,
     });
-
     return { ok: true };
+  },
+});
+
+export const getRequesterState = query({
+  args: { requesterClerkId: v.string() },
+  handler: async (ctx, args) => {
+    const requests = await ctx.db
+      .query("accessRequests")
+      .withIndex("by_requester", (q) => q.eq("requesterClerkId", args.requesterClerkId))
+      .collect();
+    const latest = requests.sort((a, b) => b.updatedAt - a.updatedAt)[0];
+    if (!latest) return null;
+    const org = await ctx.db.get(latest.orgId);
+    return {
+      requestId: latest._id,
+      status: latest.status,
+      orgId: latest.orgId,
+      orgName: org?.name ?? "School",
+      updatedAt: latest.updatedAt,
+    };
   },
 });

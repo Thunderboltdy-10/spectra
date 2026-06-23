@@ -1,5 +1,10 @@
 export const EMBEDDING_DIMENSIONS = 3072;
 export const DEFAULT_ORG_SLUG = "demo-school";
+export const SUPER_ADMIN_EMAIL = "pablo.martinez.dovale@gmail.com";
+
+export function isSuperAdminEmail(value: string) {
+  return value.trim().toLowerCase() === SUPER_ADMIN_EMAIL;
+}
 
 export const LIMITS = {
   maxTeacherFilesPerPack: 30,

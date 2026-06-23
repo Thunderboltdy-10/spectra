@@ -33,7 +33,7 @@ function SignUpCard({ redirectUrl }: { redirectUrl?: string }) {
             </p>
             <div className="mt-4 rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4 text-sm text-[var(--text-secondary)]">
               {invitationFlow ? (
-                <>Create the account using the exact email address that received the invitation. After sign-up, the invitation will be completed automatically.</>
+                <>Create the account using the exact email address that received the invitation. You will return to the invitation page to review and accept it.</>
               ) : (
                 <>
                   School access is invitation-based. If your school has not invited you yet, submit an access request first.

@@ -1,4 +1,5 @@
-import type { ButtonHTMLAttributes, CSSProperties, HTMLAttributes, LucideIcon, ReactNode } from "react";
+import type { ButtonHTMLAttributes, CSSProperties, HTMLAttributes, ReactNode } from "react";
+import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export type SpectraCardVariant =

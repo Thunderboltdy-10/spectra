@@ -102,15 +102,16 @@ export function ResultCardStack({
       {visibleCards.map((card) => {
         const awaitingApproval = card.actions.some((action) => action.key === "confirm");
         const optimistic = card.id.startsWith("optimistic:") || card.runId.startsWith("pending:");
+        const opensDetails = !optimistic && Boolean(onOpen);
         const continued = activeRunId === card.runId || Boolean(threadIds[card.runId] && threadIds[card.runId] === activeThreadId);
         return (
           <div
             key={card.id}
-            role="button"
-            tabIndex={0}
-            className={cn("group my-0.5 grid min-h-[35px] w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2.5 rounded-[7px] px-2.5 py-1 text-left text-[12px] transition animate-[spectra-fade-up_180ms_ease-out] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--accent-cyan)]", optimistic ? "cursor-default" : "cursor-pointer hover:bg-[var(--bg-hover)]", continued && "bg-[color-mix(in_oklab,#8b6ff0_9%,var(--bg-elevated))] shadow-[inset_3px_0_0_#8b6ff0]")}
-            onClick={() => { if (!optimistic) onOpen?.(card); }}
-            onKeyDown={(event) => { if (!optimistic && (event.key === "Enter" || event.key === " ")) onOpen?.(card); }}
+            role={opensDetails ? "button" : undefined}
+            tabIndex={opensDetails ? 0 : undefined}
+            className={cn("group my-0.5 grid min-h-[35px] w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2.5 rounded-[7px] px-2.5 py-1 text-left text-[12px] transition animate-[spectra-fade-up_180ms_ease-out] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--accent-cyan)]", opensDetails ? "cursor-pointer hover:bg-[var(--bg-hover)]" : "cursor-default", continued && "bg-[color-mix(in_oklab,#8b6ff0_9%,var(--bg-elevated))] shadow-[inset_3px_0_0_#8b6ff0]")}
+            onClick={() => { if (opensDetails) onOpen?.(card); }}
+            onKeyDown={(event) => { if (opensDetails && (event.key === "Enter" || event.key === " ")) onOpen?.(card); }}
           >
             <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[color-mix(in_oklab,currentColor_10%,var(--bg-elevated))]" style={{ color: tone(card) }}>
               {card.status === "running" && !awaitingApproval ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : awaitingApproval ? <ShieldCheck className="h-3.5 w-3.5" /> : card.status === "completed" ? <CheckCircle2 className="h-3.5 w-3.5" /> : card.status === "failed" || card.status === "cancelled" ? <AlertCircle className="h-3.5 w-3.5" /> : <Clock3 className="h-3.5 w-3.5" />}

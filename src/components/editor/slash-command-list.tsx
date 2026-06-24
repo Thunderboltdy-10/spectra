@@ -31,6 +31,7 @@ import {
   Bold,
   Italic,
   Underline,
+  Sigma,
 } from "lucide-react";
 
 const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -51,6 +52,7 @@ const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
   bold: Bold,
   italic: Italic,
   underline: Underline,
+  sigma: Sigma,
 };
 
 export interface SlashCommandListRef {

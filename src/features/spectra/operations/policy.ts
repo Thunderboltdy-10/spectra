@@ -2,6 +2,7 @@ import type { ModelOperation, OperationInput, RequestIntent, SpectraOperationTyp
 
 const DIRECT_OPERATION_TYPES = new Set<SpectraOperationType>([
   "artifact.create", "artifact.update", "workspaceItem.add", "workspaceItem.hide", "thread.create",
+  "workspace.update", "artifact.link",
   "resultCard.create", "resultCard.update", "plannerTask.create", "quiz.create", "flashcardDeck.create",
 ]);
 

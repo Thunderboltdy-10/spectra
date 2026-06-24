@@ -64,6 +64,18 @@ export function validatePlanAgainstIntent(plan: SpectraPlan, references: OwnedOp
     if (operation.type === "workspace.create" && intent.mode !== "create_workspace" && intent.mode !== "mixed") {
       throw new Error("The proposed workspace creation is unrelated to the interpreted request.");
     }
+    if (operation.type === "workspace.update") {
+      if (intent.mode !== "update_workspace" && intent.mode !== "mixed") throw new Error("The proposed workspace update is unrelated to the interpreted request.");
+      requireOwnedReference("workspace", operation.input.workspaceId, references.workspaceIds);
+      if (intent.targetWorkspaceId && operation.input.workspaceId !== intent.targetWorkspaceId) throw new Error("The workspace update target does not match the interpreted request.");
+    }
+    if (operation.type === "artifact.link") {
+      if (intent.mode !== "link" && intent.mode !== "mixed") throw new Error("The proposed artifact link is unrelated to the interpreted request.");
+      requireOwnedReference("artifact", operation.input.sourceArtifactId, references.artifactIds);
+      requireOwnedReference("artifact", operation.input.targetArtifactId, references.artifactIds);
+      if (operation.input.workspaceId) requireOwnedReference("workspace", operation.input.workspaceId, references.workspaceIds);
+      if (operation.input.sourceArtifactId === operation.input.targetArtifactId) throw new Error("An artifact cannot link to itself.");
+    }
   }
 
   return plan;

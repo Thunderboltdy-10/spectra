@@ -15,7 +15,7 @@ describe("OpenRouter public response streaming", () => {
 
   it("emits incremental text and records provider usage from SSE", async () => {
     const chunks = [
-      'data: {"model":"deepseek/deepseek-v4-pro","provider":"DeepSeek","choices":[{"delta":{"content":"{\\"decision\\":\\"answer\\",\\"finalResponse\\":\\"Hello"}}]}\n\n',
+      'data: {"model":"deepseek/deepseek-v4-pro","provider":"DeepSeek","choices":[{"delta":{"reasoning":"Checking context. ","content":"{\\"decision\\":\\"answer\\",\\"finalResponse\\":\\"Hello"}}]}\n\n',
       'data: {"choices":[{"delta":{"content":" world\\",\\"operations\\":[]}"}}],"usage":{"prompt_tokens":12,"completion_tokens":4,"total_tokens":16}}\n\n',
       "data: [DONE]\n\n",
     ];
@@ -27,8 +27,10 @@ describe("OpenRouter public response streaming", () => {
       },
     }), { headers: { "content-type": "text/event-stream" } });
     const deltas: string[] = [];
-    const result = await readOpenRouterResponse(response, (delta) => deltas.push(delta));
+    const reasoning: string[] = [];
+    const result = await readOpenRouterResponse(response, (delta) => deltas.push(delta), (delta) => reasoning.push(delta));
     expect(deltas.join("")).toBe("Hello world");
+    expect(reasoning.join("")).toBe("Checking context. ");
     expect(result.provider).toBe("DeepSeek");
     expect(result.usage).toMatchObject({ promptTokens: 12, completionTokens: 4, totalTokens: 16 });
   });

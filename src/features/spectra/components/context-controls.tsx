@@ -86,7 +86,8 @@ export function ContextFocusControl({
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
-        className="group flex max-w-[230px] items-center gap-1.5 rounded-[7px] px-1.5 py-1 text-[11px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+        data-focus-state={mode}
+        className="group flex max-w-[230px] items-center gap-1.5 rounded-[7px] px-2 py-1 text-[11px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
         aria-label="Choose AI context"
         title="Choose what Spectra will use"
       >
@@ -177,7 +178,9 @@ export function SelectionActionBar({
           initial={{ opacity: 0, y: 12, scale: 0.98 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: 8, scale: 0.98 }}
-          className="mb-2 ml-[52px] flex min-h-10 flex-wrap items-center gap-1.5 rounded-[10px] border border-[color-mix(in_oklab,var(--accent-cyan)_22%,var(--border-default))] bg-[color-mix(in_oklab,var(--bg-elevated)_95%,var(--accent-cyan))] px-2.5 py-1.5 shadow-[0_8px_26px_rgba(27,20,12,0.08)]"
+          data-spectra-card="result"
+          data-card-state="context"
+          className="mb-2 ml-[52px] flex min-h-10 flex-wrap items-center gap-1.5 px-2.5 py-1.5"
         >
           <span className="mr-1 inline-flex items-center gap-1.5 text-[11px] font-semibold text-[var(--text-primary)]">
             <Files className="h-3.5 w-3.5 text-[var(--accent-cyan)]" />

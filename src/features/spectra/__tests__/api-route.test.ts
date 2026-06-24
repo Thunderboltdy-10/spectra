@@ -80,10 +80,28 @@ describe("Spectra API route", () => {
       actorClerkId: "user_spectra",
       title: "TOK Exhibition",
       description: undefined,
+      icon: undefined,
+      color: undefined,
     });
     expect(convexMutation).toHaveBeenNthCalledWith(2, "spectraWorkspaces:archive", {
       actorClerkId: "user_spectra",
       workspaceId: "workspace_new",
+    });
+  });
+
+  it("rejects a wrong-table workspace id through the public normalization boundary", async () => {
+    const requireActor = vi.fn().mockResolvedValue(mockActor());
+    const convexMutation = vi.fn();
+    const convexQuery = vi.fn().mockResolvedValue(null);
+    vi.doMock("@/lib/auth-server", () => ({ requireActor }));
+    vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation }));
+
+    const route = await import("@/app/api/spectra/route");
+    const response = await route.GET(new NextRequest("http://localhost/api/spectra?action=workspace&workspaceId=t57ax7akvh0w6j3zzqkr800kzd88vdrr"));
+    expect(response.status).toBe(400);
+    expect(convexQuery).toHaveBeenCalledWith("spectraWorkspaceItems:listForWorkspacePublic", {
+      actorClerkId: "user_spectra",
+      workspaceId: "t57ax7akvh0w6j3zzqkr800kzd88vdrr",
     });
   });
 

@@ -43,6 +43,16 @@
   --success: #148f5d;
   --warning: #b67616;
 
+  --card-paper: #fffdf9;
+  --card-paper-quiet: #faf8f4;
+  --card-border: color-mix(in oklab, #8d7d69 24%, transparent);
+  --card-border-soft: color-mix(in oklab, #8d7d69 15%, transparent);
+  --card-shadow: 0 8px 24px -18px rgba(54, 39, 22, 0.32), 0 1px 2px rgba(54, 39, 22, 0.035);
+  --card-shadow-hover: 0 18px 38px -25px rgba(54, 39, 22, 0.42), 0 3px 8px rgba(54, 39, 22, 0.04);
+  --card-focus: #16856f;
+  --card-pinned: #c78320;
+  --card-radius: 10px;
+
   --header-height: 64px;
   --radius-container: 18px;
   --radius-input: 12px;
@@ -108,6 +118,15 @@
   --danger: #ff7f8a;
   --success: #43d097;
   --warning: #f4ba54;
+
+  --card-paper: #1e1e1d;
+  --card-paper-quiet: #191918;
+  --card-border: color-mix(in oklab, #cfc1ac 22%, transparent);
+  --card-border-soft: color-mix(in oklab, #cfc1ac 13%, transparent);
+  --card-shadow: 0 12px 28px -18px rgba(0, 0, 0, 0.72);
+  --card-shadow-hover: 0 18px 40px -20px rgba(0, 0, 0, 0.88);
+  --card-focus: #4bc8a4;
+  --card-pinned: #e2a84d;
 
   --shadow-soft: 0 24px 44px -30px rgba(0, 0, 0, 0.8);
   --shadow-card: 0 12px 24px -18px rgba(0, 0, 0, 0.7);
@@ -1772,6 +1791,55 @@ button:disabled {
   cursor: grabbing;
 }
 
+.spectra-equation {
+  margin: 1rem 0;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  padding: 0.8rem 1rem;
+  background: color-mix(in oklab, var(--bg-elevated) 76%, transparent);
+  transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+}
+
+.spectra-equation.is-selected {
+  border-color: color-mix(in oklab, var(--accent-cyan) 48%, var(--border-default));
+  background: color-mix(in oklab, var(--accent-cyan) 5%, var(--bg-elevated));
+  box-shadow: 0 7px 24px rgba(24, 20, 14, 0.06);
+}
+
+.spectra-equation.is-left { text-align: left; }
+.spectra-equation.is-center { text-align: center; }
+.spectra-equation.is-right { text-align: right; }
+.spectra-equation-inline { display: inline-flex; margin: 0 0.2em; padding: 0.12rem 0.3rem; }
+.spectra-equation-source {
+  display: block;
+  width: 100%;
+  margin-top: 0.8rem;
+  resize: vertical;
+  border: 1px solid var(--border-default);
+  border-radius: 7px;
+  background: var(--bg-primary);
+  padding: 0.55rem 0.7rem;
+  color: var(--text-primary);
+  font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
+  outline: none;
+}
+
+[data-ai-state="generated"]::after,
+[data-ai-state="edited"]::after {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent-cyan) 18%, transparent);
+  animation: spectra-ai-settle 900ms ease-out both;
+}
+
+@keyframes spectra-ai-settle {
+  from { background: color-mix(in oklab, var(--accent-cyan) 9%, transparent); opacity: 1; }
+  to { background: transparent; opacity: 0.42; }
+}
+
 @media (max-width: 768px) {
   .editor-gutter-controls {
     display: none;
@@ -1882,6 +1950,229 @@ button:disabled {
 
 .ai-edit-delete {
   animation: ai-delete-highlight 250ms ease-out forwards;
+}
+
+/* ── Spectra card language ─────────────────────────────────────────── */
+
+.spectra-card,
+[data-spectra-card] {
+  --card-accent: var(--mode-document);
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  border: 1px solid var(--card-border);
+  border-radius: var(--card-radius);
+  background: var(--card-paper);
+  box-shadow: var(--card-shadow);
+  transition:
+    transform 180ms var(--ease-standard),
+    border-color 160ms ease,
+    box-shadow 180ms ease,
+    background-color 160ms ease,
+    opacity 160ms ease;
+}
+
+.spectra-card::before,
+[data-spectra-card]::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  right: -18px;
+  bottom: -22px;
+  width: min(58%, 230px);
+  height: 82%;
+  pointer-events: none;
+  opacity: 0.34;
+  background-image:
+    radial-gradient(circle at 100% 100%, transparent 0 28px, color-mix(in oklab, var(--card-accent) 22%, transparent) 29px 30px, transparent 31px 48px, color-mix(in oklab, var(--card-accent) 14%, transparent) 49px 50px, transparent 51px 70px, color-mix(in oklab, var(--card-accent) 10%, transparent) 71px 72px, transparent 73px),
+    radial-gradient(circle, color-mix(in oklab, var(--card-accent) 26%, transparent) 0 0.65px, transparent 0.85px);
+  background-size: 100% 100%, 7px 7px;
+  mask-image: radial-gradient(ellipse at 100% 100%, #000 0, rgba(0,0,0,.82) 34%, rgba(0,0,0,.22) 64%, transparent 82%);
+}
+
+.spectra-card:hover,
+[data-spectra-card][data-interactive="true"]:hover {
+  border-color: color-mix(in oklab, var(--card-accent) 27%, var(--card-border));
+  box-shadow: var(--card-shadow-hover);
+  transform: translateY(-1px);
+}
+
+.spectra-card:focus-within,
+[data-spectra-card]:focus-within {
+  border-color: color-mix(in oklab, var(--card-focus) 66%, var(--card-border));
+}
+
+.spectra-card--inbox,
+[data-spectra-card="inbox"] {
+  --card-accent: var(--text-tertiary);
+  background: color-mix(in oklab, var(--card-paper-quiet) 92%, var(--bg-primary));
+  border-color: var(--card-border-soft);
+  box-shadow: 0 5px 18px -16px rgba(54, 39, 22, 0.28);
+}
+
+.spectra-card--inbox::before,
+[data-spectra-card="inbox"]::before { opacity: 0.16; }
+
+.spectra-card--workspace::before,
+[data-spectra-card="workspace"]::before { width: 68%; height: 92%; opacity: 0.42; }
+
+.spectra-card--pinned,
+[data-spectra-card="pinned"] {
+  --card-accent: var(--card-pinned);
+  border-color: color-mix(in oklab, var(--card-pinned) 38%, var(--card-border));
+  background: color-mix(in oklab, var(--card-pinned) 4%, var(--card-paper));
+  box-shadow: 0 12px 30px -21px color-mix(in oklab, var(--card-pinned) 36%, transparent);
+}
+
+.spectra-card--board,
+[data-spectra-card="board"] { --card-radius: 8px; box-shadow: 0 6px 18px -16px rgba(54, 39, 22, .32); }
+.spectra-card--board::before,
+[data-spectra-card="board"]::before { width: 64%; opacity: .26; }
+
+.spectra-card--canvas,
+[data-spectra-card="canvas"] { --card-radius: 9px; box-shadow: 0 14px 28px -22px rgba(54,39,22,.48); }
+.spectra-card--canvas::before,
+[data-spectra-card="canvas"]::before { opacity: .2; }
+
+.spectra-card--timeline,
+[data-spectra-card="timeline"] { --card-radius: 9px; }
+.spectra-card--timeline::before,
+[data-spectra-card="timeline"]::before { width: 52%; height: 75%; opacity: .52; }
+
+.spectra-card--result,
+[data-spectra-card="result"] { --card-radius: 8px; box-shadow: 0 6px 20px -18px rgba(54,39,22,.32); }
+.spectra-card--result::before,
+[data-spectra-card="result"]::before { width: 38%; opacity: .12; }
+
+.spectra-card--side,
+[data-spectra-card="side"] { --card-radius: 9px; background: color-mix(in oklab, var(--card-paper) 88%, var(--bg-primary)); box-shadow: none; }
+.spectra-card--side::before,
+[data-spectra-card="side"]::before { width: 48%; opacity: .12; }
+
+[data-card-state="selected"],
+[data-card-state="focused"],
+[data-card-state="context"] {
+  border-color: color-mix(in oklab, var(--card-focus) 72%, var(--card-border));
+  background: color-mix(in oklab, var(--card-focus) 3.5%, var(--card-paper));
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--card-focus) 12%, transparent), var(--card-shadow-hover);
+}
+
+[data-card-state="context"]::after {
+  content: "";
+  position: absolute;
+  z-index: 3;
+  top: 9px;
+  right: 9px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--card-focus);
+  box-shadow: 0 0 0 4px color-mix(in oklab, var(--card-focus) 12%, transparent);
+}
+
+[data-card-state="continued"] { --card-accent: #8166d8; border-color: color-mix(in oklab, #8166d8 42%, var(--card-border)); box-shadow: inset 3px 0 #8166d8, var(--card-shadow); }
+[data-card-state="confirmation"] { --card-accent: var(--warning); border-color: color-mix(in oklab, var(--warning) 42%, var(--card-border)); }
+[data-card-state="failed"] { --card-accent: var(--danger); border-color: color-mix(in oklab, var(--danger) 42%, var(--card-border)); }
+[data-card-state="disabled"],
+[data-card-state="archived"] { filter: saturate(.35); opacity: .58; box-shadow: none; }
+
+[data-card-state="creating"],
+[data-card-state="updating"] {
+  border-color: color-mix(in oklab, var(--accent-cyan) 42%, var(--card-border));
+}
+
+[data-card-state="creating"]::after,
+[data-card-state="updating"]::after {
+  content: "";
+  position: absolute;
+  z-index: 4;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(104deg, transparent 20%, color-mix(in oklab, var(--accent-cyan) 10%, transparent) 43%, transparent 66%);
+  transform: translateX(-100%);
+  animation: spectra-card-working 1.8s ease-in-out infinite;
+}
+
+@keyframes spectra-card-working { to { transform: translateX(100%); } }
+
+.spectra-card-type-icon {
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  border: 1px solid color-mix(in oklab, var(--card-accent) 20%, var(--card-border-soft));
+  background: color-mix(in oklab, var(--card-accent) 8%, var(--card-paper));
+}
+
+.spectra-icon-action {
+  position: relative;
+  display: inline-flex;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-tertiary);
+  transition: color 140ms ease, background 140ms ease, transform 140ms ease;
+}
+
+.spectra-icon-action:hover,
+.spectra-icon-action:focus-visible { background: color-mix(in oklab, var(--bg-hover) 72%, transparent); color: var(--text-primary); outline: none; }
+.spectra-icon-action:active { transform: scale(.92); }
+.spectra-icon-action.is-active { color: var(--card-focus); background: color-mix(in oklab, var(--card-focus) 9%, transparent); }
+.spectra-icon-action.is-danger:hover { color: var(--danger); background: color-mix(in oklab, var(--danger) 7%, transparent); }
+.spectra-icon-action:disabled { opacity: .38; pointer-events: none; }
+
+.spectra-icon-action[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  z-index: 200;
+  left: 50%;
+  bottom: calc(100% + 7px);
+  width: max-content;
+  max-width: 190px;
+  transform: translate(-50%, 3px);
+  border: 1px solid var(--card-border-soft);
+  border-radius: 6px;
+  background: color-mix(in oklab, var(--card-paper) 96%, transparent);
+  box-shadow: 0 8px 24px -16px rgba(30,20,10,.55);
+  padding: 5px 7px;
+  color: var(--text-primary);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.2;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease, transform 120ms ease;
+  transition-delay: 0ms;
+}
+
+.spectra-icon-action[data-tooltip]:hover::after,
+.spectra-icon-action[data-tooltip]:focus-visible::after { opacity: 1; transform: translate(-50%, 0); transition-delay: 380ms; }
+
+[data-focus-state]:not([data-focus-state="global"]) {
+  color: var(--text-primary);
+  background: color-mix(in oklab, var(--card-focus) 7%, transparent);
+  box-shadow: inset 2px 0 color-mix(in oklab, var(--card-focus) 72%, transparent);
+}
+
+[data-board-column] {
+  border-color: color-mix(in oklab, var(--card-accent, var(--text-tertiary)) 16%, var(--card-border-soft));
+  background: color-mix(in oklab, var(--card-accent, var(--text-tertiary)) 3%, var(--bg-primary));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spectra-card,
+  [data-spectra-card],
+  .spectra-icon-action { transition: none; }
+  [data-card-state="creating"]::after,
+  [data-card-state="updating"]::after { animation: none; background: color-mix(in oklab, var(--accent-cyan) 5%, transparent); }
 }
 
 

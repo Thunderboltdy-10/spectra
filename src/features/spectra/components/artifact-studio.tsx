@@ -2,6 +2,9 @@
 
 import {
   Archive,
+  AlignCenter,
+  AlignLeft,
+  AlignRight,
   Bold,
   BookOpen,
   CalendarCheck2,
@@ -27,6 +30,7 @@ import {
   Radio,
   RotateCcw,
   Save,
+  Sigma,
   Trash2,
   Underline as UnderlineIcon,
   X,
@@ -49,6 +53,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { SlashCommand } from "@/components/editor/slash-command-extension";
 import { createSlashCommandRenderer } from "@/components/editor/slash-command-renderer";
 import { Callout } from "@/components/editor/extensions/callout-node";
+import { DragHandle } from "@/components/editor/extensions/drag-handle";
+import { Equation } from "@/components/editor/extensions/equation-node";
 import { blueprintMeta } from "./artifact-card";
 import {
   artifactPlacements,
@@ -70,6 +76,8 @@ type DeckCard = {
   hint?: string;
   section?: string;
   confidence?: "unknown" | "weak" | "medium" | "strong";
+  sourceRefs?: string[];
+  review?: { state?: "new" | "learning" | "review" | "mastered"; correctStreak?: number; lastReviewedAt?: number | null; nextReviewAt?: number | null };
 };
 
 type QuizQuestion = {
@@ -82,6 +90,8 @@ type QuizQuestion = {
   difficulty?: "easy" | "medium" | "hard";
   points?: number;
   timeLimitSeconds?: number;
+  sourceRefs?: string[];
+  feedback?: string;
 };
 
 type PlannerSubtask = { id: string; title: string; done: boolean };
@@ -99,6 +109,9 @@ type PlannerTask = {
   attachments: PlannerAttachment[];
   linkedArtifactIds: string[];
   reminders: string[];
+  estimateMinutes?: number;
+  progressNote?: string;
+  sourceRefs: string[];
 };
 
 const storageVersion = 1;
@@ -135,6 +148,28 @@ function tagsFromDraft(value: string) {
   return value.split(",").map((tag) => tag.trim()).filter(Boolean);
 }
 
+type ArtifactSnapshot = { title: string; summary?: string; content: unknown; tags: string[] };
+
+function snapshotLines(snapshot: ArtifactSnapshot) {
+  const content = JSON.stringify(snapshot.content, null, 2).split("\n").slice(0, 420);
+  return [`Title: ${snapshot.title}`, `Summary: ${snapshot.summary ?? ""}`, `Tags: ${(snapshot.tags ?? []).join(", ")}`, "", ...content];
+}
+
+function lineDiff(current: ArtifactSnapshot, historical: ArtifactSnapshot) {
+  const before = snapshotLines(historical);
+  const after = snapshotLines(current);
+  const rows = Array.from({ length: before.length + 1 }, () => new Uint16Array(after.length + 1));
+  for (let left = before.length - 1; left >= 0; left -= 1) for (let right = after.length - 1; right >= 0; right -= 1) rows[left]![right] = before[left] === after[right] ? rows[left + 1]![right + 1]! + 1 : Math.max(rows[left + 1]![right]!, rows[left]![right + 1]!);
+  const result: Array<{ kind: "same" | "added" | "removed"; text: string }> = [];
+  let left = 0; let right = 0;
+  while (left < before.length || right < after.length) {
+    if (left < before.length && right < after.length && before[left] === after[right]) { result.push({ kind: "same", text: before[left]! }); left += 1; right += 1; }
+    else if (right < after.length && (left >= before.length || rows[left]![right + 1]! >= rows[left + 1]![right]!)) { result.push({ kind: "added", text: after[right]! }); right += 1; }
+    else { result.push({ kind: "removed", text: before[left]! }); left += 1; }
+  }
+  return result;
+}
+
 function contentTextFromJson(node?: JSONContent): string {
   if (!node) return "";
   const own = typeof node.text === "string" ? node.text : "";
@@ -150,6 +185,10 @@ function documentJsonFromContent(content: unknown, title: string): JSONContent {
   const contentNodes = blocks.length > 0
     ? blocks.map((block) => {
       const text = typeof block.text === "string" ? block.text : "";
+      if (block.type === "equation" || block.type === "math") {
+        const attrs = record(block.attrs);
+        return { type: "equation", attrs: { latex: typeof block.latex === "string" ? block.latex : text, display: attrs.display === "inline" ? "inline" : "block", alignment: ["left", "right"].includes(String(attrs.alignment)) ? attrs.alignment : "center" } };
+      }
       const type = block.type === "heading" ? "heading" : block.type === "list" ? "bulletList" : block.type === "quote" ? "blockquote" : "paragraph";
       if (type === "heading") return { type: "heading", attrs: { level: 2 }, content: text ? [{ type: "text", text }] : undefined };
       if (type === "bulletList") return { type: "bulletList", content: [{ type: "listItem", content: [{ type: "paragraph", content: text ? [{ type: "text", text }] : undefined }] }] };
@@ -166,6 +205,7 @@ function documentJsonFromContent(content: unknown, title: string): JSONContent {
 function blocksFromJson(json: JSONContent) {
   const nodes = Array.isArray(json.content) ? json.content : [];
   return nodes.map((node, index) => {
+    if (node.type === "equation") return { id: `block-${index + 1}`, type: "equation", text: typeof node.attrs?.latex === "string" ? node.attrs.latex : "", latex: typeof node.attrs?.latex === "string" ? node.attrs.latex : "", attrs: { display: node.attrs?.display ?? "block", alignment: node.attrs?.alignment ?? "center" } };
     const text = contentTextFromJson(node);
     const type = node.type === "heading" ? "heading" : node.type === "blockquote" ? "quote" : node.type === "bulletList" || node.type === "orderedList" ? "list" : "paragraph";
     return { id: `block-${index + 1}`, type, text };
@@ -193,6 +233,8 @@ function deckCards(content: unknown): DeckCard[] {
     hint: typeof card.hint === "string" ? card.hint : "",
     section: typeof card.section === "string" ? card.section : "Section 1",
     confidence: (card.confidence === "weak" || card.confidence === "medium" || card.confidence === "strong" ? card.confidence : "unknown") as DeckCard["confidence"],
+    sourceRefs: Array.isArray(card.sourceRefs) ? card.sourceRefs.filter((item): item is string => typeof item === "string") : [],
+    review: record(card.review) as DeckCard["review"],
   }));
   return cards.length > 0 ? cards : [{ id: "card-1", front: "", back: "", hint: "", section: "Section 1", confidence: "unknown" }];
 }
@@ -210,6 +252,8 @@ function quizQuestions(content: unknown): QuizQuestion[] {
       difficulty: (question.difficulty === "easy" || question.difficulty === "hard" ? question.difficulty : "medium") as QuizQuestion["difficulty"],
       points: typeof question.points === "number" ? question.points : 1,
       timeLimitSeconds: typeof question.timeLimitSeconds === "number" ? question.timeLimitSeconds : 90,
+      sourceRefs: Array.isArray(question.sourceRefs) ? question.sourceRefs.filter((item): item is string => typeof item === "string") : [],
+      feedback: typeof question.feedback === "string" ? question.feedback : "",
     };
   });
   return questions.length > 0
@@ -239,6 +283,9 @@ function plannerTask(content: unknown): PlannerTask {
     })),
     linkedArtifactIds: Array.isArray(task.linkedArtifactIds) ? task.linkedArtifactIds.filter((item): item is string => typeof item === "string") : [],
     reminders: Array.isArray(task.reminders) ? task.reminders.filter((item): item is string => typeof item === "string") : [],
+    estimateMinutes: typeof task.estimateMinutes === "number" ? task.estimateMinutes : undefined,
+    progressNote: typeof task.progressNote === "string" ? task.progressNote : "",
+    sourceRefs: Array.isArray(task.sourceRefs) ? task.sourceRefs.filter((item): item is string => typeof item === "string") : [],
   };
 }
 
@@ -653,9 +700,11 @@ function ArtifactStudioEditor({
   const [historyOpen, setHistoryOpen] = useState(false);
   const [versions, setVersions] = useState<SpectraArtifactVersion[]>([]);
   const [historyBusy, setHistoryBusy] = useState<string | null>(null);
+  const [previewVersion, setPreviewVersion] = useState<SpectraArtifactVersion | null>(null);
   const meta = blueprintMeta[artifact.blueprintKey];
   const Icon = meta.icon;
   const baseline = useMemo(() => JSON.stringify({ title: artifact.title, summary: artifact.summary ?? "", tagDraft: (artifact.tags ?? []).join(", "), content: artifact.content }), [artifact]);
+  const previewDiff = useMemo(() => previewVersion ? lineDiff({ title: artifact.title, summary: artifact.summary, content: artifact.content, tags: artifact.tags }, previewVersion.before) : [], [artifact, previewVersion]);
 
   useEffect(() => {
     onDirtyChange(dirty);
@@ -787,13 +836,14 @@ function ArtifactStudioEditor({
         </div>
       </main>
       {closeDecisionOpen ? <div className="absolute inset-0 z-[120] flex items-center justify-center bg-[color-mix(in_oklab,var(--bg-primary)_70%,transparent)] p-5 backdrop-blur-[2px]" onPointerDown={() => setCloseDecisionOpen(false)}><div className="w-full max-w-[420px] rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5 shadow-[0_24px_70px_rgba(27,20,12,0.2)]" onPointerDown={(event) => event.stopPropagation()}><h2 className="font-display text-[20px] font-semibold text-[var(--text-primary)]">Save changes to {artifact.title}?</h2><p className="mt-2 text-[12px] leading-5 text-[var(--text-secondary)]">This artifact has edits that have not been saved.</p><div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setCloseDecisionOpen(false)} className="h-9 px-3 text-[12px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]">Keep editing</button><button type="button" onClick={onClose} className="h-9 rounded-[8px] px-3 text-[12px] font-medium text-[var(--danger)] hover:bg-[color-mix(in_oklab,var(--danger)_8%,transparent)]">Discard</button><button type="button" disabled={busy || !title.trim()} onClick={() => void save().then(onClose)} className="h-9 rounded-[8px] bg-[var(--text-primary)] px-3 text-[12px] font-medium text-[var(--bg-primary)] disabled:opacity-45">Save & close</button></div></div></div> : null}
-      {historyOpen ? <div className="absolute inset-0 z-[119] flex items-center justify-center bg-[color-mix(in_oklab,var(--bg-primary)_70%,transparent)] p-5 backdrop-blur-[2px]" onPointerDown={() => setHistoryOpen(false)}><div className="w-full max-w-[520px] rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5 shadow-[0_24px_70px_rgba(27,20,12,0.2)]" onPointerDown={(event) => event.stopPropagation()}><div className="flex items-start justify-between gap-4"><div><h2 className="font-display text-[20px] font-semibold text-[var(--text-primary)]">Version history</h2><p className="mt-1 text-[11px] text-[var(--text-secondary)]">Manual, AI, and revert snapshots.</p></div><IconButton label="Close history" onClick={() => setHistoryOpen(false)} icon={X} /></div><div className="mt-4 max-h-[420px] space-y-1.5 overflow-y-auto">{versions.map((version) => <div key={version._id} className="flex items-center gap-3 rounded-[8px] bg-[var(--bg-primary)] px-3 py-2.5"><span className={`h-2 w-2 shrink-0 rounded-full ${version.source === "ai" ? "bg-[var(--accent-cyan)]" : version.source === "revert" ? "bg-[#d88922]" : "bg-[var(--text-tertiary)]"}`} /><div className="min-w-0 flex-1"><div className="truncate text-[12px] font-medium text-[var(--text-primary)]">{version.summary ?? `${version.source} edit`}</div><div className="mt-0.5 text-[10px] capitalize text-[var(--text-tertiary)]">{version.source} · {formatRelativeTime(version.createdAt)}</div></div><button type="button" disabled={Boolean(historyBusy) || dirty} onClick={() => { setHistoryBusy(version._id); void Promise.resolve(onRevert(version._id)).then(() => setHistoryOpen(false)).finally(() => setHistoryBusy(null)); }} className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-35" aria-label="Revert to before this change" title={dirty ? "Save or discard current edits before reverting" : "Revert this change"}>{historyBusy === version._id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}</button></div>)}{versions.length === 0 ? <div className="py-8 text-center text-[12px] text-[var(--text-tertiary)]">No saved versions yet.</div> : null}</div></div></div> : null}
+      {historyOpen ? <div className="absolute inset-0 z-[119] flex items-center justify-center bg-[color-mix(in_oklab,var(--bg-primary)_70%,transparent)] p-5 backdrop-blur-[2px]" onPointerDown={() => setHistoryOpen(false)}><div className="flex max-h-[min(720px,88vh)] w-full max-w-[980px] flex-col rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5 shadow-[0_24px_70px_rgba(27,20,12,0.2)]" onPointerDown={(event) => event.stopPropagation()}><div className="flex items-start justify-between gap-4"><div><h2 className="font-display text-[20px] font-semibold text-[var(--text-primary)]">Version history</h2><p className="mt-1 text-[11px] text-[var(--text-secondary)]">Preview any state without changing the artifact. Restore only when ready.</p></div><IconButton label="Close history" onClick={() => setHistoryOpen(false)} icon={X} /></div><div className="mt-4 grid min-h-0 flex-1 gap-4 md:grid-cols-[300px_minmax(0,1fr)]"><div className="max-h-[580px] space-y-1.5 overflow-y-auto pr-1">{versions.map((version) => <button type="button" key={version._id} onClick={() => setPreviewVersion(version)} className={`flex w-full items-center gap-3 rounded-[8px] px-3 py-2.5 text-left transition ${previewVersion?._id === version._id ? "bg-[color-mix(in_oklab,var(--accent-cyan)_9%,var(--bg-primary))] shadow-[inset_3px_0_0_var(--accent-cyan)]" : "bg-[var(--bg-primary)] hover:bg-[var(--bg-hover)]"}`}><span className={`h-2 w-2 shrink-0 rounded-full ${version.source === "ai" ? "bg-[var(--accent-cyan)]" : version.source === "revert" ? "bg-[#d88922]" : "bg-[var(--text-tertiary)]"}`} /><span className="min-w-0 flex-1"><span className="block truncate text-[12px] font-medium text-[var(--text-primary)]">{version.summary ?? `${version.source} edit`}</span><span className="mt-0.5 block text-[10px] capitalize text-[var(--text-tertiary)]">{version.source} · {formatRelativeTime(version.createdAt)}</span></span></button>)}{versions.length === 0 ? <div className="py-8 text-center text-[12px] text-[var(--text-tertiary)]">No saved versions yet.</div> : null}</div><section className="min-h-[300px] overflow-hidden rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-primary)]">{previewVersion ? <div className="flex h-full min-h-0 flex-col"><div className="flex items-center justify-between border-b border-[var(--border-default)] px-4 py-3"><div><div className="text-[12px] font-semibold text-[var(--text-primary)]">Before “{previewVersion.summary ?? `${previewVersion.source} edit`}”</div><div className="mt-0.5 text-[10px] text-[var(--text-tertiary)]">Green is current content · red was removed from this historical state</div></div><button type="button" disabled={Boolean(historyBusy) || dirty} onClick={() => { setHistoryBusy(previewVersion._id); void Promise.resolve(onRevert(previewVersion._id)).then(() => setHistoryOpen(false)).finally(() => setHistoryBusy(null)); }} className="flex h-8 items-center gap-1.5 rounded-[7px] bg-[var(--text-primary)] px-2.5 text-[10px] font-medium text-[var(--bg-primary)] disabled:opacity-35">{historyBusy === previewVersion._id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}Restore this version</button></div><div className="min-h-0 flex-1 overflow-auto p-3 font-mono text-[10px] leading-5">{previewDiff.map((line, index) => <div key={`${index}:${line.text}`} className={`whitespace-pre-wrap break-all px-2 ${line.kind === "added" ? "bg-[color-mix(in_oklab,var(--success)_11%,transparent)] text-[var(--success)]" : line.kind === "removed" ? "bg-[color-mix(in_oklab,var(--danger)_9%,transparent)] text-[var(--danger)] line-through" : "text-[var(--text-tertiary)]"}`}><span className="mr-2 select-none opacity-55">{line.kind === "added" ? "+" : line.kind === "removed" ? "−" : " "}</span>{line.text || " "}</div>)}</div></div> : <div className="flex h-full min-h-[320px] items-center justify-center p-8 text-center text-[12px] text-[var(--text-secondary)]">Select a version to preview its highlighted changes.</div>}</section></div></div></div> : null}
     </div>
   );
 }
 
 function DocumentStudio({ title, content, onChange }: { title: string; content: unknown; onChange: (content: unknown) => void }) {
   const [initialContent] = useState(() => documentJsonFromContent(content, title));
+  const [, refreshToolbar] = useState(0);
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ heading: { levels: [1, 2, 3] } }),
@@ -806,6 +856,8 @@ function DocumentStudio({ title, content, onChange }: { title: string; content: 
       TaskItem.configure({ nested: true }),
       Image.configure({ allowBase64: true, inline: false }),
       Callout,
+      Equation,
+      DragHandle,
       Placeholder.configure({ placeholder: "Type / for commands" }),
       SlashCommand.configure({
         suggestion: {
@@ -823,7 +875,11 @@ function DocumentStudio({ title, content, onChange }: { title: string; content: 
       },
     },
     onUpdate: ({ editor }) => onChange(documentContentFromJson(editor.getJSON(), content)),
+    onSelectionUpdate: () => refreshToolbar((value) => value + 1),
   });
+
+  const equationActive = editor?.isActive("equation") ?? false;
+  const equationAttrs = equationActive ? editor?.getAttributes("equation") ?? {} : {};
 
   return (
     <div className="bg-[var(--bg-primary)]">
@@ -837,9 +893,11 @@ function DocumentStudio({ title, content, onChange }: { title: string; content: 
         <Divider />
         <ToolbarButton label="Bullet list" onClick={() => editor?.chain().focus().toggleBulletList().run()} active={editor?.isActive("bulletList")} icon={List} />
         <ToolbarButton label="Quote" onClick={() => editor?.chain().focus().toggleBlockquote().run()} active={editor?.isActive("blockquote")} icon={MessageSquare} />
+        <ToolbarButton label="Insert equation" onClick={() => editor?.chain().focus().insertContent({ type: "equation", attrs: { latex: "", display: "block", alignment: "center" } }).run()} active={equationActive} icon={Sigma} />
         <ToolbarButton label="Link" disabled icon={Link2} />
         <ToolbarButton label="More" disabled icon={MoreHorizontal} />
       </div>
+      {equationActive ? <div className="flex flex-wrap items-center gap-2 border-b border-[color-mix(in_oklab,var(--accent-cyan)_18%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_4%,var(--bg-elevated))] px-4 py-2" data-equation-toolbar="true"><Sigma className="h-4 w-4 text-[var(--accent-cyan)]" /><span className="text-[11px] font-semibold text-[var(--text-secondary)]">LaTeX</span><input value={typeof equationAttrs.latex === "string" ? equationAttrs.latex : ""} onChange={(event) => editor?.chain().focus().updateAttributes("equation", { latex: event.target.value }).run()} className="h-8 min-w-[220px] flex-1 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 font-mono text-[12px] text-[var(--text-primary)] outline-none" placeholder="E = mc^2" /><ToolbarButton label="Align left" icon={AlignLeft} active={equationAttrs.alignment === "left"} onClick={() => editor?.chain().focus().updateAttributes("equation", { alignment: "left" }).run()} /><ToolbarButton label="Align center" icon={AlignCenter} active={!equationAttrs.alignment || equationAttrs.alignment === "center"} onClick={() => editor?.chain().focus().updateAttributes("equation", { alignment: "center" }).run()} /><ToolbarButton label="Align right" icon={AlignRight} active={equationAttrs.alignment === "right"} onClick={() => editor?.chain().focus().updateAttributes("equation", { alignment: "right" }).run()} /></div> : null}
       <div className="min-h-[680px] px-2 py-4 sm:px-6">
         <EditorContent
           editor={editor}
@@ -951,6 +1009,12 @@ function FlashcardStudio({ mode, content, onChange }: { mode: "split" | "tab"; c
                 </select>
               </Field>
             </div>
+            <div className={`mt-3 grid gap-3 ${mode === "tab" ? "md:grid-cols-3" : "grid-cols-1"}`}>
+              <Field label="Section"><input value={activeCard.section ?? ""} onChange={(event) => updateCard(activeCard.id, { section: event.target.value || "Section 1" })} className={inputClass()} placeholder="Section" /></Field>
+              <Field label="Review state"><select value={activeCard.review?.state ?? "new"} onChange={(event) => updateCard(activeCard.id, { review: { ...activeCard.review, state: event.target.value as NonNullable<DeckCard["review"]>["state"] } })} className={inputClass()}><option value="new">New</option><option value="learning">Learning</option><option value="review">Review</option><option value="mastered">Mastered</option></select></Field>
+              <Field label="Correct streak"><input type="number" min={0} value={activeCard.review?.correctStreak ?? 0} onChange={(event) => updateCard(activeCard.id, { review: { ...activeCard.review, correctStreak: Math.max(0, Number(event.target.value)) } })} className={inputClass()} /></Field>
+            </div>
+            <div className="mt-3"><Field label="Sources / provenance"><input value={(activeCard.sourceRefs ?? []).join(", ")} onChange={(event) => updateCard(activeCard.id, { sourceRefs: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) })} className={inputClass()} placeholder="Chapter 3, lecture notes" /></Field></div>
           </div>
         ) : null}
       </section>
@@ -962,6 +1026,8 @@ function QuizStudio({ mode, content, onChange }: { mode: "split" | "tab"; conten
   const [questions, setQuestions] = useState(() => quizQuestions(content));
   const [activeQuestionId, setActiveQuestionId] = useState(questions[0]?.id ?? "");
   const [view, setView] = useState<"builder" | "preview">("builder");
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [submitted, setSubmitted] = useState(false);
   const activeQuestion = questions.find((question) => question.id === activeQuestionId) ?? questions[0];
 
   function commit(next: QuizQuestion[]) {
@@ -993,19 +1059,20 @@ function QuizStudio({ mode, content, onChange }: { mode: "split" | "tab"; conten
       {view === "preview" ? (
         <div className="p-5">
           <div className="mx-auto max-w-[760px] space-y-3">
+            <div className="mb-5 flex items-end justify-between"><div><h3 className="font-display text-[24px] font-semibold text-[var(--text-primary)]">Take quiz</h3><p className="mt-1 text-[12px] text-[var(--text-secondary)]">Answer locally, then submit to mark and review explanations.</p></div>{submitted ? <div className="rounded-[8px] bg-[color-mix(in_oklab,var(--success)_9%,var(--bg-primary))] px-3 py-2 text-[12px] font-semibold text-[var(--success)]">{questions.filter((question) => (answers[question.id] ?? "").trim().toLowerCase() === (question.correctAnswer ?? "").trim().toLowerCase()).length}/{questions.length} correct</div> : null}</div>
             {questions.map((question, index) => (
-              <div key={question.id} className="rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-4">
+              <div key={question.id} className={`rounded-[8px] border bg-[var(--bg-primary)] p-4 ${submitted ? (answers[question.id] ?? "").trim().toLowerCase() === (question.correctAnswer ?? "").trim().toLowerCase() ? "border-[color-mix(in_oklab,var(--success)_48%,var(--border-default))]" : "border-[color-mix(in_oklab,var(--danger)_38%,var(--border-default))]" : "border-[var(--border-default)]"}`}>
                 <div className="text-[12px] font-semibold text-[var(--text-secondary)]">Question {index + 1}</div>
                 <div className="mt-2 text-[15px] font-medium text-[var(--text-primary)]">{question.prompt || "Untitled question"}</div>
                 <div className="mt-3 space-y-2">
                   {question.type === "multiple_choice" ? question.options.map((option, optionIndex) => (
-                    <div key={`${question.id}-${optionIndex}`} className="flex items-center gap-2 rounded-[7px] border border-[var(--border-default)] px-3 py-2 text-[13px] text-[var(--text-secondary)]">
-                      <Radio className="h-3.5 w-3.5" />{option || `Option ${optionIndex + 1}`}
-                    </div>
-                  )) : <div className="rounded-[7px] border border-dashed border-[var(--border-default)] px-3 py-6 text-[13px] text-[var(--text-secondary)]">Short answer response</div>}
+                    <button type="button" disabled={submitted} onClick={() => setAnswers((current) => ({ ...current, [question.id]: option }))} key={`${question.id}-${optionIndex}`} className={`flex w-full items-center gap-2 rounded-[7px] border px-3 py-2 text-left text-[13px] transition ${answers[question.id] === option ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-elevated))] text-[var(--text-primary)]" : "border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}><Radio className="h-3.5 w-3.5" />{option || `Option ${optionIndex + 1}`}</button>
+                  )) : <input disabled={submitted} value={answers[question.id] ?? ""} onChange={(event) => setAnswers((current) => ({ ...current, [question.id]: event.target.value }))} className={inputClass()} placeholder="Type your answer" />}
                 </div>
+                {submitted ? <div className="mt-3 border-t border-[var(--border-subtle)] pt-3 text-[11px] leading-5 text-[var(--text-secondary)]"><div><strong className="text-[var(--text-primary)]">Answer:</strong> {question.correctAnswer}</div>{question.explanation ? <div className="mt-1">{question.explanation}</div> : null}{question.sourceRefs?.length ? <div className="mt-1 text-[var(--text-tertiary)]">Sources: {question.sourceRefs.join(" · ")}</div> : null}</div> : null}
               </div>
             ))}
+            <div className="flex justify-end gap-2 pt-3">{submitted ? <button type="button" className={smallActionClass()} onClick={() => { setSubmitted(false); setAnswers({}); }}>Try again</button> : <button type="button" className="h-9 rounded-[8px] bg-[var(--text-primary)] px-3 text-[12px] font-medium text-[var(--bg-primary)]" onClick={() => setSubmitted(true)}>Submit answers</button>}</div>
           </div>
         </div>
       ) : (
@@ -1125,6 +1192,7 @@ function PlannerStudio({
         <Field label="Description">
           <textarea value={task.description ?? ""} onChange={(event) => commit({ ...task, description: event.target.value })} className={textareaClass("min-h-[136px]")} placeholder="What needs to happen?" />
         </Field>
+        <div className={`mt-4 grid gap-3 ${mode === "tab" ? "md:grid-cols-[160px_minmax(0,1fr)]" : "grid-cols-1"}`}><Field label="Estimate (minutes)"><input type="number" min={1} value={task.estimateMinutes ?? ""} onChange={(event) => commit({ ...task, estimateMinutes: event.target.value ? Number(event.target.value) : undefined })} className={inputClass()} placeholder="45" /></Field><Field label="Progress note"><input value={task.progressNote ?? ""} onChange={(event) => commit({ ...task, progressNote: event.target.value })} className={inputClass()} placeholder="Current blocker or next concrete step" /></Field></div>
         <div className={`mt-4 grid gap-3 ${mode === "tab" ? "md:grid-cols-4" : "grid-cols-1"}`}>
           <Field label="Status">
             <select value={task.status} onChange={(event) => commit({ ...task, status: event.target.value as PlannerTask["status"] })} className={inputClass()}>
@@ -1166,6 +1234,7 @@ function PlannerStudio({
         </div>
         <TaskListEditor task={task} commit={commit} />
         <AttachmentEditor task={task} commit={commit} />
+        <div className="mt-5"><Field label="Sources / provenance"><input value={task.sourceRefs.join(", ")} onChange={(event) => commit({ ...task, sourceRefs: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) })} className={inputClass()} placeholder="Assignment brief, linked document" /></Field></div>
       </section>
       {mode === "tab" ? <aside className="space-y-4">
         <SideCard title="Schedule">
@@ -1286,6 +1355,7 @@ function QuestionEditor({ question, questionNumber, onChange, onRemove }: { ques
           <textarea value={question.explanation ?? ""} onChange={(event) => onChange({ explanation: event.target.value })} className={textareaClass("min-h-[110px]")} placeholder="Optional answer explanation" />
         </Field>
       </div>
+      <div className="mt-4"><Field label="Sources / provenance"><input value={(question.sourceRefs ?? []).join(", ")} onChange={(event) => onChange({ sourceRefs: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) })} className={inputClass()} placeholder="Textbook p. 42, class notes" /></Field></div>
     </div>
   );
 }
@@ -1362,6 +1432,8 @@ function StudioDetails({ artifact, artifacts, tagDraft, onTagDraftChange }: { ar
   const links = linkedArtifacts(artifact, artifacts);
   const [durableLinks, setDurableLinks] = useState<SpectraArtifactLink[]>([]);
   const [linkingId, setLinkingId] = useState<string | null>(null);
+  const [newTag, setNewTag] = useState("");
+  const visibleTags = tagsFromDraft(tagDraft);
   useEffect(() => {
     void getSpectraArtifactLinks(artifact._id).then((result) => setDurableLinks(result.links)).catch(() => setDurableLinks([]));
   }, [artifact._id]);
@@ -1381,6 +1453,11 @@ function StudioDetails({ artifact, artifacts, tagDraft, onTagDraftChange }: { ar
       const result = await getSpectraArtifactLinks(artifact._id);
       setDurableLinks(result.links);
     } finally { setLinkingId(null); }
+  }
+  async function removeLink(linkId: string) {
+    await postSpectra({ action: "removeArtifactLink", linkId });
+    const result = await getSpectraArtifactLinks(artifact._id);
+    setDurableLinks(result.links);
   }
   return (
     <aside className="space-y-4">
@@ -1403,7 +1480,7 @@ function StudioDetails({ artifact, artifacts, tagDraft, onTagDraftChange }: { ar
       </SideCard>
       <SideCard title="Linked artifacts">
         <div className="space-y-2">
-          {durableLinks.slice(0, 5).map((link) => link.artifact ? <div key={link._id} className="flex items-center gap-2 rounded-[7px] bg-[var(--bg-primary)] px-2 py-1.5 text-[11px] text-[var(--text-primary)]"><span className="h-1.5 w-1.5 rounded-full bg-[var(--accent-cyan)]" /><span className="min-w-0 flex-1 truncate">{link.artifact.title}</span><span className="text-[9px] text-[var(--text-tertiary)]">{link.relationType.replace("_", " ")}</span></div> : null)}
+          {durableLinks.slice(0, 8).map((link) => link.artifact ? <div key={link._id} className="group rounded-[7px] bg-[var(--bg-primary)] px-2 py-1.5 text-[11px] text-[var(--text-primary)]" data-link-direction={link.direction}><div className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-[var(--accent-cyan)]" /><span className="min-w-0 flex-1 truncate font-medium">{link.artifact.title}</span><span className="text-[9px] text-[var(--text-tertiary)]">{link.direction === "incoming" ? "←" : "→"} {link.relationType.replaceAll("_", " ")}</span><button type="button" onClick={() => void removeLink(link._id)} className="text-[var(--text-tertiary)] opacity-0 transition hover:text-[var(--danger)] group-hover:opacity-100" aria-label={`Remove link to ${link.artifact.title}`}><X className="h-3 w-3" /></button></div>{link.explanation ? <div className="mt-1 line-clamp-2 pl-3.5 text-[9px] leading-4 text-[var(--text-tertiary)]">{link.explanation}</div> : null}</div> : null)}
           {links.slice(0, 4).map(({ artifact: linked }) => {
             const linkedMeta = blueprintMeta[linked.blueprintKey];
             const LinkedIcon = linkedMeta.icon;
@@ -1420,7 +1497,7 @@ function StudioDetails({ artifact, artifacts, tagDraft, onTagDraftChange }: { ar
       {suggestions.length > 0 ? <SideCard title="Related suggestions"><div className="space-y-1.5">{suggestions.map(({ candidate }) => <div key={candidate._id} className="group flex items-center gap-2 rounded-[7px] px-1.5 py-1.5 hover:bg-[var(--bg-primary)]"><span className="min-w-0 flex-1 truncate text-[11px] text-[var(--text-secondary)]">{candidate.title}</span><button type="button" disabled={linkingId === candidate._id} onClick={() => void confirmLink(candidate)} className="rounded-[5px] px-1.5 py-1 text-[9px] font-medium text-[var(--accent-cyan)] opacity-70 hover:bg-[var(--bg-hover)] group-hover:opacity-100">{linkingId === candidate._id ? "Linking…" : "Confirm link"}</button></div>)}</div></SideCard> : null}
       {artifact.createdFrom ? <SideCard title="Provenance"><div className="text-[11px] leading-5 text-[var(--text-secondary)]"><div className="font-medium text-[var(--text-primary)]">{artifact.createdFrom.contextSummary ?? `Created from ${artifact.createdFrom.source}`}</div>{artifact.createdFrom.sourceArtifactIds?.length ? <div className="mt-1">Used {artifact.createdFrom.sourceArtifactIds.length} source artifact{artifact.createdFrom.sourceArtifactIds.length === 1 ? "" : "s"}</div> : null}{artifact.createdFrom.threadId ? <div>Includes conversation context</div> : null}{artifact.createdFrom.sourceAttachmentNames?.length ? <div>{artifact.createdFrom.sourceAttachmentNames.length} attachment{artifact.createdFrom.sourceAttachmentNames.length === 1 ? "" : "s"}</div> : null}</div></SideCard> : null}
       <SideCard title="Tags">
-        <input value={tagDraft} onChange={(event) => onTagDraftChange(event.target.value)} className={inputClass()} placeholder="biology, revision" />
+        <div className="flex flex-wrap gap-1.5">{visibleTags.map((tag) => <span key={tag} className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 py-1 text-[10px] font-medium text-[var(--text-secondary)]" data-artifact-tag={tag}><span>{tag}</span><button type="button" onClick={() => onTagDraftChange(visibleTags.filter((item) => item !== tag).join(", "))} aria-label={`Remove ${tag}`}><X className="h-3 w-3" /></button></span>)}</div><div className="mt-2 flex gap-1.5"><input value={newTag} onChange={(event) => setNewTag(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && newTag.trim()) { event.preventDefault(); onTagDraftChange(Array.from(new Set([...visibleTags, newTag.trim()])).join(", ")); setNewTag(""); } }} className="h-8 min-w-0 flex-1 bg-transparent text-[11px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]" placeholder="Add a tag" /><button type="button" className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--accent-cyan)] hover:bg-[var(--bg-hover)]" onClick={() => { if (!newTag.trim()) return; onTagDraftChange(Array.from(new Set([...visibleTags, newTag.trim()])).join(", ")); setNewTag(""); }} aria-label="Add tag"><Plus className="h-3.5 w-3.5" /></button></div>
       </SideCard>
       <SideCard title="Activity">
         <MetricRow label="Last edited" value={formatRelativeTime(artifact.updatedAt)} />
@@ -1446,7 +1523,7 @@ function CardFace({ label, value, placeholder, onChange }: { label: string; valu
 
 function SideCard({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section className="rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
+    <section data-spectra-card="side" className="p-4">
       <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">{title}</h3>
       {children}
     </section>
@@ -1499,7 +1576,7 @@ function iconButtonClass() {
 }
 
 function smallActionClass() {
-  return "inline-flex h-8 items-center gap-1.5 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 text-[12px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-45";
+  return "inline-flex h-8 items-center gap-1.5 rounded-[7px] bg-transparent px-2.5 text-[12px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-45";
 }
 
 function toolbarClass(active?: boolean) {

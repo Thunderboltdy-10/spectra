@@ -12,6 +12,7 @@ export type SpectraLiveExchange = {
   runId?: string;
   prompt: string;
   content: string;
+  reasoning: string;
   status: "starting" | "streaming" | "failed";
   startedAt: number;
 };
@@ -99,9 +100,12 @@ export function useSpectraRun({
   const dismissedCardIds = useRef(new Set<string>());
   const activeRequests = useRef(new Set<AbortController>());
   const activeRunIds = useRef(new Set<string>());
+  const durableThreadId = useRef(threadId);
   const selectedKey = selectedArtifactIds.join(",");
   const scopeKey = `${surface}:${workspaceId ?? ""}:${artifactId ?? ""}:${threadId ?? ""}:${focusMode ?? ""}:${selectedKey}`;
   const previousScopeKey = useRef(scopeKey);
+
+  useEffect(() => { durableThreadId.current = threadId; }, [threadId]);
 
   useEffect(() => {
     const incoming = initialCards.filter((card) => !card.hiddenAt && !dismissedCardIds.current.has(card._id)).map(persistedToStream);
@@ -151,8 +155,12 @@ export function useSpectraRun({
           activeRunIds.current.add(event.runId);
           requestRunId = event.runId;
         }
-        if (event.type === "thread_ready") void onThreadReady?.(event.threadId);
+        if (event.type === "thread_ready") {
+          durableThreadId.current = event.threadId;
+          void onThreadReady?.(event.threadId);
+        }
         if (event.type === "text_delta") setLiveExchange((current) => current && (!liveExchangeId || current.id === liveExchangeId) ? { ...current, runId: event.runId, content: current.content + event.content, status: "streaming" } : current);
+        if (event.type === "reasoning_delta") setLiveExchange((current) => current && (!liveExchangeId || current.id === liveExchangeId) ? { ...current, runId: event.runId, reasoning: current.reasoning + event.content, status: "streaming" } : current);
         if (event.type === "run_created" || event.type === "result_card" || event.type === "confirmation_required" || event.type === "final") upsert(event.card);
         if (event.type === "error") {
           if (event.card) upsert(event.card);
@@ -168,7 +176,8 @@ export function useSpectraRun({
             updatedAt: Date.now(),
           } : card));
         }
-        if (event.type === "operation_result") changed = true;
+        if (event.type === "operation_preview" && event.preview) setCards((current) => current.map((card) => card.runId === event.runId ? { ...card, title: event.preview!.action === "create" ? "Creating" : event.preview!.action === "update" ? "Updating" : "Working", summary: event.preview!.title, updatedAt: Date.now() } : card));
+        if (event.type === "operation_result") { changed = true; void onDataChanged?.(); }
         if (event.type === "final") void onFinal?.({ runId: event.runId, summary: event.summary, prompt: promptByRun.current.get(event.runId) ?? "" });
         if (event.type === "final" || event.type === "confirmation_required") changed = true;
       }
@@ -185,10 +194,10 @@ export function useSpectraRun({
     const exchangeId = crypto.randomUUID();
     const optimisticCardId = `optimistic:${exchangeId}`;
     setActiveRequestCount((count) => count + 1);
-    setLiveExchange({ id: exchangeId, prompt: clean, content: "", status: "starting", startedAt: Date.now() });
+    setLiveExchange({ id: exchangeId, prompt: clean, content: "", reasoning: "", status: "starting", startedAt: Date.now() });
     upsert({ id: optimisticCardId, runId: `pending:${exchangeId}`, status: "running", title: "Thinking", summary: clean, variant: "status", actions: [], updatedAt: Date.now() });
     try {
-      await consume({ action: "run", prompt: clean, surface, workspaceId, artifactId, threadId, focusMode, selectedArtifactIds, currentView, attachments, localConversation }, optimisticCardId, exchangeId);
+      await consume({ action: "run", prompt: clean, surface, workspaceId, artifactId, threadId: durableThreadId.current, focusMode, selectedArtifactIds, currentView, attachments, localConversation }, optimisticCardId, exchangeId);
     } catch (error) {
       setCards((current) => current.filter((card) => card.id !== optimisticCardId));
       if (!(error instanceof DOMException && error.name === "AbortError")) {
@@ -198,7 +207,7 @@ export function useSpectraRun({
       setActiveRequestCount((count) => Math.max(0, count - 1));
       setLiveExchange((current) => current?.id === exchangeId ? null : current);
     }
-  }, [artifactId, consume, currentView, focusMode, localConversation, selectedArtifactIds, surface, threadId, upsert, workspaceId]);
+  }, [artifactId, consume, currentView, focusMode, localConversation, selectedArtifactIds, surface, upsert, workspaceId]);
 
   const keepAsThread = useCallback(async (runId: string, placeInWorkspace = false) => {
     const result = await postSpectra<{ threadId: string }>({ action: "keepRunAsThread", runId, placeInWorkspace, createReference: true });

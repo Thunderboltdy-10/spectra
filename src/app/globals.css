@@ -1772,6 +1772,55 @@ button:disabled {
   cursor: grabbing;
 }
 
+.spectra-equation {
+  margin: 1rem 0;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  padding: 0.8rem 1rem;
+  background: color-mix(in oklab, var(--bg-elevated) 76%, transparent);
+  transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+}
+
+.spectra-equation.is-selected {
+  border-color: color-mix(in oklab, var(--accent-cyan) 48%, var(--border-default));
+  background: color-mix(in oklab, var(--accent-cyan) 5%, var(--bg-elevated));
+  box-shadow: 0 7px 24px rgba(24, 20, 14, 0.06);
+}
+
+.spectra-equation.is-left { text-align: left; }
+.spectra-equation.is-center { text-align: center; }
+.spectra-equation.is-right { text-align: right; }
+.spectra-equation-inline { display: inline-flex; margin: 0 0.2em; padding: 0.12rem 0.3rem; }
+.spectra-equation-source {
+  display: block;
+  width: 100%;
+  margin-top: 0.8rem;
+  resize: vertical;
+  border: 1px solid var(--border-default);
+  border-radius: 7px;
+  background: var(--bg-primary);
+  padding: 0.55rem 0.7rem;
+  color: var(--text-primary);
+  font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
+  outline: none;
+}
+
+[data-ai-state="generated"]::after,
+[data-ai-state="edited"]::after {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent-cyan) 18%, transparent);
+  animation: spectra-ai-settle 900ms ease-out both;
+}
+
+@keyframes spectra-ai-settle {
+  from { background: color-mix(in oklab, var(--accent-cyan) 9%, transparent); opacity: 1; }
+  to { background: transparent; opacity: 0.42; }
+}
+
 @media (max-width: 768px) {
   .editor-gutter-controls {
     display: none;

@@ -12,6 +12,7 @@ const quizQuestionSchema = z.object({
     sourceRefs: z.array(z.string()).optional(),
     points: z.number().positive().optional(),
     timeLimitSeconds: z.number().positive().optional(),
+    feedback: z.string().optional(),
   }).passthrough().superRefine((question, ctx) => {
     if (question.type !== "multiple_choice") return;
     const options = (question.options ?? []).map((option) => option.trim()).filter(Boolean);
@@ -26,6 +27,8 @@ export const quizContentSchema = z.object({
   settings: z.object({
     showAnswersImmediately: z.boolean().optional(),
     timed: z.boolean().optional(),
+    shuffleQuestions: z.boolean().optional(),
+    passingScore: z.number().min(0).max(100).optional(),
   }).passthrough().optional(),
 }).passthrough();
 
@@ -33,7 +36,7 @@ export const quizBlueprint: ArtifactBlueprint = {
   key: "quiz",
   name: "Quiz",
   description: "A real question set with answer and review state.",
-  version: 1,
+  version: 2,
   schema: quizContentSchema,
   defaultContent: {
     questions: [],

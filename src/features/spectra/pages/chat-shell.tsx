@@ -158,6 +158,7 @@ export function ChatShell() {
           liveExchange={runEngine.liveExchange}
           workspaces={workspaces}
           onOpenArtifact={openArtifact}
+          onChoice={(choice) => void runEngine.run(choice.description ? `${choice.title}: ${choice.description}` : choice.title)}
           activeCards={activeCards}
           onCardAction={(card, action, target) => void runEngine.onCardAction(card, action, target)}
           empty={<div className="mx-auto flex min-h-[58vh] w-full max-w-[820px] flex-col justify-center py-10 text-left">

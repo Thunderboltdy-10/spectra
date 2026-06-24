@@ -104,6 +104,8 @@ describe("Spectra run route", () => {
     expect(createCall).toBeTruthy();
     expect((createCall?.[1] as { content: { cards: unknown[] } }).content.cards).toHaveLength(6);
     expect(convexMutation.mock.calls.some(([name]) => String(name).includes("spectraWorkspaceItems:hide"))).toBe(false);
+    const workspaceThreadCall = convexMutation.mock.calls.find(([name]) => String(name).includes("spectraThreads:create"));
+    expect(workspaceThreadCall?.[1]).toMatchObject({ origin: "workspace", workspaceId: "workspace-real" });
     expect(events.some((event) => event.type === "confirmation_required")).toBe(false);
     expect(events.some((event) => event.message === "Validating 6 cards")).toBe(true);
     expect(events.some((event) => event.message === "Saving deck to Biology")).toBe(true);

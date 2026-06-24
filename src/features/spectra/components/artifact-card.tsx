@@ -14,6 +14,7 @@ export type ArtifactCardView = {
   pinned?: boolean;
   variant?: string;
   metrics?: Record<string, string | number>;
+  aiState?: "generated" | "edited" | "creating" | "updating";
 };
 
 export const blueprintMeta: Record<ArtifactCardView["blueprintKey"], { label: string; icon: LucideIcon; color: string; soft: string }> = {
@@ -75,6 +76,8 @@ export function ArtifactCard({
         `,
       } : undefined}
       onClick={selectionMode && onToggleContext ? onToggleContext : onSelect}
+      data-ai-state={artifact.aiState}
+      data-context-state={contextSelected ? "selected" : selected ? "focused" : "normal"}
     >
       {selectionMode ? <button type="button" onClick={(event) => { event.stopPropagation(); onToggleContext?.(); }} className={`absolute right-2.5 top-2.5 z-20 flex h-6 w-6 items-center justify-center rounded-[6px] border transition-all duration-200 ${contextSelected ? "scale-100 border-[var(--accent-cyan)] bg-[var(--accent-cyan)] text-white shadow-[0_4px_12px_color-mix(in_oklab,var(--accent-cyan)_28%,transparent)]" : "border-[var(--border-default)] bg-[var(--bg-elevated)] text-transparent hover:border-[var(--accent-cyan)]"}`} aria-label={contextSelected ? "Remove from context" : "Add to context"}><Check className="h-3.5 w-3.5" /></button> : null}
       {botanical ? (

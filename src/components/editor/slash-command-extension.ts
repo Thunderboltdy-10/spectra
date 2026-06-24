@@ -125,6 +125,15 @@ export const SLASH_COMMANDS: SlashCommandItem[] = [
     action: (editor) => editor.chain().focus().toggleCodeBlock().run(),
   },
   {
+    id: "equation",
+    label: "Equation",
+    description: "Editable LaTeX equation with live preview",
+    icon: "sigma",
+    section: "Blocks",
+    aliases: ["math", "latex", "formula"],
+    action: (editor) => editor.chain().focus().insertContent({ type: "equation", attrs: { latex: "", display: "block", alignment: "center" } }).run(),
+  },
+  {
     id: "divider",
     label: "Divider",
     description: "Horizontal separator line",

@@ -202,7 +202,11 @@ export const applyGeneratedMetadata = mutation({
   },
   handler: async (ctx, args) => {
     const { thread } = await requireOwnedThread(ctx, args.actorClerkId, args.threadId);
-    const mayRetitle = (thread.messageCount ?? 0) <= 1;
+    const messageCount = thread.messageCount ?? 0;
+    const provisionalTitle = thread.title === "New thread" || thread.title.split(/\s+/).length >= 8;
+    // Sparse title windows avoid sidebar instability while allowing a weak
+    // first-prompt title to improve once the purpose becomes clear.
+    const mayRetitle = messageCount <= 2 || provisionalTitle || (messageCount >= 6 && messageCount <= 8) || (messageCount >= 16 && messageCount <= 18);
     await ctx.db.patch(args.threadId, {
       title: mayRetitle && args.title ? cleanTitle(args.title) : thread.title,
       summaryShort: args.summary?.replace(/\s+/g, " ").trim().slice(0, 320) || thread.summaryShort,

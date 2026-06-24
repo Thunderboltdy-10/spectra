@@ -295,6 +295,10 @@ export function ArtifactsShell() {
     selectedArtifactIds: [...selectedContextIds],
     currentView: mode,
     initialCards: resultCards,
+    onThreadReady: (threadId) => {
+      setComposerThread((current) => current?.id === threadId ? current : { id: threadId, title: "Current conversation" });
+      window.dispatchEvent(new Event("spectra:threads-changed"));
+    },
     onDataChanged: () => load(true),
     onOpenArtifact: async (artifactId) => {
       const refreshed = await load(true);
@@ -735,6 +739,8 @@ export function ArtifactsShell() {
               context={<ContextFocusControl mode={effectiveFocusMode} onModeChange={setFocusModeOverride} workspace={selectedWorkspace} artifact={studio.activeArtifact} selectedCount={selectedContextIds.size} threadTitle={composerThread?.title ?? activeLocalThread?.title} />}
               menu={(
                 <div>
+                  <button type="button" className={menuItemClass()} onClick={() => { setComposerThread(null); spectraSession.clearActivePanel(); }}><MessageSquare className="h-4 w-4" />New chat</button>
+                  <div className="my-1 h-px bg-[var(--border-subtle)]" />
                   {filters.filter((filter) => filter.key !== "all" && filter.key !== "thread_reference").map((filter) => {
                     const Icon = filter.icon;
                     const key = filter.key as SpectraBlueprintKey;

@@ -18,6 +18,8 @@ export const OPERATION_TYPES = [
   "artifact.create",
   "artifact.update",
   "workspace.create",
+  "workspace.update",
+  "artifact.link",
   "workspaceItem.add",
   "workspaceItem.hide",
   "thread.create",
@@ -33,12 +35,14 @@ export const MODEL_OPERATION_TYPES = [
   "artifact.create",
   "artifact.update",
   "workspace.create",
+  "workspace.update",
+  "artifact.link",
   "workspaceItem.add",
   "workspaceItem.hide",
 ] as const;
 
 export const PLAN_DECISIONS = ["answer", "operate", "clarify", "refuse"] as const;
-export const REQUEST_INTENT_MODES = ["answer", "create", "update", "place", "remove_placement", "create_workspace", "mixed"] as const;
+export const REQUEST_INTENT_MODES = ["answer", "create", "update", "place", "remove_placement", "create_workspace", "update_workspace", "link", "mixed"] as const;
 
 export type SpectraOperationType = (typeof OPERATION_TYPES)[number];
 export type ModelOperationType = (typeof MODEL_OPERATION_TYPES)[number];
@@ -75,7 +79,17 @@ const artifactUpdateInputSchema = z.union([
   updateInput("thread_reference", threadReferenceContentSchema),
 ]);
 
-const workspaceCreateInputSchema = z.object({ title: shortText, description: summaryText.nullable() }).strict();
+const workspaceIconSchema = z.enum(["Sparkles", "BookOpen", "Sprout", "BarChart3"]);
+const workspaceCreateInputSchema = z.object({ title: shortText, description: summaryText.nullable(), icon: workspaceIconSchema.nullable().optional(), color: z.string().trim().max(48).nullable().optional() }).strict();
+const workspaceUpdateInputSchema = z.object({ workspaceId: idText, title: shortText.nullable(), description: summaryText.nullable(), icon: workspaceIconSchema.nullable().optional(), color: z.string().trim().max(48).nullable().optional() }).strict();
+const artifactLinkInputSchema = z.object({
+  sourceArtifactId: idText,
+  targetArtifactId: idText,
+  relationType: z.enum(["related", "supports", "contradicts", "source_for", "generated_from", "follow_up", "belongs_with"]),
+  label: z.string().trim().max(120).nullable(),
+  explanation: z.string().trim().max(600).nullable(),
+  workspaceId: idText.nullable(),
+}).strict();
 const workspaceItemAddInputSchema = z.object({ artifactId: idText, workspaceId: idText }).strict();
 const workspaceItemHideInputSchema = z.object({ workspaceItemId: idText }).strict();
 
@@ -83,6 +97,8 @@ export const modelOperationSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("artifact.create"), input: artifactCreateInputSchema }).strict(),
   z.object({ type: z.literal("artifact.update"), input: artifactUpdateInputSchema }).strict(),
   z.object({ type: z.literal("workspace.create"), input: workspaceCreateInputSchema }).strict(),
+  z.object({ type: z.literal("workspace.update"), input: workspaceUpdateInputSchema }).strict(),
+  z.object({ type: z.literal("artifact.link"), input: artifactLinkInputSchema }).strict(),
   z.object({ type: z.literal("workspaceItem.add"), input: workspaceItemAddInputSchema }).strict(),
   z.object({ type: z.literal("workspaceItem.hide"), input: workspaceItemHideInputSchema }).strict(),
 ]);
@@ -104,6 +120,13 @@ export const spectraPlanSchema = z.object({
   intent: requestIntentSchema,
   conversationTitle: z.string().trim().min(1).max(64).nullable().optional(),
   conversationSummary: z.string().trim().min(1).max(320).nullable().optional(),
+  choices: z.object({
+    question: z.string().trim().min(1).max(500),
+    options: z.array(z.object({
+      title: z.string().trim().min(1).max(80),
+      description: z.string().trim().max(240).nullable().optional(),
+    }).strict()).min(2).max(4),
+  }).strict().nullable().optional(),
   finalResponse: z.string().trim().min(1).max(4_000),
   operations: z.array(modelOperationSchema).max(8),
 }).strict().superRefine((plan, ctx) => {
@@ -166,6 +189,8 @@ function normalizePlanIntentMode(value: unknown) {
     else if (types.has("workspaceItem.add")) mode = "place";
     else if (types.has("workspaceItem.hide")) mode = "remove_placement";
     else if (types.has("workspace.create")) mode = "create_workspace";
+    else if (types.has("workspace.update")) mode = "update_workspace";
+    else if (types.has("artifact.link")) mode = "link";
   }
   return { ...plan, intent: { ...intent, mode } };
 }
@@ -181,7 +206,7 @@ const nullableNumber = { anyOf: [{ type: "number" }, { type: "null" }] } as cons
 const documentContentJsonSchema = {
   type: "object", additionalProperties: false, required: ["blocks", "outline"],
   properties: {
-    blocks: { type: "array", minItems: 1, maxItems: 300, items: { type: "object", additionalProperties: false, required: ["id", "type", "text"], properties: { id: { type: "string" }, type: { enum: ["paragraph", "heading", "quote", "callout", "list", "math", "code"] }, text: { type: "string" } } } },
+    blocks: { type: "array", minItems: 1, maxItems: 300, items: { type: "object", additionalProperties: false, required: ["id", "type", "text"], properties: { id: { type: "string" }, type: { enum: ["paragraph", "heading", "quote", "callout", "list", "math", "equation", "code", "task", "table"] }, text: { type: "string" }, latex: { type: "string" }, attrs: { type: "object", additionalProperties: true } } } },
     outline: { type: "array", items: { type: "object", additionalProperties: false, required: ["id", "title", "level"], properties: { id: { type: "string" }, title: { type: "string" }, level: { type: "number" } } } },
   },
 } as const;
@@ -189,22 +214,22 @@ const documentContentJsonSchema = {
 const deckContentJsonSchema = {
   type: "object", additionalProperties: false, required: ["cards", "settings"],
   properties: {
-    cards: { type: "array", minItems: 1, maxItems: 200, items: { type: "object", additionalProperties: false, required: ["id", "front", "back", "hint", "sourceRefs", "confidence"], properties: { id: { type: "string" }, front: { type: "string", minLength: 1 }, back: { type: "string", minLength: 1 }, hint: { type: "string" }, sourceRefs: { type: "array", items: { type: "string" } }, confidence: { enum: ["unknown", "weak", "medium", "strong"] } } } },
-    settings: { type: "object", additionalProperties: false, required: ["shuffle", "revealMode"], properties: { shuffle: { type: "boolean" }, revealMode: { enum: ["click", "type"] } } },
+    cards: { type: "array", minItems: 1, maxItems: 200, items: { type: "object", additionalProperties: false, required: ["id", "front", "back", "hint", "sourceRefs", "confidence", "section", "tags"], properties: { id: { type: "string" }, front: { type: "string", minLength: 1 }, back: { type: "string", minLength: 1 }, hint: { type: "string" }, sourceRefs: { type: "array", items: { type: "string" } }, confidence: { enum: ["unknown", "weak", "medium", "strong"] }, section: { type: "string" }, tags: { type: "array", items: { type: "string" } } } } },
+    settings: { type: "object", additionalProperties: false, required: ["shuffle", "revealMode", "showHints"], properties: { shuffle: { type: "boolean" }, revealMode: { enum: ["click", "type"] }, showHints: { type: "boolean" } } },
   },
 } as const;
 
 const quizContentJsonSchema = {
   type: "object", additionalProperties: false, required: ["questions", "settings"],
   properties: {
-    questions: { type: "array", minItems: 1, maxItems: 100, items: { type: "object", additionalProperties: false, required: ["id", "prompt", "type", "options", "correctAnswer", "explanation", "difficulty", "sourceRefs"], properties: { id: { type: "string" }, prompt: { type: "string", minLength: 1 }, type: { enum: ["multiple_choice", "short_answer"] }, options: { type: "array", items: { type: "string" } }, correctAnswer: { type: "string", minLength: 1 }, explanation: { type: "string" }, difficulty: { enum: ["easy", "medium", "hard"] }, sourceRefs: { type: "array", items: { type: "string" } } } } },
-    settings: { type: "object", additionalProperties: false, required: ["showAnswersImmediately", "timed"], properties: { showAnswersImmediately: { type: "boolean" }, timed: { type: "boolean" } } },
+    questions: { type: "array", minItems: 1, maxItems: 100, items: { type: "object", additionalProperties: false, required: ["id", "prompt", "type", "options", "correctAnswer", "explanation", "difficulty", "sourceRefs", "feedback"], properties: { id: { type: "string" }, prompt: { type: "string", minLength: 1 }, type: { enum: ["multiple_choice", "short_answer"] }, options: { type: "array", items: { type: "string" } }, correctAnswer: { type: "string", minLength: 1 }, explanation: { type: "string" }, difficulty: { enum: ["easy", "medium", "hard"] }, sourceRefs: { type: "array", items: { type: "string" } }, feedback: { type: "string" } } } },
+    settings: { type: "object", additionalProperties: false, required: ["showAnswersImmediately", "timed", "shuffleQuestions", "passingScore"], properties: { showAnswersImmediately: { type: "boolean" }, timed: { type: "boolean" }, shuffleQuestions: { type: "boolean" }, passingScore: { type: "number" } } },
   },
 } as const;
 
 const plannerContentJsonSchema = {
-  type: "object", additionalProperties: false, required: ["description", "dueAt", "status", "priority", "linkedArtifactIds", "linkedThreadIds"],
-  properties: { description: { type: "string" }, dueAt: nullableNumber, status: { enum: ["todo", "doing", "done"] }, priority: { enum: ["low", "medium", "high"] }, linkedArtifactIds: { type: "array", items: { type: "string" } }, linkedThreadIds: { type: "array", items: { type: "string" } } },
+  type: "object", additionalProperties: false, required: ["description", "dueAt", "startAt", "endAt", "allDay", "status", "priority", "linkedArtifactIds", "linkedThreadIds", "subtasks", "attachments", "reminders", "estimateMinutes", "progressNote", "sourceRefs"],
+  properties: { description: { type: "string" }, dueAt: nullableNumber, startAt: nullableNumber, endAt: nullableNumber, allDay: { type: "boolean" }, status: { enum: ["todo", "doing", "done"] }, priority: { enum: ["low", "medium", "high"] }, linkedArtifactIds: { type: "array", items: { type: "string" } }, linkedThreadIds: { type: "array", items: { type: "string" } }, subtasks: { type: "array", items: { type: "object", additionalProperties: false, required: ["id", "title", "done"], properties: { id: { type: "string" }, title: { type: "string" }, done: { type: "boolean" } } } }, attachments: { type: "array", items: { type: "object", additionalProperties: false, required: ["id", "name", "meta"], properties: { id: { type: "string" }, name: { type: "string" }, meta: { type: "string" } } } }, reminders: { type: "array", items: { type: "string" } }, estimateMinutes: nullableNumber, progressNote: { type: "string" }, sourceRefs: { type: "array", items: { type: "string" } } },
 } as const;
 
 const threadContentJsonSchema = {
@@ -235,12 +260,13 @@ function artifactUpdateVariant(blueprintKey: (typeof SPECTRA_BLUEPRINT_KEYS)[num
 export const SPECTRA_PLAN_JSON_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["decision", "intent", "conversationTitle", "conversationSummary", "finalResponse", "operations"],
+  required: ["decision", "intent", "conversationTitle", "conversationSummary", "choices", "finalResponse", "operations"],
   properties: {
     decision: { enum: PLAN_DECISIONS },
     intent: { type: "object", additionalProperties: false, required: ["mode", "requestedArtifactTypes", "requestedVisibleArtifactCount", "targetArtifactId", "targetWorkspaceId"], properties: { mode: { enum: REQUEST_INTENT_MODES }, requestedArtifactTypes: { type: "array", items: { enum: SPECTRA_BLUEPRINT_KEYS }, maxItems: 5 }, requestedVisibleArtifactCount: { type: "integer", minimum: 0, maximum: 1000 }, targetArtifactId: nullableString, targetWorkspaceId: nullableString } },
     conversationTitle: nullableString,
     conversationSummary: nullableString,
+    choices: { anyOf: [{ type: "object", additionalProperties: false, required: ["question", "options"], properties: { question: { type: "string" }, options: { type: "array", minItems: 2, maxItems: 4, items: { type: "object", additionalProperties: false, required: ["title", "description"], properties: { title: { type: "string" }, description: nullableString } } } } }, { type: "null" }] },
     finalResponse: { type: "string", minLength: 1, maxLength: 4000 },
     operations: {
       type: "array", maxItems: 8,
@@ -255,7 +281,9 @@ export const SPECTRA_PLAN_JSON_SCHEMA = {
         artifactUpdateVariant("quiz", quizContentJsonSchema),
         artifactUpdateVariant("planner_task", plannerContentJsonSchema),
         artifactUpdateVariant("thread_reference", threadContentJsonSchema),
-        { type: "object", additionalProperties: false, required: ["type", "input"], properties: { type: { const: "workspace.create" }, input: { type: "object", additionalProperties: false, required: ["title", "description"], properties: { title: { type: "string" }, description: nullableString } } } },
+        { type: "object", additionalProperties: false, required: ["type", "input"], properties: { type: { const: "workspace.create" }, input: { type: "object", additionalProperties: false, required: ["title", "description", "icon", "color"], properties: { title: { type: "string" }, description: nullableString, icon: { anyOf: [{ enum: ["Sparkles", "BookOpen", "Sprout", "BarChart3"] }, { type: "null" }] }, color: nullableString } } } },
+        { type: "object", additionalProperties: false, required: ["type", "input"], properties: { type: { const: "workspace.update" }, input: { type: "object", additionalProperties: false, required: ["workspaceId", "title", "description", "icon", "color"], properties: { workspaceId: { type: "string" }, title: nullableString, description: nullableString, icon: { anyOf: [{ enum: ["Sparkles", "BookOpen", "Sprout", "BarChart3"] }, { type: "null" }] }, color: nullableString } } } },
+        { type: "object", additionalProperties: false, required: ["type", "input"], properties: { type: { const: "artifact.link" }, input: { type: "object", additionalProperties: false, required: ["sourceArtifactId", "targetArtifactId", "relationType", "label", "explanation", "workspaceId"], properties: { sourceArtifactId: { type: "string" }, targetArtifactId: { type: "string" }, relationType: { enum: ["related", "supports", "contradicts", "source_for", "generated_from", "follow_up", "belongs_with"] }, label: nullableString, explanation: nullableString, workspaceId: nullableString } } } },
         { type: "object", additionalProperties: false, required: ["type", "input"], properties: { type: { const: "workspaceItem.add" }, input: { type: "object", additionalProperties: false, required: ["artifactId", "workspaceId"], properties: { artifactId: { type: "string" }, workspaceId: { type: "string" } } } } },
         { type: "object", additionalProperties: false, required: ["type", "input"], properties: { type: { const: "workspaceItem.hide" }, input: { type: "object", additionalProperties: false, required: ["workspaceItemId"], properties: { workspaceItemId: { type: "string" } } } } },
       ] },

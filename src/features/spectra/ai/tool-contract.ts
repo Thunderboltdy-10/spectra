@@ -12,6 +12,8 @@ export const SPECTRA_TOOL_CONTRACT: readonly SpectraToolCapability[] = [
   { type: "workspaceItem.add", purpose: "Place an owned artifact in an owned workspace only when placement is requested.", execution: "immediate", availability: "wave5", batchable: true },
   { type: "workspaceItem.hide", purpose: "Hide a requested workspace placement without deleting the source object.", execution: "immediate", availability: "wave5", batchable: true },
   { type: "workspace.create", purpose: "Create a workspace after explicit confirmation.", execution: "confirmation", availability: "wave5", batchable: false },
+  { type: "workspace.update", purpose: "Update the name, description, icon, or color of an owned workspace when explicitly requested.", execution: "immediate", availability: "wave5", batchable: false },
+  { type: "artifact.link", purpose: "Create a typed, explained relationship between two owned artifacts.", execution: "immediate", availability: "wave5", batchable: true },
   { type: "skill.load", purpose: "Load one or more relevant skills before specialized work.", execution: "deferred", availability: "future", batchable: true },
   { type: "research.search", purpose: "Use a research provider when current external evidence is required.", execution: "deferred", availability: "future", batchable: true },
   { type: "context.file.read", purpose: "Read user-selected files or contextual sources.", execution: "deferred", availability: "future", batchable: true },

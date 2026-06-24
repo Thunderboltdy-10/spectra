@@ -107,6 +107,7 @@ export function artifactToCard(artifact: SpectraArtifact, placement?: "inbox" | 
     placement: placement ?? artifactPlacementStatus(artifact),
     updatedAt: artifact.updatedAt,
     metrics: meta.metrics,
+    aiState: artifact.createdFrom?.runId ? "generated" : undefined,
   };
 }
 
@@ -124,6 +125,7 @@ export function workspaceItemToCard(item: SpectraWorkspaceItem): ArtifactCardVie
     pinned: item.viewData.pinned,
     variant: item.viewData.cardVariant,
     metrics: meta.metrics,
+    aiState: item.artifact.createdFrom?.runId ? "generated" : undefined,
   };
 }
 

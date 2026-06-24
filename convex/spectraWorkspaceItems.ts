@@ -52,30 +52,58 @@ async function hydrateWorkspaceItem(ctx: Parameters<typeof requireSpectraActor>[
   };
 }
 
+async function listOwnedWorkspaceItems(
+  ctx: Parameters<typeof requireSpectraActor>[0],
+  actorClerkId: string,
+  workspaceId: Id<"spectraWorkspaces">,
+  includeHidden?: boolean,
+) {
+  const { workspace } = await requireOwnedWorkspace(ctx, actorClerkId, workspaceId);
+  const items = await ctx.db
+    .query("spectraWorkspaceItems")
+    .withIndex("by_workspace", (q) => q.eq("workspaceId", workspaceId))
+    .order("desc")
+    .collect();
+  const hydrated = await Promise.all(
+    items
+      .filter((item) => includeHidden || item.viewData.hidden !== true)
+      .map((item) => hydrateWorkspaceItem(ctx, item, workspace.title)),
+  );
+  return {
+    workspace,
+    items: hydrated
+      .filter((item) => item.sourceType !== "artifact" || item.artifact)
+      .sort((a, b) => b.updatedAt - a.updatedAt),
+  };
+}
+
 export const listForWorkspace = query({
   args: {
     actorClerkId: v.string(),
     workspaceId: v.id("spectraWorkspaces"),
     includeHidden: v.optional(v.boolean()),
   },
+  handler: (ctx, args) => listOwnedWorkspaceItems(ctx, args.actorClerkId, args.workspaceId, args.includeHidden),
+});
+
+// HTTP query-string ids are untrusted. Normalize before entering a table-typed
+// validator so a stale widget/item id becomes a controlled miss, not a Convex
+// ArgumentValidationError for spectraWorkspaces.
+export const listForWorkspacePublic = query({
+  args: {
+    actorClerkId: v.string(),
+    workspaceId: v.string(),
+    includeHidden: v.optional(v.boolean()),
+  },
   handler: async (ctx, args) => {
-    const { workspace } = await requireOwnedWorkspace(ctx, args.actorClerkId, args.workspaceId);
-    const items = await ctx.db
-      .query("spectraWorkspaceItems")
-      .withIndex("by_workspace", (q) => q.eq("workspaceId", args.workspaceId))
-      .order("desc")
-      .collect();
-    const hydrated = await Promise.all(
-      items
-        .filter((item) => args.includeHidden || item.viewData.hidden !== true)
-        .map((item) => hydrateWorkspaceItem(ctx, item, workspace.title)),
-    );
-    return {
-      workspace,
-      items: hydrated
-        .filter((item) => item.sourceType !== "artifact" || item.artifact)
-        .sort((a, b) => b.updatedAt - a.updatedAt),
-    };
+    const workspaceId = ctx.db.normalizeId("spectraWorkspaces", args.workspaceId);
+    if (!workspaceId) return null;
+    try {
+      return await listOwnedWorkspaceItems(ctx, args.actorClerkId, workspaceId, args.includeHidden);
+    } catch (error) {
+      if (error instanceof Error && error.message.toLowerCase().includes("workspace not found")) return null;
+      throw error;
+    }
   },
 });
 

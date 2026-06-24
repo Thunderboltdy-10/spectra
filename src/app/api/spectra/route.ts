@@ -17,11 +17,6 @@ function isFunctionPathNotFound(error: unknown) {
   return message.includes("FunctionPathNotFound") || message.includes("Could not find public function");
 }
 
-function isWorkspaceNotFound(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.toLowerCase().includes("workspace not found");
-}
-
 async function spectraQuery<TArgs extends object, TResult>(functionName: string, args: TArgs) {
   try {
     return await convexQuery<TArgs, TResult>(functionName, args);
@@ -101,10 +96,11 @@ export async function GET(request: NextRequest) {
     if (action === "workspace") {
       const workspaceId = params.get("workspaceId");
       if (!workspaceId) return badRequest("workspaceId is required");
-      const workspace = await spectraQuery("spectraWorkspaceItems:listForWorkspace", {
+      const workspace = await spectraQuery("spectraWorkspaceItems:listForWorkspacePublic", {
         actorClerkId: actor.clerkId,
         workspaceId,
       });
+      if (!workspace) return badRequest("Workspace not found");
       return ok({ workspace });
     }
 
@@ -176,18 +172,16 @@ export async function GET(request: NextRequest) {
         limit: 30,
       }) as Array<{ _id: string }>;
       const requestedWorkspaceId = params.get("workspaceId") ?? undefined;
-      const selectedWorkspaceId = requestedWorkspaceId;
-      const workspacePromise = selectedWorkspaceId
-        ? spectraQuery("spectraWorkspaceItems:listForWorkspace", {
+      const workspace = requestedWorkspaceId
+        ? await spectraQuery("spectraWorkspaceItems:listForWorkspacePublic", {
           actorClerkId: actor.clerkId,
-          workspaceId: selectedWorkspaceId,
-        }).catch((error) => {
-          if (isWorkspaceNotFound(error)) return null;
-          throw error;
+          workspaceId: requestedWorkspaceId,
         })
-        : Promise.resolve(null);
-      const [workspace, artifacts, runs, resultCards] = await Promise.all([
-        workspacePromise,
+        : null;
+      const selectedWorkspaceId = workspace && typeof workspace === "object"
+        ? String((workspace as { workspace: { _id: string } }).workspace._id)
+        : undefined;
+      const [artifacts, runs, resultCards] = await Promise.all([
         spectraQuery("spectraArtifacts:list", {
           actorClerkId: actor.clerkId,
           placement: "all",
@@ -240,6 +234,8 @@ export async function POST(request: NextRequest) {
         actorClerkId: actor.clerkId,
         title: requireString(body.title, "title"),
         description: optionalString(body.description),
+        icon: optionalString(body.icon),
+        color: optionalString(body.color),
       });
       return ok({ workspaceId });
     }
@@ -250,6 +246,8 @@ export async function POST(request: NextRequest) {
         workspaceId: requireString(body.workspaceId, "workspaceId"),
         title: optionalString(body.title),
         description: optionalString(body.description),
+        icon: optionalString(body.icon),
+        color: optionalString(body.color),
         defaultView: optionalString(body.defaultView),
       });
       return ok(result);

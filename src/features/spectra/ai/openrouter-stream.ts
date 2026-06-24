@@ -69,6 +69,7 @@ function normalizeUsage(value: unknown, elapsedMs: number): OpenRouterUsage | un
 export async function readOpenRouterResponse(
   response: Response,
   onPublicText?: (delta: string) => void,
+  onReasoningText?: (delta: string) => void,
 ): Promise<OpenRouterPlanResult> {
   const startedAt = Date.now();
   const contentType = response.headers.get("content-type") ?? "";
@@ -115,6 +116,12 @@ export async function readOpenRouterResponse(
       const choices = Array.isArray(chunk.choices) ? chunk.choices as Array<Record<string, unknown>> : [];
       const delta = choices[0]?.delta && typeof choices[0].delta === "object" ? choices[0].delta as Record<string, unknown> : {};
       if (typeof delta.content === "string") text += delta.content;
+      if (typeof delta.reasoning === "string") onReasoningText?.(delta.reasoning);
+      if (Array.isArray(delta.reasoning_details)) {
+        for (const detail of delta.reasoning_details) {
+          if (detail && typeof detail === "object" && typeof (detail as Record<string, unknown>).text === "string") onReasoningText?.((detail as Record<string, unknown>).text as string);
+        }
+      }
       const publicText = extractPartialJsonStringField(text, "finalResponse").value;
       if (publicText.length > emittedLength) {
         onPublicText?.(publicText.slice(emittedLength));

@@ -302,26 +302,48 @@ async function callModel(surface: Surface, prompt: string, context: unknown, att
   });
   console.info("[spectra.openrouter.request]", { model: baseBody.model, provider: primaryRouting, mode: "native-primary" });
   let response = await request(primaryRouting, false);
+  let result: Awaited<ReturnType<typeof readOpenRouterResponse>> | undefined;
+  let plan: SpectraPlan | undefined;
+  let primaryFailure: unknown;
   if (!response.ok) {
     const detail = await response.text().catch(() => "");
-    if (!allowSpectraProviderFallbacks()) throw new Error(`DeepSeek provider request failed (${response.status})${detail ? `: ${detail.slice(0, 240)}` : ""}`);
+    primaryFailure = new Error(`DeepSeek provider request failed (${response.status})${detail ? `: ${detail.slice(0, 240)}` : ""}`);
+  } else {
+    try {
+      result = await readOpenRouterResponse(response);
+      if (!result.text.trim()) throw new Error("The Spectra model returned an empty plan.");
+      const normalizedText = result.text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+      plan = parseSpectraPlan(JSON.parse(normalizedText));
+    } catch (error) {
+      primaryFailure = error;
+    }
+  }
+  if (primaryFailure) {
+    if (!allowSpectraProviderFallbacks()) throw primaryFailure;
     const fallbackRouting = getSpectraProviderRouting("fallback");
-    console.warn("[spectra.openrouter.fallback]", { model: baseBody.model, primaryStatus: response.status, provider: fallbackRouting });
+    console.warn("[spectra.openrouter.fallback]", {
+      model: baseBody.model,
+      primaryStatus: response.status,
+      primaryError: publicError(primaryFailure),
+      provider: fallbackRouting,
+    });
     response = await request(fallbackRouting, true);
     if (!response.ok) {
       const fallbackDetail = await response.text().catch(() => "");
       throw new Error(`OpenRouter fallback request failed (${response.status})${fallbackDetail ? `: ${fallbackDetail.slice(0, 240)}` : ""}`);
     }
+    result = await readOpenRouterResponse(response);
+    if (!result.text.trim()) throw new Error("The Spectra fallback model returned an empty plan.");
+    const normalizedText = result.text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+    plan = parseSpectraPlan(JSON.parse(normalizedText));
   }
-  const result = await readOpenRouterResponse(response, onPublicText);
+  if (!result || !plan) throw new Error("The Spectra model did not return a valid plan.");
   const usedProvider = result.provider?.toLowerCase();
   const usedFallback = usedProvider && usedProvider !== "deepseek";
   if (usedFallback && !allowSpectraProviderFallbacks()) throw new Error(`Unexpected OpenRouter provider: ${result.provider}`);
   console.info("[spectra.openrouter.response]", { model: result.model, provider: result.provider, fallback: Boolean(usedFallback) });
-  const text = result.text;
-  if (!text.trim()) throw new Error("The Spectra model returned an empty plan.");
-  const normalizedText = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
-  return { plan: parseSpectraPlan(JSON.parse(normalizedText)), model: result.model, provider: result.provider, usage: result.usage };
+  onPublicText?.(plan.finalResponse);
+  return { plan, model: result.model, provider: result.provider, usage: result.usage };
 }
 
 function operationLabel(operation: ModelOperation) {

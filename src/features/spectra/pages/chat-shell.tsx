@@ -8,7 +8,6 @@ import { useSpectraRun } from "../ai/use-spectra-run";
 import { ConversationSurface } from "../components/conversation-surface";
 import { CommandBar } from "../components/command-bar";
 import { ContextFocusControl, type ComposerFocusMode } from "../components/context-controls";
-import { RunDetailPanel } from "../components/run-detail-panel";
 import { useSpectraSession } from "@/context/spectra-session-context";
 import { ArtifactStudio, useArtifactStudioState } from "../components/artifact-studio";
 import type { ArtifactPayload } from "../components/artifact-blueprint-sheet";
@@ -40,7 +39,8 @@ export function ChatShell() {
   useEffect(() => {
     const hour = new Date().getHours();
     setWelcome(hour < 5 ? "Still thinking? Let’s make it lighter." : hour < 12 ? "Good morning. Let’s get one thing moving." : hour < 18 ? "Good afternoon. What can we make clearer?" : "Good evening. Let’s finish something worthwhile.");
-  }, []);
+    spectraSession.clearActivePanel();
+  }, [spectraSession]);
 
   const refresh = useCallback(async (nextThreadId?: string | null) => {
     const [threadRows, overview, selected] = await Promise.all([
@@ -159,7 +159,6 @@ export function ChatShell() {
           workspaces={workspaces}
           onOpenArtifact={openArtifact}
           activeCards={activeCards}
-          onCardOpen={(card) => { setThreadPanelArtifactId(null); spectraSession.openLocalThread(card.runId, card.summary ?? card.title); }}
           onCardAction={(card, action, target) => void runEngine.onCardAction(card, action, target)}
           empty={<div className="mx-auto flex min-h-[58vh] w-full max-w-[820px] flex-col justify-center py-10 text-left">
             <span className="flex h-11 w-11 items-center justify-center rounded-[11px] bg-[color-mix(in_oklab,var(--accent-cyan)_9%,var(--bg-elevated))] text-[var(--accent-cyan)] shadow-[0_8px_28px_rgba(24,20,14,0.06)]"><Sparkles className="h-5 w-5" /></span>
@@ -182,7 +181,6 @@ export function ChatShell() {
         <div className="border-t border-[var(--border-subtle)] pt-3 text-[10px] font-semibold uppercase tracking-[0.11em] text-[var(--text-tertiary)]">All runs</div>
         <div className="mt-2 space-y-1.5">{history.map((card) => <div key={card._id} className="rounded-[7px] border border-[var(--border-default)] px-3 py-2"><div className="flex items-center gap-2 text-[11px] font-medium"><Clock3 className="h-3 w-3" />{card.title}</div><div className="mt-1 line-clamp-2 text-[10px] leading-4 text-[var(--text-tertiary)]">{card.summary}</div></div>)}</div>
       </aside> : null}
-      {spectraSession.activeLocalThreadRunId ? <RunDetailPanel runId={spectraSession.activeLocalThreadRunId} card={runEngine.cards.find((card) => card.runId === spectraSession.activeLocalThreadRunId)} onClose={spectraSession.clearActivePanel} onUseThread={(continuedId) => selectThread(continuedId)} onAction={(card, action, target) => { void runEngine.onCardAction(card, action, target); }} /> : null}
     </div>
   );
 }

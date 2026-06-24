@@ -1523,7 +1523,7 @@ function CardFace({ label, value, placeholder, onChange }: { label: string; valu
 
 function SideCard({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section className="rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
+    <section data-spectra-card="side" className="p-4">
       <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">{title}</h3>
       {children}
     </section>
@@ -1576,7 +1576,7 @@ function iconButtonClass() {
 }
 
 function smallActionClass() {
-  return "inline-flex h-8 items-center gap-1.5 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 text-[12px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-45";
+  return "inline-flex h-8 items-center gap-1.5 rounded-[7px] bg-transparent px-2.5 text-[12px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-45";
 }
 
 function toolbarClass(active?: boolean) {

@@ -25,7 +25,7 @@ import {
   X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { toast } from "sonner";
 import { useSpectraSession } from "@/context/spectra-session-context";
 import { useSpectraRun } from "../ai/use-spectra-run";
@@ -246,16 +246,15 @@ function WorkspaceHome({
             return (
               <div
                 key={workspace._id}
-                className="group relative min-h-[142px] overflow-hidden rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 text-left shadow-[0_8px_24px_rgba(27,20,12,0.035)] transition duration-200 hover:-translate-y-0.5 hover:border-[color-mix(in_oklab,var(--text-tertiary)_38%,var(--border-default))]"
-                style={{
-                  background: `radial-gradient(circle at 88% 20%, color-mix(in oklab, ${accent.color} 15%, transparent) 0 20%, transparent 21%), linear-gradient(135deg, ${accent.soft}, var(--bg-elevated) 62%)`,
-                }}
+                data-spectra-card="workspace"
+                data-card-state="normal"
+                data-interactive="true"
+                className="group relative min-h-[150px] overflow-hidden p-4 text-left"
+                style={{ "--card-accent": accent.color } as CSSProperties}
               >
                 <button type="button" className="absolute inset-0 z-[1]" onClick={() => onSelect(workspace._id)} aria-label={`Open ${workspace.title} workspace`} />
-                <div className="pointer-events-none absolute inset-x-0 top-0 h-1" style={{ background: accent.color }} />
-                <div className="pointer-events-none absolute inset-0 opacity-[0.18] [background-image:radial-gradient(color-mix(in_oklab,var(--text-primary)_16%,transparent)_0.45px,transparent_0.45px)] [background-size:7px_7px]" />
-                <div className="flex items-start gap-3">
-                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px] text-white" style={{ background: accent.color }}>
+                <div className="relative z-[2] flex items-start gap-3">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px] border border-[color-mix(in_oklab,var(--card-accent)_22%,var(--card-border))] bg-[color-mix(in_oklab,var(--card-accent)_9%,var(--card-paper))]" style={{ color: accent.color }}>
                     <Icon className="h-4 w-4" />
                   </span>
                   <span className="min-w-0 flex-1">
@@ -439,7 +438,7 @@ function CardsView({
         <div className="grid gap-3 xl:grid-cols-[minmax(300px,1.1fr)_minmax(360px,1.4fr)]">
           {activeEntries[0]?.card ? (
             <ArtifactCard
-              artifact={{ ...activeEntries[0].card, variant: activeEntries[0].card.variant ?? "botanical" }}
+              artifact={activeEntries[0].card}
               size="large"
               selected={selected?.type === "artifact" && selected.itemId === activeEntries[0].item._id}
               onSelect={() => onSelect(activeEntries[0].item, activeEntries[0].artifact)}
@@ -494,9 +493,11 @@ function CompactShelf({
             <button
               key={entry.item._id}
               type="button"
-              className={`flex min-h-[58px] items-center gap-3 rounded-[8px] border bg-[var(--bg-elevated)] px-3 py-2 text-left ${
-                selected?.type === "artifact" && selected.itemId === entry.item._id ? "border-[#8b6ff0]" : "border-[var(--border-default)] hover:bg-[var(--bg-hover)]"
-              }`}
+              data-spectra-card="artifact"
+              data-card-state={selected?.type === "artifact" && selected.itemId === entry.item._id ? "focused" : "normal"}
+              data-interactive="true"
+              className="flex min-h-[62px] items-center gap-3 px-3 py-2 text-left"
+              style={{ "--card-accent": meta.color } as CSSProperties}
               onClick={() => onSelect(entry.item, entry.artifact)}
             >
               <Icon className="h-5 w-5 shrink-0" style={{ color: meta.color }} />
@@ -605,11 +606,14 @@ function TimelineView({
                 <button
                   key={row.id}
                   type="button"
-                  className={`group relative overflow-hidden rounded-[9px] border p-3.5 text-left transition-colors duration-150 hover:bg-[var(--bg-hover)] ${hierarchy} ${surface} ${active ? "ring-2 ring-[color-mix(in_oklab,#8b6ff0_14%,transparent)]" : ""}`}
-                  style={{ animationDelay: `${groupIndex * 35}ms` }}
+                  data-spectra-card="timeline"
+                  data-card-state={active ? "focused" : row.kind === "run" && row.run.status === "failed" ? "failed" : row.kind === "run" && row.run.status === "awaiting_confirmation" ? "confirmation" : "normal"}
+                  data-interactive="true"
+                  data-timeline-kind={row.kind}
+                  className={`group relative overflow-hidden p-3.5 text-left ${hierarchy} ${surface}`}
+                  style={{ animationDelay: `${groupIndex * 35}ms`, "--card-accent": row.kind === "run" ? "var(--accent-cyan)" : row.kind === "thread" ? "#df7623" : row.kind === "edit" ? "#8b6ff0" : meta?.color } as CSSProperties}
                   onClick={() => row.kind === "run" ? onSelectRun(row.run) : entry ? onSelectArtifact(entry.item, entry.artifact) : undefined}
                 >
-                  <span className="pointer-events-none absolute bottom-0 right-0 h-20 w-32 opacity-35 [background-image:linear-gradient(135deg,transparent_45%,color-mix(in_oklab,var(--accent-cyan)_11%,transparent))]" />
                   <span className="relative flex items-start gap-3">
                     <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[7px] bg-[var(--bg-primary)]">
                       {RowIcon ? <RowIcon className="h-4 w-4" style={{ color: row.kind === "thread" ? "#8b6ff0" : row.kind === "edit" ? "var(--text-secondary)" : meta?.color }} /> : <Sparkles className="h-4 w-4 text-[var(--accent-cyan)]" />}
@@ -713,9 +717,9 @@ function CanvasView({
   const groups = createTypes.map((type) => ({ ...type, entries: entries.filter((entry) => entry.artifact.blueprintKey === type.key) })).filter((group) => group.entries.length > 0);
 
   return (
-    <div className="h-full min-h-full overflow-auto bg-[radial-gradient(var(--border-default)_0.7px,transparent_0.7px)] p-4 [background-size:18px_18px]">
-      <div className="grid min-h-full auto-rows-min gap-4 lg:grid-cols-2 2xl:grid-cols-3">
-        {groups.map((group) => { const meta = blueprintMeta[group.key]; const Icon = meta.icon; return <section key={group.key} className="self-start rounded-[12px] border p-3 shadow-[0_8px_24px_rgba(27,20,12,0.04)]" style={{ borderColor: `color-mix(in oklab, ${meta.color} 20%, var(--border-default))`, background: meta.soft }}><header className="mb-3 flex items-center gap-2 px-1"><Icon className="h-4 w-4" style={{ color: meta.color }} /><span className="text-[13px] font-semibold text-[var(--text-primary)]">{group.label}</span><span className="ml-auto text-[11px] text-[var(--text-tertiary)]">{group.entries.length}</span></header><div className="grid gap-2 sm:grid-cols-2">{group.entries.map((entry) => <ArtifactCard key={entry.item._id} artifact={entry.card!} selected={selectedArtifact?._id === entry.artifact._id} quiet className="bg-[var(--bg-elevated)]" onSelect={() => onSelect(entry.item, entry.artifact)} />)}</div></section>; })}
+    <div className="h-full min-h-full overflow-auto bg-[radial-gradient(color-mix(in_oklab,var(--border-default)_62%,transparent)_0.65px,transparent_0.8px)] p-5 [background-size:18px_18px]">
+      <div className="grid min-h-full auto-rows-min gap-5 lg:grid-cols-2 2xl:grid-cols-3">
+        {groups.map((group, index) => { const meta = blueprintMeta[group.key]; const Icon = meta.icon; return <section key={group.key} data-canvas-cluster={group.key} className={`self-start rounded-[18px] border p-3.5 ${index % 2 ? "2xl:mt-12" : ""}`} style={{ borderColor: `color-mix(in oklab, ${meta.color} 22%, var(--border-default))`, background: `color-mix(in oklab, ${meta.color} 5%, var(--bg-primary))` }}><header className="mb-3 flex items-center gap-2 px-1"><span className="flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-semibold" style={{ color: meta.color, background: `color-mix(in oklab, ${meta.color} 10%, var(--bg-elevated))` }}>{index + 1}</span><Icon className="h-4 w-4" style={{ color: meta.color }} /><span className="text-[13px] font-semibold text-[var(--text-primary)]">{group.label}</span><span className="ml-auto text-[11px] text-[var(--text-tertiary)]">{group.entries.length}</span></header><div className="grid gap-2 sm:grid-cols-2">{group.entries.map((entry) => <ArtifactCard key={entry.item._id} artifact={entry.card!} selected={selectedArtifact?._id === entry.artifact._id} quiet className="spectra-card--canvas" onSelect={() => onSelect(entry.item, entry.artifact)} />)}</div></section>; })}
       </div>
     </div>
   );
@@ -894,7 +898,7 @@ function MetricRow({ label, value }: { label: string; value: string }) {
 }
 
 function PinnedArtifactShelf({ artifacts, onSelect }: { artifacts: SpectraArtifact[]; onSelect: (artifact: SpectraArtifact) => void }) {
-  return <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{artifacts.slice(0, 6).map((artifact) => { const meta = blueprintMeta[artifact.blueprintKey]; const Icon = meta.icon; return <article key={artifact._id} className="relative min-h-[112px] overflow-hidden rounded-[8px] border border-[color-mix(in_oklab,#b67616_18%,var(--border-default))] bg-[linear-gradient(118deg,color-mix(in_oklab,#b67616_5%,var(--bg-elevated)),var(--bg-elevated)_72%)] p-3 shadow-[0_1px_3px_rgba(27,20,12,0.035)]"><span className="pointer-events-none absolute inset-y-0 left-0 w-1 bg-[#b67616]" /><span className="pointer-events-none absolute -bottom-12 -right-10 h-24 w-24 rounded-full border border-[color-mix(in_oklab,#b67616_13%,transparent)]" /><button type="button" className="relative flex w-full items-start gap-2.5 pl-1 text-left" onClick={() => onSelect(artifact)}><span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[7px] bg-[var(--bg-primary)]"><Icon className="h-4 w-4" style={{ color: meta.color }} /></span><span className="min-w-0 flex-1"><span className="block truncate text-[13px] font-semibold text-[var(--text-primary)]">{artifact.title}</span><span className="mt-0.5 block truncate text-[11px] text-[var(--text-secondary)]">{artifact.summary ?? meta.label}</span><span className="mt-1 block text-[10px] text-[var(--text-tertiary)]">{meta.label} · {formatRelativeTime(artifact.updatedAt)}</span></span></button></article>; })}</div>;
+  return <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{artifacts.slice(0, 6).map((artifact) => <ArtifactCard key={artifact._id} artifact={{ id: artifact._id, title: artifact.title, blueprintKey: artifact.blueprintKey, summary: artifact.summary ?? blueprintMeta[artifact.blueprintKey].label, meta: formatRelativeTime(artifact.updatedAt), placement: artifactPlacements(artifact).length ? "workspace" : "inbox", updatedAt: artifact.updatedAt, pinned: true }} onSelect={() => onSelect(artifact)} />)}</div>;
 }
 
 export function WorkspaceShell() {

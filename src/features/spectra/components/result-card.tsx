@@ -6,6 +6,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { useSpectraSession } from "@/context/spectra-session-context";
 import { cn } from "@/lib/utils";
+import { IconAction, type SpectraCardState } from "./card-system";
 import type { ResultCardStreamView } from "../ai/stream-events";
 import { postSpectra } from "../data/api";
 
@@ -98,18 +99,30 @@ export function ResultCardStack({
   }
 
   return (
-    <div className={cn("relative max-h-[76px] overflow-y-auto rounded-[9px] border border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_96%,var(--bg-primary))] shadow-[0_2px_9px_rgba(27,20,12,0.05)] [scrollbar-width:thin]", className)}>
+    <div className={cn("relative max-h-[92px] space-y-1 overflow-y-auto [scrollbar-width:thin]", className)}>
       {visibleCards.map((card) => {
         const awaitingApproval = card.actions.some((action) => action.key === "confirm");
         const optimistic = card.id.startsWith("optimistic:") || card.runId.startsWith("pending:");
         const opensDetails = !optimistic && Boolean(onOpen);
         const continued = activeRunId === card.runId || Boolean(threadIds[card.runId] && threadIds[card.runId] === activeThreadId);
+        const cardState: SpectraCardState = continued
+          ? "continued"
+          : card.status === "failed" || card.status === "cancelled"
+            ? "failed"
+            : awaitingApproval
+              ? "confirmation"
+              : card.status === "running"
+                ? "updating"
+                : "normal";
         return (
           <div
             key={card.id}
             role={opensDetails ? "button" : undefined}
             tabIndex={opensDetails ? 0 : undefined}
-            className={cn("group my-0.5 grid min-h-[35px] w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2.5 rounded-[7px] px-2.5 py-1 text-left text-[12px] transition animate-[spectra-fade-up_180ms_ease-out] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--accent-cyan)]", opensDetails ? "cursor-pointer hover:bg-[var(--bg-hover)]" : "cursor-default", continued && "bg-[color-mix(in_oklab,#8b6ff0_9%,var(--bg-elevated))] shadow-[inset_3px_0_0_#8b6ff0]")}
+            data-spectra-card="result"
+            data-card-state={cardState}
+            data-interactive={opensDetails ? "true" : undefined}
+            className={cn("group grid min-h-[40px] w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2.5 px-2.5 py-1 text-left text-[12px] animate-[spectra-fade-up_180ms_ease-out] focus-visible:outline-none", opensDetails ? "cursor-pointer" : "cursor-default")}
             onClick={() => { if (opensDetails) onOpen?.(card); }}
             onKeyDown={(event) => { if (opensDetails && (event.key === "Enter" || event.key === " ")) onOpen?.(card); }}
           >
@@ -124,35 +137,25 @@ export function ResultCardStack({
             </span>
             <div className="flex items-center">{card.actions.map((action) => {
               const ActionIcon = actionIcon(action.key);
-              return <button
+              return <IconAction
                 key={`${card.id}-${action.key}`}
-                type="button"
-                className={cn(
-                  "flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
-                  action.key === "confirm" && "bg-[var(--text-primary)] text-[var(--bg-primary)] hover:bg-[var(--text-primary)] hover:text-[var(--bg-primary)]",
-                )}
+                icon={ActionIcon}
+                label={action.label}
+                active={action.key === "confirm" || action.key === "continue" || action.key === "continue_thread"}
+                danger={action.key === "cancel" || action.key === "reject"}
                 onClick={(event) => { event.stopPropagation(); onAction?.(card, action.key, action.targetId); }}
-                aria-label={action.label}
-                title={action.label}
-              >
-                <ActionIcon className="h-3.5 w-3.5" />
-              </button>;
+              />;
             })}
-            {onContinue && !optimistic ? <button
-              type="button"
+            {onContinue && !optimistic ? <IconAction
+              icon={busyRunId === card.runId ? Loader2 : MessageSquarePlus}
+              label={continued ? "Stop continuing chat" : "Continue chat"}
+              active={continued}
               disabled={busyRunId === card.runId}
-              className={cn("flex h-7 shrink-0 items-center gap-1.5 rounded-[6px] px-2 text-[10px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-50", continued && "bg-[color-mix(in_oklab,#8b6ff0_12%,transparent)] text-[#7256dc]")}
+              className={busyRunId === card.runId ? "animate-spin" : undefined}
               onClick={(event) => { event.stopPropagation(); void toggleContinuation(card); }}
-              aria-label={continued ? "Stop continuing this chat" : "Continue chat"}
               aria-pressed={continued}
-              title={continued ? "Stop continuing chat" : "Continue chat"}
-            >
-              {busyRunId === card.runId ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MessageSquarePlus className="h-3.5 w-3.5" />}
-              <span className="hidden sm:inline">{continued ? "Continuing" : "Continue chat"}</span>
-            </button> : null}
-            {!optimistic ? <button type="button" className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[5px] text-[var(--text-tertiary)] opacity-55 hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)] group-hover:opacity-100" aria-label="Hide result" onClick={(event) => { event.stopPropagation(); onAction?.(card, "hide"); }}>
-              <X className="h-3.5 w-3.5" />
-            </button> : null}
+            /> : null}
+            {!optimistic ? <IconAction icon={X} label="Hide result" className="opacity-55 group-hover:opacity-100" onClick={(event) => { event.stopPropagation(); onAction?.(card, "hide"); }} /> : null}
             </div>
             <ProvenanceLine card={card} />
           </div>

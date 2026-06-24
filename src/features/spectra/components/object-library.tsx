@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
   Check,
   CheckCircle2,
@@ -18,6 +18,7 @@ import {
   X,
 } from "lucide-react";
 import { blueprintMeta } from "./artifact-card";
+import { CardTypeIcon, IconAction } from "./card-system";
 import { FloatingMenu } from "./floating-menu";
 import {
   artifactPlacements,
@@ -240,61 +241,38 @@ export function ObjectLibrary({
     const pinned = Boolean(entry.item?.viewData.pinned);
     return (
       <div className="flex items-center gap-2">
-        <button
-          type="button"
-          className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
+        <IconAction
+          icon={ExternalLink}
+          label="Open artifact"
           onClick={() => onOpen(entry)}
-          aria-label="Open artifact"
-          title="Open artifact"
-        >
-          <ExternalLink className="h-3.5 w-3.5" />
-        </button>
+        />
         {onTogglePin ? (
-          <button
-            type="button"
-            className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]"
+          <IconAction
+            icon={pinned ? PinOff : Pin}
+            label={pinned ? "Remove from important" : "Mark important"}
+            active={pinned}
             onClick={() => onTogglePin(entry)}
-            aria-label={pinned ? "Unpin" : "Pin"}
-            title={pinned ? "Remove from important" : "Mark important"}
-          >
-            {pinned ? (
-              <PinOff className="h-3.5 w-3.5 text-[#b67616]" />
-            ) : (
-              <Pin className="h-3.5 w-3.5" />
-            )}
-          </button>
+          />
         ) : null}
         {onRemove && entry.item ? (
-          <button
-            type="button"
-            className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--danger)]"
+          <IconAction
+            icon={busyKey === `hide:${entry.item._id}` ? Loader2 : X}
+            label="Remove from workspace; the artifact remains available"
+            danger
             disabled={busyKey === `hide:${entry.item._id}`}
             onClick={() => onRemove(entry)}
-            aria-label="Remove from workspace"
-            title="Remove from workspace; the artifact remains available"
-          >
-            {busyKey === `hide:${entry.item._id}` ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <X className="h-3.5 w-3.5" />
-            )}
-          </button>
+            className={busyKey === `hide:${entry.item._id}` ? "animate-spin" : undefined}
+          />
         ) : null}
         {onDelete ? (
-          <button
-            type="button"
-            className="flex h-8 w-8 items-center justify-center text-[var(--text-secondary)] hover:text-[var(--danger)]"
+          <IconAction
+            icon={busyKey === `delete:${entry.artifact._id}` ? Loader2 : Trash2}
+            label="Delete artifact permanently"
+            danger
             disabled={busyKey === `delete:${entry.artifact._id}`}
             onClick={() => onDelete(entry)}
-            aria-label="Delete artifact permanently"
-            title="Delete artifact permanently"
-          >
-            {busyKey === `delete:${entry.artifact._id}` ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Trash2 className="h-3.5 w-3.5" />
-            )}
-          </button>
+            className={busyKey === `delete:${entry.artifact._id}` ? "animate-spin" : undefined}
+          />
         ) : null}
       </div>
     );
@@ -307,18 +285,14 @@ export function ObjectLibrary({
       <div className="flex items-center gap-2">
         {actions(entry)}
         <div>
-          <button
-            type="button"
-            className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
+          <IconAction
+            icon={FolderPlus}
+            label="Add to workspace"
             onClick={(event) => {
               setPlacementAnchor(event.currentTarget.getBoundingClientRect());
               setPlacementMenuId(open ? null : entry.artifact._id);
             }}
-            aria-label="Add to workspace"
-            title="Add to workspace"
-          >
-            <FolderPlus className="h-3.5 w-3.5" />
-          </button>
+          />
           <FloatingMenu
             open={open}
             anchor={placementAnchor}
@@ -403,12 +377,12 @@ export function ObjectLibrary({
     return (
       <article
         key={entry.artifact._id}
-        className={`relative min-h-[112px] overflow-hidden rounded-[8px] border bg-[var(--bg-elevated)] p-3 shadow-[0_1px_3px_rgba(27,20,12,0.035)] ${selected ? "border-[var(--accent-cyan)]" : "border-[var(--border-default)]"}`}
+        data-spectra-card="inbox"
+        data-card-state={selected ? "context" : "normal"}
+        data-interactive="true"
+        className="relative min-h-[118px] overflow-hidden p-3"
+        style={{ "--card-accent": meta.color } as CSSProperties}
       >
-        <span
-          className="pointer-events-none absolute inset-y-0 left-0 w-1"
-          style={{ background: meta.color }}
-        />
         {selectionMode ? (
           <span
             className={`absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-[6px] border transition ${selected ? "border-[var(--accent-cyan)] bg-[var(--accent-cyan)] text-white" : "border-[var(--border-default)] text-transparent"}`}
@@ -421,9 +395,7 @@ export function ObjectLibrary({
           className="flex w-full items-start gap-2.5 pl-1 text-left"
           onClick={() => activateEntry(entry)}
         >
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[7px] bg-[var(--bg-primary)]">
-            <Icon className="h-4 w-4" style={{ color: meta.color }} />
-          </span>
+          <CardTypeIcon icon={Icon} color={meta.color} className="h-8 w-8" />
           <span className="min-w-0 flex-1">
             <span className="block truncate text-[13px] font-semibold text-[var(--text-primary)]">
               {entry.artifact.title}
@@ -654,7 +626,8 @@ export function ObjectLibrary({
                       return (
                         <div
                           key={`${group.key}:${entry.item?._id ?? entry.artifact._id}`}
-                          className={`grid min-h-[58px] cursor-pointer grid-cols-[minmax(260px,1.2fr)_minmax(130px,0.6fr)_minmax(130px,0.5fr)_auto] items-center gap-4 border-b border-[var(--border-default)] px-4 py-2.5 last:border-b-0 hover:bg-[color-mix(in_oklab,var(--bg-hover)_58%,transparent)] ${selectedArtifactId === entry.artifact._id || contextSelected ? "bg-[color-mix(in_oklab,var(--accent-cyan)_5%,transparent)]" : ""}`}
+                          data-card-state={selectedArtifactId === entry.artifact._id ? "focused" : contextSelected ? "context" : "normal"}
+                          className="grid min-h-[58px] cursor-pointer grid-cols-[minmax(260px,1.2fr)_minmax(130px,0.6fr)_minmax(130px,0.5fr)_auto] items-center gap-4 border-b border-[var(--card-border-soft)] px-4 py-2.5 transition-colors last:border-b-0 hover:bg-[color-mix(in_oklab,var(--bg-hover)_58%,transparent)] data-[card-state=context]:bg-[color-mix(in_oklab,var(--card-focus)_5%,transparent)] data-[card-state=focused]:bg-[color-mix(in_oklab,var(--card-focus)_5%,transparent)]"
                           role="button"
                           tabIndex={0}
                           onClick={() => activateEntry(entry)}
@@ -743,7 +716,8 @@ export function ObjectLibrary({
                 <section
                   key={group.key}
                   className="self-start rounded-[10px] border p-2.5 shadow-[0_10px_28px_rgba(27,20,12,0.04)]"
-                  style={{ borderColor: group.border, background: group.soft }}
+                  data-board-column={group.key}
+                  style={{ "--card-accent": group.color, borderColor: group.border, background: group.soft } as CSSProperties}
                 >
                   <div className="mb-2 flex h-8 items-center justify-between px-1">
                     <div className="flex items-center gap-2 text-[13px] font-semibold text-[var(--text-primary)]">
@@ -768,7 +742,11 @@ export function ObjectLibrary({
                           <button
                             key={`${group.key}:${entry.item?._id ?? entry.artifact._id}`}
                             type="button"
-                            className={`flex min-h-[54px] w-full items-center gap-3 rounded-[8px] border bg-[var(--bg-elevated)] px-3 py-1.5 text-left shadow-[0_1px_3px_rgba(27,20,12,0.035)] hover:bg-[var(--bg-hover)] ${contextSelected ? "border-[var(--accent-cyan)]" : "border-[var(--border-default)]"}`}
+                            data-spectra-card="board"
+                            data-card-state={contextSelected ? "context" : selectedArtifactId === entry.artifact._id ? "focused" : "normal"}
+                            data-interactive="true"
+                            className="flex min-h-[66px] w-full items-center gap-3 px-3 py-2 text-left"
+                            style={{ "--card-accent": meta.color } as CSSProperties}
                             onClick={() => activateEntry(entry)}
                           >
                             {selectionMode ? <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-[5px] border transition ${contextSelected ? "border-[var(--accent-cyan)] bg-[var(--accent-cyan)] text-white" : "border-[var(--border-default)] text-transparent"}`}><Check className="h-3 w-3" /></span> : null}

@@ -26,7 +26,7 @@ import {
   X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { toast } from "sonner";
 import { useSearchParams } from "next/navigation";
 import { useSpectraRun } from "../ai/use-spectra-run";
@@ -935,7 +935,7 @@ function BoardColumns({
         const accent = workspaceAccent(group.workspace, index);
         const expanded = expandedGroups.has(group.workspace._id);
         return (
-          <section key={group.workspace._id} className="min-h-[620px] rounded-[10px] border p-2.5 shadow-[0_10px_28px_rgba(27,20,12,0.04)]" style={{ borderColor: accent.border, background: accent.soft }}>
+          <section key={group.workspace._id} data-board-column={group.workspace._id} className="min-h-[620px] rounded-[12px] border p-3 shadow-[0_10px_28px_rgba(27,20,12,0.04)]" style={{ "--card-accent": accent.color, borderColor: accent.border, background: `color-mix(in oklab, ${accent.color} 3%, var(--bg-primary))` } as CSSProperties}>
             <div className="mb-3 flex items-center justify-between px-1">
               <div className="flex items-center gap-2 text-[13px] font-semibold text-[var(--text-primary)]">
                 <span className="h-2 w-2 rounded-full" style={{ background: accent.color }} />
@@ -946,7 +946,7 @@ function BoardColumns({
             <div className="space-y-2.5">
               {group.artifacts.slice(0, expanded ? group.artifacts.length : 6).map((artifact) => {
                 const card = artifactToCard(artifact);
-                return <ArtifactCard key={artifact._id} artifact={card} quiet onSelect={() => onOpen(artifact)} />;
+                return <ArtifactCard key={artifact._id} artifact={card} quiet className="spectra-card--board" onSelect={() => onOpen(artifact)} />;
               })}
             </div>
             {group.artifacts.length > 6 ? <button type="button" className="mt-3 h-8 px-1 text-[11px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)]" onClick={() => setExpandedGroups((current) => { const next = new Set(current); if (expanded) next.delete(group.workspace._id); else next.add(group.workspace._id); return next; })}>{expanded ? "Show fewer" : `Show ${group.artifacts.length - 6} more`}</button> : null}

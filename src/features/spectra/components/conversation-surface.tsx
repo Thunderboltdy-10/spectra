@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { AlertCircle, ArrowDown, Check, ChevronDown, CircleDot, ExternalLink, FileText, FolderPlus, Loader2, MessageSquare, ShieldCheck, Sparkles, Wrench } from "lucide-react";
 import { toast } from "sonner";
 import { RichText } from "@/components/chat/rich-text";
@@ -44,7 +44,7 @@ function OperationalTrace({ trace }: { trace: SpectraThreadTrace }) {
   const [open, setOpen] = useState(trace.run.status === "awaiting_confirmation" || trace.run.status === "failed");
   const failed = trace.run.status === "failed";
   return (
-    <div className="mt-4 overflow-hidden rounded-[9px] border border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_82%,transparent)]">
+    <div data-spectra-card="result" data-card-state={failed ? "failed" : trace.run.status === "awaiting_confirmation" ? "confirmation" : "normal"} className="mt-4 overflow-hidden">
       <button type="button" onClick={() => setOpen((value) => !value)} className="flex w-full items-center gap-2.5 px-3 py-2 text-left hover:bg-[var(--bg-hover)]">
         {failed ? <AlertCircle className="h-3.5 w-3.5 text-[var(--danger)]" /> : trace.run.status === "awaiting_confirmation" ? <ShieldCheck className="h-3.5 w-3.5 text-amber-600" /> : <Wrench className="h-3.5 w-3.5 text-[var(--accent-cyan)]" />}
         <span className="flex-1 text-[11px] font-semibold text-[var(--text-secondary)]">
@@ -81,7 +81,7 @@ function ArtifactResult({ artifact, workspaces, onOpen }: { artifact: SpectraArt
   const [choosing, setChoosing] = useState(false);
   const [busy, setBusy] = useState(false);
   return (
-    <div className="mt-4 border-l-2 border-[#d88922] bg-[color-mix(in_oklab,#d88922_5%,var(--bg-elevated))] px-4 py-3">
+    <div data-spectra-card="result" data-card-state={artifact.createdFrom?.runId ? "edited" : "normal"} className="mt-4 px-4 py-3" style={{ "--card-accent": "var(--card-pinned)" } as CSSProperties}>
       <div className="flex items-start gap-3">
         <span className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-primary)] text-[#d88922]"><FileText className="h-4 w-4" /></span>
         <div className="min-w-0 flex-1">

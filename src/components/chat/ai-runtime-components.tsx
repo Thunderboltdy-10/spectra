@@ -1,19 +1,26 @@
 "use client";
 
-import { AlertTriangle, CheckCircle2, CircleDashed, FileText, Hammer, HelpCircle, Layers3, RefreshCw, Users } from "lucide-react";
+import { AlertTriangle, CheckCircle2, CircleDashed, FileText, Hammer, HelpCircle, Layers3, Sparkles, Users } from "lucide-react";
 import { ExecutionTimeline, type ExecutionEvent } from "@/components/shared/execution-timeline";
 import { ModelRoutingBadge } from "@/components/chat/model-routing-badge";
-import { cn } from "@/lib/utils";
 import type { RouteTrace } from "@/types";
+import type { CSSProperties } from "react";
 import type React from "react";
 
 type RuntimeCardState = "running" | "done" | "failed" | "pending";
 
-const stateStyles: Record<RuntimeCardState, string> = {
-  running: "border-[color-mix(in_oklab,var(--accent-cyan)_36%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-secondary))]",
-  done: "border-[color-mix(in_oklab,var(--success)_26%,var(--border-default))] bg-[color-mix(in_oklab,var(--success)_5%,var(--bg-secondary))]",
-  failed: "border-[color-mix(in_oklab,var(--danger)_32%,var(--border-default))] bg-[color-mix(in_oklab,var(--danger)_7%,var(--bg-secondary))]",
-  pending: "border-[var(--border-default)] bg-[var(--bg-secondary)]",
+const cardState: Record<RuntimeCardState, string> = {
+  running: "updating",
+  done: "edited",
+  failed: "failed",
+  pending: "normal",
+};
+
+const stateAccent: Record<RuntimeCardState, string> = {
+  running: "var(--accent-cyan)",
+  done: "var(--success)",
+  failed: "var(--danger)",
+  pending: "var(--text-tertiary)",
 };
 
 function RuntimeCard({
@@ -30,9 +37,14 @@ function RuntimeCard({
   children?: React.ReactNode;
 }) {
   return (
-    <section className={cn("rounded-2xl border p-3 shadow-[0_18px_50px_-34px_var(--text-primary)]", stateStyles[state])}>
+    <section
+      data-spectra-card="result"
+      data-card-state={cardState[state]}
+      className="px-3 py-3"
+      style={{ "--card-accent": stateAccent[state] } as CSSProperties}
+    >
       <div className="flex items-start gap-3">
-        <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-secondary)]">
+        <div className="spectra-card-type-icon mt-0.5 h-8 w-8 text-[var(--card-accent)]">
           {icon}
         </div>
         <div className="min-w-0 flex-1">
@@ -51,13 +63,13 @@ function RuntimeCard({
 function RuntimeStatusDot({ state }: { state: RuntimeCardState }) {
   if (state === "done") return <CheckCircle2 className="h-3.5 w-3.5 text-[var(--success)]" />;
   if (state === "failed") return <AlertTriangle className="h-3.5 w-3.5 text-[var(--danger)]" />;
-  if (state === "running") return <RefreshCw className="h-3.5 w-3.5 animate-spin text-[var(--accent-cyan)]" />;
+  if (state === "running") return <Sparkles className="h-3.5 w-3.5 text-[var(--accent-cyan)]" />;
   return <CircleDashed className="h-3.5 w-3.5 text-[var(--text-tertiary)]" />;
 }
 
 export function AiRunHeader({ modelUsed, routeTrace }: { modelUsed?: string; routeTrace?: RouteTrace }) {
   return (
-    <div className="mb-3 flex items-center justify-between gap-3 rounded-2xl border border-[var(--border-default)] bg-[linear-gradient(135deg,color-mix(in_oklab,var(--bg-secondary)_92%,transparent),color-mix(in_oklab,var(--accent-cyan)_5%,var(--bg-primary)))] px-3 py-2">
+    <div data-spectra-card="result" data-card-state="continued" className="mb-3 flex items-center justify-between gap-3 px-3 py-2">
       <AiModelBadge modelUsed={modelUsed} routeTrace={routeTrace} />
       <span className="shrink-0 text-[10px] uppercase tracking-[0.16em] text-[var(--text-tertiary)]">AI run</span>
     </div>
@@ -71,7 +83,7 @@ export function AiModelBadge(props: React.ComponentProps<typeof ModelRoutingBadg
 export function WhyThisModelPopover({ reason }: { reason?: string }) {
   if (!reason) return null;
   return (
-    <details className="group rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2">
+    <details data-spectra-card="side" className="group px-3 py-2">
       <summary className="cursor-pointer list-none text-xs font-semibold text-[var(--text-primary)] [&::-webkit-details-marker]:hidden">
         Why this model
       </summary>
@@ -86,7 +98,7 @@ export function AiRunTimeline(props: { events?: ExecutionEvent[]; routeTrace?: R
 
 export function AiRunEventGroup({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="space-y-2 rounded-2xl border border-[var(--border-default)] bg-[var(--bg-primary)] p-3">
+    <div data-spectra-card="side" className="space-y-2 p-3">
       <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--text-tertiary)]">{title}</p>
       {children}
     </div>

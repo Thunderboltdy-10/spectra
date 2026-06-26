@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Bot, Download, Layers, LoaderCircle, Menu, MoreHorizontal, Search, Settings2, Square, WifiOff } from "lucide-react";
@@ -78,7 +78,7 @@ function StreamingIndicator({ phase, sending }: { phase?: string; sending: boole
   if (showDone && !sending) {
     return (
       <div className="flex items-center gap-2 transition-opacity duration-500">
-        <div className="h-1.5 w-1.5 rounded-full bg-[var(--success)]" />
+        <span className="spectra-status-dot" style={{ "--card-accent": "var(--success)" } as CSSProperties} />
         <span className="text-xs text-[var(--success)]">done</span>
         {elapsed > 0 && <span className="text-[10px] text-[var(--text-tertiary)]">{elapsed}s</span>}
       </div>
@@ -89,7 +89,7 @@ function StreamingIndicator({ phase, sending }: { phase?: string; sending: boole
 
   return (
     <div className="flex items-center gap-2">
-      <div className="h-1.5 w-1.5 animate-pulse rounded-full" style={{ background: config.color }} />
+      <span className="spectra-status-dot" data-active="true" style={{ "--card-accent": config.color } as CSSProperties} />
       <span className="text-xs" style={{ color: config.color }}>{config.label}</span>
       {elapsed > 0 && <span className="text-[10px] text-[var(--text-tertiary)]">{elapsed}s</span>}
     </div>
@@ -154,7 +154,7 @@ export function ChatHeader({
             type="button"
             variant="secondary"
             size="icon"
-            className="md:hidden"
+            className="spectra-header-action md:hidden"
             onClick={onToggleMobileSidebar}
             aria-label="Open sidebar"
           >
@@ -195,6 +195,7 @@ export function ChatHeader({
               type="button"
               variant="secondary"
               size="icon"
+              className="spectra-header-action"
               onClick={() => query.toggle()}
               aria-label="Open command palette (Cmd+K or Ctrl+K)"
               title="Open command palette (Cmd+K / Ctrl+K)"
@@ -206,7 +207,7 @@ export function ChatHeader({
                 type="button"
                 variant="secondary"
                 size="icon"
-                className="h-9 w-9"
+                className="spectra-header-action h-9 w-9"
                 onClick={onOpenOrchestration}
                 aria-label="Open orchestration panel"
                 title="Open orchestration panel"
@@ -216,7 +217,7 @@ export function ChatHeader({
             ) : null}
             <div className="flex items-center gap-1.5">
               {sending && (
-                <Button type="button" variant="secondary" size="sm" className="h-9 gap-1.5" onClick={onStop}>
+                <Button type="button" variant="secondary" size="sm" className="spectra-header-action h-9 gap-1.5 text-[var(--accent-coral)]" onClick={onStop}>
                   <Square className="h-3.5 w-3.5" />
                   Stop
                 </Button>
@@ -225,7 +226,7 @@ export function ChatHeader({
                 type="button"
                 variant="secondary"
                 size="icon"
-                className="h-9 w-9"
+                className="spectra-header-action h-9 w-9"
                 onClick={onOpenSettings}
                 data-tour="settings-trigger"
                 aria-label="Open settings"
@@ -239,7 +240,7 @@ export function ChatHeader({
                 type="button"
                 variant="secondary"
                 size="sm"
-                className="h-9 gap-1.5"
+                className="spectra-header-action h-9 gap-1.5"
                 onClick={onCompact}
                 disabled={compacting}
               >
@@ -254,7 +255,7 @@ export function ChatHeader({
             ) : null}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button type="button" variant="secondary" size="icon" className="h-9 w-9" aria-label="More actions">
+                <Button type="button" variant="secondary" size="icon" className="spectra-header-action h-9 w-9" aria-label="More actions">
                   <MoreHorizontal className="h-4 w-4" />
                 </Button>
               </DropdownMenuTrigger>

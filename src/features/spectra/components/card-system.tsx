@@ -15,6 +15,7 @@ export type SpectraCardVariant =
 
 export type SpectraCardState =
   | "normal"
+  | "pinned"
   | "selected"
   | "focused"
   | "context"

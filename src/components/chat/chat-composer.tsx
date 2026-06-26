@@ -789,14 +789,16 @@ export function ChatComposer(props: ChatComposerProps) {
                       type="button"
                       variant="ghost"
                       size="icon"
-                      className={cn("h-10 w-10 rounded-full bg-[var(--bg-elevated)]/95 backdrop-blur-xl border border-[var(--border-default)]/40 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] shadow-[0_10px_32px_-14px_rgba(8,22,40,0.18),0_4px_12px_-10px_rgba(8,22,40,0.12)] transition-transform", showPlusMenu && "bg-[var(--bg-hover)] rotate-45")}
+                      className={cn("spectra-icon-action h-10 w-10 rounded-[10px] bg-[var(--card-paper)]/90 text-[var(--text-secondary)] shadow-[0_10px_32px_-18px_rgba(54,39,22,0.24)] backdrop-blur-xl transition-transform", showPlusMenu && "is-active rotate-45")}
                       onClick={() => setShowPlusMenu((prev) => !prev)}
+                      aria-label="Open composer tools"
+                      title="Open composer tools"
                     >
                       <Plus className="h-5 w-5" />
                     </Button>
                     
                     {showPlusMenu && (
-                      <div className="absolute bottom-full left-0 mb-2 w-48 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[var(--shadow-soft)] z-[340] flex flex-col gap-0.5">
+                      <div data-spectra-card="result" className="absolute bottom-full left-0 z-[340] mb-2 flex w-48 flex-col gap-0.5 p-1">
                         <button type="button" className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-[var(--bg-hover)] transition-colors text-left" onClick={() => { setShowPlusMenu(false); setShowModeSelector(true); }}>
                           <span className="inline-flex h-2 w-2 rounded-full shrink-0" style={{ background: modeConfig.color }} /> <span className="truncate text-[var(--text-primary)]">Mode: {modeConfig.label}</span>
                         </button>
@@ -815,7 +817,7 @@ export function ChatComposer(props: ChatComposerProps) {
 
                     <div ref={modeMenuRef}>
                       {showModeSelector && (
-                  <div className="absolute bottom-full left-0 z-[340] mb-2 max-h-[320px] w-[min(92vw,22rem)] overflow-y-auto overscroll-contain rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[var(--shadow-soft)]">
+                  <div data-spectra-card="result" className="absolute bottom-full left-0 z-[340] mb-2 max-h-[320px] w-[min(92vw,22rem)] overflow-y-auto overscroll-contain p-1">
                     <p className="mb-1 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.11em] text-[var(--text-secondary)]">
                       Available
                     </p>
@@ -897,7 +899,8 @@ export function ChatComposer(props: ChatComposerProps) {
                       {showModelSelector && createPortal(
                   <div
                     ref={modelPortalRef}
-                    className="fixed z-[9999] max-h-[480px] w-[min(92vw,32rem)] overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-soft)]"
+                    data-spectra-card="result"
+                    className="fixed z-[9999] max-h-[480px] w-[min(92vw,32rem)] overflow-hidden"
                     style={modelSelectorPosition ? { bottom: modelSelectorPosition.bottom, left: modelSelectorPosition.left, opacity: 1 } : { top: 0, left: 0, opacity: 0, pointerEvents: "none" }}
                   >
                     <div className="flex h-full max-h-[480px]">
@@ -1097,7 +1100,7 @@ export function ChatComposer(props: ChatComposerProps) {
                     </div>
                     <div ref={agentMenuRef}>
                       {showAgentSelector && (
-                  <div className="absolute bottom-full left-0 z-[340] mb-2 w-[min(95vw,22rem)] overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[var(--shadow-soft)]">
+                  <div data-spectra-card="result" className="absolute bottom-full left-0 z-[340] mb-2 w-[min(95vw,22rem)] overflow-hidden">
                     <div className="border-b border-[var(--border-default)] px-3 py-2">
                       <p className="text-xs font-semibold uppercase tracking-[0.1em] text-[var(--text-secondary)]">Agent Workspace</p>
                       <div className="mt-2 flex flex-col gap-2">

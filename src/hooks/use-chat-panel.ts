@@ -21,6 +21,11 @@ type UseChatPanelParams = {
   onStreamEvent?: (event: ChatStreamEvent) => void;
 };
 
+function createPanelMessageIdFactory() {
+  let counter = 0;
+  return () => `msg-${++counter}-${Date.now()}`;
+}
+
 function phaseFromPhaseUpdate(event: ChatStreamEvent): string | null {
   const status = typeof event.status === "string" ? event.status : "";
   if (status !== "in_progress") return null;
@@ -81,9 +86,8 @@ export function useChatPanel(params: UseChatPanelParams = {}) {
   const abortRef = useRef<AbortController | null>(null);
   const createChatPromiseRef = useRef<Promise<string> | null>(null);
   const inflightLookupRef = useRef<Promise<string> | null>(null);
-  const counterRef = useRef(0);
   const accumulatorRef = useRef(
-    new ChatMessageAccumulator([], () => `msg-${++counterRef.current}-${Date.now()}`),
+    new ChatMessageAccumulator([], createPanelMessageIdFactory()),
   );
 
   const syncAccumulator = useCallback(() => {
@@ -101,7 +105,7 @@ export function useChatPanel(params: UseChatPanelParams = {}) {
     const data = (await response.json()) as { chat?: { _id?: string }; messages?: Array<Record<string, unknown>> };
     accumulatorRef.current = new ChatMessageAccumulator(
       toPanelMessages(Array.isArray(data.messages) ? data.messages : []),
-      () => `msg-${++counterRef.current}-${Date.now()}`,
+      createPanelMessageIdFactory(),
     );
     setChatId(data.chat?._id ? String(data.chat._id) : targetChatId);
     syncAccumulator();
@@ -287,7 +291,7 @@ export function useChatPanel(params: UseChatPanelParams = {}) {
     abortRef.current?.abort();
     createChatPromiseRef.current = null;
     inflightLookupRef.current = null;
-    accumulatorRef.current = new ChatMessageAccumulator([], () => `msg-${++counterRef.current}-${Date.now()}`);
+    accumulatorRef.current = new ChatMessageAccumulator([], createPanelMessageIdFactory());
     setMessages([]);
     setChatId(null);
     setStreaming(false);

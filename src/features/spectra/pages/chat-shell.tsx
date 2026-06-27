@@ -18,6 +18,7 @@ export function ChatShell() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const requestedThreadId = searchParams.get("threadId");
+  const requestedPrompt = searchParams.get("prompt");
   const [threadId, setThreadId] = useState<string | null>(requestedThreadId);
   const [threads, setThreads] = useState<SpectraThread[]>([]);
   const [detail, setDetail] = useState<SpectraThreadDetail | null>(null);
@@ -35,6 +36,7 @@ export function ChatShell() {
   const [threadPanelWidth, setThreadPanelWidth] = useState(560);
   const [threadPanelArtifactId, setThreadPanelArtifactId] = useState<string | null>(null);
   const activeThreadRef = useRef<string | null>(requestedThreadId);
+  const consumedPromptRef = useRef<string | null>(null);
 
   useEffect(() => {
     const hour = new Date().getHours();
@@ -104,12 +106,13 @@ export function ChatShell() {
   const scopedWorkspaceId = chatWorkspaceId ?? detail?.thread.workspaceId;
   const naturalFocusMode: ComposerFocusMode = threadId ? "thread" : focusedArtifact ? "artifact" : scopedWorkspaceId ? "workspace" : "global";
   const effectiveFocusMode = focusModeOverride === "thread" && !threadId ? naturalFocusMode : focusModeOverride === "artifact" && !focusedArtifact ? naturalFocusMode : focusModeOverride === "workspace" && !scopedWorkspaceId ? naturalFocusMode : focusModeOverride ?? naturalFocusMode;
+  const continuingThread = Boolean(threadId && effectiveFocusMode === "thread");
 
   const runEngine = useSpectraRun({
     surface: "chat",
     workspaceId: scopedWorkspaceId,
     artifactId: focusedArtifact?._id,
-    threadId: threadId ?? undefined,
+    threadId: continuingThread ? threadId ?? undefined : undefined,
     focusMode: effectiveFocusMode,
     currentView: "conversation",
     initialCards: [],
@@ -123,12 +126,43 @@ export function ChatShell() {
     },
     onDataChanged: () => refresh(activeThreadRef.current),
     onOpenArtifact: openArtifact,
-  });
+	  });
+
+	  useEffect(() => {
+	    function onOpenArtifact(event: Event) {
+	      const artifactId = (event as CustomEvent<{ artifactId?: string }>).detail?.artifactId;
+	      if (artifactId) openArtifact(artifactId);
+	    }
+	    function onOpenWorkspace(event: Event) {
+	      const workspaceId = (event as CustomEvent<{ workspaceId?: string }>).detail?.workspaceId;
+	      if (workspaceId) setChatWorkspaceId(workspaceId);
+	    }
+	    function onAsk(event: Event) {
+	      const prompt = (event as CustomEvent<{ prompt?: string }>).detail?.prompt?.trim();
+	      if (prompt) void runEngine.run(prompt);
+	    }
+	    window.addEventListener("spectra:open-artifact", onOpenArtifact);
+	    window.addEventListener("spectra:open-workspace", onOpenWorkspace);
+	    window.addEventListener("spectra:ask", onAsk);
+	    return () => {
+	      window.removeEventListener("spectra:open-artifact", onOpenArtifact);
+	      window.removeEventListener("spectra:open-workspace", onOpenWorkspace);
+	      window.removeEventListener("spectra:ask", onAsk);
+	    };
+	  });
+
+	  useEffect(() => {
+	    const prompt = requestedPrompt?.trim();
+	    if (!prompt || consumedPromptRef.current === prompt) return;
+	    consumedPromptRef.current = prompt;
+	    void runEngine.run(prompt);
+	    router.replace(threadId ? `/chat?threadId=${encodeURIComponent(threadId)}` : "/chat?new=1");
+	  }, [requestedPrompt, router, runEngine, threadId]);
 
   const title = detail?.thread.title ?? "New conversation";
   const activeWorkspace = workspaces.find((workspace) => workspace._id === (chatWorkspaceId ?? detail?.thread.workspaceId));
   const activeCards = useMemo(() => runEngine.cards.filter((card) => card.status !== "completed"), [runEngine.cards]);
-  const pageComposer = <CommandBar placeholder={threadId ? `Continue ${title}…` : activeWorkspace ? `Ask with ${activeWorkspace.title} context…` : focusedArtifact ? `Ask about ${focusedArtifact.title}…` : "Ask Spectra anything…"} busy={runEngine.submitting} allowConcurrent allowAttachments onStop={runEngine.stop} onSubmit={(value, attachments) => { void runEngine.run(value, attachments); return true; }} menu={<><button type="button" onClick={() => selectThread(null)} className="flex w-full items-center gap-2 rounded-[6px] px-2.5 py-2 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"><Plus className="h-4 w-4" />New conversation</button><div className="my-1 h-px bg-[var(--border-subtle)]" />{workspaces.slice(0, 6).map((workspace) => <button key={workspace._id} type="button" onClick={() => selectWorkspaceContext(workspace._id)} className="flex w-full items-center gap-2 rounded-[6px] px-2.5 py-2 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"><FolderPlus className="h-4 w-4" /><span className="min-w-0 flex-1 truncate">Use {workspace.title}</span>{activeWorkspace?._id === workspace._id ? <Check className="h-3.5 w-3.5 text-[var(--success)]" /> : null}</button>)}</>} context={<ContextFocusControl mode={effectiveFocusMode} onModeChange={setFocusModeOverride} workspace={activeWorkspace} artifact={focusedArtifact} threadTitle={threadId ? title : undefined} />} />;
+  const pageComposer = <CommandBar placeholder={continuingThread ? `Continue ${title}…` : threadId ? "Start a new thread with the selected context…" : activeWorkspace ? `Ask with ${activeWorkspace.title} context…` : focusedArtifact ? `Ask about ${focusedArtifact.title}…` : "Ask Spectra anything…"} busy={runEngine.submitting} allowConcurrent allowAttachments onStop={runEngine.stop} onSubmit={(value, attachments) => { void runEngine.run(value, attachments); return true; }} menu={<><button type="button" onClick={() => selectThread(null)} className="flex w-full items-center gap-2 rounded-[6px] px-2.5 py-2 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"><Plus className="h-4 w-4" />New conversation</button><div className="my-1 h-px bg-[var(--border-subtle)]" />{workspaces.slice(0, 6).map((workspace) => <button key={workspace._id} type="button" onClick={() => selectWorkspaceContext(workspace._id)} className="flex w-full items-center gap-2 rounded-[6px] px-2.5 py-2 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"><FolderPlus className="h-4 w-4" /><span className="min-w-0 flex-1 truncate">Use {workspace.title}</span>{activeWorkspace?._id === workspace._id ? <Check className="h-3.5 w-3.5 text-[var(--success)]" /> : null}</button>)}</>} context={<ContextFocusControl mode={effectiveFocusMode} onModeChange={setFocusModeOverride} workspace={activeWorkspace} artifact={focusedArtifact} threadTitle={threadId ? title : undefined} />} />;
 
   return (
     <div className="relative flex h-full min-h-0 bg-[var(--bg-primary)]">
@@ -136,7 +170,7 @@ export function ChatShell() {
         <header className="flex h-14 shrink-0 items-center justify-between border-b border-[var(--border-subtle)] px-5 sm:px-7">
           <div className="min-w-0">
             <div className="truncate font-display text-[18px] font-semibold text-[var(--text-primary)]">{title}</div>
-            <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">Persistent thread · Spectra run foundation</div>
+            <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">Thread · Shared Spectra conversation</div>
           </div>
           <div className="flex items-center gap-1">
             {threadId ? <button type="button" onClick={() => { setTitleDraft(title); setRenaming(true); }} className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]" aria-label="Rename thread" title="Rename thread"><Pencil className="h-3.5 w-3.5" /></button> : null}
@@ -151,14 +185,16 @@ export function ChatShell() {
             }} className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" aria-label="Open runs" title="Runs"><History className="h-3.5 w-3.5" /></button>
           </div>
         </header>
-        {renaming && threadId ? <div className="absolute left-5 top-12 z-50 flex w-[min(420px,calc(100vw-40px))] items-center gap-1.5 rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2 shadow-[0_16px_40px_rgba(27,20,12,0.14)] sm:left-7"><input autoFocus value={titleDraft} maxLength={64} onChange={(event) => setTitleDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") setRenaming(false); if (event.key === "Enter" && titleDraft.trim()) void postSpectra({ action: "updateThread", threadId, title: titleDraft.trim() }).then(() => refresh(threadId)).then(() => setRenaming(false)); }} className="h-9 min-w-0 flex-1 bg-transparent px-2 text-[13px] font-medium text-[var(--text-primary)] outline-none" /><button type="button" onClick={() => void postSpectra({ action: "updateThread", threadId, title: titleDraft.trim() }).then(() => refresh(threadId)).then(() => setRenaming(false))} className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--success)] hover:bg-[var(--bg-hover)]" aria-label="Save title"><Check className="h-4 w-4" /></button><button type="button" onClick={() => setRenaming(false)} className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]" aria-label="Cancel rename"><X className="h-4 w-4" /></button></div> : null}
-        <ConversationSurface
+	        {renaming && threadId ? <div className="absolute left-5 top-12 z-50 flex w-[min(420px,calc(100vw-40px))] items-center gap-1.5 rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2 shadow-[0_16px_40px_rgba(27,20,12,0.14)] sm:left-7"><input autoFocus value={titleDraft} maxLength={64} onChange={(event) => setTitleDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") setRenaming(false); if (event.key === "Enter" && titleDraft.trim()) void postSpectra({ action: "updateThread", threadId, title: titleDraft.trim() }).then(() => refresh(threadId)).then(() => setRenaming(false)); }} className="h-9 min-w-0 flex-1 bg-transparent px-2 text-[13px] font-medium text-[var(--text-primary)] outline-none" /><button type="button" onClick={() => void postSpectra({ action: "updateThread", threadId, title: titleDraft.trim() }).then(() => refresh(threadId)).then(() => setRenaming(false))} className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--success)] hover:bg-[var(--bg-hover)]" aria-label="Save title"><Check className="h-4 w-4" /></button><button type="button" onClick={() => setRenaming(false)} className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]" aria-label="Cancel rename"><X className="h-4 w-4" /></button></div> : null}
+	        {threadId && !continuingThread ? <div className="border-b border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--accent-cyan)_5%,var(--bg-primary))] px-5 py-2 text-[11px] text-[var(--text-secondary)] sm:px-7"><span className="font-semibold text-[var(--text-primary)]">New thread ready.</span> The current conversation is open for reference; your next message will create a separate thread using the selected context.</div> : null}
+	        <ConversationSurface
           detail={detail}
           loading={loading}
           liveExchange={runEngine.liveExchange}
-          workspaces={workspaces}
-          onOpenArtifact={openArtifact}
-          onChoice={(choice) => void runEngine.run(choice.description ? `${choice.title}: ${choice.description}` : choice.title)}
+	          workspaces={workspaces}
+	          onOpenArtifact={openArtifact}
+	          onOpenWorkspace={(workspaceId) => router.push(`/workspace?workspaceId=${encodeURIComponent(workspaceId)}&threadId=${encodeURIComponent(threadId ?? "")}`)}
+	          onChoice={(choice) => void runEngine.run(choice.description ? `${choice.title}: ${choice.description}` : choice.title)}
           activeCards={activeCards}
           onCardAction={(card, action, target) => void runEngine.onCardAction(card, action, target)}
           empty={<div className="mx-auto flex min-h-[58vh] w-full max-w-[820px] flex-col justify-center py-10 text-left">

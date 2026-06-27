@@ -7,9 +7,16 @@ const vOrigin = v.union(v.literal("chat"), v.literal("workspace"), v.literal("ar
 const vRole = v.union(v.literal("user"), v.literal("assistant"), v.literal("system"), v.literal("tool"));
 
 function cleanTitle(value: string) {
-  const words = value.replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
+  const words = value
+    .replace(/[`*_#[\](){}<>]/g, " ")
+    .replace(/\b(please|can|could|would|spectra|help|me|with|about|the|a|an|to|for|from|into|this|that|these|those)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(" ")
+    .filter(Boolean);
   if (words.length === 0) return "New thread";
-  return words.slice(0, 8).join(" ").replace(/[.!?,;:]+$/, "").slice(0, 88);
+  const title = words.slice(0, 4).join(" ").replace(/[.!?,;:]+$/, "").slice(0, 48);
+  return title.charAt(0).toUpperCase() + title.slice(1);
 }
 
 function cleanContent(value: string) {

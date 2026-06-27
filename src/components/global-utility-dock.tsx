@@ -165,10 +165,7 @@ export function GlobalUtilityDock({ placement = "floating", className }: GlobalU
   const [chatContext, setChatContext] = useState<ChatFeedbackContext | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [timerSnapshot, setTimerSnapshot] = useState<TimerSnapshot | null>(null);
-  const traceId = useMemo(
-    () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `trace-${Date.now()}`),
-    [],
-  );
+  const [traceId] = useState(() => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `trace-${Date.now()}`));
 
   const feedbackOpen = activePanel === "feedback";
   const timerOpen = activePanel === "timer";

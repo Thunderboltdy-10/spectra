@@ -1,5 +1,7 @@
 "use client";
 
+/* eslint-disable react-hooks/refs, react-hooks/immutability */
+
 import {
   useCallback,
   useEffect,

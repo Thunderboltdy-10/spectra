@@ -50,7 +50,16 @@ async function optionalSpectraQuery<TArgs extends object, TResult>(
 
 function requireString(value: unknown, name: string) {
   if (typeof value !== "string" || value.trim().length === 0) {
-    throw new Error(`${name} is required`);
+	    const label = name === "workspaceId"
+	      ? "Choose a workspace first."
+	      : name === "artifactId"
+	        ? "Choose a document or artifact first."
+	        : name === "threadId"
+	          ? "Choose a thread first."
+	          : name === "action"
+	            ? "Choose an available Spectra action."
+	          : "A required selection is missing.";
+    throw new Error(label);
   }
   return value.trim();
 }
@@ -60,10 +69,10 @@ function optionalString(value: unknown) {
 }
 
 function requireBlueprint(value: unknown) {
-  const blueprint = requireString(value, "blueprintKey");
-  if (!BLUEPRINTS.has(blueprint)) {
-    throw new Error("Invalid blueprintKey");
-  }
+	  const blueprint = requireString(value, "blueprintKey");
+	  if (!BLUEPRINTS.has(blueprint)) {
+	    throw new Error("Choose a supported artifact type.");
+	  }
   return blueprint;
 }
 
@@ -95,7 +104,7 @@ export async function GET(request: NextRequest) {
 
     if (action === "workspace") {
       const workspaceId = params.get("workspaceId");
-      if (!workspaceId) return badRequest("workspaceId is required");
+      if (!workspaceId) return badRequest("Choose a workspace first.");
       const workspace = await spectraQuery("spectraWorkspaceItems:listForWorkspacePublic", {
         actorClerkId: actor.clerkId,
         workspaceId,
@@ -209,7 +218,7 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    return badRequest("Unknown Spectra action");
+	    return badRequest("That Spectra action is not available.");
   }, request);
 }
 
@@ -443,6 +452,6 @@ export async function POST(request: NextRequest) {
       return ok(kept);
     }
 
-    return badRequest("Unknown Spectra action");
+	    return badRequest("That Spectra action is not available.");
   }, request);
 }

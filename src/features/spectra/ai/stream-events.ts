@@ -33,7 +33,6 @@ export const spectraStreamEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("run_created"), runId: z.string(), card: resultCardStreamViewSchema }).strict(),
   z.object({ type: z.literal("thread_ready"), runId: z.string(), threadId: z.string() }).strict(),
   z.object({ type: z.literal("text_delta"), runId: z.string(), content: z.string() }).strict(),
-  z.object({ type: z.literal("reasoning_delta"), runId: z.string(), content: z.string() }).strict(),
   z.object({ type: z.literal("status"), runId: z.string(), message: z.string() }).strict(),
   z.object({ type: z.literal("operation_preview"), runId: z.string(), operationId: z.string(), operationType: z.string(), preview: z.object({ action: z.enum(["create", "update", "link", "place", "remove", "workspace"]), title: z.string(), blueprintKey: z.string().optional(), targetId: z.string().optional() }).optional() }).strict(),
   z.object({ type: z.literal("operation_commit"), runId: z.string(), operationId: z.string() }).strict(),

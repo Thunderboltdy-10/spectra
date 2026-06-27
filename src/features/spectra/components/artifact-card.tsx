@@ -54,7 +54,7 @@ export function ArtifactCard({
   const interactive = Boolean(onSelect);
   const metrics = Object.entries(artifact.metrics ?? {}).slice(0, size === "compact" ? 0 : 4);
   const cardState: SpectraCardState = contextSelected
-    ? "context"
+    ? selectionMode ? "multi-selected" : "context"
     : selected
       ? "focused"
       : artifact.aiState === "creating"
@@ -77,7 +77,13 @@ export function ArtifactCard({
         quiet ? "shadow-none" : "shadow-[0_1px_2px_rgba(27,20,12,0.03)]",
         className,
       )}
-      onClick={selectionMode && onToggleContext ? onToggleContext : onSelect}
+      onClick={(event) => {
+        if (onToggleContext && (selectionMode || event.metaKey || event.ctrlKey)) {
+          onToggleContext();
+          return;
+        }
+        onSelect?.();
+      }}
       data-interactive={interactive ? "true" : undefined}
       data-ai-state={artifact.aiState}
       data-context-state={contextSelected ? "selected" : selected ? "focused" : "normal"}

@@ -60,6 +60,18 @@ type Card = { _id: string; runId: string; status: "queued" | "running" | "awaiti
 type RunState = { status: Card["status"]; sourceSurface: "chat" | "workspace" | "artifact"; threadId?: string; workspaceId?: string; artifactId?: string; userPrompt: string; finalSummary?: string; decision?: SpectraPlan["decision"]; planIntent?: unknown; contextSnapshot?: { focusMode?: EffectiveFocusMode; selectedObjectIds?: string[]; currentView?: string } };
 type RunDetail = { run: RunState; cards: Card[]; operations: StoredOperation[] };
 
+function fallbackThreadTitle(prompt: string) {
+  const stop = new Set(["please", "can", "could", "would", "spectra", "help", "me", "with", "about", "the", "a", "an", "to", "for", "from", "into", "this", "that", "these", "those", "make", "create"]);
+  const words = prompt
+    .replace(/[`*_#[\](){}<>]/g, " ")
+    .split(/\s+/)
+    .map((word) => word.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, ""))
+    .filter((word) => word && !stop.has(word.toLowerCase()))
+    .slice(0, 4);
+  if (words.length === 0) return "New thread";
+  return words.map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(" ").slice(0, 48);
+}
+
 function withJsExtension(functionName: string) {
   const [moduleName, exportName] = functionName.split(":");
   return !moduleName || !exportName || moduleName.endsWith(".js") ? functionName : `${moduleName}.js:${exportName}`;
@@ -391,12 +403,21 @@ function safeOperationPreview(operation: ModelOperation) {
 function publicError(error: unknown) {
   if (error instanceof ZodError) {
     const issue = error.issues[0];
-    const path = issue?.path.length ? issue.path.join(".") : "plan";
-    return `Invalid AI plan at ${path}: ${issue?.message ?? "schema mismatch"}`;
+    const path = issue?.path.join(".") ?? "";
+    if (/artifactId|workspaceId|threadId|plannerItemId|operationId|sourceId|targetId|_id/i.test(path)) {
+      return "Spectra could not match that request to an open or selected object. Choose the document or workspace you want to use, then try again.";
+    }
+    return "Spectra could not safely apply that plan. Try again with the relevant document or workspace selected.";
   }
   if (error instanceof SyntaxError) return "The AI returned malformed structured output. Retry the run.";
   const message = error instanceof Error ? error.message : "Spectra run failed.";
-  return message.length > 360 ? `${message.slice(0, 357)}…` : message;
+  if (/\b(artifactId|workspaceId|threadId|plannerItemId|operationId|sourceId|targetId|object ID|database id)\b/i.test(message)) {
+    return "Spectra could not match that request to an open or selected object. Choose the document or workspace you want to use, then try again.";
+  }
+  if (/\bJSON|schema|Zod|planner|operation input|FunctionPathNotFound|Convex\b/i.test(message)) {
+    return "Spectra could not safely complete that request. Try again, or choose the object you want Spectra to use.";
+  }
+  return message.length > 240 ? `${message.slice(0, 237)}…` : message;
 }
 
 async function executeOperation(actorClerkId: string, runId: string, operationId: string, operation: ModelOperation, context: { surface: Surface; threadId?: string; workspaceId?: string; selectedArtifactIds?: string[]; attachmentNames?: string[]; contextSummary?: string }) {
@@ -528,6 +549,21 @@ async function saveAssistantMessage(params: {
   });
 }
 
+async function inferWorkspaceForRun(actorClerkId: string, body: Body) {
+  if (body.workspaceId) return body.workspaceId;
+  if (!body.artifactId) return undefined;
+  try {
+    const artifact = await query<unknown & object, { placements?: Array<{ workspaceId?: string }> }>("spectraArtifacts:get", {
+      actorClerkId,
+      artifactId: body.artifactId,
+    });
+    const workspaceIds = [...new Set((artifact.placements ?? []).flatMap((placement) => typeof placement.workspaceId === "string" ? [placement.workspaceId] : []))];
+    return workspaceIds.length === 1 ? workspaceIds[0] : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function ndjson(task: (emit: (event: unknown) => void) => Promise<void>) {
   const encoder = new TextEncoder();
   return new Response(new ReadableStream({
@@ -566,6 +602,15 @@ async function runAttempt(params: { actorClerkId: string; runId: string; resultC
       },
     });
     const workspaceTitle = context.currentWorkspace?.title;
+    const provenance = {
+      artifactIds: context.selectedArtifactIds,
+      artifactTitles: context.packet.selectedObjects.map((item) => item.title),
+      threadId: params.threadId,
+      workspaceId: params.workspaceId,
+      workspaceTitle,
+      attachmentNames: params.attachments?.map((attachment) => attachment.name) ?? [],
+      focusMode: context.focusMode,
+    };
     if (params.artifactId && context.focusedArtifact?.title) emit({ type: "status", runId: params.runId, message: `Reviewing ${context.focusedArtifact.title}` });
     else if (workspaceTitle) emit({ type: "status", runId: params.runId, message: `Reviewing ${workspaceTitle} context` });
     const modelResult = await callModel(
@@ -574,7 +619,7 @@ async function runAttempt(params: { actorClerkId: string; runId: string; resultC
       { ...context.packet, conversation },
       params.attachments ?? [],
       (content) => emit({ type: "text_delta", runId: params.runId, content }),
-      (content) => emit({ type: "reasoning_delta", runId: params.runId, content }),
+      undefined,
       params.signal,
     );
     const plan = validatePlanAgainstIntent(modelResult.plan, ownedReferences(context));
@@ -599,7 +644,7 @@ async function runAttempt(params: { actorClerkId: string; runId: string; resultC
 
     if (plan.decision !== "operate") {
       const title = plan.decision === "clarify" ? "Needs clarification" : plan.decision === "refuse" ? "Unable to apply" : "Answer";
-      await mutate("spectraRuns:updateStatus", { actorClerkId: params.actorClerkId, runId: params.runId, status: "completed", decision: plan.decision, planIntent: plan.intent, finalSummary: plan.finalResponse, resultTitle: title, resultSummary: plan.finalResponse, resultVariant: "status", resultActions: [], modelUsed: modelResult.model, providerUsed: modelResult.provider, usage: modelResult.usage });
+      await mutate("spectraRuns:updateStatus", { actorClerkId: params.actorClerkId, runId: params.runId, status: "completed", decision: plan.decision, planIntent: plan.intent, finalSummary: plan.finalResponse, resultTitle: title, resultSummary: plan.finalResponse, resultVariant: "status", resultActions: [], provenance, modelUsed: modelResult.model, providerUsed: modelResult.provider, usage: modelResult.usage });
       await saveAssistantMessage({ actorClerkId: params.actorClerkId, threadId: params.threadId, runId: params.runId, content: plan.finalResponse, decision: plan.decision, model: modelResult.model, provider: modelResult.provider, usage: modelResult.usage, choices: plan.choices });
       card = await latestCard(params.actorClerkId, params.runId);
       emit({ type: "final", runId: params.runId, summary: plan.finalResponse, card: streamCard(card) });
@@ -611,7 +656,7 @@ async function runAttempt(params: { actorClerkId: string; runId: string; resultC
         { key: "confirm", label: "Confirm", targetType: "run", targetId: params.runId },
         { key: "cancel", label: "Cancel", targetType: "run", targetId: params.runId },
       ];
-      await mutate("spectraRuns:updateStatus", { actorClerkId: params.actorClerkId, runId: params.runId, status: "awaiting_confirmation", decision: plan.decision, planIntent: plan.intent, finalSummary: plan.finalResponse, resultTitle: "Confirmation required", resultSummary: policy.reasons.join(" · "), resultVariant: "operation", resultActions: actions, modelUsed: modelResult.model, providerUsed: modelResult.provider, usage: modelResult.usage });
+      await mutate("spectraRuns:updateStatus", { actorClerkId: params.actorClerkId, runId: params.runId, status: "awaiting_confirmation", decision: plan.decision, planIntent: plan.intent, finalSummary: plan.finalResponse, resultTitle: "Confirmation required", resultSummary: policy.reasons.join(" · "), resultVariant: "operation", resultActions: actions, provenance, modelUsed: modelResult.model, providerUsed: modelResult.provider, usage: modelResult.usage });
       await saveAssistantMessage({ actorClerkId: params.actorClerkId, threadId: params.threadId, runId: params.runId, content: plan.finalResponse, decision: plan.decision, awaitingConfirmation: true, model: modelResult.model, provider: modelResult.provider, usage: modelResult.usage });
       card = await latestCard(params.actorClerkId, params.runId);
       emit({ type: "confirmation_required", runId: params.runId, reasons: policy.reasons, card: streamCard(card) });
@@ -648,15 +693,6 @@ async function runAttempt(params: { actorClerkId: string; runId: string; resultC
     }
     const artifact = allAffected.find((item) => item.type === "artifact");
     const actions: ResultAction[] = artifact ? [{ key: "open", label: "Open", targetType: "artifact", targetId: artifact.id }] : [];
-    const provenance = {
-      artifactIds: context.selectedArtifactIds,
-      artifactTitles: context.packet.selectedObjects.map((item) => item.title),
-      threadId: params.threadId,
-      workspaceId: params.workspaceId,
-      workspaceTitle,
-      attachmentNames: params.attachments?.map((attachment) => attachment.name) ?? [],
-      focusMode: context.focusMode,
-    };
     await mutate("spectraRuns:updateStatus", { actorClerkId: params.actorClerkId, runId: params.runId, status: "completed", decision: plan.decision, planIntent: plan.intent, finalSummary: plan.finalResponse, resultTitle: "Done", resultSummary: plan.finalResponse, resultVariant: artifact ? "artifact" : "status", resultActions: actions, provenance, modelUsed: modelResult.model, providerUsed: modelResult.provider, usage: modelResult.usage });
     await saveAssistantMessage({ actorClerkId: params.actorClerkId, threadId: params.threadId, runId: params.runId, content: plan.finalResponse, decision: plan.decision, affected: allAffected, model: modelResult.model, provider: modelResult.provider, usage: modelResult.usage });
     card = await latestCard(params.actorClerkId, params.runId);
@@ -691,14 +727,15 @@ export async function POST(request: NextRequest) {
     const surface = body.surface;
     if (!prompt || prompt.length > 12_000) return new Response("Invalid prompt", { status: 400 });
     if (!surface || !["chat", "workspace", "artifacts", "artifact"].includes(surface)) return new Response("Invalid surface", { status: 400 });
-    const sourceSurface = surface === "artifacts" ? "artifact" : surface;
-    const attachments = await prepareAttachments(body.attachments);
-    const localConversation = prepareLocalConversation(body.localConversation);
-    let threadId = body.threadId?.trim() || undefined;
-    if (!threadId) {
-      threadId = await mutate<unknown & object, string>("spectraThreads:create", { actorClerkId: actor.clerkId, origin: sourceSurface, workspaceId: body.workspaceId, artifactId: body.artifactId });
-    }
-    const created = await mutate<unknown & object, { runId: string; resultCardId: string }>("spectraRuns:create", { actorClerkId: actor.clerkId, sourceSurface, userPrompt: prompt, threadId, workspaceId: body.workspaceId, artifactId: body.artifactId, modelUsed: getSpectraModelId() });
+	    const sourceSurface = surface === "artifacts" ? "artifact" : surface;
+	    const attachments = await prepareAttachments(body.attachments);
+	    const localConversation = prepareLocalConversation(body.localConversation);
+	    const placementWorkspaceId = await inferWorkspaceForRun(actor.clerkId, body);
+	    let threadId = body.threadId?.trim() || undefined;
+	    if (!threadId) {
+	      threadId = await mutate<unknown & object, string>("spectraThreads:create", { actorClerkId: actor.clerkId, title: fallbackThreadTitle(prompt), origin: sourceSurface, workspaceId: placementWorkspaceId, artifactId: body.artifactId });
+	    }
+	    const created = await mutate<unknown & object, { runId: string; resultCardId: string }>("spectraRuns:create", { actorClerkId: actor.clerkId, sourceSurface, userPrompt: prompt, threadId, workspaceId: placementWorkspaceId, artifactId: body.artifactId, modelUsed: getSpectraModelId() });
     if (threadId) {
       await mutate("spectraThreads:appendMessage", { actorClerkId: actor.clerkId, threadId, role: "user", content: prompt, runId: created.runId, clientMessageId: `user:${created.runId}`, metadata: { attachments: attachments.map(({ name, mimeType, size, handling }) => ({ name, mimeType, size, handling })) } });
     }
@@ -709,7 +746,7 @@ export async function POST(request: NextRequest) {
       prompt,
       surface,
       threadId,
-      workspaceId: body.workspaceId,
+	      workspaceId: placementWorkspaceId,
       artifactId: body.artifactId,
       focusMode: body.focusMode,
       selectedArtifactIds: body.selectedArtifactIds,

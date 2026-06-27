@@ -17,16 +17,21 @@ export type SpectraCardState =
   | "normal"
   | "pinned"
   | "selected"
+  | "active"
   | "focused"
   | "context"
+  | "multi-selected"
   | "creating"
   | "updating"
+  | "completed"
   | "edited"
   | "confirmation"
   | "failed"
   | "disabled"
   | "archived"
-  | "continued";
+  | "continued"
+  | "drag-preview"
+  | "drop-target";
 
 export function spectraCardClass(variant: SpectraCardVariant, className?: string) {
   return cn("spectra-card", `spectra-card--${variant}`, className);

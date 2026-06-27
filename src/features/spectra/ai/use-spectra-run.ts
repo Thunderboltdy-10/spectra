@@ -12,7 +12,7 @@ export type SpectraLiveExchange = {
   runId?: string;
   prompt: string;
   content: string;
-  reasoning: string;
+  steps: Array<{ id: string; title: string; summary?: string; status: "running" | "done" | "error"; createdAt: number }>;
   status: "starting" | "streaming" | "failed";
   startedAt: number;
 };
@@ -61,6 +61,25 @@ function mergeCards(current: ResultCardStreamView[], incoming: ResultCardStreamV
       });
   });
   return unchanged ? current : merged;
+}
+
+function statusTitle(message: string) {
+  if (/review|reading|context/i.test(message)) return "Reading context";
+  if (/validating|analys/i.test(message)) return "Planning response";
+  if (/saving|creating|updating|adding|removing/i.test(message)) return "Updating workspace";
+  return "Writing response";
+}
+
+function appendStep(exchange: SpectraLiveExchange, message: string): SpectraLiveExchange {
+  const last = exchange.steps.at(-1);
+  if (last?.summary === message && last.status === "running") return exchange;
+  return {
+    ...exchange,
+    steps: [
+      ...exchange.steps.map((step, index) => index === exchange.steps.length - 1 && step.status === "running" ? { ...step, status: "done" as const } : step),
+      { id: `${exchange.runId ?? exchange.id}:${exchange.steps.length}:${Date.now()}`, title: statusTitle(message), summary: message, status: "running" as const, createdAt: Date.now() },
+    ].slice(-8),
+  };
 }
 
 export function useSpectraRun({
@@ -160,7 +179,6 @@ export function useSpectraRun({
           void onThreadReady?.(event.threadId);
         }
         if (event.type === "text_delta") setLiveExchange((current) => current && (!liveExchangeId || current.id === liveExchangeId) ? { ...current, runId: event.runId, content: current.content + event.content, status: "streaming" } : current);
-        if (event.type === "reasoning_delta") setLiveExchange((current) => current && (!liveExchangeId || current.id === liveExchangeId) ? { ...current, runId: event.runId, reasoning: current.reasoning + event.content, status: "streaming" } : current);
         if (event.type === "run_created" || event.type === "result_card" || event.type === "confirmation_required" || event.type === "final") upsert(event.card);
         if (event.type === "error") {
           if (event.card) upsert(event.card);
@@ -168,6 +186,7 @@ export function useSpectraRun({
           setLiveExchange((current) => current && (!liveExchangeId || current.id === liveExchangeId) ? { ...current, status: "failed" } : current);
         }
         if (event.type === "status") {
+          setLiveExchange((current) => current && (!liveExchangeId || current.id === liveExchangeId) ? appendStep({ ...current, runId: event.runId, status: "streaming" }, event.message) : current);
           setCards((current) => current.map((card) => card.runId === event.runId ? {
             ...card,
             status: "running",
@@ -178,7 +197,16 @@ export function useSpectraRun({
         }
         if (event.type === "operation_preview" && event.preview) setCards((current) => current.map((card) => card.runId === event.runId ? { ...card, title: event.preview!.action === "create" ? "Creating" : event.preview!.action === "update" ? "Updating" : "Working", summary: event.preview!.title, updatedAt: Date.now() } : card));
         if (event.type === "operation_result") { changed = true; void onDataChanged?.(); }
-        if (event.type === "final") void onFinal?.({ runId: event.runId, summary: event.summary, prompt: promptByRun.current.get(event.runId) ?? "" });
+        if (event.type === "operation_preview" && event.preview) {
+          setLiveExchange((current) => current && (!liveExchangeId || current.id === liveExchangeId) ? appendStep({ ...current, runId: event.runId, status: "streaming" }, event.preview!.title) : current);
+        }
+        if (event.type === "operation_result") {
+          setLiveExchange((current) => current && (!liveExchangeId || current.id === liveExchangeId) ? appendStep({ ...current, runId: event.runId, status: "streaming" }, "Checking result") : current);
+        }
+        if (event.type === "final") {
+          setLiveExchange((current) => current && (!liveExchangeId || current.id === liveExchangeId) ? { ...current, runId: event.runId, steps: current.steps.map((step) => step.status === "running" ? { ...step, status: "done" } : step), status: "streaming" } : current);
+          void onFinal?.({ runId: event.runId, summary: event.summary, prompt: promptByRun.current.get(event.runId) ?? "" });
+        }
         if (event.type === "final" || event.type === "confirmation_required") changed = true;
       }
       if (done) break;
@@ -194,7 +222,7 @@ export function useSpectraRun({
     const exchangeId = crypto.randomUUID();
     const optimisticCardId = `optimistic:${exchangeId}`;
     setActiveRequestCount((count) => count + 1);
-    setLiveExchange({ id: exchangeId, prompt: clean, content: "", reasoning: "", status: "starting", startedAt: Date.now() });
+    setLiveExchange({ id: exchangeId, prompt: clean, content: "", steps: [{ id: `${exchangeId}:start`, title: "Starting", summary: "Creating the thread", status: "running", createdAt: Date.now() }], status: "starting", startedAt: Date.now() });
     upsert({ id: optimisticCardId, runId: `pending:${exchangeId}`, status: "running", title: "Thinking", summary: clean, variant: "status", actions: [], updatedAt: Date.now() });
     try {
       await consume({ action: "run", prompt: clean, surface, workspaceId, artifactId, threadId: durableThreadId.current, focusMode, selectedArtifactIds, currentView, attachments, localConversation }, optimisticCardId, exchangeId);

@@ -5,19 +5,20 @@ import type { LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ConversationSurface } from "./conversation-surface";
+import { ConversationSurface, ThreadConversation } from "./conversation-surface";
 import { StudioSplitShell } from "./artifact-studio";
 import { useSpectraSession } from "@/context/spectra-session-context";
 import { getSpectraRunDetail, postSpectra, type SpectraRunDetail, type SpectraThreadDetail } from "../data/api";
 import type { ResultCardStreamView } from "../ai/stream-events";
 import { IconAction } from "./card-system";
 
-function temporaryDetail(detail: SpectraRunDetail): SpectraThreadDetail {
+function legacyRunDetail(detail: SpectraRunDetail): SpectraThreadDetail {
   const run = detail.run;
   const assistantContent = run.finalSummary ?? run.error ?? detail.cards[0]?.summary ?? "Spectra is working on this request.";
+  const threadId = `run:${run._id}`;
   return {
     thread: {
-      _id: `temporary:${run._id}`,
+      _id: threadId,
       title: run.userPrompt.split(/\s+/).slice(0, 8).join(" "),
       origin: run.sourceSurface,
       workspaceId: run.workspaceId,
@@ -28,8 +29,8 @@ function temporaryDetail(detail: SpectraRunDetail): SpectraThreadDetail {
       updatedAt: run.updatedAt,
     },
     messages: [
-      { _id: `temporary:user:${run._id}`, threadId: `temporary:${run._id}`, role: "user", content: run.userPrompt, runId: run._id, createdAt: run.createdAt },
-      { _id: `temporary:assistant:${run._id}`, threadId: `temporary:${run._id}`, role: "assistant", content: assistantContent, runId: run._id, createdAt: run.updatedAt },
+      { _id: `run:user:${run._id}`, threadId, role: "user", content: run.userPrompt, runId: run._id, createdAt: run.createdAt },
+      { _id: `run:assistant:${run._id}`, threadId, role: "assistant", content: assistantContent, runId: run._id, createdAt: run.updatedAt },
     ],
     traces: [{ run, operations: detail.operations, cards: detail.cards, artifacts: [] }],
     viewerName: "You",
@@ -57,9 +58,8 @@ export function RunDetailPanel({ runId, card, onClose, onAction, onUseThread, on
   const localArtifact = spectraSession.localThreads.find((thread) => thread.runId === runId);
   const conversation = useMemo(() => {
     if (!detail) return null;
-    const base = temporaryDetail(detail);
-    return { ...base, messages: [...base.messages, ...(localArtifact?.messages ?? []).map((message) => ({ _id: message.id, threadId: `temporary:${runId}`, role: message.role, content: message.content, runId: message.runId, createdAt: message.createdAt }))] } satisfies SpectraThreadDetail;
-  }, [detail, localArtifact?.messages, runId]);
+    return legacyRunDetail(detail);
+  }, [detail]);
   const persistedCard = detail?.cards[0];
   const isPermanent = Boolean(detail?.run.threadId);
   const displayCard: ResultCardStreamView | undefined = card ?? (persistedCard ? { id: persistedCard._id, runId: persistedCard.runId, status: persistedCard.status, title: persistedCard.title, summary: persistedCard.summary, variant: persistedCard.variant, actions: persistedCard.actions, updatedAt: persistedCard.updatedAt } : undefined);
@@ -86,12 +86,12 @@ export function RunDetailPanel({ runId, card, onClose, onAction, onUseThread, on
     return ExternalLink;
   }
 
-  return <StudioSplitShell width={width} onWidthChange={setWidth} ariaLabel="Run conversation" cssWidthVariable="--spectra-run-panel-width"><div className="flex h-full min-h-0 flex-col">
+  return <StudioSplitShell width={width} onWidthChange={setWidth} ariaLabel="Thread panel" cssWidthVariable="--spectra-run-panel-width"><div className="flex h-full min-h-0 flex-col">
     <header className="flex min-h-16 shrink-0 items-center justify-between border-b border-[var(--border-subtle)] px-5 py-3">
-      <div className="flex min-w-0 items-center gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] bg-[color-mix(in_oklab,#8b6ff0_10%,var(--bg-elevated))] text-[#8b6ff0]"><MessageSquare className="h-4 w-4" /></span><div className="min-w-0"><div className="truncate font-display text-[17px] font-semibold">{conversation?.thread.title ?? "Conversation"}</div><div className="text-[10px] uppercase tracking-[0.11em] text-[var(--text-tertiary)]">Run conversation · {displayCard?.status.replaceAll("_", " ") ?? "loading"}</div></div></div>
+      <div className="flex min-w-0 items-center gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] bg-[color-mix(in_oklab,#8b6ff0_10%,var(--bg-elevated))] text-[#8b6ff0]"><MessageSquare className="h-4 w-4" /></span><div className="min-w-0"><div className="truncate font-display text-[17px] font-semibold">{conversation?.thread.title ?? "Conversation"}</div><div className="text-[10px] uppercase tracking-[0.11em] text-[var(--text-tertiary)]">Thread · {displayCard?.status.replaceAll("_", " ") ?? "loading"}</div></div></div>
       <div className="flex items-center gap-1"><IconAction icon={busy === "continue" ? Loader2 : Maximize2} label="Open in Chat" disabled={busy !== null} className={busy === "continue" ? "animate-spin" : undefined} onClick={() => { if (detail?.run.threadId) router.push(`/chat?threadId=${encodeURIComponent(detail.run.threadId)}`); else void keep(false, true, false); }} /><IconAction icon={X} label="Close" onClick={onClose} /></div>
     </header>
-    <div className="min-h-0 flex-1">{conversation ? <ConversationSurface detail={conversation} compact /> : <div className="flex h-full items-center justify-center gap-2 text-[12px] text-[var(--text-tertiary)]"><Loader2 className="h-4 w-4 animate-spin" />Loading conversation</div>}</div>
+    <div className="min-h-0 flex-1">{detail?.run.threadId ? <ThreadConversation threadId={detail.run.threadId} compact showComposer={false} /> : conversation ? <ConversationSurface detail={conversation} compact /> : <div className="flex h-full items-center justify-center gap-2 text-[12px] text-[var(--text-tertiary)]"><Loader2 className="h-4 w-4 animate-spin" />Loading conversation</div>}</div>
     <footer className="shrink-0 border-t border-[var(--border-subtle)] bg-[var(--bg-primary)] p-3">
       <div className="flex items-center justify-end gap-2">
         {displayCard?.actions.map((action) => { const Icon = runActionIcon(action.key); return <IconAction key={action.key} icon={Icon} label={action.label} active={action.key === "confirm"} danger={action.key === "cancel" || action.key === "reject"} onClick={() => onAction?.(displayCard, action.key, action.targetId)} />; })}

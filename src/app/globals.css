@@ -2085,7 +2085,9 @@ button:disabled {
 
 [data-card-state="selected"],
 [data-card-state="focused"],
-[data-card-state="context"] {
+[data-card-state="context"],
+[data-card-state="multi-selected"],
+[data-card-state="active"] {
   border-color: color-mix(in oklab, var(--card-focus) 72%, var(--card-border));
   background: color-mix(in oklab, var(--card-focus) 3.5%, var(--card-paper));
   box-shadow: 0 0 0 1px color-mix(in oklab, var(--card-focus) 12%, transparent), var(--card-shadow-hover);
@@ -2121,8 +2123,37 @@ button:disabled {
   box-shadow: 0 0 0 4px color-mix(in oklab, var(--card-focus) 12%, transparent);
 }
 
+[data-card-state="multi-selected"] {
+  --card-accent: var(--accent-cyan);
+  background:
+    linear-gradient(180deg, color-mix(in oklab, var(--accent-cyan) 5%, transparent), transparent 55%),
+    color-mix(in oklab, var(--accent-cyan) 4%, var(--card-paper));
+}
+
+[data-card-state="multi-selected"]::after {
+  content: "";
+  position: absolute;
+  z-index: 3;
+  top: 8px;
+  right: 8px;
+  width: 18px;
+  height: 18px;
+  border-radius: 6px;
+  background:
+    linear-gradient(135deg, transparent 44%, white 45% 55%, transparent 56%),
+    var(--accent-cyan);
+  box-shadow: 0 4px 12px color-mix(in oklab, var(--accent-cyan) 24%, transparent);
+}
+
+[data-card-state="active"],
+[data-card-state="completed"] {
+  border-color: color-mix(in oklab, var(--success) 38%, var(--card-border));
+}
+
 [data-card-state="continued"] { --card-accent: #8166d8; border-color: color-mix(in oklab, #8166d8 42%, var(--card-border)); box-shadow: inset 3px 0 #8166d8, var(--card-shadow); }
 [data-card-state="continued"]::before { animation: spectra-texture-drift 6s ease-in-out infinite alternate; }
+[data-card-state="drag-preview"] { opacity: .72; transform: scale(.985); box-shadow: 0 18px 38px -22px rgba(24,20,14,.42); }
+[data-card-state="drop-target"] { --card-accent: var(--accent-cyan); border-style: dashed; border-color: color-mix(in oklab, var(--accent-cyan) 62%, var(--card-border)); background: color-mix(in oklab, var(--accent-cyan) 6%, var(--card-paper)); }
 [data-card-state="edited"] { border-color: color-mix(in oklab, var(--card-accent) 34%, var(--card-border)); background: color-mix(in oklab, var(--card-accent) 3%, var(--card-paper)); }
 [data-card-state="edited"]::after {
   content: "";

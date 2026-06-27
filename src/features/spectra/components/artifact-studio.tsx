@@ -293,6 +293,19 @@ function sameTabs(a: StudioTab[], b: StudioTab[]) {
   return a.length === b.length && a.every((tab, index) => tab.artifactId === b[index]?.artifactId && tab.openedAt === b[index]?.openedAt);
 }
 
+function artifactEditorSnapshot(artifact: SpectraArtifact) {
+  return {
+    title: artifact.title,
+    summary: artifact.summary ?? "",
+    tagDraft: (artifact.tags ?? []).join(", "),
+    content: artifact.content,
+  };
+}
+
+function snapshotKey(snapshot: { title: string; summary: string; tagDraft: string; content: unknown }) {
+  return JSON.stringify(snapshot);
+}
+
 export function useArtifactStudioState(storageKey: string, artifacts: SpectraArtifact[]) {
   const [mode, setMode] = useState<StudioMode>("closed");
   const [activeArtifactId, setActiveArtifactId] = useState<string | null>(null);
@@ -695,6 +708,7 @@ function ArtifactStudioEditor({
   const [summary, setSummary] = useState(artifact.summary ?? "");
   const [tagDraft, setTagDraft] = useState((artifact.tags ?? []).join(", "));
   const [content, setContent] = useState<unknown>(artifact.content);
+  const [baseline, setBaseline] = useState(() => artifactEditorSnapshot(artifact));
   const [dirty, setDirty] = useState(false);
   const [closeDecisionOpen, setCloseDecisionOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -703,16 +717,35 @@ function ArtifactStudioEditor({
   const [previewVersion, setPreviewVersion] = useState<SpectraArtifactVersion | null>(null);
   const meta = blueprintMeta[artifact.blueprintKey];
   const Icon = meta.icon;
-  const baseline = useMemo(() => JSON.stringify({ title: artifact.title, summary: artifact.summary ?? "", tagDraft: (artifact.tags ?? []).join(", "), content: artifact.content }), [artifact]);
+  const dirtyRef = useRef(dirty);
+  const activeArtifactIdRef = useRef(artifact._id);
+  const incomingSnapshot = useMemo(() => artifactEditorSnapshot(artifact), [artifact]);
+  const currentSnapshot = useMemo(() => ({ title, summary, tagDraft, content }), [content, summary, tagDraft, title]);
   const previewDiff = useMemo(() => previewVersion ? lineDiff({ title: artifact.title, summary: artifact.summary, content: artifact.content, tags: artifact.tags }, previewVersion.before) : [], [artifact, previewVersion]);
 
   useEffect(() => {
     onDirtyChange(dirty);
+    dirtyRef.current = dirty;
   }, [dirty, onDirtyChange]);
 
   useEffect(() => {
-    setDirty(JSON.stringify({ title, summary, tagDraft, content }) !== baseline);
-  }, [baseline, content, summary, tagDraft, title]);
+    setDirty(snapshotKey(currentSnapshot) !== snapshotKey(baseline));
+  }, [baseline, currentSnapshot]);
+
+  useEffect(() => {
+    const switchedArtifacts = activeArtifactIdRef.current !== artifact._id;
+    if (!switchedArtifacts && dirtyRef.current) return;
+    activeArtifactIdRef.current = artifact._id;
+    setTitle(incomingSnapshot.title);
+    setSummary(incomingSnapshot.summary);
+    setTagDraft(incomingSnapshot.tagDraft);
+    setContent(incomingSnapshot.content);
+    setBaseline(incomingSnapshot);
+    if (switchedArtifacts) {
+      setDirty(false);
+      setCloseDecisionOpen(false);
+    }
+  }, [artifact._id, artifact.updatedAt, incomingSnapshot]);
 
   useEffect(() => {
     function requestClose(event: Event) {
@@ -750,6 +783,12 @@ function ArtifactStudioEditor({
       summary: summary.trim() || undefined,
       content,
       tags: tagsFromDraft(tagDraft),
+    });
+    setBaseline({
+      title: trimmedTitle,
+      summary: summary.trim(),
+      tagDraft: tagsFromDraft(tagDraft).join(", "),
+      content,
     });
     setDirty(false);
   }
@@ -821,10 +860,10 @@ function ArtifactStudioEditor({
       <main className={mainClass}>
         <div className={editorLayoutClass}>
           <section className="min-w-0">
-            {artifact.blueprintKey === "document" ? <DocumentStudio title={title} content={content} onChange={changeContent} /> : null}
-            {artifact.blueprintKey === "flashcard_deck" ? <FlashcardStudio mode={mode} content={content} onChange={changeContent} /> : null}
-            {artifact.blueprintKey === "quiz" ? <QuizStudio mode={mode} content={content} onChange={changeContent} /> : null}
-            {artifact.blueprintKey === "planner_task" ? <PlannerStudio mode={mode} artifact={artifact} artifacts={artifacts} title={title} content={content} onChange={changeContent} onArchive={onArchive} /> : null}
+            {artifact.blueprintKey === "document" ? <DocumentStudio key={`${artifact._id}:document`} title={title} content={content} onChange={changeContent} /> : null}
+            {artifact.blueprintKey === "flashcard_deck" ? <FlashcardStudio key={`${artifact._id}:deck`} mode={mode} content={content} onChange={changeContent} /> : null}
+            {artifact.blueprintKey === "quiz" ? <QuizStudio key={`${artifact._id}:quiz`} mode={mode} content={content} onChange={changeContent} /> : null}
+            {artifact.blueprintKey === "planner_task" ? <PlannerStudio key={`${artifact._id}:planner`} mode={mode} artifact={artifact} artifacts={artifacts} title={title} content={content} onChange={changeContent} onArchive={onArchive} /> : null}
             {artifact.blueprintKey === "thread_reference" ? <ThreadReferenceStudio content={content} /> : null}
           </section>
           {showDetails ? <StudioDetails

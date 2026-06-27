@@ -99,9 +99,11 @@ export function buildBoundedContextPacket(input: {
     .filter((artifact) => !selectedIds.has(String(artifact._id)) && artifact._id !== input.focusedArtifact?._id)
     .map((artifact) => ({ artifact, score: relevanceScore(artifact, input.prompt, workspaceId) }))
     .sort((a, b) => b.score - a.score);
-  const workspaceArtifacts = ranked.filter(({ artifact }) => placements(artifact).some((placement) => placement.workspaceId === workspaceId)).slice(0, CONTEXT_LIMITS.workspaceArtifactCount);
-  const catalog = ranked.slice(0, CONTEXT_LIMITS.catalogArtifactCount);
-  const selectedSnapshots = selected.map((artifact) => artifactContextSnapshot(artifact, { includeExcerpt: true, relevance: "explicitly selected", links: input.linksByArtifact?.[String(artifact._id)] }));
+	  const workspaceArtifacts = ranked.filter(({ artifact }) => placements(artifact).some((placement) => placement.workspaceId === workspaceId)).slice(0, CONTEXT_LIMITS.workspaceArtifactCount);
+	  const catalog = ranked.slice(0, CONTEXT_LIMITS.catalogArtifactCount);
+	  const broadPrompt = /\b(all|everything|search|find|across|compare|related|workspace|library|catalog|inbox)\b/i.test(input.prompt);
+	  const includeCatalog = input.focusMode === "global" || broadPrompt;
+	  const selectedSnapshots = selected.map((artifact) => artifactContextSnapshot(artifact, { includeExcerpt: true, relevance: "explicitly selected", links: input.linksByArtifact?.[String(artifact._id)] }));
   const focusedSnapshot = input.focusedArtifact ? artifactContextSnapshot(input.focusedArtifact, { includeExcerpt: true, relevance: "visibly open artifact", links: input.linksByArtifact?.[String(input.focusedArtifact._id)] }) : null;
   const packet = {
     version: 1,
@@ -119,7 +121,7 @@ export function buildBoundedContextPacket(input: {
     } : null,
     focusedArtifact: focusedSnapshot,
     selectedObjects: selectedSnapshots,
-    catalog: input.focusMode === "global" ? catalog.map(({ artifact }) => artifactContextSnapshot(artifact)) : catalog.slice(0, 8).map(({ artifact }) => artifactContextSnapshot(artifact)),
+	    catalog: includeCatalog ? (input.focusMode === "global" ? catalog : catalog.slice(0, 8)).map(({ artifact }) => artifactContextSnapshot(artifact)) : [],
     conversation: boundedConversation,
     omitted: {
       fullWorkspaceContent: true,

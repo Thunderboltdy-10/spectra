@@ -13,7 +13,7 @@ import {
   useMatches,
   useRegisterActions,
 } from "kbar";
-import { FileText, MessageSquare, CalendarClock, Code2, Image as ImageIcon, Layers, Plus } from "lucide-react";
+import { FileText, MessageSquare, CalendarClock, Code2, Image as ImageIcon, Layers, Plus, Grid2X2, XCircle } from "lucide-react";
 import { ALL_MODES, getModeConfig, isModeAvailable } from "@/lib/modes";
 import { useSidebar } from "@/context/sidebar-context";
 
@@ -104,6 +104,19 @@ type WorkspaceSearchResult = {
   workstreamTitle?: string | null;
 };
 
+type SpectraSearchResult = {
+  artifacts?: Array<{ _id: string; title: string; summary?: string; blueprintKey?: string; placements?: Array<{ workspaceId: string; workspaceTitle?: string; workspaceItemId: string }> }>;
+  workspaces?: Array<{ _id: string; title: string; description?: string }>;
+};
+
+type SpectraThreadResult = {
+  _id: string;
+  title: string;
+  summaryShort?: string;
+  workspaceId?: string;
+  messageCount?: number;
+};
+
 function typeIcon(itemType?: string, renderMode?: string) {
   const mode = renderMode ?? itemType ?? "";
   if (mode === "code_project" || mode === "code_output") return <Code2 className="h-3.5 w-3.5" />;
@@ -192,6 +205,170 @@ function WorkspaceQuickCommands() {
       : [],
     [searchQuery],
   );
+
+  return null;
+}
+
+function SpectraCommandBridge() {
+  const router = useRouter();
+  const { searchQuery } = useKBar((state) => ({ searchQuery: state.searchQuery }));
+  const [objects, setObjects] = useState<SpectraSearchResult>({});
+  const [threads, setThreads] = useState<SpectraThreadResult[]>([]);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fetchRef = useRef(0);
+  const queryText = searchQuery.trim();
+
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (queryText.length < 2) {
+      setObjects({});
+      setThreads([]);
+      return;
+    }
+
+    debounceRef.current = setTimeout(async () => {
+      const fetchId = ++fetchRef.current;
+      try {
+        const [objectResponse, threadResponse] = await Promise.all([
+          fetch(`/api/spectra?action=search&search=${encodeURIComponent(queryText)}`),
+          fetch("/api/spectra?action=threads&limit=80"),
+        ]);
+        if (fetchId !== fetchRef.current) return;
+        const objectPayload = objectResponse.ok ? await objectResponse.json() as SpectraSearchResult : {};
+        const threadPayload = threadResponse.ok ? await threadResponse.json() as { threads?: SpectraThreadResult[] } : {};
+        const needle = queryText.toLowerCase();
+        setObjects(objectPayload);
+        setThreads((threadPayload.threads ?? []).filter((thread) => `${thread.title} ${thread.summaryShort ?? ""}`.toLowerCase().includes(needle)).slice(0, 8));
+      } catch {
+        if (fetchId === fetchRef.current) {
+          setObjects({});
+          setThreads([]);
+        }
+      }
+    }, 160);
+  }, [queryText]);
+
+  const actions = useMemo(() => {
+    const placementActions = /\b(move|add|place|send)\b/i.test(queryText)
+      ? (objects.artifacts ?? []).slice(0, 4).flatMap((artifact) => (objects.workspaces ?? []).slice(0, 4).map((workspace) => ({
+        id: `spectra-place-${artifact._id}-${workspace._id}`,
+        name: `Move ${artifact.title} to ${workspace.title}`,
+        subtitle: "Place artifact in workspace",
+        section: "Spectra actions",
+        icon: <Layers className="h-3.5 w-3.5" />,
+        perform: async () => {
+          await fetch("/api/spectra", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "addArtifactToWorkspace", artifactId: artifact._id, workspaceId: workspace._id }),
+          }).catch(() => null);
+          window.dispatchEvent(new CustomEvent("spectra:open-workspace", { detail: { workspaceId: workspace._id } }));
+        },
+      })))
+      : [];
+    const inboxActions = /\b(inbox|unplaced|remove)\b/i.test(queryText)
+      ? (objects.artifacts ?? []).slice(0, 6).flatMap((artifact) => (artifact.placements ?? []).slice(0, 2).map((placement) => ({
+        id: `spectra-inbox-${artifact._id}-${placement.workspaceItemId}`,
+        name: `Send ${artifact.title} to Inbox`,
+        subtitle: placement.workspaceTitle ? `Remove from ${placement.workspaceTitle}` : "Remove workspace placement",
+        section: "Spectra actions",
+        icon: <XCircle className="h-3.5 w-3.5" />,
+        perform: async () => {
+          await fetch("/api/spectra", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "hideWorkspaceItem", workspaceItemId: placement.workspaceItemId }),
+          }).catch(() => null);
+          window.dispatchEvent(new Event("spectra:refresh"));
+        },
+      })))
+      : [];
+    const rows = [
+      ...placementActions,
+      ...inboxActions,
+      ...(objects.workspaces ?? []).slice(0, 8).map((workspace) => ({
+        id: `spectra-workspace-${workspace._id}`,
+        name: `Open ${workspace.title}`,
+        subtitle: workspace.description ?? "Workspace",
+        section: "Spectra",
+        icon: <Layers className="h-3.5 w-3.5" />,
+        perform: () => {
+          router.push(`/workspace?workspaceId=${encodeURIComponent(workspace._id)}`);
+          window.dispatchEvent(new CustomEvent("spectra:open-workspace", { detail: { workspaceId: workspace._id } }));
+        },
+      })),
+      ...(objects.artifacts ?? []).slice(0, 10).map((artifact) => ({
+        id: `spectra-artifact-${artifact._id}`,
+        name: `Open ${artifact.title}`,
+        subtitle: artifact.summary ?? artifact.blueprintKey ?? "Artifact",
+        section: "Spectra",
+        icon: <FileText className="h-3.5 w-3.5" />,
+        perform: () => {
+          window.dispatchEvent(new CustomEvent("spectra:open-artifact", { detail: { artifactId: artifact._id } }));
+          if (!window.location.pathname.startsWith("/workspace") && !window.location.pathname.startsWith("/artifacts") && !window.location.pathname.startsWith("/chat")) {
+            router.push(`/artifacts?artifactId=${encodeURIComponent(artifact._id)}`);
+          }
+        },
+      })),
+      ...threads.map((thread) => ({
+        id: `spectra-thread-${thread._id}`,
+        name: `Open ${thread.title}`,
+        subtitle: thread.messageCount ? `${thread.messageCount} messages` : "Thread",
+        section: "Spectra threads",
+        icon: <MessageSquare className="h-3.5 w-3.5" />,
+        perform: () => router.push(`/chat?threadId=${encodeURIComponent(thread._id)}`),
+      })),
+    ];
+
+    const baseActions = queryText.length === 0 ? [
+      {
+        id: "spectra-tile-selected",
+        name: "Open selected artifacts in tiled view",
+        section: "Spectra actions",
+        icon: <Grid2X2 className="h-3.5 w-3.5" />,
+        perform: () => window.dispatchEvent(new Event("spectra:tile-selected")),
+      },
+      {
+        id: "spectra-focus-set",
+        name: "Focus this set",
+        section: "Spectra actions",
+        icon: <Layers className="h-3.5 w-3.5" />,
+        perform: () => window.dispatchEvent(new Event("spectra:focus-set")),
+      },
+      {
+        id: "spectra-clear-selection",
+        name: "Clear Spectra selection",
+        section: "Spectra actions",
+        icon: <XCircle className="h-3.5 w-3.5" />,
+        perform: () => window.dispatchEvent(new Event("spectra:clear-selection")),
+      },
+      {
+        id: "spectra-new-thread",
+        name: "Start new Spectra thread",
+        section: "Spectra actions",
+        icon: <MessageSquare className="h-3.5 w-3.5" />,
+        perform: () => router.push("/chat?new=1"),
+      },
+    ] : [];
+
+    const fallback = queryText.length >= 2 ? [{
+      id: `spectra-ask-${queryText}`,
+      name: `Ask Spectra: ${queryText}`,
+      subtitle: "Send this text as a chat request",
+      section: "Ask Spectra",
+      icon: <MessageSquare className="h-3.5 w-3.5" />,
+      perform: () => {
+        window.dispatchEvent(new CustomEvent("spectra:ask", { detail: { prompt: queryText } }));
+        if (!window.location.pathname.startsWith("/workspace") && !window.location.pathname.startsWith("/artifacts") && !window.location.pathname.startsWith("/chat")) {
+          router.push(`/chat?prompt=${encodeURIComponent(queryText)}`);
+        }
+      },
+    }] : [];
+
+    return [...baseActions, ...rows, ...fallback];
+  }, [objects.artifacts, objects.workspaces, queryText, router, threads]);
+
+  useRegisterActions(actions, [actions]);
 
   return null;
 }
@@ -336,6 +513,7 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
       <CommandPaletteHotkeys />
       <WorkspaceSearchBridge />
       <WorkspaceQuickCommands />
+      <SpectraCommandBridge />
       <KBarPortal>
         <KBarPositioner className="z-[100] bg-[var(--bg-overlay)]">
           <KBarAnimator className="w-full max-w-xl rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 shadow-[var(--shadow-soft)]">

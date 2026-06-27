@@ -74,21 +74,21 @@ export function ResultCardStack({
   const visibleCards = cards?.slice(0, 12) ?? [];
   if (visibleCards.length === 0) return null;
 
-  async function toggleContinuation(card: ResultCardView) {
-    const knownThreadId = threadIds[card.runId];
-    if (activeRunId === card.runId || (knownThreadId && activeThreadId === knownThreadId)) {
-      onContinue?.(null);
-      return;
-    }
-    setBusyRunId(card.runId);
-    try {
-      const threadId = knownThreadId ?? (await postSpectra<{ threadId: string }>({
-        action: "keepRunAsThread",
-        runId: card.runId,
-        placeInWorkspace: false,
-        createReference: false,
-        localMessages: session.localThreads.find((thread) => thread.runId === card.runId)?.messages ?? [],
-      })).threadId;
+	  async function toggleContinuation(card: ResultCardView) {
+	    const knownThreadId = card.provenance?.threadId ?? threadIds[card.runId];
+	    if (activeRunId === card.runId || (knownThreadId && activeThreadId === knownThreadId)) {
+	      onContinue?.(null);
+	      return;
+	    }
+	    setBusyRunId(card.runId);
+	    try {
+	      const threadId = knownThreadId ?? (await postSpectra<{ threadId: string }>({
+	        action: "keepRunAsThread",
+	        runId: card.runId,
+	        placeInWorkspace: false,
+	        createReference: false,
+	        localMessages: session.localThreads.find((thread) => thread.runId === card.runId)?.messages ?? [],
+	      })).threadId;
       setThreadIds((current) => ({ ...current, [card.runId]: threadId }));
       onContinue?.({ threadId, title: card.summary || card.title || "Conversation", runId: card.runId });
     } catch (error) {
@@ -104,7 +104,8 @@ export function ResultCardStack({
         const awaitingApproval = card.actions.some((action) => action.key === "confirm");
         const optimistic = card.id.startsWith("optimistic:") || card.runId.startsWith("pending:");
         const opensDetails = !optimistic && Boolean(onOpen);
-        const continued = activeRunId === card.runId || Boolean(threadIds[card.runId] && threadIds[card.runId] === activeThreadId);
+	        const cardThreadId = card.provenance?.threadId ?? threadIds[card.runId];
+	        const continued = activeRunId === card.runId || Boolean(cardThreadId && cardThreadId === activeThreadId);
         const cardState: SpectraCardState = continued
           ? "continued"
           : card.status === "failed" || card.status === "cancelled"

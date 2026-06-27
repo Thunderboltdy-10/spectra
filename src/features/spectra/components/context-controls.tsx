@@ -81,22 +81,27 @@ export function ContextFocusControl({
           : mode === "thread"
             ? threadTitle
             : "All Spectra objects";
+  const visibleFocus = [
+    threadTitle ? { key: "thread", label: threadTitle, Icon: MessageSquare } : null,
+    workspace ? { key: "workspace", label: workspace.title, Icon: BookOpen } : null,
+    artifact ? { key: "artifact", label: artifact.title, Icon: FileText } : null,
+    selectedCount ? { key: "selection", label: `${selectedCount} selected`, Icon: Files } : null,
+  ].filter((item): item is { key: string; label: string; Icon: typeof Globe2 } => Boolean(item));
+  const focusSummary = mode === "thread" && visibleFocus.length > 1
+    ? `${threadTitle} + ${visibleFocus.length - 1} focus item${visibleFocus.length === 2 ? "" : "s"}`
+    : detail;
   return (
     <div ref={ref} className="relative">
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
         data-focus-state={mode}
-        className="group flex max-w-[230px] items-center gap-1.5 rounded-[7px] px-2 py-1 text-[11px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+	        className="group flex max-w-[360px] items-center gap-1.5 rounded-[7px] px-2 py-1 text-[11px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
         aria-label="Choose AI context"
         title="Choose what Spectra will use"
       >
         <ActiveIcon className="h-3.5 w-3.5 shrink-0 text-[var(--accent-cyan)]" />
-        <span className="min-w-0 truncate">
-          {mode === "thread" && artifact
-            ? `${detail} + ${artifact.title}`
-            : detail}
-        </span>
+	        <span className="min-w-0 truncate">{focusSummary}</span>
         <ChevronDown
           className={`h-3 w-3 shrink-0 transition-transform duration-200 ${open ? "rotate-180" : ""}`}
         />
@@ -110,9 +115,19 @@ export function ContextFocusControl({
             transition={{ duration: 0.16 }}
             className="absolute bottom-[calc(100%+11px)] left-0 z-[80] w-[280px] overflow-hidden rounded-[10px] border border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_96%,transparent)] p-1.5 shadow-[0_18px_48px_rgba(27,20,12,0.16)] backdrop-blur-xl"
           >
-            <div className="px-2 pb-1.5 pt-1 text-[10px] font-semibold uppercase tracking-[0.09em] text-[var(--text-tertiary)]">
-              Use as primary context
-            </div>
+	            <div className="px-2 pb-1.5 pt-1 text-[10px] font-semibold uppercase tracking-[0.09em] text-[var(--text-tertiary)]">
+	              Next message context
+	            </div>
+	            {visibleFocus.length > 0 ? (
+	              <div className="mb-1.5 flex flex-wrap gap-1 px-2">
+	                {visibleFocus.map(({ key, label, Icon }) => (
+	                  <span key={key} className="inline-flex max-w-full items-center gap-1 rounded-[6px] bg-[var(--bg-secondary)] px-1.5 py-1 text-[10px] text-[var(--text-secondary)]">
+	                    <Icon className="h-3 w-3 shrink-0" />
+	                    <span className="max-w-[190px] truncate">{label}</span>
+	                  </span>
+	                ))}
+	              </div>
+	            ) : null}
             {available.map((option) => {
               const meta = modeMeta[option];
               const Icon = meta.icon;
@@ -165,11 +180,15 @@ export function SelectionActionBar({
   onClear,
   onExit,
   onRun,
+  onTile,
+  onFocusSet,
 }: {
   count: number;
   onClear: () => void;
   onExit: () => void;
   onRun: (prompt: string) => void;
+  onTile?: () => void;
+  onFocusSet?: () => void;
 }) {
   return (
     <AnimatePresence>
@@ -217,6 +236,24 @@ export function SelectionActionBar({
               >
                 Make quiz
               </button>
+              {onTile ? (
+                <button
+                  type="button"
+                  onClick={onTile}
+                  className="rounded-[6px] px-2 py-1 text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                >
+                  Tile selected
+                </button>
+              ) : null}
+              {onFocusSet ? (
+                <button
+                  type="button"
+                  onClick={onFocusSet}
+                  className="rounded-[6px] px-2 py-1 text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                >
+                  Focus this set
+                </button>
+              ) : null}
               <button
                 type="button"
                 onClick={onClear}
@@ -271,18 +308,13 @@ export function GlobalSearch({
     workspaces: SpectraWorkspace[];
   }>({ artifacts: [], workspaces: [] });
   useEffect(() => {
+    if (!open) return;
     const onKey = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
-        event.preventDefault();
-        event.stopPropagation();
-        event.stopImmediatePropagation();
-        setOpen(true);
-      }
       if (event.key === "Escape") setOpen(false);
     };
-    window.addEventListener("keydown", onKey, { capture: true });
-    return () => window.removeEventListener("keydown", onKey, { capture: true });
-  }, []);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
   useEffect(() => {
     if (!open || query.trim().length < 2) {
       setResults({ artifacts: [], workspaces: [] });
@@ -303,11 +335,11 @@ export function GlobalSearch({
         type="button"
         onClick={() => setOpen(true)}
         className={trigger === "icon" ? "flex h-9 w-9 items-center justify-center rounded-[8px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" : "flex h-9 items-center gap-2 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"}
-        title="Search Spectra (⌘K)"
+	        title="Search Spectra"
         aria-label="Search artifacts and workspaces"
       >
         <Search className="h-4 w-4" />
-        {trigger === "button" ? <><span>Search</span><kbd className="ml-2 text-[10px] font-normal text-[var(--text-tertiary)]">⌘K</kbd></> : null}
+	        {trigger === "button" ? <span>Search</span> : null}
       </button>
       <AnimatePresence>
         {open ? (

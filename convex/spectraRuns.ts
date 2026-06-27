@@ -92,6 +92,12 @@ export const create = mutation({
       title: "Queued",
       summary: "Spectra is preparing this run.",
       actions: [],
+      provenance: {
+        threadId: args.threadId,
+        workspaceId: args.workspaceId,
+        artifactIds: args.artifactId ? [args.artifactId] : [],
+        focusMode: args.threadId ? "thread" : args.artifactId ? "artifact" : args.workspaceId ? "workspace" : "global",
+      },
       createdAt: now,
       updatedAt: now,
     });

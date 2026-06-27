@@ -96,17 +96,31 @@ function ArtifactResult({ artifact, workspaces, onOpen }: { artifact: SpectraArt
   const [choosing, setChoosing] = useState(false);
   const [busy, setBusy] = useState(false);
   return (
-    <div data-spectra-card="result" data-card-state={artifact.createdFrom?.runId ? "edited" : "normal"} className="mt-4 px-4 py-3" style={{ "--card-accent": "var(--card-pinned)" } as CSSProperties}>
+    <div
+      role={onOpen ? "button" : undefined}
+      tabIndex={onOpen ? 0 : undefined}
+      data-spectra-card="result"
+      data-card-state={artifact.createdFrom?.runId ? "edited" : "normal"}
+      data-interactive={onOpen ? "true" : undefined}
+      className="mt-4 px-4 py-3 outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--accent-cyan)_44%,transparent)]"
+      style={{ "--card-accent": "var(--card-pinned)" } as CSSProperties}
+      onClick={() => onOpen?.(artifact._id)}
+      onKeyDown={(event) => {
+        if (!onOpen || (event.key !== "Enter" && event.key !== " ")) return;
+        event.preventDefault();
+        onOpen(artifact._id);
+      }}
+    >
       <div className="flex items-start gap-3">
         <span className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-primary)] text-[#d88922]"><FileText className="h-4 w-4" /></span>
         <div className="min-w-0 flex-1">
           <div className="text-[12px] font-semibold text-[var(--text-primary)]">{artifact.title}</div>
           <div className="mt-0.5 text-[11px] text-[var(--text-secondary)]">{artifact.summary ?? artifact.blueprintKey.replaceAll("_", " ")}</div>
         </div>
-        <button type="button" onClick={() => onOpen?.(artifact._id)} className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]" aria-label="Open artifact" title="Open artifact"><ExternalLink className="h-3.5 w-3.5" /></button>
-        <button type="button" onClick={() => setChoosing((value) => !value)} className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]" aria-label="Add to workspace" title="Add to workspace"><FolderPlus className="h-3.5 w-3.5" /></button>
+        <button type="button" onClick={(event) => { event.stopPropagation(); onOpen?.(artifact._id); }} className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]" aria-label="Open artifact" title="Open artifact"><ExternalLink className="h-3.5 w-3.5" /></button>
+        <button type="button" onClick={(event) => { event.stopPropagation(); setChoosing((value) => !value); }} className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]" aria-label="Add to workspace" title="Add to workspace"><FolderPlus className="h-3.5 w-3.5" /></button>
       </div>
-      {choosing ? <div className="mt-3 flex flex-wrap gap-1.5 border-t border-[var(--border-subtle)] pt-3">
+      {choosing ? <div className="mt-3 flex flex-wrap gap-1.5 border-t border-[var(--border-subtle)] pt-3" onClick={(event) => event.stopPropagation()}>
         {workspaces.map((workspace) => <button key={workspace._id} type="button" disabled={busy} onClick={() => {
           setBusy(true);
           void postSpectra({ action: "addArtifactToWorkspace", artifactId: artifact._id, workspaceId: workspace._id })

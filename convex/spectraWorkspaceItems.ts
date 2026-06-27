@@ -189,6 +189,7 @@ export const hide = mutation({
 
     return {
       workspaceItemId: args.workspaceItemId,
+      workspaceId: item.workspaceId,
       sourceType: item.sourceType,
       sourceId: item.sourceId,
       artifactStillExists,

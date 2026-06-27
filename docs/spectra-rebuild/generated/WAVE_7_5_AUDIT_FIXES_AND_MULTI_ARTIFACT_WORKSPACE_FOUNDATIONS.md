@@ -346,12 +346,12 @@ Root fix direction:
 - [x] Right-panel duplication: run detail now opens the real shared thread when available instead of fabricating a local duplicate conversation.
 - [x] Thread naming: new run-created threads receive immediate short fallback titles; backend title cleanup caps long/generated titles.
 - [~] Thread creation timing/tabs: server already creates thread before run; UI still needs immediate workspace tab/card visibility audit.
-- [~] `/workspace` quick chat and `/chat` universal: right panel now uses shared `ThreadConversation`; remaining local session continuation paths should be removed or quarantined further.
-- [~] Remove temporary/persistent language: user-facing right-panel/chat copy changed; deeper legacy code/type cleanup remains.
+- [x] `/workspace` quick chat and `/chat` universal: active UI now uses durable threads; obsolete client-local Spectra session continuation state has been removed.
+- [x] Remove temporary/persistent language and legacy active UI paths: user-facing copy changed and active UI no longer imports `SpectraSessionProvider`/`useSpectraSession`.
 
 ### B. Formatting, Rendering, Output Quality
 
-- [~] Markdown/math everywhere: shared `RichText` exists; need compact surfaces and action summaries audit.
+- [~] Markdown/math everywhere: shared `RichText` exists in conversations and result summaries; secondary object-library/card snippets still need a compact-render audit.
 - [~] Prevent technical leakage: Spectra route errors now sanitize ids/schema/planner/Convex details; prompt/finalResponse guard still needs broader regression tests.
 - [x] Thinking traces: public live progress now uses structured trace steps and Spectra no longer streams provider reasoning to the UI.
 - [~] Streaming text animation: existing text deltas stream; need smoothness/autoscroll checks.
@@ -359,7 +359,7 @@ Root fix direction:
 ### C. Performance And Token Efficiency
 
 - [ ] Workspace switching and commands: audit and optimize broad refresh/query paths.
-- [ ] AI edits too slow: reduce context fetches for simple artifact edits.
+- [~] AI edits too slow: focused artifact runs now skip the broad artifact catalog unless the prompt/focus requires it; broader route/query profiling remains.
 
 ### D. Cards, States, Polish
 
@@ -372,20 +372,20 @@ Root fix direction:
 
 ### E. Focus And Context Model
 
-- [ ] Focus is deceptive: make continue-thread vs new-thread state explicit.
-- [ ] Multi-focus support: introduce visible chip-based focus model.
+- [x] Focus is deceptive: selection now wins as primary context even while a continued thread supplies history; context dropdown names additional selected/thread focus.
+- [~] Multi-focus support: visible chip-based focus exists and selected artifacts/thread history are sent together; `/chat` still has no artifact multi-select surface.
 
 ### F. Placement And Affected Objects
 
 - [~] Thread placement: server creates thread with `workspaceId` when workspace/artifact context sent; need mixed-artifact rule and UI surfacing.
-- [ ] Affected objects: add clickable artifact/workspace result cards at bottom of AI responses and navigation bridge.
+- [x] Affected objects: artifact/workspace result cards render under AI responses; artifact cards are now whole-card clickable and removal operations record workspace/artifact affected objects.
 
 ### G. Multi-Artifact Tiled Workspace
 
-- [ ] Multiple artifacts open together.
-- [~] Multi-select behavior with Ctrl/Cmd-click and localStorage restoration: workspace/artifacts selections now persist locally and artifact cards support Ctrl/Cmd toggle where wired.
-- [ ] "Keep together" isolated group rail. Recommended label after audit: "Focus this set".
-- [ ] Dragging/moving artifacts between workspaces and Inbox.
+- [x] Multiple artifacts open together.
+- [x] Multi-select behavior with Ctrl/Cmd-click and localStorage restoration: workspace/artifacts selections persist locally and Workspace Home now supports multi-select.
+- [x] "Keep together" isolated group rail. Implemented as "Focus this set".
+- [~] Dragging/moving artifacts between workspaces and Inbox: explicit move-to-workspace and move-to-Inbox actions are implemented; drag-and-drop movement remains open.
 
 ### H. K-Bar
 
@@ -395,7 +395,7 @@ Root fix direction:
 ### I. Workspace Home And Navigation
 
 - [~] Opening workspace from home: exists; skeleton/loading needs polish and duplicate tab prevention audit.
-- [ ] Selecting multiple artifacts from home.
+- [x] Selecting multiple artifacts from home.
 
 ### J. AI Mutations And Live Updates
 
@@ -403,15 +403,15 @@ Root fix direction:
 
 ### K. Implementation Quality
 
-- [ ] Shared thread lifecycle.
-- [ ] Shared thread renderer.
-- [ ] Shared markdown/math renderer.
-- [ ] Shared thinking/progress trace component.
-- [ ] Shared focus/context model.
-- [ ] Shared object card/state system.
-- [ ] Shared K-bar command registry.
-- [ ] Shared artifact panel/tile primitives.
-- [ ] Shared AI action result object cards.
+- [x] Shared thread lifecycle.
+- [x] Shared thread renderer.
+- [~] Shared markdown/math renderer: complete for conversations/result summaries; compact object snippets still need audit.
+- [x] Shared thinking/progress trace component.
+- [~] Shared focus/context model: shared mode/control exists; full chat-side multi-object selection remains open.
+- [~] Shared object card/state system: core state system exists; secondary library/card consolidation remains open.
+- [x] Shared K-bar command registry.
+- [x] Shared artifact panel/tile primitives.
+- [x] Shared AI action result object cards.
 
 ## Implementation Completed In This Pass
 
@@ -482,6 +482,81 @@ Final follow-up state:
 - New Wave 7.5 run/detail flows no longer depend on fabricated local run conversations. Workspace and Artifacts shells now open run details by active run id, and `RunDetailPanel` renders the real thread when `run.threadId` exists. The remaining local session API is retained as a legacy compatibility layer, not as the primary current-thread path.
 - The multi-artifact tiled workspace, focused local work set, multi-select persistence, K-bar Spectra registry, affected workspace cards, real-thread result-card continuation, context visibility, placement inference, and focused-context token reduction are implemented in this pass.
 - Browser/E2E interaction testing was not run because the repository validation requirements explicitly prioritized non-browser checks. The code-level checks below passed.
+
+## Deep Active-Stack Audit Addendum - 2026-06-27
+
+This addendum documents the deeper audit requested after the earlier Wave 7.5 work. Where this section conflicts with older checklist wording above, treat this section as the current source of truth. The older phase checklist is stale in several places: it still lists some tasks as open even though the implementation and final report later in this file show them as complete.
+
+Files and areas read during this audit:
+
+- Active routes and providers: `src/app/chat/page.tsx`, `src/app/workspace/page.tsx`, `src/app/artifacts/page.tsx`, `src/app/api/spectra/route.ts`, `src/app/api/spectra/run/route.ts`, `src/components/providers.tsx`.
+- Active chat/workspace/artifact shells and shared UI: `src/features/spectra/pages/chat-shell.tsx`, `src/features/spectra/pages/workspace-shell.tsx`, `src/features/spectra/pages/artifacts-shell.tsx`, `src/features/spectra/components/conversation-surface.tsx`, `src/features/spectra/components/run-detail-panel.tsx`, `src/features/spectra/components/result-card.tsx`, `src/features/spectra/components/artifact-studio.tsx`, `src/features/spectra/components/artifact-tile-surface.tsx`, `src/features/spectra/components/context-controls.tsx`, `src/features/spectra/components/command-bar.tsx`, `src/features/spectra/components/artifact-card.tsx`, `src/features/spectra/components/card-system.tsx`, `src/features/spectra/components/object-library.tsx`, `src/features/spectra/components/spectra-view-model.ts`, `src/features/spectra/components/workspace-tab-state.ts`.
+- Active AI and operation layers: `src/features/spectra/ai/use-spectra-run.ts`, `src/features/spectra/ai/stream-events.ts`, `src/features/spectra/ai/context-builder.ts`, `src/features/spectra/ai/openrouter-stream.ts`, `src/features/spectra/ai/model-config.ts`, `src/features/spectra/ai/tool-contract.ts`, `src/features/spectra/operations/schema.ts`, `src/features/spectra/operations/policy.ts`, `src/features/spectra/operations/validate-plan.ts`, and the Spectra blueprints.
+- Convex persistence layer: `convex/spectraThreads.ts`, `convex/spectraRuns.ts`, `convex/spectraArtifacts.ts`, `convex/spectraWorkspaceItems.ts`, `convex/spectraShared.ts`, `convex/spectraWorkspaces.ts`, `convex/spectraOperations.ts`, `convex/spectraArtifactLinks.ts`, and the Spectra schema region in `convex/schema.ts`.
+
+Confirmed as implemented:
+
+- `/api/spectra/run` creates a durable `spectraThread` before new runs, appends the user message with a deterministic `clientMessageId`, emits `thread_ready`, and persists a single assistant message at final/confirmation time.
+- `convex/spectraThreads.appendMessage` deduplicates user messages by `clientMessageId` and upserts assistant messages by run, which protects current run persistence from duplicate streamed completions.
+- `RunDetailPanel` renders `ThreadConversation` for runs with `threadId`, so the right panel uses the real thread instead of a fabricated local conversation.
+- Provider reasoning is no longer part of the client stream contract. The UI displays safe progress/status via `ProgressTrace` instead of raw provider reasoning.
+- `ConversationSurface` uses `RichText` for assistant and live messages, which gives `/chat`, right-panel threads, and shared conversation rendering the same markdown/math renderer.
+- `ArtifactStudioEditor` has baseline-based dirty tracking: saving resets the baseline, clean incoming artifact changes are adopted, and dirty incoming changes do not silently overwrite local edits.
+- Multi-artifact tiling is present through `ArtifactTileSurface`, `tileArtifactIds`, and the "Focus this set" workflow in workspace/artifacts shells.
+- Multi-selection persistence exists locally in workspace/artifacts shells.
+- The global command palette includes Spectra object/thread search, move/place actions, send to Inbox, tile selected, focus set, clear selection, start new thread, and Ask Spectra fallback. `GlobalSearch` no longer owns Cmd/Ctrl+K.
+- Shared card state coverage includes `active`, `completed`, `multi-selected`, `drag-preview`, and `drop-target`.
+- Context building is partially optimized. `buildBoundedContextPacket` only includes the broad catalog for broad/global prompts, but the API route still fetches broad artifact/workspace catalogs for validation and relevance.
+- Affected artifact and workspace cards render under assistant messages in `ConversationSurface`. `WorkspaceResult` is whole-card clickable.
+
+Open issues and gaps after this continuation pass:
+
+- `/chat` still has no direct multi-artifact selection surface, although workspace/artifacts can send selected artifacts with continued thread history.
+- Secondary object-library/card snippets still need a compact markdown/math rendering audit.
+- Live progress steps are not persisted as the exact same trace list shown during streaming. Persisted state comes from run/operation/card traces.
+- `ObjectLibrary` and some secondary local views still use ad hoc card layouts/state and have not been fully consolidated with the shared card system.
+- Drag-and-drop movement between workspaces and Inbox remains open. Explicit move-to-workspace and move-to-Inbox actions are implemented.
+- Browser/manual interaction testing has not been run in this audit pass.
+
+Validation status during the 2026-06-27 audit:
+
+- `node.exe node_modules/typescript/bin/tsc --noEmit` passed before the local-session cleanup edits.
+- `node.exe node_modules/eslint/bin/eslint.js . --max-warnings=0` passed before the local-session cleanup edits.
+- `node.exe node_modules/convex/bin/main.js codegen` failed with `401 MissingAccessToken`; Convex auth is required.
+- `node.exe node_modules/vitest/vitest.mjs run` failed at startup because Windows Node resolved a missing Windows rolldown optional dependency while `node_modules` contains Linux optional dependencies. This appears to be a runtime/dependency-platform mismatch, not a Spectra test failure.
+
+In-progress working-tree changes at this checkpoint:
+
+- `src/features/spectra/ai/use-spectra-run.ts` no longer accepts or sends `localConversation`.
+- `src/app/api/spectra/run/route.ts` no longer accepts `localConversation`, no longer prepares browser-local conversation context, and now builds model conversation only from persisted thread history excluding the current user prompt.
+- `src/features/spectra/pages/workspace-shell.tsx` has had `useSpectraSession`, `activeLocalThread`, `localConversation`, `appendLocalExchange`, local placeholders, and local active-run fallbacks removed.
+- `src/features/spectra/pages/artifacts-shell.tsx` has had the same local/session conversation path removed and now uses durable `composerThread` state for placeholders/context/active-run behavior.
+
+Immediate continuation steps from the audit checkpoint are complete except for browser/manual interaction testing.
+
+Continuation progress in this follow-up pass:
+
+- Removed active UI dependencies on `useSpectraSession`, removed `SpectraSessionProvider`, and deleted the obsolete client-local `src/context/spectra-session-context.tsx`.
+- Removed `localConversation` from the active `/api/spectra/run` request path and from `useSpectraRun`.
+- Added a `text_replace` stream event and client handling so a failed primary provider cannot leave partial public text appended before fallback output.
+- Made selected artifacts the natural primary focus before continued-thread mode in workspace/artifacts, while still sending `threadId` for conversation history.
+- Made the focus dropdown describe selected objects as additional thread focus.
+- Made affected artifact result cards whole-card clickable and keyboard accessible.
+- Returned `workspaceId` from `spectraWorkspaceItems.hide` and recorded workspace/artifact affected objects for placement removals.
+- Added Workspace Home multi-select wiring through `ObjectLibrary` and the existing selection action bar.
+- Added a visible artifact-editor remote-update conflict banner with "Keep local edits" and "Reload latest" actions.
+- Rendered result-card summaries through the shared `RichText` renderer in compact mode.
+- Added a narrow context path for focused artifact runs so the route skips the broad artifact catalog unless broad/global/selection/workspace context is needed.
+- Added move-to-workspace and move-to-Inbox API/UI actions for workspace object libraries. Drag-and-drop movement is still open.
+
+Validation after these changes:
+
+- WSL Node `<local-workspace> node_modules/typescript/bin/tsc --noEmit` passed.
+- WSL Node `<local-workspace> node_modules/vitest/vitest.mjs run src/features/spectra/__tests__/wave4-operation-engine.test.ts` passed.
+- WSL Node `<local-workspace> node_modules/eslint/bin/eslint.js . --max-warnings=0` passed.
+- WSL Node `<local-workspace> node_modules/vitest/vitest.mjs run` passed: 72 test files passed, 1 skipped; 382 tests passed, 3 skipped.
+- `PATH=<local-workspace> node node_modules/convex/bin/main.js codegen` passed.
+- `PATH=<local-workspace> node node_modules/next/dist/bin/next build` passed. Running the absolute node binary without putting its directory on `PATH` caused Turbopack to fail spawning a child `node` process; the PATH-correct command passed.
 
 ## Next Implementation Plan
 

@@ -30,7 +30,6 @@ type Body = {
   threadId?: string;
   runId?: string;
   attachments?: AttachmentInput[];
-  localConversation?: Array<{ role?: string; content?: string }>;
   focusMode?: EffectiveFocusMode;
   selectedArtifactIds?: string[];
   currentView?: string;
@@ -143,14 +142,6 @@ async function prepareAttachments(input: AttachmentInput[] | undefined): Promise
   return prepared;
 }
 
-function prepareLocalConversation(input: Body["localConversation"]) {
-  return (Array.isArray(input) ? input : []).slice(-30).flatMap((message) => {
-    if ((message.role !== "user" && message.role !== "assistant") || typeof message.content !== "string") return [];
-    const content = message.content.replace(/\u0000/g, "").trim().slice(0, 8_000);
-    return content ? [{ role: message.role as "user" | "assistant", content }] : [];
-  });
-}
-
 function systemPrompt(surface: Surface) {
   const common = `You are Spectra's controlled school-work planner. Return only the strict JSON plan.
 
@@ -192,8 +183,11 @@ function summarizeArtifact(artifact: Record<string, unknown>, includeContent = f
 
 async function buildContext(actorClerkId: string, body: Pick<Body, "workspaceId" | "artifactId" | "threadId" | "focusMode" | "selectedArtifactIds" | "currentView">, prompt = "") {
   const selectedArtifactIds = Array.isArray(body.selectedArtifactIds) ? [...new Set(body.selectedArtifactIds.filter((id): id is string => typeof id === "string" && id.length > 0))].slice(0, 12) : [];
+  const focusMode = body.focusMode ?? (body.threadId ? "thread" : selectedArtifactIds.length ? "selection" : body.artifactId ? "artifact" : body.workspaceId ? "workspace" : "global");
+  const broadContextRequest = /\b(all|everything|search|find|across|compare|related|workspace|library|catalog|inbox)\b/i.test(prompt);
+  const shouldLoadArtifactCatalog = focusMode === "global" || focusMode === "workspace" || focusMode === "selection" || broadContextRequest;
   const [artifactRows, workspaceRows, workspace, focusedArtifact, threadDetail, recentRuns] = await Promise.all([
-    query<unknown & object, unknown>("spectraArtifacts:list", { actorClerkId, placement: "all", limit: 36 }),
+    shouldLoadArtifactCatalog ? query<unknown & object, unknown>("spectraArtifacts:list", { actorClerkId, placement: "all", limit: 36 }) : Promise.resolve([]),
     query<unknown & object, unknown>("spectraWorkspaces:list", { actorClerkId, includeArchived: false, limit: 30 }),
     body.workspaceId ? query<unknown & object, unknown>("spectraWorkspaceItems:listForWorkspace", { actorClerkId, workspaceId: body.workspaceId }).catch(() => null) : Promise.resolve(null),
     body.artifactId ? query<unknown & object, unknown>("spectraArtifacts:get", { actorClerkId, artifactId: body.artifactId }).catch(() => null) : Promise.resolve(null),
@@ -219,7 +213,6 @@ async function buildContext(actorClerkId: string, body: Pick<Body, "workspaceId"
     ? rows((threadDetail as Record<string, unknown>).messages).slice(-24).map((message) => ({ role: message.role, content: typeof message.content === "string" ? message.content.slice(0, 8_000) : "" }))
     : [];
   const currentWorkspace = workspaceRecord ? workspaceRecord.workspace as Record<string, unknown> | undefined : undefined;
-  const focusMode = body.focusMode ?? (body.threadId ? "thread" : selectedArtifactIds.length ? "selection" : body.artifactId ? "artifact" : body.workspaceId ? "workspace" : "global");
   const contextPacket = buildBoundedContextPacket({
     prompt,
     focusMode,
@@ -276,7 +269,7 @@ function ownedReferences(context: Awaited<ReturnType<typeof buildContext>>): Own
   return { artifactIds, artifactBlueprints, workspaceIds, workspaceItems, threadIds: new Set(context.currentThreadId ? [context.currentThreadId] : []) };
 }
 
-async function callModel(surface: Surface, prompt: string, context: unknown, attachments: PreparedAttachment[], onPublicText?: (delta: string) => void, onReasoningText?: (delta: string) => void, signal?: AbortSignal) {
+async function callModel(surface: Surface, prompt: string, context: unknown, attachments: PreparedAttachment[], onPublicText?: (content: string, mode?: "delta" | "replace") => void, onReasoningText?: (delta: string) => void, signal?: AbortSignal) {
   const apiKey = process.env.OPENROUTER_API_KEY?.trim();
   if (!apiKey) throw new Error("OpenRouter is not configured for Spectra runs.");
   const textAttachments = attachments.filter((attachment) => attachment.extractedText).map((attachment) => `\n\nAttachment: ${attachment.name}\n${attachment.extractedText}`).join("");
@@ -317,7 +310,8 @@ async function callModel(surface: Surface, prompt: string, context: unknown, att
   console.info("[spectra.openrouter.request]", { model: baseBody.model, provider: primaryRouting, mode: "native-primary" });
   let response = await request(primaryRouting, false);
   let emittedPublicText = "";
-  const emitPublic = (delta: string) => { emittedPublicText += delta; onPublicText?.(delta); };
+  const emitPublic = (delta: string) => { emittedPublicText += delta; onPublicText?.(delta, "delta"); };
+  const replacePublic = (content: string) => { emittedPublicText = content; onPublicText?.(content, "replace"); };
   let result: Awaited<ReturnType<typeof readOpenRouterResponse>> | undefined;
   let plan: SpectraPlan | undefined;
   let primaryFailure: unknown;
@@ -335,7 +329,11 @@ async function callModel(surface: Surface, prompt: string, context: unknown, att
     }
   }
   if (primaryFailure) {
-    if (!allowSpectraProviderFallbacks()) throw primaryFailure;
+    if (!allowSpectraProviderFallbacks()) {
+      if (emittedPublicText) replacePublic("");
+      throw primaryFailure;
+    }
+    if (emittedPublicText) replacePublic("");
     const fallbackRouting = getSpectraProviderRouting("fallback");
     console.warn("[spectra.openrouter.fallback]", {
       model: baseBody.model,
@@ -477,6 +475,8 @@ async function executeOperation(actorClerkId: string, runId: string, operationId
   } else if (operation.type === "workspaceItem.hide") {
     output = await mutate("spectraWorkspaceItems:hide", { actorClerkId, workspaceItemId: operation.input.workspaceItemId }) as Record<string, unknown>;
     affected = [{ type: "workspaceItem", id: operation.input.workspaceItemId }];
+    if (typeof output.workspaceId === "string") affected.push({ type: "workspace", id: output.workspaceId });
+    if (typeof output.sourceId === "string" && output.sourceType === "artifact") affected.push({ type: "artifact", id: output.sourceId });
   } else if (operation.type === "workspace.create") {
     const workspaceId = await mutate("spectraWorkspaces:create", { actorClerkId, title: operation.input.title, description: operation.input.description ?? undefined, icon: operation.input.icon ?? undefined, color: operation.input.color ?? undefined }) as string;
     output = { workspaceId };
@@ -574,7 +574,7 @@ function ndjson(task: (emit: (event: unknown) => void) => Promise<void>) {
   }), { headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-cache, no-transform", "X-Content-Type-Options": "nosniff" } });
 }
 
-async function runAttempt(params: { actorClerkId: string; runId: string; resultCardId: string; prompt: string; surface: Surface; threadId?: string; workspaceId?: string; artifactId?: string; focusMode?: EffectiveFocusMode; selectedArtifactIds?: string[]; currentView?: string; attachments?: PreparedAttachment[]; localConversation?: Array<{ role: "user" | "assistant"; content: string }>; signal?: AbortSignal }, emit: (event: unknown) => void) {
+async function runAttempt(params: { actorClerkId: string; runId: string; resultCardId: string; prompt: string; surface: Surface; threadId?: string; workspaceId?: string; artifactId?: string; focusMode?: EffectiveFocusMode; selectedArtifactIds?: string[]; currentView?: string; attachments?: PreparedAttachment[]; signal?: AbortSignal }, emit: (event: unknown) => void) {
   let card = await latestCard(params.actorClerkId, params.runId);
   let commitStarted = false;
   emit({ type: "run_created", runId: params.runId, card: streamCard(card) });
@@ -586,7 +586,7 @@ async function runAttempt(params: { actorClerkId: string; runId: string; resultC
     const persistedConversation = context.conversation.at(-1)?.role === "user" && context.conversation.at(-1)?.content === params.prompt
       ? context.conversation.slice(0, -1)
       : context.conversation;
-    const conversation = [...persistedConversation, ...(params.localConversation ?? [])].slice(-30);
+    const conversation = persistedConversation.slice(-30);
     await mutate("spectraRuns:setContextSnapshot", {
       actorClerkId: params.actorClerkId,
       runId: params.runId,
@@ -618,7 +618,7 @@ async function runAttempt(params: { actorClerkId: string; runId: string; resultC
       params.prompt,
       { ...context.packet, conversation },
       params.attachments ?? [],
-      (content) => emit({ type: "text_delta", runId: params.runId, content }),
+      (content, mode) => emit({ type: mode === "replace" ? "text_replace" : "text_delta", runId: params.runId, content }),
       undefined,
       params.signal,
     );
@@ -729,7 +729,6 @@ export async function POST(request: NextRequest) {
     if (!surface || !["chat", "workspace", "artifacts", "artifact"].includes(surface)) return new Response("Invalid surface", { status: 400 });
 	    const sourceSurface = surface === "artifacts" ? "artifact" : surface;
 	    const attachments = await prepareAttachments(body.attachments);
-	    const localConversation = prepareLocalConversation(body.localConversation);
 	    const placementWorkspaceId = await inferWorkspaceForRun(actor.clerkId, body);
 	    let threadId = body.threadId?.trim() || undefined;
 	    if (!threadId) {
@@ -752,7 +751,6 @@ export async function POST(request: NextRequest) {
       selectedArtifactIds: body.selectedArtifactIds,
       currentView: body.currentView,
       attachments,
-      localConversation,
       signal: request.signal,
     }, emit));
   }

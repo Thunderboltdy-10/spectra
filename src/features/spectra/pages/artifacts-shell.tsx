@@ -44,7 +44,6 @@ import { ContextFocusControl, GlobalSearch, SelectionActionBar, type ComposerFoc
 import { FloatingMenu } from "../components/floating-menu";
 import { ResultCardStack } from "../components/result-card";
 import { RunDetailPanel } from "../components/run-detail-panel";
-import { useSpectraSession } from "@/context/spectra-session-context";
 import {
   artifactPlacements,
   artifactToCard,
@@ -170,7 +169,6 @@ function ArtifactsRail({
 }
 
 export function ArtifactsShell() {
-  const spectraSession = useSpectraSession();
   const searchParams = useSearchParams();
   const requestedArtifactId = searchParams.get("artifactId");
   const [allArtifacts, setAllArtifacts] = useState<SpectraArtifact[]>([]);
@@ -214,9 +212,8 @@ export function ArtifactsShell() {
     [allArtifacts, tileArtifactIds],
   );
   const selectedWorkspace = workspaces.find((item) => item._id === selectedWorkspaceId) ?? null;
-  const activeLocalThread = !composerThread ? spectraSession.localThreads.find((thread) => thread.runId === spectraSession.activeLocalThreadRunId) ?? null : null;
-  const naturalFocusMode: ComposerFocusMode = composerThread || activeLocalThread ? "thread" : selectedContextIds.size ? "selection" : studio.activeArtifact ? "artifact" : selectedWorkspace ? "workspace" : "global";
-  const effectiveFocusMode = focusModeOverride === "selection" && selectedContextIds.size === 0 ? naturalFocusMode : focusModeOverride === "artifact" && !studio.activeArtifact ? naturalFocusMode : focusModeOverride === "workspace" && !selectedWorkspace ? naturalFocusMode : focusModeOverride === "thread" && !composerThread && !activeLocalThread ? naturalFocusMode : focusModeOverride ?? naturalFocusMode;
+  const naturalFocusMode: ComposerFocusMode = selectedContextIds.size ? "selection" : composerThread ? "thread" : studio.activeArtifact ? "artifact" : selectedWorkspace ? "workspace" : "global";
+  const effectiveFocusMode = focusModeOverride === "selection" && selectedContextIds.size === 0 ? naturalFocusMode : focusModeOverride === "artifact" && !studio.activeArtifact ? naturalFocusMode : focusModeOverride === "workspace" && !selectedWorkspace ? naturalFocusMode : focusModeOverride === "thread" && !composerThread ? naturalFocusMode : focusModeOverride ?? naturalFocusMode;
 
   function restoreLatestSelection() {
     try {
@@ -362,7 +359,6 @@ export function ArtifactsShell() {
     workspaceId: selectedWorkspaceId || undefined,
     artifactId: studio.activeArtifact?._id,
     threadId: composerThread?.id,
-    localConversation: activeLocalThread?.messages.map((message) => ({ role: message.role, content: message.content })),
     focusMode: effectiveFocusMode,
     selectedArtifactIds: [...selectedContextIds],
     currentView: mode,
@@ -377,9 +373,6 @@ export function ArtifactsShell() {
       const artifact = refreshed.find((item) => item._id === artifactId);
       if (artifact) studio.openSplit(artifact);
     },
-    onFinal: ({ runId, prompt, summary }) => {
-      if (activeLocalThread) spectraSession.appendLocalExchange(activeLocalThread.runId, prompt, summary, runId);
-	    },
 	  });
 
 	  useEffect(() => {
@@ -867,9 +860,9 @@ export function ArtifactsShell() {
 	        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 bg-[linear-gradient(to_top,var(--bg-primary)_72%,transparent)] px-8 pb-5 pt-12" style={activeRunPanelId ? { right: "var(--spectra-run-panel-width, 680px)" } : undefined}>
           <div className="pointer-events-auto mx-auto max-w-[880px]">
 	            {multiSelectMode ? <SelectionActionBar count={selectedContextIds.size} onClear={clearSelection} onExit={() => { setMultiSelectMode(false); if (selectedContextIds.size === 0) setFocusModeOverride(null); }} onRun={(prompt) => void runEngine.run(prompt)} onTile={openSelectedArtifactsInTiles} onFocusSet={() => { openSelectedArtifactsInTiles(); setWorkSetIsolated(true); }} /> : null}
-	            <ResultCardStack cards={runEngine.cards} className="mb-1.5 ml-[52px]" activeThreadId={composerThread?.id} activeRunId={composerThread?.runId ?? activeLocalThread?.runId} onContinue={(thread) => setComposerThread(thread ? { id: thread.threadId, title: thread.title, runId: thread.runId } : null)} onOpen={(card) => void openRunPanel(card.runId, card.summary ?? card.title)} onAction={(card, action, targetId) => { if (action === "hide" && activeRunPanelId === card.runId) setActiveRunPanelId(null); void runEngine.onCardAction(card, action, targetId); }} />
+	            <ResultCardStack cards={runEngine.cards} className="mb-1.5 ml-[52px]" activeThreadId={composerThread?.id} activeRunId={composerThread?.runId} onContinue={(thread) => setComposerThread(thread ? { id: thread.threadId, title: thread.title, runId: thread.runId } : null)} onOpen={(card) => void openRunPanel(card.runId, card.summary ?? card.title)} onAction={(card, action, targetId) => { if (action === "hide" && activeRunPanelId === card.runId) setActiveRunPanelId(null); void runEngine.onCardAction(card, action, targetId); }} />
             <CommandBar
-              placeholder={composerThread ? `Continue ${composerThread.title}...` : activeLocalThread ? `Continue ${activeLocalThread.title}...` : studio.activeArtifact ? `Act on ${studio.activeArtifact.title}...` : "Ask across all objects..."}
+              placeholder={composerThread ? `Continue ${composerThread.title}...` : studio.activeArtifact ? `Act on ${studio.activeArtifact.title}...` : "Ask across all objects..."}
               onSubmit={(prompt, attachments) => {
                 if (studio.activeArtifact && studio.dirtyIds.has(studio.activeArtifact._id)) {
                   toast.message("Save this artifact before asking Spectra to update it.");
@@ -881,10 +874,10 @@ export function ArtifactsShell() {
               busy={runEngine.submitting}
               allowConcurrent
               onStop={runEngine.stop}
-              context={<ContextFocusControl mode={effectiveFocusMode} onModeChange={setFocusModeOverride} workspace={selectedWorkspace} artifact={studio.activeArtifact} selectedCount={selectedContextIds.size} threadTitle={composerThread?.title ?? activeLocalThread?.title} />}
+              context={<ContextFocusControl mode={effectiveFocusMode} onModeChange={setFocusModeOverride} workspace={selectedWorkspace} artifact={studio.activeArtifact} selectedCount={selectedContextIds.size} threadTitle={composerThread?.title} />}
               menu={(
                 <div>
-                  <button type="button" className={menuItemClass()} onClick={() => { setComposerThread(null); spectraSession.clearActivePanel(); }}><MessageSquare className="h-4 w-4" />New chat</button>
+                  <button type="button" className={menuItemClass()} onClick={() => setComposerThread(null)}><MessageSquare className="h-4 w-4" />New chat</button>
                   <div className="my-1 h-px bg-[var(--border-subtle)]" />
                   {filters.filter((filter) => filter.key !== "all" && filter.key !== "thread_reference").map((filter) => {
                     const Icon = filter.icon;

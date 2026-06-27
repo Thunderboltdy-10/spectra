@@ -140,7 +140,7 @@ export function ContextFocusControl({
                       ? artifact?.title
                       : option === "selection"
                         ? `${selectedCount} explicitly selected artifacts`
-                        : `${threadTitle}${artifact ? ` · ${artifact.title} also in focus` : ""}`;
+                        : `${threadTitle}${selectedCount ? ` · ${selectedCount} selected also in focus` : artifact ? ` · ${artifact.title} also in focus` : ""}`;
               return (
                 <button
                   key={option}

@@ -91,7 +91,6 @@ export function useSpectraRun({
   onDataChanged,
   onOpenArtifact,
   onThreadReady,
-  localConversation,
   onFinal,
   focusMode,
   selectedArtifactIds = [],
@@ -105,7 +104,6 @@ export function useSpectraRun({
   onDataChanged?: () => Promise<unknown> | unknown;
   onOpenArtifact?: (artifactId: string) => Promise<unknown> | unknown;
   onThreadReady?: (threadId: string) => Promise<unknown> | unknown;
-  localConversation?: Array<{ role: "user" | "assistant"; content: string }>;
   onFinal?: (result: { runId: string; summary: string; prompt: string }) => Promise<unknown> | unknown;
   focusMode?: "global" | "workspace" | "artifact" | "selection" | "thread";
   selectedArtifactIds?: string[];
@@ -179,6 +177,7 @@ export function useSpectraRun({
           void onThreadReady?.(event.threadId);
         }
         if (event.type === "text_delta") setLiveExchange((current) => current && (!liveExchangeId || current.id === liveExchangeId) ? { ...current, runId: event.runId, content: current.content + event.content, status: "streaming" } : current);
+        if (event.type === "text_replace") setLiveExchange((current) => current && (!liveExchangeId || current.id === liveExchangeId) ? { ...current, runId: event.runId, content: event.content, status: "streaming" } : current);
         if (event.type === "run_created" || event.type === "result_card" || event.type === "confirmation_required" || event.type === "final") upsert(event.card);
         if (event.type === "error") {
           if (event.card) upsert(event.card);
@@ -225,7 +224,7 @@ export function useSpectraRun({
     setLiveExchange({ id: exchangeId, prompt: clean, content: "", steps: [{ id: `${exchangeId}:start`, title: "Starting", summary: "Creating the thread", status: "running", createdAt: Date.now() }], status: "starting", startedAt: Date.now() });
     upsert({ id: optimisticCardId, runId: `pending:${exchangeId}`, status: "running", title: "Thinking", summary: clean, variant: "status", actions: [], updatedAt: Date.now() });
     try {
-      await consume({ action: "run", prompt: clean, surface, workspaceId, artifactId, threadId: durableThreadId.current, focusMode, selectedArtifactIds, currentView, attachments, localConversation }, optimisticCardId, exchangeId);
+      await consume({ action: "run", prompt: clean, surface, workspaceId, artifactId, threadId: durableThreadId.current, focusMode, selectedArtifactIds, currentView, attachments }, optimisticCardId, exchangeId);
     } catch (error) {
       setCards((current) => current.filter((card) => card.id !== optimisticCardId));
       if (!(error instanceof DOMException && error.name === "AbortError")) {
@@ -235,7 +234,7 @@ export function useSpectraRun({
       setActiveRequestCount((count) => Math.max(0, count - 1));
       setLiveExchange((current) => current?.id === exchangeId ? null : current);
     }
-  }, [artifactId, consume, currentView, focusMode, localConversation, selectedArtifactIds, surface, upsert, workspaceId]);
+  }, [artifactId, consume, currentView, focusMode, selectedArtifactIds, surface, upsert, workspaceId]);
 
   const keepAsThread = useCallback(async (runId: string, placeInWorkspace = false) => {
     const result = await postSpectra<{ threadId: string }>({ action: "keepRunAsThread", runId, placeInWorkspace, createReference: true });

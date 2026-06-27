@@ -8,13 +8,11 @@ import { useSpectraRun } from "../ai/use-spectra-run";
 import { ConversationSurface } from "../components/conversation-surface";
 import { CommandBar } from "../components/command-bar";
 import { ContextFocusControl, type ComposerFocusMode } from "../components/context-controls";
-import { useSpectraSession } from "@/context/spectra-session-context";
 import { ArtifactStudio, useArtifactStudioState } from "../components/artifact-studio";
 import type { ArtifactPayload } from "../components/artifact-blueprint-sheet";
 import { getSpectraOverview, getSpectraResultCards, getSpectraThread, getSpectraThreads, postSpectra, type SpectraArtifact, type SpectraResultCard, type SpectraThread, type SpectraThreadDetail, type SpectraWorkspace } from "../data/api";
 
 export function ChatShell() {
-  const spectraSession = useSpectraSession();
   const router = useRouter();
   const searchParams = useSearchParams();
   const requestedThreadId = searchParams.get("threadId");
@@ -41,8 +39,7 @@ export function ChatShell() {
   useEffect(() => {
     const hour = new Date().getHours();
     setWelcome(hour < 5 ? "Still thinking? Let’s make it lighter." : hour < 12 ? "Good morning. Let’s get one thing moving." : hour < 18 ? "Good afternoon. What can we make clearer?" : "Good evening. Let’s finish something worthwhile.");
-    spectraSession.clearActivePanel();
-  }, [spectraSession]);
+  }, []);
 
   const refresh = useCallback(async (nextThreadId?: string | null) => {
     const [threadRows, overview, selected] = await Promise.all([
@@ -84,12 +81,11 @@ export function ChatShell() {
     if (!artifact) { toast.error("That artifact is no longer available."); return; }
     setHistoryOpen(false);
     if (artifact.blueprintKey === "thread_reference") {
-      spectraSession.clearActivePanel();
       setThreadPanelArtifactId(artifact._id);
       return;
     }
     studio.openSplit(artifact);
-  }, [artifacts, spectraSession, studio]);
+  }, [artifacts, studio]);
 
   const updateArtifact = useCallback(async (artifactId: string, payload: ArtifactPayload) => {
     await postSpectra({ action: "updateArtifact", artifactId, title: payload.title, summary: payload.summary, content: payload.content, tags: payload.tags, source: "manual" });

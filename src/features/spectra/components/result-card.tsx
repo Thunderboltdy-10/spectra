@@ -4,7 +4,7 @@ import { AlertCircle, Check, CheckCircle2, ChevronDown, Clock3, ExternalLink, Fo
 import type { LucideIcon } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
-import { useSpectraSession } from "@/context/spectra-session-context";
+import { RichText } from "@/components/chat/rich-text";
 import { cn } from "@/lib/utils";
 import { IconAction, type SpectraCardState } from "./card-system";
 import type { ResultCardStreamView } from "../ai/stream-events";
@@ -68,7 +68,6 @@ export function ResultCardStack({
   activeRunId?: string | null;
   onContinue?: (thread: { threadId: string; title: string; runId: string } | null) => void;
 }) {
-  const session = useSpectraSession();
   const [busyRunId, setBusyRunId] = useState<string | null>(null);
   const [threadIds, setThreadIds] = useState<Record<string, string>>({});
   const visibleCards = cards?.slice(0, 12) ?? [];
@@ -87,7 +86,6 @@ export function ResultCardStack({
 	        runId: card.runId,
 	        placeInWorkspace: false,
 	        createReference: false,
-	        localMessages: session.localThreads.find((thread) => thread.runId === card.runId)?.messages ?? [],
 	      })).threadId;
       setThreadIds((current) => ({ ...current, [card.runId]: threadId }));
       onContinue?.({ threadId, title: card.summary || card.title || "Conversation", runId: card.runId });
@@ -130,12 +128,12 @@ export function ResultCardStack({
             <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[color-mix(in_oklab,currentColor_10%,var(--bg-elevated))]" style={{ color: tone(card) }}>
               {card.status === "running" && !awaitingApproval ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : awaitingApproval ? <ShieldCheck className="h-3.5 w-3.5" /> : card.status === "completed" ? <CheckCircle2 className="h-3.5 w-3.5" /> : card.status === "failed" || card.status === "cancelled" ? <AlertCircle className="h-3.5 w-3.5" /> : <Clock3 className="h-3.5 w-3.5" />}
             </span>
-            <span className="min-w-0 flex-1">
-              <span className="flex items-baseline gap-2">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-baseline gap-2">
                 <span className="shrink-0 font-semibold text-[var(--text-primary)]">{card.title}</span>
-                {card.summary ? <span className="truncate text-[var(--text-secondary)]">{card.summary}</span> : null}
-              </span>
-            </span>
+                {card.summary ? <RichText content={card.summary} className="line-clamp-1 min-w-0 flex-1 overflow-hidden text-[var(--text-secondary)] [&_*]:inline [&_a_svg]:hidden [&_code]:px-1 [&_p]:m-0 [&_p]:leading-normal" /> : null}
+              </div>
+            </div>
             <div className="flex items-center">{card.actions.map((action) => {
               const ActionIcon = actionIcon(action.key);
               return <IconAction

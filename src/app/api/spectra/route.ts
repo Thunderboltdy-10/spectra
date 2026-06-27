@@ -347,6 +347,26 @@ export async function POST(request: NextRequest) {
       return ok(result);
     }
 
+    if (action === "moveArtifactToWorkspace") {
+      const artifactId = requireString(body.artifactId, "artifactId");
+      const workspaceId = requireString(body.workspaceId, "workspaceId");
+      const artifact = await spectraQuery("spectraArtifacts:get", { actorClerkId: actor.clerkId, artifactId }) as { placements?: Array<{ workspaceId?: string; workspaceItemId?: string }> };
+      const result = await spectraMutation("spectraWorkspaceItems:addArtifact", { actorClerkId: actor.clerkId, workspaceId, artifactId });
+      await Promise.all((artifact.placements ?? [])
+        .filter((placement) => placement.workspaceId !== workspaceId && typeof placement.workspaceItemId === "string")
+        .map((placement) => spectraMutation("spectraWorkspaceItems:hide", { actorClerkId: actor.clerkId, workspaceItemId: placement.workspaceItemId! })));
+      return ok(result);
+    }
+
+    if (action === "moveArtifactToInbox") {
+      const artifactId = requireString(body.artifactId, "artifactId");
+      const artifact = await spectraQuery("spectraArtifacts:get", { actorClerkId: actor.clerkId, artifactId }) as { placements?: Array<{ workspaceItemId?: string }> };
+      const hidden = await Promise.all((artifact.placements ?? [])
+        .filter((placement) => typeof placement.workspaceItemId === "string")
+        .map((placement) => spectraMutation("spectraWorkspaceItems:hide", { actorClerkId: actor.clerkId, workspaceItemId: placement.workspaceItemId! })));
+      return ok({ artifactId, hidden });
+    }
+
     if (action === "hideWorkspaceItem") {
       const result = await spectraMutation("spectraWorkspaceItems:hide", {
         actorClerkId: actor.clerkId,

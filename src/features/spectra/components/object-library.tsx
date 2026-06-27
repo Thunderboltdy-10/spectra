@@ -69,6 +69,8 @@ export function ObjectLibrary({
   onRemove,
   onDelete,
   onAddToWorkspace,
+  onMoveToWorkspace,
+  onMoveToInbox,
   onCreateArtifact,
   mode: controlledMode,
   onModeChange,
@@ -93,6 +95,8 @@ export function ObjectLibrary({
   onRemove?: (entry: ObjectLibraryEntry) => void;
   onDelete?: (entry: ObjectLibraryEntry) => void;
   onAddToWorkspace?: (entry: ObjectLibraryEntry, workspaceId: string) => void;
+  onMoveToWorkspace?: (entry: ObjectLibraryEntry, workspaceId: string) => void;
+  onMoveToInbox?: (entry: ObjectLibraryEntry) => void;
   onCreateArtifact?: (
     blueprintKey: SpectraBlueprintKey,
     workspaceId?: string,
@@ -281,6 +285,8 @@ export function ObjectLibrary({
   function placementAction(entry: ObjectLibraryEntry) {
     if (!onAddToWorkspace || workspaces.length === 0) return actions(entry);
     const open = placementMenuId === entry.artifact._id;
+    const placements = artifactPlacements(entry.artifact);
+    const hasVisiblePlacement = placements.length > 0;
     return (
       <div className="flex items-center gap-2">
         {actions(entry)}
@@ -298,10 +304,23 @@ export function ObjectLibrary({
             anchor={placementAnchor}
             onClose={() => setPlacementMenuId(null)}
           >
+            {onMoveToInbox && hasVisiblePlacement ? (
+              <button
+                type="button"
+                className="mb-1 flex w-full items-center gap-2 rounded-[7px] px-2.5 py-2 text-left text-[13px] text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
+                onClick={() => {
+                  setPlacementMenuId(null);
+                  onMoveToInbox(entry);
+                }}
+              >
+                <span className="min-w-0 flex-1 truncate">Move to Inbox</span>
+              </button>
+            ) : null}
             {workspaces.map((workspace) => {
-              const alreadyPlaced = artifactPlacements(entry.artifact).some(
+              const alreadyPlaced = placements.some(
                 (placement) => placement.workspaceId === workspace._id,
               );
+              const moveAvailable = Boolean(onMoveToWorkspace && hasVisiblePlacement && !alreadyPlaced);
               return (
                 <button
                   key={workspace._id}
@@ -310,11 +329,12 @@ export function ObjectLibrary({
                   disabled={alreadyPlaced}
                   onClick={() => {
                     setPlacementMenuId(null);
-                    onAddToWorkspace(entry, workspace._id);
+                    if (moveAvailable) onMoveToWorkspace?.(entry, workspace._id);
+                    else onAddToWorkspace(entry, workspace._id);
                   }}
                 >
                   <span className="min-w-0 flex-1 truncate">
-                    {workspace.title}
+                    {moveAvailable ? `Move to ${workspace.title}` : workspace.title}
                   </span>
                   {alreadyPlaced ? (
                     <CheckCircle2 className="h-4 w-4 text-[var(--success)]" />

@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  AlertCircle,
   Archive,
   AlignCenter,
   AlignLeft,
@@ -715,6 +716,8 @@ function ArtifactStudioEditor({
   const [versions, setVersions] = useState<SpectraArtifactVersion[]>([]);
   const [historyBusy, setHistoryBusy] = useState<string | null>(null);
   const [previewVersion, setPreviewVersion] = useState<SpectraArtifactVersion | null>(null);
+  const [remoteConflict, setRemoteConflict] = useState<ReturnType<typeof artifactEditorSnapshot> | null>(null);
+  const [dismissedRemoteKey, setDismissedRemoteKey] = useState<string | null>(null);
   const meta = blueprintMeta[artifact.blueprintKey];
   const Icon = meta.icon;
   const dirtyRef = useRef(dirty);
@@ -734,8 +737,14 @@ function ArtifactStudioEditor({
 
   useEffect(() => {
     const switchedArtifacts = activeArtifactIdRef.current !== artifact._id;
-    if (!switchedArtifacts && dirtyRef.current) return;
+    if (!switchedArtifacts && dirtyRef.current) {
+      const incomingKey = snapshotKey(incomingSnapshot);
+      if (incomingKey !== snapshotKey(baseline) && incomingKey !== dismissedRemoteKey) setRemoteConflict(incomingSnapshot);
+      return;
+    }
     activeArtifactIdRef.current = artifact._id;
+    setRemoteConflict(null);
+    setDismissedRemoteKey(null);
     setTitle(incomingSnapshot.title);
     setSummary(incomingSnapshot.summary);
     setTagDraft(incomingSnapshot.tagDraft);
@@ -745,7 +754,7 @@ function ArtifactStudioEditor({
       setDirty(false);
       setCloseDecisionOpen(false);
     }
-  }, [artifact._id, artifact.updatedAt, incomingSnapshot]);
+  }, [artifact._id, artifact.updatedAt, baseline, dismissedRemoteKey, incomingSnapshot]);
 
   useEffect(() => {
     function requestClose(event: Event) {
@@ -791,6 +800,25 @@ function ArtifactStudioEditor({
       content,
     });
     setDirty(false);
+    setRemoteConflict(null);
+    setDismissedRemoteKey(null);
+  }
+
+  function keepLocalEdits() {
+    if (remoteConflict) setDismissedRemoteKey(snapshotKey(remoteConflict));
+    setRemoteConflict(null);
+  }
+
+  function reloadRemoteVersion() {
+    if (!remoteConflict) return;
+    setTitle(remoteConflict.title);
+    setSummary(remoteConflict.summary);
+    setTagDraft(remoteConflict.tagDraft);
+    setContent(remoteConflict.content);
+    setBaseline(remoteConflict);
+    setDirty(false);
+    setRemoteConflict(null);
+    setDismissedRemoteKey(null);
   }
 
   const showDetails = mode === "tab";
@@ -857,6 +885,16 @@ function ArtifactStudioEditor({
           </div>
         </div>
       </header>
+      {remoteConflict ? (
+        <div className="shrink-0 border-b border-[color-mix(in_oklab,#d88922_28%,var(--border-default))] bg-[color-mix(in_oklab,#d88922_7%,var(--bg-primary))] px-5 py-2.5">
+          <div className="flex flex-wrap items-center gap-2 text-[12px] text-[var(--text-secondary)]">
+            <AlertCircle className="h-4 w-4 shrink-0 text-[#d88922]" />
+            <span className="min-w-0 flex-1">A newer saved version arrived while you were editing. Your local changes are still untouched.</span>
+            <button type="button" onClick={keepLocalEdits} className="rounded-[7px] px-2.5 py-1 text-[11px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)]">Keep local edits</button>
+            <button type="button" onClick={reloadRemoteVersion} className="rounded-[7px] bg-[var(--text-primary)] px-2.5 py-1 text-[11px] font-medium text-[var(--bg-primary)]">Reload latest</button>
+          </div>
+        </div>
+      ) : null}
       <main className={mainClass}>
         <div className={editorLayoutClass}>
           <section className="min-w-0">

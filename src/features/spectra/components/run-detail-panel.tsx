@@ -7,7 +7,6 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { ConversationSurface, ThreadConversation } from "./conversation-surface";
 import { StudioSplitShell } from "./artifact-studio";
-import { useSpectraSession } from "@/context/spectra-session-context";
 import { getSpectraRunDetail, postSpectra, type SpectraRunDetail, type SpectraThreadDetail } from "../data/api";
 import type { ResultCardStreamView } from "../ai/stream-events";
 import { IconAction } from "./card-system";
@@ -46,7 +45,6 @@ export function RunDetailPanel({ runId, card, onClose, onAction, onUseThread, on
   onSaved?: (threadId: string) => void;
 }) {
   const router = useRouter();
-  const spectraSession = useSpectraSession();
   const [detail, setDetail] = useState<SpectraRunDetail | null>(null);
   const [busy, setBusy] = useState<"keep" | "continue" | null>(null);
   const [width, setWidth] = useState(680);
@@ -55,7 +53,6 @@ export function RunDetailPanel({ runId, card, onClose, onAction, onUseThread, on
     void getSpectraRunDetail(runId).then((value) => { if (active) setDetail(value); }).catch((error) => toast.error(error instanceof Error ? error.message : "Could not load run."));
     return () => { active = false; };
   }, [runId, card?.updatedAt]);
-  const localArtifact = spectraSession.localThreads.find((thread) => thread.runId === runId);
   const conversation = useMemo(() => {
     if (!detail) return null;
     return legacyRunDetail(detail);
@@ -67,7 +64,7 @@ export function RunDetailPanel({ runId, card, onClose, onAction, onUseThread, on
   async function keep(placeInWorkspace: boolean, navigate: boolean, createReference = true) {
     setBusy(navigate ? "continue" : "keep");
     try {
-      const result = await postSpectra<{ threadId: string }>({ action: "keepRunAsThread", runId, placeInWorkspace, createReference, localMessages: localArtifact?.messages ?? [] });
+      const result = await postSpectra<{ threadId: string }>({ action: "keepRunAsThread", runId, placeInWorkspace, createReference });
       window.dispatchEvent(new Event("spectra:threads-changed"));
       if (navigate) router.push(`/chat?threadId=${encodeURIComponent(result.threadId)}`);
       else toast.success(placeInWorkspace ? "Thread kept and placed in this workspace." : "Thread kept.");

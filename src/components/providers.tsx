@@ -9,7 +9,6 @@ import { SidebarProvider } from "@/context/sidebar-context";
 import { PanelProvider } from "@/context/panel-context";
 import { DynamicFavicon } from "@/components/spectra-logo";
 import { GlobalErrorBoundary } from "@/components/global-error-boundary";
-import { SpectraSessionProvider } from "@/context/spectra-session-context";
 
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
@@ -17,7 +16,6 @@ export function Providers({ children }: { children: React.ReactNode }) {
     <ThemeProvider>
       <SidebarProvider>
         <PanelProvider>
-          <SpectraSessionProvider>
           <CommandPaletteProvider>
             {children}
             <DynamicFavicon />
@@ -34,7 +32,6 @@ export function Providers({ children }: { children: React.ReactNode }) {
               }}
             />
           </CommandPaletteProvider>
-          </SpectraSessionProvider>
         </PanelProvider>
       </SidebarProvider>
     </ThemeProvider>

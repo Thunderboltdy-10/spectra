@@ -169,4 +169,70 @@ describe("Spectra run route", () => {
     expect(messageCalls[1]?.[1]).toMatchObject({ role: "assistant", content: answerPlan.finalResponse, runId: "run-real" });
     expect(JSON.stringify(messageCalls)).not.toContain("Analysing request");
   });
+
+  it("sanitizes invalid operation errors before streaming them to the client", async () => {
+    const invalidPlan = {
+      decision: "operate",
+      intent: { mode: "update", requestedArtifactTypes: ["document"], requestedVisibleArtifactCount: 0, targetArtifactId: "missing-artifact", targetWorkspaceId: null },
+      finalResponse: "I could not safely update that document.",
+      operations: [{
+        type: "artifact.update",
+        input: {
+          artifactId: "missing-artifact",
+          blueprintKey: "document",
+          title: "Internal id leak check",
+          summary: null,
+          content: null,
+          tags: null,
+        },
+      }],
+    };
+    setup(invalidPlan);
+    const route = await import("@/app/api/spectra/run/route");
+    const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", {
+      method: "POST",
+      body: JSON.stringify({ action: "run", surface: "workspace", workspaceId: "workspace-real", prompt: "Update this document." }),
+    }));
+    const events = (await response.text()).trim().split("\n").map((line) => JSON.parse(line) as { type: string; message?: string });
+    const error = events.find((event) => event.type === "error");
+
+    expect(error?.message).toBe("Spectra could not safely complete that request. Try again, or choose the object you want Spectra to use.");
+    expect(error?.message).not.toMatch(/artifactId|workspaceId|threadId|operation|schema|JSON|Convex/i);
+  });
+
+  it("keeps confirmation operations proposed until the user accepts or rejects them", async () => {
+    const workspacePlan = {
+      decision: "operate",
+      intent: { mode: "create_workspace", requestedArtifactTypes: [], requestedVisibleArtifactCount: 0, targetArtifactId: null, targetWorkspaceId: null },
+      finalResponse: "I can create a workspace for the exhibition.",
+      operations: [{
+        type: "workspace.create",
+        input: {
+          title: "TOK Exhibition",
+          description: "Planning and evidence for the exhibition.",
+          icon: "BookOpen",
+          color: null,
+        },
+      }],
+    };
+    const { convexMutation } = setup(workspacePlan);
+    const route = await import("@/app/api/spectra/run/route");
+    const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", {
+      method: "POST",
+      body: JSON.stringify({ action: "run", surface: "workspace", workspaceId: "workspace-real", prompt: "Create a new TOK Exhibition workspace." }),
+    }));
+    const events = (await response.text()).trim().split("\n").map((line) => JSON.parse(line) as { type: string; card?: { actions?: Array<{ key: string }> } });
+
+    expect(events.some((event) => event.type === "confirmation_required")).toBe(true);
+    expect(events.find((event) => event.type === "confirmation_required")?.card?.actions?.map((action) => action.key)).toEqual(["confirm", "cancel"]);
+    expect(convexMutation.mock.calls.some(([name]) => String(name).includes("spectraWorkspaces:create"))).toBe(false);
+
+    const cancelResponse = await route.POST(new NextRequest("http://localhost/api/spectra/run", {
+      method: "POST",
+      body: JSON.stringify({ action: "cancel", runId: "run-real" }),
+    }));
+    const cancelEvents = (await cancelResponse.text()).trim().split("\n").map((line) => JSON.parse(line) as { type: string; summary?: string });
+    expect(cancelEvents).toContainEqual(expect.objectContaining({ type: "final", summary: "No proposed changes were applied." }));
+    expect(convexMutation.mock.calls.some(([name, args]) => String(name).includes("spectraRuns:updateStatus") && (args as { status?: string }).status === "cancelled")).toBe(true);
+  });
 });

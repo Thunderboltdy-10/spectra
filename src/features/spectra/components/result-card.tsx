@@ -112,7 +112,9 @@ export function ResultCardStack({
               ? "confirmation"
               : card.status === "running"
                 ? "updating"
-                : "normal";
+                : card.status === "completed"
+                  ? "completed"
+                  : "normal";
         return (
           <div
             key={card.id}
@@ -133,6 +135,30 @@ export function ResultCardStack({
                 <span className="shrink-0 font-semibold text-[var(--text-primary)]">{card.title}</span>
                 {card.summary ? <RichText content={card.summary} className="line-clamp-1 min-w-0 flex-1 overflow-hidden text-[var(--text-secondary)] [&_*]:inline [&_a_svg]:hidden [&_code]:px-1 [&_p]:m-0 [&_p]:leading-normal" /> : null}
               </div>
+              {awaitingApproval ? (
+                <div
+                  className="mt-1.5 flex flex-wrap items-center gap-1.5 rounded-[7px] border border-[color-mix(in_oklab,var(--warning)_22%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_5%,var(--bg-primary))] px-2 py-1"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <span className="mr-1 text-[10px] font-medium text-[var(--text-secondary)]">
+                    Review before Spectra mutates objects.
+                  </span>
+                  <button
+                    type="button"
+                    className="rounded-[6px] bg-[var(--text-primary)] px-2 py-1 text-[10px] font-semibold text-[var(--bg-primary)] hover:opacity-90"
+                    onClick={() => onAction?.(card, "confirm", card.runId)}
+                  >
+                    Apply changes
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-[6px] px-2 py-1 text-[10px] font-semibold text-[var(--danger)] hover:bg-[color-mix(in_oklab,var(--danger)_8%,transparent)]"
+                    onClick={() => onAction?.(card, "cancel", card.runId)}
+                  >
+                    Reject proposal
+                  </button>
+                </div>
+              ) : null}
             </div>
             <div className="flex items-center">{card.actions.map((action) => {
               const ActionIcon = actionIcon(action.key);

@@ -30,7 +30,7 @@ import {
   X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { useSpectraRun } from "../ai/use-spectra-run";
@@ -238,6 +238,7 @@ function WorkspaceHome({
 }) {
   const [createOpen, setCreateOpen] = useState(false);
   const [pinnedOpen, setPinnedOpen] = useState(true);
+  const [dropWorkspaceId, setDropWorkspaceId] = useState<string | null>(null);
   const createRef = useOutsideClick<HTMLDivElement>(createOpen, () => setCreateOpen(false));
   useEffect(() => { setPinnedOpen(window.localStorage.getItem("spectra.home.pinned.open") !== "false"); }, []);
   useEffect(() => { window.localStorage.setItem("spectra.home.pinned.open", String(pinnedOpen)); }, [pinnedOpen]);
@@ -250,6 +251,24 @@ function WorkspaceHome({
     .map((artifact) => ({ id: artifact._id, time: artifact.updatedAt, title: artifact.title, detail: Math.abs(artifact.updatedAt - artifact.createdAt) < 1_000 ? "Created" : "Updated", artifact }))
     .sort((a, b) => b.time - a.time)
     .slice(0, 8);
+
+  function artifactFromDrag(event: DragEvent<HTMLElement>) {
+    const artifactId =
+      event.dataTransfer.getData("application/x-spectra-artifact") ||
+      event.dataTransfer.getData("text/plain");
+    return artifacts.find((artifact) => artifact._id === artifactId);
+  }
+
+  function allowWorkspaceDrop(
+    event: DragEvent<HTMLElement>,
+    workspaceId: string,
+  ) {
+    const artifact = artifactFromDrag(event);
+    if (!artifact) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    setDropWorkspaceId(workspaceId);
+  }
 
   return (
     <main className="min-h-0 flex-1 overflow-y-auto bg-[radial-gradient(circle_at_22%_-5%,color-mix(in_oklab,var(--accent-cyan)_7%,transparent),transparent_34%),var(--bg-primary)] px-8 pb-[150px] pt-8">
@@ -285,10 +304,21 @@ function WorkspaceHome({
               <div
                 key={workspace._id}
                 data-spectra-card="workspace"
-                data-card-state="normal"
+                data-card-state={dropWorkspaceId === workspace._id ? "drop-target" : "normal"}
                 data-interactive="true"
                 className="group relative min-h-[150px] overflow-hidden p-4 text-left"
                 style={{ "--card-accent": accent.color } as CSSProperties}
+                onDragOver={(event) => allowWorkspaceDrop(event, workspace._id)}
+                onDragLeave={(event) => {
+                  if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropWorkspaceId(null);
+                }}
+                onDrop={(event) => {
+                  const artifact = artifactFromDrag(event);
+                  setDropWorkspaceId(null);
+                  if (!artifact) return;
+                  event.preventDefault();
+                  onMoveArtifactToWorkspace(artifact, workspace._id);
+                }}
               >
                 <button type="button" className="absolute inset-0 z-[1]" onClick={() => onSelect(workspace._id)} aria-label={`Open ${workspace.title} workspace`} />
                 <div className="relative z-[2] flex items-start gap-3">

@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type DragEvent,
+} from "react";
 import {
   Check,
   CheckCircle2,
@@ -17,6 +24,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { RichText } from "@/components/chat/rich-text";
 import { blueprintMeta } from "./artifact-card";
 import { CardTypeIcon, IconAction } from "./card-system";
 import { FloatingMenu } from "./floating-menu";
@@ -128,6 +136,10 @@ export function ObjectLibrary({
   const [placementAnchor, setPlacementAnchor] = useState<DOMRect | null>(null);
   const [createMenuKey, setCreateMenuKey] = useState<string | null>(null);
   const [unplacedOpen, setUnplacedOpen] = useState(false);
+  const [draggingArtifactId, setDraggingArtifactId] = useState<string | null>(
+    null,
+  );
+  const [dropTargetKey, setDropTargetKey] = useState<string | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(
     () => new Set(),
   );
@@ -240,6 +252,80 @@ export function ObjectLibrary({
           };
         });
   const populatedGroups = groups.filter((group) => group.entries.length > 0);
+  const canDragMove = Boolean(onMoveToWorkspace || onMoveToInbox);
+
+  function beginDrag(
+    event: DragEvent<HTMLElement>,
+    entry: ObjectLibraryEntry,
+  ) {
+    if (selectionMode || !canDragMove) {
+      event.preventDefault();
+      return;
+    }
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", entry.artifact._id);
+    event.dataTransfer.setData("application/x-spectra-artifact", entry.artifact._id);
+    setDraggingArtifactId(entry.artifact._id);
+  }
+
+  function draggedEntry(event: DragEvent<HTMLElement>) {
+    const id =
+      event.dataTransfer.getData("application/x-spectra-artifact") ||
+      event.dataTransfer.getData("text/plain") ||
+      draggingArtifactId;
+    return id ? entries.find((entry) => entry.artifact._id === id) : undefined;
+  }
+
+  function allowDrop(event: DragEvent<HTMLElement>, targetKey: string) {
+    if (!canDragMove) return;
+    const entry = draggedEntry(event);
+    if (!entry) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    setDropTargetKey(targetKey);
+  }
+
+  function finishDrop(
+    event: DragEvent<HTMLElement>,
+    target: { workspaceId?: string; inbox?: boolean },
+  ) {
+    const entry = draggedEntry(event);
+    setDropTargetKey(null);
+    setDraggingArtifactId(null);
+    if (!entry) return;
+    event.preventDefault();
+    if (target.inbox) {
+      onMoveToInbox?.(entry);
+      return;
+    }
+    if (target.workspaceId) {
+      const placements = artifactPlacements(entry.artifact);
+      const alreadyPlaced = placements.some(
+        (placement) => placement.workspaceId === target.workspaceId,
+      );
+      if (!alreadyPlaced) {
+        onMoveToWorkspace?.(entry, target.workspaceId);
+        onAddToWorkspace?.(entry, target.workspaceId);
+      }
+    }
+  }
+
+  function CompactSummary({
+    value,
+    fallback,
+    className,
+  }: {
+    value?: string;
+    fallback: string;
+    className?: string;
+  }) {
+    return (
+      <RichText
+        content={value?.trim() || fallback}
+        className={`min-w-0 overflow-hidden text-[var(--text-secondary)] [&_*]:inline [&_a_svg]:hidden [&_code]:px-1 [&_p]:m-0 [&_p]:leading-normal ${className ?? ""}`}
+      />
+    );
+  }
 
   function actions(entry: ObjectLibraryEntry) {
     const pinned = Boolean(entry.item?.viewData.pinned);
@@ -398,10 +484,16 @@ export function ObjectLibrary({
       <article
         key={entry.artifact._id}
         data-spectra-card="inbox"
-        data-card-state={selected ? "context" : "normal"}
+        data-card-state={dropTargetKey === "inbox" ? "drop-target" : draggingArtifactId === entry.artifact._id ? "drag-preview" : selected ? "multi-selected" : "normal"}
         data-interactive="true"
+        draggable={canDragMove && !selectionMode}
         className="relative min-h-[118px] overflow-hidden p-3"
         style={{ "--card-accent": meta.color } as CSSProperties}
+        onDragStart={(event) => beginDrag(event, entry)}
+        onDragEnd={() => {
+          setDraggingArtifactId(null);
+          setDropTargetKey(null);
+        }}
       >
         {selectionMode ? (
           <span
@@ -416,17 +508,19 @@ export function ObjectLibrary({
           onClick={() => activateEntry(entry)}
         >
           <CardTypeIcon icon={Icon} color={meta.color} className="h-8 w-8" />
-          <span className="min-w-0 flex-1">
+          <div className="min-w-0 flex-1">
             <span className="block truncate text-[13px] font-semibold text-[var(--text-primary)]">
               {entry.artifact.title}
             </span>
-            <span className="mt-0.5 block truncate text-[11px] text-[var(--text-secondary)]">
-              {entry.artifact.summary ?? meta.label}
-            </span>
+            <CompactSummary
+              value={entry.artifact.summary}
+              fallback={meta.label}
+              className="mt-0.5 block truncate text-[11px]"
+            />
             <span className="mt-1 block text-[10px] text-[var(--text-tertiary)]">
               {meta.label} · {formatRelativeTime(entry.artifact.updatedAt)}
             </span>
-          </span>
+          </div>
         </button>
         <div
           className="mt-2 flex justify-end"
@@ -579,7 +673,15 @@ export function ObjectLibrary({
             </span>
           </button>
           {unplacedOpen ? (
-            <div className="grid gap-3 xl:grid-cols-3">
+            <div
+              className="grid gap-3 xl:grid-cols-3"
+              data-card-state={dropTargetKey === "inbox" ? "drop-target" : undefined}
+              onDragOver={(event) => allowDrop(event, "inbox")}
+              onDragLeave={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropTargetKey(null);
+              }}
+              onDrop={(event) => finishDrop(event, { inbox: true })}
+            >
               {unplaced.slice(0, 6).map(unplacedCard)}
               {unplaced.length === 0 ? (
                 <div className="rounded-[8px] border border-dashed border-[var(--border-default)] px-4 py-7 text-[13px] text-[var(--text-secondary)]">
@@ -608,7 +710,14 @@ export function ObjectLibrary({
               {populatedGroups.map((group) => (
                 <section
                   key={group.key}
+                  data-spectra-card="side"
+                  data-card-state={dropTargetKey === group.key ? "drop-target" : "normal"}
                   className="overflow-hidden rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)]"
+                  onDragOver={(event) => allowDrop(event, group.key)}
+                  onDragLeave={(event) => {
+                    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropTargetKey(null);
+                  }}
+                  onDrop={(event) => finishDrop(event, { workspaceId: group.workspace?._id })}
                 >
                   <div
                     className="flex h-11 items-center justify-between border-b border-[var(--border-default)] px-4"
@@ -646,10 +755,18 @@ export function ObjectLibrary({
                       return (
                         <div
                           key={`${group.key}:${entry.item?._id ?? entry.artifact._id}`}
-                          data-card-state={selectedArtifactId === entry.artifact._id ? "focused" : contextSelected ? "context" : "normal"}
+                          data-spectra-card="side"
+                          data-card-state={draggingArtifactId === entry.artifact._id ? "drag-preview" : selectedArtifactId === entry.artifact._id ? "focused" : contextSelected ? "multi-selected" : "normal"}
+                          data-interactive="true"
+                          draggable={canDragMove && !selectionMode}
                           className="grid min-h-[58px] cursor-pointer grid-cols-[minmax(260px,1.2fr)_minmax(130px,0.6fr)_minmax(130px,0.5fr)_auto] items-center gap-4 border-b border-[var(--card-border-soft)] px-4 py-2.5 transition-colors last:border-b-0 hover:bg-[color-mix(in_oklab,var(--bg-hover)_58%,transparent)] data-[card-state=context]:bg-[color-mix(in_oklab,var(--card-focus)_5%,transparent)] data-[card-state=focused]:bg-[color-mix(in_oklab,var(--card-focus)_5%,transparent)]"
                           role="button"
                           tabIndex={0}
+                          onDragStart={(event) => beginDrag(event, entry)}
+                          onDragEnd={() => {
+                            setDraggingArtifactId(null);
+                            setDropTargetKey(null);
+                          }}
                           onClick={() => activateEntry(entry)}
                           onKeyDown={(event) => {
                             if (event.key === "Enter" || event.key === " ")
@@ -774,14 +891,16 @@ export function ObjectLibrary({
                               className="h-4 w-4 shrink-0"
                               style={{ color: meta.color }}
                             />
-                            <span className="min-w-0 flex-1">
+                            <div className="min-w-0 flex-1">
                               <span className="block truncate text-[13px] font-semibold text-[var(--text-primary)]">
                                 {entry.artifact.title}
                               </span>
-                              <span className="block truncate text-[10px] text-[var(--text-secondary)]">
-                                {entry.artifact.summary ?? meta.label}
-                              </span>
-                            </span>
+                              <CompactSummary
+                                value={entry.artifact.summary}
+                                fallback={meta.label}
+                                className="block truncate text-[10px]"
+                              />
+                            </div>
                             <span className="shrink-0 text-[10px] text-[var(--text-tertiary)]">
                               {formatRelativeTime(entry.artifact.updatedAt)}
                             </span>

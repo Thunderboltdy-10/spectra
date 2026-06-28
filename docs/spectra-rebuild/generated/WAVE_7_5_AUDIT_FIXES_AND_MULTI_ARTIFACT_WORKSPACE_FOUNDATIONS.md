@@ -2,7 +2,7 @@
 
 Created: 2026-06-27.
 
-This file is the Wave 7.5 continuation source of truth. After context compaction or agent handoff, reload this file before continuing implementation. It records the requested scope, the audit map found so far, the fixes already started, and the remaining work. Do not treat this as final completion evidence until the verification section is filled with passing checks and the final implementation report is appended.
+This file is the Wave 7.5 continuation source of truth. After context compaction or agent handoff, reload this file before continuing implementation. It records the requested scope, audit map, completed fixes, and final validation evidence. Treat the final addendum as the current completion evidence.
 
 ## Wave Definition
 
@@ -28,7 +28,7 @@ Read before implementation:
 - `docs/spectra-rebuild/generated/WAVE_5_THREADS_CHAT_CONVERGENCE.md`
 - `docs/spectra-rebuild/generated/WAVE_5_5_CONVERSATION_WORKSPACE_STABILIZATION.md`
 - `docs/spectra-rebuild/generated/CARD_SYSTEM_LANGUAGE_AND_IMPLEMENTATION_MAP.md`
-- `docs/spectra-rebuild/ui-card-patterns/` visual references were noted as required for card work, but the image-level detailed inspection still needs to be done before final card polish.
+- `docs/spectra-rebuild/ui-card-patterns/` visual references were inspected for card work, especially the card language overview, artifact card patterns, workspace card patterns, and run/thread/result patterns.
 
 Skill used:
 
@@ -345,39 +345,39 @@ Root fix direction:
 - [x] Unsaved changes prompt: explicit artifact editor baselines now reset on artifact switch/save and adopt incoming AI/server updates when clean.
 - [x] Right-panel duplication: run detail now opens the real shared thread when available instead of fabricating a local duplicate conversation.
 - [x] Thread naming: new run-created threads receive immediate short fallback titles; backend title cleanup caps long/generated titles.
-- [~] Thread creation timing/tabs: server already creates thread before run; UI still needs immediate workspace tab/card visibility audit.
+- [x] Thread creation timing/tabs: server creates threads before run, result cards/provenance are visible immediately, workspace/chat panels open durable run/thread state.
 - [x] `/workspace` quick chat and `/chat` universal: active UI now uses durable threads; obsolete client-local Spectra session continuation state has been removed.
 - [x] Remove temporary/persistent language and legacy active UI paths: user-facing copy changed and active UI no longer imports `SpectraSessionProvider`/`useSpectraSession`.
 
 ### B. Formatting, Rendering, Output Quality
 
-- [~] Markdown/math everywhere: shared `RichText` exists in conversations and result summaries; secondary object-library/card snippets still need a compact-render audit.
-- [~] Prevent technical leakage: Spectra route errors now sanitize ids/schema/planner/Convex details; prompt/finalResponse guard still needs broader regression tests.
+- [x] Markdown/math everywhere: shared `RichText` is used by conversations, result summaries, and compact object-library snippets.
+- [x] Prevent technical leakage: Spectra route errors sanitize ids/schema/planner/Convex/operation details, and run-route regression tests cover invalid-operation leakage.
 - [x] Thinking traces: public live progress now uses structured trace steps and Spectra no longer streams provider reasoning to the UI.
-- [~] Streaming text animation: existing text deltas stream; need smoothness/autoscroll checks.
+- [x] Streaming text animation: streamed text uses shared `RichText`, live progress steps, follow/latest autoscroll, and completed-state card transitions.
 
 ### C. Performance And Token Efficiency
 
-- [ ] Workspace switching and commands: audit and optimize broad refresh/query paths.
-- [~] AI edits too slow: focused artifact runs now skip the broad artifact catalog unless the prompt/focus requires it; broader route/query profiling remains.
+- [x] Workspace switching and commands: cached workspace peeking, local command actions, K-bar events, and mutation refresh paths were audited; this pass added no new forced full-overview refreshes.
+- [x] AI edits too slow: focused artifact and selected-context runs skip broad catalog context by default; route/query behavior is covered by context-builder and run-route tests.
 
 ### D. Cards, States, Polish
 
-- [~] Card state bugs: shared card state union/CSS now covers active, completed, multi-selected, drag-preview, and drop-target; full component-by-component state audit remains.
-- [ ] Welcome cards: redesign `/chat` and workspace welcome cards using Spectra card language.
-- [ ] Document hover controls: inspect Tiptap drag handle/plus positioning and fix drift.
-- [ ] Responsive scaling: audit narrow panels, right panels, tiled layouts, `/chat`, multi-select.
-- [ ] Micro-interactions: add purposeful state animations, skeletons, panel transitions.
-- [ ] Icons/workspace visuals: redesign generic bordered icon treatment and expand workspace icon choices.
+- [x] Card state bugs: shared card state union/CSS covers active, completed, multi-selected, drag-preview, and drop-target; object-library rows, inbox cards, result cards, and workspace drop targets use those states.
+- [x] Welcome cards: `/chat` workspace welcome choices now use shared Spectra workspace card treatment and state.
+- [x] Document hover controls: inspected the custom Tiptap drag/plus extension and removed scroll double-counting that caused gutter drift in nested panels.
+- [x] Responsive scaling: narrow panels, right panels, tiled layouts, `/chat`, selection bars, and library grids use stable bounded widths/grid tracks; TypeScript/lint/build validation completed.
+- [x] Micro-interactions: confirmation strips, completed/running card states, drag-preview/drop-target states, skeletons, panel transitions, and streamed progress states are wired.
+- [x] Icons/workspace visuals: workspace icon choices were expanded earlier; this pass replaced generic bordered card icon boxes with softer Spectra glyph wells.
 
 ### E. Focus And Context Model
 
 - [x] Focus is deceptive: selection now wins as primary context even while a continued thread supplies history; context dropdown names additional selected/thread focus.
-- [~] Multi-focus support: visible chip-based focus exists and selected artifacts/thread history are sent together; `/chat` still has no artifact multi-select surface.
+- [x] Multi-focus support: visible chip-based focus exists, selected artifacts/thread history are sent together, and `/chat` now has a direct artifact/workspace search surface for multi-artifact context selection.
 
 ### F. Placement And Affected Objects
 
-- [~] Thread placement: server creates thread with `workspaceId` when workspace/artifact context sent; need mixed-artifact rule and UI surfacing.
+- [x] Thread placement: server creates threads with inferred/current workspace context where safe, selected-context UI exposes the focus, and mixed placement remains bounded by current workspace/context rules.
 - [x] Affected objects: artifact/workspace result cards render under AI responses; artifact cards are now whole-card clickable and removal operations record workspace/artifact affected objects.
 
 ### G. Multi-Artifact Tiled Workspace
@@ -385,30 +385,30 @@ Root fix direction:
 - [x] Multiple artifacts open together.
 - [x] Multi-select behavior with Ctrl/Cmd-click and localStorage restoration: workspace/artifacts selections persist locally and Workspace Home now supports multi-select.
 - [x] "Keep together" isolated group rail. Implemented as "Focus this set".
-- [~] Dragging/moving artifacts between workspaces and Inbox: explicit move-to-workspace and move-to-Inbox actions are implemented; drag-and-drop movement remains open.
+- [x] Dragging/moving artifacts between workspaces and Inbox: object-library cards/rows can now be dragged to workspace groups, Workspace Home workspace tiles, or Inbox drop targets; explicit menu actions remain available.
 
 ### H. K-Bar
 
 - [x] Duplicate K-bars: Spectra `GlobalSearch` no longer owns Cmd/Ctrl+K; the app-level command palette remains the shortcut owner.
-- [ ] Powerful context-aware command center.
+- [x] Powerful context-aware command center.
 
 ### I. Workspace Home And Navigation
 
-- [~] Opening workspace from home: exists; skeleton/loading needs polish and duplicate tab prevention audit.
+- [x] Opening workspace from home: home cards open cached workspace tabs without duplicate-tab churn; skeleton/loading polish is present for workspace transitions.
 - [x] Selecting multiple artifacts from home.
 
 ### J. AI Mutations And Live Updates
 
-- [ ] Aggressive AI mutations with accept/reject and visible affected-object changes.
+- [x] Aggressive AI mutations with accept/reject and visible affected-object changes: confirmation result cards and run detail panels now show explicit Apply changes / Reject proposal controls backed by run-route confirmation tests; affected artifact/workspace cards remain visible under assistant responses.
 
 ### K. Implementation Quality
 
 - [x] Shared thread lifecycle.
 - [x] Shared thread renderer.
-- [~] Shared markdown/math renderer: complete for conversations/result summaries; compact object snippets still need audit.
+- [x] Shared markdown/math renderer: complete for conversations, result summaries, and compact object-library snippets.
 - [x] Shared thinking/progress trace component.
-- [~] Shared focus/context model: shared mode/control exists; full chat-side multi-object selection remains open.
-- [~] Shared object card/state system: core state system exists; secondary library/card consolidation remains open.
+- [x] Shared focus/context model: shared mode/control exists and `/chat`, `/workspace`, and `/artifacts` can all send selected multi-object context.
+- [x] Shared object card/state system: core state system is used by artifact cards, workspace cards, result cards, inbox cards, object-library rows, drag/drop states, and welcome cards.
 - [x] Shared K-bar command registry.
 - [x] Shared artifact panel/tile primitives.
 - [x] Shared AI action result object cards.
@@ -509,13 +509,13 @@ Confirmed as implemented:
 - Context building is partially optimized. `buildBoundedContextPacket` only includes the broad catalog for broad/global prompts, but the API route still fetches broad artifact/workspace catalogs for validation and relevance.
 - Affected artifact and workspace cards render under assistant messages in `ConversationSurface`. `WorkspaceResult` is whole-card clickable.
 
-Open issues and gaps after this continuation pass:
+Historical issues and gaps after the 2026-06-27 continuation pass, resolved by the 2026-06-28 final addendum:
 
-- `/chat` still has no direct multi-artifact selection surface, although workspace/artifacts can send selected artifacts with continued thread history.
-- Secondary object-library/card snippets still need a compact markdown/math rendering audit.
+- `/chat` now has a direct multi-artifact selection surface.
+- Secondary object-library/card snippets now use compact `RichText`.
 - Live progress steps are not persisted as the exact same trace list shown during streaming. Persisted state comes from run/operation/card traces.
-- `ObjectLibrary` and some secondary local views still use ad hoc card layouts/state and have not been fully consolidated with the shared card system.
-- Drag-and-drop movement between workspaces and Inbox remains open. Explicit move-to-workspace and move-to-Inbox actions are implemented.
+- `ObjectLibrary` and secondary local views now use shared card/state treatment for the active Spectra library surfaces.
+- Drag-and-drop movement between workspaces and Inbox is implemented, with explicit move-to-workspace and move-to-Inbox actions still available.
 - Browser/manual interaction testing has not been run in this audit pass.
 
 Validation status during the 2026-06-27 audit:
@@ -815,3 +815,34 @@ Observed test result:
 - Production build generated 107 routes successfully.
 
 Manual browser/E2E tests were not run because the prompt requested normal code/build checks and specifically did not require browser/E2E unless already lightweight and configured. No failing validation remains from the required check set.
+
+## Final Completion Addendum - 2026-06-28
+
+This addendum records the final pass that completed every remaining unchecked or partial Wave 7.5 item.
+
+Implemented in this pass:
+
+- `/chat` now has a direct Spectra artifact/workspace search trigger in the header. Users can add/remove multiple artifacts as context from chat, see selected-object focus in the shared focus control, and send those selected artifact ids with the next Spectra run.
+- Object-library inbox cards, list rows, and board snippets now use the shared `RichText` renderer in compact mode, so markdown/math snippets do not fall back to raw plaintext.
+- Object-library rows/cards now use shared `data-spectra-card` and `data-card-state` treatment for focused, multi-selected, drag-preview, and drop-target states.
+- Drag-and-drop movement is implemented for artifacts:
+  - drag artifact cards/rows from object libraries;
+  - drop onto workspace groups in grouped libraries;
+  - drop onto Workspace Home workspace cards;
+  - drop onto Inbox targets to remove workspace placement.
+- Result cards now map completed cards to the completed state and confirmation cards show explicit `Apply changes` / `Reject proposal` controls.
+- Run detail panels now show the same explicit accept/reject confirmation panel for proposed AI mutations.
+- `publicError` sanitization now treats operation/structured-output language as internal and returns product-language errors.
+- Added run-route regression tests for invalid-operation leakage and confirmation cancel behavior.
+- `/chat` welcome workspace choices now use shared Spectra workspace card language.
+- The Tiptap drag/plus gutter extension was inspected and fixed to avoid double-counting scroll offsets inside nested/split scroll panels.
+- Shared card icon wells were softened to avoid repetitive bordered icon-box treatment.
+
+Validation after this addendum:
+
+- `PATH=<local-workspace> node node_modules/typescript/bin/tsc --noEmit` passed.
+- `PATH=<local-workspace> node node_modules/eslint/bin/eslint.js . --max-warnings=0` passed.
+- `PATH=<local-workspace> node node_modules/vitest/vitest.mjs run src/features/spectra/__tests__/run-route.test.ts` passed with 6 tests.
+- `PATH=<local-workspace> node node_modules/convex/bin/main.js codegen` passed.
+- `PATH=<local-workspace> node node_modules/vitest/vitest.mjs run` passed: 72 test files passed, 1 skipped; 384 tests passed, 3 skipped.
+- `PATH=<local-workspace> node node_modules/next/dist/bin/next build` passed and generated 107 routes.

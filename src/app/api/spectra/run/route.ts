@@ -407,12 +407,12 @@ function publicError(error: unknown) {
     }
     return "Spectra could not safely apply that plan. Try again with the relevant document or workspace selected.";
   }
-  if (error instanceof SyntaxError) return "The AI returned malformed structured output. Retry the run.";
+  if (error instanceof SyntaxError) return "Spectra could not safely read the response. Retry the run.";
   const message = error instanceof Error ? error.message : "Spectra run failed.";
   if (/\b(artifactId|workspaceId|threadId|plannerItemId|operationId|sourceId|targetId|object ID|database id)\b/i.test(message)) {
     return "Spectra could not match that request to an open or selected object. Choose the document or workspace you want to use, then try again.";
   }
-  if (/\bJSON|schema|Zod|planner|operation input|FunctionPathNotFound|Convex\b/i.test(message)) {
+  if (/\bJSON|schema|Zod|planner|operation|structured output|FunctionPathNotFound|Convex\b/i.test(message)) {
     return "Spectra could not safely complete that request. Try again, or choose the object you want Spectra to use.";
   }
   return message.length > 240 ? `${message.slice(0, 237)}…` : message;

@@ -220,7 +220,7 @@ export function ConversationSurface({
     ].filter(Boolean).join(" · ");
   }, [detail?.viewerName]);
   return (
-    <div className="relative flex h-full min-h-0 flex-col bg-[var(--bg-primary)]">
+    <div className="spectra-conversation relative flex h-full min-h-0 flex-col bg-[var(--bg-primary)]">
       <div ref={scrollRef} onScroll={(event) => {
         const element = event.currentTarget;
         setFollowing(element.scrollHeight - element.scrollTop - element.clientHeight < 72);

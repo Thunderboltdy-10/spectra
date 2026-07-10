@@ -254,6 +254,7 @@ async function buildContext(actorClerkId: string, body: Pick<Body, "workspaceId"
   });
   return {
     workspaces,
+    threads,
     currentWorkspace: workspaceRecord ? {
       id: (workspaceRecord.workspace as Record<string, unknown> | undefined)?._id,
       title: (workspaceRecord.workspace as Record<string, unknown> | undefined)?.title,
@@ -293,7 +294,90 @@ function ownedReferences(context: Awaited<ReturnType<typeof buildContext>>): Own
   for (const item of context.currentWorkspace?.items ?? []) {
     if (typeof item.id === "string" && typeof item.workspaceId === "string") workspaceItems.set(item.id, { artifactId: item.sourceType === "artifact" && typeof item.sourceId === "string" ? item.sourceId : undefined, workspaceId: item.workspaceId });
   }
-  return { artifactIds, artifactBlueprints, workspaceIds, workspaceItems, threadIds: new Set(context.currentThreadId ? [context.currentThreadId] : []) };
+  return { artifactIds, artifactBlueprints, workspaceIds, workspaceItems, threadIds: new Set([...context.threads.flatMap((thread) => typeof thread.id === "string" ? [thread.id] : []), ...(context.currentThreadId ? [context.currentThreadId] : [])]) };
+}
+
+function normalizedReference(value: string) {
+  return value.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function resolveNamedReference(value: string | null | undefined, candidates: Array<{ id: unknown; title: unknown }>) {
+  if (!value) return value;
+  const valid = candidates.flatMap((candidate) => typeof candidate.id === "string" && typeof candidate.title === "string" ? [{ id: candidate.id, title: candidate.title }] : []);
+  if (valid.some((candidate) => candidate.id === value)) return value;
+  const needle = normalizedReference(value);
+  if (!needle) return value;
+  const exact = valid.filter((candidate) => normalizedReference(candidate.title) === needle);
+  if (exact.length === 1) return exact[0]!.id;
+  if (needle.length < 5) return value;
+  const contained = valid.filter((candidate) => {
+    const title = normalizedReference(candidate.title);
+    return title.includes(needle) || needle.includes(title);
+  });
+  return contained.length === 1 ? contained[0]!.id : value;
+}
+
+function resolvePlanReferences(plan: SpectraPlan, context: Awaited<ReturnType<typeof buildContext>>) {
+  const next = structuredClone(plan) as SpectraPlan;
+  const artifactCandidates = context.artifacts.map((artifact) => ({ id: artifact.id, title: artifact.title }));
+  const workspaceCandidates = context.workspaces.map((workspace) => ({ id: workspace.id, title: workspace.title }));
+  const threadCandidates = context.threads.map((thread) => ({ id: thread.id, title: thread.title }));
+  const resolveArtifact = (value: string | null | undefined) => resolveNamedReference(value, artifactCandidates);
+  const resolveWorkspace = (value: string | null | undefined) => resolveNamedReference(value, workspaceCandidates);
+  const resolveThread = (value: string | null | undefined) => resolveNamedReference(value, threadCandidates);
+  next.intent.targetArtifactId = resolveArtifact(next.intent.targetArtifactId) ?? null;
+  next.intent.targetWorkspaceId = resolveWorkspace(next.intent.targetWorkspaceId) ?? null;
+  for (const operation of next.operations) {
+    if (operation.type === "artifact.create") {
+      operation.input.workspaceId = resolveWorkspace(operation.input.workspaceId) ?? null;
+      if (operation.input.blueprintKey === "planner_task") {
+        operation.input.content.linkedArtifactIds = (operation.input.content.linkedArtifactIds ?? []).map((id) => resolveArtifact(id) ?? id);
+        operation.input.content.linkedThreadIds = (operation.input.content.linkedThreadIds ?? []).map((id) => resolveThread(id) ?? id);
+      }
+      if (operation.input.blueprintKey === "thread_reference" && operation.input.content.threadId) operation.input.content.threadId = resolveThread(operation.input.content.threadId) ?? operation.input.content.threadId;
+    } else if (operation.type === "artifact.update") {
+      operation.input.artifactId = resolveArtifact(operation.input.artifactId) ?? operation.input.artifactId;
+    } else if (operation.type === "workspace.update") {
+      operation.input.workspaceId = resolveWorkspace(operation.input.workspaceId) ?? operation.input.workspaceId;
+    } else if (operation.type === "workspaceItem.add") {
+      operation.input.artifactId = resolveArtifact(operation.input.artifactId) ?? operation.input.artifactId;
+      operation.input.workspaceId = resolveWorkspace(operation.input.workspaceId) ?? operation.input.workspaceId;
+    } else if (operation.type === "workspaceItem.hide") {
+      if (!context.currentWorkspace?.items.some((item) => item.id === operation.input.workspaceItemId)) {
+        const artifactId = resolveArtifact(operation.input.workspaceItemId);
+        const matches = context.currentWorkspace?.items.filter((item) => item.sourceType === "artifact" && item.sourceId === artifactId) ?? [];
+        if (matches.length === 1 && typeof matches[0]!.id === "string") operation.input.workspaceItemId = matches[0]!.id;
+      }
+    } else if (operation.type === "artifact.link") {
+      operation.input.sourceArtifactId = resolveArtifact(operation.input.sourceArtifactId) ?? operation.input.sourceArtifactId;
+      operation.input.targetArtifactId = resolveArtifact(operation.input.targetArtifactId) ?? operation.input.targetArtifactId;
+      operation.input.workspaceId = resolveWorkspace(operation.input.workspaceId) ?? null;
+    }
+  }
+  return parseSpectraPlan(next);
+}
+
+function resolveAndValidatePlan(plan: SpectraPlan, context: Awaited<ReturnType<typeof buildContext>>) {
+  const resolved = resolvePlanReferences(plan, context);
+  try {
+    return validatePlanAgainstIntent(resolved, ownedReferences(context));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (!/\b(reference|target|destination|owned id|database ids?)\b/i.test(message)) throw error;
+    const candidates = context.artifacts.slice(0, 3).flatMap((artifact) => typeof artifact.title === "string" ? [artifact.title] : []);
+    return parseSpectraPlan({
+      ...resolved,
+      decision: "clarify",
+      operations: [],
+      choices: candidates.length >= 2 ? {
+        question: "Which Spectra object should I use?",
+        options: candidates.map((title) => ({ title, description: "Use this owned object as the target." })),
+      } : null,
+      finalResponse: candidates.length
+        ? `I found relevant work, but the requested change could apply to more than one object. Choose ${candidates.map((title) => `“${title}”`).join(", ")}, or name a different object.`
+        : "I can help with that, but I need the name of the Spectra object you want to change.",
+    });
+  }
 }
 
 async function callModel(surface: Surface, prompt: string, context: unknown, attachments: PreparedAttachment[], onPublicText?: (content: string, mode?: "delta" | "replace") => void, onReasoningText?: (delta: string) => void, signal?: AbortSignal, onPlanOperation?: (operation: unknown, index: number) => void) {
@@ -784,7 +868,7 @@ async function runAttempt(params: { actorClerkId: string; runId: string; resultC
     );
     await partialWrite;
     await Promise.all(progressiveWrites);
-    const plan = validatePlanAgainstIntent(modelResult.plan, ownedReferences(context));
+    const plan = resolveAndValidatePlan(modelResult.plan, context);
     if (!params.threadId && (plan.conversationTitle || plan.conversationSummary)) {
       await mutate("spectraRuns:setSuggestedThreadMetadata", { actorClerkId: params.actorClerkId, runId: params.runId, executionId: params.executionId, title: plan.conversationTitle ?? undefined, summary: plan.conversationSummary ?? undefined });
     }

@@ -46,6 +46,7 @@ import { FloatingMenu } from "../components/floating-menu";
 import { ResultCardStack } from "../components/result-card";
 import { DurableRunTabs } from "../components/durable-run-tabs";
 import { RunDetailPanel } from "../components/run-detail-panel";
+import { LiveThreadPanel } from "../components/live-thread-panel";
 import {
   artifactPlacements,
   artifactToCard,
@@ -190,11 +191,13 @@ export function ArtifactsShell() {
   const [multiSelectMode, setMultiSelectMode] = useState(false);
   const [focusModeOverride, setFocusModeOverride] = useState<ComposerFocusMode | null>(null);
   const [activeRunPanelId, setActiveRunPanelId] = useState<string | null>(null);
+  const [liveThread, setLiveThread] = useState<{ id: string; title: string } | null>(null);
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
   const [hubTabs, setHubTabs] = useState<ArtifactHubTab[]>(() => [{ id: "artifacts-all-default", label: "All" }]);
   const [activeHubTabId, setActiveHubTabId] = useState<string | null>("artifacts-all-default");
   const [hubTabsRestored, setHubTabsRestored] = useState(false);
   const [studioPanelWidth, setStudioPanelWidth] = useState(760);
+  const [liveThreadPanelWidth, setLiveThreadPanelWidth] = useState(560);
   const [tileArtifactIds, setTileArtifactIds] = useState<string[]>([]);
   const [workSetIsolated, setWorkSetIsolated] = useState(false);
   const [addMenuArtifactId, setAddMenuArtifactId] = useState<string | null>(null);
@@ -674,7 +677,7 @@ export function ArtifactsShell() {
   }
 
   return (
-    <div className="flex h-full min-h-0 bg-[radial-gradient(circle_at_32%_-12%,color-mix(in_oklab,var(--bg-elevated)_70%,transparent),transparent_34%),var(--bg-primary)]">
+    <div className="spectra-wave-y flex h-full min-h-0 bg-[radial-gradient(circle_at_32%_-12%,color-mix(in_oklab,var(--bg-elevated)_70%,transparent),transparent_34%),var(--bg-primary)]">
       <ArtifactsRail workspaces={workspaces} selectedWorkspaceId={selectedWorkspaceId} onSelect={setSelectedWorkspaceId} />
       <div className="flex min-w-0 flex-1 flex-col">
         <StudioTabRail
@@ -883,7 +886,7 @@ export function ArtifactsShell() {
 	      )}
 	        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 bg-[linear-gradient(to_top,var(--bg-primary)_72%,transparent)] px-2 pb-3 pt-12 sm:px-5 sm:pb-5 lg:px-8" style={activeRunPanelId ? { right: "var(--spectra-run-panel-width, 680px)" } : undefined}>
           <div className="pointer-events-auto mx-auto max-w-[880px]">
-	            <DurableRunTabs workspaceId={selectedWorkspaceId || undefined} onOpen={(runId, _threadId, title) => void openRunPanel(runId, title)} onStop={(runId) => runEngine.stop(runId)} />
+	            <DurableRunTabs workspaceId={selectedWorkspaceId || undefined} onOpen={(_runId, threadId, title) => { setActiveRunPanelId(null); setLiveThread({ id: threadId, title }); }} onStop={(runId) => runEngine.stop(runId)} />
 	            {multiSelectMode ? <SelectionActionBar count={selectedContextIds.size} onClear={clearSelection} onExit={() => { setMultiSelectMode(false); if (selectedContextIds.size === 0) setFocusModeOverride(null); }} onAddToContext={() => { commitSelection(); setFocusModeOverride("selection"); setMultiSelectMode(false); toast.success(`${selectedContextIds.size} object${selectedContextIds.size === 1 ? "" : "s"} added to context.`); }} onTile={openSelectedArtifactsInTiles} /> : null}
 	            <ResultCardStack cards={runEngine.cards} className="mb-1.5 ml-[52px]" activeThreadId={composerThread?.id} activeRunId={composerThread?.runId} onContinue={(thread) => setComposerThread(thread ? { id: thread.threadId, title: thread.title, runId: thread.runId } : null)} onOpen={(card) => void openRunPanel(card.runId, card.summary ?? card.title)} onAction={(card, action, targetId) => { if (action === "hide" && activeRunPanelId === card.runId) setActiveRunPanelId(null); void runEngine.onCardAction(card, action, targetId); }} />
             <CommandBar
@@ -920,6 +923,7 @@ export function ArtifactsShell() {
             />
           </div>
         </div>
+	        {liveThread ? <LiveThreadPanel threadId={liveThread.id} title={liveThread.title} width={liveThreadPanelWidth} onWidthChange={setLiveThreadPanelWidth} onClose={() => setLiveThread(null)} onOpenArtifact={(artifactId) => { const artifact = allArtifacts.find((item) => item._id === artifactId); if (artifact) studio.openSplit(artifact); }} onOpenWorkspace={(workspaceId) => setSelectedWorkspaceId(workspaceId)} /> : null}
 	        {activeRunPanelId ? (
 	          <RunDetailPanel
 	            runId={activeRunPanelId}

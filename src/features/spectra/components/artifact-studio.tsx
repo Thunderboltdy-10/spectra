@@ -26,7 +26,6 @@ import {
   MessageSquare,
   MessageSquarePlus,
   Minus,
-  MoreHorizontal,
   Plus,
   Radio,
   RotateCcw,
@@ -44,6 +43,7 @@ import type { JSONContent } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
 import Underline from "@tiptap/extension-underline";
+import TiptapLink from "@tiptap/extension-link";
 import { Table } from "@tiptap/extension-table";
 import { TableRow } from "@tiptap/extension-table-row";
 import { TableCell } from "@tiptap/extension-table-cell";
@@ -853,8 +853,8 @@ function ArtifactStudioEditor({
     : "min-h-0 flex-1 overflow-y-auto px-5 pb-5 pt-5";
 
   return (
-    <div className="relative flex h-full min-h-0 flex-col">
-      <header className="shrink-0 border-b border-[var(--border-default)] bg-[var(--bg-primary)] px-5 py-4">
+    <div className="spectra-artifact-studio relative flex h-full min-h-0 flex-col">
+      <header className="spectra-artifact-header shrink-0 border-b border-[var(--border-default)] bg-[var(--bg-primary)] px-5 py-4">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0 flex-1">
             <div className={`${mode === "split" ? "hidden" : "mb-3 flex"} items-center gap-2 text-[12px] text-[var(--text-secondary)]`}>
@@ -918,7 +918,7 @@ function ArtifactStudioEditor({
           </div>
         </div>
       ) : null}
-      <main className={mainClass}>
+      <main className={`spectra-artifact-main ${mainClass}`}>
         <div className={editorLayoutClass}>
           <section className="min-w-0">
             {artifact.blueprintKey === "document" ? <DocumentStudio key={`${artifact._id}:document`} title={title} content={content} onChange={changeContent} /> : null}
@@ -948,6 +948,7 @@ function DocumentStudio({ title, content, onChange }: { title: string; content: 
     extensions: [
       StarterKit.configure({ heading: { levels: [1, 2, 3] } }),
       Underline,
+      TiptapLink.configure({ openOnClick: false, autolink: true }),
       Table.configure({ resizable: true, lastColumnResizable: true }),
       TableRow,
       TableCell,
@@ -982,7 +983,7 @@ function DocumentStudio({ title, content, onChange }: { title: string; content: 
   const equationAttrs = equationActive ? editor?.getAttributes("equation") ?? {} : {};
 
   return (
-    <div className="bg-[var(--bg-primary)]">
+    <div className="spectra-document-studio bg-[var(--bg-primary)]">
       <div className="flex min-h-11 flex-wrap items-center gap-1 border-b border-[var(--border-default)] px-3 py-2">
         <ToolbarButton label="Heading 1" onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()} active={editor?.isActive("heading", { level: 1 })} icon={FileText} />
         <ToolbarButton label="Heading 2" onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).run()} active={editor?.isActive("heading", { level: 2 })} icon={BookOpen} />
@@ -994,8 +995,8 @@ function DocumentStudio({ title, content, onChange }: { title: string; content: 
         <ToolbarButton label="Bullet list" onClick={() => editor?.chain().focus().toggleBulletList().run()} active={editor?.isActive("bulletList")} icon={List} />
         <ToolbarButton label="Quote" onClick={() => editor?.chain().focus().toggleBlockquote().run()} active={editor?.isActive("blockquote")} icon={MessageSquare} />
         <ToolbarButton label="Insert equation" onClick={() => editor?.chain().focus().insertContent({ type: "equation", attrs: { latex: "", display: "block", alignment: "center" } }).run()} active={equationActive} icon={Sigma} />
-        <ToolbarButton label="Link" disabled icon={Link2} />
-        <ToolbarButton label="More" disabled icon={MoreHorizontal} />
+        <ToolbarButton label="Link" icon={Link2} onClick={() => { const href = window.prompt("Link URL"); if (href) editor?.chain().focus().extendMarkRange("link").setLink({ href }).run(); }} />
+        <ToolbarButton label="Insert callout" icon={Sparkles} onClick={() => editor?.chain().focus().insertContent({ type: "callout", attrs: { tone: "info" }, content: [{ type: "paragraph", content: [{ type: "text", text: "Key idea" }] }] }).run()} />
       </div>
       {equationActive ? <div className="flex flex-wrap items-center gap-2 border-b border-[color-mix(in_oklab,var(--accent-cyan)_18%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_4%,var(--bg-elevated))] px-4 py-2" data-equation-toolbar="true"><Sigma className="h-4 w-4 text-[var(--accent-cyan)]" /><span className="text-[11px] font-semibold text-[var(--text-secondary)]">LaTeX</span><input value={typeof equationAttrs.latex === "string" ? equationAttrs.latex : ""} onChange={(event) => editor?.chain().focus().updateAttributes("equation", { latex: event.target.value }).run()} className="h-8 min-w-[220px] flex-1 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 font-mono text-[12px] text-[var(--text-primary)] outline-none" placeholder="E = mc^2" /><ToolbarButton label="Align left" icon={AlignLeft} active={equationAttrs.alignment === "left"} onClick={() => editor?.chain().focus().updateAttributes("equation", { alignment: "left" }).run()} /><ToolbarButton label="Align center" icon={AlignCenter} active={!equationAttrs.alignment || equationAttrs.alignment === "center"} onClick={() => editor?.chain().focus().updateAttributes("equation", { alignment: "center" }).run()} /><ToolbarButton label="Align right" icon={AlignRight} active={equationAttrs.alignment === "right"} onClick={() => editor?.chain().focus().updateAttributes("equation", { alignment: "right" }).run()} /></div> : null}
       <div className="min-h-[680px] px-2 py-4 sm:px-6">
@@ -1032,7 +1033,7 @@ function FlashcardStudio({ mode, content, onChange }: { mode: "split" | "tab"; c
   }
 
   return (
-    <div className={`grid min-h-[720px] gap-4 ${mode === "tab" ? "lg:grid-cols-[300px_minmax(0,1fr)]" : "grid-cols-1"}`}>
+    <div className={`spectra-flashcard-studio grid min-h-[720px] gap-4 ${mode === "tab" ? "lg:grid-cols-[300px_minmax(0,1fr)]" : "grid-cols-1"}`}>
       <aside className="rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)]">
         <div className="flex items-center justify-between border-b border-[var(--border-default)] px-3 py-3">
           <div>
@@ -1125,14 +1126,21 @@ function FlashcardStudio({ mode, content, onChange }: { mode: "split" | "tab"; c
 function QuizStudio({ mode, content, onChange }: { mode: "split" | "tab"; content: unknown; onChange: (content: unknown) => void }) {
   const [questions, setQuestions] = useState(() => quizQuestions(content));
   const [activeQuestionId, setActiveQuestionId] = useState(questions[0]?.id ?? "");
-  const [view, setView] = useState<"builder" | "preview">("builder");
+  const [view, setView] = useState<"builder" | "settings" | "preview" | "responses">("builder");
+  const [quizSettings, setQuizSettings] = useState(() => ({ showAnswersImmediately: record(record(content).settings).showAnswersImmediately !== false, timed: record(record(content).settings).timed === true, shuffleQuestions: record(record(content).settings).shuffleQuestions === true, passingScore: typeof record(record(content).settings).passingScore === "number" ? Number(record(record(content).settings).passingScore) : 70 }));
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [submitted, setSubmitted] = useState(false);
   const activeQuestion = questions.find((question) => question.id === activeQuestionId) ?? questions[0];
 
   function commit(next: QuizQuestion[]) {
     setQuestions(next);
-    onChange({ ...record(content), questions: next, settings: record(content).settings ?? { showAnswersImmediately: true, timed: false } });
+    onChange({ ...record(content), questions: next, settings: quizSettings });
+  }
+
+  function commitSettings(patch: Partial<typeof quizSettings>) {
+    const next = { ...quizSettings, ...patch };
+    setQuizSettings(next);
+    onChange({ ...record(content), questions, settings: next });
   }
 
   function updateQuestion(questionId: string, patch: Partial<QuizQuestion>) {
@@ -1146,11 +1154,13 @@ function QuizStudio({ mode, content, onChange }: { mode: "split" | "tab"; conten
   }
 
   return (
-    <div className="rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)]">
+    <div className="spectra-quiz-studio rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)]">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border-default)] px-4 py-3">
         <div className="flex items-center gap-3">
           <button type="button" className={tabButtonClass(view === "builder")} onClick={() => setView("builder")}>Builder</button>
+          <button type="button" className={tabButtonClass(view === "settings")} onClick={() => setView("settings")}>Settings</button>
           <button type="button" className={tabButtonClass(view === "preview")} onClick={() => setView("preview")}>Preview</button>
+          <button type="button" className={tabButtonClass(view === "responses")} onClick={() => setView("responses")}>Responses</button>
         </div>
         <div className="flex items-center gap-2">
           <button type="button" className={smallActionClass()} onClick={addQuestion}><Plus className="h-3.5 w-3.5" />Add question</button>
@@ -1175,6 +1185,15 @@ function QuizStudio({ mode, content, onChange }: { mode: "split" | "tab"; conten
             <div className="flex justify-end gap-2 pt-3">{submitted ? <button type="button" className={smallActionClass()} onClick={() => { setSubmitted(false); setAnswers({}); }}>Try again</button> : <button type="button" className="h-9 rounded-[8px] bg-[var(--text-primary)] px-3 text-[12px] font-medium text-[var(--bg-primary)]" onClick={() => setSubmitted(true)}>Submit answers</button>}</div>
           </div>
         </div>
+      ) : view === "settings" ? (
+        <div className="mx-auto grid max-w-[900px] gap-4 p-6 md:grid-cols-2">
+          <button type="button" onClick={() => commitSettings({ showAnswersImmediately: !quizSettings.showAnswersImmediately })} className="flex items-center justify-between rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-4 text-left"><span><span className="block text-[13px] font-semibold text-[var(--text-primary)]">Immediate answer feedback</span><span className="mt-1 block text-[11px] text-[var(--text-secondary)]">Reveal the correct answer and explanation after each response.</span></span><CheckCircle2 className={`h-5 w-5 ${quizSettings.showAnswersImmediately ? "text-[var(--success)]" : "text-[var(--text-tertiary)]"}`} /></button>
+          <button type="button" onClick={() => commitSettings({ timed: !quizSettings.timed })} className="flex items-center justify-between rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-4 text-left"><span><span className="block text-[13px] font-semibold text-[var(--text-primary)]">Timed quiz</span><span className="mt-1 block text-[11px] text-[var(--text-secondary)]">Use each question&apos;s configured time limit.</span></span><CheckCircle2 className={`h-5 w-5 ${quizSettings.timed ? "text-[var(--success)]" : "text-[var(--text-tertiary)]"}`} /></button>
+          <button type="button" onClick={() => commitSettings({ shuffleQuestions: !quizSettings.shuffleQuestions })} className="flex items-center justify-between rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-4 text-left"><span><span className="block text-[13px] font-semibold text-[var(--text-primary)]">Shuffle questions</span><span className="mt-1 block text-[11px] text-[var(--text-secondary)]">Present a different order on each attempt.</span></span><CheckCircle2 className={`h-5 w-5 ${quizSettings.shuffleQuestions ? "text-[var(--success)]" : "text-[var(--text-tertiary)]"}`} /></button>
+          <Field label="Passing score"><div className="rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-4"><input type="range" min={0} max={100} value={quizSettings.passingScore} onChange={(event) => commitSettings({ passingScore: Number(event.target.value) })} className="w-full accent-[var(--accent-cyan)]" /><div className="mt-2 text-right font-display text-[20px] font-semibold text-[var(--text-primary)]">{quizSettings.passingScore}%</div></div></Field>
+        </div>
+      ) : view === "responses" ? (
+        <div className="mx-auto max-w-[760px] p-6"><div data-spectra-card="result" className="p-6 text-center"><CheckCircle2 className="mx-auto h-7 w-7 text-[var(--success)]" /><h3 className="mt-3 font-display text-[22px] font-semibold text-[var(--text-primary)]">No submitted responses yet</h3><p className="mx-auto mt-2 max-w-[440px] text-[12px] leading-5 text-[var(--text-secondary)]">Attempts will appear here with score, completion time, and per-question review. Use Preview to test the quiz without creating a response.</p><button type="button" onClick={() => setView("preview")} className="mt-4 rounded-[8px] bg-[var(--text-primary)] px-3 py-2 text-[11px] font-medium text-[var(--bg-primary)]">Open preview</button></div></div>
       ) : (
         <div className={`grid min-h-[680px] ${mode === "tab" ? "lg:grid-cols-[310px_minmax(0,1fr)_220px]" : "grid-cols-1"}`}>
           <aside className={`${mode === "tab" ? "border-r" : "border-b"} border-[var(--border-default)] p-3`}>
@@ -1229,10 +1248,11 @@ function QuizStudio({ mode, content, onChange }: { mode: "split" | "tab"; conten
                 <Field label="Time">
                   <input type="number" value={activeQuestion.timeLimitSeconds ?? 90} min={0} onChange={(event) => updateQuestion(activeQuestion.id, { timeLimitSeconds: Number(event.target.value) })} className={inputClass()} />
                 </Field>
-                <div className="rounded-[8px] border border-dashed border-[var(--border-default)] p-4 text-center text-[12px] text-[var(--text-secondary)]">
+                <label className="block cursor-pointer rounded-[8px] border border-dashed border-[var(--border-default)] p-4 text-center text-[12px] text-[var(--text-secondary)] transition hover:border-[color-mix(in_oklab,var(--accent-cyan)_42%,var(--border-default))] hover:bg-[var(--bg-hover)]">
                   <ImageIcon className="mx-auto mb-2 h-4 w-4" />
-                  Media upload is deferred.
-                </div>
+                  Add media reference
+                  <input type="file" accept="image/*" hidden onChange={(event) => { const file = event.currentTarget.files?.[0]; if (file) updateQuestion(activeQuestion.id, { sourceRefs: Array.from(new Set([...(activeQuestion.sourceRefs ?? []), `Media: ${file.name}`])) }); event.currentTarget.value = ""; }} />
+                </label>
               </div>
             ) : null}
           </aside>
@@ -1280,7 +1300,7 @@ function PlannerStudio({
     .filter((item): item is SpectraArtifact => Boolean(item));
 
   return (
-    <div className={`grid gap-5 ${mode === "tab" ? "lg:grid-cols-[minmax(0,1fr)_280px]" : "grid-cols-1"}`}>
+    <div className={`spectra-planner-studio grid gap-5 ${mode === "tab" ? "lg:grid-cols-[minmax(0,1fr)_280px]" : "grid-cols-1"}`}>
       <section className="rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
         <div className="mb-5 flex items-center gap-3">
           <CalendarCheck2 className="h-8 w-8 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-1.5 text-[#d88922]" />
@@ -1487,7 +1507,7 @@ function AttachmentEditor({ task, commit }: { task: PlannerTask; commit: (task: 
     <section className="mt-5">
       <div className="mb-2 flex items-center justify-between">
         <h4 className="text-[12px] font-semibold text-[var(--text-secondary)]">Attachments</h4>
-        <button type="button" className={smallActionClass()} onClick={() => commit({ ...task, attachments: [...task.attachments, { id: id("attachment"), name: "", meta: "" }] })}><Plus className="h-3.5 w-3.5" />Add</button>
+        <label className={`${smallActionClass()} cursor-pointer`}><Plus className="h-3.5 w-3.5" />Attach<input type="file" multiple hidden onChange={(event) => { const files = Array.from(event.currentTarget.files ?? []); if (files.length) commit({ ...task, attachments: [...task.attachments, ...files.map((file) => ({ id: id("attachment"), name: file.name, meta: `${Math.max(1, Math.round(file.size / 1024))} KB · ${file.type || "file"}` }))] }); event.currentTarget.value = ""; }} /></label>
       </div>
       <div className="space-y-2">
         {task.attachments.map((attachment) => (
@@ -1497,7 +1517,7 @@ function AttachmentEditor({ task, commit }: { task: PlannerTask; commit: (task: 
             <button type="button" className={iconButtonClass()} onClick={() => commit({ ...task, attachments: task.attachments.filter((item) => item.id !== attachment.id) })} aria-label="Remove attachment"><Trash2 className="h-4 w-4" /></button>
           </div>
         ))}
-        {task.attachments.length === 0 ? <div className="rounded-[8px] border border-dashed border-[var(--border-default)] px-4 py-4 text-center text-[12px] text-[var(--text-secondary)]">Attach files later, or add a reference now.</div> : null}
+        {task.attachments.length === 0 ? <label className="block cursor-pointer rounded-[8px] border border-dashed border-[var(--border-default)] px-4 py-5 text-center text-[12px] text-[var(--text-secondary)] transition hover:border-[color-mix(in_oklab,#d88922_45%,var(--border-default))] hover:bg-[var(--bg-hover)]">Drop files here or click to attach<input type="file" multiple hidden onChange={(event) => { const files = Array.from(event.currentTarget.files ?? []); if (files.length) commit({ ...task, attachments: files.map((file) => ({ id: id("attachment"), name: file.name, meta: `${Math.max(1, Math.round(file.size / 1024))} KB · ${file.type || "file"}` })) }); event.currentTarget.value = ""; }} /></label> : null}
       </div>
     </section>
   );
@@ -1560,7 +1580,7 @@ function StudioDetails({ artifact, artifacts, tagDraft, onTagDraftChange }: { ar
     setDurableLinks(result.links);
   }
   return (
-    <aside className="space-y-4">
+    <aside className="spectra-studio-details space-y-4">
       <SideCard title="Details">
         <div className="flex items-center gap-2 text-[13px] font-semibold text-[var(--text-primary)]">
           <Icon className="h-4 w-4" style={{ color: meta.color }} />

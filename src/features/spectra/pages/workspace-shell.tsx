@@ -45,6 +45,7 @@ import { ContextFocusControl, GlobalSearch, SelectionActionBar, showContinuation
 import { ResultCardStack } from "../components/result-card";
 import { DurableRunTabs } from "../components/durable-run-tabs";
 import { RunDetailPanel } from "../components/run-detail-panel";
+import { LiveThreadPanel } from "../components/live-thread-panel";
 import { ObjectLibrary, type LibraryMode } from "../components/object-library";
 import { parseWorkspaceHubTabs } from "../components/workspace-tab-state";
 import {
@@ -1001,6 +1002,7 @@ export function WorkspaceShell() {
   const [multiSelectMode, setMultiSelectMode] = useState(false);
   const [focusModeOverride, setFocusModeOverride] = useState<ComposerFocusMode | null>(null);
   const [activeRunPanelId, setActiveRunPanelId] = useState<string | null>(null);
+  const [liveThread, setLiveThread] = useState<{ id: string; title: string } | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [workspaceSort, setWorkspaceSort] = useState<WorkspaceSort>("updated");
   const [workspaceType, setWorkspaceType] = useState<"all" | SpectraBlueprintKey>("all");
@@ -1020,6 +1022,7 @@ export function WorkspaceShell() {
   const [hubTabsRestored, setHubTabsRestored] = useState(false);
   const [studioPanelWidth, setStudioPanelWidth] = useState(720);
   const [threadPanelWidth, setThreadPanelWidth] = useState(560);
+  const [liveThreadPanelWidth, setLiveThreadPanelWidth] = useState(560);
   const [threadPanelArtifactId, setThreadPanelArtifactId] = useState<string | null>(null);
   const [tileArtifactIds, setTileArtifactIds] = useState<string[]>([]);
   const [workSetIsolated, setWorkSetIsolated] = useState(false);
@@ -1632,7 +1635,7 @@ export function WorkspaceShell() {
   }
 
   return (
-    <div className="relative flex h-full min-h-0 bg-[var(--bg-primary)]">
+    <div className="spectra-wave-y relative flex h-full min-h-0 bg-[var(--bg-primary)]">
       <WorkspaceRail
         workspaces={workspaces}
         selectedWorkspaceId={selectedWorkspaceId}
@@ -1914,7 +1917,7 @@ export function WorkspaceShell() {
           {threadPanelArtifact ? <ArtifactStudio mode="split" artifact={threadPanelArtifact} artifacts={allArtifacts} tabs={[]} dirtyIds={new Set()} panelWidth={threadPanelWidth} sourceLabel={workspace?.title ?? "Workspace"} onPanelWidthChange={setThreadPanelWidth} onClose={() => setThreadPanelArtifactId(null)} onExpand={openArtifactPanel} onActivateTab={() => undefined} onCloseTab={() => setThreadPanelArtifactId(null)} onSave={updateArtifact} onRevert={revertArtifactVersion} onArchive={archiveArtifact} onDirtyChange={() => undefined} onContinueThread={(threadId, title) => toggleContinuedThread(threadId, title)} continuedThreadId={composerThread?.id} /> : null}
           <div className="pointer-events-none absolute inset-x-0 bottom-0 z-50 bg-[linear-gradient(to_top,var(--bg-primary)_72%,transparent)] px-2 pb-3 pt-12 sm:px-5 sm:pb-5 lg:px-8">
             <div className="pointer-events-auto mx-auto max-w-[880px]">
-              <DurableRunTabs workspaceId={selectedWorkspaceId} onOpen={(runId, _threadId, title) => void openRunPanel(runId, title)} onStop={(runId) => runEngine.stop(runId)} />
+              <DurableRunTabs workspaceId={selectedWorkspaceId} onOpen={(_runId, threadId, title) => { setActiveRunPanelId(null); setThreadPanelArtifactId(null); setLiveThread({ id: threadId, title }); }} onStop={(runId) => runEngine.stop(runId)} />
 	              {multiSelectMode ? <SelectionActionBar count={selectionCount} onClear={clearSelection} onExit={() => { setMultiSelectMode(false); if (selectionCount === 0) setFocusModeOverride(null); }} onAddToContext={() => { const count = selectionCount; commitSelection(); setFocusModeOverride("selection"); setMultiSelectMode(false); toast.success(`${count} object${count === 1 ? "" : "s"} added to context.`); }} onTile={selectedContextIds.size ? openSelectedArtifactsInTiles : undefined} /> : null}
 	              <ResultCardStack cards={runEngine.cards} className="mb-1.5 ml-[52px]" activeThreadId={composerThread?.id} activeRunId={composerThread?.runId} onContinue={(thread) => setComposerThread(thread ? { id: thread.threadId, title: thread.title, runId: thread.runId } : null)} onOpen={(card) => { setThreadPanelArtifactId(null); void openRunPanel(card.runId, card.summary ?? card.title); }} onAction={(card, action, targetId) => { if (action === "hide" && activeRunPanelId === card.runId) setActiveRunPanelId(null); void runEngine.onCardAction(card, action, targetId); }} />
               <div className="flex items-center gap-1"><CommandBar
@@ -1952,6 +1955,7 @@ export function WorkspaceShell() {
               /></div>
             </div>
           </div>
+	          {liveThread ? <LiveThreadPanel threadId={liveThread.id} title={liveThread.title} width={liveThreadPanelWidth} onWidthChange={setLiveThreadPanelWidth} onClose={() => setLiveThread(null)} onOpenArtifact={(artifactId) => { const artifact = allArtifacts.find((item) => item._id === artifactId); if (artifact) openArtifactPanel(artifact); }} onOpenWorkspace={goToWorkspaceHub} /> : null}
 	          {activeRunPanelId ? (
 	            <RunDetailPanel
 	              runId={activeRunPanelId}

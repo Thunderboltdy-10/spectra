@@ -53,11 +53,5 @@ crons.interval(
   internal.models.evaluateChallengerLane,
   {},
 );
-crons.interval(
-  "regenerate-workspace-ghosts",
-  { hours: 6 },
-  internal.ghosts.runScheduledRegenerationSweep,
-  {},
-);
 crons.interval("reconcile-stale-spectra-runs", { minutes: 2 }, internal.spectraRuns.reconcileStaleRuns, {});
 export default crons;

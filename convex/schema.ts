@@ -261,352 +261,9 @@ export default defineSchema({
     .index("by_agent_model", ["agentId", "modelId"]),
 
   
-  workspaceItems: defineTable({
-    orgId: v.id("orgs"),
-    ownerUserId: v.id("users"),
-    workstreamId: v.optional(v.id("workstreams")),
-    type: v.union(
-      v.literal("thread"),
-      v.literal("document"),
-      v.literal("planner"),
-      v.literal("board"),
-      v.literal("visualization"),
-      v.literal("media"),
-      v.literal("reference"),
-      v.literal("custom"),
-      v.literal("utility")
-    ),
-    itemType: v.optional(v.union(
-      v.literal("thread"),
-      v.literal("artifact"),
-      v.literal("planner"),
-      v.literal("utility"),
-      v.literal("custom"),
-    )),
-    sourceKind: v.optional(v.union(
-      v.literal("chat"),
-      v.literal("artifact"),
-      v.literal("plannerItem"),
-      v.literal("utility"),
-      v.literal("custom"),
-    )),
-    sourceId: v.optional(v.string()),
-    renderMode: v.optional(v.string()),
-    sourceChatId: v.optional(v.id("chats")),
-    sourceArtifactId: v.optional(v.id("artifacts")),
-    sourcePlannerItemId: v.optional(v.id("plannerItems")),
-    title: v.string(),
-    contentSummary: v.optional(v.string()),
-    x: v.number(),
-    y: v.number(),
-    width: v.optional(v.number()),
-    height: v.optional(v.number()),
-    zIndex: v.optional(v.number()),
-    category: v.optional(v.union(
-      v.literal("threads"),
-      v.literal("documents"),
-      v.literal("planner"),
-      v.literal("boards"),
-      v.literal("visualizations"),
-      v.literal("media"),
-      v.literal("references"),
-      v.literal("custom"),
-    )),
-    status: v.union(v.literal("active"), v.literal("archived")),
-    pinned: v.optional(v.boolean()),
-    collapsed: v.optional(v.boolean()),
-    hidden: v.optional(v.boolean()),
-    visualGroup: v.optional(v.string()),
-    renderProps: v.optional(v.any()),
-    provenanceSource: v.optional(v.union(
-      v.literal("user"),
-      v.literal("ai"),
-      v.literal("system"),
-    )),
-    provenanceAction: v.optional(v.string()),
-    topicCluster: v.optional(v.string()),
-    clusterOverride: v.optional(v.string()),
-    searchText: v.optional(v.string()),
-    createdAt: v.number(),
-    updatedAt: v.number(),
-  })
-    .index("by_workstream", ["workstreamId"])
-    .index("by_owner", ["ownerUserId"])
-    .index("by_source_artifact", ["sourceArtifactId"])
-    .index("by_source_chat", ["sourceChatId"])
-    .index("by_source_planner", ["sourcePlannerItemId"])
-    .searchIndex("search_text", {
-      searchField: "searchText",
-      filterFields: ["ownerUserId", "orgId", "workstreamId", "status", "itemType"],
-    }),
-
-  workspaceTopicClusters: defineTable({
-    orgId: v.id("orgs"),
-    ownerUserId: v.id("users"),
-    workstreamId: v.id("workstreams"),
-    clusterId: v.string(),
-    generatedTitle: v.string(),
-    userTitle: v.optional(v.string()),
-    lastAppliedAt: v.optional(v.number()),
-    createdAt: v.number(),
-    updatedAt: v.number(),
-  })
-    .index("by_workstream", ["workstreamId"])
-    .index("by_workstream_cluster", ["workstreamId", "clusterId"]),
-
-  ghostSuggestions: defineTable({
-    orgId: v.id("orgs"),
-    ownerUserId: v.id("users"),
-    workstreamId: v.id("workstreams"),
-    linkedAgentId: v.optional(v.id("agents")),
-    sourceWorkspaceMutationId: v.optional(v.id("workspaceMutations")),
-    status: v.union(
-      v.literal("pending"),
-      v.literal("accepted"),
-      v.literal("dismissed"),
-      v.literal("expired"),
-    ),
-    suggestionKind: v.union(
-      v.literal("note"),
-      v.literal("planner"),
-      v.literal("quiz"),
-      v.literal("flashcard_deck"),
-      v.literal("visualization"),
-      v.literal("code_project"),
-    ),
-    confidenceTier: v.union(
-      v.literal("high"),
-      v.literal("medium"),
-      v.literal("low"),
-    ),
-    confidenceScore: v.number(),
-    title: v.string(),
-    summary: v.optional(v.string()),
-    content: v.optional(v.string()),
-    renderMode: v.optional(v.string()),
-    category: v.optional(v.string()),
-    x: v.optional(v.number()),
-    y: v.optional(v.number()),
-    similarityKey: v.string(),
-    contextHash: v.string(),
-    contextSignals: v.array(v.string()),
-    resourceContext: v.optional(v.string()),
-    generationModel: v.string(),
-    modelLane: v.string(),
-    generationReason: v.string(),
-    unseenSessions: v.number(),
-    lastSeenSessionKey: v.optional(v.string()),
-    acceptedArtifactId: v.optional(v.id("artifacts")),
-    acceptedWorkspaceItemId: v.optional(v.id("workspaceItems")),
-    dismissedAt: v.optional(v.number()),
-    acceptedAt: v.optional(v.number()),
-    expiredAt: v.optional(v.number()),
-    createdAt: v.number(),
-    updatedAt: v.number(),
-  })
-    .index("by_owner_workstream_status", ["ownerUserId", "workstreamId", "status"])
-    .index("by_workstream_status", ["workstreamId", "status"])
-    .index("by_similarity", ["ownerUserId", "similarityKey"])
-    .index("by_status_updated", ["status", "updatedAt"]),
-
-  ghostRegenerationState: defineTable({
-    orgId: v.id("orgs"),
-    ownerUserId: v.id("users"),
-    workstreamId: v.id("workstreams"),
-    status: v.union(v.literal("scheduled"), v.literal("running"), v.literal("idle")),
-    scheduledAt: v.optional(v.number()),
-    startedAt: v.optional(v.number()),
-    completedAt: v.optional(v.number()),
-    contextHash: v.optional(v.string()),
-    trigger: v.optional(v.string()),
-    updatedAt: v.number(),
-  })
-    .index("by_workstream", ["workstreamId"])
-    .index("by_owner_workstream", ["ownerUserId", "workstreamId"])
-    .index("by_status_updated", ["status", "updatedAt"]),
-
-  workspaceMutations: defineTable({
-    orgId: v.id("orgs"),
-    ownerUserId: v.id("users"),
-    workstreamId: v.optional(v.id("workstreams")),
-    targetWorkstreamId: v.optional(v.id("workstreams")),
-    mutationType: v.string(),
-    source: v.union(v.literal("user"), v.literal("ai"), v.literal("system")),
-    summary: v.optional(v.string()),
-    targetItemIds: v.optional(v.array(v.id("workspaceItems"))),
-    affectedWorkstreamIds: v.optional(v.array(v.id("workstreams"))),
-    revisionKey: v.optional(v.string()),
-    before: v.optional(v.any()),
-    after: v.optional(v.any()),
-    revertData: v.optional(v.any()),
-    status: v.union(v.literal("applied"), v.literal("reverted")),
-    createdAt: v.number(),
-    updatedAt: v.number(),
-    revertedAt: v.optional(v.number()),
-  })
-    .index("by_owner", ["ownerUserId"])
-    .index("by_workstream", ["workstreamId"])
-    .index("by_target_workstream", ["targetWorkstreamId"]),
-
-  workspaceCommandResults: defineTable({
-    orgId: v.id("orgs"),
-    ownerUserId: v.id("users"),
-    workstreamId: v.id("workstreams"),
-    sourceChatId: v.optional(v.id("chats")),
-    sourceMessageId: v.optional(v.id("messages")),
-    intent: v.union(
-      v.literal("note"),
-      v.literal("planner"),
-      v.literal("thread"),
-      v.literal("result"),
-      v.literal("widget"),
-    ),
-    status: v.union(v.literal("processing"), v.literal("completed"), v.literal("dismissed")),
-    title: v.string(),
-    summary: v.string(),
-    detail: v.optional(v.string()),
-    variant: v.optional(v.union(
-      v.literal("summary"),
-      v.literal("answer"),
-      v.literal("artifact"),
-      v.literal("planner"),
-      v.literal("thread"),
-    )),
-    targetKind: v.optional(v.union(
-      v.literal("artifact"),
-      v.literal("plannerItem"),
-      v.literal("chat"),
-      v.literal("workspaceItem"),
-      v.literal("result"),
-    )),
-    targetId: v.optional(v.string()),
-    topicCluster: v.optional(v.string()),
-    timelineAt: v.optional(v.number()),
-    signalStrength: v.optional(v.number()),
-    threadStatus: v.optional(v.union(
-      v.literal("open"),
-      v.literal("resolved"),
-      v.literal("blocked"),
-    )),
-    metadata: v.optional(v.any()),
-    createdAt: v.number(),
-    updatedAt: v.number(),
-    dismissedAt: v.optional(v.number()),
-  })
-    .index("by_workstream_status", ["workstreamId", "status"])
-    .index("by_workstream_updated", ["workstreamId", "updatedAt"])
-    .index("by_chat", ["sourceChatId"]),
-
-  workspaceWidgets: defineTable({
-    orgId: v.id("orgs"),
-    ownerUserId: v.id("users"),
-    workstreamId: v.optional(v.id("workstreams")),
-    kind: v.string(),
-    title: v.string(),
-    x: v.number(),
-    y: v.number(),
-    w: v.number(),
-    h: v.number(),
-    collapsed: v.optional(v.boolean()),
-    hidden: v.optional(v.boolean()),
-    state: v.optional(v.any()),
-    source: v.optional(v.union(v.literal("user"), v.literal("ai"), v.literal("system"))),
-    createdAt: v.number(),
-    updatedAt: v.number(),
-  })
-    .index("by_owner_updated", ["ownerUserId", "updatedAt"])
-    .index("by_workstream_updated", ["workstreamId", "updatedAt"]),
-
-  workstreams: defineTable({
-    ownerUserId: v.id("users"),
-    orgId: v.id("orgs"),
-    type: v.union(v.literal("subject"), v.literal("project"), v.literal("general")),
-    title: v.string(),
-    description: v.optional(v.string()),
-    emoji: v.optional(v.string()),
-    color: v.optional(v.string()),
-    status: v.union(v.literal("active"), v.literal("completed"), v.literal("archived")),
-    canvasX: v.optional(v.number()),
-    canvasY: v.optional(v.number()),
-    canvasWidth: v.optional(v.number()),
-    canvasHeight: v.optional(v.number()),
-    subjectCode: v.optional(v.string()),
-    managebacClassId: v.optional(v.string()),
-    managebacContext: v.optional(v.any()),
-    managebacInactiveSince: v.optional(v.number()),
-    linkedAgentId: v.optional(v.id("agents")),
-    linkedPackId: v.optional(v.id("packs")),
-    defaultMode: v.optional(vStudyMode),
-    defaultThinking: v.optional(vThinkingLevel),
-    artifactCount: v.optional(v.number()),
-    threadCount: v.optional(v.number()),
-    lastActivityAt: v.optional(v.number()),
-    workspaceRevision: v.optional(v.number()),
-    workspaceRevisionKey: v.optional(v.string()),
-    lastWorkspaceMutationId: v.optional(v.id("workspaceMutations")),
-    completedAt: v.optional(v.number()),
-    createdAt: v.number(),
-    updatedAt: v.number(),
-  })
-    .index("by_owner", ["ownerUserId"])
-    .index("by_owner_status", ["ownerUserId", "status"])
-    .index("by_owner_updated", ["ownerUserId", "updatedAt"])
-    .index("by_owner_status_updated", ["ownerUserId", "status", "updatedAt"])
-    .index("by_org", ["orgId"])
-    .searchIndex("search_title", {
-      searchField: "title",
-      filterFields: ["ownerUserId", "orgId", "status", "type"],
-    }),
-
-  workstreamMemory: defineTable({
-    workstreamId: v.id("workstreams"),
-    ownerUserId: v.id("users"),
-    orgId: v.id("orgs"),
-    key: v.string(),
-    text: v.string(),
-    textHash: v.optional(v.string()),
-    embedding: v.array(v.float64()),
-    category: v.union(
-      v.literal("concept"),
-      v.literal("progress"),
-      v.literal("preference"),
-      v.literal("deadline"),
-      v.literal("correction"),
-      v.literal("resource_link"),
-    ),
-    confidence: v.number(),
-    freshness: v.number(),
-    sourceType: v.union(
-      v.literal("chat_extraction"),
-      v.literal("artifact_link"),
-      v.literal("user_explicit"),
-      v.literal("managebac_sync"),
-      v.literal("agent_inference"),
-    ),
-    sourceChatId: v.optional(v.id("chats")),
-    sourceMessageId: v.optional(v.id("messages")),
-    sourceArtifactId: v.optional(v.id("artifacts")),
-    status: v.union(v.literal("active"), v.literal("superseded"), v.literal("dismissed")),
-    supersededBy: v.optional(v.id("workstreamMemory")),
-    archivedAt: v.optional(v.number()),
-    lastDecayedAt: v.optional(v.number()),
-    createdAt: v.number(),
-    updatedAt: v.number(),
-  })
-    .index("by_workstream", ["workstreamId"])
-    .index("by_workstream_category", ["workstreamId", "category"])
-    .index("by_workstream_status", ["workstreamId", "status"])
-    .index("by_source_chat", ["sourceChatId"])
-    .vectorIndex("by_embedding", {
-      vectorField: "embedding",
-      dimensions: EMBEDDING_DIMENSIONS,
-      filterFields: ["workstreamId", "ownerUserId", "orgId", "status", "category"],
-    }),
-
   plannerItems: defineTable({
     ownerUserId: v.id("users"),
     orgId: v.id("orgs"),
-    workstreamId: v.optional(v.id("workstreams")),
     title: v.string(),
     description: v.optional(v.string()),
     type: v.union(v.literal("deadline"), v.literal("milestone"), v.literal("goal"), v.literal("reminder")),
@@ -626,13 +283,11 @@ export default defineSchema({
   })
     .index("by_owner", ["ownerUserId"])
     .index("by_owner_status", ["ownerUserId", "status"])
-    .index("by_workstream", ["workstreamId"])
     .index("by_due", ["dueAt"]),
 
   notes: defineTable({
     ownerUserId: v.id("users"),
     orgId: v.id("orgs"),
-    workstreamId: v.optional(v.id("workstreams")),
     artifactId: v.optional(v.id("artifacts")),
     title: v.string(),
     content: v.any(),
@@ -649,7 +304,6 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_owner_updated", ["ownerUserId", "updatedAt"])
-    .index("by_workstream", ["workstreamId"])
     .index("by_artifact", ["artifactId"])
     .searchIndex("search_content", {
       searchField: "contentPlaintext",
@@ -660,7 +314,6 @@ export default defineSchema({
     orgId: v.id("orgs"),
     packId: v.optional(v.id("packs")),
     agentId: v.optional(v.id("agents")),
-    workstreamId: v.optional(v.id("workstreams")),
     artifactId: v.optional(v.id("artifacts")),
     threadType: v.optional(v.union(v.literal("conversation"), v.literal("artifact_edit"))),
     ownerUserId: v.id("users"),
@@ -688,7 +341,6 @@ export default defineSchema({
     .index("by_owner", ["ownerUserId"])
     .index("by_owner_updated", ["ownerUserId", "updatedAt"])
     .index("by_owner_pack_updated", ["ownerUserId", "packId", "updatedAt"])
-    .index("by_workstream", ["workstreamId"])
     .index("by_artifact", ["artifactId"])
     .index("by_org", ["orgId"]),
 
@@ -768,7 +420,6 @@ export default defineSchema({
   artifacts: defineTable({
     ownerUserId: v.id("users"),
     orgId: v.id("orgs"),
-    workstreamId: v.optional(v.id("workstreams")),
     type: v.string(),
     title: v.string(),
     content: v.any(),
@@ -800,12 +451,11 @@ export default defineSchema({
     .index("by_owner_updated", ["ownerUserId", "updatedAt"])
     .index("by_org", ["orgId"])
     .index("by_type", ["type"])
-    .index("by_workstream", ["workstreamId"])
     .index("by_owner_type", ["ownerUserId", "type"])
     .index("by_legacy_note", ["legacyNoteId"])
     .searchIndex("search_content", {
       searchField: "contentPlaintext",
-      filterFields: ["ownerUserId", "orgId", "type", "status", "workstreamId"],
+      filterFields: ["ownerUserId", "orgId", "type", "status"],
     }),
 
   artifactVersions: defineTable({
@@ -878,9 +528,8 @@ export default defineSchema({
     sourceChatId: v.optional(v.id("chats")),
     sourceMessageId: v.optional(v.id("messages")),
     sourceArtifactId: v.optional(v.id("artifacts")),
-    sourceWorkstreamId: v.optional(v.id("workstreams")),
     freshness: v.optional(v.number()),
-    scope: v.optional(v.union(v.literal("global"), v.literal("workstream"))),
+    scope: v.optional(v.literal("global")),
     archivedAt: v.optional(v.number()),
     lastDecayedAt: v.optional(v.number()),
     relatedArtifacts: v.optional(v.array(v.string())),

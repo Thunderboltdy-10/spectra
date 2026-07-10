@@ -44,7 +44,30 @@ import {
 import { hasClerkPublishableKey } from "@/lib/clerk-config";
 import { getModeConfig } from "@/lib/modes";
 import { cn } from "@/lib/utils";
-import type { Chat, UserSpending } from "@/hooks/use-chat-state";
+import type { StudyMode } from "@/types";
+
+type Chat = {
+  _id: string;
+  title: string;
+  latestUserPrompt?: string;
+  mode: StudyMode;
+  packId?: string;
+  agentId?: string;
+  updatedAt: number;
+};
+
+type UserSpending = {
+  totalSpentEur: number;
+  totalCostCents: number;
+  tier: "normal" | "expensive_blocked" | "cheap_only" | "free_only";
+  softLimitReached: boolean;
+  hardLimitReached: boolean;
+  budgetUsagePercent?: number;
+  activityUsagePercent?: number;
+  tokenUsagePercent?: number;
+  monthlyTokens?: number;
+  monthlyEvents?: number;
+};
 
 type GroupedChats = {
   heading: string;

@@ -2130,20 +2130,7 @@ button:disabled {
     color-mix(in oklab, var(--accent-cyan) 4%, var(--card-paper));
 }
 
-[data-card-state="multi-selected"]::after {
-  content: "";
-  position: absolute;
-  z-index: 3;
-  top: 8px;
-  right: 8px;
-  width: 18px;
-  height: 18px;
-  border-radius: 6px;
-  background:
-    linear-gradient(135deg, transparent 44%, white 45% 55%, transparent 56%),
-    var(--accent-cyan);
-  box-shadow: 0 4px 12px color-mix(in oklab, var(--accent-cyan) 24%, transparent);
-}
+[data-card-state="multi-selected"]::after { content: none; }
 
 [data-card-state="active"],
 [data-card-state="completed"] {
@@ -2440,6 +2427,8 @@ button:disabled {
   .spectra-icon-action,
   .spectra-tabs-trigger,
   .spectra-chat-row { transition: none; }
+  [data-spectra-card],
+  [data-run-status] { animation: none !important; }
   [data-card-state="creating"]::after,
   [data-card-state="updating"]::after,
   [data-card-state="selected"]::after,
@@ -2449,6 +2438,12 @@ button:disabled {
   .spectra-skeleton-block { animation: none; background-position: 0 0; }
   [data-card-state="creating"]::after,
   [data-card-state="updating"]::after { background: color-mix(in oklab, var(--accent-cyan) 5%, transparent); }
+}
+
+@media (max-width: 520px) {
+  [class~="w-[390px]"],
+  [class~="w-[480px]"] { width: calc(100vw - 32px) !important; }
+  [class~="w-[330px]"] { width: calc(100vw - 24px) !important; }
 }
 
 
@@ -2495,4 +2490,9 @@ button:disabled {
 @keyframes shimmerBg {
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }
+}
+@keyframes spectra-tab-sweep {
+  0% { transform: translateX(0); opacity: 0; }
+  18% { opacity: 1; }
+  75%, 100% { transform: translateX(320%); opacity: 0; }
 }

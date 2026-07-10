@@ -15,13 +15,16 @@ export const recordPlan = mutation({
   args: {
     actorClerkId: v.string(),
     runId: v.id("spectraAiRuns"),
+    executionId: v.string(),
     operations: v.array(v.object({ type: v.string(), input: v.any(), requiresConfirmation: v.boolean() })),
   },
   handler: async (ctx, args) => {
-    await requireOwnedRun(ctx, args.actorClerkId, args.runId);
+    const run = await requireOwnedRun(ctx, args.actorClerkId, args.runId);
+    if (run.status !== "running" || run.executionId !== args.executionId) throw new Error("This run attempt is no longer active");
     const now = Date.now();
     const operationIds = await Promise.all(args.operations.map((operation) => ctx.db.insert("spectraOperations", {
       runId: args.runId,
+      executionId: args.executionId,
       actorType: "ai",
       type: operation.type,
       status: "proposed",
@@ -42,14 +45,57 @@ export const listForRun = query({
   },
 });
 
+export const attachPendingArtifact = mutation({
+  args: { actorClerkId: v.string(), operationId: v.id("spectraOperations"), artifactId: v.id("spectraArtifacts") },
+  handler: async (ctx, args) => {
+    const operation = await ctx.db.get(args.operationId);
+    if (!operation?.runId || operation.status !== "proposed") throw new Error("Operation is no longer pending");
+    const run = await requireOwnedRun(ctx, args.actorClerkId, operation.runId);
+    if (run.status !== "running" || operation.executionId !== run.executionId) throw new Error("Operation belongs to an older run attempt");
+    const artifact = await ctx.db.get(args.artifactId);
+    if (!artifact || artifact.ownerUserId !== run.ownerUserId || artifact.aiRunId !== run._id || artifact.aiExecutionId !== run.executionId || artifact.aiState !== "creating") throw new Error("Pending artifact not found");
+    await ctx.db.patch(args.operationId, { pendingArtifactId: args.artifactId });
+    return { operationId: args.operationId };
+  },
+});
+
+export const attachPendingWorkspace = mutation({
+  args: { actorClerkId: v.string(), operationId: v.id("spectraOperations"), workspaceId: v.id("spectraWorkspaces") },
+  handler: async (ctx, args) => {
+    const operation = await ctx.db.get(args.operationId);
+    if (!operation?.runId || operation.status !== "proposed") throw new Error("Operation is no longer pending");
+    const run = await requireOwnedRun(ctx, args.actorClerkId, operation.runId);
+    if (run.status !== "running" || operation.executionId !== run.executionId) throw new Error("Operation belongs to an older run attempt");
+    const workspace = await ctx.db.get(args.workspaceId);
+    if (!workspace || workspace.ownerUserId !== run.ownerUserId || workspace.aiRunId !== run._id || workspace.aiExecutionId !== run.executionId || workspace.aiState !== "creating") throw new Error("Pending workspace not found");
+    await ctx.db.patch(args.operationId, { pendingWorkspaceId: args.workspaceId });
+    return { operationId: args.operationId };
+  },
+});
+
 export const claim = mutation({
   args: { actorClerkId: v.string(), operationId: v.id("spectraOperations") },
   handler: async (ctx, args) => {
     const operation = await ctx.db.get(args.operationId);
     if (!operation?.runId) throw new Error("Operation not found");
-    await requireOwnedRun(ctx, args.actorClerkId, operation.runId);
+    const run = await requireOwnedRun(ctx, args.actorClerkId, operation.runId);
+    if (run.status !== "running") throw new Error("This run is no longer allowed to apply changes");
+    if (operation.executionId !== run.executionId) throw new Error("Operation belongs to an older run attempt");
     if (operation.status !== "proposed") throw new Error("Operation is no longer pending");
     await ctx.db.patch(args.operationId, { status: "executing" });
+    return { operationId: args.operationId };
+  },
+});
+
+export const assertClaimed = mutation({
+  args: { actorClerkId: v.string(), operationId: v.id("spectraOperations") },
+  handler: async (ctx, args) => {
+    const operation = await ctx.db.get(args.operationId);
+    if (!operation?.runId) throw new Error("Operation not found");
+    const run = await requireOwnedRun(ctx, args.actorClerkId, operation.runId);
+    if (run.status !== "running") throw new Error("This run is no longer allowed to apply changes");
+    if (operation.executionId !== run.executionId) throw new Error("Operation belongs to an older run attempt");
+    if (operation.status !== "executing") throw new Error("Operation is no longer approved for execution");
     return { operationId: args.operationId };
   },
 });
@@ -62,7 +108,8 @@ export const markExecuted = mutation({
   handler: async (ctx, args) => {
     const operation = await ctx.db.get(args.operationId);
     if (!operation?.runId) throw new Error("Operation not found");
-    await requireOwnedRun(ctx, args.actorClerkId, operation.runId);
+    const run = await requireOwnedRun(ctx, args.actorClerkId, operation.runId);
+    if (run.status !== "running" || operation.executionId !== run.executionId) throw new Error("Operation belongs to an older run attempt");
     if (operation.status !== "executing") throw new Error("Operation was not claimed for execution");
     await ctx.db.patch(args.operationId, { status: "executed", output: args.output, affected: args.affected, executedAt: Date.now() });
     return { operationId: args.operationId };
@@ -74,18 +121,20 @@ export const markFailed = mutation({
   handler: async (ctx, args) => {
     const operation = await ctx.db.get(args.operationId);
     if (!operation?.runId) throw new Error("Operation not found");
-    await requireOwnedRun(ctx, args.actorClerkId, operation.runId);
+    const run = await requireOwnedRun(ctx, args.actorClerkId, operation.runId);
+    if (operation.executionId !== run.executionId) throw new Error("Operation belongs to an older run attempt");
     await ctx.db.patch(args.operationId, { status: "failed", output: { error: args.error }, executedAt: Date.now() });
     return { operationId: args.operationId };
   },
 });
 
 export const cancelPending = mutation({
-  args: { actorClerkId: v.string(), runId: v.id("spectraAiRuns") },
+  args: { actorClerkId: v.string(), runId: v.id("spectraAiRuns"), executionId: v.optional(v.string()) },
   handler: async (ctx, args) => {
     await requireOwnedRun(ctx, args.actorClerkId, args.runId);
     const operations = await ctx.db.query("spectraOperations").withIndex("by_run", (q) => q.eq("runId", args.runId)).collect();
-    await Promise.all(operations.filter((operation) => operation.status === "proposed").map((operation) => ctx.db.patch(operation._id, { status: "cancelled" })));
-    return { cancelled: operations.filter((operation) => operation.status === "proposed").length };
+    const pending = operations.filter((operation) => operation.status === "proposed" && (!args.executionId || operation.executionId === args.executionId));
+    await Promise.all(pending.map((operation) => ctx.db.patch(operation._id, { status: "cancelled" })));
+    return { cancelled: pending.length };
   },
 });

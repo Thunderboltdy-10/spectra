@@ -32,6 +32,7 @@ import {
   RotateCcw,
   Save,
   Sigma,
+  Sparkles,
   Trash2,
   Underline as UnderlineIcon,
   X,
@@ -119,6 +120,19 @@ const storageVersion = 1;
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? value as Record<string, unknown> : {};
+}
+
+function aiPreviewSections(artifact: SpectraArtifact) {
+  const content = record(artifact.aiPreview?.content);
+  const rows = Array.isArray(content.blocks) ? content.blocks
+    : Array.isArray(content.cards) ? content.cards
+      : Array.isArray(content.questions) ? content.questions
+        : [];
+  return rows.slice(0, 4).flatMap((row): string[] => {
+    const item = record(row);
+    const label = [item.title, item.heading, item.front, item.prompt, item.text].find((value) => typeof value === "string" && value.trim());
+    return typeof label === "string" ? [label.trim().slice(0, 90)] : [];
+  });
 }
 
 function arrayOfRecords(value: unknown): Array<Record<string, unknown>> {
@@ -492,7 +506,7 @@ export function ArtifactStudio({
   ) : (
     <div className="flex h-full min-h-0 flex-col bg-[var(--bg-primary)]">
       <ArtifactStudioEditor
-        key={`${artifact._id}:${artifact.updatedAt}`}
+        key={artifact._id}
         mode={mode}
         artifact={artifact}
         artifacts={artifacts}
@@ -821,6 +835,13 @@ function ArtifactStudioEditor({
     setDismissedRemoteKey(null);
   }
 
+  function loadFailedAiPreview() {
+    if (!artifact.aiPreview) return;
+    if (artifact.aiPreview.title !== undefined) setTitle(artifact.aiPreview.title);
+    if (artifact.aiPreview.summary !== undefined) setSummary(artifact.aiPreview.summary);
+    if (artifact.aiPreview.content !== undefined) setContent(artifact.aiPreview.content);
+  }
+
   const showDetails = mode === "tab";
   const editorLayoutClass = showDetails
     ? mode === "tab"
@@ -885,6 +906,8 @@ function ArtifactStudioEditor({
           </div>
         </div>
       </header>
+      {artifact.aiState === "updating" && artifact.aiPreview ? <section className="relative shrink-0 overflow-hidden border-b border-[color-mix(in_oklab,var(--accent-cyan)_24%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_6%,var(--bg-primary))] px-5 py-3" aria-live="polite"><span className="pointer-events-none absolute inset-y-0 -left-1/3 w-1/3 animate-[spectra-tab-sweep_1.8s_ease-in-out_infinite] bg-[linear-gradient(90deg,transparent,color-mix(in_oklab,var(--accent-cyan)_10%,transparent),transparent)] motion-reduce:hidden" /><div className="relative flex items-start gap-3"><Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent-cyan)]" /><div className="min-w-0 flex-1"><div className="text-[11px] font-semibold text-[var(--text-primary)]">Spectra is updating this artifact</div><p className="mt-0.5 text-[10px] leading-4 text-[var(--text-secondary)]">The saved version remains intact until the canonical edit commits.</p>{aiPreviewSections(artifact).length ? <div className="mt-2 flex flex-wrap gap-1.5">{aiPreviewSections(artifact).map((section, index) => <span key={`${index}:${section}`} className="max-w-[260px] truncate rounded-[6px] border border-[color-mix(in_oklab,var(--accent-cyan)_22%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_8%,var(--bg-elevated))] px-2 py-1 text-[10px] text-[var(--text-secondary)]">{section}</span>)}</div> : null}</div></div></section> : null}
+      {artifact.aiState === "failed" && artifact.aiPreview ? <section className="shrink-0 border-b border-[color-mix(in_oklab,var(--danger)_24%,var(--border-default))] bg-[color-mix(in_oklab,var(--danger)_5%,var(--bg-primary))] px-5 py-3" aria-live="polite"><div className="flex flex-wrap items-center gap-3"><AlertCircle className="h-4 w-4 shrink-0 text-[var(--danger)]" /><div className="min-w-0 flex-1"><div className="text-[11px] font-semibold text-[var(--text-primary)]">The AI edit did not finish</div><p className="mt-0.5 text-[10px] text-[var(--text-secondary)]">The proposed content is retained as a recoverable preview. Your saved version was not replaced.</p></div><button type="button" onClick={loadFailedAiPreview} className="min-h-9 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[11px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)]">Load preview for review</button></div></section> : null}
       {remoteConflict ? (
         <div className="shrink-0 border-b border-[color-mix(in_oklab,#d88922_28%,var(--border-default))] bg-[color-mix(in_oklab,#d88922_7%,var(--bg-primary))] px-5 py-2.5">
           <div className="flex flex-wrap items-center gap-2 text-[12px] text-[var(--text-secondary)]">

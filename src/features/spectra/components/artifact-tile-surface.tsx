@@ -1,7 +1,7 @@
 "use client";
 
-import { Layers3, Maximize2, PanelRightClose, Plus, X } from "lucide-react";
-import { useMemo, type ReactNode } from "react";
+import { GripVertical, Maximize2, PanelRightClose, Plus, Scaling, X } from "lucide-react";
+import { useEffect, useMemo, useState, type DragEvent, type ReactNode } from "react";
 import type { ArtifactPayload } from "./artifact-blueprint-sheet";
 import { ArtifactStudio } from "./artifact-studio";
 import type { SpectraArtifact } from "../data/api";
@@ -17,6 +17,7 @@ type ArtifactTileSurfaceProps = {
   continuedThreadId?: string | null;
   onCloseArtifact: (artifactId: string) => void;
   onCloseAll: () => void;
+  onAddArtifact?: (artifactId: string) => void;
   onFocusSet: () => void;
   onExitFocusSet: () => void;
   onSave: (artifactId: string, payload: ArtifactPayload) => Promise<void> | void;
@@ -26,11 +27,7 @@ type ArtifactTileSurfaceProps = {
   onContinueThread?: (threadId: string, title: string) => void;
 };
 
-function gridClass(count: number) {
-  if (count <= 1) return "grid-cols-1";
-  if (count === 2) return "grid-cols-1 2xl:grid-cols-2";
-  return "grid-cols-1 xl:grid-cols-2 2xl:grid-cols-3";
-}
+type TileSize = "normal" | "wide" | "tall";
 
 export function ArtifactTileSurface({
   artifacts,
@@ -43,6 +40,7 @@ export function ArtifactTileSurface({
   continuedThreadId,
   onCloseArtifact,
   onCloseAll,
+  onAddArtifact,
   onFocusSet,
   onExitFocusSet,
   onSave,
@@ -51,41 +49,73 @@ export function ArtifactTileSurface({
   onDirtyChange,
   onContinueThread,
 }: ArtifactTileSurfaceProps) {
-  const visibleArtifacts = useMemo(
-    () => artifacts.filter((artifact, index, rows) => rows.findIndex((row) => row._id === artifact._id) === index).slice(0, 8),
+  const uniqueArtifacts = useMemo(
+    () => artifacts.filter((artifact, index, rows) => rows.findIndex((row) => row._id === artifact._id) === index),
     [artifacts],
   );
+  const storageKey = "spectra.tiles.v3";
+  const [order, setOrder] = useState<string[]>([]);
+  const [sizes, setSizes] = useState<Record<string, TileSize>>({});
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
+  useEffect(() => {
+    try { const saved = JSON.parse(window.localStorage.getItem(storageKey) ?? "null") as { order?: string[]; sizes?: Record<string, TileSize> } | null; setOrder(saved?.order ?? uniqueArtifacts.map((artifact) => artifact._id)); setSizes(saved?.sizes ?? {}); }
+    catch { setOrder(uniqueArtifacts.map((artifact) => artifact._id)); setSizes({}); }
+  }, [storageKey, uniqueArtifacts]);
+  useEffect(() => { if (order.length) window.localStorage.setItem(storageKey, JSON.stringify({ order, sizes })); }, [order, sizes, storageKey]);
+  const visibleArtifacts = useMemo(() => [...uniqueArtifacts].sort((a, b) => (order.indexOf(a._id) < 0 ? 999 : order.indexOf(a._id)) - (order.indexOf(b._id) < 0 ? 999 : order.indexOf(b._id))), [order, uniqueArtifacts]);
+
+  function moveBefore(event: DragEvent, targetId: string) {
+    event.preventDefault();
+    if (!draggingId || draggingId === targetId) return;
+    setOrder((current) => { const next = current.filter((id) => id !== draggingId); const index = next.indexOf(targetId); next.splice(index < 0 ? next.length : index, 0, draggingId); return next; });
+  }
+
+  function safeClose(artifactId: string) {
+    if (dirtyIds.has(artifactId)) {
+      window.dispatchEvent(new CustomEvent("spectra:request-artifact-close", { detail: { artifactId } }));
+      return;
+    }
+    onCloseArtifact(artifactId);
+  }
+
+  function safeCloseAll() {
+    const dirty = visibleArtifacts.find((artifact) => dirtyIds.has(artifact._id));
+    if (dirty) {
+      window.dispatchEvent(new CustomEvent("spectra:request-artifact-close", { detail: { artifactId: dirty._id } }));
+      return;
+    }
+    onCloseAll();
+  }
 
   if (visibleArtifacts.length === 0) return null;
 
   return (
     <section
       className={isolated
-        ? "min-w-0 flex-1 overflow-hidden bg-[var(--bg-primary)]"
-        : "hidden min-w-[520px] max-w-[62vw] flex-[0_0_56vw] overflow-hidden border-l border-[var(--border-default)] bg-[var(--bg-primary)] shadow-[-18px_0_40px_rgba(27,20,12,0.06)] xl:flex xl:flex-col"}
+        ? "relative min-w-0 flex-1 overflow-hidden bg-[var(--bg-primary)]"
+        : "fixed inset-2 z-[70] flex min-w-0 flex-col overflow-hidden rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-primary)] shadow-[0_24px_70px_rgba(27,20,12,0.18)] md:absolute md:inset-y-3 md:left-auto md:right-3 md:w-[min(72vw,1120px)] xl:inset-y-0 xl:right-0 xl:w-[min(62vw,1120px)] xl:rounded-none xl:border-y-0 xl:border-r-0"}
       aria-label={isolated ? "Focused work set" : "Tiled artifact set"}
+      onDragOver={(event) => { if (event.dataTransfer.types.includes("application/x-spectra-artifact")) event.preventDefault(); }}
+      onDrop={(event) => { const artifactId = event.dataTransfer.getData("application/x-spectra-artifact") || event.dataTransfer.getData("text/plain"); if (artifactId && allArtifacts.some((artifact) => artifact._id === artifactId)) { event.preventDefault(); onAddArtifact?.(artifactId); } }}
     >
-      <header className="flex min-h-12 shrink-0 items-center gap-3 border-b border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_64%,var(--bg-primary))] px-3.5">
-        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] bg-[color-mix(in_oklab,var(--accent-cyan)_10%,var(--bg-primary))] text-[var(--accent-cyan)]">
-          <Layers3 className="h-4 w-4" />
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-[12px] font-semibold text-[var(--text-primary)]">{isolated ? "Focused work set" : "Tiled selection"}</div>
-          <div className="truncate text-[10px] text-[var(--text-tertiary)]">{visibleArtifacts.length} artifact{visibleArtifacts.length === 1 ? "" : "s"} open together</div>
-        </div>
+      <div className="absolute right-3 top-3 z-50 flex items-center gap-1 rounded-[9px] border border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_92%,transparent)] p-1 shadow-[0_8px_24px_rgba(27,20,12,0.12)] backdrop-blur-xl">
         {actionSlot}
-        <button type="button" onClick={isolated ? onExitFocusSet : onFocusSet} className="flex h-8 items-center gap-1.5 rounded-[7px] px-2 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" title={isolated ? "Return to workspace with this set still available" : "Focus this set"}>
+        {onAddArtifact ? <div className="relative"><button type="button" onClick={() => setAddOpen((value) => !value)} className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" aria-label="Add artifact to tiled set" aria-expanded={addOpen}><Plus className="h-4 w-4" /></button>{addOpen ? <div className="absolute right-0 top-[calc(100%+7px)] max-h-[280px] w-[260px] overflow-y-auto rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 shadow-[0_16px_38px_rgba(27,20,12,0.15)]">{allArtifacts.filter((artifact) => !visibleArtifacts.some((visible) => visible._id === artifact._id)).map((artifact) => <button key={artifact._id} type="button" onClick={() => { onAddArtifact(artifact._id); setAddOpen(false); }} className="flex w-full items-center gap-2 rounded-[7px] px-2.5 py-2 text-left hover:bg-[var(--bg-hover)]"><span className="min-w-0 flex-1 truncate text-[11px] text-[var(--text-primary)]">{artifact.title}</span><span className="text-[9px] capitalize text-[var(--text-tertiary)]">{artifact.blueprintKey.replaceAll("_", " ")}</span></button>)}{allArtifacts.every((artifact) => visibleArtifacts.some((visible) => visible._id === artifact._id)) ? <div className="px-2.5 py-3 text-[11px] text-[var(--text-tertiary)]">Every available artifact is already open.</div> : null}</div> : null}</div> : null}
+        <button type="button" onClick={isolated ? onExitFocusSet : onFocusSet} className="flex h-8 items-center gap-1.5 rounded-[7px] px-2 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" title={isolated ? "Return to workspace with these tiles still available" : "Expand tiled workspace"}>
           {isolated ? <PanelRightClose className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
-          {isolated ? "Return" : "Focus this set"}
+          {isolated ? "Return" : "Expand tiles"}
         </button>
-        <button type="button" onClick={onCloseAll} className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" aria-label="Close tiled set" title="Close tiled set">
+        <button type="button" onClick={safeCloseAll} className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" aria-label="Close tiled set" title="Close tiled set">
           <X className="h-4 w-4" />
         </button>
-      </header>
-      <div className={`grid min-h-0 flex-1 gap-2 overflow-auto p-2 ${gridClass(visibleArtifacts.length)}`}>
+      </div>
+      <div className="grid min-h-0 flex-1 auto-rows-[minmax(420px,1fr)] grid-cols-1 gap-2 overflow-auto p-2 pt-14 md:grid-cols-12">
         {visibleArtifacts.map((artifact) => (
-          <div key={artifact._id} className="relative flex min-h-[520px] min-w-0 overflow-hidden rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-primary)] shadow-[0_8px_28px_rgba(27,20,12,0.05)]">
-            <button type="button" onClick={() => onCloseArtifact(artifact._id)} className="absolute right-2 top-2 z-30 flex h-7 w-7 items-center justify-center rounded-[7px] bg-[color-mix(in_oklab,var(--bg-primary)_88%,transparent)] text-[var(--text-tertiary)] shadow-[0_4px_12px_rgba(27,20,12,0.08)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" aria-label={`Close ${artifact.title}`} title={`Close ${artifact.title}`}>
+          <div key={artifact._id} draggable onDragStart={() => setDraggingId(artifact._id)} onDragEnd={() => setDraggingId(null)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => moveBefore(event, artifact._id)} className={`relative flex min-h-[420px] min-w-0 overflow-hidden rounded-[9px] border bg-[var(--bg-primary)] shadow-[0_8px_28px_rgba(27,20,12,0.05)] transition ${sizes[artifact._id] === "wide" ? "md:col-span-12" : "md:col-span-6"} ${sizes[artifact._id] === "tall" ? "md:row-span-2" : ""} ${draggingId === artifact._id ? "scale-[0.985] border-[var(--accent-cyan)] opacity-65" : "border-[var(--border-default)]"}`}>
+            <span className="absolute left-2 top-2 z-30 flex h-7 w-7 cursor-grab items-center justify-center rounded-[7px] bg-[color-mix(in_oklab,var(--bg-primary)_88%,transparent)] text-[var(--text-tertiary)] shadow-[0_4px_12px_rgba(27,20,12,0.08)]" title="Drag to rearrange"><GripVertical className="h-3.5 w-3.5" /></span>
+            <button type="button" onClick={() => setSizes((current) => ({ ...current, [artifact._id]: current[artifact._id] === "normal" || !current[artifact._id] ? "wide" : current[artifact._id] === "wide" ? "tall" : "normal" }))} className="absolute right-10 top-2 z-30 flex h-7 w-7 items-center justify-center rounded-[7px] bg-[color-mix(in_oklab,var(--bg-primary)_88%,transparent)] text-[var(--text-tertiary)] shadow-[0_4px_12px_rgba(27,20,12,0.08)] hover:bg-[var(--bg-hover)]" aria-label={`Resize ${artifact.title}`} title="Cycle tile size"><Scaling className="h-3.5 w-3.5" /></button>
+            <button type="button" onClick={() => safeClose(artifact._id)} className="absolute right-2 top-2 z-30 flex h-7 w-7 items-center justify-center rounded-[7px] bg-[color-mix(in_oklab,var(--bg-primary)_88%,transparent)] text-[var(--text-tertiary)] shadow-[0_4px_12px_rgba(27,20,12,0.08)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" aria-label={`Close ${artifact.title}`} title={`Close ${artifact.title}`}>
               <X className="h-3.5 w-3.5" />
             </button>
             <ArtifactStudio
@@ -96,7 +126,7 @@ export function ArtifactTileSurface({
               dirtyIds={dirtyIds}
               busy={busyArtifactId === artifact._id}
               sourceLabel={sourceLabel}
-              onClose={() => onCloseArtifact(artifact._id)}
+              onClose={() => safeClose(artifact._id)}
               onExpand={() => undefined}
               onActivateTab={() => undefined}
               onCloseTab={onCloseArtifact}

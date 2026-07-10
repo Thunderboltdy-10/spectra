@@ -13,9 +13,10 @@ import {
   useMatches,
   useRegisterActions,
 } from "kbar";
-import { FileText, MessageSquare, CalendarClock, Code2, Image as ImageIcon, Layers, Plus, Grid2X2, XCircle } from "lucide-react";
+import { FileText, MessageSquare, Layers, Plus, Grid2X2, XCircle } from "lucide-react";
 import { ALL_MODES, getModeConfig, isModeAvailable } from "@/lib/modes";
 import { useSidebar } from "@/context/sidebar-context";
+import { useSpectraContextStore } from "@/stores/spectra-context-store";
 
 function CommandResults() {
   const { results } = useMatches();
@@ -94,16 +95,6 @@ function CommandPaletteHotkeys() {
 
 /* ─── Workspace search bridge ──────────────────────────────── */
 
-type WorkspaceSearchResult = {
-  id: string;
-  title: string;
-  type: string;
-  itemType?: string;
-  renderMode?: string;
-  workstreamId?: string;
-  workstreamTitle?: string | null;
-};
-
 type SpectraSearchResult = {
   artifacts?: Array<{ _id: string; title: string; summary?: string; blueprintKey?: string; placements?: Array<{ workspaceId: string; workspaceTitle?: string; workspaceItemId: string }> }>;
   workspaces?: Array<{ _id: string; title: string; description?: string }>;
@@ -115,137 +106,63 @@ type SpectraThreadResult = {
   summaryShort?: string;
   workspaceId?: string;
   messageCount?: number;
+  lastRunId?: string;
 };
-
-function typeIcon(itemType?: string, renderMode?: string) {
-  const mode = renderMode ?? itemType ?? "";
-  if (mode === "code_project" || mode === "code_output") return <Code2 className="h-3.5 w-3.5" />;
-  if (mode === "visualization" || mode === "image" || mode === "diagram") return <ImageIcon className="h-3.5 w-3.5" />;
-  if (mode === "thread" || itemType === "thread") return <MessageSquare className="h-3.5 w-3.5" />;
-  if (mode === "planner" || itemType === "planner") return <CalendarClock className="h-3.5 w-3.5" />;
-  return <FileText className="h-3.5 w-3.5" />;
-}
-
-function WorkspaceSearchBridge() {
-  const { searchQuery } = useKBar((state) => ({ searchQuery: state.searchQuery }));
-  const [wsResults, setWsResults] = useState<WorkspaceSearchResult[]>([]);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const fetchRef = useRef(0);
-
-  useEffect(() => {
-    const q = searchQuery.trim();
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    if (!q) { setWsResults([]); return; }
-
-    debounceRef.current = setTimeout(async () => {
-      const fetchId = ++fetchRef.current;
-      try {
-        const r = await fetch(`/api/workspace-items?action=search&q=${encodeURIComponent(q)}&limit=10`);
-        if (!r.ok || fetchId !== fetchRef.current) return;
-        const data = await r.json() as { results?: WorkspaceSearchResult[] };
-        setWsResults(data.results ?? []);
-      } catch { /* silent — palette stays usable even if workspace search fails */ }
-    }, 280);
-  }, [searchQuery]);
-
-  const wsActions = useMemo(
-    () =>
-      wsResults.map((r) => ({
-        id: `ws-search-${r.id}`,
-        name: r.title,
-        subtitle: r.workstreamTitle ? `in ${r.workstreamTitle}` : undefined,
-        section: "Workspace",
-        icon: typeIcon(r.itemType, r.renderMode),
-        perform: () => {
-          if (r.workstreamId) {
-            window.dispatchEvent(new CustomEvent("workspace:navigate-to-item", {
-              detail: { itemId: r.id, workstreamId: r.workstreamId },
-            }));
-          }
-        },
-      })),
-    [wsResults],
-  );
-
-  useRegisterActions(wsActions, [wsActions]);
-
-  return null;
-}
-
-/* ─── Workspace quick commands ─────────────────────────────── */
-
-function WorkspaceQuickCommands() {
-  const { searchQuery } = useKBar((state) => ({ searchQuery: state.searchQuery }));
-
-  useRegisterActions(
-    searchQuery.trim() === ""
-      ? [
-          {
-            id: "ws-new-note",
-            name: "New note",
-            section: "Quick actions",
-            icon: <FileText className="h-3.5 w-3.5" />,
-            perform: () => window.dispatchEvent(new CustomEvent("workspace:create", { detail: { type: "note" } })),
-          },
-          {
-            id: "ws-new-workspace",
-            name: "New workspace",
-            section: "Quick actions",
-            icon: <Layers className="h-3.5 w-3.5" />,
-            perform: () => window.dispatchEvent(new CustomEvent("workspace:create", { detail: { type: "workspace" } })),
-          },
-          {
-            id: "ws-switch-workspace",
-            name: "Switch to workspace…",
-            section: "Quick actions",
-            icon: <Plus className="h-3.5 w-3.5" />,
-            perform: () => window.dispatchEvent(new Event("workspace:center-home")),
-          },
-        ]
-      : [],
-    [searchQuery],
-  );
-
-  return null;
-}
 
 function SpectraCommandBridge() {
   const router = useRouter();
   const { searchQuery } = useKBar((state) => ({ searchQuery: state.searchQuery }));
   const [objects, setObjects] = useState<SpectraSearchResult>({});
   const [threads, setThreads] = useState<SpectraThreadResult[]>([]);
+  const [searchState, setSearchState] = useState<"idle" | "loading" | "ready" | "empty" | "error">("idle");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
   const fetchRef = useRef(0);
   const queryText = searchQuery.trim();
+  const explicit = useSpectraContextStore((state) => state.explicit);
+  const addExplicit = useSpectraContextStore((state) => state.addExplicit);
+  const removeExplicit = useSpectraContextStore((state) => state.removeExplicit);
+  const setContinuation = useSpectraContextStore((state) => state.setContinuation);
+  const clearSelection = useSpectraContextStore((state) => state.clearSelection);
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
+    abortRef.current?.abort();
     if (queryText.length < 2) {
       setObjects({});
       setThreads([]);
+      setSearchState("idle");
       return;
     }
 
     debounceRef.current = setTimeout(async () => {
       const fetchId = ++fetchRef.current;
+      const controller = new AbortController();
+      abortRef.current = controller;
+      setSearchState("loading");
       try {
         const [objectResponse, threadResponse] = await Promise.all([
-          fetch(`/api/spectra?action=search&search=${encodeURIComponent(queryText)}`),
-          fetch("/api/spectra?action=threads&limit=80"),
+          fetch(`/api/spectra?action=search&search=${encodeURIComponent(queryText)}`, { signal: controller.signal }),
+          fetch("/api/spectra?action=threads&limit=80", { signal: controller.signal }),
         ]);
         if (fetchId !== fetchRef.current) return;
         const objectPayload = objectResponse.ok ? await objectResponse.json() as SpectraSearchResult : {};
         const threadPayload = threadResponse.ok ? await threadResponse.json() as { threads?: SpectraThreadResult[] } : {};
         const needle = queryText.toLowerCase();
+        const matchingThreads = (threadPayload.threads ?? []).filter((thread) => `${thread.title} ${thread.summaryShort ?? ""}`.toLowerCase().includes(needle)).slice(0, 8);
         setObjects(objectPayload);
-        setThreads((threadPayload.threads ?? []).filter((thread) => `${thread.title} ${thread.summaryShort ?? ""}`.toLowerCase().includes(needle)).slice(0, 8));
-      } catch {
+        setThreads(matchingThreads);
+        setSearchState((objectPayload.artifacts?.length ?? 0) + (objectPayload.workspaces?.length ?? 0) + matchingThreads.length ? "ready" : "empty");
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") return;
         if (fetchId === fetchRef.current) {
           setObjects({});
           setThreads([]);
+          setSearchState("error");
         }
       }
     }, 160);
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); abortRef.current?.abort(); };
   }, [queryText]);
 
   const actions = useMemo(() => {
@@ -260,7 +177,7 @@ function SpectraCommandBridge() {
           await fetch("/api/spectra", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ action: "addArtifactToWorkspace", artifactId: artifact._id, workspaceId: workspace._id }),
+            body: JSON.stringify({ action: "moveArtifactToWorkspace", artifactId: artifact._id, workspaceId: workspace._id }),
           }).catch(() => null);
           window.dispatchEvent(new CustomEvent("spectra:open-workspace", { detail: { workspaceId: workspace._id } }));
         },
@@ -297,6 +214,10 @@ function SpectraCommandBridge() {
           window.dispatchEvent(new CustomEvent("spectra:open-workspace", { detail: { workspaceId: workspace._id } }));
         },
       })),
+      ...(objects.workspaces ?? []).slice(0, 8).map((workspace) => {
+        const added = explicit.some((item) => item.type === "workspace" && item.id === workspace._id);
+        return { id: `spectra-context-workspace-${workspace._id}`, name: `${added ? "Remove" : "Add"} ${workspace.title} ${added ? "from" : "to"} context`, subtitle: "Workspace map, activity, and retrieval context", section: "Spectra context", icon: <Layers className="h-3.5 w-3.5" />, perform: () => added ? removeExplicit("workspace", workspace._id) : addExplicit({ type: "workspace", id: workspace._id, label: workspace.title, source: "explicit", capability: "context" }) };
+      }),
       ...(objects.artifacts ?? []).slice(0, 10).map((artifact) => ({
         id: `spectra-artifact-${artifact._id}`,
         name: `Open ${artifact.title}`,
@@ -310,14 +231,33 @@ function SpectraCommandBridge() {
           }
         },
       })),
+      ...(objects.artifacts ?? []).slice(0, 10).map((artifact) => {
+        const added = explicit.some((item) => item.type === "artifact" && item.id === artifact._id);
+        return {
+          id: `spectra-context-${artifact._id}`,
+          name: `${added ? "Remove" : "Add"} ${artifact.title} ${added ? "from" : "to"} context`,
+          subtitle: added ? "Keep it open but exclude it from explicit AI context" : "Keep this artifact in context across navigation",
+          section: "Spectra context",
+          icon: <Plus className="h-3.5 w-3.5" />,
+          perform: () => added ? removeExplicit("artifact", artifact._id) : addExplicit({ type: "artifact", id: artifact._id, label: artifact.title, workspaceId: artifact.placements?.[0]?.workspaceId, source: "explicit", capability: artifact.blueprintKey === "thread_reference" ? "context" : "tile" }),
+        };
+      }),
       ...threads.map((thread) => ({
         id: `spectra-thread-${thread._id}`,
-        name: `Open ${thread.title}`,
+        name: `Continue ${thread.title}`,
         subtitle: thread.messageCount ? `${thread.messageCount} messages` : "Thread",
         section: "Spectra threads",
         icon: <MessageSquare className="h-3.5 w-3.5" />,
-        perform: () => router.push(`/chat?threadId=${encodeURIComponent(thread._id)}`),
+        perform: () => {
+          setContinuation({ id: thread._id, title: thread.title, workspaceId: thread.workspaceId, runId: thread.lastRunId });
+          void fetch("/api/spectra", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "selectRunTab", runId: thread.lastRunId }) });
+          window.dispatchEvent(new CustomEvent("spectra:continue-thread", { detail: { threadId: thread._id, title: thread.title, workspaceId: thread.workspaceId } }));
+        },
       })),
+      ...threads.map((thread) => {
+        const added = explicit.some((item) => item.type === "thread" && item.id === thread._id);
+        return { id: `spectra-context-thread-${thread._id}`, name: `${added ? "Remove" : "Use"} ${thread.title} ${added ? "from context" : "as context"}`, subtitle: "Reference this conversation without continuing it", section: "Spectra context", icon: <MessageSquare className="h-3.5 w-3.5" />, perform: () => added ? removeExplicit("thread", thread._id) : addExplicit({ type: "thread", id: thread._id, label: thread.title, workspaceId: thread.workspaceId, source: "explicit", capability: "context" }) };
+      }),
     ];
 
     const baseActions = queryText.length === 0 ? [
@@ -329,25 +269,18 @@ function SpectraCommandBridge() {
         perform: () => window.dispatchEvent(new Event("spectra:tile-selected")),
       },
       {
-        id: "spectra-focus-set",
-        name: "Focus this set",
-        section: "Spectra actions",
-        icon: <Layers className="h-3.5 w-3.5" />,
-        perform: () => window.dispatchEvent(new Event("spectra:focus-set")),
-      },
-      {
         id: "spectra-clear-selection",
         name: "Clear Spectra selection",
         section: "Spectra actions",
         icon: <XCircle className="h-3.5 w-3.5" />,
-        perform: () => window.dispatchEvent(new Event("spectra:clear-selection")),
+        perform: () => { clearSelection(); window.dispatchEvent(new Event("spectra:clear-selection")); },
       },
       {
         id: "spectra-new-thread",
         name: "Start new Spectra thread",
         section: "Spectra actions",
         icon: <MessageSquare className="h-3.5 w-3.5" />,
-        perform: () => router.push("/chat?new=1"),
+        perform: () => { setContinuation(null); void fetch("/api/spectra", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "selectRunTab" }) }); router.push("/chat?new=1"); },
       },
     ] : [];
 
@@ -365,8 +298,11 @@ function SpectraCommandBridge() {
       },
     }] : [];
 
-    return [...baseActions, ...rows, ...fallback];
-  }, [objects.artifacts, objects.workspaces, queryText, router, threads]);
+    const tileAction = /\b(tile|group|arrange)\b/i.test(queryText) && /\b(selected|selection|artifacts?|documents?)\b/i.test(queryText) ? [{ id: "spectra-tile-selected-query", name: "Open selected artifacts in tiled view", section: "Spectra actions", icon: <Grid2X2 className="h-3.5 w-3.5" />, perform: () => window.dispatchEvent(new Event("spectra:tile-selected")) }] : [];
+    const stateAction = queryText.length >= 2 && searchState !== "ready" ? [{ id: `spectra-search-state-${searchState}`, name: searchState === "loading" ? "Searching Spectra…" : searchState === "error" ? "Spectra search is temporarily unavailable" : searchState === "empty" ? "No matching Spectra objects" : "Search Spectra", subtitle: searchState === "error" ? "You can still send this as an AI request below." : undefined, section: "Spectra search", icon: <Layers className="h-3.5 w-3.5" />, perform: () => undefined }] : [];
+
+    return [...baseActions, ...tileAction, ...rows, ...stateAction, ...fallback];
+  }, [addExplicit, clearSelection, explicit, objects.artifacts, objects.workspaces, queryText, removeExplicit, router, searchState, setContinuation, threads]);
 
   useRegisterActions(actions, [actions]);
 
@@ -511,8 +447,6 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
     >
       {children}
       <CommandPaletteHotkeys />
-      <WorkspaceSearchBridge />
-      <WorkspaceQuickCommands />
       <SpectraCommandBridge />
       <KBarPortal>
         <KBarPositioner className="z-[100] bg-[var(--bg-overlay)]">

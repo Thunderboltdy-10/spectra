@@ -31,8 +31,8 @@ function deckPlan() {
 }
 
 function setup(plan: unknown, initialStatus: "queued" | "failed" = "queued") {
-  const card = { _id: "card-real", runId: "run-real", status: initialStatus, title: initialStatus === "failed" ? "Run failed" : "Queued", summary: "", variant: initialStatus === "failed" ? "error" : "status", actions: [] as Array<Record<string, unknown>>, updatedAt: 1 };
-  const run: Record<string, unknown> & { status: string; sourceSurface: "workspace" | "chat"; workspaceId?: string; userPrompt: string; attemptCount: number } = { status: initialStatus, sourceSurface: "workspace", workspaceId: "workspace-real", userPrompt: "Create a flashcard deck about photosynthesis with 6 cards. Include memory cues.", attemptCount: 1 };
+  const card: { _id: string; runId: string; status: string; title: string; summary: string; variant: string; actions: Array<Record<string, unknown>>; updatedAt: number } = { _id: "card-real", runId: "run-real", status: initialStatus, title: initialStatus === "failed" ? "Run failed" : "Queued", summary: "", variant: initialStatus === "failed" ? "error" : "status", actions: [], updatedAt: 1 };
+  const run: Record<string, unknown> & { status: string; sourceSurface: "workspace" | "chat"; workspaceId?: string; userPrompt: string; attemptCount: number } = { _id: "run-real", status: initialStatus, sourceSurface: "workspace", workspaceId: "workspace-real", threadId: "thread-real", executionId: "execution-1", userPrompt: "Create a flashcard deck about photosynthesis with 6 cards. Include memory cues.", attemptCount: 1 };
   const operations: Array<Record<string, unknown>> = [];
   const requireActor = vi.fn().mockResolvedValue({ clerkId: "actor" });
   const convexQuery = vi.fn(async (name: string) => {
@@ -44,20 +44,22 @@ function setup(plan: unknown, initialStatus: "queued" | "failed" = "queued") {
     throw new Error(`Unexpected query: ${name}`);
   });
   const convexMutation = vi.fn(async (name: string, args: Record<string, unknown>) => {
-    if (name.includes("spectraThreads:create")) return "thread-real";
+    if (name.includes("spectraRuns:beginRun")) {
+      run.sourceSurface = args.sourceSurface as "workspace" | "chat";
+      run.workspaceId = args.workspaceId as string | undefined;
+      run.userPrompt = args.userPrompt as string;
+      return { runId: "run-real", resultCardId: "card-real", threadId: "thread-real", executionId: "execution-1", created: true };
+    }
     if (name.includes("spectraThreads:appendMessage")) return "message-real";
     if (name.includes("spectraThreads:applyGeneratedMetadata")) return { threadId: "thread-real" };
-    if (name.includes("spectraRuns:create")) {
-      run.sourceSurface = args.sourceSurface as "workspace" | "chat";
-      run.threadId = args.threadId;
-      return { runId: "run-real", resultCardId: "card-real" };
-    }
+    if (name.includes("spectraRuns:setSuggestedThreadMetadata")) return { runId: "run-real" };
     if (name.includes("spectraRuns:setContextSnapshot")) return { runId: "run-real" };
     if (name.includes("spectraRuns:resetForRetry")) {
       run.status = "queued";
       run.attemptCount = 2;
+      run.executionId = "execution-2";
       card.status = "queued";
-      return { runId: "run-real", resultCardId: "card-real", prompt: run.userPrompt, workspaceId: run.workspaceId, sourceSurface: "workspace" };
+      return { runId: "run-real", resultCardId: "card-real", prompt: run.userPrompt, workspaceId: run.workspaceId, sourceSurface: "workspace", executionId: "execution-2", created: true };
     }
     if (name.includes("spectraRuns:updateStatus")) {
       run.status = args.status as typeof run.status;
@@ -67,6 +69,9 @@ function setup(plan: unknown, initialStatus: "queued" | "failed" = "queued") {
       card.variant = typeof args.resultVariant === "string" ? args.resultVariant : card.variant;
       card.actions = Array.isArray(args.resultActions) ? args.resultActions : card.actions;
       card.updatedAt += 1;
+      if (args.decision !== undefined) run.decision = args.decision;
+      if (args.planIntent !== undefined) run.planIntent = args.planIntent;
+      if (args.finalSummary !== undefined) run.finalSummary = args.finalSummary;
       return { runId: "run-real" };
     }
     if (name.includes("spectraRuns:patchResultCard")) {
@@ -80,8 +85,21 @@ function setup(plan: unknown, initialStatus: "queued" | "failed" = "queued") {
       operations.push(...next.map((operation, index) => ({ _id: `operation-${index + 1}`, runId: "run-real", status: "proposed", affected: [], ...operation })));
       return { operationIds: next.map((_operation, index) => `operation-${index + 1}`) };
     }
+    if (name.includes("spectraArtifacts:createPending")) return { artifactId: "artifact-pending" };
+    if (name.includes("spectraArtifacts:finalizePending")) return { artifactId: "artifact-real", workspaceItemId: "item-real" };
     if (name.includes("spectraArtifacts:create")) return { artifactId: "artifact-real", workspaceItemId: "item-real" };
-    if (name.includes("spectraOperations:claim") || name.includes("spectraOperations:markExecuted") || name.includes("spectraOperations:cancelPending")) return {};
+    if (name.includes("spectraWorkspaces:createPending")) return { workspaceId: "workspace-pending" };
+    if (name.includes("spectraRuns:rejectConfirmation")) {
+      run.status = "cancelled";
+      card.status = "cancelled";
+      card.title = "Cancelled";
+      card.summary = "No proposed changes were applied.";
+      card.actions = [];
+      return { alreadyRejected: false };
+    }
+    if (name.includes("spectraOperations:claim") || name.includes("spectraOperations:assertClaimed") || name.includes("spectraOperations:markExecuted") || name.includes("spectraOperations:cancelPending") || name.includes("spectraOperations:attachPendingArtifact") || name.includes("spectraOperations:attachPendingWorkspace")) return {};
+    if (name.includes("spectraRuns:appendEvent") || name.includes("spectraRuns:markTraceDegraded")) return {};
+    if (name.includes("spectraArtifacts:patchPendingContent") || name.includes("spectraArtifacts:discardPendingForRun") || name.includes("spectraArtifacts:failPendingForRun") || name.includes("spectraArtifacts:settleStagedForRun") || name.includes("spectraWorkspaces:settleForRun")) return {};
     throw new Error(`Unexpected mutation: ${name}`);
   });
 
@@ -100,12 +118,12 @@ describe("Spectra run route", () => {
     const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", { method: "POST", body: JSON.stringify({ action: "run", surface: "workspace", workspaceId: "workspace-real", prompt: "Create a flashcard deck about photosynthesis with 6 cards. Include memory cues." }) }));
     const events = (await response.text()).trim().split("\n").map((line) => JSON.parse(line) as { type: string; message?: string });
 
-    const createCall = convexMutation.mock.calls.find(([name]) => String(name).includes("spectraArtifacts:create"));
+    const createCall = convexMutation.mock.calls.find(([name]) => String(name).includes("spectraArtifacts:finalizePending"));
     expect(createCall).toBeTruthy();
     expect((createCall?.[1] as { content: { cards: unknown[] } }).content.cards).toHaveLength(6);
     expect(convexMutation.mock.calls.some(([name]) => String(name).includes("spectraWorkspaceItems:hide"))).toBe(false);
-    const workspaceThreadCall = convexMutation.mock.calls.find(([name]) => String(name).includes("spectraThreads:create"));
-    expect(workspaceThreadCall?.[1]).toMatchObject({ origin: "workspace", workspaceId: "workspace-real" });
+    const beginRunCall = convexMutation.mock.calls.find(([name]) => String(name).includes("spectraRuns:beginRun"));
+    expect(beginRunCall?.[1]).toMatchObject({ sourceSurface: "workspace", workspaceId: "workspace-real" });
     expect(events.some((event) => event.type === "confirmation_required")).toBe(false);
     expect(events.some((event) => event.message === "Validating 6 cards")).toBe(true);
     expect(events.some((event) => event.message === "Saving deck to Biology")).toBe(true);
@@ -147,7 +165,7 @@ describe("Spectra run route", () => {
     const events = (await response.text()).trim().split("\n").map((line) => JSON.parse(line) as { type: string; runId?: string; card?: { id: string } });
 
     expect(convexMutation.mock.calls.some(([name]) => String(name).includes("spectraRuns:resetForRetry"))).toBe(true);
-    expect(convexMutation.mock.calls.some(([name]) => String(name).includes("spectraRuns:create"))).toBe(false);
+    expect(convexMutation.mock.calls.some(([name]) => String(name).includes("spectraRuns:beginRun"))).toBe(false);
     expect(events.find((event) => event.type === "run_created")).toMatchObject({ runId: "run-real", card: { id: "card-real" } });
   });
 
@@ -159,14 +177,15 @@ describe("Spectra run route", () => {
     const events = (await response.text()).trim().split("\n").map((line) => JSON.parse(line) as { type: string; threadId?: string });
 
     expect(events).toContainEqual(expect.objectContaining({ type: "thread_ready", threadId: "thread-real" }));
-    const createThreadCall = convexMutation.mock.calls.find(([name]) => String(name).includes("spectraThreads:create"));
-    expect(createThreadCall?.[1]).toMatchObject({ origin: "chat", workspaceId: "workspace-real" });
+    const beginRunCall = convexMutation.mock.calls.find(([name]) => String(name).includes("spectraRuns:beginRun"));
+    expect(beginRunCall?.[1]).toMatchObject({ sourceSurface: "chat", workspaceId: "workspace-real", userPrompt: "Explain photosynthesis simply." });
     const metadataCall = convexMutation.mock.calls.find(([name]) => String(name).includes("spectraThreads:applyGeneratedMetadata"));
     expect(metadataCall?.[1]).toMatchObject({ title: "Photosynthesis in plain language", summary: "A simple explanation of how plants store light energy." });
     const messageCalls = convexMutation.mock.calls.filter(([name]) => String(name).includes("spectraThreads:appendMessage"));
-    expect(messageCalls).toHaveLength(2);
-    expect(messageCalls[0]?.[1]).toMatchObject({ role: "user", content: "Explain photosynthesis simply.", runId: "run-real" });
-    expect(messageCalls[1]?.[1]).toMatchObject({ role: "assistant", content: answerPlan.finalResponse, runId: "run-real" });
+    expect(messageCalls.length).toBeGreaterThanOrEqual(1);
+    expect(messageCalls.every(([, args]) => (args as { role?: string }).role === "assistant")).toBe(true);
+    expect(messageCalls.at(-1)?.[1]).toMatchObject({ role: "assistant", content: answerPlan.finalResponse, runId: "run-real" });
+    expect(messageCalls.some(([, args]) => (args as { metadata?: { partial?: boolean } }).metadata?.partial === true)).toBe(true);
     expect(JSON.stringify(messageCalls)).not.toContain("Analysing request");
   });
 
@@ -225,7 +244,7 @@ describe("Spectra run route", () => {
 
     expect(events.some((event) => event.type === "confirmation_required")).toBe(true);
     expect(events.find((event) => event.type === "confirmation_required")?.card?.actions?.map((action) => action.key)).toEqual(["confirm", "cancel"]);
-    expect(convexMutation.mock.calls.some(([name]) => String(name).includes("spectraWorkspaces:create"))).toBe(false);
+    expect(convexMutation.mock.calls.some(([name]) => String(name) === "spectraWorkspaces:create")).toBe(false);
 
     const cancelResponse = await route.POST(new NextRequest("http://localhost/api/spectra/run", {
       method: "POST",
@@ -233,6 +252,6 @@ describe("Spectra run route", () => {
     }));
     const cancelEvents = (await cancelResponse.text()).trim().split("\n").map((line) => JSON.parse(line) as { type: string; summary?: string });
     expect(cancelEvents).toContainEqual(expect.objectContaining({ type: "final", summary: "No proposed changes were applied." }));
-    expect(convexMutation.mock.calls.some(([name, args]) => String(name).includes("spectraRuns:updateStatus") && (args as { status?: string }).status === "cancelled")).toBe(true);
+    expect(convexMutation.mock.calls.some(([name]) => String(name).includes("spectraRuns:rejectConfirmation"))).toBe(true);
   });
 });

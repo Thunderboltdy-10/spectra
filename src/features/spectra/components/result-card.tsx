@@ -97,7 +97,7 @@ export function ResultCardStack({
   }
 
   return (
-    <div className={cn("relative max-h-[92px] space-y-1 overflow-y-auto [scrollbar-width:thin]", className)}>
+    <div className={cn("relative max-h-[132px] space-y-1 overflow-y-auto [scrollbar-width:thin]", className)} aria-label="Spectra run results" aria-live="polite">
       {visibleCards.map((card) => {
         const awaitingApproval = card.actions.some((action) => action.key === "confirm");
         const optimistic = card.id.startsWith("optimistic:") || card.runId.startsWith("pending:");
@@ -118,21 +118,17 @@ export function ResultCardStack({
         return (
           <div
             key={card.id}
-            role={opensDetails ? "button" : undefined}
-            tabIndex={opensDetails ? 0 : undefined}
+            role="group"
             data-spectra-card="result"
             data-card-state={cardState}
-            data-interactive={opensDetails ? "true" : undefined}
-            className={cn("group grid min-h-[40px] w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2.5 px-2.5 py-1 text-left text-[12px] animate-[spectra-fade-up_180ms_ease-out] focus-visible:outline-none", opensDetails ? "cursor-pointer" : "cursor-default")}
-            onClick={() => { if (opensDetails) onOpen?.(card); }}
-            onKeyDown={(event) => { if (opensDetails && (event.key === "Enter" || event.key === " ")) onOpen?.(card); }}
+            className="group grid min-h-[40px] w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2.5 px-2.5 py-1 text-left text-[12px] animate-[spectra-fade-up_180ms_ease-out]"
           >
             <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[color-mix(in_oklab,currentColor_10%,var(--bg-elevated))]" style={{ color: tone(card) }}>
               {card.status === "running" && !awaitingApproval ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : awaitingApproval ? <ShieldCheck className="h-3.5 w-3.5" /> : card.status === "completed" ? <CheckCircle2 className="h-3.5 w-3.5" /> : card.status === "failed" || card.status === "cancelled" ? <AlertCircle className="h-3.5 w-3.5" /> : <Clock3 className="h-3.5 w-3.5" />}
             </span>
             <div className="min-w-0 flex-1">
               <div className="flex items-baseline gap-2">
-                <span className="shrink-0 font-semibold text-[var(--text-primary)]">{card.title}</span>
+                {opensDetails ? <button type="button" onClick={() => onOpen?.(card)} className="shrink-0 rounded-[4px] font-semibold text-[var(--text-primary)] outline-none hover:text-[var(--accent-cyan)] focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--accent-cyan)_35%,transparent)]" aria-label={`Open details for ${card.title}`}>{card.title}</button> : <span className="shrink-0 font-semibold text-[var(--text-primary)]">{card.title}</span>}
                 {card.summary ? <RichText content={card.summary} className="line-clamp-1 min-w-0 flex-1 overflow-hidden text-[var(--text-secondary)] [&_*]:inline [&_a_svg]:hidden [&_code]:px-1 [&_p]:m-0 [&_p]:leading-normal" /> : null}
               </div>
               {awaitingApproval ? (
@@ -160,7 +156,7 @@ export function ResultCardStack({
                 </div>
               ) : null}
             </div>
-            <div className="flex items-center">{card.actions.map((action) => {
+            <div className="flex items-center">{card.actions.filter((action) => !awaitingApproval || (action.key !== "confirm" && action.key !== "cancel" && action.key !== "reject")).map((action) => {
               const ActionIcon = actionIcon(action.key);
               return <IconAction
                 key={`${card.id}-${action.key}`}
@@ -186,6 +182,7 @@ export function ResultCardStack({
           </div>
         );
       })}
+      <span className="pointer-events-none sticky bottom-0 z-10 block h-3 -mt-3 bg-[linear-gradient(to_bottom,transparent,var(--bg-primary))]" aria-hidden="true" />
     </div>
   );
 }

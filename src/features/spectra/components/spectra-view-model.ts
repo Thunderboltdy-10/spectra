@@ -107,7 +107,8 @@ export function artifactToCard(artifact: SpectraArtifact, placement?: "inbox" | 
     placement: placement ?? artifactPlacementStatus(artifact),
     updatedAt: artifact.updatedAt,
     metrics: meta.metrics,
-    aiState: artifact.createdFrom?.runId ? "generated" : undefined,
+    aiState: artifact.aiState === "edited" && artifact.aiStateExpiresAt && artifact.aiStateExpiresAt <= Date.now() ? undefined : artifact.aiState,
+    aiProgress: artifact.aiProgress,
   };
 }
 
@@ -125,7 +126,8 @@ export function workspaceItemToCard(item: SpectraWorkspaceItem): ArtifactCardVie
     pinned: item.viewData.pinned,
     variant: item.viewData.cardVariant,
     metrics: meta.metrics,
-    aiState: item.artifact.createdFrom?.runId ? "generated" : undefined,
+    aiState: item.artifact.aiState === "edited" && item.artifact.aiStateExpiresAt && item.artifact.aiStateExpiresAt <= Date.now() ? undefined : item.artifact.aiState,
+    aiProgress: item.artifact.aiProgress,
   };
 }
 

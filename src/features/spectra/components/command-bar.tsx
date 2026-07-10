@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { ArrowUp, FileText, Image as ImageIcon, Loader2, Paperclip, Plus, X } from "lucide-react";
+import { ArrowUp, FileText, Image as ImageIcon, Loader2, Paperclip, Plus, Square, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 
@@ -44,6 +44,7 @@ export function CommandBar({ placeholder, menu, context, className, onSubmit, bu
   const [menuOpen, setMenuOpen] = useState(false);
   const [attachments, setAttachments] = useState<CommandAttachment[]>([]);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const hasMenu = allowAttachments || Boolean(menu);
 
@@ -53,7 +54,7 @@ export function CommandBar({ placeholder, menu, context, className, onSubmit, bu
     const selected = Array.from(files).slice(0, available);
     const next = await Promise.all(selected.map(async (file): Promise<CommandAttachment> => {
       const base = { id: crypto.randomUUID(), name: file.name, mimeType: file.type || "application/octet-stream", size: file.size };
-      if (file.type.startsWith("image/")) return { ...base, handling: "unsupported_image", error: "The fixed DeepSeek route cannot inspect images yet." };
+      if (file.type.startsWith("image/")) return { ...base, handling: "unsupported_image", error: "Spectra cannot inspect image attachments yet. Use PDF, DOCX, or text for this run." };
       if (file.type === "application/pdf") {
         if (file.size > 10 * 1024 * 1024) return { ...base, handling: "pdf", error: "PDFs must be 10 MB or smaller." };
         return { ...base, handling: "pdf", data: await readFile(file, "data-url") };
@@ -90,11 +91,18 @@ export function CommandBar({ placeholder, menu, context, className, onSubmit, bu
     return () => document.removeEventListener("pointerdown", onPointerDown);
   }, [menuOpen]);
 
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    textarea.style.height = "auto";
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 128)}px`;
+  }, [value]);
+
   return (
     <div ref={rootRef} className={cn("relative flex items-center gap-2", className)}>
       <input ref={fileInputRef} type="file" multiple hidden accept=".pdf,.docx,.txt,.md,.csv,.json,image/png,image/jpeg,image/webp,image/gif" onChange={(event) => { void addFiles(event.target.files); event.currentTarget.value = ""; }} />
       {menuOpen && hasMenu ? (
-        <div className="absolute bottom-[calc(100%+8px)] left-0 z-20 min-w-[220px] rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[0_6px_18px_rgba(0,0,0,0.10)]">
+        <div role="menu" className="absolute bottom-[calc(100%+8px)] left-0 z-20 min-w-[220px] rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[0_6px_18px_rgba(0,0,0,0.10)]">
           {allowAttachments ? <button type="button" onClick={() => fileInputRef.current?.click()} className="flex w-full items-center gap-2 rounded-[6px] px-2.5 py-2 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><Paperclip className="h-4 w-4" />Attach a file</button> : null}
           {menu}
         </div>
@@ -110,10 +118,11 @@ export function CommandBar({ placeholder, menu, context, className, onSubmit, bu
         <Plus className="h-4 w-4" />
       </button>
       <div className="flex min-h-12 min-w-0 flex-1 flex-col rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 shadow-[0_3px_12px_rgba(27,20,12,0.08)]">
-        {attachments.length > 0 ? <div className="flex flex-wrap gap-1.5 px-1 pb-1.5">{attachments.map((attachment) => <div key={attachment.id} className={`flex max-w-[260px] items-center gap-2 rounded-[8px] bg-[var(--bg-secondary)] px-2.5 py-1.5 text-[10px] ${attachment.error ? "text-[var(--danger)]" : "text-[var(--text-secondary)]"}`} title={attachment.error ?? attachment.name}>{attachment.handling === "unsupported_image" ? <ImageIcon className="h-3.5 w-3.5 shrink-0" /> : <FileText className="h-3.5 w-3.5 shrink-0" />}<span className="min-w-0 truncate">{attachment.name}</span><span className="shrink-0 text-[var(--text-tertiary)]">{Math.max(1, Math.round(attachment.size / 1024))} KB</span><button type="button" onClick={() => setAttachments((current) => current.filter((item) => item.id !== attachment.id))} aria-label={`Remove ${attachment.name}`}><X className="h-3 w-3" /></button></div>)}</div> : null}
+        {attachments.length > 0 ? <div className="flex flex-wrap gap-1.5 px-1 pb-1.5">{attachments.map((attachment) => <div key={attachment.id} className={`flex max-w-[260px] items-center gap-2 rounded-[8px] bg-[var(--bg-secondary)] px-2.5 py-1.5 text-[10px] ${attachment.error ? "text-[var(--danger)]" : "text-[var(--text-secondary)]"}`} title={attachment.error ?? attachment.name}>{attachment.handling === "unsupported_image" ? <ImageIcon className="h-3.5 w-3.5 shrink-0" /> : <FileText className="h-3.5 w-3.5 shrink-0" />}<span className="min-w-0 truncate">{attachment.name}</span><span className="shrink-0 text-[var(--text-tertiary)]">{Math.max(1, Math.round(attachment.size / 1024))} KB</span><button type="button" className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] hover:bg-[var(--bg-hover)]" onClick={() => setAttachments((current) => current.filter((item) => item.id !== attachment.id))} aria-label={`Remove ${attachment.name}`}><X className="h-3 w-3" /></button></div>)}</div> : null}
         <div className="flex items-end gap-2">
-        {context ? <div className="hidden h-9 shrink-0 items-center border-r border-[var(--border-default)] pr-2 md:flex">{context}</div> : null}
+        {context ? <div className="flex h-9 max-w-[76px] shrink-0 items-center border-r border-[var(--border-default)] pr-1.5">{context}</div> : null}
         <textarea
+          ref={textareaRef}
           rows={1}
           value={value}
           onChange={(event) => setValue(event.target.value)}
@@ -125,8 +134,9 @@ export function CommandBar({ placeholder, menu, context, className, onSubmit, bu
             }
           }}
           placeholder={placeholder}
-          className="max-h-[80px] min-h-9 min-w-0 flex-1 resize-none bg-transparent px-1 py-2 text-[14px] leading-5 text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
+          className="max-h-32 min-h-9 min-w-0 flex-1 resize-none overflow-y-auto bg-transparent px-1 py-2 text-[14px] leading-5 text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
         />
+        {busy && allowConcurrent && onStop ? <button type="button" onClick={onStop} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] text-[var(--danger)] hover:bg-[color-mix(in_oklab,var(--danger)_8%,transparent)]" aria-label="Stop active response" title="Stop active response"><Square className="h-3.5 w-3.5" /></button> : null}
         <button
           type="button"
           disabled={busy && !allowConcurrent ? !onStop : !value.trim() || attachments.some((attachment) => Boolean(attachment.error))}
@@ -135,9 +145,9 @@ export function CommandBar({ placeholder, menu, context, className, onSubmit, bu
             else submit();
           }}
           className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] bg-[var(--text-primary)] text-[var(--bg-primary)] disabled:bg-[var(--bg-secondary)] disabled:text-[var(--text-tertiary)]"
-          aria-label="Send command"
+          aria-label={busy && !allowConcurrent && onStop ? "Stop active response" : "Send command"}
         >
-          {busy && !allowConcurrent ? onStop ? <X className="h-4 w-4" /> : <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowUp className="h-4 w-4" />}
+          {busy && !allowConcurrent ? onStop ? <Square className="h-3.5 w-3.5" /> : <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowUp className="h-4 w-4" />}
         </button>
         </div>
       </div>

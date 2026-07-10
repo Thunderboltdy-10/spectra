@@ -83,6 +83,7 @@ export const appendMessage = mutation({
     role: vRole,
     content: v.string(),
     runId: v.optional(v.id("spectraAiRuns")),
+    executionId: v.optional(v.string()),
     clientMessageId: v.optional(v.string()),
     metadata: v.optional(v.any()),
   },
@@ -98,12 +99,14 @@ export const appendMessage = mutation({
     }
     if (args.runId) {
       const run = await ctx.db.get(args.runId);
-      if (!run || run.ownerUserId !== thread.ownerUserId || run.threadId !== args.threadId) throw new Error("AI run not found");
+      if (!run || run.ownerUserId !== thread.ownerUserId || run.threadId !== args.threadId || (args.executionId && run.executionId !== args.executionId)) throw new Error("AI run not found");
+      const partial = args.metadata && typeof args.metadata === "object" && (args.metadata as { partial?: unknown }).partial === true;
+      if (partial && run.status !== "running") throw new Error("This run is no longer streaming.");
       if (args.role === "assistant") {
         const existing = (await ctx.db.query("spectraMessages").withIndex("by_run", (q) => q.eq("runId", args.runId)).collect())
           .find((message) => message.role === "assistant");
         if (existing) {
-          await ctx.db.patch(existing._id, { content, metadata: args.metadata, createdAt: Date.now() });
+          await ctx.db.patch(existing._id, { content, metadata: args.metadata });
           return existing._id;
         }
       }
@@ -127,6 +130,40 @@ export const appendMessage = mutation({
       updatedAt: now,
     });
     return messageId;
+  },
+});
+
+export const selectMessageChoice = mutation({
+  args: {
+    actorClerkId: v.string(),
+    messageId: v.id("spectraMessages"),
+    choiceKey: v.string(),
+    choiceTitle: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const message = await ctx.db.get(args.messageId);
+    if (!message) throw new Error("This choice is no longer available.");
+    await requireOwnedThread(ctx, args.actorClerkId, message.threadId);
+    const metadata = message.metadata && typeof message.metadata === "object" ? message.metadata as Record<string, unknown> : {};
+    const existing = metadata.choiceSelection;
+    if (existing && typeof existing === "object") {
+      const row = existing as { key?: unknown; title?: unknown };
+      if (row.key === args.choiceKey) return { selected: true, alreadySelected: true, choiceTitle: row.title };
+      throw new Error("A choice was already selected for this question.");
+    }
+    const now = Date.now();
+    await ctx.db.patch(args.messageId, {
+      metadata: { ...metadata, choiceSelection: { key: args.choiceKey.slice(0, 120), title: args.choiceTitle.slice(0, 200), selectedAt: now } },
+    });
+    if (message.runId) {
+      const run = await ctx.db.get(message.runId);
+      if (run) {
+        const sequence = (run.eventSequence ?? 0) + 1;
+        await ctx.db.insert("spectraRunEvents", { runId: run._id, executionId: run.executionId ?? "choice", sequence, type: "choice_selected", payload: { type: "choice_selected", runId: run._id, choiceTitle: args.choiceTitle.slice(0, 200) }, createdAt: now });
+        await ctx.db.patch(run._id, { eventSequence: sequence, updatedAt: now });
+      }
+    }
+    return { selected: true, alreadySelected: false, choiceTitle: args.choiceTitle.slice(0, 200) };
   },
 });
 
@@ -159,9 +196,10 @@ export const get = query({
     const traces = await Promise.all(runIds.map(async (runId) => {
       const run = await ctx.db.get(runId);
       if (!run) return null;
-      const [operations, cards] = await Promise.all([
+      const [operations, cards, events] = await Promise.all([
         ctx.db.query("spectraOperations").withIndex("by_run", (q) => q.eq("runId", runId)).collect(),
         ctx.db.query("spectraResultCards").withIndex("by_run", (q) => q.eq("runId", runId)).collect(),
+        ctx.db.query("spectraRunEvents").withIndex("by_run_sequence", (q) => q.eq("runId", runId)).collect(),
       ]);
       const artifactIds = [...new Set(operations.flatMap((operation) => operation.affected)
         .filter((affected) => affected.type === "artifact").map((affected) => affected.id))];
@@ -170,7 +208,7 @@ export const get = query({
         const artifact = artifactId ? await ctx.db.get(artifactId) : null;
         return artifact && artifact.ownerUserId === thread.ownerUserId ? artifact : null;
       }))).filter(Boolean);
-      return { run, operations, cards, artifacts };
+      return { run, operations, cards, events: events.sort((a, b) => a.sequence - b.sequence), artifacts };
     }));
     return { thread, messages, traces: traces.filter(Boolean), viewerName: actor.name };
   },
@@ -204,11 +242,15 @@ export const applyGeneratedMetadata = mutation({
   args: {
     actorClerkId: v.string(),
     threadId: v.id("spectraThreads"),
+    runId: v.id("spectraAiRuns"),
+    executionId: v.string(),
     title: v.optional(v.string()),
     summary: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const { thread } = await requireOwnedThread(ctx, args.actorClerkId, args.threadId);
+    const run = await ctx.db.get(args.runId);
+    if (!run || run.threadId !== args.threadId || run.status !== "running" || run.executionId !== args.executionId) throw new Error("This title belongs to an older run attempt.");
     const messageCount = thread.messageCount ?? 0;
     const provisionalTitle = thread.title === "New thread" || thread.title.split(/\s+/).length >= 8;
     // Sparse title windows avoid sidebar instability while allowing a weak

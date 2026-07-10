@@ -267,7 +267,6 @@ export const SPECTRA_PLAN_JSON_SCHEMA = {
     conversationTitle: nullableString,
     conversationSummary: nullableString,
     choices: { anyOf: [{ type: "object", additionalProperties: false, required: ["question", "options"], properties: { question: { type: "string" }, options: { type: "array", minItems: 2, maxItems: 4, items: { type: "object", additionalProperties: false, required: ["title", "description"], properties: { title: { type: "string" }, description: nullableString } } } } }, { type: "null" }] },
-    finalResponse: { type: "string", minLength: 1, maxLength: 4000 },
     operations: {
       type: "array", maxItems: 8,
       items: { oneOf: [
@@ -288,5 +287,6 @@ export const SPECTRA_PLAN_JSON_SCHEMA = {
         { type: "object", additionalProperties: false, required: ["type", "input"], properties: { type: { const: "workspaceItem.hide" }, input: { type: "object", additionalProperties: false, required: ["workspaceItemId"], properties: { workspaceItemId: { type: "string" } } } } },
       ] },
     },
+    finalResponse: { type: "string", minLength: 1, maxLength: 4000 },
   },
 } as const;

@@ -1346,6 +1346,12 @@ export default defineSchema({
     icon: v.optional(v.string()),
     color: v.optional(v.string()),
     starterKey: v.optional(v.string()),
+    aiState: v.optional(v.union(v.literal("creating"), v.literal("updating"), v.literal("edited"), v.literal("failed"))),
+    aiRunId: v.optional(v.id("spectraAiRuns")),
+    aiExecutionId: v.optional(v.string()),
+    aiPending: v.optional(v.boolean()),
+    aiStateExpiresAt: v.optional(v.number()),
+    aiPreview: v.optional(v.object({ title: v.optional(v.string()), description: v.optional(v.string()), icon: v.optional(v.string()), color: v.optional(v.string()), startedAt: v.number() })),
     // Transitional compatibility for documents written before workspace pinning
     // moved to spectraWorkspaceItems.viewData. Seed repair removes this field.
     pinned: v.optional(v.boolean()),
@@ -1383,6 +1389,17 @@ export default defineSchema({
       v.literal("archived"),
       v.literal("deleted"),
     ),
+    aiState: v.optional(v.union(v.literal("creating"), v.literal("updating"), v.literal("edited"), v.literal("failed"))),
+    aiRunId: v.optional(v.id("spectraAiRuns")),
+    aiExecutionId: v.optional(v.string()),
+    aiProgress: v.optional(v.number()),
+    aiStateExpiresAt: v.optional(v.number()),
+    aiPreview: v.optional(v.object({
+      title: v.optional(v.string()),
+      summary: v.optional(v.string()),
+      content: v.optional(v.any()),
+      startedAt: v.number(),
+    })),
     createdFrom: v.optional(v.object({
       source: v.union(
         v.literal("chat"),
@@ -1528,6 +1545,7 @@ export default defineSchema({
     ownerUserId: v.id("users"),
     orgId: v.optional(v.id("orgs")),
     sourceSurface: v.union(v.literal("chat"), v.literal("workspace"), v.literal("artifact")),
+    phase: v.optional(v.union(v.literal("created"), v.literal("planning"), v.literal("reading"), v.literal("retrieving"), v.literal("applying"), v.literal("streaming"), v.literal("approval"), v.literal("completed"), v.literal("stopped"), v.literal("failed"))),
     threadId: v.optional(v.id("spectraThreads")),
     workspaceId: v.optional(v.id("spectraWorkspaces")),
     artifactId: v.optional(v.id("spectraArtifacts")),
@@ -1550,6 +1568,13 @@ export default defineSchema({
     providerUsed: v.optional(v.string()),
     usage: v.optional(v.any()),
     sessionId: v.optional(v.string()),
+    submissionKey: v.optional(v.string()),
+    executionId: v.optional(v.string()),
+    lastRetryKey: v.optional(v.string()),
+    eventSequence: v.optional(v.number()),
+    traceDegraded: v.optional(v.boolean()),
+    heartbeatAt: v.optional(v.number()),
+    startedAt: v.optional(v.number()),
     contextSnapshot: v.optional(v.any()),
     attemptCount: v.optional(v.number()),
     createdAt: v.number(),
@@ -1558,12 +1583,14 @@ export default defineSchema({
   })
     .index("by_owner_status", ["ownerUserId", "status"])
     .index("by_owner_created", ["ownerUserId", "createdAt"])
+    .index("by_owner_submission", ["ownerUserId", "submissionKey"])
     .index("by_workspace", ["workspaceId"])
     .index("by_thread", ["threadId"])
     .index("by_artifact", ["artifactId"]),
 
   spectraOperations: defineTable({
     runId: v.optional(v.id("spectraAiRuns")),
+    executionId: v.optional(v.string()),
     actorType: v.union(v.literal("user"), v.literal("ai"), v.literal("system")),
     type: v.string(),
     status: v.union(
@@ -1577,6 +1604,8 @@ export default defineSchema({
     output: v.optional(v.any()),
     affected: v.array(v.object({ type: v.string(), id: v.string() })),
     requiresConfirmation: v.optional(v.boolean()),
+    pendingArtifactId: v.optional(v.id("spectraArtifacts")),
+    pendingWorkspaceId: v.optional(v.id("spectraWorkspaces")),
     undoData: v.optional(v.any()),
     createdAt: v.number(),
     executedAt: v.optional(v.number()),
@@ -1626,6 +1655,33 @@ export default defineSchema({
     .index("by_run", ["runId"])
     .index("by_workspace_status", ["workspaceId", "status"])
     .index("by_artifact_status", ["artifactId", "status"]),
+
+  spectraRunEvents: defineTable({
+    runId: v.id("spectraAiRuns"),
+    executionId: v.string(),
+    sequence: v.number(),
+    type: v.string(),
+    payload: v.any(),
+    createdAt: v.number(),
+  })
+    .index("by_run_sequence", ["runId", "sequence"])
+    .index("by_run_created", ["runId", "createdAt"]),
+
+  spectraRunTabs: defineTable({
+    ownerUserId: v.id("users"),
+    orgId: v.optional(v.id("orgs")),
+    runId: v.id("spectraAiRuns"),
+    threadId: v.id("spectraThreads"),
+    workspaceId: v.optional(v.id("spectraWorkspaces")),
+    surface: v.union(v.literal("chat"), v.literal("workspace"), v.literal("artifact")),
+    selected: v.optional(v.boolean()),
+    hiddenAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_owner_updated", ["ownerUserId", "updatedAt"])
+    .index("by_owner_run", ["ownerUserId", "runId"])
+    .index("by_thread", ["threadId"]),
 
   spectraFocusSpaces: defineTable({
     workspaceId: v.optional(v.id("spectraWorkspaces")),

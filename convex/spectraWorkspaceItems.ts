@@ -69,8 +69,10 @@ async function listOwnedWorkspaceItems(
       .filter((item) => includeHidden || item.viewData.hidden !== true)
       .map((item) => hydrateWorkspaceItem(ctx, item, workspace.title)),
   );
+  const settledWorkspace = workspace.aiState === "edited" && workspace.aiStateExpiresAt && workspace.aiStateExpiresAt <= Date.now() ? { ...workspace, aiState: undefined } : workspace;
+  const visibleWorkspace = settledWorkspace.aiState === "updating" && settledWorkspace.aiPreview ? { ...settledWorkspace, title: settledWorkspace.aiPreview.title ?? settledWorkspace.title, description: settledWorkspace.aiPreview.description ?? settledWorkspace.description, icon: settledWorkspace.aiPreview.icon ?? settledWorkspace.icon, color: settledWorkspace.aiPreview.color ?? settledWorkspace.color } : settledWorkspace;
   return {
-    workspace,
+    workspace: visibleWorkspace,
     items: hydrated
       .filter((item) => item.sourceType !== "artifact" || item.artifact)
       .sort((a, b) => b.updatedAt - a.updatedAt),

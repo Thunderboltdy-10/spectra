@@ -59,4 +59,5 @@ crons.interval(
   internal.ghosts.runScheduledRegenerationSweep,
   {},
 );
+crons.interval("reconcile-stale-spectra-runs", { minutes: 2 }, internal.spectraRuns.reconcileStaleRuns, {});
 export default crons;

@@ -33,14 +33,17 @@ import type { LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type ReactNode } from "react";
 import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
+import { useSpectraContextStore } from "@/stores/spectra-context-store";
 import { useSpectraRun } from "../ai/use-spectra-run";
+import { useSpectraContext } from "../hooks/use-spectra-context";
 import { createDefaultArtifactPayload, type ArtifactPayload } from "../components/artifact-blueprint-sheet";
 import { ArtifactCard, blueprintMeta } from "../components/artifact-card";
 import { ArtifactStudio, StudioTabRail, useArtifactStudioState } from "../components/artifact-studio";
 import { ArtifactTileSurface } from "../components/artifact-tile-surface";
 import { CommandBar } from "../components/command-bar";
-import { ContextFocusControl, GlobalSearch, SelectionActionBar, type ComposerFocusMode } from "../components/context-controls";
+import { ContextFocusControl, GlobalSearch, SelectionActionBar, showContinuationConflict, type ComposerFocusMode } from "../components/context-controls";
 import { ResultCardStack } from "../components/result-card";
+import { DurableRunTabs } from "../components/durable-run-tabs";
 import { RunDetailPanel } from "../components/run-detail-panel";
 import { ObjectLibrary, type LibraryMode } from "../components/object-library";
 import { parseWorkspaceHubTabs } from "../components/workspace-tab-state";
@@ -58,6 +61,7 @@ import {
 import {
   getSpectraOverview,
   getSpectraRunDetail,
+  getSpectraThread,
   peekSpectraWorkspace,
   getSpectraWorkspace,
   postSpectra,
@@ -160,14 +164,18 @@ function WorkspaceRail({
   onSelect: (workspaceId: string) => void;
   onCreateClick: () => void;
 }) {
+  const [mobileOpen, setMobileOpen] = useState(false);
   return (
-    <aside className="flex w-[74px] shrink-0 flex-col items-center border-r border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-primary)_84%,var(--bg-elevated))] px-2.5 py-5">
+    <>
+    <button type="button" onClick={() => setMobileOpen(true)} className="fixed left-2 top-2 z-[62] flex h-10 w-10 items-center justify-center rounded-[9px] border border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_94%,transparent)] text-[var(--text-secondary)] shadow-[0_6px_18px_rgba(27,20,12,0.1)] backdrop-blur sm:hidden" aria-label="Open workspace navigation" aria-expanded={mobileOpen} aria-controls="workspace-mobile-rail"><Rows3 className="h-4 w-4" /></button>
+    {mobileOpen ? <button type="button" className="fixed inset-0 z-[63] bg-black/20 sm:hidden" onClick={() => setMobileOpen(false)} aria-label="Close workspace navigation" /> : null}
+    <aside id="workspace-mobile-rail" className={`fixed inset-y-0 left-0 z-[64] flex w-[82px] shrink-0 flex-col items-center border-r border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-primary)_94%,var(--bg-elevated))] px-2.5 py-5 shadow-[12px_0_36px_rgba(27,20,12,0.12)] transition-transform duration-200 sm:relative sm:z-auto sm:w-[74px] sm:translate-x-0 sm:shadow-none ${mobileOpen ? "translate-x-0" : "-translate-x-full"}`}>
       <button
         type="button"
         className={`flex h-14 w-14 flex-col items-center justify-center gap-1 rounded-[8px] text-[11px] font-medium ${
           !selectedWorkspaceId ? "bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[0_2px_8px_rgba(27,20,12,0.04)]" : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
         }`}
-        onClick={onHome}
+        onClick={() => { onHome(); setMobileOpen(false); }}
       >
         <Home className="h-4 w-4" />
         Home
@@ -184,7 +192,7 @@ function WorkspaceRail({
               className={`flex w-14 flex-col items-center gap-1 rounded-[8px] px-1.5 py-2 text-[11px] font-medium ${
                 selected ? "bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[0_2px_8px_rgba(27,20,12,0.04)]" : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
               }`}
-              onClick={() => onSelect(workspace._id)}
+              onClick={() => { onSelect(workspace._id); setMobileOpen(false); }}
               title={workspace.title}
             >
               <span className="flex h-9 w-9 items-center justify-center rounded-[8px] text-white" style={{ background: accent.color }}>
@@ -198,12 +206,13 @@ function WorkspaceRail({
       <button
         type="button"
         className="mt-3 flex h-10 w-10 items-center justify-center rounded-[8px] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-        onClick={onCreateClick}
+        onClick={() => { onCreateClick(); setMobileOpen(false); }}
         aria-label="Create workspace"
       >
         <Plus className="h-4 w-4" />
       </button>
     </aside>
+    </>
   );
 }
 
@@ -236,6 +245,8 @@ function WorkspaceHome({
   onToggleSelection: () => void;
   searchControl: ReactNode;
 }) {
+  const selectedObjects = useSpectraContextStore((state) => state.selectionDraft);
+  const toggleSelectionObject = useSpectraContextStore((state) => state.toggleSelection);
   const [createOpen, setCreateOpen] = useState(false);
   const [pinnedOpen, setPinnedOpen] = useState(true);
   const [dropWorkspaceId, setDropWorkspaceId] = useState<string | null>(null);
@@ -271,20 +282,20 @@ function WorkspaceHome({
   }
 
   return (
-    <main className="min-h-0 flex-1 overflow-y-auto bg-[radial-gradient(circle_at_22%_-5%,color-mix(in_oklab,var(--accent-cyan)_7%,transparent),transparent_34%),var(--bg-primary)] px-8 pb-[150px] pt-8">
+    <main className="min-h-0 flex-1 overflow-y-auto bg-[radial-gradient(circle_at_22%_-5%,color-mix(in_oklab,var(--accent-cyan)_7%,transparent),transparent_34%),var(--bg-primary)] px-4 pb-[150px] pt-16 sm:px-8 sm:pt-8">
       <div className="mx-auto max-w-[1320px]">
-        <div className="flex items-end justify-between gap-5">
+        <div className="flex flex-col items-start justify-between gap-5 lg:flex-row lg:items-end">
           <div>
             <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-tertiary)]">Spectra / Workspace</div>
             <h1 className="font-display text-[36px] font-semibold leading-[1.15] text-[var(--text-primary)]">Mission control</h1>
             <p className="mt-2 text-[14px] text-[var(--text-secondary)]">Every workspace and object, from one working surface.</p>
           </div>
-          <div className="flex items-center gap-4" ref={createRef}>
+          <div className="flex max-w-full flex-wrap items-center gap-2 sm:gap-4" ref={createRef}>
             <div className="hidden items-center gap-4 text-[11px] text-[var(--text-secondary)] lg:flex">
               <span>{workspaces.length} workspaces</span><span>{artifacts.length} objects</span><span>{unplacedCount} unplaced</span>
             </div>
             {searchControl}
-            <button type="button" onClick={onToggleSelection} className={`flex h-9 items-center gap-2 rounded-[8px] border px-3 text-[12px] font-medium transition ${selectionMode ? "border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-primary)]" : "border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"}`} aria-pressed={selectionMode}><Files className="h-4 w-4" />{selectionMode ? `${selectedContextIds.size} selected` : "Select objects"}</button>
+            <button type="button" onClick={onToggleSelection} className={`flex h-9 items-center gap-2 rounded-[8px] border px-3 text-[12px] font-medium transition ${selectionMode ? "border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-primary)]" : "border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"}`} aria-pressed={selectionMode}><Files className="h-4 w-4" />{selectionMode ? `${selectedObjects.length} selected` : "Select objects"}</button>
             <div className="relative">
               <button type="button" className={smallButtonClass("dark")} onClick={() => setCreateOpen((open) => !open)}><Plus className="h-4 w-4" />Create artifact</button>
               {createOpen ? <div className="absolute right-0 top-[calc(100%+8px)] z-40 w-[230px] rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 shadow-[0_16px_38px_rgba(27,20,12,0.14)]">{createTypes.map((type) => { const Icon = type.icon; return <button key={type.key} type="button" className={menuItemClass()} onClick={() => { setCreateOpen(false); onCreateArtifact(type.key); }}><Icon className="h-4 w-4" />New {type.label}</button>; })}</div> : null}
@@ -300,11 +311,12 @@ function WorkspaceHome({
             const accent = workspaceAccent(workspace, index);
             const Icon = iconForWorkspace(workspace, index);
             const count = workspaceArtifactCount(workspace, artifacts);
+            const workspaceSelected = selectedObjects.some((item) => item.type === "workspace" && item.id === workspace._id);
             return (
               <div
                 key={workspace._id}
                 data-spectra-card="workspace"
-                data-card-state={dropWorkspaceId === workspace._id ? "drop-target" : "normal"}
+                data-card-state={dropWorkspaceId === workspace._id ? "drop-target" : workspaceSelected ? "multi-selected" : workspace.aiState === "creating" ? "creating" : workspace.aiState === "updating" ? "updating" : workspace.aiState === "failed" ? "failed" : workspace.aiState === "edited" ? "edited" : "normal"}
                 data-interactive="true"
                 className="group relative min-h-[150px] overflow-hidden p-4 text-left"
                 style={{ "--card-accent": accent.color } as CSSProperties}
@@ -320,13 +332,13 @@ function WorkspaceHome({
                   onMoveArtifactToWorkspace(artifact, workspace._id);
                 }}
               >
-                <button type="button" className="absolute inset-0 z-[1]" onClick={() => onSelect(workspace._id)} aria-label={`Open ${workspace.title} workspace`} />
+                <button type="button" className="absolute inset-0 z-[1]" onClick={() => { if (selectionMode) toggleSelectionObject({ type: "workspace", id: workspace._id, label: workspace.title, source: "selected", capability: "context" }); else onSelect(workspace._id); }} aria-label={selectionMode ? `${workspaceSelected ? "Remove" : "Add"} ${workspace.title} ${workspaceSelected ? "from" : "to"} selection` : `Open ${workspace.title} workspace`} aria-pressed={selectionMode ? workspaceSelected : undefined} />
                 <div className="relative z-[2] flex items-start gap-3">
                   <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px] border border-[color-mix(in_oklab,var(--card-accent)_22%,var(--card-border))] bg-[color-mix(in_oklab,var(--card-accent)_9%,var(--card-paper))]" style={{ color: accent.color }}>
-                    <Icon className="h-4 w-4" />
+                    {workspaceSelected ? <CheckCircle2 className="h-4 w-4" /> : <Icon className="h-4 w-4" />}
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate font-display text-[22px] font-semibold leading-tight text-[var(--text-primary)]">{workspace.title}</span>
+                    <span className="flex items-center gap-2"><span className="min-w-0 flex-1 truncate font-display text-[22px] font-semibold leading-tight text-[var(--text-primary)]">{workspace.title}</span>{workspace.aiState === "creating" || workspace.aiState === "updating" ? <span className="rounded-full bg-[color-mix(in_oklab,var(--accent-cyan)_10%,var(--bg-elevated))] px-2 py-0.5 text-[9px] font-semibold text-[var(--accent-cyan)]">{workspace.aiState === "creating" ? "Creating" : "Updating"}</span> : workspace.aiState === "failed" ? <span className="text-[9px] font-semibold text-[var(--danger)]">Needs review</span> : null}</span>
                     <span className="mt-1 line-clamp-2 block text-[12px] leading-5 text-[var(--text-secondary)]">{workspace.description}</span>
                     <span className="mt-4 flex items-center gap-3 text-[11px] text-[var(--text-tertiary)]">
                       <span>{count} artifacts</span>
@@ -982,13 +994,12 @@ function PinnedArtifactShelf({ artifacts, onSelect }: { artifacts: SpectraArtifa
 export function WorkspaceShell() {
   const searchParams = useSearchParams();
   const requestedWorkspaceId = searchParams.get("workspaceId") ?? undefined;
+  const requestedThreadId = searchParams.get("threadId") ?? undefined;
   const [overview, setOverview] = useState<SpectraOverview | null>(null);
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | undefined>();
   const [selection, setSelection] = useState<Selection>(null);
   const [multiSelectMode, setMultiSelectMode] = useState(false);
-  const [selectedContextIds, setSelectedContextIds] = useState<Set<string>>(() => new Set());
   const [focusModeOverride, setFocusModeOverride] = useState<ComposerFocusMode | null>(null);
-  const [composerThread, setComposerThread] = useState<{ id: string; title: string; runId?: string } | null>(null);
   const [activeRunPanelId, setActiveRunPanelId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [workspaceSort, setWorkspaceSort] = useState<WorkspaceSort>("updated");
@@ -1017,31 +1028,38 @@ export function WorkspaceShell() {
   const [artifactDeletePending, setArtifactDeletePending] = useState<SpectraArtifact | null>(null);
   const [workspaceDeleteConfirmation, setWorkspaceDeleteConfirmation] = useState("");
   const workspaceCreateRef = useOutsideClick<HTMLDivElement>(workspaceCreateOpen, () => setWorkspaceCreateOpen(false));
+  const workspaceRequestSequence = useRef(0);
+  const overviewRequestSequence = useRef(0);
 
   const loadOverview = useCallback(async (workspaceId?: string, quiet = false) => {
+    const sequence = ++overviewRequestSequence.current;
     if (!quiet) setLoading(true);
     try {
       const next = await getSpectraOverview(workspaceId, quiet);
+      if (sequence !== overviewRequestSequence.current) return null;
       setOverview(next);
       setSelectedWorkspaceId(next.workspace ? next.selectedWorkspaceId ?? workspaceId : undefined);
       return next;
     } catch (error) {
+      if (sequence !== overviewRequestSequence.current) return null;
       toast.error(error instanceof Error ? error.message : "Could not load Spectra workspace.");
       if (workspaceId) {
         setSelectedWorkspaceId(undefined);
         setSelection(null);
         const fallback = await getSpectraOverview().catch(() => null);
-        if (fallback) setOverview(fallback);
+        if (fallback && sequence === overviewRequestSequence.current) setOverview(fallback);
       }
       return null;
     } finally {
-      if (!quiet) setLoading(false);
+      if (!quiet && sequence === overviewRequestSequence.current) setLoading(false);
     }
   }, []);
 
   const loadWorkspace = useCallback(async (workspaceId: string, force = false) => {
+    const sequence = ++workspaceRequestSequence.current;
     const cached = !force ? peekSpectraWorkspace(workspaceId) : null;
     if (cached) {
+      if (sequence !== workspaceRequestSequence.current) return;
       setSelectedWorkspaceId(workspaceId);
       setOverview((current) => current ? { ...current, selectedWorkspaceId: workspaceId, workspace: cached } : current);
       return;
@@ -1049,29 +1067,27 @@ export function WorkspaceShell() {
     setWorkspaceLoading(true);
     try {
       const result = await getSpectraWorkspace(workspaceId, force);
+      if (sequence !== workspaceRequestSequence.current) return;
       setSelectedWorkspaceId(workspaceId);
       setOverview((current) => current
         ? { ...current, selectedWorkspaceId: workspaceId, workspace: result.workspace }
         : { workspaces: [], selectedWorkspaceId: workspaceId, workspace: result.workspace, artifacts: [], runs: [], resultCards: [] });
     } catch (error) {
+      if (sequence !== workspaceRequestSequence.current) return;
       setSelectedWorkspaceId(undefined);
       setSelection(null);
       const message = error instanceof Error ? error.message : "Could not load workspace.";
       toast.error(message.includes("Workspace not found") ? "That workspace is no longer available. Refreshed workspace home." : message);
       const fallback = await getSpectraOverview().catch(() => null);
-      if (fallback) setOverview(fallback);
+      if (fallback && sequence === workspaceRequestSequence.current) setOverview(fallback);
     } finally {
-      setWorkspaceLoading(false);
+      if (sequence === workspaceRequestSequence.current) setWorkspaceLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    void loadOverview();
-  }, [loadOverview]);
-
-  useEffect(() => {
-    if (requestedWorkspaceId) void loadWorkspace(requestedWorkspaceId);
-  }, [loadWorkspace, requestedWorkspaceId]);
+    void loadOverview(requestedWorkspaceId);
+  }, [loadOverview, requestedWorkspaceId]);
 
   useEffect(() => {
     try {
@@ -1102,14 +1118,25 @@ export function WorkspaceShell() {
   const tiledArtifacts = useMemo(
     () => tileArtifactIds.flatMap((id) => {
       const artifact = allArtifacts.find((item) => item._id === id);
-      return artifact && artifact.blueprintKey !== "thread_reference" ? [artifact] : [];
+      return artifact ? [artifact] : [];
     }),
     [allArtifacts, tileArtifactIds],
   );
   const threadPanelArtifact = allArtifacts.find((artifact) => artifact._id === threadPanelArtifactId && artifact.blueprintKey === "thread_reference") ?? null;
   const workspaceRuns = selectedWorkspaceId ? runs.filter((run) => run.workspaceId === selectedWorkspaceId) : runs;
   const workspaces = useMemo(() => sortSpectraWorkspaces(overview?.workspaces ?? []), [overview?.workspaces]);
+  const { composerThread, setComposerThread, selectedContextIds, selectionCount, contextArtifactIds, explicitContextObjects, setSelectedContextIds, commitSelection, clearDraftSelection, setVisibleArtifactIds, setActiveWorkspaceContext } = useSpectraContext(allArtifacts, workspaces);
+  useEffect(() => {
+    if (!requestedThreadId) return;
+    void getSpectraThread(requestedThreadId).then((value) => {
+      if (composerThread?.id === value.thread._id) return;
+      if (composerThread) showContinuationConflict({ currentTitle: composerThread.title, candidateTitle: value.thread.title, onReplace: () => setComposerThread({ id: value.thread._id, title: value.thread.title, workspaceId: value.thread.workspaceId }), onCancel: () => setThreadPanelArtifactId(null) });
+      else setComposerThread({ id: value.thread._id, title: value.thread.title, workspaceId: value.thread.workspaceId });
+    }).catch(() => toast.error("That conversation is no longer available."));
+  }, [composerThread, requestedThreadId, setComposerThread]);
+  const contextualArtifactIds = useMemo(() => [...new Set([...contextArtifactIds, ...selectedContextIds, ...tiledArtifacts.map((artifact) => artifact._id)])].slice(0, 24), [contextArtifactIds, selectedContextIds, tiledArtifacts]);
   const workspaceHeader = workspace ?? workspaces.find((candidate) => candidate._id === selectedWorkspaceId) ?? null;
+  useEffect(() => setActiveWorkspaceContext(workspaceHeader ? { id: workspaceHeader._id, title: workspaceHeader.title } : null), [setActiveWorkspaceContext, workspaceHeader]);
   const entries = useMemo(() => (selectedWorkspaceId && overview?.workspace?.workspace?._id === selectedWorkspaceId ? overview.workspace.items : [])
     .map((item) => {
       const card = workspaceItemToCard(item);
@@ -1124,8 +1151,11 @@ export function WorkspaceShell() {
   }), [entries, workspaceSort, workspaceType]);
   const selectedArtifact = selection?.type === "artifact" ? entries.find((entry) => entry.item._id === selection.itemId)?.artifact ?? null : null;
   const commandFocusArtifact = studio.isOpen ? studio.activeArtifact : threadPanelArtifact ?? selectedArtifact;
-  const naturalFocusMode: ComposerFocusMode = selectedContextIds.size > 0 ? "selection" : composerThread ? "thread" : commandFocusArtifact ? "artifact" : workspace ? "workspace" : "global";
-  const effectiveFocusMode = focusModeOverride === "selection" && selectedContextIds.size === 0
+  useEffect(() => {
+    setVisibleArtifactIds([...new Set([...tiledArtifacts.map((artifact) => artifact._id), ...(commandFocusArtifact ? [commandFocusArtifact._id] : [])])]);
+  }, [commandFocusArtifact, setVisibleArtifactIds, tiledArtifacts]);
+  const naturalFocusMode: ComposerFocusMode = contextualArtifactIds.length > 0 ? "selection" : composerThread ? "thread" : commandFocusArtifact ? "artifact" : workspace ? "workspace" : "global";
+  const effectiveFocusMode = focusModeOverride === "selection" && contextualArtifactIds.length === 0
     ? naturalFocusMode
     : focusModeOverride === "artifact" && !commandFocusArtifact
       ? naturalFocusMode
@@ -1144,13 +1174,15 @@ export function WorkspaceShell() {
     artifactId: commandFocusArtifact?._id,
     threadId: composerThread?.id,
     focusMode: effectiveFocusMode,
-    selectedArtifactIds: [...selectedContextIds],
+    selectedArtifactIds: contextualArtifactIds,
+    explicitContextObjects,
     currentView: viewMode,
     initialCards: initialResultCards,
     onThreadReady: (threadId) => {
       setComposerThread((current) => current?.id === threadId ? current : { id: threadId, title: "Current conversation" });
       window.dispatchEvent(new Event("spectra:threads-changed"));
     },
+    onContinuationConflict: () => setComposerThread(null),
     onDataChanged: () => loadOverview(selectedWorkspaceId, true),
     onOpenArtifact: async (artifactId) => {
       const refreshed = await loadOverview(selectedWorkspaceId, true);
@@ -1198,11 +1230,10 @@ export function WorkspaceShell() {
 
 	  async function openRunPanel(runId: string, title: string) {
 	    try {
-	      const detail = await getSpectraRunDetail(runId);
+	      await getSpectraRunDetail(runId);
 	      setActiveRunPanelId(runId);
-	      if (detail.run.threadId) setComposerThread((current) => current?.id === detail.run.threadId ? current : { id: detail.run.threadId!, title, runId });
 	    } catch (error) {
-	      toast.error(error instanceof Error ? error.message : "Could not open conversation.");
+	      toast.error(error instanceof Error ? error.message : `Could not open ${title}.`);
 	    }
 	  }
 
@@ -1210,7 +1241,7 @@ export function WorkspaceShell() {
     setMultiSelectMode(true);
     setSelectedContextIds((current) => {
       const next = new Set(current);
-      if (next.has(artifact._id)) next.delete(artifact._id); else if (next.size < 12) next.add(artifact._id);
+      if (next.has(artifact._id)) next.delete(artifact._id); else if (next.size < 24) next.add(artifact._id); else toast.message("Context can include up to 24 explicitly selected artifacts.");
       window.localStorage.setItem(WORKSPACE_SELECTION_STORAGE_KEY, JSON.stringify([...next]));
       return next;
     });
@@ -1222,7 +1253,7 @@ export function WorkspaceShell() {
       const parsed = JSON.parse(window.localStorage.getItem(WORKSPACE_SELECTION_STORAGE_KEY) ?? "[]");
       if (!Array.isArray(parsed)) return;
       const valid = new Set(allArtifacts.map((artifact) => artifact._id));
-      const restored = parsed.filter((id): id is string => typeof id === "string" && valid.has(id)).slice(0, 12);
+      const restored = parsed.filter((id): id is string => typeof id === "string" && valid.has(id)).slice(0, 24);
       if (restored.length) {
         setSelectedContextIds(new Set(restored));
         setFocusModeOverride("selection");
@@ -1233,15 +1264,15 @@ export function WorkspaceShell() {
   }
 
   function clearSelection() {
-    setSelectedContextIds(new Set());
+    clearDraftSelection();
     setFocusModeOverride(null);
     window.localStorage.removeItem(WORKSPACE_SELECTION_STORAGE_KEY);
   }
 
   function openSelectedArtifactsInTiles() {
     const selectedIds = [...selectedContextIds]
-      .filter((id) => allArtifacts.some((artifact) => artifact._id === id && artifact.blueprintKey !== "thread_reference"))
-      .slice(0, 8);
+      .filter((id) => allArtifacts.some((artifact) => artifact._id === id))
+      .slice(0, 24);
     if (selectedIds.length === 0) {
       toast.message("Select one or more artifacts first.");
       return;
@@ -1269,7 +1300,7 @@ export function WorkspaceShell() {
     if (artifact.blueprintKey === "thread_reference") {
       setThreadPanelArtifactId(artifact._id);
       const threadId = typeof (artifact.content as { threadId?: unknown } | null)?.threadId === "string" ? String((artifact.content as { threadId: string }).threadId).trim() : "";
-      if (threadId && !composerThread) setComposerThread({ id: threadId, title: artifact.title });
+      if (threadId && composerThread && composerThread.id !== threadId) showContinuationConflict({ currentTitle: composerThread.title, candidateTitle: artifact.title, onReplace: () => setComposerThread({ id: threadId, title: artifact.title }), onCancel: () => setThreadPanelArtifactId(null) });
       return;
     }
     studio.openSplit(artifact);
@@ -1630,7 +1661,7 @@ export function WorkspaceShell() {
         <div className="relative flex min-h-0 flex-1">
       {pendingCreateType ? (
         <div className="absolute inset-0 z-[90] flex items-center justify-center bg-[color-mix(in_oklab,var(--bg-primary)_72%,transparent)] backdrop-blur-[2px]" onPointerDown={() => setPendingCreateType(null)}>
-          <div className="w-[390px] rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[0_24px_70px_rgba(27,20,12,0.2)]" onPointerDown={(event) => event.stopPropagation()}>
+          <div className="w-[min(390px,calc(100vw-32px))] rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[0_24px_70px_rgba(27,20,12,0.2)]" onPointerDown={(event) => event.stopPropagation()}>
             <h2 className="font-display text-[19px] font-semibold text-[var(--text-primary)]">Where should this {blueprintMeta[pendingCreateType].label.toLowerCase()} live?</h2>
             <p className="mt-1 text-[12px] text-[var(--text-secondary)]">Choose a workspace or keep it unplaced.</p>
             <div className="mt-4 max-h-[300px] space-y-1 overflow-y-auto">
@@ -1642,7 +1673,7 @@ export function WorkspaceShell() {
       ) : null}
       {workspaceDeleteOpen && workspace ? (
         <div className="absolute inset-0 z-[95] flex items-center justify-center bg-[color-mix(in_oklab,var(--bg-primary)_76%,transparent)] backdrop-blur-[2px]" onPointerDown={() => setWorkspaceDeleteOpen(false)}>
-          <div className="w-[480px] rounded-[12px] border border-[color-mix(in_oklab,var(--danger)_28%,var(--border-default))] bg-[var(--bg-elevated)] p-5 shadow-[0_24px_70px_rgba(27,20,12,0.22)]" onPointerDown={(event) => event.stopPropagation()}>
+          <div className="w-[min(480px,calc(100vw-32px))] rounded-[12px] border border-[color-mix(in_oklab,var(--danger)_28%,var(--border-default))] bg-[var(--bg-elevated)] p-5 shadow-[0_24px_70px_rgba(27,20,12,0.22)]" onPointerDown={(event) => event.stopPropagation()}>
             <h2 className="font-display text-[21px] font-semibold text-[var(--text-primary)]">Permanently remove {workspace.title}?</h2>
             <p className="mt-2 text-[13px] leading-5 text-[var(--text-secondary)]">Workspace-only artifacts, placements, runs, operations, and result cards will be deleted. Artifacts also placed elsewhere remain available there.</p>
             <label className="mt-4 block text-[12px] font-medium text-[var(--text-primary)]">Type <span className="select-all font-mono">Remove {workspace.title} permanently</span></label>
@@ -1654,7 +1685,7 @@ export function WorkspaceShell() {
 	      {workspaceEditOpen && workspaceHeader ? <div className="absolute inset-0 z-[94] flex items-center justify-center bg-[color-mix(in_oklab,var(--bg-primary)_76%,transparent)] p-5 backdrop-blur-[2px]" onPointerDown={() => setWorkspaceEditOpen(false)}><div className="w-full max-w-[430px] rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5 shadow-[0_24px_70px_rgba(27,20,12,0.2)]" onPointerDown={(event) => event.stopPropagation()}><h2 className="font-display text-[21px] font-semibold text-[var(--text-primary)]">Edit workspace</h2><label className="mt-4 block text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">Icon</label><div className="mt-2 flex flex-wrap gap-2">{workspaceIconChoices.map(([key, Icon]) => <button key={key} type="button" onClick={() => setWorkspaceEditIcon(key)} className={`flex h-10 w-10 items-center justify-center rounded-[9px] border transition ${workspaceEditIcon === key ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_9%,var(--bg-primary))] text-[var(--accent-cyan)]" : "border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`} aria-label={key}><Icon className="h-4 w-4" /></button>)}</div><input autoFocus value={workspaceEditTitle} onChange={(event) => setWorkspaceEditTitle(event.target.value)} className="mt-4 h-10 w-full rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-[13px] text-[var(--text-primary)] outline-none" /><textarea value={workspaceEditDescription} onChange={(event) => setWorkspaceEditDescription(event.target.value)} placeholder="Short description" className="mt-2 min-h-[84px] w-full resize-none rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-[13px] text-[var(--text-primary)] outline-none" /><div className="mt-4 flex justify-end gap-2"><button type="button" className={smallButtonClass()} onClick={() => setWorkspaceEditOpen(false)}>Cancel</button><button type="button" className={smallButtonClass("dark")} disabled={!workspaceEditTitle.trim() || busyKey === `workspace:update:${workspaceHeader._id}`} onClick={() => void updateWorkspaceMetadata()}>{busyKey === `workspace:update:${workspaceHeader._id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}Save</button></div></div></div> : null}
       {artifactDeletePending ? <div className="absolute inset-0 z-[96] flex items-center justify-center bg-[color-mix(in_oklab,var(--bg-primary)_76%,transparent)] p-5 backdrop-blur-[2px]" onPointerDown={() => setArtifactDeletePending(null)}><div className="w-full max-w-[440px] rounded-[12px] border border-[color-mix(in_oklab,var(--danger)_24%,var(--border-default))] bg-[var(--bg-elevated)] p-5 shadow-[0_24px_70px_rgba(27,20,12,0.2)]" onPointerDown={(event) => event.stopPropagation()}><h2 className="font-display text-[21px] font-semibold text-[var(--text-primary)]">Delete {artifactDeletePending.title}?</h2><p className="mt-2 text-[13px] leading-5 text-[var(--text-secondary)]">The artifact, its placements, version history, and directly linked run history will be permanently removed.</p><div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setArtifactDeletePending(null)} className={smallButtonClass()}>Cancel</button><button type="button" disabled={busyKey === `delete:${artifactDeletePending._id}`} onClick={() => void permanentlyDeleteArtifact(artifactDeletePending, true)} className="flex h-9 items-center gap-2 rounded-[8px] bg-[var(--danger)] px-3 text-[12px] font-medium text-white disabled:opacity-45">{busyKey === `delete:${artifactDeletePending._id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}Delete permanently</button></div></div></div> : null}
       {workspaceCreateOpen ? (
-        <div ref={workspaceCreateRef} className="absolute left-3 top-5 z-40 w-[330px] rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 shadow-[0_18px_44px_rgba(27,20,12,0.16)]">
+        <div ref={workspaceCreateRef} className="absolute left-3 top-5 z-40 w-[min(330px,calc(100vw-24px))] rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 shadow-[0_18px_44px_rgba(27,20,12,0.16)]">
           <div className="mb-3">
             <div className="font-display text-[18px] font-semibold text-[var(--text-primary)]">New workspace</div>
             <div className="mt-1 text-[12px] text-[var(--text-secondary)]">Create a subject space that stays synced with artifacts.</div>
@@ -1692,6 +1723,7 @@ export function WorkspaceShell() {
           continuedThreadId={composerThread?.id}
           onCloseArtifact={closeTileArtifact}
           onCloseAll={closeTileSet}
+          onAddArtifact={(artifactId) => setTileArtifactIds((current) => current.includes(artifactId) ? current : [...current, artifactId].slice(0, 24))}
           onFocusSet={() => setWorkSetIsolated(true)}
           onExitFocusSet={() => setWorkSetIsolated(false)}
           onSave={updateArtifact}
@@ -1735,10 +1767,10 @@ export function WorkspaceShell() {
             onToggleSelection={() => {
               setMultiSelectMode((value) => {
                 const next = !value;
-                if (next && selectedContextIds.size === 0) restoreLatestSelection();
+                if (next && selectionCount === 0) restoreLatestSelection();
                 return next;
               });
-              if (selectedContextIds.size) setFocusModeOverride("selection");
+              if (selectionCount) setFocusModeOverride("selection");
             }}
             searchControl={<GlobalSearch onOpenArtifact={openArtifactPanel} onOpenWorkspace={(target) => goToWorkspaceHub(target._id)} selectedIds={selectedContextIds} onToggleSelected={toggleContextArtifact} />}
           />
@@ -1773,6 +1805,7 @@ export function WorkspaceShell() {
 	              continuedThreadId={composerThread?.id}
 	              onCloseArtifact={closeTileArtifact}
 	              onCloseAll={closeTileSet}
+	              onAddArtifact={(artifactId) => setTileArtifactIds((current) => current.includes(artifactId) ? current : [...current, artifactId].slice(0, 24))}
 	              onFocusSet={() => setWorkSetIsolated(true)}
 	              onExitFocusSet={() => setWorkSetIsolated(false)}
 	              onSave={updateArtifact}
@@ -1788,7 +1821,7 @@ export function WorkspaceShell() {
           <>
           <div className="flex min-w-0 flex-1 flex-col">
             <WorkspaceHeader workspace={workspaceHeader} items={entries.map((entry) => entry.item)} runs={workspaceRuns} busy={busyKey} onCreateArtifact={openCreateArtifact} onEditWorkspace={openWorkspaceEdit} onArchiveWorkspace={() => { setWorkspaceDeleteConfirmation(""); setWorkspaceDeleteOpen(true); }} />
-            <main className={viewMode === "canvas" ? "relative min-h-0 flex-1 overflow-hidden px-8 pb-[110px] pt-6" : "relative min-h-0 flex-1 overflow-y-auto px-8 pb-[150px] pt-6"}>
+            <main className={viewMode === "canvas" ? "relative min-h-0 flex-1 overflow-hidden px-3 pb-[110px] pt-4 sm:px-5 lg:px-8 lg:pt-6" : "relative min-h-0 flex-1 overflow-y-auto px-3 pb-[150px] pt-4 sm:px-5 lg:px-8 lg:pt-6"}>
               {workspaceLoading && !workspace ? <WorkspaceContentSkeleton /> : null}
               <WorkspacePinnedShelf entries={entries} workspaceTitle={workspace?.title ?? "Workspace"} onSelect={(item, artifact) => { setSelection({ type: "artifact", itemId: item._id, artifactId: artifact._id }); openArtifactPanel(artifact); }} />
               <section className="mt-10">
@@ -1802,7 +1835,7 @@ export function WorkspaceShell() {
                   type={workspaceType}
                   onTypeChange={setWorkspaceType}
                   selectionMode={multiSelectMode}
-                  onToggleSelection={() => { setMultiSelectMode((value) => { const next = !value; if (next && selectedContextIds.size === 0) restoreLatestSelection(); return next; }); if (selectedContextIds.size) setFocusModeOverride("selection"); }}
+                  onToggleSelection={() => { setMultiSelectMode((value) => { const next = !value; if (next && selectionCount === 0) restoreLatestSelection(); return next; }); if (selectionCount) setFocusModeOverride("selection"); }}
                   searchControl={<GlobalSearch onOpenArtifact={openArtifactPanel} onOpenWorkspace={(target) => goToWorkspaceHub(target._id)} selectedIds={selectedContextIds} onToggleSelected={toggleContextArtifact} placementWorkspaceId={workspace?._id} placementLabel={workspace?.title} onPlaceArtifact={workspace ? (artifact) => void addArtifactToWorkspace(artifact, workspace._id) : undefined} />}
                 />
               </section>
@@ -1865,6 +1898,7 @@ export function WorkspaceShell() {
 	              continuedThreadId={composerThread?.id}
 	              onCloseArtifact={closeTileArtifact}
 	              onCloseAll={closeTileSet}
+	              onAddArtifact={(artifactId) => setTileArtifactIds((current) => current.includes(artifactId) ? current : [...current, artifactId].slice(0, 24))}
 	              onFocusSet={() => setWorkSetIsolated(true)}
 	              onExitFocusSet={() => setWorkSetIsolated(false)}
 	              onSave={updateArtifact}
@@ -1878,9 +1912,10 @@ export function WorkspaceShell() {
 	        </section>
       )}
           {threadPanelArtifact ? <ArtifactStudio mode="split" artifact={threadPanelArtifact} artifacts={allArtifacts} tabs={[]} dirtyIds={new Set()} panelWidth={threadPanelWidth} sourceLabel={workspace?.title ?? "Workspace"} onPanelWidthChange={setThreadPanelWidth} onClose={() => setThreadPanelArtifactId(null)} onExpand={openArtifactPanel} onActivateTab={() => undefined} onCloseTab={() => setThreadPanelArtifactId(null)} onSave={updateArtifact} onRevert={revertArtifactVersion} onArchive={archiveArtifact} onDirtyChange={() => undefined} onContinueThread={(threadId, title) => toggleContinuedThread(threadId, title)} continuedThreadId={composerThread?.id} /> : null}
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 z-50 bg-[linear-gradient(to_top,var(--bg-primary)_72%,transparent)] px-8 pb-5 pt-12">
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 z-50 bg-[linear-gradient(to_top,var(--bg-primary)_72%,transparent)] px-2 pb-3 pt-12 sm:px-5 sm:pb-5 lg:px-8">
             <div className="pointer-events-auto mx-auto max-w-[880px]">
-	              {multiSelectMode ? <SelectionActionBar count={selectedContextIds.size} onClear={clearSelection} onExit={() => { setMultiSelectMode(false); if (selectedContextIds.size === 0) setFocusModeOverride(null); }} onRun={(prompt) => void runEngine.run(prompt)} onTile={openSelectedArtifactsInTiles} onFocusSet={() => { openSelectedArtifactsInTiles(); setWorkSetIsolated(true); }} /> : null}
+              <DurableRunTabs workspaceId={selectedWorkspaceId} onOpen={(runId, _threadId, title) => void openRunPanel(runId, title)} onStop={(runId) => runEngine.stop(runId)} />
+	              {multiSelectMode ? <SelectionActionBar count={selectionCount} onClear={clearSelection} onExit={() => { setMultiSelectMode(false); if (selectionCount === 0) setFocusModeOverride(null); }} onAddToContext={() => { const count = selectionCount; commitSelection(); setFocusModeOverride("selection"); setMultiSelectMode(false); toast.success(`${count} object${count === 1 ? "" : "s"} added to context.`); }} onTile={selectedContextIds.size ? openSelectedArtifactsInTiles : undefined} /> : null}
 	              <ResultCardStack cards={runEngine.cards} className="mb-1.5 ml-[52px]" activeThreadId={composerThread?.id} activeRunId={composerThread?.runId} onContinue={(thread) => setComposerThread(thread ? { id: thread.threadId, title: thread.title, runId: thread.runId } : null)} onOpen={(card) => { setThreadPanelArtifactId(null); void openRunPanel(card.runId, card.summary ?? card.title); }} onAction={(card, action, targetId) => { if (action === "hide" && activeRunPanelId === card.runId) setActiveRunPanelId(null); void runEngine.onCardAction(card, action, targetId); }} />
               <div className="flex items-center gap-1"><CommandBar
                 className="min-w-0 flex-1"
@@ -1894,9 +1929,9 @@ export function WorkspaceShell() {
                   return true;
                 }}
                 busy={runEngine.submitting}
-                allowConcurrent
+                allowConcurrent={!composerThread}
                 onStop={runEngine.stop}
-                context={<ContextFocusControl mode={effectiveFocusMode} onModeChange={setFocusModeOverride} workspace={workspace} artifact={commandFocusArtifact} selectedCount={selectedContextIds.size} threadTitle={composerThread?.title} />}
+                context={<ContextFocusControl mode={effectiveFocusMode} onModeChange={setFocusModeOverride} workspace={workspace} artifact={commandFocusArtifact} selectedCount={contextualArtifactIds.length} threadTitle={composerThread?.title} />}
                 menu={(
                   <div>
                     <button type="button" className={menuItemClass()} onClick={() => setComposerThread(null)}><MessageSquare className="h-4 w-4" />New chat</button>
@@ -1910,7 +1945,7 @@ export function WorkspaceShell() {
                         </button>
                       );
                     })}
-                    <button type="button" className={menuItemClass()} onClick={() => { setMultiSelectMode(true); if (selectedContextIds.size === 0) restoreLatestSelection(); if (selectedContextIds.size) setFocusModeOverride("selection"); }}><Files className="h-4 w-4" />Select objects for context</button>
+                    <button type="button" className={menuItemClass()} onClick={() => { setMultiSelectMode(true); if (selectionCount === 0) restoreLatestSelection(); if (selectionCount) setFocusModeOverride("selection"); }}><Files className="h-4 w-4" />Select objects for context</button>
                     {!selectedWorkspaceId ? <button type="button" className={menuItemClass()} onClick={() => setWorkspaceCreateOpen(true)}><Plus className="h-4 w-4" />New workspace</button> : null}
                   </div>
                 )}

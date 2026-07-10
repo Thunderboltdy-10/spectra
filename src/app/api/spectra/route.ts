@@ -102,6 +102,12 @@ export async function GET(request: NextRequest) {
       return ok({ artifacts });
     }
 
+    if (action === "artifact") {
+      const artifactId = requireString(params.get("artifactId"), "artifactId");
+      const artifact = await spectraQuery("spectraArtifacts:get", { actorClerkId: actor.clerkId, artifactId });
+      return ok({ artifact });
+    }
+
     if (action === "workspace") {
       const workspaceId = params.get("workspaceId");
       if (!workspaceId) return badRequest("Choose a workspace first.");
@@ -123,6 +129,21 @@ export async function GET(request: NextRequest) {
         limit: params.has("limit") ? Number(params.get("limit")) : undefined,
       }, []);
       return ok({ resultCards });
+    }
+
+    if (action === "runTabs") {
+      const runTabs = await spectraQuery("spectraRuns:listTabs", {
+        actorClerkId: actor.clerkId,
+        includeHidden: params.get("includeHidden") === "true",
+        limit: params.has("limit") ? Number(params.get("limit")) : undefined,
+      });
+      return ok({ runTabs });
+    }
+
+    if (action === "runEvents") {
+      const runId = requireString(params.get("runId"), "runId");
+      const events = await spectraQuery("spectraRuns:listEvents", { actorClerkId: actor.clerkId, runId, after: params.has("after") ? Number(params.get("after")) : undefined });
+      return ok({ events });
     }
 
     if (action === "runDetail") {
@@ -227,6 +248,26 @@ export async function POST(request: NextRequest) {
     const actor = await requireActor();
     const body = await request.json() as Record<string, unknown>;
     const action = requireString(body.action, "action");
+
+    if (action === "hideRunTab") {
+      const result = await spectraMutation("spectraRuns:hideTab", { actorClerkId: actor.clerkId, runId: requireString(body.runId, "runId") });
+      return ok(result);
+    }
+
+    if (action === "selectRunTab") {
+      const result = await spectraMutation("spectraRuns:selectTab", { actorClerkId: actor.clerkId, runId: optionalString(body.runId) });
+      return ok(result);
+    }
+
+    if (action === "selectMessageChoice") {
+      const result = await spectraMutation("spectraThreads:selectMessageChoice", {
+        actorClerkId: actor.clerkId,
+        messageId: requireString(body.messageId, "messageId"),
+        choiceKey: requireString(body.choiceKey, "choiceKey"),
+        choiceTitle: requireString(body.choiceTitle, "choiceTitle"),
+      });
+      return ok(result);
+    }
 
     if (action === "seed") {
       if (process.env.NODE_ENV === "production") {

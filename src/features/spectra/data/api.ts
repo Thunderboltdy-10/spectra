@@ -10,6 +10,10 @@ export type SpectraWorkspace = {
   color?: string;
   status: "active" | "archived";
   defaultView: "cards" | "canvas" | "timeline" | "library";
+  aiState?: "creating" | "updating" | "edited" | "failed";
+  aiRunId?: string;
+  aiStateExpiresAt?: number;
+  aiPreview?: { title?: string; description?: string; icon?: string; color?: string; startedAt: number };
   createdAt: number;
   updatedAt: number;
   lastActivityAt: number;
@@ -23,6 +27,11 @@ export type SpectraArtifact = {
   content?: unknown;
   tags: string[];
   status: "active" | "draft" | "archived" | "deleted";
+  aiState?: "creating" | "updating" | "edited" | "failed";
+  aiRunId?: string;
+  aiProgress?: number;
+  aiStateExpiresAt?: number;
+  aiPreview?: { title?: string; summary?: string; content?: unknown; startedAt: number };
   createdAt: number;
   updatedAt: number;
   placements?: Array<{
@@ -97,6 +106,7 @@ export type SpectraWorkspaceItem = {
 export type SpectraRun = {
   _id: string;
   status: "queued" | "running" | "awaiting_confirmation" | "completed" | "failed" | "cancelled";
+  phase?: "created" | "planning" | "reading" | "retrieving" | "applying" | "streaming" | "approval" | "completed" | "stopped" | "failed";
   sourceSurface: "chat" | "workspace" | "artifact";
   threadId?: string;
   workspaceId?: string;
@@ -116,6 +126,7 @@ export type SpectraRun = {
     elapsedMs?: number;
   };
   attemptCount?: number;
+  traceDegraded?: boolean;
   createdAt: number;
   updatedAt: number;
 };
@@ -133,6 +144,7 @@ export type SpectraThread = {
   createdAt: number;
   updatedAt: number;
   lastMessageAt?: number;
+  lastRunId?: string;
 };
 
 export type SpectraMessage = {
@@ -149,7 +161,18 @@ export type SpectraThreadTrace = {
   run: SpectraRun;
   operations: SpectraOperation[];
   cards: SpectraResultCard[];
+  events?: SpectraRunEvent[];
   artifacts: SpectraArtifact[];
+};
+
+export type SpectraRunEvent = {
+  _id: string;
+  runId: string;
+  executionId: string;
+  sequence: number;
+  type: string;
+  payload: Record<string, unknown>;
+  createdAt: number;
 };
 
 export type SpectraThreadDetail = {
@@ -199,6 +222,8 @@ export type SpectraOperation = {
   output?: unknown;
   affected: Array<{ type: string; id: string }>;
   requiresConfirmation?: boolean;
+  pendingArtifactId?: string;
+  pendingWorkspaceId?: string;
   createdAt: number;
   executedAt?: number;
 };
@@ -207,6 +232,20 @@ export type SpectraRunDetail = {
   run: SpectraRun;
   cards: SpectraResultCard[];
   operations: SpectraOperation[];
+};
+
+export type SpectraRunTab = {
+  _id: string;
+  runId: string;
+  threadId: string;
+  workspaceId?: string;
+  surface: "chat" | "workspace" | "artifact";
+  selected?: boolean;
+  hiddenAt?: number;
+  createdAt: number;
+  updatedAt: number;
+  run: SpectraRun;
+  thread: SpectraThread;
 };
 
 export type SpectraOverview = {
@@ -293,6 +332,11 @@ export async function getSpectraArtifacts(params?: {
   return readJson<{ artifacts: SpectraArtifact[] }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
 }
 
+export async function getSpectraArtifact(artifactId: string) {
+  const qs = new URLSearchParams({ action: "artifact", artifactId });
+  return readJson<{ artifact: SpectraArtifact }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+}
+
 export async function searchSpectra(query: string) {
   const qs = new URLSearchParams({ action: "search", search: query });
   return readJson<{ artifacts: SpectraArtifact[]; workspaces: SpectraWorkspace[] }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
@@ -317,6 +361,18 @@ export async function getSpectraResultCards(params?: {
 export async function getSpectraRunDetail(runId: string) {
   const qs = new URLSearchParams({ action: "runDetail", runId });
   return readJson<SpectraRunDetail>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+}
+
+export async function getSpectraRunTabs(options: { includeHidden?: boolean; limit?: number } = {}) {
+  const qs = new URLSearchParams({ action: "runTabs" });
+  if (options.includeHidden) qs.set("includeHidden", "true");
+  if (options.limit) qs.set("limit", String(options.limit));
+  return readJson<{ runTabs: SpectraRunTab[] }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+}
+
+export async function getSpectraRunEvents(runId: string, after = 0) {
+  const qs = new URLSearchParams({ action: "runEvents", runId, after: String(after) });
+  return readJson<{ events: SpectraRunEvent[] }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
 }
 
 export async function getSpectraArtifactVersions(artifactId: string, limit = 20) {
@@ -364,6 +420,8 @@ export function toArtifactCardView(artifact: SpectraArtifact): ArtifactCardView 
       ? placements.map((placement) => placement.workspaceTitle).join(", ")
       : "Unplaced",
     placement: artifact.placementStatus ?? (placements.length > 0 ? "workspace" : "inbox"),
+    aiState: artifact.aiState === "edited" && artifact.aiStateExpiresAt && artifact.aiStateExpiresAt <= Date.now() ? undefined : artifact.aiState,
+    aiProgress: artifact.aiProgress,
   };
 }
 

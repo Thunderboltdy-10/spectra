@@ -4,10 +4,13 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowRight, Check, CheckCircle2, Clock3, FolderPlus, History, MessageSquare, Pencil, Pin, Plus, Sparkles, X } from "lucide-react";
 import { toast } from "sonner";
+import { AnimatePresence, motion } from "framer-motion";
 import { useSpectraRun } from "../ai/use-spectra-run";
+import { useSpectraContext } from "../hooks/use-spectra-context";
 import { ConversationSurface } from "../components/conversation-surface";
 import { CommandBar } from "../components/command-bar";
 import { ContextFocusControl, GlobalSearch, type ComposerFocusMode } from "../components/context-controls";
+import { DurableRunTabs } from "../components/durable-run-tabs";
 import { ArtifactStudio, useArtifactStudioState } from "../components/artifact-studio";
 import type { ArtifactPayload } from "../components/artifact-blueprint-sheet";
 import { getSpectraOverview, getSpectraResultCards, getSpectraThread, getSpectraThreads, postSpectra, type SpectraArtifact, type SpectraResultCard, type SpectraThread, type SpectraThreadDetail, type SpectraWorkspace } from "../data/api";
@@ -28,9 +31,6 @@ export function ChatShell() {
   const [renaming, setRenaming] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
   const [chatWorkspaceId, setChatWorkspaceId] = useState<string | null>(null);
-  const [selectedContextIds, setSelectedContextIds] = useState<Set<string>>(
-    () => new Set(),
-  );
   const [focusModeOverride, setFocusModeOverride] = useState<ComposerFocusMode | null>(null);
   const [welcome, setWelcome] = useState("Welcome back.");
   const [studioPanelWidth, setStudioPanelWidth] = useState(700);
@@ -38,6 +38,7 @@ export function ChatShell() {
   const [threadPanelArtifactId, setThreadPanelArtifactId] = useState<string | null>(null);
   const activeThreadRef = useRef<string | null>(requestedThreadId);
   const consumedPromptRef = useRef<string | null>(null);
+  const { composerThread, setComposerThread, explicitContextIds: selectedContextIds, contextArtifactIds, explicitContextObjects, clearExplicitContext, toggleExplicitArtifact, setVisibleArtifactIds, setActiveWorkspaceContext } = useSpectraContext(artifacts, workspaces);
 
   useEffect(() => {
     const hour = new Date().getHours();
@@ -53,29 +54,36 @@ export function ChatShell() {
     setThreads(threadRows.threads);
     setWorkspaces(overview.workspaces);
     setArtifacts(overview.artifacts);
-    setDetail(selected);
+    if (nextThreadId === activeThreadRef.current) setDetail(selected);
     window.dispatchEvent(new Event("spectra:threads-changed"));
   }, []);
 
   useEffect(() => {
     setThreadId(requestedThreadId);
+    if (!requestedThreadId) setComposerThread(null);
     activeThreadRef.current = requestedThreadId;
     setLoading(Boolean(requestedThreadId));
     void refresh(requestedThreadId).catch((error) => toast.error(error instanceof Error ? error.message : "Could not load chat.")).finally(() => setLoading(false));
-  }, [requestedThreadId, refresh]);
+  }, [requestedThreadId, refresh, setComposerThread]);
+
+  useEffect(() => {
+    if (!threadId || !detail?.traces.some((trace) => trace.run.status === "queued" || trace.run.status === "running" || trace.run.status === "awaiting_confirmation")) return;
+    const timer = window.setInterval(() => void getSpectraThread(threadId).then(setDetail).catch(() => undefined), 750);
+    return () => window.clearInterval(timer);
+  }, [detail?.traces, threadId]);
 
   const selectThread = useCallback((id: string | null) => {
     setThreadId(id);
     activeThreadRef.current = id;
     setDetail(null);
     setChatWorkspaceId(null);
+    setComposerThread(id ? { id, title: threads.find((thread) => thread._id === id)?.title ?? "Conversation" } : null);
     router.replace(id ? `/chat?threadId=${encodeURIComponent(id)}` : "/chat?new=1");
-  }, [router]);
+  }, [router, setComposerThread, threads]);
 
   const selectWorkspaceContext = useCallback((workspaceId: string | null) => {
     setChatWorkspaceId(workspaceId);
-    if (threadId && workspaceId) void postSpectra({ action: "updateThread", threadId, workspaceId }).then(() => refresh(threadId));
-  }, [refresh, threadId]);
+  }, []);
 
   const studio = useArtifactStudioState("spectra.shared.artifactStudio", artifacts);
   const threadPanelArtifact = artifacts.find((artifact) => artifact._id === threadPanelArtifactId && artifact.blueprintKey === "thread_reference") ?? null;
@@ -102,31 +110,31 @@ export function ChatShell() {
   }, [refresh]);
 
   const focusedArtifact = studio.activeArtifact ?? threadPanelArtifact;
+  useEffect(() => { setVisibleArtifactIds(focusedArtifact && focusedArtifact.blueprintKey !== "thread_reference" ? [focusedArtifact._id] : []); }, [focusedArtifact, setVisibleArtifactIds]);
   const scopedWorkspaceId = chatWorkspaceId ?? detail?.thread.workspaceId;
-  const naturalFocusMode: ComposerFocusMode = selectedContextIds.size > 0 ? "selection" : threadId ? "thread" : focusedArtifact ? "artifact" : scopedWorkspaceId ? "workspace" : "global";
-  const effectiveFocusMode = focusModeOverride === "thread" && !threadId ? naturalFocusMode : focusModeOverride === "artifact" && !focusedArtifact ? naturalFocusMode : focusModeOverride === "workspace" && !scopedWorkspaceId ? naturalFocusMode : focusModeOverride === "selection" && selectedContextIds.size === 0 ? naturalFocusMode : focusModeOverride ?? naturalFocusMode;
-  const continuingThread = Boolean(threadId && effectiveFocusMode === "thread");
+  const naturalFocusMode: ComposerFocusMode = selectedContextIds.size > 0 ? "selection" : composerThread ? "thread" : focusedArtifact ? "artifact" : scopedWorkspaceId ? "workspace" : "global";
+  const effectiveFocusMode = focusModeOverride === "thread" && !composerThread ? naturalFocusMode : focusModeOverride === "artifact" && !focusedArtifact ? naturalFocusMode : focusModeOverride === "workspace" && !scopedWorkspaceId ? naturalFocusMode : focusModeOverride === "selection" && selectedContextIds.size === 0 ? naturalFocusMode : focusModeOverride ?? naturalFocusMode;
+  // Continuation is independent from additive artifact/workspace context.
+  // Starting a new thread is an explicit thread action, not a side effect of focus.
+  const continuingThread = Boolean(composerThread);
 
   const toggleContextArtifact = useCallback((artifact: SpectraArtifact) => {
-    setSelectedContextIds((current) => {
-      const next = new Set(current);
-      if (next.has(artifact._id)) next.delete(artifact._id);
-      else if (next.size < 12) next.add(artifact._id);
-      return next;
-    });
+    toggleExplicitArtifact(artifact);
     setFocusModeOverride("selection");
-  }, []);
+  }, [toggleExplicitArtifact]);
 
   const runEngine = useSpectraRun({
     surface: "chat",
     workspaceId: scopedWorkspaceId,
     artifactId: focusedArtifact?._id,
-    threadId: continuingThread ? threadId ?? undefined : undefined,
+    threadId: composerThread?.id,
     focusMode: effectiveFocusMode,
-    selectedArtifactIds: [...selectedContextIds],
+    selectedArtifactIds: contextArtifactIds,
+    explicitContextObjects,
     currentView: "conversation",
     initialCards: [],
     onThreadReady: async (id) => {
+      setComposerThread({ id, title: id === threadId ? detail?.thread.title ?? "Conversation" : "New thread" });
       if (id !== threadId) {
         setThreadId(id);
         activeThreadRef.current = id;
@@ -134,6 +142,7 @@ export function ChatShell() {
       }
       await refresh(id);
     },
+    onContinuationConflict: () => selectThread(null),
     onDataChanged: () => refresh(activeThreadRef.current),
     onOpenArtifact: openArtifact,
 	  });
@@ -148,22 +157,28 @@ export function ChatShell() {
 	      if (workspaceId) setChatWorkspaceId(workspaceId);
 	    }
 	    function onClearSelection() {
-	      setSelectedContextIds(new Set());
+	      clearExplicitContext();
 	      setFocusModeOverride(null);
 	    }
 	    function onAsk(event: Event) {
 	      const prompt = (event as CustomEvent<{ prompt?: string }>).detail?.prompt?.trim();
 	      if (prompt) void runEngine.run(prompt);
 	    }
+	    function onContinueThread(event: Event) {
+	      const id = (event as CustomEvent<{ threadId?: string }>).detail?.threadId;
+	      if (id) selectThread(id);
+	    }
 	    window.addEventListener("spectra:open-artifact", onOpenArtifact);
 	    window.addEventListener("spectra:open-workspace", onOpenWorkspace);
 	    window.addEventListener("spectra:ask", onAsk);
 	    window.addEventListener("spectra:clear-selection", onClearSelection);
+	    window.addEventListener("spectra:continue-thread", onContinueThread);
 	    return () => {
 	      window.removeEventListener("spectra:open-artifact", onOpenArtifact);
 	      window.removeEventListener("spectra:open-workspace", onOpenWorkspace);
 	      window.removeEventListener("spectra:ask", onAsk);
 	      window.removeEventListener("spectra:clear-selection", onClearSelection);
+	      window.removeEventListener("spectra:continue-thread", onContinueThread);
 	    };
 	  });
 
@@ -175,17 +190,19 @@ export function ChatShell() {
 	    router.replace(threadId ? `/chat?threadId=${encodeURIComponent(threadId)}` : "/chat?new=1");
 	  }, [requestedPrompt, router, runEngine, threadId]);
 
-  const title = detail?.thread.title ?? "New conversation";
+  const visibleTitle = detail?.thread.title ?? "New conversation";
+  const title = composerThread?.title ?? visibleTitle;
   const activeWorkspace = workspaces.find((workspace) => workspace._id === (chatWorkspaceId ?? detail?.thread.workspaceId));
-  const activeCards = useMemo(() => runEngine.cards.filter((card) => card.status !== "completed"), [runEngine.cards]);
-  const pageComposer = <CommandBar placeholder={continuingThread ? `Continue ${title}…` : selectedContextIds.size ? `Ask with ${selectedContextIds.size} selected artifacts…` : threadId ? "Start a new thread with the selected context…" : activeWorkspace ? `Ask with ${activeWorkspace.title} context…` : focusedArtifact ? `Ask about ${focusedArtifact.title}…` : "Ask Spectra anything…"} busy={runEngine.submitting} allowConcurrent allowAttachments onStop={runEngine.stop} onSubmit={(value, attachments) => { void runEngine.run(value, attachments); return true; }} menu={<><button type="button" onClick={() => selectThread(null)} className="flex w-full items-center gap-2 rounded-[6px] px-2.5 py-2 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"><Plus className="h-4 w-4" />New conversation</button>{selectedContextIds.size ? <button type="button" onClick={() => { setSelectedContextIds(new Set()); setFocusModeOverride(null); }} className="flex w-full items-center gap-2 rounded-[6px] px-2.5 py-2 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"><X className="h-4 w-4" />Clear selected context</button> : null}<div className="my-1 h-px bg-[var(--border-subtle)]" />{workspaces.slice(0, 6).map((workspace) => <button key={workspace._id} type="button" onClick={() => selectWorkspaceContext(workspace._id)} className="flex w-full items-center gap-2 rounded-[6px] px-2.5 py-2 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"><FolderPlus className="h-4 w-4" /><span className="min-w-0 flex-1 truncate">Use {workspace.title}</span>{activeWorkspace?._id === workspace._id ? <Check className="h-3.5 w-3.5 text-[var(--success)]" /> : null}</button>)}</>} context={<ContextFocusControl mode={effectiveFocusMode} onModeChange={setFocusModeOverride} workspace={activeWorkspace} artifact={focusedArtifact} selectedCount={selectedContextIds.size} threadTitle={threadId ? title : undefined} />} />;
+  useEffect(() => setActiveWorkspaceContext(activeWorkspace ? { id: activeWorkspace._id, title: activeWorkspace.title } : null), [activeWorkspace, setActiveWorkspaceContext]);
+  const activeCards = useMemo(() => runEngine.cards, [runEngine.cards]);
+	  const pageComposer = <CommandBar placeholder={continuingThread ? `Continue ${title}…` : selectedContextIds.size ? `Ask with ${selectedContextIds.size} selected artifacts…` : activeWorkspace ? `Ask with ${activeWorkspace.title} context…` : focusedArtifact ? `Ask about ${focusedArtifact.title}…` : "Ask Spectra anything…"} busy={runEngine.submitting} allowConcurrent={!continuingThread} allowAttachments onStop={runEngine.stop} onSubmit={(value, attachments) => { void runEngine.run(value, attachments); return true; }} menu={<><button type="button" onClick={() => selectThread(null)} className="flex w-full items-center gap-2 rounded-[6px] px-2.5 py-2 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"><Plus className="h-4 w-4" />New conversation</button>{selectedContextIds.size ? <button type="button" onClick={() => { clearExplicitContext(); setFocusModeOverride(null); }} className="flex w-full items-center gap-2 rounded-[6px] px-2.5 py-2 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"><X className="h-4 w-4" />Clear selected context</button> : null}<div className="my-1 h-px bg-[var(--border-subtle)]" />{workspaces.slice(0, 6).map((workspace) => <button key={workspace._id} type="button" onClick={() => selectWorkspaceContext(workspace._id)} className="flex w-full items-center gap-2 rounded-[6px] px-2.5 py-2 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"><FolderPlus className="h-4 w-4" /><span className="min-w-0 flex-1 truncate">Use {workspace.title}</span>{activeWorkspace?._id === workspace._id ? <Check className="h-3.5 w-3.5 text-[var(--success)]" /> : null}</button>)}</>} context={<ContextFocusControl mode={effectiveFocusMode} onModeChange={setFocusModeOverride} workspace={activeWorkspace} artifact={focusedArtifact} selectedCount={contextArtifactIds.length} threadTitle={threadId ? title : undefined} />} />;
 
   return (
     <div className="relative flex h-full min-h-0 bg-[var(--bg-primary)]">
       <section className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-14 shrink-0 items-center justify-between border-b border-[var(--border-subtle)] px-5 sm:px-7">
           <div className="min-w-0">
-            <div className="truncate font-display text-[18px] font-semibold text-[var(--text-primary)]">{title}</div>
+            <AnimatePresence mode="popLayout" initial={false}><motion.div key={visibleTitle} initial={{ opacity: 0, y: 3 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -3 }} transition={{ duration: 0.18 }} className="truncate font-display text-[18px] font-semibold text-[var(--text-primary)]">{visibleTitle}</motion.div></AnimatePresence>
             <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">Thread · Shared Spectra conversation</div>
           </div>
           <div className="flex items-center gap-1">
@@ -196,7 +213,7 @@ export function ChatShell() {
               selectedIds={selectedContextIds}
               onToggleSelected={toggleContextArtifact}
             />
-            {threadId ? <button type="button" onClick={() => { setTitleDraft(title); setRenaming(true); }} className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]" aria-label="Rename thread" title="Rename thread"><Pencil className="h-3.5 w-3.5" /></button> : null}
+            {threadId ? <button type="button" onClick={() => { setTitleDraft(visibleTitle); setRenaming(true); }} className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]" aria-label="Rename thread" title="Rename thread"><Pencil className="h-3.5 w-3.5" /></button> : null}
             {threadId ? <button type="button" onClick={() => void postSpectra({ action: "updateThread", threadId, pinned: !detail?.thread.pinned }).then(() => refresh(threadId))} className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]" aria-label={detail?.thread.pinned ? "Unpin thread" : "Pin thread"} title={detail?.thread.pinned ? "Unpin thread" : "Pin thread"}><Pin className={`h-3.5 w-3.5 ${detail?.thread.pinned ? "fill-current text-[var(--accent-cyan)]" : ""}`} /></button> : null}
             <button type="button" onClick={() => selectThread(null)} className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" aria-label="New chat" title="New chat"><Plus className="h-3.5 w-3.5" /></button>
             <button type="button" onClick={() => {
@@ -209,7 +226,7 @@ export function ChatShell() {
           </div>
         </header>
 	        {renaming && threadId ? <div className="absolute left-5 top-12 z-50 flex w-[min(420px,calc(100vw-40px))] items-center gap-1.5 rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2 shadow-[0_16px_40px_rgba(27,20,12,0.14)] sm:left-7"><input autoFocus value={titleDraft} maxLength={64} onChange={(event) => setTitleDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") setRenaming(false); if (event.key === "Enter" && titleDraft.trim()) void postSpectra({ action: "updateThread", threadId, title: titleDraft.trim() }).then(() => refresh(threadId)).then(() => setRenaming(false)); }} className="h-9 min-w-0 flex-1 bg-transparent px-2 text-[13px] font-medium text-[var(--text-primary)] outline-none" /><button type="button" onClick={() => void postSpectra({ action: "updateThread", threadId, title: titleDraft.trim() }).then(() => refresh(threadId)).then(() => setRenaming(false))} className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--success)] hover:bg-[var(--bg-hover)]" aria-label="Save title"><Check className="h-4 w-4" /></button><button type="button" onClick={() => setRenaming(false)} className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]" aria-label="Cancel rename"><X className="h-4 w-4" /></button></div> : null}
-	        {threadId && !continuingThread ? <div className="border-b border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--accent-cyan)_5%,var(--bg-primary))] px-5 py-2 text-[11px] text-[var(--text-secondary)] sm:px-7"><span className="font-semibold text-[var(--text-primary)]">New thread ready.</span> The current conversation is open for reference; your next message will create a separate thread using the selected context.</div> : null}
+	        {threadId && composerThread?.id !== threadId ? <div className="border-b border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--accent-cyan)_5%,var(--bg-primary))] px-5 py-2 text-[11px] text-[var(--text-secondary)] sm:px-7"><span className="font-semibold text-[var(--text-primary)]">{composerThread ? `Continuing ${composerThread.title}.` : "New thread ready."}</span> The visible conversation remains open for reference; the next message {composerThread ? "continues the selected conversation" : "starts a separate thread"} with the selected context.</div> : null}
 	        <ConversationSurface
           detail={detail}
           loading={loading}
@@ -231,7 +248,7 @@ export function ChatShell() {
 
       {studio.isOpen && studio.activeArtifact ? <ArtifactStudio mode={studio.mode === "tab" ? "tab" : "split"} artifact={studio.activeArtifact} artifacts={artifacts} tabs={studio.tabs} dirtyIds={studio.dirtyIds} panelWidth={studioPanelWidth} sourceLabel="Chat" onPanelWidthChange={setStudioPanelWidth} onClose={studio.closeStudio} onExpand={studio.openTab} onActivateTab={studio.activateTab} onCloseTab={studio.closeTab} onSave={updateArtifact} onRevert={revertArtifactVersion} onDirtyChange={studio.setDirty} /> : null}
       {threadPanelArtifact ? <ArtifactStudio mode="split" artifact={threadPanelArtifact} artifacts={artifacts} tabs={[]} dirtyIds={new Set()} panelWidth={threadPanelWidth} sourceLabel="Chat" onPanelWidthChange={setThreadPanelWidth} onClose={() => setThreadPanelArtifactId(null)} onExpand={() => undefined} onActivateTab={() => undefined} onCloseTab={() => setThreadPanelArtifactId(null)} onSave={updateArtifact} onRevert={revertArtifactVersion} onDirtyChange={() => undefined} onContinueThread={(continuedId) => selectThread(continuedId === threadId ? null : continuedId)} continuedThreadId={threadId} /> : null}
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-50 bg-[linear-gradient(to_top,var(--bg-primary)_76%,transparent)] px-4 pb-5 pt-14 sm:px-8"><div className="pointer-events-auto mx-auto max-w-[820px]">{pageComposer}</div></div>
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-50 bg-[linear-gradient(to_top,var(--bg-primary)_76%,transparent)] px-4 pb-5 pt-14 sm:px-8"><div className="pointer-events-auto mx-auto max-w-[820px]"><DurableRunTabs workspaceId={scopedWorkspaceId} onOpen={(_runId, selectedThreadId) => selectThread(selectedThreadId)} onStop={(runId) => runEngine.stop(runId)} />{pageComposer}</div></div>
 
       {historyOpen ? <aside className="absolute inset-y-14 right-0 z-40 w-[min(360px,92vw)] overflow-y-auto border-l border-[var(--border-default)] bg-[var(--bg-primary)] p-4 shadow-[-12px_0_30px_rgba(22,18,13,0.08)]">
         <div className="mb-4 flex items-center justify-between"><div><h2 className="text-[13px] font-semibold">Run & thread hub</h2><p className="text-[11px] text-[var(--text-tertiary)]">Hidden results remain inspectable.</p></div><button type="button" onClick={() => setHistoryOpen(false)} className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" aria-label="Close runs" title="Close"><X className="h-4 w-4" /></button></div>

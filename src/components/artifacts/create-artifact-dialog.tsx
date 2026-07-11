@@ -250,7 +250,6 @@ export function CreateArtifactDialog({
   open: boolean;
   onClose: () => void;
   onCreate: (type: ArtifactType, title: string, tags: string[], template?: ArtifactTemplate) => void;
-  defaultWorkstreamId?: string;
 }) {
   const [selectedType, setSelectedType] = useState<ArtifactType | null>(null);
   const [selectedTemplate, setSelectedTemplate] = useState<ArtifactTemplate | null>(null);

@@ -54,6 +54,7 @@ import { Image } from "@tiptap/extension-image";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { SlashCommand } from "@/components/editor/slash-command-extension";
 import { createSlashCommandRenderer } from "@/components/editor/slash-command-renderer";
+import { spectraObjectKey, useSpectraContextStore } from "@/stores/spectra-context-store";
 import { Callout } from "@/components/editor/extensions/callout-node";
 import { DragHandle } from "@/components/editor/extensions/drag-handle";
 import { Equation } from "@/components/editor/extensions/equation-node";
@@ -116,7 +117,6 @@ type PlannerTask = {
   sourceRefs: string[];
 };
 
-const storageVersion = 1;
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? value as Record<string, unknown> : {};
@@ -304,10 +304,6 @@ function plannerTask(content: unknown): PlannerTask {
   };
 }
 
-function sameTabs(a: StudioTab[], b: StudioTab[]) {
-  return a.length === b.length && a.every((tab, index) => tab.artifactId === b[index]?.artifactId && tab.openedAt === b[index]?.openedAt);
-}
-
 function artifactEditorSnapshot(artifact: SpectraArtifact) {
   return {
     title: artifact.title,
@@ -321,109 +317,50 @@ function snapshotKey(snapshot: { title: string; summary: string; tagDraft: strin
   return JSON.stringify(snapshot);
 }
 
-export function useArtifactStudioState(storageKey: string, artifacts: SpectraArtifact[]) {
-  const [mode, setMode] = useState<StudioMode>("closed");
-  const [activeArtifactId, setActiveArtifactId] = useState<string | null>(null);
-  const [tabs, setTabs] = useState<StudioTab[]>([]);
-  const [dirtyIds, setDirtyIds] = useState<Set<string>>(() => new Set());
-  const restoredStorageKeyRef = useRef<string | null>(null);
-  const artifactIdSignature = useMemo(() => artifacts.map((artifact) => artifact._id).sort().join("|"), [artifacts]);
-  const artifactIds = useMemo(() => new Set(artifactIdSignature ? artifactIdSignature.split("|") : []), [artifactIdSignature]);
-  const threadArtifactIds = useMemo(() => new Set(artifacts.filter((artifact) => artifact.blueprintKey === "thread_reference").map((artifact) => artifact._id)), [artifacts]);
-
-  useEffect(() => {
-    if (!artifactIdSignature || restoredStorageKeyRef.current === storageKey) return;
-    try {
-      const raw = window.localStorage.getItem(storageKey);
-      restoredStorageKeyRef.current = storageKey;
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as { version?: number; tabs?: StudioTab[]; activeArtifactId?: string | null; mode?: StudioMode };
-      if (parsed.version !== storageVersion) return;
-      const restoredTabs = (parsed.tabs ?? []).filter((tab) => artifactIds.has(tab.artifactId) && !threadArtifactIds.has(tab.artifactId));
-      setTabs((current) => sameTabs(current, restoredTabs) ? current : restoredTabs);
-      if (parsed.mode === "tab" && parsed.activeArtifactId && artifactIds.has(parsed.activeArtifactId)) {
-        setMode(threadArtifactIds.has(parsed.activeArtifactId) ? "split" : "tab");
-        setActiveArtifactId(parsed.activeArtifactId);
-      }
-    } catch {
-      window.localStorage.removeItem(storageKey);
-    }
-  }, [artifactIdSignature, artifactIds, storageKey, threadArtifactIds]);
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(storageKey, JSON.stringify({ version: storageVersion, tabs, activeArtifactId, mode: mode === "tab" ? "tab" : "closed" }));
-    } catch {
-      // Local persistence is best-effort UI state.
-    }
-  }, [activeArtifactId, mode, storageKey, tabs]);
-
-  useEffect(() => {
-    setTabs((current) => {
-      const next = current.filter((tab) => artifactIds.has(tab.artifactId) && !threadArtifactIds.has(tab.artifactId));
-      return sameTabs(current, next) ? current : next;
-    });
-    setActiveArtifactId((current) => current && artifactIds.has(current) ? current : null);
-  }, [artifactIds, threadArtifactIds]);
+export function useArtifactStudioState(_storageKey: string, artifacts: SpectraArtifact[]) {
+  const openObjects = useSpectraContextStore((state) => state.openObjects);
+  const activeOpenObjectKey = useSpectraContextStore((state) => state.activeOpenObjectKey);
+  const dirtyArtifactIds = useSpectraContextStore((state) => state.dirtyArtifactIds);
+  const openObject = useSpectraContextStore((state) => state.openObject);
+  const focusObject = useSpectraContextStore((state) => state.focusObject);
+  const deactivateObject = useSpectraContextStore((state) => state.deactivateObject);
+  const closeObject = useSpectraContextStore((state) => state.closeObject);
+  const setArtifactDirty = useSpectraContextStore((state) => state.setArtifactDirty);
+  const artifactById = useMemo(() => new Map(artifacts.map((artifact) => [artifact._id, artifact])), [artifacts]);
+  const studioObjects = useMemo(() => openObjects.filter((object) => object.type === "artifact" && (object.presentation === "split" || object.presentation === "tab") && artifactById.has(object.id)), [artifactById, openObjects]);
+  const activeObject = studioObjects.find((object) => spectraObjectKey(object) === activeOpenObjectKey) ?? null;
+  const mode: StudioMode = activeObject?.presentation === "split" || activeObject?.presentation === "tab" ? activeObject.presentation : "closed";
+  const activeArtifactId = activeObject?.id ?? null;
+  const activeArtifact = activeArtifactId ? artifactById.get(activeArtifactId) ?? null : null;
+  const tabs = useMemo<StudioTab[]>(() => studioObjects.filter((object) => object.presentation === "tab").map((object, index) => ({ artifactId: object.id, openedAt: index })), [studioObjects]);
+  const dirtyIds = useMemo(() => new Set(dirtyArtifactIds.filter((id) => artifactById.has(id))), [artifactById, dirtyArtifactIds]);
 
   const openSplit = useCallback((artifact: SpectraArtifact) => {
-    setActiveArtifactId(artifact._id);
-    setMode("split");
-  }, []);
+    openObject({ type: "artifact", id: artifact._id, label: artifact.title, workspaceId: artifact.placements?.[0]?.workspaceId, presentation: "split" });
+  }, [openObject]);
 
   const openTab = useCallback((artifact: SpectraArtifact) => {
-    if (artifact.blueprintKey === "thread_reference") {
-      setActiveArtifactId(artifact._id);
-      setMode("split");
-      return;
-    }
-    setTabs((current) => current.some((tab) => tab.artifactId === artifact._id) ? current : [...current, { artifactId: artifact._id, openedAt: Date.now() }]);
-    setActiveArtifactId(artifact._id);
-    setMode("tab");
-  }, []);
+    openObject({ type: "artifact", id: artifact._id, label: artifact.title, workspaceId: artifact.placements?.[0]?.workspaceId, presentation: artifact.blueprintKey === "thread_reference" ? "split" : "tab" });
+  }, [openObject]);
 
   const activateTab = useCallback((artifactId: string) => {
-    setActiveArtifactId(artifactId);
-    setMode(threadArtifactIds.has(artifactId) ? "split" : "tab");
-  }, [threadArtifactIds]);
+    if (focusObject("artifact", artifactId)) return;
+    const artifact = artifactById.get(artifactId);
+    if (artifact) openTab(artifact);
+  }, [artifactById, focusObject, openTab]);
 
   const closeTab = useCallback((artifactId: string) => {
-    setTabs((current) => {
-      const closingIndex = current.findIndex((tab) => tab.artifactId === artifactId);
-      const next = current.filter((tab) => tab.artifactId !== artifactId);
-      setActiveArtifactId((active) => {
-        if (active !== artifactId) return active;
-        if (next.length === 0) return null;
-        const nearestIndex = closingIndex > 0 ? closingIndex - 1 : 0;
-        return next[Math.min(nearestIndex, next.length - 1)]?.artifactId ?? null;
-      });
-      if (next.length === 0) setMode("closed");
-      return next;
-    });
-    setDirtyIds((current) => {
-      const next = new Set(current);
-      next.delete(artifactId);
-      return next;
-    });
-  }, []);
+    closeObject("artifact", artifactId);
+  }, [closeObject]);
 
   const closeStudio = useCallback(() => {
-    setMode("closed");
-    setActiveArtifactId(null);
-  }, []);
+    if (activeArtifactId && mode === "split") closeObject("artifact", activeArtifactId);
+    else deactivateObject();
+  }, [activeArtifactId, closeObject, deactivateObject, mode]);
 
   const setDirty = useCallback((artifactId: string, dirty: boolean) => {
-    setDirtyIds((current) => {
-      const hasDirty = current.has(artifactId);
-      if (hasDirty === dirty) return current;
-      const next = new Set(current);
-      if (dirty) next.add(artifactId);
-      else next.delete(artifactId);
-      return next;
-    });
-  }, []);
-
-  const activeArtifact = artifacts.find((artifact) => artifact._id === activeArtifactId) ?? null;
+    setArtifactDirty(artifactId, dirty);
+  }, [setArtifactDirty]);
 
   return {
     mode,
@@ -853,7 +790,7 @@ function ArtifactStudioEditor({
     : "min-h-0 flex-1 overflow-y-auto px-5 pb-5 pt-5";
 
   return (
-    <div className="spectra-artifact-studio relative flex h-full min-h-0 flex-col">
+    <div className="spectra-artifact-studio relative flex h-full min-h-0 flex-col" data-ai-state={artifact.aiState}>
       <header className="spectra-artifact-header shrink-0 border-b border-[var(--border-default)] bg-[var(--bg-primary)] px-5 py-4">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0 flex-1">

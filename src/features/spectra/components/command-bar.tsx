@@ -10,11 +10,12 @@ type CommandBarProps = {
   menu?: ReactNode;
   context?: ReactNode;
   className?: string;
-  onSubmit?: (value: string, attachments: CommandAttachment[]) => void | boolean;
+  onSubmit?: (value: string, attachments: CommandAttachment[]) => void | boolean | Promise<void | boolean>;
   busy?: boolean;
   allowAttachments?: boolean;
   onStop?: () => void;
   allowConcurrent?: boolean;
+  onStartNewThread?: () => void;
 };
 
 export type CommandAttachment = {
@@ -39,10 +40,11 @@ function readFile(file: File, mode: "text" | "data-url") {
   });
 }
 
-export function CommandBar({ placeholder, menu, context, className, onSubmit, busy = false, allowAttachments = false, onStop, allowConcurrent = false }: CommandBarProps) {
+export function CommandBar({ placeholder, menu, context, className, onSubmit, busy = false, allowAttachments = false, onStop, allowConcurrent = false, onStartNewThread }: CommandBarProps) {
   const [value, setValue] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [attachments, setAttachments] = useState<CommandAttachment[]>([]);
+  const [sending, setSending] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -73,13 +75,21 @@ export function CommandBar({ placeholder, menu, context, className, onSubmit, bu
     setMenuOpen(false);
   }
 
-  function submit() {
+  async function submit() {
     const next = value.trim();
-    if (!next || attachments.some((attachment) => attachment.error)) return;
-    if (onSubmit?.(next, attachments) === false) return;
-    setValue("");
-    setAttachments([]);
-    setMenuOpen(false);
+    if (sending || !next || attachments.some((attachment) => attachment.error)) return;
+    setSending(true);
+    try {
+      const accepted = await onSubmit?.(next, attachments);
+      if (accepted === false) return;
+      setValue("");
+      setAttachments([]);
+      setMenuOpen(false);
+    } catch {
+      // The owning run surface reports the failure. Keep the draft intact for recovery.
+    } finally {
+      setSending(false);
+    }
   }
 
   useEffect(() => {
@@ -118,6 +128,7 @@ export function CommandBar({ placeholder, menu, context, className, onSubmit, bu
         <Plus className="h-4 w-4" />
       </button>
       <div className="spectra-command-surface flex min-h-12 min-w-0 flex-1 flex-col rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 shadow-[0_3px_12px_rgba(27,20,12,0.08)]">
+        {busy && !allowConcurrent ? <div className="mb-1 flex min-h-8 flex-wrap items-center gap-1.5 rounded-[8px] bg-[color-mix(in_oklab,var(--accent-cyan)_6%,var(--bg-primary))] px-2 py-1 text-[10px] text-[var(--text-secondary)]" role="status"><span className="mr-auto font-medium text-[var(--text-primary)]">This conversation is still working.</span><span className="rounded-[5px] px-1.5 py-1">Wait</span>{onStop ? <button type="button" onClick={onStop} className="rounded-[5px] px-1.5 py-1 font-semibold text-[var(--danger)] hover:bg-[color-mix(in_oklab,var(--danger)_8%,transparent)]">Stop it</button> : null}{onStartNewThread ? <button type="button" onClick={onStartNewThread} className="rounded-[5px] bg-[var(--text-primary)] px-2 py-1 font-semibold text-[var(--bg-primary)]">Start new thread</button> : null}</div> : null}
         {attachments.length > 0 ? <div className="flex flex-wrap gap-1.5 px-1 pb-1.5">{attachments.map((attachment) => <div key={attachment.id} className={`flex max-w-[260px] items-center gap-2 rounded-[8px] bg-[var(--bg-secondary)] px-2.5 py-1.5 text-[10px] ${attachment.error ? "text-[var(--danger)]" : "text-[var(--text-secondary)]"}`} title={attachment.error ?? attachment.name}>{attachment.handling === "unsupported_image" ? <ImageIcon className="h-3.5 w-3.5 shrink-0" /> : <FileText className="h-3.5 w-3.5 shrink-0" />}<span className="min-w-0 truncate">{attachment.name}</span><span className="shrink-0 text-[var(--text-tertiary)]">{Math.max(1, Math.round(attachment.size / 1024))} KB</span><button type="button" className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] hover:bg-[var(--bg-hover)]" onClick={() => setAttachments((current) => current.filter((item) => item.id !== attachment.id))} aria-label={`Remove ${attachment.name}`}><X className="h-3 w-3" /></button></div>)}</div> : null}
         <div className="flex items-end gap-2">
         {context ? <div className="flex h-9 max-w-[76px] shrink-0 items-center border-r border-[var(--border-default)] pr-1.5">{context}</div> : null}
@@ -127,10 +138,10 @@ export function CommandBar({ placeholder, menu, context, className, onSubmit, bu
           value={value}
           onChange={(event) => setValue(event.target.value)}
           onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey) {
+            if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) {
               event.preventDefault();
-              if (busy && !allowConcurrent) return;
-              submit();
+              if ((busy && !allowConcurrent) || sending) return;
+              void submit();
             }
           }}
           placeholder={placeholder}
@@ -139,15 +150,15 @@ export function CommandBar({ placeholder, menu, context, className, onSubmit, bu
         {busy && allowConcurrent && onStop ? <button type="button" onClick={onStop} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] text-[var(--danger)] hover:bg-[color-mix(in_oklab,var(--danger)_8%,transparent)]" aria-label="Stop active response" title="Stop active response"><Square className="h-3.5 w-3.5" /></button> : null}
         <button
           type="button"
-          disabled={busy && !allowConcurrent ? !onStop : !value.trim() || attachments.some((attachment) => Boolean(attachment.error))}
+          disabled={sending || (busy && !allowConcurrent ? !onStop : !value.trim() || attachments.some((attachment) => Boolean(attachment.error)))}
           onClick={() => {
             if (busy && !allowConcurrent && onStop) onStop();
-            else submit();
+            else void submit();
           }}
           className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] bg-[var(--text-primary)] text-[var(--bg-primary)] disabled:bg-[var(--bg-secondary)] disabled:text-[var(--text-tertiary)]"
           aria-label={busy && !allowConcurrent && onStop ? "Stop active response" : "Send command"}
         >
-          {busy && !allowConcurrent ? onStop ? <Square className="h-3.5 w-3.5" /> : <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowUp className="h-4 w-4" />}
+          {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : busy && !allowConcurrent ? onStop ? <Square className="h-3.5 w-3.5" /> : <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowUp className="h-4 w-4" />}
         </button>
         </div>
       </div>

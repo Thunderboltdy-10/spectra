@@ -153,11 +153,13 @@ export const stageAiPatch = mutation({
 });
 
 export const settleForRun = mutation({
-  args: { actorClerkId: v.string(), runId: v.id("spectraAiRuns"), executionId: v.optional(v.string()), outcome: v.union(v.literal("clear"), v.literal("failed")) },
+  args: { actorClerkId: v.string(), runId: v.id("spectraAiRuns"), executionId: v.string(), outcome: v.union(v.literal("clear"), v.literal("failed")) },
   handler: async (ctx, args) => {
     const actor = await requireSpectraActor(ctx, args.actorClerkId);
+    const run = await ctx.db.get(args.runId);
+    if (!run || run.ownerUserId !== actor._id || run.orgId !== actor.orgId || run.executionId !== args.executionId) throw new Error("This run attempt is no longer active.");
     const rows = await ctx.db.query("spectraWorkspaces").withIndex("by_owner_activity", (q) => q.eq("ownerUserId", actor._id)).collect();
-    const affected = rows.filter((workspace) => workspace.orgId === actor.orgId && workspace.aiRunId === args.runId && (!args.executionId || workspace.aiExecutionId === args.executionId));
+    const affected = rows.filter((workspace) => workspace.orgId === actor.orgId && workspace.aiRunId === args.runId && workspace.aiExecutionId === args.executionId);
     const now = Date.now();
     for (const workspace of affected) {
       if (workspace.aiPending) {

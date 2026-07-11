@@ -419,7 +419,6 @@ export const routeMemoryWrite = mutation({
     sourceChatId: v.optional(v.id("chats")),
     sourceMessageId: v.optional(v.id("messages")),
     sourceArtifactId: v.optional(v.id("artifacts")),
-    sourceWorkstreamId: v.optional(v.id("workstreams")),
     entries: v.array(v.object({
       key: v.string(),
       text: v.string(),
@@ -429,7 +428,7 @@ export const routeMemoryWrite = mutation({
       category: v.optional(vMemoryCategory),
       sourceType: v.optional(vMemorySourceType),
       status: v.optional(vMemoryStatus),
-      scope: v.optional(v.union(v.literal("global"), v.literal("workstream"))),
+      scope: v.optional(v.literal("global")),
       relatedArtifacts: v.optional(v.array(v.string())),
       negativeTopicLinks: v.optional(v.array(v.string())),
     })),
@@ -476,7 +475,7 @@ export const routeMemoryWrite = mutation({
       const requestedStatus = raw.status;
       const confidence = normalizeConfidence(raw.confidence, 0.6);
       const freshness = normalizeFreshness(raw.freshness, 1);
-      const scope = raw.scope ?? (args.sourceWorkstreamId ? "workstream" : "global");
+      const scope = raw.scope ?? "global";
       const baseStatus =
         requestedStatus
         ?? (GLOBAL_MEMORY_CATEGORIES.has(category) || sourceType !== "extraction" ? "confirmed" : "pending");
@@ -502,7 +501,6 @@ export const routeMemoryWrite = mutation({
           sourceChatId: args.sourceChatId,
           sourceMessageId: args.sourceMessageId,
           sourceArtifactId: args.sourceArtifactId,
-          sourceWorkstreamId: args.sourceWorkstreamId,
           scope,
           archivedAt: undefined,
           lastDecayedAt: undefined,
@@ -550,7 +548,6 @@ export const routeMemoryWrite = mutation({
         sourceChatId: args.sourceChatId ?? existing.sourceChatId,
         sourceMessageId: args.sourceMessageId ?? existing.sourceMessageId,
         sourceArtifactId: args.sourceArtifactId ?? existing.sourceArtifactId,
-        sourceWorkstreamId: args.sourceWorkstreamId ?? existing.sourceWorkstreamId,
         scope,
         archivedAt: undefined,
         lastDecayedAt: existing.lastDecayedAt,
@@ -608,7 +605,6 @@ export const listMemoryEntries = query({
         sourceChatId: row.sourceChatId,
         sourceMessageId: row.sourceMessageId,
         sourceArtifactId: row.sourceArtifactId,
-        sourceWorkstreamId: row.sourceWorkstreamId,
         freshness: row.freshness,
         scope: row.scope,
         relatedArtifacts: row.relatedArtifacts ?? [],
@@ -788,8 +784,7 @@ export const updateMemoryEntry = mutation({
     freshness: v.optional(v.number()),
     category: v.optional(vMemoryCategory),
     status: v.optional(vMemoryStatus),
-    scope: v.optional(v.union(v.literal("global"), v.literal("workstream"))),
-    sourceWorkstreamId: v.optional(v.union(v.id("workstreams"), v.null())),
+    scope: v.optional(v.literal("global")),
   },
   handler: async (ctx, args) => {
     const actor = await getUserByClerkId(ctx, args.actorClerkId);
@@ -812,10 +807,6 @@ export const updateMemoryEntry = mutation({
     if (args.category !== undefined) updates.category = args.category;
     if (args.status !== undefined) updates.status = args.status;
     if (args.scope !== undefined) updates.scope = args.scope;
-    if (args.sourceWorkstreamId !== undefined) {
-      updates.sourceWorkstreamId = args.sourceWorkstreamId ?? undefined;
-    }
-
     await ctx.db.patch(entry._id, updates);
     return { ok: true };
   },
@@ -960,8 +951,7 @@ export const retrieveRelevantEntries: ReturnType<typeof action> = action({
       vectorRank: number;
       lexicalScore: number;
       sourceChatId?: Id<"chats">;
-      sourceWorkstreamId?: Id<"workstreams">;
-      scope?: "global" | "workstream";
+      scope?: "global";
       negativeTopicLinks: string[];
       updatedAt: number;
     }> = [];
@@ -996,7 +986,6 @@ export const retrieveRelevantEntries: ReturnType<typeof action> = action({
         const rowCategory = String(row.category ?? "");
         if (row.archivedAt) continue;
         if (row.orgId !== actor.orgId) continue;
-        if (String(row.scope ?? "") === "workstream") continue;
         if (rowStatus !== "confirmed") continue;
         if (!TOPIC_MEMORY_CATEGORIES.has(rowCategory)) continue;
         if (
@@ -1032,11 +1021,7 @@ export const retrieveRelevantEntries: ReturnType<typeof action> = action({
           vectorRank,
           lexicalScore: lexicalOverlapScore(`${String(row.key ?? "")} ${String(row.text ?? "")}`),
           sourceChatId: row.sourceChatId as Id<"chats"> | undefined,
-          sourceWorkstreamId: row.sourceWorkstreamId as Id<"workstreams"> | undefined,
-          scope:
-            row.scope === "workstream" || row.scope === "global"
-              ? row.scope
-              : undefined,
+          scope: row.scope === "global" ? row.scope : undefined,
           negativeTopicLinks,
           updatedAt: typeof row.updatedAt === "number" ? row.updatedAt : 0,
         });
@@ -1128,31 +1113,10 @@ export const runDailyMaintenance = internalMutation({
       if (shouldArchive) archivedUserEntries += 1;
     }
 
-    const workstreamEntries = await ctx.db.query("workstreamMemory").collect();
-    let decayedWorkstreamEntries = 0;
-    let archivedWorkstreamEntries = 0;
-
-    for (const entry of workstreamEntries) {
-      if (typeof entry.lastDecayedAt === "number" && now - entry.lastDecayedAt < 12 * 60 * 60 * 1000) {
-        continue;
-      }
-      const nextFreshness = normalizeFreshness(entry.freshness * 0.98, 0.98);
-      const shouldArchive = !entry.archivedAt && nextFreshness < 0.1 && normalizeConfidence(entry.confidence, 0) < 0.5;
-      await ctx.db.patch(entry._id, {
-        freshness: nextFreshness,
-        archivedAt: shouldArchive ? now : entry.archivedAt,
-        lastDecayedAt: now,
-      });
-      decayedWorkstreamEntries += 1;
-      if (shouldArchive) archivedWorkstreamEntries += 1;
-    }
-
     return {
       ok: true,
       decayedUserEntries,
       archivedUserEntries,
-      decayedWorkstreamEntries,
-      archivedWorkstreamEntries,
       ranAt: now,
     };
   },

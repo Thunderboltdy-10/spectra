@@ -1194,7 +1194,24 @@ export default defineSchema({
     ownerUserId: v.id("users"),
     orgId: v.optional(v.id("orgs")),
     sourceSurface: v.union(v.literal("chat"), v.literal("workspace"), v.literal("artifact")),
-    phase: v.optional(v.union(v.literal("created"), v.literal("planning"), v.literal("reading"), v.literal("retrieving"), v.literal("applying"), v.literal("streaming"), v.literal("approval"), v.literal("completed"), v.literal("stopped"), v.literal("failed"))),
+    phase: v.optional(v.union(
+      v.literal("created"),
+      v.literal("preparing"),
+      v.literal("planning"),
+      v.literal("reading"),
+      v.literal("retrieving"),
+      v.literal("creating"),
+      v.literal("updating"),
+      v.literal("applying"),
+      v.literal("streaming"),
+      v.literal("checking"),
+      v.literal("approval"),
+      v.literal("completed"),
+      v.literal("stopped"),
+      v.literal("interrupted"),
+      v.literal("partial"),
+      v.literal("failed"),
+    )),
     threadId: v.optional(v.id("spectraThreads")),
     workspaceId: v.optional(v.id("spectraWorkspaces")),
     artifactId: v.optional(v.id("spectraArtifacts")),
@@ -1222,6 +1239,20 @@ export default defineSchema({
     lastRetryKey: v.optional(v.string()),
     eventSequence: v.optional(v.number()),
     traceDegraded: v.optional(v.boolean()),
+    approval: v.optional(v.object({
+      executionId: v.string(),
+      status: v.union(v.literal("pending"), v.literal("accepted"), v.literal("rejected"), v.literal("revised")),
+      reasons: v.array(v.string()),
+      revision: v.optional(v.string()),
+      requestedAt: v.number(),
+      claimedAt: v.optional(v.number()),
+      decidedAt: v.optional(v.number()),
+    })),
+    recoveryState: v.optional(v.union(v.literal("interrupted"), v.literal("partial"))),
+    retryable: v.optional(v.boolean()),
+    preservedPartial: v.optional(v.boolean()),
+    workerId: v.optional(v.string()),
+    leaseExpiresAt: v.optional(v.number()),
     heartbeatAt: v.optional(v.number()),
     startedAt: v.optional(v.number()),
     contextSnapshot: v.optional(v.any()),
@@ -1330,6 +1361,7 @@ export default defineSchema({
   })
     .index("by_owner_updated", ["ownerUserId", "updatedAt"])
     .index("by_owner_run", ["ownerUserId", "runId"])
+    .index("by_owner_thread", ["ownerUserId", "threadId"])
     .index("by_thread", ["threadId"]),
 
   spectraFocusSpaces: defineTable({

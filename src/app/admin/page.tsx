@@ -52,8 +52,8 @@ type ManagebacAdminConfig = {
   lastSyncError?: string;
   lastSyncDetails?: {
     syncedStudents?: number;
-    workstreamsCreated?: number;
-    workstreamsUpdated?: number;
+    artifactsCreated?: number;
+    artifactsUpdated?: number;
     plannerCreated?: number;
     plannerUpdated?: number;
     notesCreated?: number;
@@ -615,8 +615,8 @@ function AdminPageContent() {
               <p className="mb-3 text-sm font-medium">Last sync summary</p>
               <div className="grid gap-2 sm:grid-cols-3">
                 <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2">
-                  <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">Workstreams</p>
-                  <p className="mt-0.5 text-sm font-medium">{managebac.lastSyncDetails.workstreamsCreated ?? 0} created / {managebac.lastSyncDetails.workstreamsUpdated ?? 0} updated</p>
+                  <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">Artifacts</p>
+                  <p className="mt-0.5 text-sm font-medium">{managebac.lastSyncDetails.artifactsCreated ?? 0} created / {managebac.lastSyncDetails.artifactsUpdated ?? 0} updated</p>
                 </div>
                 <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2">
                   <p className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">Planner</p>

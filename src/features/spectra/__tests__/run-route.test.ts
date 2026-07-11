@@ -50,6 +50,7 @@ function setup(plan: unknown, initialStatus: "queued" | "failed" = "queued") {
       run.userPrompt = args.userPrompt as string;
       return { runId: "run-real", resultCardId: "card-real", threadId: "thread-real", executionId: "execution-1", created: true };
     }
+    if (name.includes("spectraRuns:claimExecution")) return { claimed: true };
     if (name.includes("spectraThreads:appendMessage")) return "message-real";
     if (name.includes("spectraThreads:applyGeneratedMetadata")) return { threadId: "thread-real" };
     if (name.includes("spectraRuns:setSuggestedThreadMetadata")) return { runId: "run-real" };
@@ -161,7 +162,7 @@ describe("Spectra run route", () => {
     const answerPlan = { decision: "answer", intent: { mode: "answer", requestedArtifactTypes: [], requestedVisibleArtifactCount: 0, targetArtifactId: null, targetWorkspaceId: null }, finalResponse: "Here is the answer.", operations: [] };
     const { convexMutation } = setup(answerPlan, "failed");
     const route = await import("@/app/api/spectra/run/route");
-    const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", { method: "POST", body: JSON.stringify({ action: "retry", runId: "run-real" }) }));
+    const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", { method: "POST", body: JSON.stringify({ action: "retry", runId: "run-real", executionId: "execution-1" }) }));
     const events = (await response.text()).trim().split("\n").map((line) => JSON.parse(line) as { type: string; runId?: string; card?: { id: string } });
 
     expect(convexMutation.mock.calls.some(([name]) => String(name).includes("spectraRuns:resetForRetry"))).toBe(true);
@@ -248,7 +249,7 @@ describe("Spectra run route", () => {
 
     const cancelResponse = await route.POST(new NextRequest("http://localhost/api/spectra/run", {
       method: "POST",
-      body: JSON.stringify({ action: "cancel", runId: "run-real" }),
+      body: JSON.stringify({ action: "cancel", runId: "run-real", executionId: "execution-1" }),
     }));
     const cancelEvents = (await cancelResponse.text()).trim().split("\n").map((line) => JSON.parse(line) as { type: string; summary?: string });
     expect(cancelEvents).toContainEqual(expect.objectContaining({ type: "final", summary: "No proposed changes were applied." }));

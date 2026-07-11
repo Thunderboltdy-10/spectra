@@ -4,11 +4,9 @@ import { documentContentSchema } from "../blueprints/document";
 import { flashcardDeckContentSchema } from "../blueprints/flashcard-deck";
 import { plannerTaskContentSchema } from "../blueprints/planner-task";
 import { quizContentSchema } from "../blueprints/quiz";
-import { threadReferenceContentSchema } from "../blueprints/thread-reference";
 
 export const SPECTRA_BLUEPRINT_KEYS = [
   "document",
-  "thread_reference",
   "flashcard_deck",
   "quiz",
   "planner_task",
@@ -57,7 +55,6 @@ const artifactCreateInputSchema = z.discriminatedUnion("blueprintKey", [
   z.object({ blueprintKey: z.literal("flashcard_deck"), title: shortText, summary: summaryText.nullable(), content: flashcardDeckContentSchema, tags: tagsSchema, workspaceId: idText.nullable(), placement: z.enum(["context", "inbox"]) }).strict(),
   z.object({ blueprintKey: z.literal("quiz"), title: shortText, summary: summaryText.nullable(), content: quizContentSchema, tags: tagsSchema, workspaceId: idText.nullable(), placement: z.enum(["context", "inbox"]) }).strict(),
   z.object({ blueprintKey: z.literal("planner_task"), title: shortText, summary: summaryText.nullable(), content: plannerTaskContentSchema, tags: tagsSchema, workspaceId: idText.nullable(), placement: z.enum(["context", "inbox"]) }).strict(),
-  z.object({ blueprintKey: z.literal("thread_reference"), title: shortText, summary: summaryText.nullable(), content: threadReferenceContentSchema, tags: tagsSchema, workspaceId: idText.nullable(), placement: z.enum(["context", "inbox"]) }).strict(),
 ]);
 
 function updateInput<T extends z.ZodTypeAny>(blueprintKey: (typeof SPECTRA_BLUEPRINT_KEYS)[number], content: T) {
@@ -76,7 +73,6 @@ const artifactUpdateInputSchema = z.union([
   updateInput("flashcard_deck", flashcardDeckContentSchema),
   updateInput("quiz", quizContentSchema),
   updateInput("planner_task", plannerTaskContentSchema),
-  updateInput("thread_reference", threadReferenceContentSchema),
 ]);
 
 const workspaceIconSchema = z.enum(["Sparkles", "BookOpen", "Sprout", "BarChart3"]);
@@ -232,11 +228,6 @@ const plannerContentJsonSchema = {
   properties: { description: { type: "string" }, dueAt: nullableNumber, startAt: nullableNumber, endAt: nullableNumber, allDay: { type: "boolean" }, status: { enum: ["todo", "doing", "done"] }, priority: { enum: ["low", "medium", "high"] }, linkedArtifactIds: { type: "array", items: { type: "string" } }, linkedThreadIds: { type: "array", items: { type: "string" } }, subtasks: { type: "array", items: { type: "object", additionalProperties: false, required: ["id", "title", "done"], properties: { id: { type: "string" }, title: { type: "string" }, done: { type: "boolean" } } } }, attachments: { type: "array", items: { type: "object", additionalProperties: false, required: ["id", "name", "meta"], properties: { id: { type: "string" }, name: { type: "string" }, meta: { type: "string" } } } }, reminders: { type: "array", items: { type: "string" } }, estimateMinutes: nullableNumber, progressNote: { type: "string" }, sourceRefs: { type: "array", items: { type: "string" } } },
 } as const;
 
-const threadContentJsonSchema = {
-  type: "object", additionalProperties: false, required: ["threadId", "summary", "linkedArtifactIds"],
-  properties: { threadId: nullableString, summary: { type: "string" }, linkedArtifactIds: { type: "array", items: { type: "string" } } },
-} as const;
-
 function artifactCreateVariant(blueprintKey: (typeof SPECTRA_BLUEPRINT_KEYS)[number], content: unknown) {
   return {
     type: "object", additionalProperties: false, required: ["type", "input"],
@@ -274,12 +265,10 @@ export const SPECTRA_PLAN_JSON_SCHEMA = {
         artifactCreateVariant("flashcard_deck", deckContentJsonSchema),
         artifactCreateVariant("quiz", quizContentJsonSchema),
         artifactCreateVariant("planner_task", plannerContentJsonSchema),
-        artifactCreateVariant("thread_reference", threadContentJsonSchema),
         artifactUpdateVariant("document", documentContentJsonSchema),
         artifactUpdateVariant("flashcard_deck", deckContentJsonSchema),
         artifactUpdateVariant("quiz", quizContentJsonSchema),
         artifactUpdateVariant("planner_task", plannerContentJsonSchema),
-        artifactUpdateVariant("thread_reference", threadContentJsonSchema),
         { type: "object", additionalProperties: false, required: ["type", "input"], properties: { type: { const: "workspace.create" }, input: { type: "object", additionalProperties: false, required: ["title", "description", "icon", "color"], properties: { title: { type: "string" }, description: nullableString, icon: { anyOf: [{ enum: ["Sparkles", "BookOpen", "Sprout", "BarChart3"] }, { type: "null" }] }, color: nullableString } } } },
         { type: "object", additionalProperties: false, required: ["type", "input"], properties: { type: { const: "workspace.update" }, input: { type: "object", additionalProperties: false, required: ["workspaceId", "title", "description", "icon", "color"], properties: { workspaceId: { type: "string" }, title: nullableString, description: nullableString, icon: { anyOf: [{ enum: ["Sparkles", "BookOpen", "Sprout", "BarChart3"] }, { type: "null" }] }, color: nullableString } } } },
         { type: "object", additionalProperties: false, required: ["type", "input"], properties: { type: { const: "artifact.link" }, input: { type: "object", additionalProperties: false, required: ["sourceArtifactId", "targetArtifactId", "relationType", "label", "explanation", "workspaceId"], properties: { sourceArtifactId: { type: "string" }, targetArtifactId: { type: "string" }, relationType: { enum: ["related", "supports", "contradicts", "source_for", "generated_from", "follow_up", "belongs_with"] }, label: nullableString, explanation: nullableString, workspaceId: nullableString } } } },

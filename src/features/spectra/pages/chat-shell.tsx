@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowRight, Check, CheckCircle2, Clock3, FolderPlus, History, MessageSquare, Pencil, Pin, Plus, Sparkles, X } from "lucide-react";
 import { toast } from "sonner";
 import { AnimatePresence, motion } from "framer-motion";
+import { useSpectraContextStore } from "@/stores/spectra-context-store";
 import { useSpectraRun } from "../ai/use-spectra-run";
 import { useSpectraContext } from "../hooks/use-spectra-context";
 import { ConversationSurface } from "../components/conversation-surface";
@@ -35,12 +36,14 @@ export function ChatShell() {
   const [focusModeOverride, setFocusModeOverride] = useState<ComposerFocusMode | null>(null);
   const [welcome, setWelcome] = useState("Welcome back.");
   const [studioPanelWidth, setStudioPanelWidth] = useState(700);
-  const [threadPanelWidth, setThreadPanelWidth] = useState(560);
   const [liveThreadPanelWidth, setLiveThreadPanelWidth] = useState(560);
-  const [liveThread, setLiveThread] = useState<{ id: string; title: string } | null>(null);
-  const [threadPanelArtifactId, setThreadPanelArtifactId] = useState<string | null>(null);
   const activeThreadRef = useRef<string | null>(requestedThreadId);
   const consumedPromptRef = useRef<string | null>(null);
+  const openObjects = useSpectraContextStore((state) => state.openObjects);
+  const openObject = useSpectraContextStore((state) => state.openObject);
+  const closePresentation = useSpectraContextStore((state) => state.closePresentation);
+  const threadPanelObject = openObjects.find((object) => object.type === "thread" && object.presentation === "thread-panel") ?? null;
+  const liveThread = threadPanelObject ? { id: threadPanelObject.id, title: threadPanelObject.label } : null;
   const { composerThread, setComposerThread, explicitContextIds: selectedContextIds, contextArtifactIds, explicitContextObjects, clearExplicitContext, toggleExplicitArtifact, setVisibleArtifactIds, setActiveWorkspaceContext } = useSpectraContext(artifacts, workspaces);
 
   useEffect(() => {
@@ -89,15 +92,14 @@ export function ChatShell() {
   }, []);
 
   const studio = useArtifactStudioState("spectra.shared.artifactStudio", artifacts);
-  const threadPanelArtifact = artifacts.find((artifact) => artifact._id === threadPanelArtifactId && artifact.blueprintKey === "thread_reference") ?? null;
+  const setLiveThread = useCallback((thread: { id: string; title: string } | null) => {
+    if (thread) openObject({ type: "thread", id: thread.id, label: thread.title, presentation: "thread-panel", workspaceId: chatWorkspaceId ?? undefined });
+    else closePresentation("thread-panel");
+  }, [chatWorkspaceId, closePresentation, openObject]);
   const openArtifact = useCallback((artifactId: string) => {
     const artifact = artifacts.find((item) => item._id === artifactId);
     if (!artifact) { toast.error("That artifact is no longer available."); return; }
     setHistoryOpen(false);
-    if (artifact.blueprintKey === "thread_reference") {
-      setThreadPanelArtifactId(artifact._id);
-      return;
-    }
     studio.openSplit(artifact);
   }, [artifacts, studio]);
 
@@ -112,8 +114,8 @@ export function ChatShell() {
     await refresh(activeThreadRef.current);
   }, [refresh]);
 
-  const focusedArtifact = studio.activeArtifact ?? threadPanelArtifact;
-  useEffect(() => { setVisibleArtifactIds(focusedArtifact && focusedArtifact.blueprintKey !== "thread_reference" ? [focusedArtifact._id] : []); }, [focusedArtifact, setVisibleArtifactIds]);
+  const focusedArtifact = studio.activeArtifact;
+  useEffect(() => { setVisibleArtifactIds(focusedArtifact ? [focusedArtifact._id] : []); }, [focusedArtifact, setVisibleArtifactIds]);
   const scopedWorkspaceId = chatWorkspaceId ?? detail?.thread.workspaceId;
   const naturalFocusMode: ComposerFocusMode = selectedContextIds.size > 0 ? "selection" : composerThread ? "thread" : focusedArtifact ? "artifact" : scopedWorkspaceId ? "workspace" : "global";
   const effectiveFocusMode = focusModeOverride === "thread" && !composerThread ? naturalFocusMode : focusModeOverride === "artifact" && !focusedArtifact ? naturalFocusMode : focusModeOverride === "workspace" && !scopedWorkspaceId ? naturalFocusMode : focusModeOverride === "selection" && selectedContextIds.size === 0 ? naturalFocusMode : focusModeOverride ?? naturalFocusMode;
@@ -198,7 +200,7 @@ export function ChatShell() {
   const activeWorkspace = workspaces.find((workspace) => workspace._id === (chatWorkspaceId ?? detail?.thread.workspaceId));
   useEffect(() => setActiveWorkspaceContext(activeWorkspace ? { id: activeWorkspace._id, title: activeWorkspace.title } : null), [activeWorkspace, setActiveWorkspaceContext]);
   const activeCards = useMemo(() => runEngine.cards, [runEngine.cards]);
-	  const pageComposer = <CommandBar placeholder={continuingThread ? `Continue ${title}…` : selectedContextIds.size ? `Ask with ${selectedContextIds.size} selected artifacts…` : activeWorkspace ? `Ask with ${activeWorkspace.title} context…` : focusedArtifact ? `Ask about ${focusedArtifact.title}…` : "Ask Spectra anything…"} busy={runEngine.submitting} allowConcurrent={!continuingThread} allowAttachments onStop={runEngine.stop} onSubmit={(value, attachments) => { void runEngine.run(value, attachments); return true; }} menu={<><button type="button" onClick={() => selectThread(null)} className="flex w-full items-center gap-2 rounded-[6px] px-2.5 py-2 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"><Plus className="h-4 w-4" />New conversation</button>{selectedContextIds.size ? <button type="button" onClick={() => { clearExplicitContext(); setFocusModeOverride(null); }} className="flex w-full items-center gap-2 rounded-[6px] px-2.5 py-2 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"><X className="h-4 w-4" />Clear selected context</button> : null}<div className="my-1 h-px bg-[var(--border-subtle)]" />{workspaces.slice(0, 6).map((workspace) => <button key={workspace._id} type="button" onClick={() => selectWorkspaceContext(workspace._id)} className="flex w-full items-center gap-2 rounded-[6px] px-2.5 py-2 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"><FolderPlus className="h-4 w-4" /><span className="min-w-0 flex-1 truncate">Use {workspace.title}</span>{activeWorkspace?._id === workspace._id ? <Check className="h-3.5 w-3.5 text-[var(--success)]" /> : null}</button>)}</>} context={<ContextFocusControl mode={effectiveFocusMode} onModeChange={setFocusModeOverride} workspace={activeWorkspace} artifact={focusedArtifact} selectedCount={contextArtifactIds.length} threadTitle={threadId ? title : undefined} />} />;
+	  const pageComposer = <CommandBar placeholder={continuingThread ? `Continue ${title}…` : selectedContextIds.size ? `Ask with ${selectedContextIds.size} selected artifacts…` : activeWorkspace ? `Ask with ${activeWorkspace.title} context…` : focusedArtifact ? `Ask about ${focusedArtifact.title}…` : "Ask Spectra anything…"} busy={runEngine.submitting} allowConcurrent={!continuingThread} allowAttachments onStop={runEngine.stop} onStartNewThread={() => selectThread(null)} onSubmit={(value, attachments) => runEngine.run(value, attachments)} menu={<><button type="button" onClick={() => selectThread(null)} className="flex w-full items-center gap-2 rounded-[6px] px-2.5 py-2 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"><Plus className="h-4 w-4" />New conversation</button>{selectedContextIds.size ? <button type="button" onClick={() => { clearExplicitContext(); setFocusModeOverride(null); }} className="flex w-full items-center gap-2 rounded-[6px] px-2.5 py-2 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"><X className="h-4 w-4" />Clear selected context</button> : null}<div className="my-1 h-px bg-[var(--border-subtle)]" />{workspaces.slice(0, 6).map((workspace) => <button key={workspace._id} type="button" onClick={() => selectWorkspaceContext(workspace._id)} className="flex w-full items-center gap-2 rounded-[6px] px-2.5 py-2 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"><FolderPlus className="h-4 w-4" /><span className="min-w-0 flex-1 truncate">Use {workspace.title}</span>{activeWorkspace?._id === workspace._id ? <Check className="h-3.5 w-3.5 text-[var(--success)]" /> : null}</button>)}</>} context={<ContextFocusControl mode={effectiveFocusMode} onModeChange={setFocusModeOverride} workspace={activeWorkspace} artifact={focusedArtifact} selectedCount={contextArtifactIds.length} threadTitle={threadId ? title : undefined} />} />;
 
   return (
     <div className="spectra-wave-y relative flex h-full min-h-0 bg-[var(--bg-primary)]">
@@ -222,7 +224,6 @@ export function ChatShell() {
             <button type="button" onClick={() => {
               if (studio.activeArtifact && studio.dirtyIds.has(studio.activeArtifact._id)) { toast.message("Save or discard the open artifact before opening Runs."); return; }
               studio.closeStudio();
-              setThreadPanelArtifactId(null);
               setHistoryOpen((value) => !value);
               if (!historyOpen) void getSpectraResultCards({ includeHidden: true, limit: 50 }).then((result) => setHistory(result.resultCards));
             }} className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" aria-label="Open runs" title="Runs"><History className="h-3.5 w-3.5" /></button>
@@ -250,7 +251,6 @@ export function ChatShell() {
       </section>
 
       {studio.isOpen && studio.activeArtifact ? <ArtifactStudio mode={studio.mode === "tab" ? "tab" : "split"} artifact={studio.activeArtifact} artifacts={artifacts} tabs={studio.tabs} dirtyIds={studio.dirtyIds} panelWidth={studioPanelWidth} sourceLabel="Chat" onPanelWidthChange={setStudioPanelWidth} onClose={studio.closeStudio} onExpand={studio.openTab} onActivateTab={studio.activateTab} onCloseTab={studio.closeTab} onSave={updateArtifact} onRevert={revertArtifactVersion} onDirtyChange={studio.setDirty} /> : null}
-      {threadPanelArtifact ? <ArtifactStudio mode="split" artifact={threadPanelArtifact} artifacts={artifacts} tabs={[]} dirtyIds={new Set()} panelWidth={threadPanelWidth} sourceLabel="Chat" onPanelWidthChange={setThreadPanelWidth} onClose={() => setThreadPanelArtifactId(null)} onExpand={() => undefined} onActivateTab={() => undefined} onCloseTab={() => setThreadPanelArtifactId(null)} onSave={updateArtifact} onRevert={revertArtifactVersion} onDirtyChange={() => undefined} onContinueThread={(continuedId) => selectThread(continuedId === threadId ? null : continuedId)} continuedThreadId={threadId} /> : null}
       <div className="pointer-events-none absolute inset-x-0 bottom-0 z-50 bg-[linear-gradient(to_top,var(--bg-primary)_76%,transparent)] px-4 pb-5 pt-14 sm:px-8"><div className="pointer-events-auto mx-auto max-w-[820px]"><DurableRunTabs workspaceId={scopedWorkspaceId} onOpen={(_runId, selectedThreadId, selectedTitle) => setLiveThread({ id: selectedThreadId, title: selectedTitle })} onStop={(runId) => runEngine.stop(runId)} />{pageComposer}</div></div>
 
       {liveThread ? <LiveThreadPanel threadId={liveThread.id} title={liveThread.title} width={liveThreadPanelWidth} onWidthChange={setLiveThreadPanelWidth} onClose={() => setLiveThread(null)} onOpenArtifact={openArtifact} onOpenWorkspace={selectWorkspaceContext} /> : null}

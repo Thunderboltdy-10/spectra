@@ -55,7 +55,7 @@ const demoWorkspaces: Array<{
 
 const demoArtifacts: Array<{
   key: string;
-  blueprintKey: BlueprintKey;
+  blueprintKey: BlueprintKey | "thread_reference";
   title: string;
   summary: string;
   tags: string[];
@@ -477,6 +477,9 @@ export const ensureDemoData = mutation({
 
     let placedCount = 0;
     for (const [artifactIndex, demo] of demoArtifacts.entries()) {
+      // Historical demo conversations are no longer materialized as artifacts.
+      // Real threads are seeded/provided by the canonical thread system.
+      if (demo.blueprintKey === "thread_reference") continue;
       const workspaceId = demo.workspaceKey ? workspaceIds.get(demo.workspaceKey) : undefined;
       const existing = existingArtifacts.find((artifact) => artifact.title === demo.title && artifact.blueprintKey === demo.blueprintKey && artifact.orgId === actor.orgId);
       const artifactTime = now - (artifactIndex + 2) * 43 * 60 * 1000;

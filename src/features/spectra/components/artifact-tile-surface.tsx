@@ -1,7 +1,8 @@
 "use client";
 
 import { GripVertical, Maximize2, PanelRightClose, Plus, Scaling, X } from "lucide-react";
-import { useEffect, useMemo, useState, type DragEvent, type ReactNode } from "react";
+import { useMemo, useState, type DragEvent, type ReactNode } from "react";
+import { useSpectraContextStore } from "@/stores/spectra-context-store";
 import type { ArtifactPayload } from "./artifact-blueprint-sheet";
 import { ArtifactStudio } from "./artifact-studio";
 import type { SpectraArtifact } from "../data/api";
@@ -27,8 +28,6 @@ type ArtifactTileSurfaceProps = {
   onContinueThread?: (threadId: string, title: string) => void;
 };
 
-type TileSize = "normal" | "wide" | "tall";
-
 export function ArtifactTileSurface({
   artifacts,
   allArtifacts,
@@ -53,22 +52,18 @@ export function ArtifactTileSurface({
     () => artifacts.filter((artifact, index, rows) => rows.findIndex((row) => row._id === artifact._id) === index),
     [artifacts],
   );
-  const storageKey = "spectra.tiles.v3";
-  const [order, setOrder] = useState<string[]>([]);
-  const [sizes, setSizes] = useState<Record<string, TileSize>>({});
+  const order = useSpectraContextStore((state) => state.tileArtifactIds);
+  const sizes = useSpectraContextStore((state) => state.tileSizes);
+  const moveTileBefore = useSpectraContextStore((state) => state.moveTileBefore);
+  const cycleTileSize = useSpectraContextStore((state) => state.cycleTileSize);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
-  useEffect(() => {
-    try { const saved = JSON.parse(window.localStorage.getItem(storageKey) ?? "null") as { order?: string[]; sizes?: Record<string, TileSize> } | null; setOrder(saved?.order ?? uniqueArtifacts.map((artifact) => artifact._id)); setSizes(saved?.sizes ?? {}); }
-    catch { setOrder(uniqueArtifacts.map((artifact) => artifact._id)); setSizes({}); }
-  }, [storageKey, uniqueArtifacts]);
-  useEffect(() => { if (order.length) window.localStorage.setItem(storageKey, JSON.stringify({ order, sizes })); }, [order, sizes, storageKey]);
   const visibleArtifacts = useMemo(() => [...uniqueArtifacts].sort((a, b) => (order.indexOf(a._id) < 0 ? 999 : order.indexOf(a._id)) - (order.indexOf(b._id) < 0 ? 999 : order.indexOf(b._id))), [order, uniqueArtifacts]);
 
   function moveBefore(event: DragEvent, targetId: string) {
     event.preventDefault();
     if (!draggingId || draggingId === targetId) return;
-    setOrder((current) => { const next = current.filter((id) => id !== draggingId); const index = next.indexOf(targetId); next.splice(index < 0 ? next.length : index, 0, draggingId); return next; });
+    moveTileBefore(draggingId, targetId);
   }
 
   function safeClose(artifactId: string) {
@@ -114,7 +109,7 @@ export function ArtifactTileSurface({
         {visibleArtifacts.map((artifact) => (
           <div key={artifact._id} draggable onDragStart={() => setDraggingId(artifact._id)} onDragEnd={() => setDraggingId(null)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => moveBefore(event, artifact._id)} className={`relative flex min-h-[420px] min-w-0 overflow-hidden rounded-[9px] border bg-[var(--bg-primary)] shadow-[0_8px_28px_rgba(27,20,12,0.05)] transition ${sizes[artifact._id] === "wide" ? "md:col-span-12" : "md:col-span-6"} ${sizes[artifact._id] === "tall" ? "md:row-span-2" : ""} ${draggingId === artifact._id ? "scale-[0.985] border-[var(--accent-cyan)] opacity-65" : "border-[var(--border-default)]"}`}>
             <span className="absolute left-2 top-2 z-30 flex h-7 w-7 cursor-grab items-center justify-center rounded-[7px] bg-[color-mix(in_oklab,var(--bg-primary)_88%,transparent)] text-[var(--text-tertiary)] shadow-[0_4px_12px_rgba(27,20,12,0.08)]" title="Drag to rearrange"><GripVertical className="h-3.5 w-3.5" /></span>
-            <button type="button" onClick={() => setSizes((current) => ({ ...current, [artifact._id]: current[artifact._id] === "normal" || !current[artifact._id] ? "wide" : current[artifact._id] === "wide" ? "tall" : "normal" }))} className="absolute right-10 top-2 z-30 flex h-7 w-7 items-center justify-center rounded-[7px] bg-[color-mix(in_oklab,var(--bg-primary)_88%,transparent)] text-[var(--text-tertiary)] shadow-[0_4px_12px_rgba(27,20,12,0.08)] hover:bg-[var(--bg-hover)]" aria-label={`Resize ${artifact.title}`} title="Cycle tile size"><Scaling className="h-3.5 w-3.5" /></button>
+            <button type="button" onClick={() => cycleTileSize(artifact._id)} className="absolute right-10 top-2 z-30 flex h-7 w-7 items-center justify-center rounded-[7px] bg-[color-mix(in_oklab,var(--bg-primary)_88%,transparent)] text-[var(--text-tertiary)] shadow-[0_4px_12px_rgba(27,20,12,0.08)] hover:bg-[var(--bg-hover)]" aria-label={`Resize ${artifact.title}`} title="Cycle tile size"><Scaling className="h-3.5 w-3.5" /></button>
             <button type="button" onClick={() => safeClose(artifact._id)} className="absolute right-2 top-2 z-30 flex h-7 w-7 items-center justify-center rounded-[7px] bg-[color-mix(in_oklab,var(--bg-primary)_88%,transparent)] text-[var(--text-tertiary)] shadow-[0_4px_12px_rgba(27,20,12,0.08)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" aria-label={`Close ${artifact.title}`} title={`Close ${artifact.title}`}>
               <X className="h-3.5 w-3.5" />
             </button>

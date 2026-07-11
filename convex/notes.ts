@@ -1,9 +1,7 @@
 import { mutation, query, type MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
-import type { Doc, Id } from "./_generated/dataModel";
-import { adjustWorkstreamArtifactCount, getUserByClerkId } from "./helpers";
-import { resolveWorkstreamTransfer } from "./workstreamAssignment";
-import { removeWorkspaceItemForArtifact, syncWorkspaceItemForArtifact } from "./workspaceItemSync";
+import type { Doc } from "./_generated/dataModel";
+import { getUserByClerkId } from "./helpers";
 
 const vEditorMode = v.union(
   v.literal("standard"),
@@ -43,18 +41,6 @@ function normalizeEditorMode(mode: string | null | undefined) {
   return "standard" as const;
 }
 
-async function validateWorkstream(
-  ctx: Parameters<typeof getUserByClerkId>[0],
-  actor: Awaited<ReturnType<typeof requireActor>>,
-  workstreamId: Id<"workstreams"> | undefined,
-) {
-  if (!workstreamId) return;
-  const workstream = await ctx.db.get(workstreamId);
-  if (!workstream || workstream.ownerUserId !== actor._id || workstream.orgId !== actor.orgId) {
-    throw new Error("Workstream not found");
-  }
-}
-
 async function resolveDocumentArtifact(
   ctx: Parameters<typeof getUserByClerkId>[0],
   actor: Awaited<ReturnType<typeof requireActor>>,
@@ -86,7 +72,6 @@ async function resolveLegacyNote(
 function toCompatDocument(artifact: Doc<"artifacts">) {
   return {
     _id: artifact._id,
-    workstreamId: artifact.workstreamId,
     artifactId: undefined,
     title: artifact.title,
     content: artifact.content,
@@ -116,7 +101,6 @@ function isLegacyDuplicate(note: Doc<"notes">, artifacts: Doc<"artifacts">[]) {
   return artifacts.some((artifact) =>
     artifact.type === "document"
     && artifact.title === note.title
-    && artifact.workstreamId === note.workstreamId
     && artifact.managebacItemId === note.managebacItemId
     && artifact.createdAt === note.createdAt,
   );
@@ -133,7 +117,6 @@ async function migrateLegacyNoteToDocumentArtifact(
 
   const duplicate = existingArtifacts.find((artifact) =>
     artifact.title === note.title
-    && artifact.workstreamId === note.workstreamId
     && artifact.managebacItemId === note.managebacItemId
     && artifact.createdAt === note.createdAt,
   );
@@ -146,24 +129,12 @@ async function migrateLegacyNoteToDocumentArtifact(
       });
     }
     await ctx.db.delete(note._id);
-    await adjustWorkstreamArtifactCount(ctx, note.workstreamId, -1);
-    await syncWorkspaceItemForArtifact(ctx, {
-      artifactId: duplicate._id,
-      ownerUserId: duplicate.ownerUserId,
-      orgId: duplicate.orgId,
-      workstreamId: duplicate.workstreamId,
-      status: duplicate.status,
-      title: duplicate.title,
-      artifactType: duplicate.type,
-      contentPlaintext: duplicate.contentPlaintext,
-    });
     return duplicate;
   }
 
   const artifactId = await ctx.db.insert("artifacts", {
     ownerUserId: note.ownerUserId,
     orgId: note.orgId,
-    workstreamId: note.workstreamId,
     type: "document",
     title: note.title,
     content: note.content,
@@ -196,16 +167,6 @@ async function migrateLegacyNoteToDocumentArtifact(
     status: "confirmed",
     createdAt: note.createdAt,
   });
-  await syncWorkspaceItemForArtifact(ctx, {
-    artifactId,
-    ownerUserId: note.ownerUserId,
-    orgId: note.orgId,
-    workstreamId: note.workstreamId,
-    status: "active",
-    title: note.title,
-    artifactType: "document",
-    contentPlaintext: note.contentPlaintext,
-  });
   await ctx.db.delete(note._id);
 
   const artifact = await ctx.db.get(artifactId);
@@ -218,7 +179,6 @@ async function migrateLegacyNoteToDocumentArtifact(
 export const list = query({
   args: {
     actorClerkId: v.string(),
-    workstreamId: v.optional(v.id("workstreams")),
     artifactId: v.optional(v.id("artifacts")),
     search: v.optional(v.string()),
     limit: v.optional(v.number()),
@@ -239,10 +199,6 @@ export const list = query({
       .collect();
     legacyNotes = legacyNotes.filter((note) => !isLegacyDuplicate(note, artifacts));
 
-    if (args.workstreamId) {
-      artifacts = artifacts.filter((artifact) => artifact.workstreamId === args.workstreamId);
-      legacyNotes = legacyNotes.filter((note) => note.workstreamId === args.workstreamId);
-    }
     if (args.artifactId) {
       legacyNotes = legacyNotes.filter((note) => note.artifactId === args.artifactId);
     }
@@ -257,7 +213,6 @@ export const list = query({
       ...artifacts.map(toCompatDocument),
       ...legacyNotes.map((note) => ({
         _id: note._id,
-        workstreamId: note.workstreamId,
         artifactId: note.artifactId,
         title: note.title,
         content: note.content,
@@ -295,7 +250,6 @@ export const get = query({
     }
     return {
       _id: note._id,
-      workstreamId: note.workstreamId,
       artifactId: note.artifactId,
       title: note.title,
       content: note.content,
@@ -326,7 +280,6 @@ export const create = mutation({
     sourceDeleted: v.optional(v.boolean()),
     sourceUpdatedAt: v.optional(v.number()),
     syncConflictSummary: v.optional(v.string()),
-    workstreamId: v.optional(v.id("workstreams")),
     artifactId: v.optional(v.id("artifacts")),
     lastAiEditId: v.optional(v.string()),
     pendingDiffs: v.optional(v.any()),
@@ -335,13 +288,11 @@ export const create = mutation({
     const actor = await requireActor(ctx, args.actorClerkId);
     const title = normalizeString(args.title);
     if (!title) throw new Error("title is required");
-    await validateWorkstream(ctx, actor, args.workstreamId);
 
     const now = Date.now();
     const documentArtifactId = await ctx.db.insert("artifacts", {
       ownerUserId: actor._id,
       orgId: actor.orgId,
-      workstreamId: args.workstreamId,
       type: "document",
       title,
       content: args.content,
@@ -373,18 +324,6 @@ export const create = mutation({
       status: "confirmed",
       createdAt: now,
     });
-    await adjustWorkstreamArtifactCount(ctx, args.workstreamId, 1);
-    await syncWorkspaceItemForArtifact(ctx, {
-      artifactId: documentArtifactId,
-      ownerUserId: actor._id,
-      orgId: actor.orgId,
-      workstreamId: args.workstreamId,
-      status: "active",
-      title,
-      artifactType: "document",
-      contentPlaintext: normalizeString(args.contentPlaintext),
-    });
-
     return { noteId: documentArtifactId };
   },
 });
@@ -402,7 +341,6 @@ export const update = mutation({
     sourceDeleted: v.optional(v.union(v.boolean(), v.null())),
     sourceUpdatedAt: v.optional(v.union(v.number(), v.null())),
     syncConflictSummary: v.optional(v.union(v.string(), v.null())),
-    workstreamId: v.optional(v.union(v.id("workstreams"), v.null())),
     artifactId: v.optional(v.union(v.id("artifacts"), v.null())),
     lastAiEditId: v.optional(v.union(v.string(), v.null())),
     pendingDiffs: v.optional(v.union(v.any(), v.null())),
@@ -418,10 +356,6 @@ export const update = mutation({
       }
       artifact = await migrateLegacyNoteToDocumentArtifact(ctx, legacyNote);
       migratedFromLegacy = true;
-    }
-
-    if (args.workstreamId !== undefined) {
-      await validateWorkstream(ctx, actor, args.workstreamId ?? undefined);
     }
 
     const now = Date.now();
@@ -445,7 +379,6 @@ export const update = mutation({
     if (args.syncConflictSummary !== undefined) {
       updates.syncConflictSummary = normalizeString(toOptionalPatchValue(args.syncConflictSummary));
     }
-    if (args.workstreamId !== undefined) updates.workstreamId = toOptionalPatchValue(args.workstreamId);
     if (args.lastAiEditId !== undefined) {
       updates.lastAiEditId = normalizeString(toOptionalPatchValue(args.lastAiEditId));
     }
@@ -468,32 +401,6 @@ export const update = mutation({
       });
     }
 
-    const workstreamTransfer = resolveWorkstreamTransfer({
-      currentWorkstreamId: artifact.workstreamId,
-      requestedWorkstreamId: args.workstreamId,
-      requestIncludesWorkstreamId: args.workstreamId !== undefined,
-      isActive: true,
-    });
-    if (workstreamTransfer) {
-      await adjustWorkstreamArtifactCount(ctx, workstreamTransfer.from, -1);
-      await adjustWorkstreamArtifactCount(ctx, workstreamTransfer.to, 1);
-    }
-    await syncWorkspaceItemForArtifact(ctx, {
-      artifactId: artifact._id,
-      ownerUserId: actor._id,
-      orgId: actor.orgId,
-      workstreamId:
-        args.workstreamId === undefined
-          ? artifact.workstreamId
-          : (args.workstreamId ?? undefined),
-      status: artifact.status,
-      title: args.title === undefined ? artifact.title : (normalizeString(args.title) ?? artifact.title),
-      artifactType: artifact.type,
-      contentPlaintext:
-        args.contentPlaintext === undefined
-          ? artifact.contentPlaintext
-          : normalizeString(toOptionalPatchValue(args.contentPlaintext)),
-    });
     return { success: true, noteId: artifact._id, migratedFromLegacy };
   },
 });
@@ -512,7 +419,6 @@ export const remove = mutation({
         throw new Error("Note not found");
       }
       await ctx.db.delete(legacyNote._id);
-      await adjustWorkstreamArtifactCount(ctx, legacyNote.workstreamId, -1);
       return { success: true };
     }
 
@@ -546,13 +452,7 @@ export const remove = mutation({
         });
       }
     }
-    await removeWorkspaceItemForArtifact(ctx, {
-      artifactId: artifact._id,
-      ownerUserId: actor._id,
-      orgId: actor.orgId,
-    });
     await ctx.db.delete(artifact._id);
-    await adjustWorkstreamArtifactCount(ctx, artifact.workstreamId, -1);
     return { success: true };
   },
 });

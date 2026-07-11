@@ -64,6 +64,7 @@ export function ContextFocusControl({
   threadTitle?: string;
 }) {
   const [open, setOpen] = useState(false);
+  const [browserOpen, setBrowserOpen] = useState(false);
   const [query, setQuery] = useState("");
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const dialogRef = useRef<HTMLDivElement | null>(null);
@@ -87,6 +88,10 @@ export function ContextFocusControl({
   }, [setContinuation]);
   useEffect(() => {
     if (wasOpen.current && !open) requestAnimationFrame(() => triggerRef.current?.focus());
+    if (!open) {
+      setBrowserOpen(false);
+      setQuery("");
+    }
     wasOpen.current = open;
   }, [open]);
   useEffect(() => {
@@ -109,9 +114,13 @@ export function ContextFocusControl({
     return () => { document.removeEventListener("pointerdown", close); document.removeEventListener("keydown", escape); };
   }, [open]);
   useEffect(() => {
-    if (!open) return;
+    if (!open || !browserOpen) {
+      setThreads([]);
+      setRecent({ artifacts: [], workspaces: [] });
+      return;
+    }
     void Promise.all([getSpectraThreads({ limit: 80 }), getSpectraArtifacts({ placement: "all" }), getSpectraWorkspaces()]).then(([threadRows, artifactRows, workspaceRows]) => { setThreads(threadRows.threads); setRecent({ artifacts: artifactRows.artifacts.slice(0, 6), workspaces: workspaceRows.slice(0, 4) }); }).catch(() => { setThreads([]); setRecent({ artifacts: [], workspaces: [] }); });
-  }, [open]);
+  }, [browserOpen, open]);
   useEffect(() => {
     if (!open || query.trim().length < 2) { setResults({ artifacts: [], workspaces: [] }); return; }
     const sequence = ++searchSequence.current;
@@ -182,10 +191,13 @@ export function ContextFocusControl({
 	            <div className="px-2 pb-1.5 pt-1 text-[10px] font-semibold uppercase tracking-[0.09em] text-[var(--text-tertiary)]">
 	              Next message context
 	            </div>
-	            <div className="mx-1 mb-1.5 flex h-10 items-center gap-2 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5">
+	            <button type="button" onClick={() => setBrowserOpen((value) => !value)} className="mx-1 mb-1.5 flex h-10 w-[calc(100%-0.5rem)] cursor-pointer items-center gap-2 rounded-[8px] bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-primary))] px-2.5 text-left text-[12px] font-medium text-[var(--text-primary)] hover:bg-[color-mix(in_oklab,var(--accent-cyan)_11%,var(--bg-primary))]" aria-expanded={browserOpen}>
+	              <Files className="h-3.5 w-3.5 text-[var(--accent-cyan)]" /><span className="min-w-0 flex-1">Choose artifacts and workspaces</span><span className="text-[10px] font-normal text-[var(--text-tertiary)]">Multi-select</span><ChevronDown className={`h-3.5 w-3.5 transition-transform ${browserOpen ? "rotate-180" : ""}`} />
+	            </button>
+	            {browserOpen ? <div className="mx-1 mb-1.5 flex h-10 items-center gap-2 rounded-[8px] bg-[var(--bg-primary)] px-2.5 shadow-[inset_0_0_0_1px_var(--border-default)]">
 	              <Search className="h-3.5 w-3.5 text-[var(--text-tertiary)]" />
 	              <input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find artifacts, workspaces, or threads…" className="min-w-0 flex-1 bg-transparent text-[12px] outline-none placeholder:text-[var(--text-tertiary)]" />
-	            </div>
+	            </div> : null}
 	            {continuation ? <div className="mx-1 mb-1.5 flex items-center gap-2 rounded-[8px] bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-primary))] px-2.5 py-2"><MessageSquare className="h-3.5 w-3.5 text-[var(--accent-cyan)]" /><div className="min-w-0 flex-1"><div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--accent-cyan)]">Continue conversation</div><div className="truncate text-[11px] text-[var(--text-primary)]">{continuation.title}</div></div><button type="button" onClick={() => chooseContinuation(null)} className="flex h-7 w-7 items-center justify-center rounded-[6px] hover:bg-[var(--bg-hover)]" aria-label="Start a new conversation instead"><X className="h-3.5 w-3.5" /></button></div> : null}
 	            {explicit.length || visible.length ? <div className="mx-1 mb-1.5 rounded-[8px] border border-[var(--border-subtle)] p-2"><div className="mb-1.5 text-[9px] font-semibold uppercase tracking-[0.09em] text-[var(--text-tertiary)]">Using as context</div><div className="flex flex-wrap gap-1">{explicit.map((item) => <button key={`explicit:${item.type}:${item.id}`} type="button" onClick={() => removeExplicit(item.type, item.id)} className={`inline-flex max-w-full items-center gap-1 rounded-[6px] px-1.5 py-1 text-[10px] ${item.stale ? "bg-[color-mix(in_oklab,var(--danger)_8%,var(--bg-secondary))] text-[var(--danger)]" : "bg-[var(--bg-secondary)] text-[var(--text-secondary)]"}`} title={item.stale ? "This object is no longer available. Remove from context." : "Remove from explicit context"}><span className="max-w-[240px] truncate">{item.label}</span><X className="h-3 w-3" /></button>)}{visible.filter((item) => !explicit.some((row) => row.type === item.type && row.id === item.id)).map((item) => { const excluded = excludedVisibleKeys.includes(`${item.type}:${item.id}`); return <button key={`visible:${item.type}:${item.id}`} type="button" onClick={() => toggleVisibleExclusion(item.type, item.id)} className={`inline-flex max-w-full items-center gap-1 rounded-[6px] border border-dashed px-1.5 py-1 text-[10px] ${excluded ? "border-[var(--danger)]/35 text-[var(--danger)] opacity-70" : "border-[var(--border-default)] text-[var(--text-tertiary)]"}`} title={excluded ? "Include this visible object in context" : "Exclude from context without closing"}><span className="max-w-[240px] truncate">{item.label}</span><span className="opacity-70">{excluded ? "excluded" : "visible"}</span></button>; })}</div></div> : null}
 	            {query.trim().length >= 2 ? <div className="max-h-[220px] overflow-y-auto px-1 pb-1">{results.workspaces.map((item) => <button key={item._id} type="button" onClick={() => addExplicit({ type: "workspace", id: item._id, label: item.title, source: "explicit", capability: "context" })} className="flex w-full items-center gap-2 rounded-[7px] px-2 py-2 text-left hover:bg-[var(--bg-hover)]"><BookOpen className="h-3.5 w-3.5 text-[var(--accent-cyan)]" /><span className="min-w-0 flex-1 truncate text-[11px]">{item.title}</span><span className="text-[9px] text-[var(--text-tertiary)]">Add context</span></button>)}{results.artifacts.map((item) => <button key={item._id} type="button" onClick={() => addExplicit({ type: "artifact", id: item._id, label: item.title, workspaceId: item.placements?.[0]?.workspaceId, source: "explicit", capability: item.blueprintKey === "thread_reference" ? "context" : "tile" })} className="flex w-full items-center gap-2 rounded-[7px] px-2 py-2 text-left hover:bg-[var(--bg-hover)]"><FileText className="h-3.5 w-3.5 text-[#d88922]" /><span className="min-w-0 flex-1 truncate text-[11px]">{item.title}</span><span className="text-[9px] text-[var(--text-tertiary)]">Add context</span></button>)}{threads.filter((item) => `${item.title} ${item.summaryShort ?? ""}`.toLowerCase().includes(query.trim().toLowerCase())).slice(0, 8).map((item) => <div key={item._id} className="flex items-center gap-1 rounded-[7px] hover:bg-[var(--bg-hover)]"><button type="button" onClick={() => addExplicit({ type: "thread", id: item._id, label: item.title, workspaceId: item.workspaceId, source: "explicit", capability: "context" })} className="flex min-w-0 flex-1 items-center gap-2 px-2 py-2 text-left"><MessageSquare className="h-3.5 w-3.5 text-[#8b6ff0]" /><span className="min-w-0 flex-1 truncate text-[11px]">{item.title}</span><span className="text-[9px] text-[var(--text-tertiary)]">Use as context</span></button><button type="button" onClick={() => chooseContinuation({ id: item._id, title: item.title, workspaceId: item.workspaceId, runId: item.lastRunId })} className="mr-1 rounded-[6px] px-2 py-1 text-[9px] font-semibold text-[var(--accent-cyan)] hover:bg-[var(--bg-secondary)]">Continue</button></div>)}</div> : null}

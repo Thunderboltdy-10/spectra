@@ -29,7 +29,6 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       routerMode?: "auto" | "manual" | "openrouter_auto";
       manualModel?: string;
       agentId?: string | null;
-      workstreamId?: string | null;
       usePersonalResources?: boolean;
       title?: string;
     };

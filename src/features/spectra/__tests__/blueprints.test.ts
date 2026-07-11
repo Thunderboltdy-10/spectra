@@ -6,10 +6,9 @@ import {
 } from "@/features/spectra/blueprints";
 
 describe("Spectra blueprint registry", () => {
-  it("registers the first five built-in blueprints", () => {
+  it("registers only first-class artifact blueprints", () => {
     expect(listBlueprints().map((blueprint) => blueprint.key)).toEqual([
       "document",
-      "thread_reference",
       "flashcard_deck",
       "quiz",
       "planner_task",
@@ -33,4 +32,3 @@ describe("Spectra blueprint registry", () => {
     expect(result.success).toBe(true);
   });
 });
-

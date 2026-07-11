@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
 import { toast } from "sonner";
-import { activeArtifactContext, useSpectraContextStore, type SpectraContinuation } from "@/stores/spectra-context-store";
+import { activeArtifactContext, useSpectraContextStore, type SpectraContextObject, type SpectraContinuation } from "@/stores/spectra-context-store";
 import { getSpectraArtifact, getSpectraThread, getSpectraThreads, getSpectraWorkspace, postSpectra, type SpectraArtifact, type SpectraThread, type SpectraWorkspace } from "../data/api";
 
 export function useSpectraContext(artifacts: SpectraArtifact[], workspaces: SpectraWorkspace[] = []) {
@@ -16,6 +16,7 @@ export function useSpectraContext(artifacts: SpectraArtifact[], workspaces: Spec
   const excludedVisibleKeys = useSpectraContextStore((state) => state.excludedVisibleKeys);
   const setContinuation = useSpectraContextStore((state) => state.setContinuation);
   const setSelectionDraft = useSpectraContextStore((state) => state.setSelectionDraft);
+  const toggleSelection = useSpectraContextStore((state) => state.toggleSelection);
   const commitSelection = useSpectraContextStore((state) => state.commitSelection);
   const clearSelection = useSpectraContextStore((state) => state.clearSelection);
   const clearExplicit = useSpectraContextStore((state) => state.clearExplicit);
@@ -28,7 +29,9 @@ export function useSpectraContext(artifacts: SpectraArtifact[], workspaces: Spec
 
   const artifactById = useMemo(() => new Map(artifacts.map((artifact) => [artifact._id, artifact])), [artifacts]);
   const selectedContextIds = useMemo(() => new Set(selectionDraft.filter((row) => row.type === "artifact" && !row.stale).map((row) => row.id)), [selectionDraft]);
+  const selectedObjectKeys = useMemo(() => new Set(selectionDraft.filter((row) => !row.stale).map((row) => `${row.type}:${row.id}`)), [selectionDraft]);
   const explicitContextIds = useMemo(() => new Set(explicit.filter((row) => row.type === "artifact" && !row.stale).map((row) => row.id)), [explicit]);
+  const explicitContextObjectKeys = useMemo(() => new Set(explicit.filter((row) => !row.stale).map((row) => `${row.type}:${row.id}`)), [explicit]);
   const contextArtifactIds = useMemo(() => activeArtifactContext({ explicit, visible, excludedVisibleKeys }), [excludedVisibleKeys, explicit, visible]);
 
   const setSelectedContextIds = useCallback((action: SetStateAction<Set<string>>) => {
@@ -51,6 +54,17 @@ export function useSpectraContext(artifacts: SpectraArtifact[], workspaces: Spec
       return artifact ? [{ type: "artifact" as const, id, label: artifact.title, workspaceId: artifact.placements?.[0]?.workspaceId, source: "visible" as const, capability: artifact.blueprintKey === "thread_reference" ? "context" as const : "tile" as const }] : [];
     }));
   }, [artifactById, setVisible]);
+
+  const setVisibleObjects = useCallback((objects: SpectraContextObject[]) => {
+    setVisible(objects.map((object) => ({ ...object, source: "visible" })));
+  }, [setVisible]);
+
+  const toggleSelectedObject = useCallback((object: SpectraContextObject, cap = 24) => toggleSelection({ ...object, source: "selected" }, cap), [toggleSelection]);
+
+  const toggleExplicitObject = useCallback((object: SpectraContextObject) => {
+    if (explicit.some((row) => row.type === object.type && row.id === object.id)) removeExplicit(object.type, object.id);
+    else addExplicit({ ...object, source: "explicit" });
+  }, [addExplicit, explicit, removeExplicit]);
 
   const toggleExplicitArtifact = useCallback((artifact: SpectraArtifact) => {
     if (explicitContextIds.has(artifact._id)) removeExplicit("artifact", artifact._id);
@@ -117,16 +131,21 @@ export function useSpectraContext(artifacts: SpectraArtifact[], workspaces: Spec
     composerThread: continuation,
     setComposerThread,
     selectedContextIds,
+    selectedObjectKeys,
     selectionCount: selectionDraft.length,
     explicitContextIds,
+    explicitContextObjectKeys,
     explicitContextObjects: explicit.filter((object) => !object.stale).map(({ type, id, label, workspaceId }) => ({ type, id, label, workspaceId })),
     contextArtifactIds,
     setSelectedContextIds,
+    toggleSelectedObject,
     commitSelection,
     clearDraftSelection: clearSelection,
     clearExplicitContext: clearExplicit,
     toggleExplicitArtifact,
+    toggleExplicitObject,
     setVisibleArtifactIds,
+    setVisibleObjects,
     setActiveWorkspaceContext: setActiveWorkspace,
   };
 }

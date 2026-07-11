@@ -4,7 +4,7 @@ import { convexMutation, convexQuery } from "@/lib/convex-server";
 import { badRequest, ok } from "@/lib/http";
 import { withRouteErrorHandling } from "@/lib/route-handler";
 
-const BLUEPRINTS = new Set(["document", "thread_reference", "flashcard_deck", "quiz", "planner_task"]);
+const BLUEPRINTS = new Set(["document", "flashcard_deck", "quiz", "planner_task"]);
 
 function withJsExtension(functionName: string) {
   const [moduleName, exportName] = functionName.split(":");

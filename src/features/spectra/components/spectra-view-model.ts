@@ -71,7 +71,7 @@ export function workspaceArtifactCount(workspace: SpectraWorkspace, artifacts: S
 }
 
 export function workspaceThreadCount(items: SpectraWorkspaceItem[]) {
-  return items.filter((item) => item.artifact?.blueprintKey === "thread_reference").length;
+  return items.filter((item) => item.sourceType === "thread" && item.thread).length;
 }
 
 export function workspaceDocumentCount(items: SpectraWorkspaceItem[]) {

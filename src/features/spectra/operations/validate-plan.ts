@@ -30,9 +30,6 @@ export function validatePlanAgainstIntent(plan: SpectraPlan, references: OwnedOp
     if (intent.targetWorkspaceId && operation.input.workspaceId && operation.input.workspaceId !== intent.targetWorkspaceId) {
       throw new Error("The artifact destination does not match the interpreted request.");
     }
-    if (operation.input.blueprintKey === "thread_reference" && operation.input.content.threadId) {
-      requireOwnedReference("thread", operation.input.content.threadId, references.threadIds ?? new Set());
-    }
     if (operation.input.blueprintKey === "planner_task") {
       for (const artifactId of operation.input.content.linkedArtifactIds ?? []) requireOwnedReference("artifact", artifactId, references.artifactIds);
       for (const threadId of operation.input.content.linkedThreadIds ?? []) requireOwnedReference("thread", threadId, references.threadIds ?? new Set());

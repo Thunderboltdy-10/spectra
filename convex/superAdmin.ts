@@ -1095,11 +1095,6 @@ export const deleteOrg = mutation({
       await ctx.db.delete(row._id);
     }
 
-    const workstreamsRows = await ctx.db.query("workstreams").withIndex("by_org", (q) => q.eq("orgId", args.orgId)).collect();
-    for (const row of workstreamsRows) {
-      await ctx.db.delete(row._id);
-    }
-
     if (org.logoStorageId) {
       await ctx.storage.delete(org.logoStorageId).catch(() => {});
     }

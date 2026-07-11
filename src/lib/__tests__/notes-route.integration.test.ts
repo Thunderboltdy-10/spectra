@@ -15,14 +15,13 @@ describe("notes route compatibility", () => {
     vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation: vi.fn() }));
 
     const route = await import("@/app/api/notes/route");
-    const response = await route.GET(new NextRequest("http://localhost/api/notes?workstreamId=ws_1&limit=20"));
+    const response = await route.GET(new NextRequest("http://localhost/api/notes?limit=20"));
     const payload = (await response.json()) as { notes: Array<{ _id: string }> };
 
     expect(response.status).toBe(200);
     expect(payload.notes).toEqual([{ _id: "artifact_1", title: "Biology notes" }]);
     expect(convexQuery).toHaveBeenCalledWith("artifacts:listDocumentCompat", {
       actorClerkId: "user_notes",
-      workstreamId: "ws_1",
       search: undefined,
       limit: 20,
     });

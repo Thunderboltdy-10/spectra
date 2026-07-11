@@ -27,13 +27,15 @@ const activeRunControllers = new Map<string, AbortController>();
 
 type Surface = "chat" | "workspace" | "artifacts" | "artifact";
 type Body = {
-  action?: "run" | "retry" | "confirm" | "cancel" | "stop";
+  action?: "run" | "retry" | "confirm" | "cancel" | "revise" | "stop";
   prompt?: string;
   surface?: Surface;
   workspaceId?: string;
   artifactId?: string;
   threadId?: string;
   runId?: string;
+  executionId?: string;
+  revision?: string;
   attachments?: AttachmentInput[];
   focusMode?: EffectiveFocusMode;
   selectedArtifactIds?: string[];
@@ -65,7 +67,7 @@ type ResultAction = { key: string; label: string; targetType?: "artifact" | "thr
 type Card = { _id: string; runId: string; status: "queued" | "running" | "awaiting_confirmation" | "completed" | "failed" | "cancelled"; title: string; summary?: string; variant: "status" | "artifact" | "thread" | "operation" | "error"; actions: ResultAction[]; provenance?: unknown; updatedAt: number };
 type RunState = { status: Card["status"]; sourceSurface: "chat" | "workspace" | "artifact"; threadId?: string; workspaceId?: string; artifactId?: string; userPrompt: string; finalSummary?: string; decision?: SpectraPlan["decision"]; planIntent?: unknown; executionId?: string; contextSnapshot?: { focusMode?: EffectiveFocusMode; selectedObjectIds?: string[]; explicitContextObjects?: Body["explicitContextObjects"]; currentView?: string } };
 type RunDetail = { run: RunState; cards: Card[]; operations: StoredOperation[] };
-type RetryReset = { runId: string; resultCardId?: string; prompt: string; workspaceId?: string; artifactId?: string; sourceSurface: RunState["sourceSurface"]; executionId: string; created: boolean; contextSnapshot?: RunState["contextSnapshot"] };
+type RetryReset = { runId: string; resultCardId?: string; prompt: string; workspaceId?: string; artifactId?: string; sourceSurface: RunState["sourceSurface"]; executionId: string; previousExecutionId: string; created: boolean; contextSnapshot?: RunState["contextSnapshot"] };
 
 function withJsExtension(functionName: string) {
   const [moduleName, exportName] = functionName.split(":");
@@ -151,7 +153,7 @@ The owned context is a bounded packet. effectiveFocus states the user's explicit
 
 For the first exchange, provide a specific conversationTitle of 2 to 4 words and a one-sentence conversationSummary. Avoid generic titles such as "Biology Question" or "New Conversation". On later exchanges, refresh conversationSummary when useful. Set conversationTitle again only if the conversation's purpose has materially clarified or changed; otherwise use null. Never rename for minor topic drift.
 
-Use operation ids only when the exact id is present in owned context. Never invent, combine, prefix, suffix, or transform an id. Never use an operation key as a database id. A flashcard deck is ONE artifact with content.cards[]. A quiz is ONE artifact with content.questions[]. Memory cues belong in each flashcard's hint. Multiple-choice correctAnswer must exactly match one option. Planner tasks use one planner_task artifact. Thread references use threadId=null when no real owned thread id exists.
+Use operation ids only when the exact id is present in owned context. Never invent, combine, prefix, suffix, or transform an id. Never use an operation key as a database id. A flashcard deck is ONE artifact with content.cards[]. A quiz is ONE artifact with content.questions[]. Memory cues belong in each flashcard's hint. Multiple-choice correctAnswer must exactly match one option. Planner tasks use one planner_task artifact. Threads are first-class conversations and must never be created as artifacts.
 
 artifact.create already places a new artifact according to placement; never add a separate workspaceItem.add for that newly generated artifact. For artifact.update include blueprintKey and return the complete canonical content for that blueprint.
 
@@ -334,7 +336,6 @@ function resolvePlanReferences(plan: SpectraPlan, context: Awaited<ReturnType<ty
         operation.input.content.linkedArtifactIds = (operation.input.content.linkedArtifactIds ?? []).map((id) => resolveArtifact(id) ?? id);
         operation.input.content.linkedThreadIds = (operation.input.content.linkedThreadIds ?? []).map((id) => resolveThread(id) ?? id);
       }
-      if (operation.input.blueprintKey === "thread_reference" && operation.input.content.threadId) operation.input.content.threadId = resolveThread(operation.input.content.threadId) ?? operation.input.content.threadId;
     } else if (operation.type === "artifact.update") {
       operation.input.artifactId = resolveArtifact(operation.input.artifactId) ?? operation.input.artifactId;
     } else if (operation.type === "workspace.update") {
@@ -365,6 +366,11 @@ function resolveAndValidatePlan(plan: SpectraPlan, context: Awaited<ReturnType<t
     const message = error instanceof Error ? error.message : "";
     if (!/\b(reference|target|destination|owned id|database ids?)\b/i.test(message)) throw error;
     const candidates = context.artifacts.slice(0, 3).flatMap((artifact) => typeof artifact.title === "string" ? [artifact.title] : []);
+    // Clarification is appropriate only for genuine ambiguity. If retrieval found
+    // no viable owned target, treat the model operation as invalid so the run
+    // records one safe recoverable error instead of silently converting it into
+    // a successful-looking answer.
+    if (candidates.length < 2) throw error;
     return parseSpectraPlan({
       ...resolved,
       decision: "clarify",
@@ -488,7 +494,7 @@ function operationLabel(operation: ModelOperation) {
     if (operation.input.blueprintKey === "quiz") return "Creating quiz";
     if (operation.input.blueprintKey === "planner_task") return "Creating planner task";
     if (operation.input.blueprintKey === "document") return "Creating document";
-    return "Creating thread reference";
+    return "Creating artifact";
   }
   if (operation.type === "artifact.update") return "Updating artifact";
   if (operation.type === "workspaceItem.add") return "Adding workspace placement";
@@ -558,7 +564,7 @@ function publicError(error: unknown) {
 }
 
 async function executeOperation(actorClerkId: string, runId: string, operationId: string, operation: ModelOperation, context: { executionId: string; surface: Surface; threadId?: string; workspaceId?: string; selectedArtifactIds?: string[]; attachmentNames?: string[]; contextSummary?: string; pendingArtifactId?: string; pendingWorkspaceId?: string; preclaimed?: boolean }) {
-  await mutate(context.preclaimed ? "spectraOperations:assertClaimed" : "spectraOperations:claim", { actorClerkId, operationId });
+  await mutate(context.preclaimed ? "spectraOperations:assertClaimed" : "spectraOperations:claim", { actorClerkId, operationId, executionId: context.executionId });
   let output: Record<string, unknown> = {};
   let affected: Array<{ type: string; id: string }> = [];
   if (operation.type === "artifact.create") {
@@ -649,7 +655,7 @@ async function executeOperation(actorClerkId: string, runId: string, operationId
     }) as Record<string, unknown>;
     affected = [{ type: "artifact", id: operation.input.sourceArtifactId }, { type: "artifact", id: operation.input.targetArtifactId }];
   }
-  await mutate("spectraOperations:markExecuted", { actorClerkId, operationId, output, affected });
+  await mutate("spectraOperations:markExecuted", { actorClerkId, operationId, executionId: context.executionId, output, affected });
   return affected;
 }
 
@@ -738,7 +744,8 @@ function launchRunTask(task: (emit: (event: unknown) => void) => Promise<void>, 
   });
 }
 
-async function runAttempt(params: { actorClerkId: string; runId: string; resultCardId: string; executionId: string; prompt: string; surface: Surface; threadId?: string; workspaceId?: string; artifactId?: string; focusMode?: EffectiveFocusMode; selectedArtifactIds?: string[]; explicitContextObjects?: Body["explicitContextObjects"]; currentView?: string; attachments?: PreparedAttachment[]; signal?: AbortSignal }, emit: (event: unknown) => void) {
+async function runAttempt(params: { actorClerkId: string; runId: string; resultCardId: string; executionId: string; workerId: string; prompt: string; surface: Surface; threadId?: string; workspaceId?: string; artifactId?: string; focusMode?: EffectiveFocusMode; selectedArtifactIds?: string[]; explicitContextObjects?: Body["explicitContextObjects"]; currentView?: string; attachments?: PreparedAttachment[]; signal?: AbortSignal }, emit: (event: unknown) => void) {
+  await mutate("spectraRuns:claimExecution", { actorClerkId: params.actorClerkId, runId: params.runId, executionId: params.executionId, workerId: params.workerId });
   let card = await latestCard(params.actorClerkId, params.runId);
   let commitStarted = false;
   let publicText = "";
@@ -751,7 +758,7 @@ async function runAttempt(params: { actorClerkId: string; runId: string; resultC
   const leaseController = new AbortController();
   const executionSignal = params.signal ? AbortSignal.any([params.signal, leaseController.signal]) : leaseController.signal;
   const heartbeat = setInterval(() => {
-    void mutate<unknown & object, { alive: boolean }>("spectraRuns:heartbeat", { actorClerkId: params.actorClerkId, runId: params.runId, executionId: params.executionId }).then((result) => { if (!result.alive) leaseController.abort(); }).catch(() => null);
+    void mutate<unknown & object, { alive: boolean }>("spectraRuns:heartbeat", { actorClerkId: params.actorClerkId, runId: params.runId, executionId: params.executionId, workerId: params.workerId }).then((result) => { if (!result.alive) leaseController.abort(); }).catch(() => null);
   }, 45_000);
   const publish = (event: Record<string, unknown>) => {
     emit(event);
@@ -906,10 +913,10 @@ async function runAttempt(params: { actorClerkId: string; runId: string; resultC
       if (operation?.type === "artifact.create" && earlyPendingByIndex.get(index)) {
         pendingArtifactId = earlyPendingByIndex.get(index);
         pendingArtifacts.set(operationId, pendingArtifactId!);
-        await mutate("spectraOperations:attachPendingArtifact", { actorClerkId: params.actorClerkId, operationId, artifactId: pendingArtifactId });
+        await mutate("spectraOperations:attachPendingArtifact", { actorClerkId: params.actorClerkId, operationId, artifactId: pendingArtifactId, executionId: params.executionId });
       }
       if (operation?.type === "workspace.create" && earlyPendingWorkspaceByIndex.get(index)) {
-        await mutate("spectraOperations:attachPendingWorkspace", { actorClerkId: params.actorClerkId, operationId, workspaceId: earlyPendingWorkspaceByIndex.get(index)! });
+        await mutate("spectraOperations:attachPendingWorkspace", { actorClerkId: params.actorClerkId, operationId, workspaceId: earlyPendingWorkspaceByIndex.get(index)!, executionId: params.executionId });
       }
       publish({ type: "operation_preview", runId: params.runId, operationId, operationType: operation?.type ?? "unknown", preview: operation ? { ...safeOperationPreview(operation), pendingArtifactId } : undefined });
     }
@@ -929,7 +936,7 @@ async function runAttempt(params: { actorClerkId: string; runId: string; resultC
         { key: "confirm", label: "Confirm", targetType: "run", targetId: params.runId },
         { key: "cancel", label: "Cancel", targetType: "run", targetId: params.runId },
       ];
-      await mutate("spectraRuns:updateStatus", { actorClerkId: params.actorClerkId, runId: params.runId, executionId: params.executionId, status: "awaiting_confirmation", phase: "approval", decision: plan.decision, planIntent: plan.intent, finalSummary: plan.finalResponse, resultTitle: "Confirmation required", resultSummary: policy.reasons.join(" · "), resultVariant: "operation", resultActions: actions, provenance, modelUsed: modelResult.model, providerUsed: modelResult.provider, usage: modelResult.usage });
+      await mutate("spectraRuns:updateStatus", { actorClerkId: params.actorClerkId, runId: params.runId, executionId: params.executionId, status: "awaiting_confirmation", phase: "approval", approvalReasons: policy.reasons, decision: plan.decision, planIntent: plan.intent, finalSummary: plan.finalResponse, resultTitle: "Confirmation required", resultSummary: policy.reasons.join(" · "), resultVariant: "operation", resultActions: actions, provenance, modelUsed: modelResult.model, providerUsed: modelResult.provider, usage: modelResult.usage });
       await saveAssistantMessage({ actorClerkId: params.actorClerkId, threadId: params.threadId, runId: params.runId, executionId: params.executionId, content: plan.finalResponse, decision: plan.decision, awaitingConfirmation: true, model: modelResult.model, provider: modelResult.provider, usage: modelResult.usage });
       card = await latestCard(params.actorClerkId, params.runId);
       publish({ type: "confirmation_required", runId: params.runId, reasons: policy.reasons, card: streamCard(card) });
@@ -972,7 +979,7 @@ async function runAttempt(params: { actorClerkId: string; runId: string; resultC
         const pendingArtifactId = pendingArtifacts.get(operationId);
         if (pendingArtifactId) await mutate("spectraArtifacts:markAiState", { actorClerkId: params.actorClerkId, artifactId: pendingArtifactId, runId: params.runId, executionId: params.executionId, state: "failed" }).catch(() => null);
         if (operation.type === "artifact.update") await mutate("spectraArtifacts:markAiState", { actorClerkId: params.actorClerkId, artifactId: operation.input.artifactId, runId: params.runId, executionId: params.executionId, state: "failed" }).catch(() => null);
-        await mutate("spectraOperations:markFailed", { actorClerkId: params.actorClerkId, operationId, error: publicError(error) }).catch(() => null);
+        await mutate("spectraOperations:markFailed", { actorClerkId: params.actorClerkId, operationId, executionId: params.executionId, error: publicError(error) }).catch(() => null);
         throw error;
       }
     }
@@ -1044,6 +1051,7 @@ export async function POST(request: NextRequest) {
 	      return ndjson(async (emit) => { emit({ type: "run_created", runId: created.runId, card: streamCard(card) }); emit({ type: "thread_ready", runId: created.runId, threadId }); });
 	    }
 	    const executionController = new AbortController();
+	    const workerId = `next:${crypto.randomUUID()}`;
 	    activeRunControllers.set(created.runId, executionController);
 	    const task = async (emit: (event: unknown) => void) => {
 	      try { await runAttempt({
@@ -1051,6 +1059,7 @@ export async function POST(request: NextRequest) {
 	      runId: created.runId,
 	      resultCardId: created.resultCardId,
 	      executionId: created.executionId,
+	      workerId,
       prompt,
       surface,
       threadId,
@@ -1073,40 +1082,44 @@ export async function POST(request: NextRequest) {
 
   const runId = body.runId?.trim();
   if (!runId) return new Response("runId is required", { status: 400 });
+  const expectedExecutionId = body.executionId?.trim();
+  if (!expectedExecutionId) return new Response("This run view is out of date. Refresh it and try again.", { status: 409 });
 
   if (action === "stop") {
     let stopped: { alreadyStopped: boolean; executionId?: string };
-    try { stopped = await mutate<unknown & object, { alreadyStopped: boolean; executionId?: string }>("spectraRuns:stopRun", { actorClerkId: actor.clerkId, runId }); }
+    try { stopped = await mutate<unknown & object, { alreadyStopped: boolean; executionId?: string }>("spectraRuns:stopRun", { actorClerkId: actor.clerkId, runId, executionId: expectedExecutionId }); }
     catch (error) { return new Response(publicError(error), { status: 409 }); }
     const controller = activeRunControllers.get(runId);
     controller?.abort();
     await mutate("spectraArtifacts:discardPendingForRun", { actorClerkId: actor.clerkId, runId, executionId: stopped.executionId }).catch(() => null);
     await mutate("spectraArtifacts:settleStagedForRun", { actorClerkId: actor.clerkId, runId, executionId: stopped.executionId, outcome: "clear" }).catch(() => null);
     await mutate("spectraWorkspaces:settleForRun", { actorClerkId: actor.clerkId, runId, executionId: stopped.executionId, outcome: "clear" }).catch(() => null);
-    if (!controller && !stopped.alreadyStopped && stopped.executionId) await mutate("spectraRuns:appendEvent", { actorClerkId: actor.clerkId, runId, executionId: stopped.executionId, type: "stopped", payload: { type: "stopped", runId, partial: true } });
     return new Response(null, { status: 204 });
   }
 
   if (action === "retry") {
     const retryKey = body.submissionKey?.trim() || crypto.randomUUID();
+    const current = await query<{ actorClerkId: string; runId: string }, RunDetail>("spectraRuns:get", { actorClerkId: actor.clerkId, runId });
+    if (current.run.executionId !== expectedExecutionId) return new Response("This run attempt is no longer current. Refresh it and try again.", { status: 409 });
+    await mutate("spectraOperations:cancelPending", { actorClerkId: actor.clerkId, runId, executionId: expectedExecutionId }).catch(() => null);
+    await mutate("spectraArtifacts:discardPendingForRun", { actorClerkId: actor.clerkId, runId, executionId: expectedExecutionId }).catch(() => null);
+    await mutate("spectraArtifacts:settleStagedForRun", { actorClerkId: actor.clerkId, runId, executionId: expectedExecutionId, outcome: "clear" }).catch(() => null);
+    await mutate("spectraWorkspaces:settleForRun", { actorClerkId: actor.clerkId, runId, executionId: expectedExecutionId, outcome: "clear" }).catch(() => null);
     let reset: RetryReset;
-    try { reset = await mutate<unknown & object, RetryReset>("spectraRuns:resetForRetry", { actorClerkId: actor.clerkId, runId, retryKey }); }
+    try { reset = await mutate<unknown & object, RetryReset>("spectraRuns:resetForRetry", { actorClerkId: actor.clerkId, runId, executionId: expectedExecutionId, retryKey }); }
     catch (error) { return new Response(publicError(error), { status: 409 }); }
     if (!reset.resultCardId) return new Response("Result card not found", { status: 409 });
     if (!reset.created) {
       const card = await latestCard(actor.clerkId, runId);
       return ndjson(async (emit) => emit({ type: "run_created", runId, card: streamCard(card) }));
     }
-    await mutate("spectraOperations:cancelPending", { actorClerkId: actor.clerkId, runId }).catch(() => null);
-    await mutate("spectraArtifacts:discardPendingForRun", { actorClerkId: actor.clerkId, runId }).catch(() => null);
-    await mutate("spectraArtifacts:settleStagedForRun", { actorClerkId: actor.clerkId, runId, outcome: "clear" }).catch(() => null);
-    await mutate("spectraWorkspaces:settleForRun", { actorClerkId: actor.clerkId, runId, outcome: "clear" }).catch(() => null);
     const run: RunState = { status: "queued", sourceSurface: reset.sourceSurface, workspaceId: reset.workspaceId, artifactId: reset.artifactId, userPrompt: reset.prompt };
     const state = await query<{ actorClerkId: string; runId: string }, RunDetail>("spectraRuns:get", { actorClerkId: actor.clerkId, runId });
     const executionController = new AbortController();
+    const workerId = `next:${crypto.randomUUID()}`;
     activeRunControllers.set(runId, executionController);
     const task = async (emit: (event: unknown) => void) => {
-      try { await runAttempt({ actorClerkId: actor.clerkId, runId, resultCardId: reset.resultCardId!, executionId: reset.executionId, prompt: reset.prompt, surface: surfaceFromRun(run), threadId: state.run.threadId, workspaceId: reset.workspaceId, artifactId: reset.artifactId, focusMode: reset.contextSnapshot?.focusMode, selectedArtifactIds: reset.contextSnapshot?.selectedObjectIds, explicitContextObjects: reset.contextSnapshot?.explicitContextObjects, currentView: reset.contextSnapshot?.currentView, attachments: [], signal: executionController.signal }, emit); }
+      try { await runAttempt({ actorClerkId: actor.clerkId, runId, resultCardId: reset.resultCardId!, executionId: reset.executionId, workerId, prompt: reset.prompt, surface: surfaceFromRun(run), threadId: state.run.threadId, workspaceId: reset.workspaceId, artifactId: reset.artifactId, focusMode: reset.contextSnapshot?.focusMode, selectedArtifactIds: reset.contextSnapshot?.selectedObjectIds, explicitContextObjects: reset.contextSnapshot?.explicitContextObjects, currentView: reset.contextSnapshot?.currentView, attachments: [], signal: executionController.signal }, emit); }
       finally { if (activeRunControllers.get(runId) === executionController) activeRunControllers.delete(runId); }
     };
     const initialCard = await latestCard(actor.clerkId, runId);

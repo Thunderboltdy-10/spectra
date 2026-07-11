@@ -35,6 +35,7 @@ async function hydrateWorkspaceItem(ctx: Parameters<typeof requireSpectraActor>[
     const artifact = artifactId ? await ctx.db.get(artifactId) : null;
     return {
       ...item,
+      thread: null,
       artifact: artifact && artifact.status !== "deleted" ? {
         ...artifact,
         placements: [{
@@ -46,9 +47,22 @@ async function hydrateWorkspaceItem(ctx: Parameters<typeof requireSpectraActor>[
       } : null,
     };
   }
+  if (item.sourceType === "thread") {
+    const threadId = ctx.db.normalizeId("spectraThreads", item.sourceId);
+    const thread = threadId ? await ctx.db.get(threadId) : null;
+    const run = thread?.lastRunId ? await ctx.db.get(thread.lastRunId) : null;
+    return {
+      ...item,
+      artifact: null,
+      thread: thread && thread.status !== "deleted" && thread.workspaceId === item.workspaceId
+        ? { ...thread, run }
+        : null,
+    };
+  }
   return {
     ...item,
     artifact: null,
+    thread: null,
   };
 }
 
@@ -74,7 +88,7 @@ async function listOwnedWorkspaceItems(
   return {
     workspace: visibleWorkspace,
     items: hydrated
-      .filter((item) => item.sourceType !== "artifact" || item.artifact)
+      .filter((item) => item.sourceType === "artifact" ? item.artifact : item.sourceType === "thread" ? item.thread : true)
       .sort((a, b) => b.updatedAt - a.updatedAt),
   };
 }

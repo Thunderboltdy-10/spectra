@@ -16,6 +16,7 @@ import {
   FolderPlus,
   List,
   Loader2,
+  MessageSquare,
   PanelTop,
   Pin,
   PinOff,
@@ -36,16 +37,19 @@ import {
 import type {
   SpectraArtifact,
   SpectraBlueprintKey,
+  SpectraThread,
   SpectraWorkspace,
   SpectraWorkspaceItem,
 } from "../data/api";
 
 export type ObjectLibraryEntry = {
-  artifact: SpectraArtifact;
+  artifact?: SpectraArtifact;
+  thread?: SpectraThread;
   item?: SpectraWorkspaceItem;
 };
 type GroupBy = "workspace" | "type";
 export type LibraryMode = "list" | "board";
+type ObjectType = SpectraBlueprintKey | "thread";
 type SortMode =
   | "updated"
   | "created"
@@ -55,14 +59,24 @@ type SortMode =
   | "workspace"
   | "activity";
 
-const types: Array<{ key: "all" | SpectraBlueprintKey; label: string }> = [
+const types: Array<{ key: "all" | ObjectType; label: string }> = [
   { key: "all", label: "All" },
   { key: "document", label: "Documents" },
   { key: "flashcard_deck", label: "Decks" },
   { key: "quiz", label: "Quizzes" },
   { key: "planner_task", label: "Tasks" },
-  { key: "thread_reference", label: "Threads" },
+  { key: "thread", label: "Threads" },
 ];
+
+const threadMeta = { label: "Conversation", icon: MessageSquare, color: "#8b6ff0" };
+
+function objectId(entry: ObjectLibraryEntry) { return entry.artifact?._id ?? entry.thread?._id ?? entry.item?._id ?? "unknown"; }
+function objectTitle(entry: ObjectLibraryEntry) { return entry.artifact?.title ?? entry.thread?.title ?? "Untitled object"; }
+function objectSummary(entry: ObjectLibraryEntry) { return entry.artifact?.summary ?? entry.thread?.summaryShort ?? "Continue this conversation."; }
+function objectUpdatedAt(entry: ObjectLibraryEntry) { return entry.artifact?.updatedAt ?? entry.thread?.lastMessageAt ?? entry.thread?.updatedAt ?? entry.item?.updatedAt ?? 0; }
+function objectCreatedAt(entry: ObjectLibraryEntry) { return entry.artifact?.createdAt ?? entry.thread?.createdAt ?? entry.item?.createdAt ?? 0; }
+function objectType(entry: ObjectLibraryEntry): ObjectType { return entry.thread ? "thread" : entry.artifact?.blueprintKey ?? "document"; }
+function objectMeta(entry: ObjectLibraryEntry) { return entry.thread ? threadMeta : blueprintMeta[entry.artifact?.blueprintKey ?? "document"]; }
 
 export function ObjectLibrary({
   entries,
@@ -89,6 +103,7 @@ export function ObjectLibrary({
   showToolbar = true,
   selectionMode = false,
   selectedContextIds,
+  selectedObjectKeys,
   onToggleContext,
 }: {
   entries: ObjectLibraryEntry[];
@@ -118,6 +133,7 @@ export function ObjectLibrary({
   showToolbar?: boolean;
   selectionMode?: boolean;
   selectedContextIds?: Set<string>;
+  selectedObjectKeys?: Set<string>;
   onToggleContext?: (entry: ObjectLibraryEntry) => void;
 }) {
   const [internalMode, setInternalMode] = useState<LibraryMode>("list");
@@ -127,7 +143,7 @@ export function ObjectLibrary({
     onModeChange?.(next);
   };
   const [search, setSearch] = useState("");
-  const [activeType, setActiveType] = useState<"all" | SpectraBlueprintKey>(
+  const [activeType, setActiveType] = useState<"all" | ObjectType>(
     "all",
   );
   const [sort, setSort] = useState<SortMode>("updated");
@@ -176,12 +192,12 @@ export function ObjectLibrary({
     return entries
       .filter(
         (entry) =>
-          activeType === "all" || entry.artifact.blueprintKey === activeType,
+          activeType === "all" || objectType(entry) === activeType,
       )
       .filter(
         (entry) =>
           !needle ||
-          `${entry.artifact.title} ${entry.artifact.summary ?? ""} ${entry.artifact.tags.join(" ")}`
+          `${objectTitle(entry)} ${objectSummary(entry)} ${entry.artifact?.tags.join(" ") ?? "conversation thread"}`
             .toLowerCase()
             .includes(needle),
       )
@@ -190,36 +206,36 @@ export function ObjectLibrary({
           return (
             Number(Boolean(b.item?.viewData.pinned)) -
               Number(Boolean(a.item?.viewData.pinned)) ||
-            b.artifact.updatedAt - a.artifact.updatedAt
+            objectUpdatedAt(b) - objectUpdatedAt(a)
           );
         if (sort === "workspace")
           return (
-            artifactPlacements(a.artifact)[0]?.workspaceTitle ?? "Unplaced"
+            (a.artifact ? artifactPlacements(a.artifact)[0]?.workspaceTitle : workspaces.find((workspace) => workspace._id === a.thread?.workspaceId)?.title) ?? "Unplaced"
           ).localeCompare(
-            artifactPlacements(b.artifact)[0]?.workspaceTitle ?? "Unplaced",
+            (b.artifact ? artifactPlacements(b.artifact)[0]?.workspaceTitle : workspaces.find((workspace) => workspace._id === b.thread?.workspaceId)?.title) ?? "Unplaced",
           );
         if (sort === "activity")
           return (
-            (b.item?.updatedAt ?? b.artifact.updatedAt) -
-            (a.item?.updatedAt ?? a.artifact.updatedAt)
+            (b.item?.updatedAt ?? objectUpdatedAt(b)) -
+            (a.item?.updatedAt ?? objectUpdatedAt(a))
           );
         if (sort === "alphabetical")
-          return a.artifact.title.localeCompare(b.artifact.title);
+          return objectTitle(a).localeCompare(objectTitle(b));
         if (sort === "created")
-          return b.artifact.createdAt - a.artifact.createdAt;
+          return objectCreatedAt(b) - objectCreatedAt(a);
         if (sort === "type")
           return (
-            a.artifact.blueprintKey.localeCompare(b.artifact.blueprintKey) ||
-            a.artifact.title.localeCompare(b.artifact.title)
+            objectType(a).localeCompare(objectType(b)) ||
+            objectTitle(a).localeCompare(objectTitle(b))
           );
-        return b.artifact.updatedAt - a.artifact.updatedAt;
+        return objectUpdatedAt(b) - objectUpdatedAt(a);
       });
-  }, [activeType, entries, search, sort]);
+  }, [activeType, entries, search, sort, workspaces]);
 
   const unplaced =
     groupBy === "workspace"
       ? visible.filter(
-          (entry) => artifactPlacements(entry.artifact).length === 0,
+          (entry) => entry.artifact ? artifactPlacements(entry.artifact).length === 0 : !entry.thread?.workspaceId,
         )
       : [];
   const groups =
@@ -231,14 +247,14 @@ export function ObjectLibrary({
           soft: workspaceAccent(workspace, index).soft,
           border: workspaceAccent(workspace, index).border,
           workspace,
-          entries: visible.filter((entry) =>
+          entries: visible.filter((entry) => entry.thread ? entry.thread.workspaceId === workspace._id : entry.artifact ?
             artifactPlacements(entry.artifact).some(
               (placement) => placement.workspaceId === workspace._id,
-            ),
+            ) : false,
           ),
         }))
       : types.slice(1).map((type) => {
-          const meta = blueprintMeta[type.key as SpectraBlueprintKey];
+          const meta = type.key === "thread" ? threadMeta : blueprintMeta[type.key as SpectraBlueprintKey];
           return {
             key: type.key,
             label: type.label,
@@ -247,7 +263,7 @@ export function ObjectLibrary({
             border: `color-mix(in oklab, ${meta.color} 18%, var(--border-default))`,
             workspace: undefined,
             entries: visible.filter(
-              (entry) => entry.artifact.blueprintKey === type.key,
+              (entry) => objectType(entry) === type.key,
             ),
           };
         });
@@ -258,7 +274,7 @@ export function ObjectLibrary({
     event: DragEvent<HTMLElement>,
     entry: ObjectLibraryEntry,
   ) {
-    if (selectionMode || !canDragMove) {
+    if (selectionMode || !canDragMove || !entry.artifact) {
       event.preventDefault();
       return;
     }
@@ -273,7 +289,7 @@ export function ObjectLibrary({
       event.dataTransfer.getData("application/x-spectra-artifact") ||
       event.dataTransfer.getData("text/plain") ||
       draggingArtifactId;
-    return id ? entries.find((entry) => entry.artifact._id === id) : undefined;
+    return id ? entries.find((entry) => entry.artifact?._id === id) : undefined;
   }
 
   function allowDrop(event: DragEvent<HTMLElement>, targetKey: string) {
@@ -299,6 +315,7 @@ export function ObjectLibrary({
       return;
     }
     if (target.workspaceId) {
+      if (!entry.artifact) return;
       const placements = artifactPlacements(entry.artifact);
       const alreadyPlaced = placements.some(
         (placement) => placement.workspaceId === target.workspaceId,
@@ -333,7 +350,7 @@ export function ObjectLibrary({
       <div className="flex items-center gap-2">
         <IconAction
           icon={ExternalLink}
-          label="Open artifact"
+          label={entry.thread ? "Open conversation" : "Open artifact"}
           onClick={() => onOpen(entry)}
         />
         {onTogglePin ? (
@@ -354,7 +371,7 @@ export function ObjectLibrary({
             className={busyKey === `hide:${entry.item._id}` ? "animate-spin" : undefined}
           />
         ) : null}
-        {onDelete ? (
+        {onDelete && entry.artifact ? (
           <IconAction
             icon={busyKey === `delete:${entry.artifact._id}` ? Loader2 : Trash2}
             label="Delete artifact permanently"
@@ -369,9 +386,10 @@ export function ObjectLibrary({
   }
 
   function placementAction(entry: ObjectLibraryEntry) {
-    if (!onAddToWorkspace || workspaces.length === 0) return actions(entry);
-    const open = placementMenuId === entry.artifact._id;
-    const placements = artifactPlacements(entry.artifact);
+    if (!entry.artifact || !onAddToWorkspace || workspaces.length === 0) return actions(entry);
+    const artifact = entry.artifact;
+    const open = placementMenuId === artifact._id;
+    const placements = artifactPlacements(artifact);
     const hasVisiblePlacement = placements.length > 0;
     return (
       <div className="flex items-center gap-2">
@@ -382,7 +400,7 @@ export function ObjectLibrary({
             label="Add to workspace"
             onClick={(event) => {
               setPlacementAnchor(event.currentTarget.getBoundingClientRect());
-              setPlacementMenuId(open ? null : entry.artifact._id);
+              setPlacementMenuId(open ? null : artifact._id);
             }}
           />
           <FloatingMenu
@@ -449,7 +467,7 @@ export function ObjectLibrary({
         </button>
         {open ? (
           <div className="absolute bottom-[calc(100%+7px)] left-0 z-30 w-[210px] rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 shadow-[0_14px_32px_rgba(27,20,12,0.13)]">
-            {types.slice(1).map((type) => {
+            {types.slice(1).filter((type) => type.key !== "thread").map((type) => {
               const meta = blueprintMeta[type.key as SpectraBlueprintKey];
               const Icon = meta.icon;
               return (
@@ -477,16 +495,17 @@ export function ObjectLibrary({
   }
 
   function unplacedCard(entry: ObjectLibraryEntry) {
-    const meta = blueprintMeta[entry.artifact.blueprintKey];
+    const meta = objectMeta(entry);
     const Icon = meta.icon;
-    const selected = selectedContextIds?.has(entry.artifact._id);
+    const id = objectId(entry);
+    const selected = selectedObjectKeys?.has(`${entry.thread ? "thread" : "artifact"}:${id}`) ?? selectedContextIds?.has(id);
     return (
       <article
-        key={entry.artifact._id}
+        key={id}
         data-spectra-card="inbox"
-        data-card-state={dropTargetKey === "inbox" ? "drop-target" : draggingArtifactId === entry.artifact._id ? "drag-preview" : selected ? "multi-selected" : "normal"}
+        data-card-state={dropTargetKey === "inbox" ? "drop-target" : draggingArtifactId === entry.artifact?._id ? "drag-preview" : selected ? "multi-selected" : "normal"}
         data-interactive="true"
-        draggable={canDragMove && !selectionMode}
+        draggable={Boolean(entry.artifact) && canDragMove && !selectionMode}
         className="relative min-h-[118px] overflow-hidden p-3"
         style={{ "--card-accent": meta.color } as CSSProperties}
         onDragStart={(event) => beginDrag(event, entry)}
@@ -510,15 +529,15 @@ export function ObjectLibrary({
           <CardTypeIcon icon={Icon} color={meta.color} className="h-8 w-8" />
           <div className="min-w-0 flex-1">
             <span className="block truncate text-[13px] font-semibold text-[var(--text-primary)]">
-              {entry.artifact.title}
+              {objectTitle(entry)}
             </span>
             <CompactSummary
-              value={entry.artifact.summary}
+              value={objectSummary(entry)}
               fallback={meta.label}
               className="mt-0.5 block truncate text-[11px]"
             />
             <span className="mt-1 block text-[10px] text-[var(--text-tertiary)]">
-              {meta.label} · {formatRelativeTime(entry.artifact.updatedAt)}
+              {meta.label} · {formatRelativeTime(objectUpdatedAt(entry))}
             </span>
           </div>
         </button>
@@ -745,20 +764,21 @@ export function ObjectLibrary({
                       expandedGroups.has(group.key) ? group.entries.length : 6,
                     )
                     .map((entry) => {
-                      const meta = blueprintMeta[entry.artifact.blueprintKey];
+                      const meta = objectMeta(entry);
                       const Icon = meta.icon;
                       const workspaceName =
                         group.workspace?.title ??
-                        artifactPlacements(entry.artifact)[0]?.workspaceTitle ??
+                        (entry.artifact ? artifactPlacements(entry.artifact)[0]?.workspaceTitle : workspaces.find((workspace) => workspace._id === entry.thread?.workspaceId)?.title) ??
                         "Unplaced";
-                      const contextSelected = selectedContextIds?.has(entry.artifact._id);
+                      const id = objectId(entry);
+                      const contextSelected = selectedObjectKeys?.has(`${entry.thread ? "thread" : "artifact"}:${id}`) ?? selectedContextIds?.has(id);
                       return (
                         <div
-                          key={`${group.key}:${entry.item?._id ?? entry.artifact._id}`}
+                          key={`${group.key}:${entry.item?._id ?? id}`}
                           data-spectra-card="side"
-                          data-card-state={draggingArtifactId === entry.artifact._id ? "drag-preview" : selectedArtifactId === entry.artifact._id ? "focused" : contextSelected ? "multi-selected" : "normal"}
+                          data-card-state={draggingArtifactId === entry.artifact?._id ? "drag-preview" : selectedArtifactId === id ? "focused" : contextSelected ? "multi-selected" : "normal"}
                           data-interactive="true"
-                          draggable={canDragMove && !selectionMode}
+                          draggable={Boolean(entry.artifact) && canDragMove && !selectionMode}
                           className="grid min-h-[58px] cursor-pointer grid-cols-[minmax(260px,1.2fr)_minmax(130px,0.6fr)_minmax(130px,0.5fr)_auto] items-center gap-4 border-b border-[var(--card-border-soft)] px-4 py-2.5 transition-colors last:border-b-0 hover:bg-[color-mix(in_oklab,var(--bg-hover)_58%,transparent)] data-[card-state=context]:bg-[color-mix(in_oklab,var(--card-focus)_5%,transparent)] data-[card-state=focused]:bg-[color-mix(in_oklab,var(--card-focus)_5%,transparent)]"
                           role="button"
                           tabIndex={0}
@@ -781,7 +801,7 @@ export function ObjectLibrary({
                             />
                             <div className="min-w-0">
                               <div className="truncate text-[13px] font-semibold text-[var(--text-primary)]">
-                                {entry.artifact.title}
+                                {objectTitle(entry)}
                               </div>
                               <div className="text-[11px] text-[var(--text-secondary)]">
                                 {meta.label}
@@ -797,7 +817,7 @@ export function ObjectLibrary({
                           </div>
                           <div className="text-[12px] text-[var(--text-secondary)]">
                             Updated{" "}
-                            {formatRelativeTime(entry.artifact.updatedAt)}
+                            {formatRelativeTime(objectUpdatedAt(entry))}
                           </div>
                           <div onClick={(event) => event.stopPropagation()}>
                             {selectionMode ? null : actions(entry)}
@@ -872,15 +892,16 @@ export function ObjectLibrary({
                     {group.entries
                       .slice(0, expanded ? group.entries.length : 6)
                       .map((entry) => {
-                        const meta = blueprintMeta[entry.artifact.blueprintKey];
+                        const meta = objectMeta(entry);
                         const Icon = meta.icon;
-                        const contextSelected = selectedContextIds?.has(entry.artifact._id);
+                        const id = objectId(entry);
+                        const contextSelected = selectedObjectKeys?.has(`${entry.thread ? "thread" : "artifact"}:${id}`) ?? selectedContextIds?.has(id);
                         return (
                           <button
-                            key={`${group.key}:${entry.item?._id ?? entry.artifact._id}`}
+                            key={`${group.key}:${entry.item?._id ?? id}`}
                             type="button"
                             data-spectra-card="board"
-                            data-card-state={contextSelected ? "context" : selectedArtifactId === entry.artifact._id ? "focused" : "normal"}
+                            data-card-state={contextSelected ? "context" : selectedArtifactId === id ? "focused" : "normal"}
                             data-interactive="true"
                             className="flex min-h-[66px] w-full items-center gap-3 px-3 py-2 text-left"
                             style={{ "--card-accent": meta.color } as CSSProperties}
@@ -893,16 +914,16 @@ export function ObjectLibrary({
                             />
                             <div className="min-w-0 flex-1">
                               <span className="block truncate text-[13px] font-semibold text-[var(--text-primary)]">
-                                {entry.artifact.title}
+                                {objectTitle(entry)}
                               </span>
                               <CompactSummary
-                                value={entry.artifact.summary}
+                                value={objectSummary(entry)}
                                 fallback={meta.label}
                                 className="block truncate text-[10px]"
                               />
                             </div>
                             <span className="shrink-0 text-[10px] text-[var(--text-tertiary)]">
-                              {formatRelativeTime(entry.artifact.updatedAt)}
+                              {formatRelativeTime(objectUpdatedAt(entry))}
                             </span>
                           </button>
                         );

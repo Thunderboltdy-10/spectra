@@ -30,7 +30,6 @@ export async function GET(request: NextRequest) {
 
     const items = await convexQuery("plannerItems:list", {
       actorClerkId: actor.clerkId,
-      workstreamId: params.get("workstreamId") ?? undefined,
       status: params.get("status") ?? undefined,
       type: params.get("type") ?? undefined,
       limit: params.has("limit") ? Number(params.get("limit")) : undefined,
@@ -50,7 +49,6 @@ export async function POST(request: NextRequest) {
       actorClerkId: actor.clerkId,
       title,
       description: (body.description as string | undefined) ?? undefined,
-      workstreamId: (body.workstreamId as string | undefined) ?? undefined,
       type: (body.type as "deadline" | "milestone" | "goal" | "reminder" | undefined) ?? "deadline",
       priority: (body.priority as "low" | "medium" | "high" | undefined) ?? "medium",
       status: (body.status as "pending" | "in_progress" | "completed" | "cancelled" | undefined) ?? "pending",
@@ -74,7 +72,6 @@ export async function PATCH(request: NextRequest) {
       plannerItemId,
       title: body.title as string | undefined,
       description: body.description as string | null | undefined,
-      workstreamId: body.workstreamId as string | null | undefined,
       type: body.type as "deadline" | "milestone" | "goal" | "reminder" | undefined,
       priority: body.priority as "low" | "medium" | "high" | undefined,
       status: body.status as "pending" | "in_progress" | "completed" | "cancelled" | undefined,

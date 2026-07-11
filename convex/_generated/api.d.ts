@@ -26,10 +26,8 @@ import type * as curatedModelRegistry from "../curatedModelRegistry.js";
 import type * as env from "../env.js";
 import type * as errorEvents from "../errorEvents.js";
 import type * as feedback from "../feedback.js";
-import type * as fixCounts from "../fixCounts.js";
 import type * as flashcards from "../flashcards.js";
 import type * as gamification from "../gamification.js";
-import type * as ghosts from "../ghosts.js";
 import type * as helpers from "../helpers.js";
 import type * as images from "../images.js";
 import type * as ingestQueue from "../ingestQueue.js";
@@ -52,6 +50,7 @@ import type * as soul from "../soul.js";
 import type * as spectraArtifactLinks from "../spectraArtifactLinks.js";
 import type * as spectraArtifacts from "../spectraArtifacts.js";
 import type * as spectraOperations from "../spectraOperations.js";
+import type * as spectraRunLifecycle from "../spectraRunLifecycle.js";
 import type * as spectraRuns from "../spectraRuns.js";
 import type * as spectraSeed from "../spectraSeed.js";
 import type * as spectraShared from "../spectraShared.js";
@@ -64,16 +63,6 @@ import type * as usage from "../usage.js";
 import type * as userLifecycle from "../userLifecycle.js";
 import type * as userPreferences from "../userPreferences.js";
 import type * as users from "../users.js";
-import type * as workspaceBlueprints from "../workspaceBlueprints.js";
-import type * as workspaceCommandResults from "../workspaceCommandResults.js";
-import type * as workspaceHelpers from "../workspaceHelpers.js";
-import type * as workspaceItemSync from "../workspaceItemSync.js";
-import type * as workspaceItems from "../workspaceItems.js";
-import type * as workspaceOrchestration from "../workspaceOrchestration.js";
-import type * as workspaceWidgets from "../workspaceWidgets.js";
-import type * as workstreamAssignment from "../workstreamAssignment.js";
-import type * as workstreamMemory from "../workstreamMemory.js";
-import type * as workstreams from "../workstreams.js";
 
 import type {
   ApiFromModules,
@@ -100,10 +89,8 @@ declare const fullApi: ApiFromModules<{
   env: typeof env;
   errorEvents: typeof errorEvents;
   feedback: typeof feedback;
-  fixCounts: typeof fixCounts;
   flashcards: typeof flashcards;
   gamification: typeof gamification;
-  ghosts: typeof ghosts;
   helpers: typeof helpers;
   images: typeof images;
   ingestQueue: typeof ingestQueue;
@@ -126,6 +113,7 @@ declare const fullApi: ApiFromModules<{
   spectraArtifactLinks: typeof spectraArtifactLinks;
   spectraArtifacts: typeof spectraArtifacts;
   spectraOperations: typeof spectraOperations;
+  spectraRunLifecycle: typeof spectraRunLifecycle;
   spectraRuns: typeof spectraRuns;
   spectraSeed: typeof spectraSeed;
   spectraShared: typeof spectraShared;
@@ -138,16 +126,6 @@ declare const fullApi: ApiFromModules<{
   userLifecycle: typeof userLifecycle;
   userPreferences: typeof userPreferences;
   users: typeof users;
-  workspaceBlueprints: typeof workspaceBlueprints;
-  workspaceCommandResults: typeof workspaceCommandResults;
-  workspaceHelpers: typeof workspaceHelpers;
-  workspaceItemSync: typeof workspaceItemSync;
-  workspaceItems: typeof workspaceItems;
-  workspaceOrchestration: typeof workspaceOrchestration;
-  workspaceWidgets: typeof workspaceWidgets;
-  workstreamAssignment: typeof workstreamAssignment;
-  workstreamMemory: typeof workstreamMemory;
-  workstreams: typeof workstreams;
 }>;
 
 /**

@@ -99,12 +99,14 @@ export type SpectraWorkspaceItem = {
     collapsed?: boolean;
   };
   artifact: SpectraArtifact | null;
+  thread?: SpectraThread | null;
   createdAt: number;
   updatedAt: number;
 };
 
 export type SpectraRun = {
   _id: string;
+  executionId?: string;
   status: "queued" | "running" | "awaiting_confirmation" | "completed" | "failed" | "cancelled";
   phase?: "created" | "planning" | "reading" | "retrieving" | "applying" | "streaming" | "approval" | "completed" | "stopped" | "failed";
   sourceSurface: "chat" | "workspace" | "artifact";

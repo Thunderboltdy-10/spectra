@@ -516,7 +516,7 @@ export function ObjectLibrary({
       >
         {selectionMode ? (
           <span
-            className={`absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-[6px] border transition ${selected ? "border-[var(--accent-cyan)] bg-[var(--accent-cyan)] text-white" : "border-[var(--border-default)] text-transparent"}`}
+            className={`absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-[6px] border transition ${selected ? "border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-primary)]" : "border-[var(--border-default)] text-transparent"}`}
           >
             <Check className="h-3.5 w-3.5" />
           </span>
@@ -775,7 +775,7 @@ export function ObjectLibrary({
                       return (
                         <div
                           key={`${group.key}:${entry.item?._id ?? id}`}
-                          data-spectra-card="side"
+                          data-object-row="true"
                           data-card-state={draggingArtifactId === entry.artifact?._id ? "drag-preview" : selectedArtifactId === id ? "focused" : contextSelected ? "multi-selected" : "normal"}
                           data-interactive="true"
                           draggable={Boolean(entry.artifact) && canDragMove && !selectionMode}
@@ -794,7 +794,7 @@ export function ObjectLibrary({
                           }}
                         >
                           <div className="flex min-w-0 items-center gap-3">
-                            {selectionMode ? <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-[5px] border transition ${contextSelected ? "border-[var(--accent-cyan)] bg-[var(--accent-cyan)] text-white" : "border-[var(--border-default)] text-transparent"}`}><Check className="h-3 w-3" /></span> : null}
+                            {selectionMode ? <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-[5px] border transition ${contextSelected ? "border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-primary)]" : "border-[var(--border-default)] text-transparent"}`}><Check className="h-3 w-3" /></span> : null}
                             <Icon
                               className="h-5 w-5 shrink-0"
                               style={{ color: meta.color }}
@@ -907,7 +907,7 @@ export function ObjectLibrary({
                             style={{ "--card-accent": meta.color } as CSSProperties}
                             onClick={() => activateEntry(entry)}
                           >
-                            {selectionMode ? <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-[5px] border transition ${contextSelected ? "border-[var(--accent-cyan)] bg-[var(--accent-cyan)] text-white" : "border-[var(--border-default)] text-transparent"}`}><Check className="h-3 w-3" /></span> : null}
+                            {selectionMode ? <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-[5px] border transition ${contextSelected ? "border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-primary)]" : "border-[var(--border-default)] text-transparent"}`}><Check className="h-3 w-3" /></span> : null}
                             <Icon
                               className="h-4 w-4 shrink-0"
                               style={{ color: meta.color }}

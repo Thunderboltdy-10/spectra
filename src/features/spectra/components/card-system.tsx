@@ -1,6 +1,9 @@
+"use client";
+
 import type { ButtonHTMLAttributes, CSSProperties, HTMLAttributes, ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Tooltip } from "@/components/ui/tooltip";
 
 export type SpectraCardVariant =
   | "artifact"
@@ -86,15 +89,13 @@ export function IconAction({
   danger?: boolean;
 }) {
   return (
-    <button
+    <Tooltip label={label}><button
       {...props}
       type="button"
       className={cn("spectra-icon-action", active && "is-active", danger && "is-danger", className)}
       aria-label={label}
-      title={label}
-      data-tooltip={label}
     >
       <Icon className="h-3.5 w-3.5" aria-hidden="true" />
-    </button>
+    </button></Tooltip>
   );
 }

@@ -43,4 +43,16 @@ describe("Wave 6 bounded context builder", () => {
     expect(packet.conversation.length).toBeLessThanOrEqual(CONTEXT_LIMITS.conversationMessages);
     expect(JSON.stringify(packet).length).toBeLessThanOrEqual(CONTEXT_LIMITS.packetCharacters + 2_000);
   });
+
+  it("keeps explicitly added thread context without turning it into continuation", () => {
+    const packet = buildBoundedContextPacket({
+      prompt: "Use the discussion as supporting context for this edit",
+      focusMode: "artifact",
+      focusedArtifact: artifact("focused"),
+      artifacts: [artifact("focused")],
+      threadMap: [{ id: "thread-context", title: "Study discussion", explicit: true, contextExcerpt: [{ role: "user", content: "Focus on wave equations" }] }],
+    });
+    expect(packet.contextLayers.continuation).toBeNull();
+    expect(packet.threadMap).toEqual([expect.objectContaining({ id: "thread-context", explicit: true })]);
+  });
 });

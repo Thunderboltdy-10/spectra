@@ -100,8 +100,14 @@ export function ChatShell() {
     const artifact = artifacts.find((item) => item._id === artifactId);
     if (!artifact) { toast.error("That artifact is no longer available."); return; }
     setHistoryOpen(false);
+    if (artifact.blueprintKey === "thread_reference") {
+      const content = artifact.content && typeof artifact.content === "object" ? artifact.content as Record<string, unknown> : {};
+      const targetThreadId = typeof content.threadId === "string" ? content.threadId : "";
+      if (targetThreadId === threadId || targetThreadId === composerThread?.id) return;
+      if (targetThreadId) { setLiveThread({ id: targetThreadId, title: artifact.title }); return; }
+    }
     studio.openSplit(artifact);
-  }, [artifacts, studio]);
+  }, [artifacts, composerThread?.id, setLiveThread, studio, threadId]);
 
   const updateArtifact = useCallback(async (artifactId: string, payload: ArtifactPayload) => {
     await postSpectra({ action: "updateArtifact", artifactId, title: payload.title, summary: payload.summary, content: payload.content, tags: payload.tags, source: "manual" });
@@ -117,7 +123,7 @@ export function ChatShell() {
   const focusedArtifact = studio.activeArtifact;
   useEffect(() => { setVisibleArtifactIds(focusedArtifact ? [focusedArtifact._id] : []); }, [focusedArtifact, setVisibleArtifactIds]);
   const scopedWorkspaceId = chatWorkspaceId ?? detail?.thread.workspaceId;
-  const naturalFocusMode: ComposerFocusMode = selectedContextIds.size > 0 ? "selection" : composerThread ? "thread" : focusedArtifact ? "artifact" : scopedWorkspaceId ? "workspace" : "global";
+  const naturalFocusMode: ComposerFocusMode = composerThread ? "thread" : focusedArtifact ? "artifact" : selectedContextIds.size > 0 ? "selection" : scopedWorkspaceId ? "workspace" : "global";
   const effectiveFocusMode = focusModeOverride === "thread" && !composerThread ? naturalFocusMode : focusModeOverride === "artifact" && !focusedArtifact ? naturalFocusMode : focusModeOverride === "workspace" && !scopedWorkspaceId ? naturalFocusMode : focusModeOverride === "selection" && selectedContextIds.size === 0 ? naturalFocusMode : focusModeOverride ?? naturalFocusMode;
   // Continuation is independent from additive artifact/workspace context.
   // Starting a new thread is an explicit thread action, not a side effect of focus.
@@ -251,7 +257,7 @@ export function ChatShell() {
       </section>
 
       {studio.isOpen && studio.activeArtifact ? <ArtifactStudio mode={studio.mode === "tab" ? "tab" : "split"} artifact={studio.activeArtifact} artifacts={artifacts} tabs={studio.tabs} dirtyIds={studio.dirtyIds} panelWidth={studioPanelWidth} sourceLabel="Chat" onPanelWidthChange={setStudioPanelWidth} onClose={studio.closeStudio} onExpand={studio.openTab} onActivateTab={studio.activateTab} onCloseTab={studio.closeTab} onSave={updateArtifact} onRevert={revertArtifactVersion} onDirtyChange={studio.setDirty} /> : null}
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-50 bg-[linear-gradient(to_top,var(--bg-primary)_76%,transparent)] px-4 pb-5 pt-14 sm:px-8"><div className="pointer-events-auto mx-auto max-w-[820px]"><DurableRunTabs workspaceId={scopedWorkspaceId} onOpen={(_runId, selectedThreadId, selectedTitle) => setLiveThread({ id: selectedThreadId, title: selectedTitle })} onStop={(runId) => runEngine.stop(runId)} />{pageComposer}</div></div>
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-50 bg-transparent px-4 pb-5 pt-2 sm:px-8"><div className="pointer-events-auto mx-auto max-w-[820px]"><DurableRunTabs workspaceId={scopedWorkspaceId} onOpen={(_runId, selectedThreadId, selectedTitle) => setLiveThread({ id: selectedThreadId, title: selectedTitle })} onStop={(runId) => runEngine.stop(runId)} />{pageComposer}</div></div>
 
       {liveThread ? <LiveThreadPanel threadId={liveThread.id} title={liveThread.title} width={liveThreadPanelWidth} onWidthChange={setLiveThreadPanelWidth} onClose={() => setLiveThread(null)} onOpenArtifact={openArtifact} onOpenWorkspace={selectWorkspaceContext} /> : null}
 

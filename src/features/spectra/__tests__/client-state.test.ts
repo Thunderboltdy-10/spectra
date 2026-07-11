@@ -96,4 +96,13 @@ describe("canonical Spectra client state", () => {
     contextStore.getState().setVisible([]);
     expect(contextStore.getState().excludedVisibleKeys).toEqual([]);
   });
+
+  it("keeps an artifact split open beside a thread panel and replaces only conflicting conversation panels", () => {
+    const state = contextStore.getState();
+    state.openObject({ type: "artifact", id: "doc", label: "Document", presentation: "split" });
+    state.openObject({ type: "thread", id: "thread-a", label: "Thread A", presentation: "thread-panel" });
+    expect(contextStore.getState().openObjects.map((row) => row.id)).toEqual(["doc", "thread-a"]);
+    state.openObject({ type: "thread", id: "thread-b", label: "Thread B", presentation: "thread-panel" });
+    expect(contextStore.getState().openObjects.map((row) => row.id)).toEqual(["doc", "thread-b"]);
+  });
 });

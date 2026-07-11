@@ -272,7 +272,7 @@ function WorkspaceHome({
   const activity = artifacts
     .map((artifact) => ({ id: artifact._id, time: artifact.updatedAt, title: artifact.title, detail: Math.abs(artifact.updatedAt - artifact.createdAt) < 1_000 ? "Created" : "Updated", artifact }))
     .sort((a, b) => b.time - a.time)
-    .slice(0, 8);
+    .slice(0, 6);
 
   function artifactFromDrag(event: DragEvent<HTMLElement>) {
     const artifactId =
@@ -314,7 +314,7 @@ function WorkspaceHome({
           </div>
         </div>
 
-        <div className="mt-8 grid gap-6 xl:grid-cols-[minmax(0,1fr)_330px]">
+        <div className="mt-8 grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
           <section>
             <div className="mb-3 flex items-center justify-between"><div><h2 className="font-display text-[20px] font-semibold text-[var(--text-primary)]">Workspaces</h2><p className="mt-1 text-[12px] text-[var(--text-secondary)]">Enter a focused working room</p></div></div>
             <div className="grid content-start gap-3 md:grid-cols-2">
@@ -362,16 +362,16 @@ function WorkspaceHome({
           })}
             </div>
           </section>
-          <aside className="self-start rounded-[10px] border border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_78%,transparent)] p-4">
+          <aside className="self-start rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
             <div className="flex items-center justify-between">
               <h2 className="text-[14px] font-semibold text-[var(--text-primary)]">Recent activity</h2>
               <span className="h-2 w-2 rounded-full bg-[var(--success)]" />
             </div>
-            <div className="mt-4 space-y-3">
+            <div className="mt-3 grid gap-1 sm:grid-cols-2">
               {activity.map((entry) => {
                 return (
-                  <button key={entry.id} type="button" className="flex w-full items-center gap-3 rounded-[7px] p-1.5 text-left hover:bg-[var(--bg-hover)]" onClick={() => onOpenArtifact(entry.artifact)}>
-                    <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--accent-cyan)]" />
+                  <button key={entry.id} type="button" className="flex min-h-12 w-full items-center gap-2 rounded-[7px] px-2 py-1.5 text-left hover:bg-[var(--bg-hover)]" onClick={() => onOpenArtifact(entry.artifact)}>
+                    <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--text-tertiary)]" />
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-[12px] font-medium text-[var(--text-primary)]">{entry.title}</div>
                       <div className="text-[11px] text-[var(--text-secondary)]">{entry.detail} · {formatRelativeTime(entry.time)}</div>
@@ -609,12 +609,18 @@ function TimelineView({
   selected,
   onSelectRun,
   onSelectEntry,
+  selectionMode,
+  selectedObjectKeys,
+  onToggleContext,
 }: {
   entries: WorkspaceEntry[];
   runs: SpectraRun[];
   selected: Selection;
   onSelectRun: (run: SpectraRun) => void;
   onSelectEntry: (entry: WorkspaceEntry) => void;
+  selectionMode: boolean;
+  selectedObjectKeys: Set<string>;
+  onToggleContext: (entry: WorkspaceEntry) => void;
 }) {
   type TimelineRow =
     | { id: string; kind: "run"; run: SpectraRun; entry?: WorkspaceEntry; title: string; summary: string; time: number }
@@ -659,7 +665,13 @@ function TimelineView({
   }
 
   return (
-    <div className="relative space-y-9 pb-3 pl-8 before:absolute before:bottom-4 before:left-[7px] before:top-3 before:w-px before:bg-[linear-gradient(to_bottom,var(--accent-cyan),color-mix(in_oklab,var(--accent-cyan)_24%,var(--border-default)),transparent)]">
+    <div className="relative space-y-7 pb-3 pl-8 before:absolute before:bottom-4 before:left-[7px] before:top-[74px] before:w-px before:bg-[linear-gradient(to_bottom,var(--text-primary),color-mix(in_oklab,var(--text-primary)_18%,var(--border-default)),transparent)]">
+      <div className="grid grid-cols-2 overflow-hidden rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] sm:grid-cols-4">
+        <div className="px-4 py-3"><strong className="block font-display text-[20px] text-[var(--text-primary)]">{rows.length}</strong><span className="text-[10px] text-[var(--text-tertiary)]">Recent events</span></div>
+        <div className="border-l border-[var(--border-subtle)] px-4 py-3"><strong className="block font-display text-[20px] text-[var(--text-primary)]">{rows.filter((row) => row.kind === "run").length}</strong><span className="text-[10px] text-[var(--text-tertiary)]">AI runs</span></div>
+        <div className="border-l border-[var(--border-subtle)] px-4 py-3"><strong className="block font-display text-[20px] text-[var(--text-primary)]">{rows.filter((row) => row.kind === "edit").length}</strong><span className="text-[10px] text-[var(--text-tertiary)]">Artifact edits</span></div>
+        <div className="border-l border-[var(--border-subtle)] px-4 py-3"><strong className="block font-display text-[20px] text-[var(--text-primary)]">{dateGroups.length}</strong><span className="text-[10px] text-[var(--text-tertiary)]">Active days</span></div>
+      </div>
       {dateGroups.map((group, groupIndex) => (
         <section key={group.key} className="relative">
           <span className="absolute -left-[31px] top-1 flex h-4 w-4 items-center justify-center rounded-full bg-[var(--bg-primary)] ring-4 ring-[var(--bg-primary)]">
@@ -673,17 +685,18 @@ function TimelineView({
           <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
             {group.rows.map((row) => {
               const entry = row.entry;
-              const active = row.id === selectedId;
+              const contextKey = entry ? `${entry.thread ? "thread" : "artifact"}:${entry.thread?._id ?? entry.artifact?._id ?? ""}` : "";
+              const active = row.id === selectedId || Boolean(contextKey && selectedObjectKeys.has(contextKey));
               const meta = row.kind !== "run" && entry?.artifact ? blueprintMeta[entry.artifact.blueprintKey] : null;
               const RowIcon = row.kind === "edit" ? PencilLine : row.kind === "thread" ? MessageSquare : meta?.icon;
               const important = row.kind === "run" ? ["running", "queued", "failed", "awaiting_confirmation"].includes(row.run.status) : Boolean(entry?.item.viewData.pinned);
               const hierarchy = row.kind === "run"
-                ? important ? "min-h-[142px] sm:col-span-2" : "min-h-[116px]"
+                ? important ? "min-h-[118px] sm:col-span-2" : "min-h-[98px]"
                 : row.kind === "thread"
-                  ? "min-h-[126px] border-l-[3px] border-l-[#8b6ff0]"
+                  ? "min-h-[108px] border-l-[3px] border-l-[#8b6ff0]"
                   : row.kind === "edit"
-                    ? "min-h-[92px]"
-                    : important ? "min-h-[136px] sm:col-span-2 2xl:col-span-1" : "min-h-[116px]";
+                    ? "min-h-[82px]"
+                    : important ? "min-h-[112px] sm:col-span-2 2xl:col-span-1" : "min-h-[98px]";
               const surface = row.kind === "run"
                 ? "border-[color-mix(in_oklab,var(--accent-cyan)_24%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_6%,var(--bg-elevated))]"
                 : row.kind === "thread"
@@ -701,7 +714,7 @@ function TimelineView({
                   data-timeline-kind={row.kind}
                   className={`group relative overflow-hidden p-3.5 text-left ${hierarchy} ${surface}`}
                   style={{ animationDelay: `${groupIndex * 35}ms`, "--card-accent": row.kind === "run" ? "var(--accent-cyan)" : row.kind === "thread" ? "#df7623" : row.kind === "edit" ? "#8b6ff0" : meta?.color } as CSSProperties}
-                  onClick={() => row.kind === "run" ? onSelectRun(row.run) : entry ? onSelectEntry(entry) : undefined}
+                  onClick={() => row.kind === "run" ? onSelectRun(row.run) : entry ? selectionMode ? onToggleContext(entry) : onSelectEntry(entry) : undefined}
                 >
                   <span className="relative flex items-start gap-3">
                     <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[7px] bg-[var(--bg-primary)]">
@@ -811,18 +824,27 @@ function CanvasView({
   entries,
   selected,
   onSelect,
+  selectionMode,
+  selectedObjectKeys,
+  onToggleContext,
 }: {
   entries: WorkspaceEntry[];
   selected: Selection;
   onSelect: (entry: WorkspaceEntry) => void;
+  selectionMode: boolean;
+  selectedObjectKeys: Set<string>;
+  onToggleContext: (entry: WorkspaceEntry) => void;
 }) {
   const groups = [...createTypes.map((type) => ({ ...type, color: blueprintMeta[type.key].color, entries: entries.filter((entry) => entry.artifact?.blueprintKey === type.key) })), { key: "thread" as const, label: "Conversations", icon: MessageSquare, color: "#8b6ff0", entries: entries.filter((entry) => Boolean(entry.thread)) }].filter((group) => group.entries.length > 0);
+  const layouts = ["xl:col-span-4", "xl:col-span-4 xl:col-start-5 xl:mt-12", "xl:col-span-4 xl:col-start-9 xl:mt-4", "xl:col-span-4 xl:col-start-2", "xl:col-span-4 xl:col-start-6 xl:mt-10", "xl:col-span-4 xl:col-start-9"];
 
   return (
-    <div className="h-full min-h-full overflow-auto bg-[radial-gradient(color-mix(in_oklab,var(--border-default)_62%,transparent)_0.65px,transparent_0.8px)] p-5 [background-size:18px_18px]">
-      <div className="grid min-h-full auto-rows-min gap-5 lg:grid-cols-2 2xl:grid-cols-3">
-        {groups.map((group, index) => { const Icon = group.icon; return <section key={group.key} data-canvas-cluster={group.key} className={`self-start rounded-[18px] border p-3.5 ${index % 2 ? "2xl:mt-12" : ""}`} style={{ borderColor: `color-mix(in oklab, ${group.color} 22%, var(--border-default))`, background: `color-mix(in oklab, ${group.color} 5%, var(--bg-primary))` }}><header className="mb-3 flex items-center gap-2 px-1"><span className="flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-semibold" style={{ color: group.color, background: `color-mix(in oklab, ${group.color} 10%, var(--bg-elevated))` }}>{index + 1}</span><Icon className="h-4 w-4" style={{ color: group.color }} /><span className="text-[13px] font-semibold text-[var(--text-primary)]">{group.label}</span><span className="ml-auto text-[11px] text-[var(--text-tertiary)]">{group.entries.length}</span></header><div className="grid gap-2 sm:grid-cols-2">{group.entries.map((entry) => <WorkspaceEntryCard key={entry.item._id} entry={entry} compact selected={(selected?.type === "artifact" || selected?.type === "thread") && selected.itemId === entry.item._id} onSelect={onSelect} />)}</div></section>; })}
+    <div className="relative h-full min-h-full overflow-auto bg-[radial-gradient(color-mix(in_oklab,var(--border-default)_62%,transparent)_0.65px,transparent_0.8px)] p-4 pb-20 [background-size:18px_18px] sm:p-5 sm:pb-20">
+      <div className="sticky top-0 z-20 ml-auto mb-5 flex w-fit items-center gap-1 rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[0_10px_28px_-22px_rgba(27,20,12,.45)]"><button type="button" className="flex h-8 items-center gap-1.5 rounded-[7px] px-2.5 text-[10px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"><Sparkles className="h-3.5 w-3.5" />Auto arrange</button><span className="h-5 w-px bg-[var(--border-subtle)]" /><span className="px-2 text-[10px] text-[var(--text-tertiary)]">Clustered by type</span></div>
+      <div className="grid min-h-full auto-rows-min gap-5 lg:grid-cols-2 xl:grid-cols-12">
+        {groups.map((group, index) => { const Icon = group.icon; return <section key={group.key} data-canvas-cluster={group.key} className={`self-start rounded-[18px] border p-3.5 lg:col-span-1 ${layouts[index % layouts.length]}`} style={{ borderColor: `color-mix(in oklab, ${group.color} 24%, var(--border-default))`, background: `color-mix(in oklab, ${group.color} 5%, var(--bg-primary))`, boxShadow: `0 20px 45px -38px color-mix(in oklab, ${group.color} 42%, transparent)` }}><header className="mb-3 flex items-center gap-2 px-1"><span className="flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-semibold" style={{ color: group.color, background: `color-mix(in oklab, ${group.color} 10%, var(--bg-elevated))` }}>{index + 1}</span><Icon className="h-4 w-4" style={{ color: group.color }} /><span className="text-[13px] font-semibold text-[var(--text-primary)]">{group.label}</span><span className="ml-auto text-[11px] text-[var(--text-tertiary)]">{group.entries.length}</span></header><div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">{group.entries.map((entry) => { const objectKey = `${entry.thread ? "thread" : "artifact"}:${entry.thread?._id ?? entry.artifact?._id ?? ""}`; return <WorkspaceEntryCard key={entry.item._id} entry={entry} compact selected={selectedObjectKeys.has(objectKey) || (selected?.type === "artifact" || selected?.type === "thread") && selected.itemId === entry.item._id} onSelect={selectionMode ? onToggleContext : onSelect} />; })}</div></section>; })}
       </div>
+      <div className="fixed bottom-[132px] left-1/2 z-10 hidden -translate-x-1/2 items-center gap-4 rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-4 py-2 text-[10px] text-[var(--text-tertiary)] shadow-[0_12px_32px_-20px_rgba(27,20,12,.38)] lg:flex"><span>Pastel fields group related object types</span><span className="h-1.5 w-1.5 rounded-full bg-[var(--text-primary)]" /> <span>{selectionMode ? "Choose objects, then add them to context" : "Open any object without leaving the canvas"}</span></div>
     </div>
   );
 }
@@ -1160,7 +1182,7 @@ export function WorkspaceShell() {
       setLiveThread({ id: value.thread._id, title: value.thread.title });
     }).catch(() => toast.error("That conversation is no longer available."));
   }, [requestedThreadId, setLiveThread]);
-  const contextualArtifactIds = useMemo(() => [...new Set([...contextArtifactIds, ...selectedContextIds, ...tiledArtifacts.map((artifact) => artifact._id)])].slice(0, 24), [contextArtifactIds, selectedContextIds, tiledArtifacts]);
+  const contextualArtifactIds = useMemo(() => [...new Set([...contextArtifactIds, ...tiledArtifacts.map((artifact) => artifact._id)])].slice(0, 24), [contextArtifactIds, tiledArtifacts]);
   const workspaceHeader = workspace ?? workspaces.find((candidate) => candidate._id === selectedWorkspaceId) ?? null;
   useEffect(() => setActiveWorkspaceContext(workspaceHeader ? { id: workspaceHeader._id, title: workspaceHeader.title } : null), [setActiveWorkspaceContext, workspaceHeader]);
   const entries = useMemo<WorkspaceEntry[]>(() => (selectedWorkspaceId && overview?.workspace?.workspace?._id === selectedWorkspaceId ? overview.workspace.items : [])
@@ -1185,7 +1207,7 @@ export function WorkspaceShell() {
       ...(liveThread ? [{ type: "thread" as const, id: liveThread.id, label: liveThread.title, workspaceId: selectedWorkspaceId, source: "visible" as const, capability: "context" as const }] : []),
     ]);
   }, [commandFocusArtifact, liveThread, selectedWorkspaceId, setVisibleObjects, tiledArtifacts]);
-  const naturalFocusMode: ComposerFocusMode = contextualArtifactIds.length > 0 ? "selection" : composerThread ? "thread" : commandFocusArtifact ? "artifact" : workspace ? "workspace" : "global";
+  const naturalFocusMode: ComposerFocusMode = composerThread ? "thread" : commandFocusArtifact ? "artifact" : contextualArtifactIds.length > 0 ? "selection" : workspace ? "workspace" : "global";
   const effectiveFocusMode = focusModeOverride === "selection" && contextualArtifactIds.length === 0
     ? naturalFocusMode
     : focusModeOverride === "artifact" && !commandFocusArtifact
@@ -1342,6 +1364,11 @@ export function WorkspaceShell() {
   }
 
   function openArtifactPanel(artifact: SpectraArtifact) {
+    if (artifact.blueprintKey === "thread_reference") {
+      const content = artifact.content && typeof artifact.content === "object" ? artifact.content as Record<string, unknown> : {};
+      const threadId = typeof content.threadId === "string" ? content.threadId : "";
+      if (threadId) { setLiveThread({ id: threadId, title: artifact.title }); return; }
+    }
     studio.openSplit(artifact);
   }
 
@@ -1686,7 +1713,7 @@ export function WorkspaceShell() {
       />
       <div className="flex min-w-0 flex-1 flex-col">
         <StudioTabRail
-          hubTabs={hubTabs}
+          hubTabs={workSetIsolated && activeHubTabId ? hubTabs.map((tab) => tab.id === activeHubTabId ? { ...tab, label: `Work set · ${tiledArtifacts.length} objects` } : tab) : hubTabs}
           activeHubTabId={studio.mode === "tab" ? null : activeHubTabId}
           artifacts={allArtifacts}
           tabs={studio.tabs}
@@ -1892,10 +1919,13 @@ export function WorkspaceShell() {
                     void openRunPanel(card?.runId ?? run._id, run.userPrompt);
                   }}
                   onSelectEntry={openWorkspaceEntry}
+                  selectionMode={multiSelectMode}
+                  selectedObjectKeys={selectedObjectKeys}
+                  onToggleContext={toggleContextEntry}
                 />
               ) : null}
               {viewMode === "list" || viewMode === "board" ? <LibraryView entries={visibleEntries} workspaces={workspaces} mode={viewMode} selected={selection} onSelect={openWorkspaceEntry} onTogglePin={(item) => void toggleWorkspaceItemPin(item)} onRemove={(item) => void hideWorkspaceItem(item._id)} onDelete={(artifact) => void permanentlyDeleteArtifact(artifact)} onMoveArtifactToWorkspace={(artifact, workspaceId) => void moveArtifactToWorkspace(artifact, workspaceId)} onMoveArtifactToInbox={(artifact) => void moveArtifactToInbox(artifact)} busy={busyKey} onCreateArtifact={openCreateArtifact} selectionMode={multiSelectMode} selectedContextIds={selectedContextIds} selectedObjectKeys={selectedObjectKeys} onToggleContext={toggleContextEntry} /> : null}
-              {viewMode === "canvas" ? <CanvasView entries={visibleEntries} selected={selection} onSelect={openWorkspaceEntry} /> : null}
+              {viewMode === "canvas" ? <CanvasView entries={visibleEntries} selected={selection} onSelect={openWorkspaceEntry} selectionMode={multiSelectMode} selectedObjectKeys={selectedObjectKeys} onToggleContext={toggleContextEntry} /> : null}
             </main>
           </div>
           {studio.mode === "split" && studio.activeArtifact ? (
@@ -1942,10 +1972,10 @@ export function WorkspaceShell() {
 	          </>
 	        </section>
       )}
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 z-50 bg-[linear-gradient(to_top,var(--bg-primary)_72%,transparent)] px-2 pb-3 pt-12 sm:px-5 sm:pb-5 lg:px-8">
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 z-50 bg-transparent px-2 pb-3 pt-2 sm:px-5 sm:pb-5 lg:px-8">
             <div className="pointer-events-auto mx-auto max-w-[880px]">
               <DurableRunTabs workspaceId={selectedWorkspaceId} onOpen={(_runId, threadId, title) => { setActiveRunPanelId(null); setLiveThread({ id: threadId, title }); }} onStop={(runId) => runEngine.stop(runId)} />
-	              {multiSelectMode ? <SelectionActionBar count={selectionCount} onClear={clearSelection} onExit={() => { setMultiSelectMode(false); if (selectionCount === 0) setFocusModeOverride(null); }} onAddToContext={() => { const count = selectionCount; commitSelection(); setFocusModeOverride("selection"); setMultiSelectMode(false); toast.success(`${count} object${count === 1 ? "" : "s"} added to context.`); }} onTile={selectedContextIds.size ? openSelectedArtifactsInTiles : undefined} /> : null}
+	              {multiSelectMode ? <SelectionActionBar count={selectionCount} onClear={clearSelection} onExit={() => { clearSelection(); setMultiSelectMode(false); }} onAddToContext={() => { const count = selectionCount; commitSelection(); setFocusModeOverride("selection"); setMultiSelectMode(false); toast.success(`${count} object${count === 1 ? "" : "s"} added to context.`); }} onTile={selectedContextIds.size ? openSelectedArtifactsInTiles : undefined} /> : null}
               <div className="flex items-center gap-1"><CommandBar
                 className="min-w-0 flex-1"
                 placeholder={composerThread ? `Continue ${composerThread.title}...` : commandFocusArtifact ? `Act on ${commandFocusArtifact.title}...` : workspace ? `Work with ${workspace.title}...` : "Ask across all workspaces and objects..."}

@@ -210,7 +210,7 @@ export function QuickChat({
           data-spectra-card="result"
           data-card-state={isStreaming ? "continued" : focused ? "focused" : "normal"}
           className={cn(
-            "spectra-quick-chat relative flex flex-1 flex-col gap-0 border backdrop-blur-xl",
+            "spectra-quick-chat relative flex flex-1 flex-col gap-0 border bg-[var(--bg-elevated)]",
             "transition-all duration-300 ease-[var(--ease-standard)]",
             focused
               ? "shadow-[0_18px_48px_-24px_rgba(8,22,40,0.30),0_4px_18px_-14px_rgba(8,22,40,0.16)]"

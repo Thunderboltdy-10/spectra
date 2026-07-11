@@ -65,9 +65,9 @@ function mergeCards(current: ResultCardStreamView[], incoming: ResultCardStreamV
 
 function statusTitle(message: string) {
   if (/review|reading|context/i.test(message)) return "Reading context";
-  if (/validating|analys/i.test(message)) return "Planning response";
+  if (/validating|analys|resolving|loading|sending/i.test(message)) return "Resolving the request";
   if (/saving|creating|updating|adding|removing/i.test(message)) return "Updating workspace";
-  return "Writing response";
+  return "Preparing the result";
 }
 
 function appendStep(exchange: SpectraLiveExchange, message: string): SpectraLiveExchange {
@@ -264,7 +264,7 @@ export function useSpectraRun({
           setCards((current) => current.map((card) => card.runId === event.runId ? {
             ...card,
             status: "running",
-            title: event.message.startsWith("Saving") ? "Saving" : event.message.startsWith("Validating") ? "Creating" : "Thinking",
+            title: event.message.startsWith("Saving") ? "Saving changes" : event.message.startsWith("Validating") ? "Validating changes" : statusTitle(event.message),
             summary: event.message,
             updatedAt: Date.now(),
           } : card));
@@ -307,8 +307,8 @@ export function useSpectraRun({
         resolve(accepted);
       };
       setActiveRequestCount((count) => count + 1);
-      setLiveExchange({ id: exchangeId, prompt: clean, content: "", steps: [{ id: `${exchangeId}:start`, title: "Starting", summary: "Creating the thread", status: "running", createdAt: Date.now() }], status: "starting", startedAt: Date.now() });
-      upsert({ id: optimisticCardId, runId: `pending:${exchangeId}`, status: "running", title: "Thinking", summary: clean, variant: "status", actions: [], updatedAt: Date.now() });
+      setLiveExchange({ id: exchangeId, prompt: clean, content: "", steps: [{ id: `${exchangeId}:start`, title: "Opening the run", summary: "Saving the request before execution", status: "running", createdAt: Date.now() }], status: "starting", startedAt: Date.now() });
+      upsert({ id: optimisticCardId, runId: `pending:${exchangeId}`, status: "running", title: "Resolving the request", summary: clean, variant: "status", actions: [], updatedAt: Date.now() });
       void consume(
         { action: "run", submissionKey: exchangeId, prompt: clean, surface, workspaceId, artifactId, threadId: durableThreadId.current, focusMode, selectedArtifactIds, explicitContextObjects, currentView, attachments },
         optimisticCardId,

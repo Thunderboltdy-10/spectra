@@ -99,10 +99,10 @@ function progressTitle(message: string) {
   if (/approv|proposal|confirmation/i.test(message)) return "Approval";
   if (/interrupt|stopp|could not finish/i.test(message)) return "Run ended";
   if (/review|reading|context/i.test(message)) return "Reading context";
-  if (/validating|analys|planning/i.test(message)) return "Planning response";
+  if (/validating|analys|planning|resolving|loading|sending/i.test(message)) return "Resolving the request";
   if (/saving|creating|updating|adding|removing|applying/i.test(message)) return "Updating workspace";
   if (/check|result/i.test(message)) return "Checking result";
-  return "Writing response";
+  return "Preparing the result";
 }
 
 function PersistedProgressTrace({ trace }: { trace: SpectraThreadTrace }) {

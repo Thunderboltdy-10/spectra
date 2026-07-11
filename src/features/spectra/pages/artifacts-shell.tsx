@@ -238,8 +238,8 @@ export function ArtifactsShell() {
   );
   const selectedWorkspace = workspaces.find((item) => item._id === selectedWorkspaceId) ?? null;
   useEffect(() => setActiveWorkspaceContext(selectedWorkspace ? { id: selectedWorkspace._id, title: selectedWorkspace.title } : null), [selectedWorkspace, setActiveWorkspaceContext]);
-  const contextualArtifactIds = useMemo(() => [...new Set([...contextArtifactIds, ...selectedContextIds, ...tiledArtifacts.map((artifact) => artifact._id)])].slice(0, 24), [contextArtifactIds, selectedContextIds, tiledArtifacts]);
-  const naturalFocusMode: ComposerFocusMode = contextualArtifactIds.length ? "selection" : composerThread ? "thread" : studio.activeArtifact ? "artifact" : selectedWorkspace ? "workspace" : "global";
+  const contextualArtifactIds = useMemo(() => [...new Set([...contextArtifactIds, ...tiledArtifacts.map((artifact) => artifact._id)])].slice(0, 24), [contextArtifactIds, tiledArtifacts]);
+  const naturalFocusMode: ComposerFocusMode = composerThread ? "thread" : studio.activeArtifact ? "artifact" : contextualArtifactIds.length ? "selection" : selectedWorkspace ? "workspace" : "global";
   const effectiveFocusMode = focusModeOverride === "selection" && contextualArtifactIds.length === 0 ? naturalFocusMode : focusModeOverride === "artifact" && !studio.activeArtifact ? naturalFocusMode : focusModeOverride === "workspace" && !selectedWorkspace ? naturalFocusMode : focusModeOverride === "thread" && !composerThread ? naturalFocusMode : focusModeOverride ?? naturalFocusMode;
 
   useEffect(() => {
@@ -391,6 +391,15 @@ export function ArtifactsShell() {
     }
   }, []);
 
+	  const openArtifactSurface = useCallback((artifact: SpectraArtifact) => {
+	    if (artifact.blueprintKey === "thread_reference") {
+	      const content = artifact.content && typeof artifact.content === "object" ? artifact.content as Record<string, unknown> : {};
+	      const targetThreadId = typeof content.threadId === "string" ? content.threadId : "";
+	      if (targetThreadId) { setLiveThread({ id: targetThreadId, title: artifact.title }); return; }
+	    }
+	    studio.openSplit(artifact);
+	  }, [setLiveThread, studio]);
+
 	  const runEngine = useSpectraRun({
     surface: composerThread ? "artifacts" : studio.activeArtifact ? "artifact" : "artifacts",
     workspaceId: selectedWorkspaceId || undefined,
@@ -410,7 +419,7 @@ export function ArtifactsShell() {
     onOpenArtifact: async (artifactId) => {
       const refreshed = await load(true);
       const artifact = refreshed.find((item) => item._id === artifactId);
-      if (artifact) studio.openSplit(artifact);
+      if (artifact) openArtifactSurface(artifact);
     },
 	  });
 
@@ -418,7 +427,7 @@ export function ArtifactsShell() {
 	    function onOpenArtifact(event: Event) {
 	      const artifactId = (event as CustomEvent<{ artifactId?: string }>).detail?.artifactId;
 	      const artifact = artifactId ? allArtifacts.find((item) => item._id === artifactId) : null;
-	      if (artifact) studio.openSplit(artifact);
+	      if (artifact) openArtifactSurface(artifact);
 	    }
 	    function onOpenWorkspace(event: Event) {
 	      const workspaceId = (event as CustomEvent<{ workspaceId?: string }>).detail?.workspaceId;
@@ -475,8 +484,8 @@ export function ArtifactsShell() {
     const artifact = allArtifacts.find((item) => item._id === requestedArtifactId);
     if (!artifact) return;
     openedQueryArtifactRef.current = requestedArtifactId;
-    studio.openSplit(artifact);
-  }, [allArtifacts, requestedArtifactId, studio]);
+    openArtifactSurface(artifact);
+  }, [allArtifacts, openArtifactSurface, requestedArtifactId]);
 
   const artifacts = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -646,7 +655,7 @@ export function ArtifactsShell() {
   function rowActions(artifact: SpectraArtifact) {
     const firstPlacement = artifactPlacements(artifact)[0];
     const openButton = (
-      <button type="button" className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" onClick={() => studio.openSplit(artifact)} aria-label="Open artifact" title="Open artifact">
+      <button type="button" className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" onClick={() => openArtifactSurface(artifact)} aria-label="Open artifact" title="Open artifact">
         <ExternalLink className="h-3.5 w-3.5" />
       </button>
     );
@@ -676,7 +685,7 @@ export function ArtifactsShell() {
       <ArtifactsRail workspaces={workspaces} selectedWorkspaceId={selectedWorkspaceId} onSelect={setSelectedWorkspaceId} />
       <div className="flex min-w-0 flex-1 flex-col">
         <StudioTabRail
-          hubTabs={hubTabs}
+          hubTabs={workSetIsolated && activeHubTabId ? hubTabs.map((tab) => tab.id === activeHubTabId ? { ...tab, label: `Work set · ${tiledArtifacts.length} objects` } : tab) : hubTabs}
           activeHubTabId={studio.mode === "tab" ? null : activeHubTabId}
           artifacts={allArtifacts}
           tabs={studio.tabs}
@@ -751,7 +760,7 @@ export function ArtifactsShell() {
                 />
                 <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-[var(--text-tertiary)]">Filter</span>
               </div>
-              <GlobalSearch onOpenArtifact={studio.openSplit} onOpenWorkspace={(target) => setSelectedWorkspaceId(target._id)} selectedIds={selectedContextIds} onToggleSelected={toggleContextArtifact} placementWorkspaceId={selectedWorkspace?._id} placementLabel={selectedWorkspace?.title} onPlaceArtifact={selectedWorkspace ? (artifact) => void addToWorkspace(artifact._id, selectedWorkspace._id) : undefined} />
+              <GlobalSearch onOpenArtifact={openArtifactSurface} onOpenWorkspace={(target) => setSelectedWorkspaceId(target._id)} selectedIds={selectedContextIds} onToggleSelected={toggleContextArtifact} placementWorkspaceId={selectedWorkspace?._id} placementLabel={selectedWorkspace?.title} onPlaceArtifact={selectedWorkspace ? (artifact) => void addToWorkspace(artifact._id, selectedWorkspace._id) : undefined} />
               <WorkspacePicker workspaces={workspaces} selectedWorkspaceId={selectedWorkspaceId} onSelect={setSelectedWorkspaceId} />
               <div className="relative" ref={createMenuRef}>
                 <button type="button" className={buttonClass("dark")} onClick={() => setCreateMenuOpen((open) => !open)}>
@@ -826,11 +835,11 @@ export function ArtifactsShell() {
         </header>
         {loading ? <ArtifactsSkeleton /> : null}
         {!loading && artifacts.length === 0 ? <EmptyArtifactsState /> : null}
-        {!loading && mode === "list" ? <GroupedList inbox={inbox} groups={byWorkspace} rowActions={rowActions} onOpen={studio.openSplit} /> : null}
-        {!loading && mode === "board" ? <BoardColumns groups={byWorkspace} onOpen={studio.openSplit} /> : null}
+        {!loading && mode === "list" ? <GroupedList inbox={inbox} groups={byWorkspace} rowActions={rowActions} onOpen={openArtifactSurface} /> : null}
+        {!loading && mode === "board" ? <BoardColumns groups={byWorkspace} onOpen={openArtifactSurface} /> : null}
         {mode === "grid" ? (
           <div className="mt-8 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {!loading ? artifacts.map((artifact) => <ArtifactCard key={artifact._id} artifact={artifactToCard(artifact)} actions={multiSelectMode ? undefined : rowActions(artifact)} onSelect={() => studio.openSplit(artifact)} selectionMode={multiSelectMode} contextSelected={selectedContextIds.has(artifact._id)} onToggleContext={() => toggleContextArtifact(artifact)} />) : null}
+            {!loading ? artifacts.map((artifact) => <ArtifactCard key={artifact._id} artifact={artifactToCard(artifact)} actions={multiSelectMode ? undefined : rowActions(artifact)} onSelect={() => openArtifactSurface(artifact)} selectionMode={multiSelectMode} contextSelected={selectedContextIds.has(artifact._id)} onToggleContext={() => toggleContextArtifact(artifact)} />) : null}
           </div>
         ) : null}
       </section>
@@ -879,10 +888,10 @@ export function ArtifactsShell() {
 	      ) : null}
 	      </>
 	      )}
-	        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 bg-[linear-gradient(to_top,var(--bg-primary)_72%,transparent)] px-2 pb-3 pt-12 sm:px-5 sm:pb-5 lg:px-8" style={activeRunPanelId ? { right: "var(--spectra-run-panel-width, 680px)" } : undefined}>
+	        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 bg-transparent px-2 pb-3 pt-2 sm:px-5 sm:pb-5 lg:px-8" style={activeRunPanelId ? { right: "var(--spectra-run-panel-width, 680px)" } : undefined}>
           <div className="pointer-events-auto mx-auto max-w-[880px]">
 	            <DurableRunTabs workspaceId={selectedWorkspaceId || undefined} onOpen={(_runId, threadId, title) => { setActiveRunPanelId(null); setLiveThread({ id: threadId, title }); }} onStop={(runId) => runEngine.stop(runId)} />
-	            {multiSelectMode ? <SelectionActionBar count={selectedContextIds.size} onClear={clearSelection} onExit={() => { setMultiSelectMode(false); if (selectedContextIds.size === 0) setFocusModeOverride(null); }} onAddToContext={() => { commitSelection(); setFocusModeOverride("selection"); setMultiSelectMode(false); toast.success(`${selectedContextIds.size} object${selectedContextIds.size === 1 ? "" : "s"} added to context.`); }} onTile={openSelectedArtifactsInTiles} /> : null}
+	            {multiSelectMode ? <SelectionActionBar count={selectedContextIds.size} onClear={clearSelection} onExit={() => { clearSelection(); setMultiSelectMode(false); }} onAddToContext={() => { const count = selectedContextIds.size; commitSelection(); setFocusModeOverride("selection"); setMultiSelectMode(false); toast.success(`${count} object${count === 1 ? "" : "s"} added to context.`); }} onTile={openSelectedArtifactsInTiles} /> : null}
             <CommandBar
               placeholder={composerThread ? `Continue ${composerThread.title}...` : studio.activeArtifact ? `Act on ${studio.activeArtifact.title}...` : "Ask across all objects..."}
               onSubmit={(prompt, attachments) => {
@@ -917,7 +926,7 @@ export function ArtifactsShell() {
             />
           </div>
         </div>
-	        {liveThread ? <LiveThreadPanel threadId={liveThread.id} title={liveThread.title} width={liveThreadPanelWidth} onWidthChange={setLiveThreadPanelWidth} onClose={() => setLiveThread(null)} onOpenArtifact={(artifactId) => { const artifact = allArtifacts.find((item) => item._id === artifactId); if (artifact) studio.openSplit(artifact); }} onOpenWorkspace={(workspaceId) => setSelectedWorkspaceId(workspaceId)} /> : null}
+	        {liveThread ? <LiveThreadPanel threadId={liveThread.id} title={liveThread.title} width={liveThreadPanelWidth} onWidthChange={setLiveThreadPanelWidth} onClose={() => setLiveThread(null)} onOpenArtifact={(artifactId) => { const artifact = allArtifacts.find((item) => item._id === artifactId); if (artifact) openArtifactSurface(artifact); }} onOpenWorkspace={(workspaceId) => setSelectedWorkspaceId(workspaceId)} /> : null}
 	        {activeRunPanelId ? (
 	          <RunDetailPanel
 	            runId={activeRunPanelId}

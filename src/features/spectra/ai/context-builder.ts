@@ -1,11 +1,11 @@
 export const CONTEXT_LIMITS = {
-  packetCharacters: 48_000,
-  artifactExcerptCharacters: 3_200,
-  selectedArtifactCount: 24,
-  workspaceArtifactCount: 14,
-  catalogArtifactCount: 18,
-  conversationMessages: 24,
-  conversationMessageCharacters: 8_000,
+  packetCharacters: 28_000,
+  artifactExcerptCharacters: 2_800,
+  selectedArtifactCount: 16,
+  workspaceArtifactCount: 8,
+  catalogArtifactCount: 10,
+  conversationMessages: 16,
+  conversationMessageCharacters: 3_000,
 } as const;
 
 export type EffectiveFocusMode = "global" | "workspace" | "artifact" | "selection" | "thread";
@@ -145,9 +145,9 @@ export function buildBoundedContextPacket(input: {
       relevant: workspaceArtifacts.slice(0, 10).map(({ artifact }) => artifactContextSnapshot(artifact, { includeExcerpt: true, relevance: "workspace pin, recency, or prompt relevance" })),
       recentActivity: (input.recentActivity ?? []).slice(0, 8),
     } : null,
-    workspaceMap: (input.workspaceMap ?? []).slice(0, 30),
-    threadMap: (input.threadMap ?? []).slice(0, 24),
-    inboxMap: (input.inboxMap ?? []).slice(0, 20),
+    workspaceMap: (input.workspaceMap ?? []).filter((item) => input.focusMode === "global" || input.focusMode === "workspace" || Boolean(item && typeof item === "object" && (item as Record<string, unknown>).explicit)).slice(0, 18),
+    threadMap: (input.threadMap ?? []).filter((item) => input.focusMode === "global" || input.focusMode === "thread" || Boolean(item && typeof item === "object" && (item as Record<string, unknown>).explicit)).slice(0, 14),
+    inboxMap: input.focusMode === "global" ? (input.inboxMap ?? []).slice(0, 12) : [],
     focusedArtifact: focusedSnapshot,
     selectedObjects: selectedSnapshots,
 	    catalog: includeCatalog ? (input.focusMode === "global" ? catalog : catalog.slice(0, 8)).map(({ artifact }) => artifactContextSnapshot(artifact)) : [],

@@ -1,4 +1,4 @@
-import { after, NextRequest } from "next/server";
+import { NextRequest } from "next/server";
 import { ZodError } from "zod";
 import { requireActor } from "@/lib/auth-server";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
@@ -186,19 +186,22 @@ async function buildContext(actorClerkId: string, body: Pick<Body, "workspaceId"
   const focusMode = body.focusMode ?? (body.threadId ? "thread" : selectedArtifactIds.length ? "selection" : body.artifactId ? "artifact" : body.workspaceId ? "workspace" : "global");
   const broadContextRequest = /\b(all|everything|search|find|across|compare|related|workspace|library|catalog|inbox)\b/i.test(prompt);
   const shouldLoadArtifactCatalog = focusMode === "global" || focusMode === "workspace" || focusMode === "selection" || broadContextRequest;
+  const shouldLoadWorkspaceMap = focusMode === "global" || focusMode === "workspace" || focusMode === "selection" || explicitContextObjects.some((item) => item.type === "workspace");
+  const shouldLoadThreadMap = focusMode === "global" || focusMode === "thread" || explicitContextObjects.some((item) => item.type === "thread");
+  const shouldLoadActivity = focusMode === "global" || focusMode === "workspace";
   const retrievalTerms = [...new Set(prompt.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((word) => word.length >= 4 && !/^(this|that|with|from|into|about|please|could|would|make|create|update|change|help)$/.test(word)))].slice(0, 6);
   const [artifactRows, retrievedRows, workspaceRows, threadRows, workspace, focusedArtifact, threadDetail, recentRuns] = await Promise.all([
     shouldLoadArtifactCatalog ? query<unknown & object, unknown>("spectraArtifacts:list", { actorClerkId, placement: "all", limit: 36 }) : Promise.resolve([]),
-    Promise.all(retrievalTerms.map((search) => query<unknown & object, unknown>("spectraArtifacts:list", { actorClerkId, placement: "all", search, limit: 12 }).catch(() => []))),
-    query<unknown & object, unknown>("spectraWorkspaces:list", { actorClerkId, includeArchived: false, limit: 30 }),
-    query<unknown & object, unknown>("spectraThreads:list", { actorClerkId, includeArchived: false, limit: 80 }).catch(() => []),
+    shouldLoadArtifactCatalog ? Promise.all(retrievalTerms.slice(0, 3).map((search) => query<unknown & object, unknown>("spectraArtifacts:list", { actorClerkId, placement: "all", search, limit: 8 }).catch(() => []))) : Promise.resolve([]),
+    shouldLoadWorkspaceMap ? query<unknown & object, unknown>("spectraWorkspaces:list", { actorClerkId, includeArchived: false, limit: 24 }) : Promise.resolve([]),
+    shouldLoadThreadMap ? query<unknown & object, unknown>("spectraThreads:list", { actorClerkId, includeArchived: false, limit: 40 }).catch(() => []) : Promise.resolve([]),
     body.workspaceId ? query<unknown & object, unknown>("spectraWorkspaceItems:listForWorkspace", { actorClerkId, workspaceId: body.workspaceId }).catch(() => null) : Promise.resolve(null),
     body.artifactId ? query<unknown & object, unknown>("spectraArtifacts:get", { actorClerkId, artifactId: body.artifactId }).catch(() => null) : Promise.resolve(null),
     body.threadId ? query<unknown & object, unknown>("spectraThreads:get", { actorClerkId, threadId: body.threadId }).catch(() => null) : Promise.resolve(null),
-    query<unknown & object, unknown>("spectraRuns:listRecent", { actorClerkId, limit: 12 }).catch(() => []),
+    shouldLoadActivity ? query<unknown & object, unknown>("spectraRuns:listRecent", { actorClerkId, limit: 8 }).catch(() => []) : Promise.resolve([]),
   ]);
   const selectedRows = await Promise.all(selectedArtifactIds.map((artifactId) => query<unknown & object, unknown>("spectraArtifacts:get", { actorClerkId, artifactId }).catch(() => null)));
-  const artifacts = [...rows(artifactRows), ...retrievedRows.flatMap((result) => rows(result)), ...selectedRows.flatMap((row) => row && typeof row === "object" ? [row as Record<string, unknown>] : [])]
+  const artifacts = [...rows(artifactRows), ...retrievedRows.flatMap((result) => rows(result)), ...(focusedArtifact && typeof focusedArtifact === "object" ? [focusedArtifact as Record<string, unknown>] : []), ...selectedRows.flatMap((row) => row && typeof row === "object" ? [row as Record<string, unknown>] : [])]
     .filter((artifact, index, all) => all.findIndex((candidate) => candidate._id === artifact._id) === index);
   const ownedArtifactIdSet = new Set(artifacts.flatMap((artifact) => typeof artifact._id === "string" ? [artifact._id] : []));
   const ownedSelectedArtifactIds = selectedArtifactIds.filter((id) => ownedArtifactIdSet.has(id));
@@ -422,7 +425,7 @@ async function callModel(surface: Surface, prompt: string, context: unknown, att
       provider,
       ...(strictOutput ? { response_format: { type: "json_schema", json_schema: { name: "spectra_operation_plan", strict: true, schema: SPECTRA_PLAN_JSON_SCHEMA } } } : {}),
     }),
-    signal,
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(120_000)]) : AbortSignal.timeout(120_000),
   });
   console.info("[spectra.openrouter.request]", { model: baseBody.model, provider: primaryRouting, mode: "native-primary" });
   let response = await request(primaryRouting, false);
@@ -516,11 +519,11 @@ function operationPhases(operation: ModelOperation, workspaceTitle?: string) {
   return [operationLabel(operation)];
 }
 
-function progressiveContentFrames(operation: Extract<ModelOperation, { type: "artifact.create" }>) {
-  const content = operation.input.content as Record<string, unknown>;
-  const listKey = operation.input.blueprintKey === "document" ? "blocks"
-    : operation.input.blueprintKey === "flashcard_deck" ? "cards"
-      : operation.input.blueprintKey === "quiz" ? "questions"
+function progressiveArtifactFrames(blueprintKey: string, rawContent: unknown) {
+  const content = rawContent as Record<string, unknown>;
+  const listKey = blueprintKey === "document" ? "blocks"
+    : blueprintKey === "flashcard_deck" ? "cards"
+      : blueprintKey === "quiz" ? "questions"
         : null;
   if (!listKey || !Array.isArray(content[listKey]) || content[listKey].length === 0) return [{ content, progress: 0.78 }];
   const rows = content[listKey] as unknown[];
@@ -732,15 +735,14 @@ function ndjson(task: (emit: (event: unknown) => void) => Promise<void>) {
 }
 
 function launchRunTask(task: (emit: (event: unknown) => void) => Promise<void>, immediateEvents: unknown[]) {
-  // Unit tests execute inline so the worker contract can be asserted synchronously.
-  // Production detaches provider work from the viewer response; every later update
-  // is consumed from the persisted run-event stream by all surfaces.
-  if (process.env.NODE_ENV === "test") return ndjson(task);
-  after(async () => {
-    await task(() => {}).catch(() => undefined);
-  });
+  // Keep the worker inside the streaming response. `after()` is bounded by the
+  // route lifetime and previously abandoned longer provider calls; the lease
+  // reconciler then surfaced an interruption minutes later. The ReadableStream
+  // task continues even if its viewer detaches, while persisted events let any
+  // surface reconnect and follow the same authoritative run.
   return ndjson(async (emit) => {
     for (const event of immediateEvents) emit(event);
+    await task(emit);
   });
 }
 
@@ -759,7 +761,7 @@ async function runAttempt(params: { actorClerkId: string; runId: string; resultC
   const executionSignal = params.signal ? AbortSignal.any([params.signal, leaseController.signal]) : leaseController.signal;
   const heartbeat = setInterval(() => {
     void mutate<unknown & object, { alive: boolean }>("spectraRuns:heartbeat", { actorClerkId: params.actorClerkId, runId: params.runId, executionId: params.executionId, workerId: params.workerId }).then((result) => { if (!result.alive) leaseController.abort(); }).catch(() => null);
-  }, 45_000);
+  }, 5_000);
   const publish = (event: Record<string, unknown>) => {
     emit(event);
     eventWrite = eventWrite.then(() => mutate("spectraRuns:appendEvent", { actorClerkId: params.actorClerkId, runId: params.runId, executionId: params.executionId, type: String(event.type ?? "status"), payload: event })).catch(() => { eventPersistenceFailed = true; return null; });
@@ -768,15 +770,14 @@ async function runAttempt(params: { actorClerkId: string; runId: string; resultC
     await eventWrite;
     if (eventPersistenceFailed) await mutate("spectraRuns:markTraceDegraded", { actorClerkId: params.actorClerkId, runId: params.runId, executionId: params.executionId }).catch(() => null);
   };
-  publish({ type: "run_created", runId: params.runId, card: streamCard(card) });
-  if (params.threadId) publish({ type: "thread_ready", runId: params.runId, threadId: params.threadId });
   try {
-    await mutate("spectraRuns:updateStatus", { actorClerkId: params.actorClerkId, runId: params.runId, executionId: params.executionId, status: "running", phase: "planning", resultTitle: "Thinking", resultSummary: "Analysing request", resultActions: [] });
-    publish({ type: "status", runId: params.runId, message: "Analysing request" });
+    await mutate("spectraRuns:updateStatus", { actorClerkId: params.actorClerkId, runId: params.runId, executionId: params.executionId, status: "running", phase: "planning", resultTitle: "Resolving the request", resultSummary: params.artifactId ? "Loading the focused artifact" : params.workspaceId ? "Loading the active workspace map" : "Resolving the requested objects", resultActions: [] });
+    publish({ type: "status", runId: params.runId, message: params.artifactId ? "Loading the focused artifact" : params.workspaceId ? "Loading the active workspace map" : "Resolving the requested objects" });
     await mutate("spectraRuns:updateStatus", { actorClerkId: params.actorClerkId, runId: params.runId, executionId: params.executionId, status: "running", phase: "reading", resultTitle: "Reading context", resultSummary: "Reading the visible and selected work", resultActions: [] });
     const context = await buildContext(params.actorClerkId, { workspaceId: params.workspaceId, artifactId: params.artifactId, threadId: params.threadId, focusMode: params.focusMode, selectedArtifactIds: params.selectedArtifactIds, explicitContextObjects: params.explicitContextObjects, currentView: params.currentView }, params.prompt);
     await mutate("spectraRuns:updateStatus", { actorClerkId: params.actorClerkId, runId: params.runId, executionId: params.executionId, status: "running", phase: "retrieving", resultTitle: "Finding relevant work", resultSummary: "Matching the request to the workspace map", resultActions: [] });
-    publish({ type: "status", runId: params.runId, message: "Finding relevant work" });
+    const focusedObjectCount = context.selectedArtifactIds.length || (context.focusedArtifact ? 1 : 0);
+    publish({ type: "status", runId: params.runId, message: focusedObjectCount ? `Sending ${focusedObjectCount} focused object${focusedObjectCount === 1 ? "" : "s"} to DeepSeek` : params.workspaceId ? "Sending a bounded workspace summary to DeepSeek" : "Sending the request to DeepSeek" });
     const persistedConversation = context.conversation.at(-1)?.role === "user" && context.conversation.at(-1)?.content === params.prompt
       ? context.conversation.slice(0, -1)
       : context.conversation;
@@ -850,7 +851,7 @@ async function runAttempt(params: { actorClerkId: string; runId: string; resultC
             const pending = await mutate<unknown & object, { artifactId: string }>("spectraArtifacts:createPending", { actorClerkId: params.actorClerkId, blueprintKey: operation.input.blueprintKey, title: operation.input.title, workspaceId, runId: params.runId, executionId: params.executionId, threadId: params.threadId });
             earlyPendingByIndex.set(index, pending.artifactId);
             publish({ type: "operation_preview", runId: params.runId, operationId: `preview-${index + 1}`, operationType: operation.type, preview: { ...safeOperationPreview(operation), pendingArtifactId: pending.artifactId } });
-            const frames = progressiveContentFrames(operation);
+            const frames = progressiveArtifactFrames(operation.input.blueprintKey, operation.input.content);
             for (let frameIndex = 0; frameIndex < frames.length; frameIndex += 1) {
               const frame = frames[frameIndex]!;
               await mutate("spectraArtifacts:patchPendingContent", { actorClerkId: params.actorClerkId, artifactId: pending.artifactId, runId: params.runId, executionId: params.executionId, content: frame.content, progress: frame.progress, summary: `Building ${operation.input.title} · ${Math.round(frame.progress * 100)}%` });
@@ -859,8 +860,13 @@ async function runAttempt(params: { actorClerkId: string; runId: string; resultC
             }
           } else if (operation.type === "artifact.update" && owned.artifactIds.has(operation.input.artifactId)) {
             earlyUpdatedArtifactIds.add(operation.input.artifactId);
-            await mutate("spectraArtifacts:stageAiPatch", { actorClerkId: params.actorClerkId, artifactId: operation.input.artifactId, runId: params.runId, executionId: params.executionId, title: operation.input.title ?? undefined, summary: operation.input.summary ?? undefined, content: operation.input.content ?? undefined });
-            publish({ type: "artifact_patch", runId: params.runId, operationId: `preview-${index + 1}`, artifactId: operation.input.artifactId, patch: { title: operation.input.title, summary: operation.input.summary, content: operation.input.content } });
+            const frames = operation.input.content ? progressiveArtifactFrames(operation.input.blueprintKey, operation.input.content) : [{ content: undefined, progress: 0.86 }];
+            for (let frameIndex = 0; frameIndex < frames.length; frameIndex += 1) {
+              const frame = frames[frameIndex]!;
+              await mutate("spectraArtifacts:stageAiPatch", { actorClerkId: params.actorClerkId, artifactId: operation.input.artifactId, runId: params.runId, executionId: params.executionId, title: operation.input.title ?? undefined, summary: operation.input.summary ?? undefined, content: frame.content });
+              publish({ type: "artifact_patch", runId: params.runId, operationId: `preview-${index + 1}`, artifactId: operation.input.artifactId, patch: { title: operation.input.title, summary: operation.input.summary, content: frame.content, progress: frame.progress } });
+              if (frameIndex < frames.length - 1) await new Promise((resolve) => setTimeout(resolve, 120));
+            }
           } else if (operation.type === "workspace.create") {
             const pending = await mutate<unknown & object, { workspaceId: string }>("spectraWorkspaces:createPending", { actorClerkId: params.actorClerkId, runId: params.runId, executionId: params.executionId, title: operation.input.title, description: operation.input.description ?? undefined, icon: operation.input.icon ?? undefined, color: operation.input.color ?? undefined });
             earlyPendingWorkspaceByIndex.set(index, pending.workspaceId);
@@ -1082,8 +1088,20 @@ export async function POST(request: NextRequest) {
 
   const runId = body.runId?.trim();
   if (!runId) return new Response("runId is required", { status: 400 });
-  const expectedExecutionId = body.executionId?.trim();
-  if (!expectedExecutionId) return new Response("This run view is out of date. Refresh it and try again.", { status: 409 });
+  // Older and compact clients only have a run id. Resolve the current execution
+  // after the ownership check in the run mutation/query instead of making every
+  // stop/confirm control fail before it can act. Callers that do know the
+  // execution id still receive stale-view protection.
+  let expectedExecutionId = body.executionId?.trim();
+  if (!expectedExecutionId) {
+    try {
+      const detail = await query<unknown & object, RunDetail>("spectraRuns:get", { actorClerkId: actor.clerkId, runId });
+      expectedExecutionId = detail.run.executionId;
+    } catch {
+      return new Response("Run not found", { status: 404 });
+    }
+  }
+  if (!expectedExecutionId) return new Response("This run has no active execution.", { status: 409 });
 
   if (action === "stop") {
     let stopped: { alreadyStopped: boolean; executionId?: string };

@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { extractPartialJsonStringField, readOpenRouterResponse } from "../ai/openrouter-stream";
-import { getSpectraProviderRouting } from "../ai/model-config";
+import { allowSpectraProviderFallbacks, getSpectraProviderRouting } from "../ai/model-config";
 
 describe("OpenRouter public response streaming", () => {
   it("restricts the primary call to native DeepSeek and keeps fallback routing explicit", () => {
     delete process.env.SPECTRA_ALLOW_PROVIDER_FALLBACKS;
+    expect(allowSpectraProviderFallbacks()).toBe(true);
     expect(getSpectraProviderRouting("primary")).toEqual({ order: ["deepseek"], only: ["deepseek"], allow_fallbacks: false });
     expect(getSpectraProviderRouting("fallback")).toEqual({ order: ["baidu", "streamlake", "deepinfra"], only: ["baidu", "streamlake", "deepinfra"], allow_fallbacks: true, require_parameters: true });
   });

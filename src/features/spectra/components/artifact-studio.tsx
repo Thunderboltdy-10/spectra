@@ -51,7 +51,7 @@ import { TableHeader } from "@tiptap/extension-table-header";
 import { TaskList } from "@tiptap/extension-task-list";
 import { TaskItem } from "@tiptap/extension-task-item";
 import { Image } from "@tiptap/extension-image";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { SlashCommand } from "@/components/editor/slash-command-extension";
 import { createSlashCommandRenderer } from "@/components/editor/slash-command-renderer";
 import { spectraObjectKey, useSpectraContextStore } from "@/stores/spectra-context-store";
@@ -68,6 +68,7 @@ import {
 import type { ArtifactPayload } from "./artifact-blueprint-sheet";
 import { getSpectraArtifactLinks, getSpectraArtifactVersions, postSpectra, type SpectraArtifact, type SpectraArtifactLink, type SpectraArtifactVersion } from "../data/api";
 import { ThreadConversation } from "./conversation-surface";
+import { Tooltip } from "@/components/ui/tooltip";
 
 type StudioMode = "closed" | "split" | "tab";
 type StudioTab = { artifactId: string; openedAt: number };
@@ -395,6 +396,7 @@ export function ArtifactStudio({
   onDirtyChange,
   onContinueThread,
   continuedThreadId,
+  compact = false,
 }: {
   mode: "split" | "tab";
   artifact: SpectraArtifact;
@@ -415,6 +417,7 @@ export function ArtifactStudio({
   onDirtyChange: (artifactId: string, dirty: boolean) => void;
   onContinueThread?: (threadId: string, title: string) => void;
   continuedThreadId?: string | null;
+  compact?: boolean;
 }) {
   const router = useRouter();
   const width = panelWidth ?? Math.round(typeof window === "undefined" ? 720 : window.innerWidth * 0.5);
@@ -455,6 +458,7 @@ export function ArtifactStudio({
         onRevert={handleRevert}
         onArchive={handleArchive}
         onDirtyChange={handleDirtyChange}
+        compact={compact}
       />
     </div>
   );
@@ -512,7 +516,7 @@ export function StudioSplitShell({ width, onWidthChange, ariaLabel, cssWidthVari
     document.addEventListener("pointerup", onUp);
     return () => { document.removeEventListener("pointermove", onMove); document.removeEventListener("pointerup", onUp); };
   }, [onWidthChange]);
-  return <aside ref={panelRef} data-studio-panel className="relative z-40 hidden h-full min-w-[360px] max-w-[94vw] shrink-0 border-l border-[var(--border-default)] bg-[var(--bg-primary)] shadow-[-18px_0_40px_rgba(27,20,12,0.06)] xl:block" style={{ width, containerType: "inline-size" }} aria-label={ariaLabel}><button type="button" className="absolute -left-1 top-0 z-20 h-full w-2 cursor-ew-resize bg-transparent transition-colors hover:bg-[color-mix(in_oklab,var(--text-tertiary)_18%,transparent)]" aria-label={`Resize ${ariaLabel}`} onPointerDown={(event) => { event.preventDefault(); resizingRef.current = true; document.body.style.cursor = "ew-resize"; document.body.style.userSelect = "none"; }} />{children}</aside>;
+  return <aside ref={panelRef} data-studio-panel className="fixed inset-y-0 right-0 z-[90] flex h-full min-w-[320px] max-w-[94vw] shrink-0 border-l border-[var(--border-default)] bg-[var(--bg-primary)] shadow-[-18px_0_40px_rgba(27,20,12,0.10)] md:relative md:inset-auto md:z-40 md:min-w-[360px]" style={{ width, containerType: "inline-size" }} aria-label={ariaLabel}><button type="button" className="absolute -left-1 top-0 z-20 h-full w-2 cursor-ew-resize bg-transparent transition-colors hover:bg-[color-mix(in_oklab,var(--text-tertiary)_18%,transparent)]" aria-label={`Resize ${ariaLabel}`} onPointerDown={(event) => { event.preventDefault(); resizingRef.current = true; document.body.style.cursor = "ew-resize"; document.body.style.userSelect = "none"; }} />{children}</aside>;
 }
 
 export function StudioTabRail({
@@ -643,6 +647,7 @@ function ArtifactStudioEditor({
   onRevert,
   onArchive,
   onDirtyChange,
+  compact,
 }: {
   mode: "split" | "tab";
   artifact: SpectraArtifact;
@@ -655,6 +660,7 @@ function ArtifactStudioEditor({
   onRevert: (versionId: string) => Promise<void> | void;
   onArchive?: () => Promise<void> | void;
   onDirtyChange: (dirty: boolean) => void;
+  compact: boolean;
 }) {
   const [title, setTitle] = useState(artifact.title);
   const [summary, setSummary] = useState(artifact.summary ?? "");
@@ -676,6 +682,9 @@ function ArtifactStudioEditor({
   const incomingSnapshot = useMemo(() => artifactEditorSnapshot(artifact), [artifact]);
   const currentSnapshot = useMemo(() => ({ title, summary, tagDraft, content }), [content, summary, tagDraft, title]);
   const previewDiff = useMemo(() => previewVersion ? lineDiff({ title: artifact.title, summary: artifact.summary, content: artifact.content, tags: artifact.tags }, previewVersion.before) : [], [artifact, previewVersion]);
+  const aiPreviewActive = artifact.aiState === "updating" && Boolean(artifact.aiPreview);
+  const editorContent = aiPreviewActive && artifact.aiPreview?.content !== undefined ? artifact.aiPreview.content : content;
+  const editorChange = aiPreviewActive ? () => undefined : changeContent;
 
   useEffect(() => {
     onDirtyChange(dirty);
@@ -779,10 +788,11 @@ function ArtifactStudioEditor({
     if (artifact.aiPreview.content !== undefined) setContent(artifact.aiPreview.content);
   }
 
-  const showDetails = mode === "tab";
+  const showDetails = mode === "tab" && !compact;
+  const contentMode = compact ? "split" as const : mode;
   const editorLayoutClass = showDetails
     ? mode === "tab"
-      ? "mx-auto grid max-w-[1500px] gap-5 xl:grid-cols-[minmax(0,1fr)_300px]"
+      ? "mx-auto grid w-full max-w-[1680px] gap-4 xl:grid-cols-[minmax(0,1fr)_320px]"
       : "grid gap-5 2xl:grid-cols-[minmax(0,1fr)_280px]"
     : "block";
   const mainClass = artifact.blueprintKey === "document"
@@ -790,7 +800,7 @@ function ArtifactStudioEditor({
     : "min-h-0 flex-1 overflow-y-auto px-5 pb-5 pt-5";
 
   return (
-    <div className="spectra-artifact-studio relative flex h-full min-h-0 flex-col" data-ai-state={artifact.aiState}>
+    <div className="spectra-artifact-studio relative flex h-full min-h-0 flex-col" data-ai-state={artifact.aiState} data-blueprint={artifact.blueprintKey} style={{ "--studio-accent": meta.color } as CSSProperties}>
       <header className="spectra-artifact-header shrink-0 border-b border-[var(--border-default)] bg-[var(--bg-primary)] px-5 py-4">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0 flex-1">
@@ -855,13 +865,13 @@ function ArtifactStudioEditor({
           </div>
         </div>
       ) : null}
-      <main className={`spectra-artifact-main ${mainClass}`}>
+      <main className={`spectra-artifact-main ${mainClass}`} data-ai-preview={aiPreviewActive || undefined}>
         <div className={editorLayoutClass}>
           <section className="min-w-0">
-            {artifact.blueprintKey === "document" ? <DocumentStudio key={`${artifact._id}:document`} title={title} content={content} onChange={changeContent} /> : null}
-            {artifact.blueprintKey === "flashcard_deck" ? <FlashcardStudio key={`${artifact._id}:deck`} mode={mode} content={content} onChange={changeContent} /> : null}
-            {artifact.blueprintKey === "quiz" ? <QuizStudio key={`${artifact._id}:quiz`} mode={mode} content={content} onChange={changeContent} /> : null}
-            {artifact.blueprintKey === "planner_task" ? <PlannerStudio key={`${artifact._id}:planner`} mode={mode} artifact={artifact} artifacts={artifacts} title={title} content={content} onChange={changeContent} onArchive={onArchive} /> : null}
+            {artifact.blueprintKey === "document" ? <DocumentStudio key={`${artifact._id}:document:${artifact.aiPreview?.startedAt ?? "saved"}`} title={title} content={editorContent} onChange={editorChange} /> : null}
+            {artifact.blueprintKey === "flashcard_deck" ? <FlashcardStudio key={`${artifact._id}:deck:${artifact.aiPreview?.startedAt ?? "saved"}`} mode={contentMode} content={editorContent} onChange={editorChange} /> : null}
+            {artifact.blueprintKey === "quiz" ? <QuizStudio key={`${artifact._id}:quiz:${artifact.aiPreview?.startedAt ?? "saved"}`} mode={contentMode} content={editorContent} onChange={editorChange} /> : null}
+            {artifact.blueprintKey === "planner_task" ? <PlannerStudio key={`${artifact._id}:planner:${artifact.aiPreview?.startedAt ?? "saved"}`} mode={contentMode} artifact={artifact} artifacts={artifacts} title={title} content={editorContent} onChange={editorChange} onArchive={onArchive} /> : null}
             {artifact.blueprintKey === "thread_reference" ? <ThreadReferenceStudio content={content} /> : null}
           </section>
           {showDetails ? <StudioDetails
@@ -971,6 +981,12 @@ function FlashcardStudio({ mode, content, onChange }: { mode: "split" | "tab"; c
 
   return (
     <div className={`spectra-flashcard-studio grid min-h-[720px] gap-4 ${mode === "tab" ? "lg:grid-cols-[300px_minmax(0,1fr)]" : "grid-cols-1"}`}>
+      <div className={`grid grid-cols-2 overflow-hidden rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] sm:grid-cols-4 ${mode === "tab" ? "lg:col-span-2" : ""}`}>
+        <div className="px-4 py-3"><strong className="block font-display text-[18px] text-[var(--text-primary)]">{cards.length}</strong><span className="text-[10px] text-[var(--text-tertiary)]">Cards</span></div>
+        <div className="border-l border-[var(--border-subtle)] px-4 py-3"><strong className="block font-display text-[18px] text-[var(--text-primary)]">{sections.length}</strong><span className="text-[10px] text-[var(--text-tertiary)]">Sections</span></div>
+        <div className="border-l border-[var(--border-subtle)] px-4 py-3"><strong className="block font-display text-[18px] text-[var(--text-primary)]">{Math.round(cards.filter((card) => card.review?.state === "mastered").length / Math.max(1, cards.length) * 100)}%</strong><span className="text-[10px] text-[var(--text-tertiary)]">Mastery</span></div>
+        <div className="border-l border-[var(--border-subtle)] px-4 py-3"><strong className="block font-display text-[18px] text-[var(--text-primary)]">~{Math.max(1, Math.ceil(cards.length * .75))} min</strong><span className="text-[10px] text-[var(--text-tertiary)]">Study time</span></div>
+      </div>
       <aside className="rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)]">
         <div className="flex items-center justify-between border-b border-[var(--border-default)] px-3 py-3">
           <div>
@@ -1100,6 +1116,7 @@ function QuizStudio({ mode, content, onChange }: { mode: "split" | "tab"; conten
           <button type="button" className={tabButtonClass(view === "responses")} onClick={() => setView("responses")}>Responses</button>
         </div>
         <div className="flex items-center gap-2">
+          <span className="hidden items-center gap-5 rounded-[8px] border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-1.5 text-[10px] text-[var(--text-tertiary)] md:flex"><strong className="font-display text-[16px] text-[var(--text-primary)]">{questions.length}</strong> questions <strong className="font-display text-[16px] text-[var(--text-primary)]">{Math.max(1, Math.ceil(questions.reduce((total, question) => total + (question.timeLimitSeconds ?? 90), 0) / 60))} min</strong></span>
           <button type="button" className={smallActionClass()} onClick={addQuestion}><Plus className="h-3.5 w-3.5" />Add question</button>
         </div>
       </div>
@@ -1602,18 +1619,18 @@ function MetricRow({ label, value }: { label: string; value: string }) {
 
 function ToolbarButton({ label, icon: Icon, active, disabled, onClick }: { label: string; icon: LucideIcon; active?: boolean; disabled?: boolean; onClick?: () => void }) {
   return (
-    <button type="button" className={toolbarClass(active)} onClick={onClick} disabled={disabled} title={label}>
+    <Tooltip label={label}><button type="button" className={toolbarClass(active)} onClick={onClick} disabled={disabled} aria-label={label}>
       <Icon className="h-4 w-4" />
-    </button>
+    </button></Tooltip>
   );
 }
 
 function ToolbarTextButton({ label, active, onClick, children }: { label: string; active?: boolean; onClick?: () => void; children: ReactNode }) {
-  return <button type="button" className={toolbarClass(active)} onClick={onClick} title={label}>{children}</button>;
+  return <Tooltip label={label}><button type="button" className={toolbarClass(active)} onClick={onClick} aria-label={label}>{children}</button></Tooltip>;
 }
 
 function IconButton({ label, icon: Icon, onClick }: { label: string; icon: LucideIcon; onClick: () => void }) {
-  return <button type="button" className={iconButtonClass()} onClick={onClick} aria-label={label} title={label}><Icon className="h-4 w-4" /></button>;
+  return <Tooltip label={label}><button type="button" className={iconButtonClass()} onClick={onClick} aria-label={label}><Icon className="h-4 w-4" /></button></Tooltip>;
 }
 
 function Divider() {

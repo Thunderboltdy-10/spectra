@@ -26,6 +26,8 @@ export function getSpectraProviderRouting(mode: "primary" | "fallback" = "primar
 }
 
 export function allowSpectraProviderFallbacks() {
+  // Every primary request is provider-locked to native DeepSeek. Automatic
+  // fallback is a second, explicit request only after that attempt fails.
   return process.env.SPECTRA_ALLOW_PROVIDER_FALLBACKS !== "false";
 }
 

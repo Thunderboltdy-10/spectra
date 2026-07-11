@@ -104,10 +104,12 @@ export function normalizeTileObjects(objects: SpectraOpenObject[], cap = 24) {
 
 function upsertOpenObject(objects: SpectraOpenObject[], object: SpectraOpenObject) {
   const key = spectraObjectKey(object);
-  const panelPresentations = new Set<SpectraOpenPresentation>(["split", "thread-panel", "run-panel"]);
-  const exclusivePresentation = panelPresentations.has(object.presentation);
+  const conflictingPresentations = object.presentation === "thread-panel" ? new Set<SpectraOpenPresentation>(["thread-panel", "run-panel"])
+    : object.presentation === "run-panel" ? new Set<SpectraOpenPresentation>(["thread-panel", "run-panel"])
+      : object.presentation === "split" ? new Set<SpectraOpenPresentation>(["split"])
+        : new Set<SpectraOpenPresentation>();
   return [
-    ...objects.filter((row) => spectraObjectKey(row) !== key && (!exclusivePresentation || !panelPresentations.has(row.presentation))),
+    ...objects.filter((row) => spectraObjectKey(row) !== key && !conflictingPresentations.has(row.presentation)),
     object,
   ];
 }

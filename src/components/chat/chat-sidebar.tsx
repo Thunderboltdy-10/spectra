@@ -44,7 +44,30 @@ import {
 import { hasClerkPublishableKey } from "@/lib/clerk-config";
 import { getModeConfig } from "@/lib/modes";
 import { cn } from "@/lib/utils";
-import type { Chat, UserSpending } from "@/hooks/use-chat-state";
+import type { StudyMode } from "@/types";
+
+type Chat = {
+  _id: string;
+  title: string;
+  latestUserPrompt?: string;
+  mode: StudyMode;
+  packId?: string;
+  agentId?: string;
+  updatedAt: number;
+};
+
+type UserSpending = {
+  totalSpentEur: number;
+  totalCostCents: number;
+  tier: "normal" | "expensive_blocked" | "cheap_only" | "free_only";
+  softLimitReached: boolean;
+  hardLimitReached: boolean;
+  budgetUsagePercent?: number;
+  activityUsagePercent?: number;
+  tokenUsagePercent?: number;
+  monthlyTokens?: number;
+  monthlyEvents?: number;
+};
 
 type GroupedChats = {
   heading: string;
@@ -590,29 +613,42 @@ function ChatSidebarImpl({
                 const isStreaming = activeStreamIds?.has(chat._id);
                 const hasDraftIndicator = hasDraft?.(chat._id);
                 return (
-                  <button
-                    key={chat._id}
-                    type="button"
-                    onClick={() => onSelectChat(chat._id)}
-                    className={`w-full rounded-lg px-2.5 py-1.5 text-left transition ${
-                      active
-                        ? "bg-[color-mix(in_oklab,var(--accent-cyan)_14%,var(--bg-primary))]"
-                        : "hover:bg-[var(--bg-primary)]"
-                    }`}
-                  >
-                    <div className="flex items-center gap-1.5">
-                      {isStreaming ? (
-                        <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-[var(--accent-cyan)]" />
-                      ) : (
-                        <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: chatModeConfig.color }} />
-                      )}
-                      <p className="truncate text-sm font-medium">{promptPreview}</p>
-                      {hasDraftIndicator && !isStreaming && <FileText className="h-3 w-3 shrink-0 text-[var(--text-tertiary)]" />}
-                    </div>
-                    <p className="truncate pl-3.5 text-[11px] text-[var(--text-secondary)]">
-                      {isStreaming ? <span className="text-[var(--accent-cyan)]">Generating...</span> : "Pinned"}
-                    </p>
-                  </button>
+                  <div key={chat._id} className="group relative">
+                    <button
+                      type="button"
+                      onClick={() => onSelectChat(chat._id)}
+                      data-active={active ? "true" : "false"}
+                      className="spectra-chat-row spectra-chat-row--pinned w-full px-2.5 py-1.5 text-left"
+                    >
+                      <div className="flex items-center gap-1.5">
+                        {isStreaming ? (
+                          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-[var(--accent-cyan)]" />
+                        ) : (
+                          <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: chatModeConfig.color }} />
+                        )}
+                        <p className="truncate text-sm font-medium">{promptPreview}</p>
+                        {hasDraftIndicator && !isStreaming && <FileText className="h-3 w-3 shrink-0 text-[var(--text-tertiary)]" />}
+                        <Star className="ml-auto h-3 w-3 shrink-0 text-[var(--card-pinned)]" />
+                      </div>
+                      <p className="truncate pl-3.5 text-[11px] text-[var(--text-secondary)]">
+                        {isStreaming ? <span className="text-[var(--accent-cyan)]">Generating...</span> : "Pinned"}
+                      </p>
+                    </button>
+                    {onPinChat ? (
+                      <div className="pointer-events-none absolute right-2 top-2 flex gap-1 opacity-0 transition group-hover:pointer-events-auto group-hover:opacity-100">
+                        <button
+                          type="button"
+                          className="spectra-icon-action is-active h-6 w-6"
+                          onClick={() => onPinChat(chat._id)}
+                          aria-label="Unpin chat"
+                          title="Unpin chat"
+                          data-tooltip="Unpin chat"
+                        >
+                          <Pin className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
                 );
               })}
             </div>
@@ -646,11 +682,8 @@ function ChatSidebarImpl({
                       <button
                         type="button"
                         onClick={() => onSelectChat(chat._id)}
-                        className={`w-full rounded-lg px-2.5 py-1.5 text-left transition ${
-                          active
-                            ? "bg-[color-mix(in_oklab,var(--accent-cyan)_14%,var(--bg-primary))]"
-                            : "hover:bg-[var(--bg-primary)]"
-                        }`}
+                        data-active={active ? "true" : "false"}
+                        className="spectra-chat-row w-full px-2.5 py-1.5 text-left"
                       >
                         {editingChatId === chat._id ? (
                           <form
@@ -705,29 +738,35 @@ function ChatSidebarImpl({
                           {onPinChat && (
                             <button
                               type="button"
-                              className="inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-md bg-[var(--bg-secondary)] hover:bg-[var(--bg-hover)]"
+                              className="spectra-icon-action h-6 w-6"
                               onClick={() => onPinChat(chat._id)}
                               aria-label="Pin chat"
+                              title="Pin chat"
+                              data-tooltip="Pin chat"
                             >
                               <Pin className="h-3.5 w-3.5" />
                             </button>
                           )}
                           <button
                             type="button"
-                            className="inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-md bg-[var(--bg-secondary)] hover:bg-[var(--bg-hover)]"
+                            className="spectra-icon-action h-6 w-6"
                             onClick={() => {
                               setEditingChatId(chat._id);
                               setEditingValue(chat.title);
                             }}
                             aria-label="Rename"
+                            title="Rename"
+                            data-tooltip="Rename"
                           >
                             <Pencil className="h-3.5 w-3.5" />
                           </button>
                           <button
                             type="button"
-                            className="inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-md bg-[var(--bg-secondary)] hover:bg-[var(--bg-hover)]"
+                            className="spectra-icon-action is-danger h-6 w-6"
                             onClick={() => onDeleteChat(chat._id)}
                             aria-label="Delete"
+                            title="Delete"
+                            data-tooltip="Delete"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
                           </button>

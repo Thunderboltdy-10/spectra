@@ -99,6 +99,7 @@ describe("Wave 4 controlled operation engine", () => {
 
   it("strictly parses operation-derived progress events", () => {
     expect(parseSpectraStreamEvent({ type: "status", runId: "run-1", message: "Validating 6 cards" })).toEqual({ type: "status", runId: "run-1", message: "Validating 6 cards" });
+    expect(parseSpectraStreamEvent({ type: "text_replace", runId: "run-1", content: "" })).toEqual({ type: "text_replace", runId: "run-1", content: "" });
     expect(() => parseSpectraStreamEvent({ type: "status", runId: "run-1", message: "ok", privateReasoning: "hidden" })).toThrow();
   });
 });

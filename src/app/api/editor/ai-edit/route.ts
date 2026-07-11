@@ -20,7 +20,6 @@ type DiffOp = {
 
 type ArtifactContext = {
   _id: string;
-  workstreamId?: string;
   title?: string;
 };
 
@@ -218,7 +217,6 @@ ${body.documentText.slice(0, 8000)}
       const thread = await convexMutation("chats:getOrCreateArtifactThread", {
         actorClerkId: actor.clerkId,
         artifactId: targetArtifactId,
-        workstreamId: typeof artifactContext.workstreamId === "string" ? artifactContext.workstreamId : undefined,
         mode: "document",
         thinkingLevel: "low",
         routerMode: "auto",

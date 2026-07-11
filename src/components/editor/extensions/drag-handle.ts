@@ -122,15 +122,10 @@ export const DragHandle = Extension.create({
       // Both are viewport-relative so the difference is the offset within the wrapper.
       const contentLeft = blockRect.left - wrapperRect.left;
 
-      // Vertically align buttons to the top of the block, corrected for any scroll in
-      // a scrollable ancestor that lies OUTSIDE the positioned wrapper.
-      // blockRect.top and wrapperRect.top are both viewport-relative; their difference
-      // gives the visual offset. Add wrapper.scrollTop only if the wrapper itself scrolls
-      // (normally 0 since the scroll container is a parent, not the tiptap-root).
-      const scrollOffset = wrapper.scrollTop ?? 0;
-      // Center the 22px buttons within the first line (~28px line-height at 15–16px font).
-      // A 3px nudge down centers them visually on the first baseline.
-      const top = blockRect.top - wrapperRect.top + scrollOffset + 3;
+      // Vertically align to the rendered block, not document scroll position. Both
+      // rects are viewport-relative, so this stays stable inside split panels and
+      // nested scroll containers without double-counting scrollTop.
+      const top = Math.max(0, blockRect.top - wrapperRect.top + 3);
 
       // Buttons: 2 × 22px + 4px gap = 48px. Place 4px to the left of where text starts.
       // ProseMirror has padding-left: 3.5rem (56px), so 48px + 4px gap = 52px fits in gutter.

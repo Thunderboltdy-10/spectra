@@ -6,11 +6,16 @@ import {
   CalendarCheck2,
   CheckCircle2,
   ChevronDown,
+  Atom,
+  Brain,
+  Calculator,
   ExternalLink,
   FileText,
   Files,
+  FlaskConical,
   FolderInput,
   FolderPlus,
+  GraduationCap,
   Grid2X2,
   HelpCircle,
   LayoutGrid,
@@ -29,16 +34,19 @@ import type { LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { toast } from "sonner";
 import { useSearchParams } from "next/navigation";
+import { useSpectraContextStore } from "@/stores/spectra-context-store";
 import { useSpectraRun } from "../ai/use-spectra-run";
+import { useSpectraContext } from "../hooks/use-spectra-context";
 import { createDefaultArtifactPayload, type ArtifactPayload } from "../components/artifact-blueprint-sheet";
 import { ArtifactCard, blueprintMeta } from "../components/artifact-card";
 import { ArtifactStudio, StudioTabRail, useArtifactStudioState } from "../components/artifact-studio";
+import { ArtifactTileSurface } from "../components/artifact-tile-surface";
 import { CommandBar } from "../components/command-bar";
 import { ContextFocusControl, GlobalSearch, SelectionActionBar, type ComposerFocusMode } from "../components/context-controls";
 import { FloatingMenu } from "../components/floating-menu";
-import { ResultCardStack } from "../components/result-card";
+import { DurableRunTabs } from "../components/durable-run-tabs";
 import { RunDetailPanel } from "../components/run-detail-panel";
-import { useSpectraSession } from "@/context/spectra-session-context";
+import { LiveThreadPanel } from "../components/live-thread-panel";
 import {
   artifactPlacements,
   artifactToCard,
@@ -50,7 +58,6 @@ import {
 import {
   getSpectraArtifacts,
   getSpectraOverview,
-  getSpectraRunDetail,
   postSpectra,
   type SpectraArtifact,
   type SpectraBlueprintKey,
@@ -72,10 +79,18 @@ const filters: Array<{ key: "all" | SpectraBlueprintKey; label: string; icon: Lu
   { key: "flashcard_deck", label: "Decks", icon: BookOpen },
   { key: "quiz", label: "Quizzes", icon: HelpCircle },
   { key: "planner_task", label: "Tasks", icon: CalendarCheck2 },
-  { key: "thread_reference", label: "Threads", icon: MessageSquare },
 ];
 
 function iconForWorkspace(workspace: SpectraWorkspace, index: number) {
+  if (workspace.icon === "Atom") return Atom;
+  if (workspace.icon === "Brain") return Brain;
+  if (workspace.icon === "Calculator") return Calculator;
+  if (workspace.icon === "FlaskConical") return FlaskConical;
+  if (workspace.icon === "GraduationCap") return GraduationCap;
+  if (workspace.icon === "Sprout") return Sprout;
+  if (workspace.icon === "BookOpen") return BookOpen;
+  if (workspace.icon === "BarChart3") return BarChart3;
+  if (workspace.icon === "Sparkles") return Sparkles;
   const accent = workspaceAccent(workspace, index);
   if (accent.icon === "leaf") return Sprout;
   if (accent.icon === "bar") return BarChart3;
@@ -115,14 +130,18 @@ function ArtifactsRail({
   selectedWorkspaceId: string;
   onSelect: (workspaceId: string) => void;
 }) {
+  const [mobileOpen, setMobileOpen] = useState(false);
   return (
-    <aside className="flex w-[74px] shrink-0 flex-col items-center border-r border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-primary)_84%,var(--bg-elevated))] px-2.5 py-5">
+    <>
+    <button type="button" onClick={() => setMobileOpen(true)} className="fixed left-2 top-2 z-[62] flex h-10 w-10 items-center justify-center rounded-[9px] border border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_94%,transparent)] text-[var(--text-secondary)] shadow-[0_6px_18px_rgba(27,20,12,0.1)] backdrop-blur sm:hidden" aria-label="Open artifact workspace filters" aria-expanded={mobileOpen} aria-controls="artifacts-mobile-rail"><LayoutGrid className="h-4 w-4" /></button>
+    {mobileOpen ? <button type="button" className="fixed inset-0 z-[63] bg-black/20 sm:hidden" onClick={() => setMobileOpen(false)} aria-label="Close artifact workspace filters" /> : null}
+    <aside id="artifacts-mobile-rail" className={`fixed inset-y-0 left-0 z-[64] flex w-[82px] shrink-0 flex-col items-center border-r border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-primary)_94%,var(--bg-elevated))] px-2.5 py-5 shadow-[12px_0_36px_rgba(27,20,12,0.12)] transition-transform duration-200 sm:relative sm:z-auto sm:w-[74px] sm:translate-x-0 sm:shadow-none ${mobileOpen ? "translate-x-0" : "-translate-x-full"}`}>
       <button
         type="button"
         className={`flex h-14 w-14 flex-col items-center justify-center gap-1 rounded-[8px] text-[11px] font-medium transition ${
           !selectedWorkspaceId ? "bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[0_2px_8px_rgba(27,20,12,0.04)]" : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
         }`}
-        onClick={() => onSelect("")}
+        onClick={() => { onSelect(""); setMobileOpen(false); }}
       >
         <LayoutGrid className="h-4 w-4" />
         All
@@ -139,7 +158,7 @@ function ArtifactsRail({
               className={`flex w-14 flex-col items-center gap-1 rounded-[8px] px-1.5 py-2 text-[11px] font-medium transition ${
                 selected ? "bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[0_2px_8px_rgba(27,20,12,0.04)]" : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
               }`}
-              onClick={() => onSelect(workspace._id)}
+              onClick={() => { onSelect(workspace._id); setMobileOpen(false); }}
               title={`Filter ${workspace.title}`}
             >
               <span className="flex h-9 w-9 items-center justify-center rounded-[8px] text-white" style={{ background: accent.color }}>
@@ -151,11 +170,11 @@ function ArtifactsRail({
         })}
       </div>
     </aside>
+    </>
   );
 }
 
 export function ArtifactsShell() {
-  const spectraSession = useSpectraSession();
   const searchParams = useSearchParams();
   const requestedArtifactId = searchParams.get("artifactId");
   const [allArtifacts, setAllArtifacts] = useState<SpectraArtifact[]>([]);
@@ -168,30 +187,114 @@ export function ArtifactsShell() {
   const [sortOpen, setSortOpen] = useState(false);
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState("");
   const [multiSelectMode, setMultiSelectMode] = useState(false);
-  const [selectedContextIds, setSelectedContextIds] = useState<Set<string>>(() => new Set());
   const [focusModeOverride, setFocusModeOverride] = useState<ComposerFocusMode | null>(null);
-  const [composerThread, setComposerThread] = useState<{ id: string; title: string; runId?: string } | null>(null);
   const [createMenuOpen, setCreateMenuOpen] = useState(false);
   const [hubTabs, setHubTabs] = useState<ArtifactHubTab[]>(() => [{ id: "artifacts-all-default", label: "All" }]);
   const [activeHubTabId, setActiveHubTabId] = useState<string | null>("artifacts-all-default");
   const [hubTabsRestored, setHubTabsRestored] = useState(false);
   const [studioPanelWidth, setStudioPanelWidth] = useState(760);
+  const [liveThreadPanelWidth, setLiveThreadPanelWidth] = useState(560);
   const [addMenuArtifactId, setAddMenuArtifactId] = useState<string | null>(null);
   const [moveMenuArtifactId, setMoveMenuArtifactId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const metadataLoadedRef = useRef(false);
+  const loadSequenceRef = useRef(0);
   const openedQueryArtifactRef = useRef<string | null>(null);
   const [placementAnchor, setPlacementAnchor] = useState<DOMRect | null>(null);
   const [pendingCreateType, setPendingCreateType] = useState<SpectraBlueprintKey | null>(null);
   const [artifactDeletePending, setArtifactDeletePending] = useState<SpectraArtifact | null>(null);
   const createMenuRef = useOutsideClick<HTMLDivElement>(createMenuOpen, () => setCreateMenuOpen(false));
   const sortMenuRef = useOutsideClick<HTMLDivElement>(sortOpen, () => setSortOpen(false));
+  const openObjects = useSpectraContextStore((state) => state.openObjects);
+  const tileArtifactIds = useSpectraContextStore((state) => state.tileArtifactIds);
+  const workSetIsolated = useSpectraContextStore((state) => state.tilesIsolated);
+  const openObject = useSpectraContextStore((state) => state.openObject);
+  const closePresentation = useSpectraContextStore((state) => state.closePresentation);
+  const setTileObjects = useSpectraContextStore((state) => state.setTileObjects);
+  const addTileObject = useSpectraContextStore((state) => state.addTileObject);
+  const removeTileObject = useSpectraContextStore((state) => state.removeTileObject);
+  const clearTiles = useSpectraContextStore((state) => state.clearTiles);
+  const setWorkSetIsolated = useSpectraContextStore((state) => state.setTilesIsolated);
+  const activeRunPanelId = openObjects.find((object) => object.type === "run" && object.presentation === "run-panel")?.id ?? null;
+  const threadPanelObject = openObjects.find((object) => object.type === "thread" && object.presentation === "thread-panel") ?? null;
+  const liveThread = threadPanelObject ? { id: threadPanelObject.id, title: threadPanelObject.label } : null;
+  const { composerThread, setComposerThread, selectedContextIds, contextArtifactIds, explicitContextObjects, setSelectedContextIds, commitSelection, clearDraftSelection, setVisibleArtifactIds, setActiveWorkspaceContext } = useSpectraContext(allArtifacts, workspaces);
   const studio = useArtifactStudioState("spectra.shared.artifactStudio", allArtifacts);
+  const setActiveRunPanelId = useCallback((runId: string | null, label = "Run details") => {
+    if (runId) openObject({ type: "run", id: runId, label, presentation: "run-panel" });
+    else closePresentation("run-panel");
+  }, [closePresentation, openObject]);
+  const setLiveThread = useCallback((thread: { id: string; title: string } | null) => {
+    if (thread) openObject({ type: "thread", id: thread.id, label: thread.title, presentation: "thread-panel" });
+    else closePresentation("thread-panel");
+  }, [closePresentation, openObject]);
+  const tiledArtifacts = useMemo(
+    () => tileArtifactIds.flatMap((id) => {
+      const artifact = allArtifacts.find((item) => item._id === id);
+      return artifact ? [artifact] : [];
+    }),
+    [allArtifacts, tileArtifactIds],
+  );
   const selectedWorkspace = workspaces.find((item) => item._id === selectedWorkspaceId) ?? null;
-  const activeLocalThread = !composerThread ? spectraSession.localThreads.find((thread) => thread.runId === spectraSession.activeLocalThreadRunId) ?? null : null;
-  const naturalFocusMode: ComposerFocusMode = composerThread || activeLocalThread ? "thread" : selectedContextIds.size ? "selection" : studio.activeArtifact ? "artifact" : selectedWorkspace ? "workspace" : "global";
-  const effectiveFocusMode = focusModeOverride === "selection" && selectedContextIds.size === 0 ? naturalFocusMode : focusModeOverride === "artifact" && !studio.activeArtifact ? naturalFocusMode : focusModeOverride === "workspace" && !selectedWorkspace ? naturalFocusMode : focusModeOverride === "thread" && !composerThread && !activeLocalThread ? naturalFocusMode : focusModeOverride ?? naturalFocusMode;
+  useEffect(() => setActiveWorkspaceContext(selectedWorkspace ? { id: selectedWorkspace._id, title: selectedWorkspace.title } : null), [selectedWorkspace, setActiveWorkspaceContext]);
+  const contextualArtifactIds = useMemo(() => [...new Set([...contextArtifactIds, ...tiledArtifacts.map((artifact) => artifact._id)])].slice(0, 24), [contextArtifactIds, tiledArtifacts]);
+  const naturalFocusMode: ComposerFocusMode = composerThread ? "thread" : studio.activeArtifact ? "artifact" : contextualArtifactIds.length ? "selection" : selectedWorkspace ? "workspace" : "global";
+  const effectiveFocusMode = focusModeOverride === "selection" && contextualArtifactIds.length === 0 ? naturalFocusMode : focusModeOverride === "artifact" && !studio.activeArtifact ? naturalFocusMode : focusModeOverride === "workspace" && !selectedWorkspace ? naturalFocusMode : focusModeOverride === "thread" && !composerThread ? naturalFocusMode : focusModeOverride ?? naturalFocusMode;
+
+  useEffect(() => {
+    setVisibleArtifactIds([...new Set([...tiledArtifacts.map((artifact) => artifact._id), ...(studio.activeArtifact ? [studio.activeArtifact._id] : [])])]);
+  }, [setVisibleArtifactIds, studio.activeArtifact, tiledArtifacts]);
+
+  function restoreLatestSelection() {
+    try {
+      const parsed = JSON.parse(window.localStorage.getItem("spectra.artifacts.latest-selection.v1") ?? "[]");
+      if (!Array.isArray(parsed)) return;
+      const valid = new Set(allArtifacts.map((artifact) => artifact._id));
+      const restored = parsed.filter((id): id is string => typeof id === "string" && valid.has(id)).slice(0, 24);
+      if (restored.length) {
+        setSelectedContextIds(new Set(restored));
+        setFocusModeOverride("selection");
+      }
+    } catch {
+      window.localStorage.removeItem("spectra.artifacts.latest-selection.v1");
+    }
+  }
+
+  function clearSelection() {
+    clearDraftSelection();
+    setFocusModeOverride(null);
+    window.localStorage.removeItem("spectra.artifacts.latest-selection.v1");
+  }
+
+  function openSelectedArtifactsInTiles() {
+    const selectedIds = [...selectedContextIds]
+      .filter((id) => allArtifacts.some((artifact) => artifact._id === id))
+      .slice(0, 24);
+    if (selectedIds.length === 0) {
+      toast.message("Select one or more artifacts first.");
+      return;
+    }
+    setTileObjects(selectedIds.flatMap((id) => {
+      const artifact = allArtifacts.find((item) => item._id === id);
+      return artifact ? [{ type: "artifact" as const, id, label: artifact.title, workspaceId: artifact.placements?.[0]?.workspaceId, presentation: "tile" as const }] : [];
+    }));
+    studio.closeStudio();
+    setWorkSetIsolated(false);
+  }
+
+  function closeTileArtifact(artifactId: string) {
+    removeTileObject(artifactId);
+  }
+
+  function addArtifactTile(artifactId: string) {
+    const artifact = allArtifacts.find((item) => item._id === artifactId);
+    if (artifact) addTileObject({ type: "artifact", id: artifact._id, label: artifact.title, workspaceId: artifact.placements?.[0]?.workspaceId, presentation: "tile" });
+  }
+
+  function closeTileSet() {
+    clearTiles();
+  }
 
   useEffect(() => {
     try {
@@ -262,6 +365,7 @@ export function ArtifactsShell() {
   }
 
   const load = useCallback(async (quiet = false) => {
+    const sequence = ++loadSequenceRef.current;
     if (!quiet) setLoading(true);
     try {
       const [artifactResult, overview] = await Promise.all([
@@ -270,6 +374,7 @@ export function ArtifactsShell() {
         }),
         metadataLoadedRef.current ? Promise.resolve(null) : getSpectraOverview(),
       ]);
+      if (sequence !== loadSequenceRef.current) return artifactResult.artifacts;
       setAllArtifacts(artifactResult.artifacts);
       if (overview) {
         metadataLoadedRef.current = true;
@@ -278,49 +383,81 @@ export function ArtifactsShell() {
       }
       return artifactResult.artifacts;
     } catch (error) {
+      if (sequence !== loadSequenceRef.current) return [];
       toast.error(error instanceof Error ? error.message : "Could not load artifacts.");
       return [];
     } finally {
-      setLoading(false);
+      if (sequence === loadSequenceRef.current) setLoading(false);
     }
   }, []);
 
-  const runEngine = useSpectraRun({
+	  const openArtifactSurface = useCallback((artifact: SpectraArtifact) => {
+	    if (artifact.blueprintKey === "thread_reference") {
+	      const content = artifact.content && typeof artifact.content === "object" ? artifact.content as Record<string, unknown> : {};
+	      const targetThreadId = typeof content.threadId === "string" ? content.threadId : "";
+	      if (targetThreadId) { setLiveThread({ id: targetThreadId, title: artifact.title }); return; }
+	    }
+	    studio.openSplit(artifact);
+	  }, [setLiveThread, studio]);
+
+	  const runEngine = useSpectraRun({
     surface: composerThread ? "artifacts" : studio.activeArtifact ? "artifact" : "artifacts",
     workspaceId: selectedWorkspaceId || undefined,
     artifactId: studio.activeArtifact?._id,
     threadId: composerThread?.id,
-    localConversation: activeLocalThread?.messages.map((message) => ({ role: message.role, content: message.content })),
     focusMode: effectiveFocusMode,
-    selectedArtifactIds: [...selectedContextIds],
+    selectedArtifactIds: contextualArtifactIds,
+    explicitContextObjects,
     currentView: mode,
     initialCards: resultCards,
     onThreadReady: (threadId) => {
       setComposerThread((current) => current?.id === threadId ? current : { id: threadId, title: "Current conversation" });
       window.dispatchEvent(new Event("spectra:threads-changed"));
     },
+    onContinuationConflict: () => setComposerThread(null),
     onDataChanged: () => load(true),
     onOpenArtifact: async (artifactId) => {
       const refreshed = await load(true);
       const artifact = refreshed.find((item) => item._id === artifactId);
-      if (artifact) studio.openSplit(artifact);
+      if (artifact) openArtifactSurface(artifact);
     },
-    onFinal: ({ runId, prompt, summary }) => {
-      if (activeLocalThread) spectraSession.appendLocalExchange(activeLocalThread.runId, prompt, summary, runId);
-    },
-  });
+	  });
 
-  async function openRunPanel(runId: string, title: string) {
-    try {
-      const detail = await getSpectraRunDetail(runId);
-      spectraSession.openLocalThread(runId, title, [
-        { id: `root-user:${runId}`, role: "user", content: detail.run.userPrompt, runId, createdAt: detail.run.createdAt },
-        { id: `root-assistant:${runId}`, role: "assistant", content: detail.run.finalSummary ?? detail.run.error ?? title, runId, createdAt: detail.run.updatedAt },
-      ]);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not open conversation.");
-    }
-  }
+	  useEffect(() => {
+	    function onOpenArtifact(event: Event) {
+	      const artifactId = (event as CustomEvent<{ artifactId?: string }>).detail?.artifactId;
+	      const artifact = artifactId ? allArtifacts.find((item) => item._id === artifactId) : null;
+	      if (artifact) openArtifactSurface(artifact);
+	    }
+	    function onOpenWorkspace(event: Event) {
+	      const workspaceId = (event as CustomEvent<{ workspaceId?: string }>).detail?.workspaceId;
+	      if (workspaceId) setSelectedWorkspaceId(workspaceId);
+	    }
+	    function onAsk(event: Event) {
+	      const prompt = (event as CustomEvent<{ prompt?: string }>).detail?.prompt?.trim();
+	      if (prompt) void runEngine.run(prompt);
+	    }
+	    const tile = () => openSelectedArtifactsInTiles();
+	    const focusSet = () => { openSelectedArtifactsInTiles(); setWorkSetIsolated(true); };
+	    const clear = () => clearSelection();
+	    const refresh = () => { void load(true); };
+	    window.addEventListener("spectra:open-artifact", onOpenArtifact);
+	    window.addEventListener("spectra:open-workspace", onOpenWorkspace);
+	    window.addEventListener("spectra:ask", onAsk);
+	    window.addEventListener("spectra:tile-selected", tile);
+	    window.addEventListener("spectra:focus-set", focusSet);
+	    window.addEventListener("spectra:clear-selection", clear);
+	    window.addEventListener("spectra:refresh", refresh);
+	    return () => {
+	      window.removeEventListener("spectra:open-artifact", onOpenArtifact);
+	      window.removeEventListener("spectra:open-workspace", onOpenWorkspace);
+	      window.removeEventListener("spectra:ask", onAsk);
+	      window.removeEventListener("spectra:tile-selected", tile);
+	      window.removeEventListener("spectra:focus-set", focusSet);
+	      window.removeEventListener("spectra:clear-selection", clear);
+	      window.removeEventListener("spectra:refresh", refresh);
+	    };
+	  });
 
   function toggleContinuedThread(threadId: string, title: string, runId?: string) {
     setComposerThread((current) => current?.id === threadId ? null : { id: threadId, title, runId });
@@ -331,7 +468,8 @@ export function ArtifactsShell() {
     setMode("grid");
     setSelectedContextIds((current) => {
       const next = new Set(current);
-      if (next.has(artifact._id)) next.delete(artifact._id); else if (next.size < 12) next.add(artifact._id);
+      if (next.has(artifact._id)) next.delete(artifact._id); else if (next.size < 24) next.add(artifact._id); else toast.message("Context can include up to 24 explicitly selected artifacts.");
+      window.localStorage.setItem("spectra.artifacts.latest-selection.v1", JSON.stringify([...next]));
       return next;
     });
     setFocusModeOverride("selection");
@@ -346,17 +484,8 @@ export function ArtifactsShell() {
     const artifact = allArtifacts.find((item) => item._id === requestedArtifactId);
     if (!artifact) return;
     openedQueryArtifactRef.current = requestedArtifactId;
-    studio.openSplit(artifact);
-  }, [allArtifacts, requestedArtifactId, studio]);
-
-  const autoContinuedArtifactRef = useRef<string | null>(null);
-  useEffect(() => {
-    const artifact = studio.activeArtifact;
-    if (!artifact || artifact.blueprintKey !== "thread_reference" || autoContinuedArtifactRef.current === artifact._id) return;
-    autoContinuedArtifactRef.current = artifact._id;
-    const threadId = typeof (artifact.content as { threadId?: unknown } | null)?.threadId === "string" ? String((artifact.content as { threadId: string }).threadId).trim() : "";
-    if (threadId && !composerThread) setComposerThread({ id: threadId, title: artifact.title });
-  }, [composerThread, studio.activeArtifact]);
+    openArtifactSurface(artifact);
+  }, [allArtifacts, openArtifactSurface, requestedArtifactId]);
 
   const artifacts = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -526,7 +655,7 @@ export function ArtifactsShell() {
   function rowActions(artifact: SpectraArtifact) {
     const firstPlacement = artifactPlacements(artifact)[0];
     const openButton = (
-      <button type="button" className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" onClick={() => studio.openSplit(artifact)} aria-label="Open artifact" title="Open artifact">
+      <button type="button" className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" onClick={() => openArtifactSurface(artifact)} aria-label="Open artifact" title="Open artifact">
         <ExternalLink className="h-3.5 w-3.5" />
       </button>
     );
@@ -552,11 +681,11 @@ export function ArtifactsShell() {
   }
 
   return (
-    <div className="flex h-full min-h-0 bg-[radial-gradient(circle_at_32%_-12%,color-mix(in_oklab,var(--bg-elevated)_70%,transparent),transparent_34%),var(--bg-primary)]">
+    <div className="spectra-wave-y flex h-full min-h-0 bg-[radial-gradient(circle_at_32%_-12%,color-mix(in_oklab,var(--bg-elevated)_70%,transparent),transparent_34%),var(--bg-primary)]">
       <ArtifactsRail workspaces={workspaces} selectedWorkspaceId={selectedWorkspaceId} onSelect={setSelectedWorkspaceId} />
       <div className="flex min-w-0 flex-1 flex-col">
         <StudioTabRail
-          hubTabs={hubTabs}
+          hubTabs={workSetIsolated && activeHubTabId ? hubTabs.map((tab) => tab.id === activeHubTabId ? { ...tab, label: `Work set · ${tiledArtifacts.length} objects` } : tab) : hubTabs}
           activeHubTabId={studio.mode === "tab" ? null : activeHubTabId}
           artifacts={allArtifacts}
           tabs={studio.tabs}
@@ -571,8 +700,28 @@ export function ArtifactsShell() {
         <div className="relative flex min-h-0 flex-1">
       {pendingCreateType ? <div className="absolute inset-0 z-[90] flex items-center justify-center bg-[color-mix(in_oklab,var(--bg-primary)_72%,transparent)] backdrop-blur-[2px]" onPointerDown={() => setPendingCreateType(null)}><div className="w-[390px] rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[0_24px_70px_rgba(27,20,12,0.2)]" onPointerDown={(event) => event.stopPropagation()}><h2 className="font-display text-[19px] font-semibold text-[var(--text-primary)]">Choose a destination</h2><p className="mt-1 text-[12px] text-[var(--text-secondary)]">Create this {blueprintMeta[pendingCreateType].label.toLowerCase()} in a workspace or keep it unplaced.</p><div className="mt-4 max-h-[300px] space-y-1 overflow-y-auto"><button type="button" className={menuItemClass()} onClick={() => { const type = pendingCreateType; setPendingCreateType(null); void createArtifact(createDefaultArtifactPayload(type)); }}><LayoutGrid className="h-4 w-4" />Unplaced / inbox</button>{workspaces.map((target) => <button key={target._id} type="button" className={menuItemClass()} onClick={() => { const type = pendingCreateType; setPendingCreateType(null); void createArtifact(createDefaultArtifactPayload(type), target._id); }}>{target.title}</button>)}</div></div></div> : null}
       {artifactDeletePending ? <div className="absolute inset-0 z-[96] flex items-center justify-center bg-[color-mix(in_oklab,var(--bg-primary)_76%,transparent)] p-5 backdrop-blur-[2px]" onPointerDown={() => setArtifactDeletePending(null)}><div className="w-full max-w-[440px] rounded-[12px] border border-[color-mix(in_oklab,var(--danger)_24%,var(--border-default))] bg-[var(--bg-elevated)] p-5 shadow-[0_24px_70px_rgba(27,20,12,0.2)]" onPointerDown={(event) => event.stopPropagation()}><h2 className="font-display text-[21px] font-semibold text-[var(--text-primary)]">Delete {artifactDeletePending.title}?</h2><p className="mt-2 text-[13px] leading-5 text-[var(--text-secondary)]">The artifact, placements, version history, and linked run history will be permanently removed.</p><div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setArtifactDeletePending(null)} className="h-9 px-3 text-[12px] text-[var(--text-secondary)]">Cancel</button><button type="button" disabled={busyKey === `delete:${artifactDeletePending._id}`} onClick={() => void permanentlyDeleteArtifact(artifactDeletePending, true)} className="flex h-9 items-center gap-2 rounded-[8px] bg-[var(--danger)] px-3 text-[12px] font-medium text-white disabled:opacity-45">{busyKey === `delete:${artifactDeletePending._id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}Delete permanently</button></div></div></div> : null}
-      {studio.mode === "tab" && studio.activeArtifact ? (
-        <ArtifactStudio
+	      {workSetIsolated && tiledArtifacts.length > 0 ? (
+	        <ArtifactTileSurface
+	          isolated
+	          artifacts={tiledArtifacts}
+	          allArtifacts={allArtifacts}
+	          dirtyIds={studio.dirtyIds}
+	          busyArtifactId={busyKey?.startsWith("artifact:update:") ? busyKey.replace("artifact:update:", "") : null}
+	          sourceLabel="Artifacts"
+	          continuedThreadId={composerThread?.id}
+	          onCloseArtifact={closeTileArtifact}
+	          onCloseAll={closeTileSet}
+	          onAddArtifact={addArtifactTile}
+	          onFocusSet={() => setWorkSetIsolated(true)}
+	          onExitFocusSet={() => setWorkSetIsolated(false)}
+	          onSave={updateArtifact}
+	          onRevert={revertArtifactVersion}
+	          onArchive={archiveArtifact}
+	          onDirtyChange={studio.setDirty}
+	          onContinueThread={(threadId, title) => toggleContinuedThread(threadId, title)}
+	        />
+	      ) : studio.mode === "tab" && studio.activeArtifact ? (
+	        <ArtifactStudio
           mode="tab"
           artifact={studio.activeArtifact}
           artifacts={allArtifacts}
@@ -593,7 +742,7 @@ export function ArtifactsShell() {
         />
       ) : (
       <>
-      <section className="min-w-0 flex-1 overflow-y-auto px-8 pb-[150px] pt-7">
+      <section className="min-w-0 flex-1 overflow-y-auto px-4 pb-[150px] pt-16 sm:px-8 sm:pt-7">
         <header>
           <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
             <div>
@@ -611,7 +760,7 @@ export function ArtifactsShell() {
                 />
                 <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-[var(--text-tertiary)]">Filter</span>
               </div>
-              <GlobalSearch onOpenArtifact={studio.openSplit} onOpenWorkspace={(target) => setSelectedWorkspaceId(target._id)} selectedIds={selectedContextIds} onToggleSelected={toggleContextArtifact} placementWorkspaceId={selectedWorkspace?._id} placementLabel={selectedWorkspace?.title} onPlaceArtifact={selectedWorkspace ? (artifact) => void addToWorkspace(artifact._id, selectedWorkspace._id) : undefined} />
+              <GlobalSearch onOpenArtifact={openArtifactSurface} onOpenWorkspace={(target) => setSelectedWorkspaceId(target._id)} selectedIds={selectedContextIds} onToggleSelected={toggleContextArtifact} placementWorkspaceId={selectedWorkspace?._id} placementLabel={selectedWorkspace?.title} onPlaceArtifact={selectedWorkspace ? (artifact) => void addToWorkspace(artifact._id, selectedWorkspace._id) : undefined} />
               <WorkspacePicker workspaces={workspaces} selectedWorkspaceId={selectedWorkspaceId} onSelect={setSelectedWorkspaceId} />
               <div className="relative" ref={createMenuRef}>
                 <button type="button" className={buttonClass("dark")} onClick={() => setCreateMenuOpen((open) => !open)}>
@@ -620,7 +769,7 @@ export function ArtifactsShell() {
                 </button>
                 {createMenuOpen ? (
                   <div className="absolute right-0 top-[calc(100%+8px)] z-30 w-[230px] rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[0_6px_18px_rgba(0,0,0,0.10)]">
-                    {filters.filter((filter) => filter.key !== "all" && filter.key !== "thread_reference").map((filter) => {
+                    {filters.filter((filter) => filter.key !== "all").map((filter) => {
                       const Icon = filter.icon;
                       const key = filter.key as SpectraBlueprintKey;
                       return (
@@ -664,7 +813,7 @@ export function ArtifactsShell() {
               })}
             </div>
             <div className="ml-auto flex items-center gap-2">
-            <button type="button" onClick={() => { setMultiSelectMode((value) => !value); setMode("grid"); }} className={`flex h-9 items-center gap-2 rounded-[8px] border px-3 text-[12px] font-medium transition ${multiSelectMode ? "border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-primary)]" : "border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`} title={multiSelectMode ? "Finish selecting" : "Select objects for AI context"} aria-label={multiSelectMode ? "Finish selecting" : "Select multiple artifacts"} aria-pressed={multiSelectMode}><Files className="h-4 w-4" />{multiSelectMode ? "Done selecting" : "Select objects"}</button>
+            <button type="button" onClick={() => { setMultiSelectMode((value) => { const next = !value; if (next && selectedContextIds.size === 0) restoreLatestSelection(); return next; }); setMode("grid"); }} className={`flex h-9 items-center gap-2 rounded-[8px] border px-3 text-[12px] font-medium transition ${multiSelectMode ? "border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-primary)]" : "border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`} title={multiSelectMode ? "Finish selecting" : "Select objects for AI context"} aria-label={multiSelectMode ? "Finish selecting" : "Select multiple artifacts"} aria-pressed={multiSelectMode}><Files className="h-4 w-4" />{multiSelectMode ? "Done selecting" : "Select objects"}</button>
             <div className="relative" ref={sortMenuRef}><button type="button" className={buttonClass()} onClick={() => setSortOpen((open) => !open)}>{sortMode === "updated" ? "Recently updated" : sortMode === "created" ? "Recently created" : sortMode === "title" ? "Title A–Z" : sortMode === "type" ? "Artifact type" : sortMode === "workspace" ? "Workspace" : "Activity"}<ChevronDown className="h-3.5 w-3.5" /></button>{sortOpen ? <div className="absolute right-0 top-[calc(100%+7px)] z-40 w-[190px] rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 shadow-[0_14px_32px_rgba(27,20,12,0.13)]">{([['updated','Recently updated'],['created','Recently created'],['title','Title A–Z'],['type','Artifact type'],['workspace','Workspace'],['activity','Activity']] as Array<[ArtifactSort,string]>).map(([key,label]) => <button key={key} type="button" className={menuItemClass()} onClick={() => { setSortMode(key); setSortOpen(false); }}>{label}{sortMode === key ? <CheckCircle2 className="ml-auto h-4 w-4 text-[var(--success)]" /> : null}</button>)}</div> : null}</div>
             <div className="flex rounded-[10px] bg-[color-mix(in_oklab,var(--bg-elevated)_74%,transparent)] p-1 shadow-[inset_0_0_0_1px_var(--border-default)]">
               {[
@@ -686,11 +835,11 @@ export function ArtifactsShell() {
         </header>
         {loading ? <ArtifactsSkeleton /> : null}
         {!loading && artifacts.length === 0 ? <EmptyArtifactsState /> : null}
-        {!loading && mode === "list" ? <GroupedList inbox={inbox} groups={byWorkspace} rowActions={rowActions} onOpen={studio.openSplit} /> : null}
-        {!loading && mode === "board" ? <BoardColumns groups={byWorkspace} onOpen={studio.openSplit} /> : null}
+        {!loading && mode === "list" ? <GroupedList inbox={inbox} groups={byWorkspace} rowActions={rowActions} onOpen={openArtifactSurface} /> : null}
+        {!loading && mode === "board" ? <BoardColumns groups={byWorkspace} onOpen={openArtifactSurface} /> : null}
         {mode === "grid" ? (
           <div className="mt-8 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {!loading ? artifacts.map((artifact) => <ArtifactCard key={artifact._id} artifact={artifactToCard(artifact)} actions={multiSelectMode ? undefined : rowActions(artifact)} onSelect={() => studio.openSplit(artifact)} selectionMode={multiSelectMode} contextSelected={selectedContextIds.has(artifact._id)} onToggleContext={() => toggleContextArtifact(artifact)} />) : null}
+            {!loading ? artifacts.map((artifact) => <ArtifactCard key={artifact._id} artifact={artifactToCard(artifact)} actions={multiSelectMode ? undefined : rowActions(artifact)} onSelect={() => openArtifactSurface(artifact)} selectionMode={multiSelectMode} contextSelected={selectedContextIds.has(artifact._id)} onToggleContext={() => toggleContextArtifact(artifact)} />) : null}
           </div>
         ) : null}
       </section>
@@ -714,34 +863,54 @@ export function ArtifactsShell() {
           onArchive={archiveArtifact}
           onDirtyChange={studio.setDirty}
           onContinueThread={(threadId, title) => toggleContinuedThread(threadId, title)}
-          continuedThreadId={composerThread?.id}
-        />
-      ) : null}
-      </>
-      )}
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 bg-[linear-gradient(to_top,var(--bg-primary)_72%,transparent)] px-8 pb-5 pt-12" style={spectraSession.activeLocalThreadRunId ? { right: "var(--spectra-run-panel-width, 680px)" } : undefined}>
+	          continuedThreadId={composerThread?.id}
+	        />
+	      ) : null}
+	      {!workSetIsolated && tiledArtifacts.length > 0 ? (
+	        <ArtifactTileSurface
+	          artifacts={tiledArtifacts}
+	          allArtifacts={allArtifacts}
+	          dirtyIds={studio.dirtyIds}
+	          busyArtifactId={busyKey?.startsWith("artifact:update:") ? busyKey.replace("artifact:update:", "") : null}
+	          sourceLabel="Artifacts"
+	          continuedThreadId={composerThread?.id}
+	          onCloseArtifact={closeTileArtifact}
+	          onCloseAll={closeTileSet}
+	          onAddArtifact={addArtifactTile}
+	          onFocusSet={() => setWorkSetIsolated(true)}
+	          onExitFocusSet={() => setWorkSetIsolated(false)}
+	          onSave={updateArtifact}
+	          onRevert={revertArtifactVersion}
+	          onArchive={archiveArtifact}
+	          onDirtyChange={studio.setDirty}
+	          onContinueThread={(threadId, title) => toggleContinuedThread(threadId, title)}
+	        />
+	      ) : null}
+	      </>
+	      )}
+	        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 bg-transparent px-2 pb-3 pt-2 sm:px-5 sm:pb-5 lg:px-8" style={activeRunPanelId ? { right: "var(--spectra-run-panel-width, 680px)" } : undefined}>
           <div className="pointer-events-auto mx-auto max-w-[880px]">
-            {multiSelectMode ? <SelectionActionBar count={selectedContextIds.size} onClear={() => { setSelectedContextIds(new Set()); setFocusModeOverride(null); }} onExit={() => { setMultiSelectMode(false); if (selectedContextIds.size === 0) setFocusModeOverride(null); }} onRun={(prompt) => void runEngine.run(prompt)} /> : null}
-            <ResultCardStack cards={runEngine.cards} className="mb-1.5 ml-[52px]" activeThreadId={composerThread?.id} activeRunId={composerThread?.runId ?? activeLocalThread?.runId} onContinue={(thread) => setComposerThread(thread ? { id: thread.threadId, title: thread.title, runId: thread.runId } : null)} onOpen={(card) => void openRunPanel(card.runId, card.summary ?? card.title)} onAction={(card, action, targetId) => { if (action === "hide" && spectraSession.activeLocalThreadRunId === card.runId) spectraSession.closeLocalThread(card.runId); void runEngine.onCardAction(card, action, targetId); }} />
+	            <DurableRunTabs workspaceId={selectedWorkspaceId || undefined} onOpen={(_runId, threadId, title) => { setActiveRunPanelId(null); setLiveThread({ id: threadId, title }); }} onStop={(runId) => runEngine.stop(runId)} />
+	            {multiSelectMode ? <SelectionActionBar count={selectedContextIds.size} onClear={clearSelection} onExit={() => { clearSelection(); setMultiSelectMode(false); }} onAddToContext={() => { const count = selectedContextIds.size; commitSelection(); setFocusModeOverride("selection"); setMultiSelectMode(false); toast.success(`${count} object${count === 1 ? "" : "s"} added to context.`); }} onTile={openSelectedArtifactsInTiles} /> : null}
             <CommandBar
-              placeholder={composerThread ? `Continue ${composerThread.title}...` : activeLocalThread ? `Continue ${activeLocalThread.title}...` : studio.activeArtifact ? `Act on ${studio.activeArtifact.title}...` : "Ask across all objects..."}
+              placeholder={composerThread ? `Continue ${composerThread.title}...` : studio.activeArtifact ? `Act on ${studio.activeArtifact.title}...` : "Ask across all objects..."}
               onSubmit={(prompt, attachments) => {
                 if (studio.activeArtifact && studio.dirtyIds.has(studio.activeArtifact._id)) {
                   toast.message("Save this artifact before asking Spectra to update it.");
                   return false;
                 }
-                void runEngine.run(prompt, attachments);
-                return true;
+                return runEngine.run(prompt, attachments);
               }}
               busy={runEngine.submitting}
-              allowConcurrent
+              allowConcurrent={!composerThread}
               onStop={runEngine.stop}
-              context={<ContextFocusControl mode={effectiveFocusMode} onModeChange={setFocusModeOverride} workspace={selectedWorkspace} artifact={studio.activeArtifact} selectedCount={selectedContextIds.size} threadTitle={composerThread?.title ?? activeLocalThread?.title} />}
+              onStartNewThread={() => setComposerThread(null)}
+              context={<ContextFocusControl mode={effectiveFocusMode} onModeChange={setFocusModeOverride} workspace={selectedWorkspace} artifact={studio.activeArtifact} selectedCount={contextualArtifactIds.length} threadTitle={composerThread?.title} />}
               menu={(
                 <div>
-                  <button type="button" className={menuItemClass()} onClick={() => { setComposerThread(null); spectraSession.clearActivePanel(); }}><MessageSquare className="h-4 w-4" />New chat</button>
+                  <button type="button" className={menuItemClass()} onClick={() => setComposerThread(null)}><MessageSquare className="h-4 w-4" />New chat</button>
                   <div className="my-1 h-px bg-[var(--border-subtle)]" />
-                  {filters.filter((filter) => filter.key !== "all" && filter.key !== "thread_reference").map((filter) => {
+                  {filters.filter((filter) => filter.key !== "all").map((filter) => {
                     const Icon = filter.icon;
                     const key = filter.key as SpectraBlueprintKey;
                     return (
@@ -751,22 +920,23 @@ export function ArtifactsShell() {
                       </button>
                     );
                   })}
-                  <button type="button" className={menuItemClass()} onClick={() => { setMultiSelectMode(true); setMode("grid"); }}><Files className="h-4 w-4" />Select objects for context</button>
+                  <button type="button" className={menuItemClass()} onClick={() => { setMultiSelectMode(true); setMode("grid"); if (selectedContextIds.size === 0) restoreLatestSelection(); }}><Files className="h-4 w-4" />Select objects for context</button>
                 </div>
               )}
             />
           </div>
         </div>
-        {spectraSession.activeLocalThreadRunId ? (
-          <RunDetailPanel
-            runId={spectraSession.activeLocalThreadRunId}
-            card={runEngine.cards.find((card) => card.runId === spectraSession.activeLocalThreadRunId)}
-            onClose={spectraSession.clearActivePanel}
-            onSaved={() => spectraSession.closeLocalThread(spectraSession.activeLocalThreadRunId!)}
-            onUseThread={(id, title) => toggleContinuedThread(id, title, spectraSession.activeLocalThreadRunId ?? undefined)}
-            onAction={(card, action, targetId) => void runEngine.onCardAction(card, action, targetId)}
-          />
-        ) : null}
+	        {liveThread ? <LiveThreadPanel threadId={liveThread.id} title={liveThread.title} width={liveThreadPanelWidth} onWidthChange={setLiveThreadPanelWidth} onClose={() => setLiveThread(null)} onOpenArtifact={(artifactId) => { const artifact = allArtifacts.find((item) => item._id === artifactId); if (artifact) openArtifactSurface(artifact); }} onOpenWorkspace={(workspaceId) => setSelectedWorkspaceId(workspaceId)} /> : null}
+	        {activeRunPanelId ? (
+	          <RunDetailPanel
+	            runId={activeRunPanelId}
+	            card={runEngine.cards.find((card) => card.runId === activeRunPanelId)}
+	            onClose={() => setActiveRunPanelId(null)}
+	            onSaved={() => setActiveRunPanelId(null)}
+	            onUseThread={(id, title) => toggleContinuedThread(id, title, activeRunPanelId)}
+	            onAction={(card, action, targetId) => void runEngine.onCardAction(card, action, targetId)}
+	          />
+	        ) : null}
         </div>
       </div>
     </div>

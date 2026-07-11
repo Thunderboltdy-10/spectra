@@ -1496,7 +1496,7 @@ export function ChatMessages({
 
           {visibleDraftResponse && (mode === "quiz" || mode === "exam" || mode === "flashcard" || mode === "document") ? (
             <article className="chat-fade-in flex justify-start">
-              <div className="w-full max-w-5xl rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-4 py-3">
+              <div data-spectra-card="result" data-card-state="creating" className="w-full max-w-5xl px-4 py-3">
                 <div className="mb-3 inline-flex items-center gap-2 text-xs text-[var(--text-secondary)]">
                   <ProviderLogo provider={activeProvider} modelId={streamingModelId} size={12} className="h-5 w-5 rounded-md" />
                   <span>{modelLabel(streamingModelId)} · {streamingStatus}</span>
@@ -1513,11 +1513,11 @@ export function ChatMessages({
                     {(showQuizSkeletonOnly ? [0, 1, 2] : [0, 1, 2, 3]).map((index) => (
                       <div
                         key={`structured-stream-skeleton-${index}`}
-                        className="rounded-xl border border-dashed border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-3"
+                        className="spectra-skeleton-block px-3 py-3"
                       >
-                        <div className="h-3 w-2/3 animate-pulse rounded bg-[var(--bg-primary)]" />
-                        <div className="mt-2 h-2.5 w-full animate-pulse rounded bg-[var(--bg-primary)]" />
-                        <div className="mt-1.5 h-2.5 w-5/6 animate-pulse rounded bg-[var(--bg-primary)]" />
+                        <div className="spectra-skeleton-line h-3 w-2/3" />
+                        <div className="spectra-skeleton-line mt-2 h-2.5 w-full" />
+                        <div className="spectra-skeleton-line mt-1.5 h-2.5 w-5/6" />
                       </div>
                     ))}
                   </div>
@@ -1586,9 +1586,9 @@ export function ChatMessages({
               >
                 {!hasRealThinking && activeCollaborators.length === 0 ? (
                   <div className="space-y-2 mt-2">
-                    <div className="h-4 w-3/4 animate-pulse rounded bg-[var(--bg-secondary)]" />
-                    <div className="h-4 w-1/2 animate-pulse rounded bg-[var(--bg-secondary)]" />
-                    <div className="h-4 w-5/6 animate-pulse rounded bg-[var(--bg-secondary)]" />
+                    <div className="spectra-skeleton-line h-4 w-3/4" />
+                    <div className="spectra-skeleton-line h-4 w-1/2" />
+                    <div className="spectra-skeleton-line h-4 w-5/6" />
                   </div>
                 ) : null}
               </ChatMessage>

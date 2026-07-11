@@ -51,6 +51,41 @@ export function extractPartialJsonStringField(source: string, field: string) {
   return { ...decodePartialJsonString(source, start), found: true };
 }
 
+export function extractCompleteJsonArrayItems(source: string, field: string) {
+  const match = new RegExp(`"${field}"\\s*:\\s*\\[`).exec(source);
+  if (!match) return [] as unknown[];
+  const values: unknown[] = [];
+  let itemStart = -1;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = match.index + match[0].length; index < source.length; index += 1) {
+    const character = source[index]!;
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') inString = false;
+      continue;
+    }
+    if (character === '"') { inString = true; continue; }
+    if (character === "{") {
+      if (depth === 0) itemStart = index;
+      depth += 1;
+      continue;
+    }
+    if (character === "}") {
+      depth -= 1;
+      if (depth === 0 && itemStart >= 0) {
+        try { values.push(JSON.parse(source.slice(itemStart, index + 1))); } catch { /* incomplete item */ }
+        itemStart = -1;
+      }
+      continue;
+    }
+    if (character === "]" && depth === 0) break;
+  }
+  return values;
+}
+
 function normalizeUsage(value: unknown, elapsedMs: number): OpenRouterUsage | undefined {
   if (!value || typeof value !== "object") return elapsedMs > 0 ? { elapsedMs } : undefined;
   const usage = value as Record<string, unknown>;
@@ -70,6 +105,7 @@ export async function readOpenRouterResponse(
   response: Response,
   onPublicText?: (delta: string) => void,
   onReasoningText?: (delta: string) => void,
+  onPlanText?: (text: string) => void,
 ): Promise<OpenRouterPlanResult> {
   const startedAt = Date.now();
   const contentType = response.headers.get("content-type") ?? "";
@@ -83,6 +119,7 @@ export async function readOpenRouterResponse(
       : "";
     const extracted = extractPartialJsonStringField(text, "finalResponse");
     if (extracted.value) onPublicText?.(extracted.value);
+    onPlanText?.(text);
     return {
       text,
       model: typeof payload.model === "string" ? payload.model : undefined,
@@ -115,7 +152,10 @@ export async function readOpenRouterResponse(
       if (chunk.usage) rawUsage = chunk.usage;
       const choices = Array.isArray(chunk.choices) ? chunk.choices as Array<Record<string, unknown>> : [];
       const delta = choices[0]?.delta && typeof choices[0].delta === "object" ? choices[0].delta as Record<string, unknown> : {};
-      if (typeof delta.content === "string") text += delta.content;
+      if (typeof delta.content === "string") {
+        text += delta.content;
+        onPlanText?.(text);
+      }
       if (typeof delta.reasoning === "string") onReasoningText?.(delta.reasoning);
       if (Array.isArray(delta.reasoning_details)) {
         for (const detail of delta.reasoning_details) {

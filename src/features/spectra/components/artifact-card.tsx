@@ -15,7 +15,8 @@ export type ArtifactCardView = {
   pinned?: boolean;
   variant?: string;
   metrics?: Record<string, string | number>;
-  aiState?: "generated" | "edited" | "creating" | "updating";
+  aiState?: "generated" | "edited" | "creating" | "updating" | "failed";
+  aiProgress?: number;
 };
 
 export const blueprintMeta: Record<ArtifactCardView["blueprintKey"], { label: string; icon: LucideIcon; color: string; soft: string }> = {
@@ -54,7 +55,7 @@ export function ArtifactCard({
   const interactive = Boolean(onSelect);
   const metrics = Object.entries(artifact.metrics ?? {}).slice(0, size === "compact" ? 0 : 4);
   const cardState: SpectraCardState = contextSelected
-    ? "context"
+    ? selectionMode ? "multi-selected" : "context"
     : selected
       ? "focused"
       : artifact.aiState === "creating"
@@ -63,6 +64,8 @@ export function ArtifactCard({
           ? "updating"
           : artifact.aiState === "edited" || artifact.aiState === "generated"
             ? "edited"
+            : artifact.aiState === "failed"
+              ? "failed"
             : "normal";
 
   return (
@@ -77,12 +80,18 @@ export function ArtifactCard({
         quiet ? "shadow-none" : "shadow-[0_1px_2px_rgba(27,20,12,0.03)]",
         className,
       )}
-      onClick={selectionMode && onToggleContext ? onToggleContext : onSelect}
+      onClick={(event) => {
+        if (onToggleContext && (selectionMode || event.metaKey || event.ctrlKey)) {
+          onToggleContext();
+          return;
+        }
+        onSelect?.();
+      }}
       data-interactive={interactive ? "true" : undefined}
       data-ai-state={artifact.aiState}
       data-context-state={contextSelected ? "selected" : selected ? "focused" : "normal"}
     >
-      {selectionMode ? <button type="button" onClick={(event) => { event.stopPropagation(); onToggleContext?.(); }} className={`absolute right-2.5 top-2.5 z-20 flex h-6 w-6 items-center justify-center rounded-[6px] border transition-all duration-200 ${contextSelected ? "scale-100 border-[var(--accent-cyan)] bg-[var(--accent-cyan)] text-white shadow-[0_4px_12px_color-mix(in_oklab,var(--accent-cyan)_28%,transparent)]" : "border-[var(--border-default)] bg-[var(--bg-elevated)] text-transparent hover:border-[var(--accent-cyan)]"}`} aria-label={contextSelected ? "Remove from context" : "Add to context"}><Check className="h-3.5 w-3.5" /></button> : null}
+      {selectionMode ? <button type="button" onClick={(event) => { event.stopPropagation(); onToggleContext?.(); }} className={`absolute right-2.5 top-2.5 z-20 flex h-6 w-6 items-center justify-center rounded-[6px] border transition-all duration-200 ${contextSelected ? "scale-100 border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-primary)]" : "border-[var(--border-default)] bg-[var(--bg-elevated)] text-transparent hover:border-[var(--text-primary)]"}`} aria-label={contextSelected ? "Remove from selection" : "Add to selection"}><Check className="h-3.5 w-3.5" /></button> : null}
       <div className="relative z-[1] flex items-start gap-3">
         <CardTypeIcon icon={Icon} color={meta.color} />
         <div className="min-w-0 flex-1">
@@ -91,8 +100,9 @@ export function ArtifactCard({
             <span className="text-[10px] text-[var(--text-tertiary)]">•</span>
             <span className="min-w-0 truncate text-[11px] text-[var(--text-tertiary)]">{artifact.meta}</span>
           </div>
-          <h3 className={cn("mt-2 text-[var(--text-primary)]", size === "large" ? "max-w-[14rem] text-[20px] font-semibold leading-[1.12] font-display" : "truncate text-[14px] font-semibold")}>{artifact.title}</h3>
+          {interactive ? <button type="button" onClick={(event) => { event.stopPropagation(); if (selectionMode && onToggleContext) onToggleContext(); else onSelect?.(); }} className={cn("mt-2 block max-w-full rounded-[4px] text-left text-[var(--text-primary)] outline-none hover:text-[var(--accent-cyan)] focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--accent-cyan)_35%,transparent)]", size === "large" ? "max-w-[14rem] text-[20px] font-semibold leading-[1.12] font-display" : "truncate text-[14px] font-semibold")}>{artifact.title}</button> : <h3 className={cn("mt-2 text-[var(--text-primary)]", size === "large" ? "max-w-[14rem] text-[20px] font-semibold leading-[1.12] font-display" : "truncate text-[14px] font-semibold")}>{artifact.title}</h3>}
           <p className={cn("mt-2 text-[12px] leading-5 text-[var(--text-secondary)]", size === "large" ? "line-clamp-3 max-w-[16rem]" : "line-clamp-2")}>{artifact.summary}</p>
+          {artifact.aiState === "creating" && typeof artifact.aiProgress === "number" ? <div className="mt-3 h-1 overflow-hidden rounded-full bg-[color-mix(in_oklab,var(--accent-cyan)_10%,var(--bg-secondary))]" role="progressbar" aria-label={`Creating ${artifact.title}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(artifact.aiProgress * 100)}><span className="block h-full rounded-full bg-[var(--accent-cyan)] transition-[width] duration-300 motion-reduce:transition-none" style={{ width: `${Math.max(4, artifact.aiProgress * 100)}%` }} /></div> : null}
           {metrics.length > 0 ? (
             <div className="mt-5 grid grid-cols-3 gap-2">
               {metrics.slice(0, 3).map(([label, value]) => (

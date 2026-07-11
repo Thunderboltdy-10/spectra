@@ -87,7 +87,6 @@ export async function GET(request: NextRequest) {
       const artifacts = await convexQuery("artifacts:searchByContent", {
         actorClerkId: actor.clerkId,
         query,
-        workstreamId: params.get("workstreamId") ?? undefined,
         limit: params.has("limit") ? Number(params.get("limit")) : undefined,
       });
       return ok({ artifacts });
@@ -129,7 +128,6 @@ export async function GET(request: NextRequest) {
       actorClerkId: actor.clerkId,
       type: params.get("type") ?? undefined,
       status: params.get("status") ?? undefined,
-      workstreamId: params.get("workstreamId") ?? undefined,
       search: params.get("search") ?? undefined,
       limit: params.has("limit") ? Number(params.get("limit")) : undefined,
     });
@@ -150,7 +148,6 @@ export async function POST(request: NextRequest) {
         title?: string;
         content?: unknown;
         contentPlaintext?: string;
-        workstreamId?: string;
         editorMode?: "standard" | "ai_enhanced" | "agentic" | "notion" | "simple";
         sourceType?: "user_manual" | "ai_generated" | "managebac_sync";
         managebacItemId?: string;
@@ -172,7 +169,6 @@ export async function POST(request: NextRequest) {
         title: sanitizeArtifactTitle(title, type === "document" ? "Untitled document" : "Untitled artifact"),
         content: content ?? {},
         contentPlaintext: sanitizeArtifactPlaintext(body.contentPlaintext),
-        workstreamId: body.workstreamId as string | undefined,
         editorMode: body.editorMode as "standard" | "ai_enhanced" | "agentic" | "notion" | "simple" | undefined,
         sourceType: body.sourceType as "user_manual" | "ai_generated" | "managebac_sync" | undefined,
         managebacItemId: body.managebacItemId as string | undefined,
@@ -195,7 +191,6 @@ export async function POST(request: NextRequest) {
         title?: string;
         content?: unknown;
         contentPlaintext?: string | null;
-        workstreamId?: string | null;
         editorMode?: "standard" | "ai_enhanced" | "agentic" | "notion" | "simple";
         sourceType?: "user_manual" | "ai_generated" | "managebac_sync" | null;
         managebacItemId?: string | null;
@@ -219,7 +214,6 @@ export async function POST(request: NextRequest) {
         title: title == null ? undefined : sanitizeArtifactTitle(title),
         content,
         contentPlaintext: sanitizeArtifactPlaintext(body.contentPlaintext) as string | null | undefined,
-        workstreamId: body.workstreamId as string | null | undefined,
         editorMode: body.editorMode as "standard" | "ai_enhanced" | "agentic" | "notion" | "simple" | undefined,
         sourceType: body.sourceType as "user_manual" | "ai_generated" | "managebac_sync" | null | undefined,
         managebacItemId: body.managebacItemId as string | null | undefined,

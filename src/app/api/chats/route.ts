@@ -9,7 +9,6 @@ export async function GET(request: NextRequest) {
   return withRouteErrorHandling(async () => {
     const actor = await requireActor();
     const packId = request.nextUrl.searchParams.get("packId") ?? undefined;
-    const workstreamId = request.nextUrl.searchParams.get("workstreamId") ?? undefined;
     const artifactId = request.nextUrl.searchParams.get("artifactId") ?? undefined;
     const limitRaw = Number.parseInt(request.nextUrl.searchParams.get("limit") ?? "", 10);
     const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(limitRaw, 300)) : 120;
@@ -24,7 +23,6 @@ export async function GET(request: NextRequest) {
     const chats = await convexQuery("chats:listChats", {
       actorClerkId: actor.clerkId,
       packId,
-      workstreamId,
       limit,
     });
     return ok({ chats });
@@ -36,7 +34,6 @@ export async function POST(request: NextRequest) {
     const actor = await requireActor();
     const body = (await request.json()) as {
       packId?: string;
-      workstreamId?: string;
       artifactId?: string;
       threadType?: "conversation" | "artifact_edit";
       mode?: StudyMode;
@@ -58,7 +55,6 @@ export async function POST(request: NextRequest) {
       actorClerkId: actor.clerkId,
       packId: body.packId,
       agentId: body.agentId,
-      workstreamId: body.workstreamId,
       artifactId: body.artifactId,
       threadType: body.threadType,
       mode: validMode,

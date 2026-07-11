@@ -1,4 +1,4 @@
-import { action, internalMutation, internalQuery, mutation, query, type MutationCtx } from "./_generated/server";
+import { action, internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { getUserByClerkId } from "./helpers";
@@ -13,8 +13,6 @@ import {
   summarizeBranchedMessages,
 } from "./chatBranching";
 import { addMessageToPlatformStats, removeMessageFromPlatformStats } from "./platformStatsAggregates";
-import { recordWorkspaceMutation } from "./workspaceHelpers";
-import { syncWorkspaceItemForChat } from "./workspaceItemSync";
 
 async function validateArtifact(
   ctx: Parameters<typeof getUserByClerkId>[0],
@@ -26,20 +24,6 @@ async function validateArtifact(
   if (!artifact || artifact.ownerUserId !== actor._id || artifact.orgId !== actor.orgId) {
     throw new Error("Artifact not found");
   }
-}
-
-async function adjustWorkstreamThreadCount(
-  ctx: Pick<MutationCtx, "db">,
-  workstreamId: Id<"workstreams"> | undefined,
-  delta: number,
-) {
-  if (!workstreamId || delta === 0) return;
-  const workstream = await ctx.db.get(workstreamId);
-  if (!workstream) return;
-  await ctx.db.patch(workstreamId, {
-    threadCount: Math.max(0, (workstream.threadCount ?? 0) + delta),
-    updatedAt: Date.now(),
-  });
 }
 
 function compactMessageText(value: string) {
@@ -191,7 +175,6 @@ export const listChats = query({
   args: {
     actorClerkId: v.string(),
     packId: v.optional(v.id("packs")),
-    workstreamId: v.optional(v.id("workstreams")),
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
@@ -208,27 +191,15 @@ export const listChats = query({
           .filter((q) => q.eq(q.field("deletedAt"), undefined))
           .order("desc")
           .take(max)
-      : args.workstreamId
-        ? await ctx.db
-            .query("chats")
-            .withIndex("by_workstream", (q) => q.eq("workstreamId", args.workstreamId))
-            .filter((q) => q.and(
-              q.eq(q.field("ownerUserId"), actor._id),
-              q.eq(q.field("orgId"), actor.orgId),
-              q.eq(q.field("deletedAt"), undefined),
-            ))
-            .order("desc")
-            .take(max)
-        : await ctx.db
-            .query("chats")
-            .withIndex("by_owner_updated", (q) => q.eq("ownerUserId", actor._id))
-            .filter((q) => q.eq(q.field("deletedAt"), undefined))
-            .order("desc")
-            .take(max);
+      : await ctx.db
+          .query("chats")
+          .withIndex("by_owner_updated", (q) => q.eq("ownerUserId", actor._id))
+          .filter((q) => q.eq(q.field("deletedAt"), undefined))
+          .order("desc")
+          .take(max);
 
     return chats
       .filter((chat) => (args.packId ? chat.packId === args.packId : true))
-      .filter((chat) => (args.workstreamId ? chat.workstreamId === args.workstreamId : true))
       .slice(0, max)
       .map((chat) => ({
         _id: chat._id,
@@ -237,7 +208,6 @@ export const listChats = query({
         mode: chat.mode,
         packId: chat.packId,
         agentId: chat.agentId,
-        workstreamId: chat.workstreamId,
         artifactId: chat.artifactId,
         threadType: chat.threadType ?? "conversation",
         messageCount: chat.messageCount ?? 0,
@@ -302,47 +272,11 @@ export const listByArtifact = query({
   },
 });
 
-export const listByWorkstreamSummary = query({
-  args: {
-    actorClerkId: v.string(),
-    workstreamId: v.optional(v.id("workstreams")),
-    recentLimit: v.optional(v.number()),
-  },
-  handler: async (ctx, args) => {
-    const actor = await getUserByClerkId(ctx, args.actorClerkId);
-    if (!actor) {
-      throw new Error("Unauthorized");
-    }
-
-    const recentLimit = Math.max(5, Math.min(args.recentLimit ?? 6, 8));
-    const rows = args.workstreamId
-      ? await ctx.db
-          .query("chats")
-          .withIndex("by_workstream", (q) => q.eq("workstreamId", args.workstreamId))
-          .collect()
-      : await ctx.db
-          .query("chats")
-          .withIndex("by_owner_updated", (q) => q.eq("ownerUserId", actor._id))
-          .collect();
-
-    const filtered = rows
-      .filter((row) => row.ownerUserId === actor._id && row.orgId === actor.orgId && !row.deletedAt)
-      .filter((row) => (args.workstreamId === undefined ? row.workstreamId === undefined : row.workstreamId === args.workstreamId))
-      .sort((a, b) => b.updatedAt - a.updatedAt);
-
-    return {
-      recent: filtered.slice(0, recentLimit),
-      overflowCount: Math.max(0, filtered.length - recentLimit),
-    };
-  },
-});
-
 export const createChat = mutation({
   args: {
     actorClerkId: v.string(),
     packId: v.optional(v.id("packs")),
     agentId: v.optional(v.id("agents")),
-    workstreamId: v.optional(v.id("workstreams")),
     artifactId: v.optional(v.id("artifacts")),
     threadType: v.optional(v.union(v.literal("conversation"), v.literal("artifact_edit"))),
     mode: vStudyMode,
@@ -377,13 +311,6 @@ export const createChat = mutation({
       }
     }
 
-    if (args.workstreamId) {
-      const workstream = await ctx.db.get(args.workstreamId);
-      if (!workstream || workstream.ownerUserId !== actor._id || workstream.orgId !== actor.orgId) {
-        throw new Error("Workstream not found");
-      }
-    }
-
     await validateArtifact(ctx, actor, args.artifactId);
     const threadType = args.threadType ?? (args.artifactId ? "artifact_edit" : "conversation");
 
@@ -393,7 +320,6 @@ export const createChat = mutation({
       orgId: actor.orgId,
       packId: args.packId,
       agentId,
-      workstreamId: args.workstreamId,
       artifactId: args.artifactId,
       threadType,
       ownerUserId: actor._id,
@@ -411,31 +337,7 @@ export const createChat = mutation({
       updatedAt: now,
     });
 
-    const mutationId = await recordWorkspaceMutation(ctx, {
-      orgId: actor.orgId,
-      ownerUserId: actor._id,
-      workstreamId: args.workstreamId,
-      mutationType: "create_thread",
-      source: "user",
-      entity: "thread",
-      action: "created",
-      summary: `Created thread ${title}`,
-      after: { chatId },
-    });
-    await syncWorkspaceItemForChat(ctx, {
-      chatId,
-      ownerUserId: actor._id,
-      orgId: actor.orgId,
-      workstreamId: args.workstreamId,
-      title,
-      latestUserPrompt: undefined,
-      contextSummary: undefined,
-      createdAt: now,
-      updatedAt: now,
-    });
-    await adjustWorkstreamThreadCount(ctx, args.workstreamId, 1);
-
-    return { chatId, mutationId };
+    return { chatId };
   },
 });
 
@@ -471,7 +373,6 @@ export const getOrCreateArtifactThread = mutation({
   args: {
     actorClerkId: v.string(),
     artifactId: v.id("artifacts"),
-    workstreamId: v.optional(v.id("workstreams")),
     mode: vStudyMode,
     thinkingLevel: vThinkingLevel,
     routerMode: vRouterMode,
@@ -486,12 +387,6 @@ export const getOrCreateArtifactThread = mutation({
     }
 
     await validateArtifact(ctx, actor, args.artifactId);
-    if (args.workstreamId) {
-      const workstream = await ctx.db.get(args.workstreamId);
-      if (!workstream || workstream.ownerUserId !== actor._id || workstream.orgId !== actor.orgId) {
-        throw new Error("Workstream not found");
-      }
-    }
 
     const now = Date.now();
     const title = args.title ?? "New chat";
@@ -499,7 +394,6 @@ export const getOrCreateArtifactThread = mutation({
       orgId: actor.orgId,
       packId: undefined,
       agentId: undefined,
-      workstreamId: args.workstreamId,
       artifactId: args.artifactId,
       threadType: "artifact_edit",
       ownerUserId: actor._id,
@@ -517,31 +411,7 @@ export const getOrCreateArtifactThread = mutation({
       updatedAt: now,
     });
 
-    const mutationId = await recordWorkspaceMutation(ctx, {
-      orgId: actor.orgId,
-      ownerUserId: actor._id,
-      workstreamId: args.workstreamId,
-      mutationType: "create_thread",
-      source: "user",
-      entity: "thread",
-      action: "created",
-      summary: `Created thread ${title}`,
-      after: { chatId },
-    });
-    await syncWorkspaceItemForChat(ctx, {
-      chatId,
-      ownerUserId: actor._id,
-      orgId: actor.orgId,
-      workstreamId: args.workstreamId,
-      title,
-      latestUserPrompt: undefined,
-      contextSummary: undefined,
-      createdAt: now,
-      updatedAt: now,
-    });
-    await adjustWorkstreamThreadCount(ctx, args.workstreamId, 1);
-
-    return { chatId, created: true, mutationId };
+    return { chatId, created: true };
   },
 });
 
@@ -683,18 +553,6 @@ export const appendMessage = mutation({
       mode: args.mode,
     });
 
-    await syncWorkspaceItemForChat(ctx, {
-      chatId: chat._id,
-      ownerUserId: actor._id,
-      orgId: actor.orgId,
-      workstreamId: chat.workstreamId,
-      title: nextTitle,
-      latestUserPrompt: nextLatestUserPrompt,
-      contextSummary: chat.contextSummary,
-      createdAt: chat.createdAt,
-      updatedAt: now,
-    });
-
     return { messageId, deduped: false };
   },
 });
@@ -827,7 +685,6 @@ export const branchFromMessage = mutation({
       orgId: sourceChat.orgId,
       packId: sourceChat.packId,
       agentId: sourceChat.agentId,
-      workstreamId: sourceChat.workstreamId,
       artifactId: sourceChat.artifactId,
       threadType: sourceChat.threadType,
       ownerUserId: sourceChat.ownerUserId,
@@ -884,30 +741,6 @@ export const branchFromMessage = mutation({
       messageCount,
       updatedAt: now + messageCount,
     });
-
-    await recordWorkspaceMutation(ctx, {
-      orgId: actor.orgId,
-      ownerUserId: actor._id,
-      workstreamId: sourceChat.workstreamId,
-      mutationType: "create_thread",
-      source: "user",
-      entity: "thread",
-      action: "created",
-      summary: `Created thread ${branchedTitle}`,
-      after: { chatId, branchedFromChatId: sourceChat._id, pivotMessageId: pivot._id },
-    });
-    await syncWorkspaceItemForChat(ctx, {
-      chatId,
-      ownerUserId: actor._id,
-      orgId: actor.orgId,
-      workstreamId: sourceChat.workstreamId,
-      title: branchedTitle,
-      latestUserPrompt,
-      contextSummary: sourceChat.contextSummary,
-      createdAt: now,
-      updatedAt: now + messageCount,
-    });
-    await adjustWorkstreamThreadCount(ctx, sourceChat.workstreamId, 1);
 
     return { chatId };
   },
@@ -966,7 +799,6 @@ export const updateChatSettings = mutation({
     routerMode: v.optional(vRouterMode),
     manualModel: v.optional(v.string()),
     agentId: v.optional(v.union(v.id("agents"), v.null())),
-    workstreamId: v.optional(v.union(v.id("workstreams"), v.null())),
     usePersonalResources: v.optional(v.boolean()),
     title: v.optional(v.string()),
   },
@@ -1002,69 +834,16 @@ export const updateChatSettings = mutation({
       }
     }
 
-    let nextWorkstreamId = chat.workstreamId;
-    if (args.workstreamId !== undefined) {
-      if (args.workstreamId === null) {
-        nextWorkstreamId = undefined;
-      } else {
-        const workstream = await ctx.db.get(args.workstreamId);
-        if (!workstream || workstream.ownerUserId !== actor._id || workstream.orgId !== actor.orgId) {
-          throw new Error("Workstream not found");
-        }
-        nextWorkstreamId = workstream._id;
-      }
-    }
-
     await ctx.db.patch(args.chatId, {
       mode: args.mode ?? chat.mode,
       thinkingLevel: args.thinkingLevel ?? chat.thinkingLevel,
       routerMode: args.routerMode ?? chat.routerMode,
       manualModel: args.manualModel ?? chat.manualModel,
       agentId: nextAgentId,
-      workstreamId: nextWorkstreamId,
       usePersonalResources: args.usePersonalResources ?? chat.usePersonalResources,
       title: args.title ?? chat.title,
       updatedAt: Date.now(),
     });
-
-    await recordWorkspaceMutation(ctx, {
-      orgId: actor.orgId,
-      ownerUserId: actor._id,
-      workstreamId: chat.workstreamId,
-      targetWorkstreamId: nextWorkstreamId !== chat.workstreamId ? nextWorkstreamId : undefined,
-      mutationType: nextWorkstreamId !== chat.workstreamId ? "move_thread" : "update_thread",
-      source: "user",
-      entity: "thread",
-      action: "updated",
-      summary: `Updated thread ${args.title ?? chat.title}`,
-      before: chat,
-      after: {
-        mode: args.mode ?? chat.mode,
-        thinkingLevel: args.thinkingLevel ?? chat.thinkingLevel,
-        routerMode: args.routerMode ?? chat.routerMode,
-        manualModel: args.manualModel ?? chat.manualModel,
-        agentId: nextAgentId,
-        workstreamId: nextWorkstreamId,
-        usePersonalResources: args.usePersonalResources ?? chat.usePersonalResources,
-        title: args.title ?? chat.title,
-      },
-    });
-    await syncWorkspaceItemForChat(ctx, {
-      chatId: chat._id,
-      ownerUserId: actor._id,
-      orgId: actor.orgId,
-      workstreamId: nextWorkstreamId,
-      title: args.title ?? chat.title,
-      latestUserPrompt: chat.latestUserPrompt,
-      contextSummary: chat.contextSummary,
-      createdAt: chat.createdAt,
-      updatedAt: Date.now(),
-    });
-
-    if (nextWorkstreamId !== chat.workstreamId) {
-      await adjustWorkstreamThreadCount(ctx, chat.workstreamId, -1);
-      await adjustWorkstreamThreadCount(ctx, nextWorkstreamId, 1);
-    }
 
     return { ok: true };
   },
@@ -1090,18 +869,6 @@ export const setContextSummary = mutation({
     const updatedAt = Date.now();
     await ctx.db.patch(chat._id, {
       contextSummary: args.contextSummary,
-      updatedAt,
-    });
-
-    await syncWorkspaceItemForChat(ctx, {
-      chatId: chat._id,
-      ownerUserId: actor._id,
-      orgId: actor.orgId,
-      workstreamId: chat.workstreamId,
-      title: chat.title,
-      latestUserPrompt: chat.latestUserPrompt,
-      contextSummary: args.contextSummary,
-      createdAt: chat.createdAt,
       updatedAt,
     });
 
@@ -1401,30 +1168,6 @@ export const deleteChat = mutation({
 
     const updatedAt = Date.now();
     await ctx.db.patch(args.chatId, { deletedAt: updatedAt, updatedAt });
-    await recordWorkspaceMutation(ctx, {
-      orgId: actor.orgId,
-      ownerUserId: actor._id,
-      workstreamId: chat.workstreamId,
-      mutationType: "delete_thread",
-      source: "user",
-      entity: "thread",
-      action: "deleted",
-      summary: `Deleted thread ${chat.title}`,
-      before: chat,
-    });
-    await syncWorkspaceItemForChat(ctx, {
-      chatId: chat._id,
-      ownerUserId: actor._id,
-      orgId: actor.orgId,
-      workstreamId: undefined,
-      deletedAt: updatedAt,
-      title: chat.title,
-      latestUserPrompt: chat.latestUserPrompt,
-      contextSummary: chat.contextSummary,
-      createdAt: chat.createdAt,
-      updatedAt,
-    });
-    await adjustWorkstreamThreadCount(ctx, chat.workstreamId, -1);
     return { ok: true };
   },
 });

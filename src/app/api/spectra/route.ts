@@ -4,7 +4,7 @@ import { convexMutation, convexQuery } from "@/lib/convex-server";
 import { badRequest, ok } from "@/lib/http";
 import { withRouteErrorHandling } from "@/lib/route-handler";
 
-const BLUEPRINTS = new Set(["document", "thread_reference", "flashcard_deck", "quiz", "planner_task"]);
+const BLUEPRINTS = new Set(["document", "flashcard_deck", "quiz", "planner_task"]);
 
 function withJsExtension(functionName: string) {
   const [moduleName, exportName] = functionName.split(":");
@@ -50,7 +50,16 @@ async function optionalSpectraQuery<TArgs extends object, TResult>(
 
 function requireString(value: unknown, name: string) {
   if (typeof value !== "string" || value.trim().length === 0) {
-    throw new Error(`${name} is required`);
+	    const label = name === "workspaceId"
+	      ? "Choose a workspace first."
+	      : name === "artifactId"
+	        ? "Choose a document or artifact first."
+	        : name === "threadId"
+	          ? "Choose a thread first."
+	          : name === "action"
+	            ? "Choose an available Spectra action."
+	          : "A required selection is missing.";
+    throw new Error(label);
   }
   return value.trim();
 }
@@ -60,10 +69,10 @@ function optionalString(value: unknown) {
 }
 
 function requireBlueprint(value: unknown) {
-  const blueprint = requireString(value, "blueprintKey");
-  if (!BLUEPRINTS.has(blueprint)) {
-    throw new Error("Invalid blueprintKey");
-  }
+	  const blueprint = requireString(value, "blueprintKey");
+	  if (!BLUEPRINTS.has(blueprint)) {
+	    throw new Error("Choose a supported artifact type.");
+	  }
   return blueprint;
 }
 
@@ -93,9 +102,15 @@ export async function GET(request: NextRequest) {
       return ok({ artifacts });
     }
 
+    if (action === "artifact") {
+      const artifactId = requireString(params.get("artifactId"), "artifactId");
+      const artifact = await spectraQuery("spectraArtifacts:get", { actorClerkId: actor.clerkId, artifactId });
+      return ok({ artifact });
+    }
+
     if (action === "workspace") {
       const workspaceId = params.get("workspaceId");
-      if (!workspaceId) return badRequest("workspaceId is required");
+      if (!workspaceId) return badRequest("Choose a workspace first.");
       const workspace = await spectraQuery("spectraWorkspaceItems:listForWorkspacePublic", {
         actorClerkId: actor.clerkId,
         workspaceId,
@@ -114,6 +129,21 @@ export async function GET(request: NextRequest) {
         limit: params.has("limit") ? Number(params.get("limit")) : undefined,
       }, []);
       return ok({ resultCards });
+    }
+
+    if (action === "runTabs") {
+      const runTabs = await spectraQuery("spectraRuns:listTabs", {
+        actorClerkId: actor.clerkId,
+        includeHidden: params.get("includeHidden") === "true",
+        limit: params.has("limit") ? Number(params.get("limit")) : undefined,
+      });
+      return ok({ runTabs });
+    }
+
+    if (action === "runEvents") {
+      const runId = requireString(params.get("runId"), "runId");
+      const events = await spectraQuery("spectraRuns:listEvents", { actorClerkId: actor.clerkId, runId, after: params.has("after") ? Number(params.get("after")) : undefined });
+      return ok({ events });
     }
 
     if (action === "runDetail") {
@@ -209,7 +239,7 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    return badRequest("Unknown Spectra action");
+	    return badRequest("That Spectra action is not available.");
   }, request);
 }
 
@@ -218,6 +248,26 @@ export async function POST(request: NextRequest) {
     const actor = await requireActor();
     const body = await request.json() as Record<string, unknown>;
     const action = requireString(body.action, "action");
+
+    if (action === "hideRunTab") {
+      const result = await spectraMutation("spectraRuns:hideTab", { actorClerkId: actor.clerkId, runId: requireString(body.runId, "runId") });
+      return ok(result);
+    }
+
+    if (action === "selectRunTab") {
+      const result = await spectraMutation("spectraRuns:selectTab", { actorClerkId: actor.clerkId, runId: optionalString(body.runId) });
+      return ok(result);
+    }
+
+    if (action === "selectMessageChoice") {
+      const result = await spectraMutation("spectraThreads:selectMessageChoice", {
+        actorClerkId: actor.clerkId,
+        messageId: requireString(body.messageId, "messageId"),
+        choiceKey: requireString(body.choiceKey, "choiceKey"),
+        choiceTitle: requireString(body.choiceTitle, "choiceTitle"),
+      });
+      return ok(result);
+    }
 
     if (action === "seed") {
       if (process.env.NODE_ENV === "production") {
@@ -338,6 +388,26 @@ export async function POST(request: NextRequest) {
       return ok(result);
     }
 
+    if (action === "moveArtifactToWorkspace") {
+      const artifactId = requireString(body.artifactId, "artifactId");
+      const workspaceId = requireString(body.workspaceId, "workspaceId");
+      const artifact = await spectraQuery("spectraArtifacts:get", { actorClerkId: actor.clerkId, artifactId }) as { placements?: Array<{ workspaceId?: string; workspaceItemId?: string }> };
+      const result = await spectraMutation("spectraWorkspaceItems:addArtifact", { actorClerkId: actor.clerkId, workspaceId, artifactId });
+      await Promise.all((artifact.placements ?? [])
+        .filter((placement) => placement.workspaceId !== workspaceId && typeof placement.workspaceItemId === "string")
+        .map((placement) => spectraMutation("spectraWorkspaceItems:hide", { actorClerkId: actor.clerkId, workspaceItemId: placement.workspaceItemId! })));
+      return ok(result);
+    }
+
+    if (action === "moveArtifactToInbox") {
+      const artifactId = requireString(body.artifactId, "artifactId");
+      const artifact = await spectraQuery("spectraArtifacts:get", { actorClerkId: actor.clerkId, artifactId }) as { placements?: Array<{ workspaceItemId?: string }> };
+      const hidden = await Promise.all((artifact.placements ?? [])
+        .filter((placement) => typeof placement.workspaceItemId === "string")
+        .map((placement) => spectraMutation("spectraWorkspaceItems:hide", { actorClerkId: actor.clerkId, workspaceItemId: placement.workspaceItemId! })));
+      return ok({ artifactId, hidden });
+    }
+
     if (action === "hideWorkspaceItem") {
       const result = await spectraMutation("spectraWorkspaceItems:hide", {
         actorClerkId: actor.clerkId,
@@ -443,6 +513,6 @@ export async function POST(request: NextRequest) {
       return ok(kept);
     }
 
-    return badRequest("Unknown Spectra action");
+	    return badRequest("That Spectra action is not available.");
   }, request);
 }

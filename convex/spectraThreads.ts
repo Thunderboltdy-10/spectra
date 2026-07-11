@@ -1,15 +1,23 @@
-import { mutation, query } from "./_generated/server";
+import { internalMutation, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { getUserByClerkId } from "./helpers";
+import { ensureThreadWorkspacePlacement } from "./spectraShared";
 
 const vOrigin = v.union(v.literal("chat"), v.literal("workspace"), v.literal("artifact"));
 const vRole = v.union(v.literal("user"), v.literal("assistant"), v.literal("system"), v.literal("tool"));
 
 function cleanTitle(value: string) {
-  const words = value.replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
+  const words = value
+    .replace(/[`*_#[\](){}<>]/g, " ")
+    .replace(/\b(please|can|could|would|spectra|help|me|with|about|the|a|an|to|for|from|into|this|that|these|those)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(" ")
+    .filter(Boolean);
   if (words.length === 0) return "New thread";
-  return words.slice(0, 8).join(" ").replace(/[.!?,;:]+$/, "").slice(0, 88);
+  const title = words.slice(0, 4).join(" ").replace(/[.!?,;:]+$/, "").slice(0, 48);
+  return title.charAt(0).toUpperCase() + title.slice(1);
 }
 
 function cleanContent(value: string) {
@@ -54,7 +62,7 @@ export const create = mutation({
       if (!artifact || artifact.ownerUserId !== actor._id || artifact.orgId !== actor.orgId) throw new Error("Artifact not found");
     }
     const now = Date.now();
-    return ctx.db.insert("spectraThreads", {
+    const threadId = await ctx.db.insert("spectraThreads", {
       ownerUserId: actor._id,
       orgId: actor.orgId,
       title: args.title?.trim().slice(0, 88) || "New thread",
@@ -66,6 +74,15 @@ export const create = mutation({
       createdAt: now,
       updatedAt: now,
     });
+    await ensureThreadWorkspacePlacement(ctx, {
+      threadId,
+      workspaceId: args.workspaceId,
+      summary: "Conversation ready",
+    });
+    if (args.workspaceId) {
+      await ctx.db.patch(args.workspaceId, { updatedAt: now, lastActivityAt: now });
+    }
+    return threadId;
   },
 });
 
@@ -76,6 +93,7 @@ export const appendMessage = mutation({
     role: vRole,
     content: v.string(),
     runId: v.optional(v.id("spectraAiRuns")),
+    executionId: v.optional(v.string()),
     clientMessageId: v.optional(v.string()),
     metadata: v.optional(v.any()),
   },
@@ -91,12 +109,14 @@ export const appendMessage = mutation({
     }
     if (args.runId) {
       const run = await ctx.db.get(args.runId);
-      if (!run || run.ownerUserId !== thread.ownerUserId || run.threadId !== args.threadId) throw new Error("AI run not found");
+      if (!args.executionId || !run || run.ownerUserId !== thread.ownerUserId || run.threadId !== args.threadId || run.executionId !== args.executionId) throw new Error("AI run not found");
+      const partial = args.metadata && typeof args.metadata === "object" && (args.metadata as { partial?: unknown }).partial === true;
+      if (partial && run.status !== "running") throw new Error("This run is no longer streaming.");
       if (args.role === "assistant") {
         const existing = (await ctx.db.query("spectraMessages").withIndex("by_run", (q) => q.eq("runId", args.runId)).collect())
           .find((message) => message.role === "assistant");
         if (existing) {
-          await ctx.db.patch(existing._id, { content, metadata: args.metadata, createdAt: Date.now() });
+          await ctx.db.patch(existing._id, { content, metadata: args.metadata });
           return existing._id;
         }
       }
@@ -120,6 +140,40 @@ export const appendMessage = mutation({
       updatedAt: now,
     });
     return messageId;
+  },
+});
+
+export const selectMessageChoice = mutation({
+  args: {
+    actorClerkId: v.string(),
+    messageId: v.id("spectraMessages"),
+    choiceKey: v.string(),
+    choiceTitle: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const message = await ctx.db.get(args.messageId);
+    if (!message) throw new Error("This choice is no longer available.");
+    await requireOwnedThread(ctx, args.actorClerkId, message.threadId);
+    const metadata = message.metadata && typeof message.metadata === "object" ? message.metadata as Record<string, unknown> : {};
+    const existing = metadata.choiceSelection;
+    if (existing && typeof existing === "object") {
+      const row = existing as { key?: unknown; title?: unknown };
+      if (row.key === args.choiceKey) return { selected: true, alreadySelected: true, choiceTitle: row.title };
+      throw new Error("A choice was already selected for this question.");
+    }
+    const now = Date.now();
+    await ctx.db.patch(args.messageId, {
+      metadata: { ...metadata, choiceSelection: { key: args.choiceKey.slice(0, 120), title: args.choiceTitle.slice(0, 200), selectedAt: now } },
+    });
+    if (message.runId) {
+      const run = await ctx.db.get(message.runId);
+      if (run) {
+        const sequence = (run.eventSequence ?? 0) + 1;
+        await ctx.db.insert("spectraRunEvents", { runId: run._id, executionId: run.executionId ?? "choice", sequence, type: "choice_selected", payload: { type: "choice_selected", runId: run._id, choiceTitle: args.choiceTitle.slice(0, 200) }, createdAt: now });
+        await ctx.db.patch(run._id, { eventSequence: sequence, updatedAt: now });
+      }
+    }
+    return { selected: true, alreadySelected: false, choiceTitle: args.choiceTitle.slice(0, 200) };
   },
 });
 
@@ -152,9 +206,10 @@ export const get = query({
     const traces = await Promise.all(runIds.map(async (runId) => {
       const run = await ctx.db.get(runId);
       if (!run) return null;
-      const [operations, cards] = await Promise.all([
+      const [operations, cards, events] = await Promise.all([
         ctx.db.query("spectraOperations").withIndex("by_run", (q) => q.eq("runId", runId)).collect(),
         ctx.db.query("spectraResultCards").withIndex("by_run", (q) => q.eq("runId", runId)).collect(),
+        ctx.db.query("spectraRunEvents").withIndex("by_run_sequence", (q) => q.eq("runId", runId)).collect(),
       ]);
       const artifactIds = [...new Set(operations.flatMap((operation) => operation.affected)
         .filter((affected) => affected.type === "artifact").map((affected) => affected.id))];
@@ -163,7 +218,7 @@ export const get = query({
         const artifact = artifactId ? await ctx.db.get(artifactId) : null;
         return artifact && artifact.ownerUserId === thread.ownerUserId ? artifact : null;
       }))).filter(Boolean);
-      return { run, operations, cards, artifacts };
+      return { run, operations, cards, events: events.sort((a, b) => a.sequence - b.sequence), artifacts };
     }));
     return { thread, messages, traces: traces.filter(Boolean), viewerName: actor.name };
   },
@@ -173,7 +228,7 @@ export const update = mutation({
   args: {
     actorClerkId: v.string(), threadId: v.id("spectraThreads"),
     title: v.optional(v.string()), pinned: v.optional(v.boolean()),
-    workspaceId: v.optional(v.id("spectraWorkspaces")),
+    workspaceId: v.optional(v.union(v.id("spectraWorkspaces"), v.null())),
     status: v.optional(v.union(v.literal("active"), v.literal("archived"))),
   },
   handler: async (ctx, args) => {
@@ -182,13 +237,30 @@ export const update = mutation({
       const workspace = await ctx.db.get(args.workspaceId);
       if (!workspace || workspace.ownerUserId !== actor._id || workspace.orgId !== actor.orgId || workspace.status !== "active") throw new Error("Workspace not found");
     }
+    const nextWorkspaceId = args.workspaceId === undefined ? thread.workspaceId : args.workspaceId ?? undefined;
+    const now = Date.now();
     await ctx.db.patch(args.threadId, {
       title: args.title === undefined ? thread.title : cleanTitle(args.title),
       pinned: args.pinned ?? thread.pinned,
-      workspaceId: args.workspaceId ?? thread.workspaceId,
+      workspaceId: nextWorkspaceId,
       status: args.status ?? thread.status,
-      updatedAt: Date.now(),
+      updatedAt: now,
     });
+    if (args.workspaceId !== undefined && nextWorkspaceId !== thread.workspaceId) {
+      const placements = await ctx.db.query("spectraWorkspaceItems")
+        .withIndex("by_source", (q) => q.eq("sourceType", "thread").eq("sourceId", args.threadId))
+        .collect();
+      await Promise.all(placements.map((placement) => ctx.db.patch(placement._id, {
+        viewData: { ...placement.viewData, hidden: placement.workspaceId !== nextWorkspaceId },
+        updatedAt: now,
+      })));
+      await ensureThreadWorkspacePlacement(ctx, {
+        threadId: args.threadId,
+        workspaceId: nextWorkspaceId,
+        summary: thread.summaryShort,
+        pinned: args.pinned ?? thread.pinned,
+      });
+    }
     return { threadId: args.threadId };
   },
 });
@@ -197,21 +269,31 @@ export const applyGeneratedMetadata = mutation({
   args: {
     actorClerkId: v.string(),
     threadId: v.id("spectraThreads"),
+    runId: v.id("spectraAiRuns"),
+    executionId: v.string(),
     title: v.optional(v.string()),
     summary: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const { thread } = await requireOwnedThread(ctx, args.actorClerkId, args.threadId);
+    const run = await ctx.db.get(args.runId);
+    if (!run || run.threadId !== args.threadId || run.status !== "running" || run.executionId !== args.executionId) throw new Error("This title belongs to an older run attempt.");
     const messageCount = thread.messageCount ?? 0;
     const provisionalTitle = thread.title === "New thread" || thread.title.split(/\s+/).length >= 8;
     // Sparse title windows avoid sidebar instability while allowing a weak
     // first-prompt title to improve once the purpose becomes clear.
     const mayRetitle = messageCount <= 2 || provisionalTitle || (messageCount >= 6 && messageCount <= 8) || (messageCount >= 16 && messageCount <= 18);
-    await ctx.db.patch(args.threadId, {
-      title: mayRetitle && args.title ? cleanTitle(args.title) : thread.title,
-      summaryShort: args.summary?.replace(/\s+/g, " ").trim().slice(0, 320) || thread.summaryShort,
-      updatedAt: Date.now(),
-    });
+    const title = mayRetitle && args.title ? cleanTitle(args.title) : thread.title;
+    const summary = args.summary?.replace(/\s+/g, " ").trim().slice(0, 320) || thread.summaryShort;
+    const now = Date.now();
+    await ctx.db.patch(args.threadId, { title, summaryShort: summary, updatedAt: now });
+    const placements = await ctx.db.query("spectraWorkspaceItems")
+      .withIndex("by_source", (q) => q.eq("sourceType", "thread").eq("sourceId", args.threadId))
+      .collect();
+    await Promise.all(placements.map((placement) => ctx.db.patch(placement._id, {
+      viewData: { ...placement.viewData, titleOverride: title, compactSummary: summary },
+      updatedAt: now,
+    })));
     return { threadId: args.threadId };
   },
 });
@@ -219,84 +301,69 @@ export const applyGeneratedMetadata = mutation({
 export const createFromRun = mutation({
   args: {
     actorClerkId: v.string(), runId: v.id("spectraAiRuns"),
-    placeInWorkspace: v.optional(v.boolean()), createReference: v.optional(v.boolean()),
-    localMessages: v.optional(v.array(v.object({
-      id: v.string(),
-      role: v.union(v.literal("user"), v.literal("assistant")),
-      content: v.string(),
-      runId: v.optional(v.id("spectraAiRuns")),
-      createdAt: v.number(),
-    }))),
+    placeInWorkspace: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx, args.actorClerkId);
     const run = await ctx.db.get(args.runId);
     if (!run || run.ownerUserId !== actor._id || run.orgId !== actor.orgId) throw new Error("AI run not found");
-    let threadId = run.threadId;
-    const now = Date.now();
-    if (!threadId) {
-      threadId = await ctx.db.insert("spectraThreads", {
-        ownerUserId: actor._id, orgId: actor.orgId, title: cleanTitle(run.suggestedThreadTitle ?? run.userPrompt),
-        origin: run.sourceSurface, workspaceId: run.workspaceId, artifactId: run.artifactId,
-        status: "active", messageCount: run.finalSummary ? 2 : 1,
-        createdAt: run.createdAt, updatedAt: now, lastMessageAt: now, lastRunId: run._id,
-      });
-      await ctx.db.insert("spectraMessages", { threadId, role: "user", content: cleanContent(run.userPrompt), runId: run._id, createdAt: run.createdAt });
-      if (run.finalSummary) await ctx.db.insert("spectraMessages", {
-        threadId, role: "assistant", content: cleanContent(run.finalSummary), runId: run._id,
-        metadata: { decision: run.decision, hasOperationalTrace: true }, createdAt: run.completedAt ?? now,
-      });
-      await ctx.db.patch(run._id, { threadId, updatedAt: now });
-    }
+    if (!run.threadId) throw new Error("This older run has no conversation to keep.");
+    const thread = await ctx.db.get(run.threadId);
+    if (!thread || thread.ownerUserId !== actor._id || thread.status === "deleted") throw new Error("Thread not found");
+    const workspaceItemId = args.placeInWorkspace
+      ? await ensureThreadWorkspacePlacement(ctx, {
+        threadId: thread._id,
+        workspaceId: thread.workspaceId,
+        summary: thread.summaryShort ?? run.finalSummary?.slice(0, 240),
+        pinned: true,
+      })
+      : undefined;
+    return { threadId: thread._id, workspaceItemId };
+  },
+});
 
-    let appendedLocalCount = 0;
-    for (const message of (args.localMessages ?? []).slice(0, 60)) {
-      const clientMessageId = `local:${message.id.slice(0, 180)}`;
-      const existing = await ctx.db.query("spectraMessages").withIndex("by_thread_client", (q) => q.eq("threadId", threadId!).eq("clientMessageId", clientMessageId)).unique();
-      if (existing) continue;
-      const content = cleanContent(message.content);
-      if (!content) continue;
-      await ctx.db.insert("spectraMessages", { threadId, role: message.role, content, runId: message.runId, clientMessageId, createdAt: message.createdAt });
-      if (message.runId) {
-        const childRun = await ctx.db.get(message.runId);
-        if (childRun && childRun.ownerUserId === actor._id && !childRun.threadId) await ctx.db.patch(message.runId, { threadId, updatedAt: now });
-      }
-      appendedLocalCount += 1;
-    }
-    if (appendedLocalCount > 0) {
-      const currentThread = await ctx.db.get(threadId);
-      if (currentThread) await ctx.db.patch(threadId, { messageCount: (currentThread.messageCount ?? 0) + appendedLocalCount, lastMessageAt: now, updatedAt: now });
-    }
-
-    let referenceArtifactId: Id<"spectraArtifacts"> | undefined;
-    let workspaceItemId: Id<"spectraWorkspaceItems"> | undefined;
-    if (args.createReference !== false) {
-      const existing = await ctx.db.query("spectraArtifacts").withIndex("by_owner_blueprint", (q) => q.eq("ownerUserId", actor._id).eq("blueprintKey", "thread_reference")).collect();
-      const found = existing.find((artifact) => (artifact.content as { threadId?: string } | null)?.threadId === threadId && artifact.status !== "deleted");
-      referenceArtifactId = found?._id;
-      if (!referenceArtifactId) {
-        referenceArtifactId = await ctx.db.insert("spectraArtifacts", {
-          ownerUserId: actor._id, orgId: actor.orgId, blueprintKey: "thread_reference",
-          title: cleanTitle(run.suggestedThreadTitle ?? run.userPrompt), summary: (run.suggestedThreadSummary ?? run.finalSummary)?.slice(0, 240),
-          content: { threadId, summary: run.finalSummary ?? "", linkedArtifactIds: [] },
-          textIndex: `${run.userPrompt} ${run.finalSummary ?? ""}`.slice(0, 8_000), tags: ["thread"], status: "active",
-          createdFrom: { source: run.sourceSurface, threadId, runId: run._id, workspaceId: run.workspaceId },
-          createdAt: now, updatedAt: now,
+// Explicit one-way repair for rows created before threads became first-class
+// workspace items. Runtime code never creates thread-reference artifacts.
+export const migrateLegacyThreadReferences = internalMutation({
+  args: { limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const legacy = await ctx.db.query("spectraArtifacts")
+      .filter((q) => q.eq(q.field("blueprintKey"), "thread_reference"))
+      .take(Math.max(1, Math.min(args.limit ?? 100, 500)));
+    let migrated = 0;
+    let removed = 0;
+    for (const artifact of legacy) {
+      const rawThreadId = (artifact.content as { threadId?: unknown } | null)?.threadId;
+      const threadId = typeof rawThreadId === "string" ? ctx.db.normalizeId("spectraThreads", rawThreadId) : null;
+      const thread = threadId ? await ctx.db.get(threadId) : null;
+      const placements = await ctx.db.query("spectraWorkspaceItems")
+        .withIndex("by_source", (q) => q.eq("sourceType", "artifact").eq("sourceId", artifact._id))
+        .collect();
+      if (thread && thread.ownerUserId === artifact.ownerUserId && thread.orgId === artifact.orgId && thread.status !== "deleted") {
+        const destination = thread.workspaceId ?? placements.find((item) => item.viewData.hidden !== true)?.workspaceId;
+        if (destination && !thread.workspaceId) await ctx.db.patch(thread._id, { workspaceId: destination, updatedAt: Date.now() });
+        await ensureThreadWorkspacePlacement(ctx, {
+          threadId: thread._id,
+          workspaceId: destination,
+          summary: thread.summaryShort ?? artifact.summary,
+          pinned: placements.some((item) => item.viewData.pinned),
         });
+        migrated += 1;
       }
-      if (args.placeInWorkspace && run.workspaceId && referenceArtifactId) {
-        const workspace = await ctx.db.get(run.workspaceId);
-        if (workspace && workspace.ownerUserId === actor._id && workspace.orgId === actor.orgId) {
-          const placement = await ctx.db.query("spectraWorkspaceItems").withIndex("by_workspace_source", (q) => q.eq("workspaceId", run.workspaceId!).eq("sourceType", "artifact").eq("sourceId", referenceArtifactId!)).unique();
-          workspaceItemId = placement?._id;
-          if (!workspaceItemId) workspaceItemId = await ctx.db.insert("spectraWorkspaceItems", {
-            workspaceId: run.workspaceId, sourceType: "artifact", sourceId: referenceArtifactId,
-            viewData: { compactSummary: run.finalSummary?.slice(0, 180), pinned: true },
-            layout: { view: "cards" }, createdAt: now, updatedAt: now,
-          });
-        }
-      }
+      const versions = await ctx.db.query("spectraArtifactVersions").withIndex("by_artifact_created", (q) => q.eq("artifactId", artifact._id)).collect();
+      const [outgoing, incoming] = await Promise.all([
+        ctx.db.query("spectraArtifactLinks").withIndex("by_source", (q) => q.eq("sourceArtifactId", artifact._id)).collect(),
+        ctx.db.query("spectraArtifactLinks").withIndex("by_target", (q) => q.eq("targetArtifactId", artifact._id)).collect(),
+      ]);
+      const links = [...new Map([...outgoing, ...incoming].map((link) => [link._id, link])).values()];
+      await Promise.all([
+        ...placements.map((placement) => ctx.db.delete(placement._id)),
+        ...versions.map((version) => ctx.db.delete(version._id)),
+        ...links.map((link) => ctx.db.delete(link._id)),
+      ]);
+      await ctx.db.delete(artifact._id);
+      removed += 1;
     }
-    return { threadId, referenceArtifactId, workspaceItemId };
+    return { scanned: legacy.length, migrated, removed, complete: legacy.length < Math.max(1, Math.min(args.limit ?? 100, 500)) };
   },
 });

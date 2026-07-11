@@ -4,11 +4,9 @@ import { documentBlueprint } from "./document";
 import { flashcardDeckBlueprint } from "./flashcard-deck";
 import { plannerTaskBlueprint } from "./planner-task";
 import { quizBlueprint } from "./quiz";
-import { threadReferenceBlueprint } from "./thread-reference";
 
 export const BUILT_IN_BLUEPRINTS = [
   documentBlueprint,
-  threadReferenceBlueprint,
   flashcardDeckBlueprint,
   quizBlueprint,
   plannerTaskBlueprint,
@@ -43,4 +41,3 @@ export function validateBlueprintContent(key: string, content: unknown) {
   }
   return blueprint.schema.safeParse(content);
 }
-

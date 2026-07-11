@@ -13,7 +13,7 @@ const TabsList = React.forwardRef<
   <TabsPrimitive.List
     ref={ref}
     className={cn(
-      "inline-flex h-10 items-center justify-center rounded-[var(--radius-pill)] border border-[var(--border-default)] bg-[var(--bg-secondary)] p-1 text-[var(--text-secondary)]",
+      "spectra-tabs-list inline-flex h-10 items-center justify-center border p-1 text-[var(--text-secondary)]",
       className,
     )}
     {...props}
@@ -28,7 +28,7 @@ const TabsTrigger = React.forwardRef<
   <TabsPrimitive.Trigger
     ref={ref}
     className={cn(
-      "inline-flex items-center justify-center whitespace-nowrap rounded-[var(--radius-pill)] px-3 py-1.5 text-sm font-medium transition data-[state=active]:bg-[var(--bg-primary)] data-[state=active]:text-[var(--text-primary)]",
+      "spectra-tabs-trigger inline-flex items-center justify-center whitespace-nowrap px-3 py-1.5 text-sm font-medium transition",
       className,
     )}
     {...props}

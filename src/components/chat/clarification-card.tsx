@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { MessageSquareQuote } from "lucide-react";
+import { Check, MessageSquareQuote } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { ClarificationBlock } from "@/types";
 
@@ -61,7 +61,7 @@ export function ClarificationCard({ block, disabled = false, onSubmit }: Clarifi
   }, [answers, block.questions]);
 
   return (
-    <section className="rounded-2xl border border-[color-mix(in_oklab,var(--accent-cyan)_28%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_8%,var(--bg-elevated))] p-4">
+    <section data-spectra-card="result" data-card-state="confirmation" className="p-4">
       <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)]">
         <MessageSquareQuote className="h-3.5 w-3.5" />
         Clarification Needed
@@ -100,14 +100,21 @@ export function ClarificationCard({ block, disabled = false, onSubmit }: Clarifi
                         key={option.id}
                         type="button"
                         onClick={() => setAnswers((prev) => ({ ...prev, [question.id]: option.id }))}
-                        className={`rounded-xl border px-3 py-2 text-left text-sm transition ${
+                        data-spectra-card="side"
+                        data-card-state={selected ? "selected" : "normal"}
+                        className={`group px-3 py-2 text-left text-sm transition ${
                           selected
-                            ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_18%,var(--bg-primary))]"
-                            : "border-[var(--border-default)] bg-[var(--bg-primary)] hover:border-[var(--border-strong)]"
+                            ? ""
+                            : "hover:border-[color-mix(in_oklab,var(--warning)_26%,var(--border-default))]"
                         }`}
                         disabled={disabled}
                       >
-                        <p className="font-medium text-[var(--text-primary)]">{option.label}</p>
+                        <p className="flex items-center gap-2 font-medium text-[var(--text-primary)]">
+                          <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-[var(--card-border-soft)] text-[var(--warning)]">
+                            {selected ? <Check className="h-3 w-3" /> : null}
+                          </span>
+                          {option.label}
+                        </p>
                         {option.description ? (
                           <p className="mt-1 text-xs text-[var(--text-secondary)]">{option.description}</p>
                         ) : null}
@@ -145,14 +152,21 @@ export function ClarificationCard({ block, disabled = false, onSubmit }: Clarifi
                             return { ...prev, [question.id]: next };
                           });
                         }}
-                        className={`rounded-xl border px-3 py-2 text-left text-sm transition ${
+                        data-spectra-card="side"
+                        data-card-state={selected ? "selected" : "normal"}
+                        className={`group px-3 py-2 text-left text-sm transition ${
                           selected
-                            ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_18%,var(--bg-primary))]"
-                            : "border-[var(--border-default)] bg-[var(--bg-primary)] hover:border-[var(--border-strong)]"
+                            ? ""
+                            : "hover:border-[color-mix(in_oklab,var(--warning)_26%,var(--border-default))]"
                         }`}
                         disabled={disabled}
                       >
-                        <p className="font-medium text-[var(--text-primary)]">{option.label}</p>
+                        <p className="flex items-center gap-2 font-medium text-[var(--text-primary)]">
+                          <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-[var(--card-border-soft)] text-[var(--warning)]">
+                            {selected ? <Check className="h-3 w-3" /> : null}
+                          </span>
+                          {option.label}
+                        </p>
                         {option.description ? (
                           <p className="mt-1 text-xs text-[var(--text-secondary)]">{option.description}</p>
                         ) : null}
@@ -168,7 +182,7 @@ export function ClarificationCard({ block, disabled = false, onSubmit }: Clarifi
 
       <div className="mt-4 flex justify-end">
         {submittedAnswers ? (
-          <div className="mr-auto rounded-xl border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-xs text-[var(--text-secondary)]">
+          <div data-spectra-card="side" data-card-state="edited" className="mr-auto px-3 py-2 text-xs text-[var(--text-secondary)]">
             <span className="font-semibold text-[var(--text-primary)]">Submitted inline:</span>{" "}
             {block.questions
               .map((question) => `${question.text}: ${formatAnswer(submittedAnswers[question.id] ?? "")}`)
@@ -194,6 +208,7 @@ export function ClarificationCard({ block, disabled = false, onSubmit }: Clarifi
             onSubmit?.({ message: lines.join("\n"), answers });
           }}
           disabled={disabled || !canSubmit || Boolean(submittedAnswers)}
+          className="rounded-[9px]"
         >
           {submittedAnswers ? "Continuing…" : "Continue"}
         </Button>

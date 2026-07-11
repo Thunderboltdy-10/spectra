@@ -70,7 +70,6 @@ export async function GET(request: NextRequest) {
 
     const notes = await convexQuery("artifacts:listDocumentCompat", {
       actorClerkId: actor.clerkId,
-      workstreamId: params.get("workstreamId") ?? undefined,
       search: params.get("search") ?? undefined,
       limit: parseLimit(params.get("limit")),
     });
@@ -101,7 +100,6 @@ export async function POST(request: NextRequest) {
         sourceDeleted: body.sourceDeleted as boolean | undefined,
         sourceUpdatedAt: body.sourceUpdatedAt as number | undefined,
         syncConflictSummary: body.syncConflictSummary as string | undefined,
-        workstreamId: body.workstreamId as string | undefined,
         linkedChatId: body.linkedChatId as string | undefined,
         sourceMessageId: body.sourceMessageId as string | undefined,
         lastAiEditId: body.lastAiEditId as string | undefined,
@@ -132,7 +130,6 @@ export async function POST(request: NextRequest) {
         sourceDeleted: body.sourceDeleted as boolean | null | undefined,
         sourceUpdatedAt: body.sourceUpdatedAt as number | null | undefined,
         syncConflictSummary: body.syncConflictSummary as string | null | undefined,
-        workstreamId: body.workstreamId as string | null | undefined,
         linkedChatId: body.linkedChatId as string | null | undefined,
         sourceMessageId: body.sourceMessageId as string | undefined,
         lastAiEditId: body.lastAiEditId as string | null | undefined,

@@ -5,7 +5,6 @@ import { getUserByClerkId } from "./helpers";
 
 export const vBlueprintKey = v.union(
   v.literal("document"),
-  v.literal("thread_reference"),
   v.literal("flashcard_deck"),
   v.literal("quiz"),
   v.literal("planner_task"),
@@ -27,7 +26,7 @@ export const vCreatedFromSource = v.union(
 );
 
 export type SpectraCtx = QueryCtx | MutationCtx;
-export type BlueprintKey = "document" | "thread_reference" | "flashcard_deck" | "quiz" | "planner_task";
+export type BlueprintKey = "document" | "flashcard_deck" | "quiz" | "planner_task";
 
 export async function requireSpectraActor(ctx: SpectraCtx, actorClerkId: string) {
   const actor = await getUserByClerkId(ctx, actorClerkId);
@@ -110,11 +109,6 @@ export function defaultArtifactContent(blueprintKey: BlueprintKey) {
         linkedArtifactIds: [],
         linkedThreadIds: [],
       };
-    case "thread_reference":
-      return {
-        threadId: null,
-        linkedArtifactIds: [],
-      };
   }
 }
 
@@ -128,9 +122,52 @@ export function fallbackArtifactSummary(blueprintKey: BlueprintKey) {
       return "Quiz artifact with questions and review metadata.";
     case "planner_task":
       return "Planner task artifact with status and links.";
-    case "thread_reference":
-      return "Reference to a useful Spectra thread.";
   }
+}
+
+export async function ensureThreadWorkspacePlacement(
+  ctx: Pick<MutationCtx, "db">,
+  params: {
+    threadId: Id<"spectraThreads">;
+    workspaceId?: Id<"spectraWorkspaces">;
+    summary?: string;
+    pinned?: boolean;
+  },
+) {
+  if (!params.workspaceId) return undefined;
+  const now = Date.now();
+  const existing = await ctx.db
+    .query("spectraWorkspaceItems")
+    .withIndex("by_workspace_source", (q) => q
+      .eq("workspaceId", params.workspaceId!)
+      .eq("sourceType", "thread")
+      .eq("sourceId", params.threadId))
+    .first();
+  if (existing) {
+    await ctx.db.patch(existing._id, {
+      viewData: {
+        ...existing.viewData,
+        compactSummary: params.summary ?? existing.viewData.compactSummary,
+        pinned: params.pinned ?? existing.viewData.pinned,
+        hidden: false,
+      },
+      updatedAt: now,
+    });
+    return existing._id;
+  }
+  return ctx.db.insert("spectraWorkspaceItems", {
+    workspaceId: params.workspaceId,
+    sourceType: "thread",
+    sourceId: params.threadId,
+    viewData: {
+      compactSummary: params.summary,
+      pinned: params.pinned ?? true,
+      hidden: false,
+    },
+    layout: { view: "cards" },
+    createdAt: now,
+    updatedAt: now,
+  });
 }
 
 export function buildArtifactTextIndex(params: {

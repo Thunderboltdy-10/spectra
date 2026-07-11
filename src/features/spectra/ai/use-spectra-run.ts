@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { parseSpectraStreamEvent, type ResultCardStreamView } from "./stream-events";
-import { postSpectra, type SpectraResultCard } from "../data/api";
+import { getSpectraRunEvents, getSpectraRunTabs, postSpectra, type SpectraResultCard } from "../data/api";
 import type { CommandAttachment } from "../components/command-bar";
 
 export type SpectraRunSurface = "chat" | "workspace" | "artifacts" | "artifact";
@@ -12,7 +12,7 @@ export type SpectraLiveExchange = {
   runId?: string;
   prompt: string;
   content: string;
-  reasoning: string;
+  steps: Array<{ id: string; title: string; summary?: string; status: "running" | "done" | "error"; createdAt: number }>;
   status: "starting" | "streaming" | "failed";
   startedAt: number;
 };
@@ -63,6 +63,25 @@ function mergeCards(current: ResultCardStreamView[], incoming: ResultCardStreamV
   return unchanged ? current : merged;
 }
 
+function statusTitle(message: string) {
+  if (/review|reading|context/i.test(message)) return "Reading context";
+  if (/validating|analys|resolving|loading|sending/i.test(message)) return "Resolving the request";
+  if (/saving|creating|updating|adding|removing/i.test(message)) return "Updating workspace";
+  return "Preparing the result";
+}
+
+function appendStep(exchange: SpectraLiveExchange, message: string): SpectraLiveExchange {
+  const last = exchange.steps.at(-1);
+  if (last?.summary === message && last.status === "running") return exchange;
+  return {
+    ...exchange,
+    steps: [
+      ...exchange.steps.map((step, index) => index === exchange.steps.length - 1 && step.status === "running" ? { ...step, status: "done" as const } : step),
+      { id: `${exchange.runId ?? exchange.id}:${exchange.steps.length}:${Date.now()}`, title: statusTitle(message), summary: message, status: "running" as const, createdAt: Date.now() },
+    ].slice(-8),
+  };
+}
+
 export function useSpectraRun({
   surface,
   workspaceId,
@@ -72,10 +91,11 @@ export function useSpectraRun({
   onDataChanged,
   onOpenArtifact,
   onThreadReady,
-  localConversation,
   onFinal,
+  onContinuationConflict,
   focusMode,
   selectedArtifactIds = [],
+  explicitContextObjects = [],
   currentView,
 }: {
   surface: SpectraRunSurface;
@@ -86,20 +106,23 @@ export function useSpectraRun({
   onDataChanged?: () => Promise<unknown> | unknown;
   onOpenArtifact?: (artifactId: string) => Promise<unknown> | unknown;
   onThreadReady?: (threadId: string) => Promise<unknown> | unknown;
-  localConversation?: Array<{ role: "user" | "assistant"; content: string }>;
   onFinal?: (result: { runId: string; summary: string; prompt: string }) => Promise<unknown> | unknown;
+  onContinuationConflict?: () => void;
   focusMode?: "global" | "workspace" | "artifact" | "selection" | "thread";
   selectedArtifactIds?: string[];
+  explicitContextObjects?: Array<{ type: "artifact" | "workspace" | "thread"; id: string; label?: string; workspaceId?: string }>;
   currentView?: string;
 }) {
   const [cards, setCards] = useState<ResultCardStreamView[]>(() => initialCards.map(persistedToStream));
   const [activeRequestCount, setActiveRequestCount] = useState(0);
+  const [observedContinuationRunId, setObservedContinuationRunId] = useState<string | null>(null);
   const [liveExchange, setLiveExchange] = useState<SpectraLiveExchange | null>(null);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const promptByRun = useRef(new Map<string, string>());
   const dismissedCardIds = useRef(new Set<string>());
-  const activeRequests = useRef(new Set<AbortController>());
+  const activeRequests = useRef(new Map<AbortController, string | null>());
   const activeRunIds = useRef(new Set<string>());
+  const eventCursors = useRef(new Map<string, number>());
   const durableThreadId = useRef(threadId);
   const selectedKey = selectedArtifactIds.join(",");
   const scopeKey = `${surface}:${workspaceId ?? ""}:${artifactId ?? ""}:${threadId ?? ""}:${focusMode ?? ""}:${selectedKey}`;
@@ -125,10 +148,76 @@ export function useSpectraRun({
     setCards((current) => mergeCards(current, [card]));
   }, []);
 
-  const consume = useCallback(async (body: Record<string, unknown>, optimisticCardId?: string, liveExchangeId?: string) => {
+  useEffect(() => {
+    let disposed = false;
+    let timer: number | undefined;
+    const poll = async () => {
+      try {
+        const { runTabs } = await getSpectraRunTabs({ limit: 120 });
+        if (disposed) return;
+        const relevant = runTabs.filter((tab) => {
+          if (threadId) return tab.threadId === threadId;
+          if (artifactId) return tab.run.artifactId === artifactId;
+          if (workspaceId) return tab.workspaceId === workspaceId;
+          return tab.surface === (surface === "artifacts" ? "artifact" : surface);
+        });
+        const active = relevant.filter((tab) => tab.run.status === "queued" || tab.run.status === "running" || tab.run.status === "awaiting_confirmation");
+        setObservedContinuationRunId(threadId ? active[0]?.runId ?? null : null);
+        const observed = relevant.filter((tab) => active.some((row) => row.runId === tab.runId) || eventCursors.current.has(tab.runId));
+        for (const tab of observed) {
+          if (activeRunIds.current.has(tab.runId)) continue;
+          const after = eventCursors.current.get(tab.runId) ?? 0;
+          const { events } = await getSpectraRunEvents(tab.runId, after);
+          if (disposed) return;
+          for (const row of events.sort((a, b) => a.sequence - b.sequence)) {
+            if (row.sequence <= (eventCursors.current.get(tab.runId) ?? 0)) continue;
+            eventCursors.current.set(tab.runId, row.sequence);
+            let event: ReturnType<typeof parseSpectraStreamEvent>;
+            try { event = parseSpectraStreamEvent(row.payload); } catch { continue; }
+            if (event.type === "run_created" || event.type === "result_card" || event.type === "confirmation_required" || event.type === "final") upsert(event.card);
+            if (event.type === "text_delta" || event.type === "text_replace" || event.type === "status" || event.type === "operation_preview" || event.type === "operation_result") {
+              setLiveExchange((current) => {
+                const base = current?.runId === tab.runId ? current : {
+                  id: `durable:${tab.runId}`,
+                  runId: tab.runId,
+                  prompt: tab.run.userPrompt,
+                  content: "",
+                  steps: [],
+                  status: "streaming" as const,
+                  startedAt: tab.run.createdAt,
+                };
+                if (event.type === "text_delta") return { ...base, content: base.content + event.content, status: "streaming" };
+                if (event.type === "text_replace") return { ...base, content: event.content, status: "streaming" };
+                if (event.type === "status") return appendStep(base, event.message);
+                if (event.type === "operation_preview" && event.preview) return appendStep(base, event.preview.title);
+                if (event.type === "operation_result") return appendStep(base, "Checking result");
+                return base;
+              });
+            }
+            if (event.type === "run_created" || event.type === "thread_ready" || event.type === "operation_preview" || event.type === "artifact_patch" || event.type === "operation_result" || event.type === "confirmation_required" || event.type === "approval_accepted" || event.type === "approval_rejected" || event.type === "choice_selected" || event.type === "interrupted" || event.type === "final") void onDataChanged?.();
+            if (event.type === "error") toast.error(event.message);
+            if (event.type === "error" || event.type === "stopped" || event.type === "interrupted") setLiveExchange((current) => current?.runId === tab.runId ? null : current);
+            if (event.type === "confirmation_required") setLiveExchange((current) => current?.runId === tab.runId ? null : current);
+            if (event.type === "final") {
+              setLiveExchange((current) => current?.runId === tab.runId ? null : current);
+              void onFinal?.({ runId: tab.runId, summary: event.summary, prompt: promptByRun.current.get(tab.runId) ?? tab.run.userPrompt });
+            }
+          }
+        }
+      } catch {
+        // A transient observer failure must not interrupt the authoritative run.
+      } finally {
+        if (!disposed) timer = window.setTimeout(poll, document.visibilityState === "visible" ? 900 : 4_000);
+      }
+    };
+    void poll();
+    return () => { disposed = true; if (timer) window.clearTimeout(timer); };
+  }, [artifactId, onDataChanged, onFinal, surface, threadId, upsert, workspaceId]);
+
+  const consume = useCallback(async (body: Record<string, unknown>, optimisticCardId?: string, liveExchangeId?: string, onAcknowledged?: (runId: string) => void) => {
     const controller = new AbortController();
     let requestRunId: string | null = null;
-    activeRequests.current.add(controller);
+    activeRequests.current.set(controller, null);
     const response = await fetch("/api/spectra/run", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -154,13 +243,16 @@ export function useSpectraRun({
           setLiveExchange((current) => current && (!liveExchangeId || current.id === liveExchangeId) ? { ...current, runId: event.runId } : current);
           activeRunIds.current.add(event.runId);
           requestRunId = event.runId;
+          activeRequests.current.set(controller, event.runId);
+          onAcknowledged?.(event.runId);
+          window.dispatchEvent(new Event("spectra:threads-changed"));
         }
         if (event.type === "thread_ready") {
           durableThreadId.current = event.threadId;
           void onThreadReady?.(event.threadId);
         }
         if (event.type === "text_delta") setLiveExchange((current) => current && (!liveExchangeId || current.id === liveExchangeId) ? { ...current, runId: event.runId, content: current.content + event.content, status: "streaming" } : current);
-        if (event.type === "reasoning_delta") setLiveExchange((current) => current && (!liveExchangeId || current.id === liveExchangeId) ? { ...current, runId: event.runId, reasoning: current.reasoning + event.content, status: "streaming" } : current);
+        if (event.type === "text_replace") setLiveExchange((current) => current && (!liveExchangeId || current.id === liveExchangeId) ? { ...current, runId: event.runId, content: event.content, status: "streaming" } : current);
         if (event.type === "run_created" || event.type === "result_card" || event.type === "confirmation_required" || event.type === "final") upsert(event.card);
         if (event.type === "error") {
           if (event.card) upsert(event.card);
@@ -168,17 +260,31 @@ export function useSpectraRun({
           setLiveExchange((current) => current && (!liveExchangeId || current.id === liveExchangeId) ? { ...current, status: "failed" } : current);
         }
         if (event.type === "status") {
+          setLiveExchange((current) => current && (!liveExchangeId || current.id === liveExchangeId) ? appendStep({ ...current, runId: event.runId, status: "streaming" }, event.message) : current);
           setCards((current) => current.map((card) => card.runId === event.runId ? {
             ...card,
             status: "running",
-            title: event.message.startsWith("Saving") ? "Saving" : event.message.startsWith("Validating") ? "Creating" : "Thinking",
+            title: event.message.startsWith("Saving") ? "Saving changes" : event.message.startsWith("Validating") ? "Validating changes" : statusTitle(event.message),
             summary: event.message,
             updatedAt: Date.now(),
           } : card));
         }
-        if (event.type === "operation_preview" && event.preview) setCards((current) => current.map((card) => card.runId === event.runId ? { ...card, title: event.preview!.action === "create" ? "Creating" : event.preview!.action === "update" ? "Updating" : "Working", summary: event.preview!.title, updatedAt: Date.now() } : card));
+        if (event.type === "operation_preview" && event.preview) {
+          setCards((current) => current.map((card) => card.runId === event.runId ? { ...card, title: event.preview!.action === "create" ? "Creating" : event.preview!.action === "update" ? "Updating" : "Working", summary: event.preview!.title, updatedAt: Date.now() } : card));
+          if (event.preview.pendingArtifactId) { changed = true; void onDataChanged?.(); }
+        }
         if (event.type === "operation_result") { changed = true; void onDataChanged?.(); }
-        if (event.type === "final") void onFinal?.({ runId: event.runId, summary: event.summary, prompt: promptByRun.current.get(event.runId) ?? "" });
+        if (event.type === "artifact_patch") { changed = true; void onDataChanged?.(); }
+        if (event.type === "operation_preview" && event.preview) {
+          setLiveExchange((current) => current && (!liveExchangeId || current.id === liveExchangeId) ? appendStep({ ...current, runId: event.runId, status: "streaming" }, event.preview!.title) : current);
+        }
+        if (event.type === "operation_result") {
+          setLiveExchange((current) => current && (!liveExchangeId || current.id === liveExchangeId) ? appendStep({ ...current, runId: event.runId, status: "streaming" }, "Checking result") : current);
+        }
+        if (event.type === "final") {
+          setLiveExchange((current) => current && (!liveExchangeId || current.id === liveExchangeId) ? { ...current, runId: event.runId, steps: current.steps.map((step) => step.status === "running" ? { ...step, status: "done" } : step), status: "streaming" } : current);
+          void onFinal?.({ runId: event.runId, summary: event.summary, prompt: promptByRun.current.get(event.runId) ?? "" });
+        }
         if (event.type === "final" || event.type === "confirmation_required") changed = true;
       }
       if (done) break;
@@ -188,26 +294,41 @@ export function useSpectraRun({
     if (requestRunId) activeRunIds.current.delete(requestRunId);
   }, [onDataChanged, onFinal, onThreadReady, upsert]);
 
-  const run = useCallback(async (prompt: string, attachments: CommandAttachment[] = []) => {
+  const run = useCallback((prompt: string, attachments: CommandAttachment[] = []): Promise<boolean> => {
     const clean = prompt.trim();
-    if (!clean) return;
-    const exchangeId = crypto.randomUUID();
-    const optimisticCardId = `optimistic:${exchangeId}`;
-    setActiveRequestCount((count) => count + 1);
-    setLiveExchange({ id: exchangeId, prompt: clean, content: "", reasoning: "", status: "starting", startedAt: Date.now() });
-    upsert({ id: optimisticCardId, runId: `pending:${exchangeId}`, status: "running", title: "Thinking", summary: clean, variant: "status", actions: [], updatedAt: Date.now() });
-    try {
-      await consume({ action: "run", prompt: clean, surface, workspaceId, artifactId, threadId: durableThreadId.current, focusMode, selectedArtifactIds, currentView, attachments, localConversation }, optimisticCardId, exchangeId);
-    } catch (error) {
-      setCards((current) => current.filter((card) => card.id !== optimisticCardId));
-      if (!(error instanceof DOMException && error.name === "AbortError")) {
-        toast.error(error instanceof Error ? error.message : "Could not start Spectra run.");
-      }
-    } finally {
-      setActiveRequestCount((count) => Math.max(0, count - 1));
-      setLiveExchange((current) => current?.id === exchangeId ? null : current);
-    }
-  }, [artifactId, consume, currentView, focusMode, localConversation, selectedArtifactIds, surface, upsert, workspaceId]);
+    if (!clean) return Promise.resolve(false);
+    return new Promise<boolean>((resolve) => {
+      const exchangeId = crypto.randomUUID();
+      const optimisticCardId = `optimistic:${exchangeId}`;
+      let beginSettled = false;
+      const settleBegin = (accepted: boolean) => {
+        if (beginSettled) return;
+        beginSettled = true;
+        resolve(accepted);
+      };
+      setActiveRequestCount((count) => count + 1);
+      setLiveExchange({ id: exchangeId, prompt: clean, content: "", steps: [{ id: `${exchangeId}:start`, title: "Opening the run", summary: "Saving the request before execution", status: "running", createdAt: Date.now() }], status: "starting", startedAt: Date.now() });
+      upsert({ id: optimisticCardId, runId: `pending:${exchangeId}`, status: "running", title: "Resolving the request", summary: clean, variant: "status", actions: [], updatedAt: Date.now() });
+      void consume(
+        { action: "run", submissionKey: exchangeId, prompt: clean, surface, workspaceId, artifactId, threadId: durableThreadId.current, focusMode, selectedArtifactIds, explicitContextObjects, currentView, attachments },
+        optimisticCardId,
+        exchangeId,
+        () => settleBegin(true),
+      ).catch((error) => {
+        setCards((current) => current.filter((card) => card.id !== optimisticCardId));
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+          const message = error instanceof Error ? error.message : "Could not start Spectra run.";
+          if (message.includes("still responding")) toast.error(message, { action: onContinuationConflict ? { label: "Start new thread", onClick: onContinuationConflict } : undefined });
+          else toast.error(message);
+        }
+        settleBegin(false);
+      }).finally(() => {
+        settleBegin(false);
+        setActiveRequestCount((count) => Math.max(0, count - 1));
+        setLiveExchange((current) => current?.id === exchangeId ? null : current);
+      });
+    });
+  }, [artifactId, consume, currentView, explicitContextObjects, focusMode, onContinuationConflict, selectedArtifactIds, surface, upsert, workspaceId]);
 
   const keepAsThread = useCallback(async (runId: string, placeInWorkspace = false) => {
     const result = await postSpectra<{ threadId: string }>({ action: "keepRunAsThread", runId, placeInWorkspace, createReference: true });
@@ -237,7 +358,7 @@ export function useSpectraRun({
     }
     if (actionKey === "retry") {
       setActiveRequestCount((count) => count + 1);
-      try { await consume({ action: "retry", runId: card.runId }); }
+      try { await consume({ action: "retry", runId: card.runId, submissionKey: crypto.randomUUID() }); }
       catch (error) { toast.error(error instanceof Error ? error.message : "Could not retry run."); }
       finally { setActiveRequestCount((count) => Math.max(0, count - 1)); }
       return;
@@ -252,16 +373,25 @@ export function useSpectraRun({
   const openDetails = useCallback((card: ResultCardStreamView) => setSelectedRunId(card.runId), []);
   const closeDetails = useCallback(() => setSelectedRunId(null), []);
 
-  const stop = useCallback(() => {
-    activeRequests.current.forEach((controller) => controller.abort());
-    activeRequests.current.clear();
-    activeRunIds.current.forEach((runId) => void fetch("/api/spectra/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "stop", runId }) }));
-    activeRunIds.current.clear();
-    setActiveRequestCount(0);
-    setLiveExchange((current) => current ? { ...current, status: "failed" } : null);
-    toast.message("Generation stopped. No incomplete assistant message was saved.");
-  }, []);
+  const stop = useCallback(async (runId?: string) => {
+    const targetRunId = runId ?? liveExchange?.runId ?? observedContinuationRunId;
+    if (!targetRunId) {
+      toast.message("Spectra is still starting this run. Stop will be available in a moment.");
+      return;
+    }
+    try {
+      const response = await fetch("/api/spectra/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "stop", runId: targetRunId }) });
+      if (!response.ok) throw new Error((await response.text().catch(() => "")) || "This run can no longer be stopped safely.");
+      activeRequests.current.forEach((requestRunId, controller) => { if (requestRunId === targetRunId) { controller.abort(); activeRequests.current.delete(controller); } });
+      activeRunIds.current.delete(targetRunId);
+      setActiveRequestCount((count) => Math.max(0, count - 1));
+      setLiveExchange((current) => current?.runId === targetRunId ? { ...current, status: "failed" } : current);
+      toast.message("Stopped. Any partial response remains saved in the thread.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "This run can no longer be stopped safely.");
+    }
+  }, [liveExchange?.runId, observedContinuationRunId]);
 
-  const submitting = activeRequestCount > 0;
+  const submitting = activeRequestCount > 0 || Boolean(observedContinuationRunId);
   return useMemo(() => ({ cards, submitting, liveExchange, run, stop, onCardAction, selectedRunId, openDetails, closeDetails, keepAsThread }), [cards, closeDetails, keepAsThread, liveExchange, onCardAction, openDetails, run, selectedRunId, stop, submitting]);
 }

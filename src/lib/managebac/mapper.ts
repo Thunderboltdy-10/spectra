@@ -3,40 +3,16 @@ import {
   type NormalizedManagebacAssignment,
   type NormalizedManagebacCasActivity,
   type NormalizedManagebacClass,
-  type NormalizedManagebacStudentProfile,
   type NormalizedManagebacTimetableEntry,
 } from "@/lib/managebac/normalizer";
 
-export function mapManagebacClassToWorkstream(input: {
-  klass: NormalizedManagebacClass;
-  timetable: NormalizedManagebacTimetableEntry[];
-  student?: NormalizedManagebacStudentProfile | null;
-}) {
-  return {
-    type: "subject" as const,
-    title: input.klass.title,
-    subjectCode: input.klass.subjectCode,
-    managebacClassId: input.klass.id,
-    managebacContext: {
-      level: input.klass.level,
-      teacherName: input.klass.teacherName,
-      description: input.klass.description,
-      timetable: input.timetable,
-      studentName: input.student?.name,
-      syncedAt: Date.now(),
-    },
-  };
-}
-
 export function mapManagebacAssignmentToPlanner(input: {
   assignment: NormalizedManagebacAssignment;
-  workstreamId?: string;
 }) {
   return {
     title: input.assignment.title,
     description: input.assignment.description,
     dueAt: input.assignment.dueAt,
-    workstreamId: input.workstreamId,
     sourceType: "managebac_sync" as const,
     managebacItemId: input.assignment.id,
     sourceUpdatedAt: input.assignment.updatedAt,
@@ -45,14 +21,12 @@ export function mapManagebacAssignmentToPlanner(input: {
 
 export function mapManagebacCasToPlanner(input: {
   activity: NormalizedManagebacCasActivity;
-  workstreamId?: string;
 }) {
   return {
     title: input.activity.title,
     description: [input.activity.strand, input.activity.status, typeof input.activity.hours === "number" ? `${input.activity.hours} hours` : undefined]
       .filter(Boolean)
       .join(" • "),
-    workstreamId: input.workstreamId,
     type: "milestone" as const,
     sourceType: "managebac_sync" as const,
     managebacItemId: input.activity.id,

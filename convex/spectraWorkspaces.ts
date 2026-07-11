@@ -12,6 +12,11 @@ const vDefaultView = v.union(
   v.literal("library"),
 );
 
+function liveWorkspace<T extends { title: string; description?: string; icon?: string; color?: string; aiState?: string; aiStateExpiresAt?: number; aiPreview?: { title?: string; description?: string; icon?: string; color?: string } }>(workspace: T) {
+  if (workspace.aiState === "edited" && workspace.aiStateExpiresAt && workspace.aiStateExpiresAt <= Date.now()) return { ...workspace, aiState: undefined };
+  return workspace.aiState === "updating" && workspace.aiPreview ? { ...workspace, title: workspace.aiPreview.title ?? workspace.title, description: workspace.aiPreview.description ?? workspace.description, icon: workspace.aiPreview.icon ?? workspace.icon, color: workspace.aiPreview.color ?? workspace.color } : workspace;
+}
+
 export const list = query({
   args: {
     actorClerkId: v.string(),
@@ -29,7 +34,8 @@ export const list = query({
     return workspaces
       .filter((workspace) => workspace.orgId === actor.orgId)
       .filter((workspace) => args.includeArchived || workspace.status === "active")
-      .slice(0, limit);
+      .slice(0, limit)
+      .map(liveWorkspace);
   },
 });
 
@@ -70,9 +76,15 @@ export const update = mutation({
     icon: v.optional(v.string()),
     color: v.optional(v.string()),
     defaultView: v.optional(vDefaultView),
+    runId: v.optional(v.id("spectraAiRuns")),
+    executionId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    await requireOwnedWorkspace(ctx, args.actorClerkId, args.workspaceId);
+    const { workspace } = await requireOwnedWorkspace(ctx, args.actorClerkId, args.workspaceId);
+    if (args.runId) {
+      const run = await ctx.db.get(args.runId);
+      if (!run || run.ownerUserId !== workspace.ownerUserId || run.status !== "running" || !args.executionId || run.executionId !== args.executionId) throw new Error("AI run not found");
+    }
     const patch: {
       title?: string;
       description?: string;
@@ -81,9 +93,19 @@ export const update = mutation({
       defaultView?: "cards" | "canvas" | "timeline" | "library";
       updatedAt: number;
       lastActivityAt: number;
+      aiState?: "edited";
+      aiRunId?: undefined;
+      aiExecutionId?: undefined;
+      aiPreview?: undefined;
+      aiStateExpiresAt?: number;
     } = {
       updatedAt: Date.now(),
       lastActivityAt: Date.now(),
+      aiState: args.runId ? "edited" : undefined,
+      aiRunId: undefined,
+      aiExecutionId: undefined,
+      aiPreview: undefined,
+      aiStateExpiresAt: args.runId ? Date.now() + 8_000 : undefined,
     };
     if (args.title !== undefined) patch.title = args.title.trim() || "Untitled workspace";
     if (args.description !== undefined) patch.description = args.description.trim() || undefined;
@@ -92,6 +114,59 @@ export const update = mutation({
     if (args.defaultView !== undefined) patch.defaultView = args.defaultView;
     await ctx.db.patch(args.workspaceId, patch);
     return { workspaceId: args.workspaceId };
+  },
+});
+
+export const createPending = mutation({
+  args: { actorClerkId: v.string(), runId: v.id("spectraAiRuns"), executionId: v.string(), title: v.string(), description: v.optional(v.string()), icon: v.optional(v.string()), color: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    const actor = await requireSpectraActor(ctx, args.actorClerkId);
+    const run = await ctx.db.get(args.runId);
+    if (!run || run.ownerUserId !== actor._id || run.orgId !== actor.orgId || run.status !== "running" || run.executionId !== args.executionId) throw new Error("AI run not found");
+    const now = Date.now();
+    const workspaceId = await ctx.db.insert("spectraWorkspaces", { ownerUserId: actor._id, orgId: actor.orgId, title: args.title.trim() || "New workspace", description: args.description?.trim() || "Awaiting your approval", icon: args.icon ?? "Sparkles", color: args.color ?? "cyan", status: "active", defaultView: "library", aiState: "creating", aiRunId: args.runId, aiExecutionId: args.executionId, aiPending: true, createdAt: now, updatedAt: now, lastActivityAt: now });
+    return { workspaceId };
+  },
+});
+
+export const finalizePending = mutation({
+  args: { actorClerkId: v.string(), workspaceId: v.id("spectraWorkspaces"), runId: v.id("spectraAiRuns"), executionId: v.string(), title: v.string(), description: v.optional(v.string()), icon: v.optional(v.string()), color: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    const { workspace } = await requireOwnedWorkspace(ctx, args.actorClerkId, args.workspaceId);
+    const run = await ctx.db.get(args.runId);
+    if (!run || run.status !== "running" || run.executionId !== args.executionId || workspace.aiRunId !== args.runId || workspace.aiExecutionId !== args.executionId || workspace.aiState !== "creating") throw new Error("This pending workspace is no longer available.");
+    const now = Date.now();
+    await ctx.db.patch(args.workspaceId, { title: args.title.trim() || workspace.title, description: args.description?.trim() || undefined, icon: args.icon ?? workspace.icon, color: args.color ?? workspace.color, aiState: "edited", aiStateExpiresAt: now + 8_000, aiRunId: undefined, aiExecutionId: undefined, aiPending: undefined, aiPreview: undefined, updatedAt: now, lastActivityAt: now });
+    return { workspaceId: args.workspaceId };
+  },
+});
+
+export const stageAiPatch = mutation({
+  args: { actorClerkId: v.string(), workspaceId: v.id("spectraWorkspaces"), runId: v.id("spectraAiRuns"), executionId: v.string(), title: v.optional(v.string()), description: v.optional(v.string()), icon: v.optional(v.string()), color: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    const { workspace } = await requireOwnedWorkspace(ctx, args.actorClerkId, args.workspaceId);
+    const run = await ctx.db.get(args.runId);
+    if (!run || run.ownerUserId !== workspace.ownerUserId || run.status !== "running" || run.executionId !== args.executionId) throw new Error("AI run not found");
+    await ctx.db.patch(args.workspaceId, { aiState: "updating", aiRunId: args.runId, aiExecutionId: args.executionId, aiPreview: { title: args.title, description: args.description, icon: args.icon, color: args.color, startedAt: Date.now() }, updatedAt: Date.now() });
+    return { workspaceId: args.workspaceId };
+  },
+});
+
+export const settleForRun = mutation({
+  args: { actorClerkId: v.string(), runId: v.id("spectraAiRuns"), executionId: v.string(), outcome: v.union(v.literal("clear"), v.literal("failed")) },
+  handler: async (ctx, args) => {
+    const actor = await requireSpectraActor(ctx, args.actorClerkId);
+    const run = await ctx.db.get(args.runId);
+    if (!run || run.ownerUserId !== actor._id || run.orgId !== actor.orgId || run.executionId !== args.executionId) throw new Error("This run attempt is no longer active.");
+    const rows = await ctx.db.query("spectraWorkspaces").withIndex("by_owner_activity", (q) => q.eq("ownerUserId", actor._id)).collect();
+    const affected = rows.filter((workspace) => workspace.orgId === actor.orgId && workspace.aiRunId === args.runId && workspace.aiExecutionId === args.executionId);
+    const now = Date.now();
+    for (const workspace of affected) {
+      if (workspace.aiPending) {
+        await ctx.db.delete(workspace._id);
+      } else await ctx.db.patch(workspace._id, args.outcome === "clear" ? { aiState: undefined, aiRunId: undefined, aiExecutionId: undefined, aiPreview: undefined, updatedAt: now } : { aiState: "failed", updatedAt: now });
+    }
+    return { settled: affected.length };
   },
 });
 

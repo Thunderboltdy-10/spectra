@@ -5,7 +5,6 @@ import type { Editor, JSONContent } from "@tiptap/react";
 import { Loader2, RotateCcw, Sparkles, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useEditorStore } from "@/stores/editor-store";
-import { notifyWorkspaceContentMutated } from "@/lib/workspace/events";
 
 interface DiffPreview {
   ops: Array<{ type: "replace" | "insert" | "delete"; from: number; to: number; content?: string; reason?: string }>;
@@ -35,10 +34,9 @@ interface AiBarProps {
   onReplaceDocument: (content: JSONContent) => EditorSnapshot | null;
   noteId?: string;
   artifactId?: string;
-  workstreamId?: string;
 }
 
-export function AiBar({ editor, onApplyEdits, onReplaceDocument, noteId, artifactId, workstreamId }: AiBarProps) {
+export function AiBar({ editor, onApplyEdits, onReplaceDocument, noteId, artifactId }: AiBarProps) {
   const { aiBarPrompt, setAiBarPrompt, aiBarBusy, setAiBarBusy } = useEditorStore();
   const [pendingEdit, setPendingEdit] = useState<PendingAiLifecycle | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -51,14 +49,6 @@ export function AiBar({ editor, onApplyEdits, onReplaceDocument, noteId, artifac
   useEffect(() => {
     versionRef.current = pendingEdit;
   }, [pendingEdit]);
-
-  const emitWorkspaceMutation = useCallback(() => {
-    notifyWorkspaceContentMutated({
-      workstreamId,
-      refreshHub: true,
-      refreshWorkstreams: !workstreamId,
-    });
-  }, [workstreamId]);
 
   const confirmPendingEdit = useCallback(async () => {
     const current = versionRef.current;
@@ -95,9 +85,8 @@ export function AiBar({ editor, onApplyEdits, onReplaceDocument, noteId, artifac
     setPendingEdit(null);
     confirmRetryCountRef.current = 0;
     setError(null);
-    emitWorkspaceMutation();
     return true;
-  }, [emitWorkspaceMutation]);
+  }, []);
 
   useEffect(() => {
     if (!pendingEdit || pendingEdit.status !== "applied") return;
@@ -235,7 +224,6 @@ export function AiBar({ editor, onApplyEdits, onReplaceDocument, noteId, artifac
           });
           confirmRetryCountRef.current = 0;
         }
-        emitWorkspaceMutation();
       }
       setAiBarPrompt("");
     } catch (err) {
@@ -249,7 +237,7 @@ export function AiBar({ editor, onApplyEdits, onReplaceDocument, noteId, artifac
     } finally {
       setAiBarBusy(false);
     }
-  }, [aiBarPrompt, aiBarBusy, artifactId, confirmPendingEdit, editor, emitWorkspaceMutation, noteId, onApplyEdits, onReplaceDocument, setAiBarBusy, setAiBarPrompt]);
+  }, [aiBarPrompt, aiBarBusy, artifactId, confirmPendingEdit, editor, noteId, onApplyEdits, onReplaceDocument, setAiBarBusy, setAiBarPrompt]);
 
   const handleDiscard = useCallback(async () => {
     if (!pendingEdit || pendingEdit.status !== "applied") return;
@@ -276,8 +264,7 @@ export function AiBar({ editor, onApplyEdits, onReplaceDocument, noteId, artifac
       status: "discarded",
       remainingMs: 0,
     });
-    emitWorkspaceMutation();
-  }, [emitWorkspaceMutation, onReplaceDocument, pendingEdit]);
+  }, [onReplaceDocument, pendingEdit]);
 
   const handleReapply = useCallback(async () => {
     if (!pendingEdit) return;
@@ -304,8 +291,7 @@ export function AiBar({ editor, onApplyEdits, onReplaceDocument, noteId, artifac
       status: "applied",
       remainingMs: 30_000,
     });
-    emitWorkspaceMutation();
-  }, [emitWorkspaceMutation, onReplaceDocument, pendingEdit]);
+  }, [onReplaceDocument, pendingEdit]);
 
   const dismissError = useCallback(() => {
     setError(null);

@@ -257,7 +257,6 @@ export function retrieveManagebacRuntimeContext(params: {
     resolutionStatus?: string;
     message?: string;
     student?: { id?: string; name?: string; gradeLevel?: string; email?: string };
-    workstreams?: Array<Record<string, unknown> & { managebacContext?: Record<string, unknown>; subjectCode?: string; managebacClassId?: string }>;
     plannerItems?: Array<Record<string, unknown>>;
     artifacts?: Array<Record<string, unknown>>;
     announcements?: Array<Record<string, unknown>>;
@@ -286,25 +285,6 @@ export function retrieveManagebacRuntimeContext(params: {
       summary: compactText(`Student profile. ${student.gradeLevel ? `Grade ${student.gradeLevel}. ` : ""}${student.email ?? ""}`),
       score: lexicalScore(params.message, text) + 0.12,
       payload: { ...student },
-    });
-  }
-
-  for (const row of snapshot.workstreams ?? []) {
-    const title = compactText(row.title ?? row.name ?? 'ManageBac class', 120);
-    const description = compactText(row.description ?? row.syncConflictSummary ?? '', 220);
-    const subjectCode = compactText(row.subjectCode ?? row.managebacContext?.subjectCode ?? '', 80);
-    const score = lexicalScore(params.message, `${title} ${description} ${subjectCode}`);
-    push({
-      kind: 'class',
-      id: String(row._id ?? row.managebacClassId ?? title),
-      title,
-      summary: compactText(`${subjectCode ? `${subjectCode} — ` : ''}${description || 'ManageBac class workspace.'}`),
-      score,
-      payload: {
-        workstreamId: row._id,
-        managebacClassId: row.managebacClassId,
-        subjectCode: row.subjectCode ?? row.managebacContext?.subjectCode,
-      },
     });
   }
 
@@ -343,7 +323,6 @@ export function retrieveManagebacRuntimeContext(params: {
       payload: {
         artifactId: row._id,
         managebacItemId: row.managebacItemId,
-        workstreamId: row.workstreamId,
       },
     });
   }

@@ -159,12 +159,12 @@ export function QuickChat({
   return (
     <div className={cn("relative flex flex-col mx-auto min-w-[320px] transition-all duration-300", focused ? "w-full" : "w-[96%]", className)}>
       {files.length > 0 && (
-        <div className="mb-2 w-[95%] mx-auto overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)]/95 backdrop-blur-xl">
+        <div data-spectra-card="inbox" className="mb-2 w-[95%] mx-auto overflow-hidden rounded-[10px]">
           <div className="flex items-center justify-between px-2.5 py-1.5 border-b border-[var(--border-default)]/40">
             <button
               type="button"
               onClick={() => setAttachmentsExpanded((prev) => !prev)}
-              className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-2.5 py-1 text-[11px] text-[var(--text-primary)] transition hover:bg-[var(--bg-hover)]"
+              className="inline-flex cursor-pointer items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] text-[var(--text-primary)] transition hover:bg-[var(--bg-hover)]"
             >
               <Paperclip className="h-3.5 w-3.5" />
               {files.length} attachment{files.length === 1 ? "" : "s"}
@@ -187,7 +187,7 @@ export function QuickChat({
                     )}
                     <span className="max-w-[120px] truncate">{file.name}</span>
                     {renderStatus(state.status, state.error)}
-                    <button type="button" onClick={() => onRemoveFile?.(file)} className="text-[var(--text-tertiary)] hover:text-[var(--danger)]">
+                    <button type="button" onClick={() => onRemoveFile?.(file)} className="spectra-icon-action h-6 w-6 text-[var(--text-tertiary)] hover:text-[var(--danger)]" aria-label={`Remove ${file.name}`} title={`Remove ${file.name}`}>
                       <X className="h-3.5 w-3.5" />
                     </button>
                   </div>
@@ -207,13 +207,14 @@ export function QuickChat({
         )}
 
         <div
+          data-spectra-card="result"
+          data-card-state={isStreaming ? "continued" : focused ? "focused" : "normal"}
           className={cn(
-            "relative flex flex-1 flex-col gap-0 rounded-[24px] border",
-            "border-[var(--border-default)]/40 bg-[var(--bg-elevated)]/95 backdrop-blur-xl",
+            "spectra-quick-chat relative flex flex-1 flex-col gap-0 border bg-[var(--bg-elevated)]",
             "transition-all duration-300 ease-[var(--ease-standard)]",
             focused
-              ? "shadow-[0_18px_48px_-14px_rgba(8,22,40,0.26),0_4px_18px_-10px_rgba(8,22,40,0.16)] border-[color-mix(in_oklab,var(--accent-cyan)_25%,var(--border-default))]"
-              : "shadow-[0_10px_32px_-14px_rgba(8,22,40,0.18),0_4px_12px_-10px_rgba(8,22,40,0.12)]"
+              ? "shadow-[0_18px_48px_-24px_rgba(8,22,40,0.30),0_4px_18px_-14px_rgba(8,22,40,0.16)]"
+              : "shadow-[0_10px_32px_-20px_rgba(8,22,40,0.18),0_4px_12px_-12px_rgba(8,22,40,0.10)]"
           )}
         >
           {topContent && (
@@ -240,15 +241,17 @@ export function QuickChat({
             />
           </div>
 
-          <div className="flex items-center gap-1.5 shrink-0 self-end">
+          <div className="spectra-quick-chat-tools flex items-center gap-1.5 shrink-0 self-end">
           {mounted && showMic && (speech.isSupported || onMicUnsupported) && (
             <button
               type="button"
               onClick={toggleMic}
               className={cn(
-                "flex h-9 w-9 items-center justify-center rounded-[12px] transition-colors",
-                speech.isListening ? "bg-[var(--accent-coral)]/12 text-[var(--accent-coral)]" : "bg-[var(--bg-secondary)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
+                "spectra-icon-action h-9 w-9 rounded-[10px] transition-colors",
+                speech.isListening ? "is-active text-[var(--accent-coral)]" : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
               )}
+              aria-label={speech.isListening ? "Stop dictation" : "Start dictation"}
+              title={speech.isListening ? "Stop dictation" : "Start dictation"}
             >
               <Mic className="h-4 w-4" />
             </button>
@@ -258,7 +261,9 @@ export function QuickChat({
             <button
               type="button"
               onClick={onStop}
-              className="flex h-9 w-9 items-center justify-center rounded-[12px] bg-[var(--accent-coral)]/12 text-[var(--accent-coral)] transition-colors hover:bg-[var(--accent-coral)]/20"
+              className="spectra-icon-action is-danger h-9 w-9 rounded-[10px] text-[var(--accent-coral)]"
+              aria-label="Stop response"
+              title="Stop response"
             >
               <Square className="h-3.5 w-3.5" />
             </button>
@@ -268,11 +273,13 @@ export function QuickChat({
               onClick={onSubmit}
               disabled={Boolean(!value.trim() || disabled)}
               className={cn(
-                "flex h-9 w-9 items-center justify-center rounded-[12px] transition-all duration-150",
+                "flex h-9 w-9 items-center justify-center rounded-[10px] transition-all duration-150",
                 value.trim()
-                  ? "bg-[var(--accent-cyan)] text-white shadow-[0_4px_12px_-6px_rgba(14,142,232,0.50)]"
-                  : "bg-[var(--bg-secondary)] text-[var(--text-tertiary)]",
+                  ? "bg-[var(--accent-cyan)] text-white shadow-[0_8px_18px_-10px_rgba(14,142,232,0.70)] hover:-translate-y-0.5"
+                  : "bg-transparent text-[var(--text-tertiary)]",
               )}
+              aria-label="Send message"
+              title="Send message"
             >
               <ArrowUp className="h-4 w-4" />
             </button>

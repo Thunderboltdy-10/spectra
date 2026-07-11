@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { AlertTriangle, Bug, ImagePlus, Loader2, MessageSquare, Send, ShieldAlert, Sparkles, Upload, X } from "lucide-react";
 import { toast } from "sonner";
@@ -45,10 +45,7 @@ export function FeedbackWidget() {
   const [screenshot, setScreenshot] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [noEvidenceWarning, setNoEvidenceWarning] = useState(false);
-  const traceId = useMemo(
-    () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `trace-${Date.now()}`),
-    [],
-  );
+  const [traceId] = useState(() => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `trace-${Date.now()}`));
 
   const remaining = MAX_MESSAGE_LENGTH - message.length;
 

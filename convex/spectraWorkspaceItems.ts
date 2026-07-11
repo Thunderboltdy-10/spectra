@@ -35,6 +35,7 @@ async function hydrateWorkspaceItem(ctx: Parameters<typeof requireSpectraActor>[
     const artifact = artifactId ? await ctx.db.get(artifactId) : null;
     return {
       ...item,
+      thread: null,
       artifact: artifact && artifact.status !== "deleted" ? {
         ...artifact,
         placements: [{
@@ -46,9 +47,22 @@ async function hydrateWorkspaceItem(ctx: Parameters<typeof requireSpectraActor>[
       } : null,
     };
   }
+  if (item.sourceType === "thread") {
+    const threadId = ctx.db.normalizeId("spectraThreads", item.sourceId);
+    const thread = threadId ? await ctx.db.get(threadId) : null;
+    const run = thread?.lastRunId ? await ctx.db.get(thread.lastRunId) : null;
+    return {
+      ...item,
+      artifact: null,
+      thread: thread && thread.status !== "deleted" && thread.workspaceId === item.workspaceId
+        ? { ...thread, run }
+        : null,
+    };
+  }
   return {
     ...item,
     artifact: null,
+    thread: null,
   };
 }
 
@@ -69,10 +83,12 @@ async function listOwnedWorkspaceItems(
       .filter((item) => includeHidden || item.viewData.hidden !== true)
       .map((item) => hydrateWorkspaceItem(ctx, item, workspace.title)),
   );
+  const settledWorkspace = workspace.aiState === "edited" && workspace.aiStateExpiresAt && workspace.aiStateExpiresAt <= Date.now() ? { ...workspace, aiState: undefined } : workspace;
+  const visibleWorkspace = settledWorkspace.aiState === "updating" && settledWorkspace.aiPreview ? { ...settledWorkspace, title: settledWorkspace.aiPreview.title ?? settledWorkspace.title, description: settledWorkspace.aiPreview.description ?? settledWorkspace.description, icon: settledWorkspace.aiPreview.icon ?? settledWorkspace.icon, color: settledWorkspace.aiPreview.color ?? settledWorkspace.color } : settledWorkspace;
   return {
-    workspace,
+    workspace: visibleWorkspace,
     items: hydrated
-      .filter((item) => item.sourceType !== "artifact" || item.artifact)
+      .filter((item) => item.sourceType === "artifact" ? item.artifact : item.sourceType === "thread" ? item.thread : true)
       .sort((a, b) => b.updatedAt - a.updatedAt),
   };
 }
@@ -189,6 +205,7 @@ export const hide = mutation({
 
     return {
       workspaceItemId: args.workspaceItemId,
+      workspaceId: item.workspaceId,
       sourceType: item.sourceType,
       sourceId: item.sourceId,
       artifactStillExists,

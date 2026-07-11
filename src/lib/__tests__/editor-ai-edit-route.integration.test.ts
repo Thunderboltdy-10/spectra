@@ -74,7 +74,6 @@ describe("editor ai-edit route integration", () => {
     expect(convexMutation).toHaveBeenNthCalledWith(1, "chats:getOrCreateArtifactThread", {
       actorClerkId: "user_edit",
       artifactId: "artifact_1",
-      workstreamId: "ws_1",
       mode: "document",
       thinkingLevel: "low",
       routerMode: "auto",

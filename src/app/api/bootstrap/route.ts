@@ -58,8 +58,7 @@ export async function GET() {
 
     await convexMutation("models:seedCatalogIfEmpty", { actorClerkId: actor.clerkId });
 
-    const [chats, models, orgSettings, agents, userSpending, userMemory] = await Promise.all([
-      convexQuery("chats:listChats", { actorClerkId: actor.clerkId, limit: 120 }) as Promise<unknown>,
+    const [models, orgSettings, agents, userSpending, userMemory] = await Promise.all([
       convexQuery("models:listModels", { actorClerkId: actor.clerkId }) as Promise<unknown>,
       convexQuery("admin:getOrgSettings", { actorClerkId: actor.clerkId }) as Promise<unknown>,
       convexQuery("agents:listAgents", { actorClerkId: actor.clerkId }) as Promise<unknown>,
@@ -107,7 +106,7 @@ export async function GET() {
     return ok({
       actor,
       isSuperAdmin,
-      chats,
+      chats: [],
       models,
       orgSettings: patchedOrgSettings,
       agents,

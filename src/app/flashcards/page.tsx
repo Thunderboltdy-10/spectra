@@ -52,6 +52,7 @@ function shuffleCards(items: DueCard[]) {
 export default function FlashcardsPage() {
   const [loading, setLoading] = useState(true);
   const [savingRating, setSavingRating] = useState(false);
+  const [now] = useState(() => Date.now());
   const [decks, setDecks] = useState<DeckItem[]>([]);
   const [dueCards, setDueCards] = useState<DueCard[]>([]);
   const [deckCards, setDeckCards] = useState<DueCard[]>([]);
@@ -121,9 +122,9 @@ export default function FlashcardsPage() {
     () =>
       dueCards.filter((card) => {
         const nextReviewAt = card.progress?.nextReviewAt ?? 0;
-        return nextReviewAt <= Date.now();
+        return nextReviewAt <= now;
       }).length,
-    [dueCards],
+    [dueCards, now],
   );
 
   const projectedDates = useMemo(() => {
@@ -132,7 +133,7 @@ export default function FlashcardsPage() {
       easeFactor: 2.5,
       interval: 0,
       repetitions: 0,
-      nextReviewAt: Date.now(),
+      nextReviewAt: now,
     };
     return QUALITY_OPTIONS.map((option) => {
       const next = calculateNextReview(option.value, baseline.easeFactor, baseline.interval, baseline.repetitions);
@@ -141,7 +142,7 @@ export default function FlashcardsPage() {
         date: new Date(next.nextReviewAt).toLocaleDateString(),
       };
     });
-  }, [current]);
+  }, [current, now]);
 
   async function rateCurrent(quality: number) {
     if (!current || savingRating) return;

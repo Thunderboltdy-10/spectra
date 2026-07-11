@@ -1,17 +1,20 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import type { CSSProperties } from "react";
+
+const activeAccentStyle = { "--card-accent": "var(--accent-cyan)" } as CSSProperties;
 
 export function MessageSkeleton({ className = "" }: { className?: string }) {
   return (
     <div className={`flex gap-3 py-4 animate-in fade-in slide-in-from-bottom-2 duration-300 ${className}`}>
-      <div className="h-8 w-8 shrink-0 rounded-full bg-[var(--bg-secondary)] animate-pulse" />
+      <div className="spectra-skeleton-block h-8 w-8 shrink-0 rounded-[8px]" />
       <div className="flex-1 space-y-2">
-        <div className="h-4 w-24 rounded bg-[var(--bg-secondary)] animate-pulse" />
+        <div className="spectra-skeleton-line h-4 w-24" />
         <div className="space-y-2">
-          <div className="h-4 w-[90%] rounded bg-[var(--bg-secondary)] animate-pulse" />
-          <div className="h-4 w-[80%] rounded bg-[var(--bg-secondary)] animate-pulse" />
-          <div className="h-4 w-[60%] rounded bg-[var(--bg-secondary)] animate-pulse" />
+          <div className="spectra-skeleton-line h-4 w-[90%]" />
+          <div className="spectra-skeleton-line h-4 w-[80%]" />
+          <div className="spectra-skeleton-line h-4 w-[60%]" />
         </div>
       </div>
     </div>
@@ -21,12 +24,8 @@ export function MessageSkeleton({ className = "" }: { className?: string }) {
 export function StreamingIndicator() {
   return (
     <div className="flex items-center gap-2 py-2">
-      <div className="flex gap-1">
-        <span className="h-2 w-2 animate-bounce rounded-full bg-[var(--accent)] [animation-delay:0ms]" />
-        <span className="h-2 w-2 animate-bounce rounded-full bg-[var(--accent)] [animation-delay:150ms]" />
-        <span className="h-2 w-2 animate-bounce rounded-full bg-[var(--accent)] [animation-delay:300ms]" />
-      </div>
-      <span className="text-xs text-[var(--text-secondary)]">AI is thinking...</span>
+      <span className="spectra-status-dot" data-active="true" style={activeAccentStyle} />
+      <span className="thinking-wave text-xs text-[var(--text-secondary)]">Working through the request...</span>
     </div>
   );
 }
@@ -51,8 +50,8 @@ export function ThinkingMessages() {
   }, []);
 
   return (
-    <div className="inline-flex items-center gap-2 rounded-full border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-1.5">
-      <div className="h-2 w-2 animate-pulse rounded-full bg-[var(--accent)]" />
+    <div data-spectra-card="result" data-card-state="updating" className="inline-flex items-center gap-2 px-3 py-1.5">
+      <span className="spectra-status-dot" data-active="true" style={activeAccentStyle} />
       <span key={index} className="thinking-copy thinking-wave text-sm text-[var(--text-secondary)]">
         {THINKING_MESSAGES[index]}
       </span>
@@ -64,13 +63,13 @@ export function ChatListSkeleton() {
   return (
     <div className="space-y-3 p-3">
       <div className="flex items-center justify-between">
-        <div className="h-8 w-20 rounded bg-[var(--bg-secondary)] animate-pulse" />
-        <div className="h-8 w-8 rounded-full bg-[var(--bg-secondary)] animate-pulse" />
+        <div className="spectra-skeleton-line h-8 w-20" />
+        <div className="spectra-skeleton-block h-8 w-8 rounded-[8px]" />
       </div>
-      <div className="h-10 w-full rounded bg-[var(--bg-secondary)] animate-pulse" />
-      <div className="h-9 w-full rounded bg-[var(--bg-secondary)] animate-pulse" />
+      <div className="spectra-skeleton-block h-10 w-full" />
+      <div className="spectra-skeleton-line h-9 w-full" />
       {Array.from({ length: 6 }).map((_, i) => (
-        <div key={i} className="h-12 w-full rounded bg-[var(--bg-secondary)] animate-pulse" />
+        <div key={i} className="spectra-skeleton-block h-12 w-full" />
       ))}
     </div>
   );
@@ -79,8 +78,8 @@ export function ChatListSkeleton() {
 export function ModelSelectorSkeleton() {
   return (
     <div className="flex items-center gap-2">
-      <div className="h-6 w-24 rounded-full bg-[var(--bg-secondary)] animate-pulse" />
-      <div className="h-6 w-6 rounded-full bg-[var(--bg-secondary)] animate-pulse" />
+      <div className="spectra-skeleton-line h-6 w-24 rounded-full" />
+      <div className="spectra-skeleton-block h-6 w-6 rounded-[8px]" />
     </div>
   );
 }

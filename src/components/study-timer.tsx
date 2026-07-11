@@ -170,7 +170,7 @@ function getInitialTimerState(): PersistedTimerState {
 
 
 export function StudyTimer({ chatId, className, open, onClose, onOpen }: StudyTimerProps) {
-  const initialState = useMemo(getInitialTimerState, []);
+  const initialState = useMemo(() => getInitialTimerState(), []);
   const [phase, setPhase] = useState<TimerPhase>(initialState.phase);
   const [workMinutes, setWorkMinutes] = useState(initialState.workMinutes);
   const [breakMinutes, setBreakMinutes] = useState(initialState.breakMinutes);

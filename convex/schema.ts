@@ -261,352 +261,9 @@ export default defineSchema({
     .index("by_agent_model", ["agentId", "modelId"]),
 
   
-  workspaceItems: defineTable({
-    orgId: v.id("orgs"),
-    ownerUserId: v.id("users"),
-    workstreamId: v.optional(v.id("workstreams")),
-    type: v.union(
-      v.literal("thread"),
-      v.literal("document"),
-      v.literal("planner"),
-      v.literal("board"),
-      v.literal("visualization"),
-      v.literal("media"),
-      v.literal("reference"),
-      v.literal("custom"),
-      v.literal("utility")
-    ),
-    itemType: v.optional(v.union(
-      v.literal("thread"),
-      v.literal("artifact"),
-      v.literal("planner"),
-      v.literal("utility"),
-      v.literal("custom"),
-    )),
-    sourceKind: v.optional(v.union(
-      v.literal("chat"),
-      v.literal("artifact"),
-      v.literal("plannerItem"),
-      v.literal("utility"),
-      v.literal("custom"),
-    )),
-    sourceId: v.optional(v.string()),
-    renderMode: v.optional(v.string()),
-    sourceChatId: v.optional(v.id("chats")),
-    sourceArtifactId: v.optional(v.id("artifacts")),
-    sourcePlannerItemId: v.optional(v.id("plannerItems")),
-    title: v.string(),
-    contentSummary: v.optional(v.string()),
-    x: v.number(),
-    y: v.number(),
-    width: v.optional(v.number()),
-    height: v.optional(v.number()),
-    zIndex: v.optional(v.number()),
-    category: v.optional(v.union(
-      v.literal("threads"),
-      v.literal("documents"),
-      v.literal("planner"),
-      v.literal("boards"),
-      v.literal("visualizations"),
-      v.literal("media"),
-      v.literal("references"),
-      v.literal("custom"),
-    )),
-    status: v.union(v.literal("active"), v.literal("archived")),
-    pinned: v.optional(v.boolean()),
-    collapsed: v.optional(v.boolean()),
-    hidden: v.optional(v.boolean()),
-    visualGroup: v.optional(v.string()),
-    renderProps: v.optional(v.any()),
-    provenanceSource: v.optional(v.union(
-      v.literal("user"),
-      v.literal("ai"),
-      v.literal("system"),
-    )),
-    provenanceAction: v.optional(v.string()),
-    topicCluster: v.optional(v.string()),
-    clusterOverride: v.optional(v.string()),
-    searchText: v.optional(v.string()),
-    createdAt: v.number(),
-    updatedAt: v.number(),
-  })
-    .index("by_workstream", ["workstreamId"])
-    .index("by_owner", ["ownerUserId"])
-    .index("by_source_artifact", ["sourceArtifactId"])
-    .index("by_source_chat", ["sourceChatId"])
-    .index("by_source_planner", ["sourcePlannerItemId"])
-    .searchIndex("search_text", {
-      searchField: "searchText",
-      filterFields: ["ownerUserId", "orgId", "workstreamId", "status", "itemType"],
-    }),
-
-  workspaceTopicClusters: defineTable({
-    orgId: v.id("orgs"),
-    ownerUserId: v.id("users"),
-    workstreamId: v.id("workstreams"),
-    clusterId: v.string(),
-    generatedTitle: v.string(),
-    userTitle: v.optional(v.string()),
-    lastAppliedAt: v.optional(v.number()),
-    createdAt: v.number(),
-    updatedAt: v.number(),
-  })
-    .index("by_workstream", ["workstreamId"])
-    .index("by_workstream_cluster", ["workstreamId", "clusterId"]),
-
-  ghostSuggestions: defineTable({
-    orgId: v.id("orgs"),
-    ownerUserId: v.id("users"),
-    workstreamId: v.id("workstreams"),
-    linkedAgentId: v.optional(v.id("agents")),
-    sourceWorkspaceMutationId: v.optional(v.id("workspaceMutations")),
-    status: v.union(
-      v.literal("pending"),
-      v.literal("accepted"),
-      v.literal("dismissed"),
-      v.literal("expired"),
-    ),
-    suggestionKind: v.union(
-      v.literal("note"),
-      v.literal("planner"),
-      v.literal("quiz"),
-      v.literal("flashcard_deck"),
-      v.literal("visualization"),
-      v.literal("code_project"),
-    ),
-    confidenceTier: v.union(
-      v.literal("high"),
-      v.literal("medium"),
-      v.literal("low"),
-    ),
-    confidenceScore: v.number(),
-    title: v.string(),
-    summary: v.optional(v.string()),
-    content: v.optional(v.string()),
-    renderMode: v.optional(v.string()),
-    category: v.optional(v.string()),
-    x: v.optional(v.number()),
-    y: v.optional(v.number()),
-    similarityKey: v.string(),
-    contextHash: v.string(),
-    contextSignals: v.array(v.string()),
-    resourceContext: v.optional(v.string()),
-    generationModel: v.string(),
-    modelLane: v.string(),
-    generationReason: v.string(),
-    unseenSessions: v.number(),
-    lastSeenSessionKey: v.optional(v.string()),
-    acceptedArtifactId: v.optional(v.id("artifacts")),
-    acceptedWorkspaceItemId: v.optional(v.id("workspaceItems")),
-    dismissedAt: v.optional(v.number()),
-    acceptedAt: v.optional(v.number()),
-    expiredAt: v.optional(v.number()),
-    createdAt: v.number(),
-    updatedAt: v.number(),
-  })
-    .index("by_owner_workstream_status", ["ownerUserId", "workstreamId", "status"])
-    .index("by_workstream_status", ["workstreamId", "status"])
-    .index("by_similarity", ["ownerUserId", "similarityKey"])
-    .index("by_status_updated", ["status", "updatedAt"]),
-
-  ghostRegenerationState: defineTable({
-    orgId: v.id("orgs"),
-    ownerUserId: v.id("users"),
-    workstreamId: v.id("workstreams"),
-    status: v.union(v.literal("scheduled"), v.literal("running"), v.literal("idle")),
-    scheduledAt: v.optional(v.number()),
-    startedAt: v.optional(v.number()),
-    completedAt: v.optional(v.number()),
-    contextHash: v.optional(v.string()),
-    trigger: v.optional(v.string()),
-    updatedAt: v.number(),
-  })
-    .index("by_workstream", ["workstreamId"])
-    .index("by_owner_workstream", ["ownerUserId", "workstreamId"])
-    .index("by_status_updated", ["status", "updatedAt"]),
-
-  workspaceMutations: defineTable({
-    orgId: v.id("orgs"),
-    ownerUserId: v.id("users"),
-    workstreamId: v.optional(v.id("workstreams")),
-    targetWorkstreamId: v.optional(v.id("workstreams")),
-    mutationType: v.string(),
-    source: v.union(v.literal("user"), v.literal("ai"), v.literal("system")),
-    summary: v.optional(v.string()),
-    targetItemIds: v.optional(v.array(v.id("workspaceItems"))),
-    affectedWorkstreamIds: v.optional(v.array(v.id("workstreams"))),
-    revisionKey: v.optional(v.string()),
-    before: v.optional(v.any()),
-    after: v.optional(v.any()),
-    revertData: v.optional(v.any()),
-    status: v.union(v.literal("applied"), v.literal("reverted")),
-    createdAt: v.number(),
-    updatedAt: v.number(),
-    revertedAt: v.optional(v.number()),
-  })
-    .index("by_owner", ["ownerUserId"])
-    .index("by_workstream", ["workstreamId"])
-    .index("by_target_workstream", ["targetWorkstreamId"]),
-
-  workspaceCommandResults: defineTable({
-    orgId: v.id("orgs"),
-    ownerUserId: v.id("users"),
-    workstreamId: v.id("workstreams"),
-    sourceChatId: v.optional(v.id("chats")),
-    sourceMessageId: v.optional(v.id("messages")),
-    intent: v.union(
-      v.literal("note"),
-      v.literal("planner"),
-      v.literal("thread"),
-      v.literal("result"),
-      v.literal("widget"),
-    ),
-    status: v.union(v.literal("processing"), v.literal("completed"), v.literal("dismissed")),
-    title: v.string(),
-    summary: v.string(),
-    detail: v.optional(v.string()),
-    variant: v.optional(v.union(
-      v.literal("summary"),
-      v.literal("answer"),
-      v.literal("artifact"),
-      v.literal("planner"),
-      v.literal("thread"),
-    )),
-    targetKind: v.optional(v.union(
-      v.literal("artifact"),
-      v.literal("plannerItem"),
-      v.literal("chat"),
-      v.literal("workspaceItem"),
-      v.literal("result"),
-    )),
-    targetId: v.optional(v.string()),
-    topicCluster: v.optional(v.string()),
-    timelineAt: v.optional(v.number()),
-    signalStrength: v.optional(v.number()),
-    threadStatus: v.optional(v.union(
-      v.literal("open"),
-      v.literal("resolved"),
-      v.literal("blocked"),
-    )),
-    metadata: v.optional(v.any()),
-    createdAt: v.number(),
-    updatedAt: v.number(),
-    dismissedAt: v.optional(v.number()),
-  })
-    .index("by_workstream_status", ["workstreamId", "status"])
-    .index("by_workstream_updated", ["workstreamId", "updatedAt"])
-    .index("by_chat", ["sourceChatId"]),
-
-  workspaceWidgets: defineTable({
-    orgId: v.id("orgs"),
-    ownerUserId: v.id("users"),
-    workstreamId: v.optional(v.id("workstreams")),
-    kind: v.string(),
-    title: v.string(),
-    x: v.number(),
-    y: v.number(),
-    w: v.number(),
-    h: v.number(),
-    collapsed: v.optional(v.boolean()),
-    hidden: v.optional(v.boolean()),
-    state: v.optional(v.any()),
-    source: v.optional(v.union(v.literal("user"), v.literal("ai"), v.literal("system"))),
-    createdAt: v.number(),
-    updatedAt: v.number(),
-  })
-    .index("by_owner_updated", ["ownerUserId", "updatedAt"])
-    .index("by_workstream_updated", ["workstreamId", "updatedAt"]),
-
-  workstreams: defineTable({
-    ownerUserId: v.id("users"),
-    orgId: v.id("orgs"),
-    type: v.union(v.literal("subject"), v.literal("project"), v.literal("general")),
-    title: v.string(),
-    description: v.optional(v.string()),
-    emoji: v.optional(v.string()),
-    color: v.optional(v.string()),
-    status: v.union(v.literal("active"), v.literal("completed"), v.literal("archived")),
-    canvasX: v.optional(v.number()),
-    canvasY: v.optional(v.number()),
-    canvasWidth: v.optional(v.number()),
-    canvasHeight: v.optional(v.number()),
-    subjectCode: v.optional(v.string()),
-    managebacClassId: v.optional(v.string()),
-    managebacContext: v.optional(v.any()),
-    managebacInactiveSince: v.optional(v.number()),
-    linkedAgentId: v.optional(v.id("agents")),
-    linkedPackId: v.optional(v.id("packs")),
-    defaultMode: v.optional(vStudyMode),
-    defaultThinking: v.optional(vThinkingLevel),
-    artifactCount: v.optional(v.number()),
-    threadCount: v.optional(v.number()),
-    lastActivityAt: v.optional(v.number()),
-    workspaceRevision: v.optional(v.number()),
-    workspaceRevisionKey: v.optional(v.string()),
-    lastWorkspaceMutationId: v.optional(v.id("workspaceMutations")),
-    completedAt: v.optional(v.number()),
-    createdAt: v.number(),
-    updatedAt: v.number(),
-  })
-    .index("by_owner", ["ownerUserId"])
-    .index("by_owner_status", ["ownerUserId", "status"])
-    .index("by_owner_updated", ["ownerUserId", "updatedAt"])
-    .index("by_owner_status_updated", ["ownerUserId", "status", "updatedAt"])
-    .index("by_org", ["orgId"])
-    .searchIndex("search_title", {
-      searchField: "title",
-      filterFields: ["ownerUserId", "orgId", "status", "type"],
-    }),
-
-  workstreamMemory: defineTable({
-    workstreamId: v.id("workstreams"),
-    ownerUserId: v.id("users"),
-    orgId: v.id("orgs"),
-    key: v.string(),
-    text: v.string(),
-    textHash: v.optional(v.string()),
-    embedding: v.array(v.float64()),
-    category: v.union(
-      v.literal("concept"),
-      v.literal("progress"),
-      v.literal("preference"),
-      v.literal("deadline"),
-      v.literal("correction"),
-      v.literal("resource_link"),
-    ),
-    confidence: v.number(),
-    freshness: v.number(),
-    sourceType: v.union(
-      v.literal("chat_extraction"),
-      v.literal("artifact_link"),
-      v.literal("user_explicit"),
-      v.literal("managebac_sync"),
-      v.literal("agent_inference"),
-    ),
-    sourceChatId: v.optional(v.id("chats")),
-    sourceMessageId: v.optional(v.id("messages")),
-    sourceArtifactId: v.optional(v.id("artifacts")),
-    status: v.union(v.literal("active"), v.literal("superseded"), v.literal("dismissed")),
-    supersededBy: v.optional(v.id("workstreamMemory")),
-    archivedAt: v.optional(v.number()),
-    lastDecayedAt: v.optional(v.number()),
-    createdAt: v.number(),
-    updatedAt: v.number(),
-  })
-    .index("by_workstream", ["workstreamId"])
-    .index("by_workstream_category", ["workstreamId", "category"])
-    .index("by_workstream_status", ["workstreamId", "status"])
-    .index("by_source_chat", ["sourceChatId"])
-    .vectorIndex("by_embedding", {
-      vectorField: "embedding",
-      dimensions: EMBEDDING_DIMENSIONS,
-      filterFields: ["workstreamId", "ownerUserId", "orgId", "status", "category"],
-    }),
-
   plannerItems: defineTable({
     ownerUserId: v.id("users"),
     orgId: v.id("orgs"),
-    workstreamId: v.optional(v.id("workstreams")),
     title: v.string(),
     description: v.optional(v.string()),
     type: v.union(v.literal("deadline"), v.literal("milestone"), v.literal("goal"), v.literal("reminder")),
@@ -626,13 +283,11 @@ export default defineSchema({
   })
     .index("by_owner", ["ownerUserId"])
     .index("by_owner_status", ["ownerUserId", "status"])
-    .index("by_workstream", ["workstreamId"])
     .index("by_due", ["dueAt"]),
 
   notes: defineTable({
     ownerUserId: v.id("users"),
     orgId: v.id("orgs"),
-    workstreamId: v.optional(v.id("workstreams")),
     artifactId: v.optional(v.id("artifacts")),
     title: v.string(),
     content: v.any(),
@@ -649,7 +304,6 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_owner_updated", ["ownerUserId", "updatedAt"])
-    .index("by_workstream", ["workstreamId"])
     .index("by_artifact", ["artifactId"])
     .searchIndex("search_content", {
       searchField: "contentPlaintext",
@@ -660,7 +314,6 @@ export default defineSchema({
     orgId: v.id("orgs"),
     packId: v.optional(v.id("packs")),
     agentId: v.optional(v.id("agents")),
-    workstreamId: v.optional(v.id("workstreams")),
     artifactId: v.optional(v.id("artifacts")),
     threadType: v.optional(v.union(v.literal("conversation"), v.literal("artifact_edit"))),
     ownerUserId: v.id("users"),
@@ -688,7 +341,6 @@ export default defineSchema({
     .index("by_owner", ["ownerUserId"])
     .index("by_owner_updated", ["ownerUserId", "updatedAt"])
     .index("by_owner_pack_updated", ["ownerUserId", "packId", "updatedAt"])
-    .index("by_workstream", ["workstreamId"])
     .index("by_artifact", ["artifactId"])
     .index("by_org", ["orgId"]),
 
@@ -768,7 +420,6 @@ export default defineSchema({
   artifacts: defineTable({
     ownerUserId: v.id("users"),
     orgId: v.id("orgs"),
-    workstreamId: v.optional(v.id("workstreams")),
     type: v.string(),
     title: v.string(),
     content: v.any(),
@@ -800,12 +451,11 @@ export default defineSchema({
     .index("by_owner_updated", ["ownerUserId", "updatedAt"])
     .index("by_org", ["orgId"])
     .index("by_type", ["type"])
-    .index("by_workstream", ["workstreamId"])
     .index("by_owner_type", ["ownerUserId", "type"])
     .index("by_legacy_note", ["legacyNoteId"])
     .searchIndex("search_content", {
       searchField: "contentPlaintext",
-      filterFields: ["ownerUserId", "orgId", "type", "status", "workstreamId"],
+      filterFields: ["ownerUserId", "orgId", "type", "status"],
     }),
 
   artifactVersions: defineTable({
@@ -878,9 +528,8 @@ export default defineSchema({
     sourceChatId: v.optional(v.id("chats")),
     sourceMessageId: v.optional(v.id("messages")),
     sourceArtifactId: v.optional(v.id("artifacts")),
-    sourceWorkstreamId: v.optional(v.id("workstreams")),
     freshness: v.optional(v.number()),
-    scope: v.optional(v.union(v.literal("global"), v.literal("workstream"))),
+    scope: v.optional(v.literal("global")),
     archivedAt: v.optional(v.number()),
     lastDecayedAt: v.optional(v.number()),
     relatedArtifacts: v.optional(v.array(v.string())),
@@ -1346,6 +995,12 @@ export default defineSchema({
     icon: v.optional(v.string()),
     color: v.optional(v.string()),
     starterKey: v.optional(v.string()),
+    aiState: v.optional(v.union(v.literal("creating"), v.literal("updating"), v.literal("edited"), v.literal("failed"))),
+    aiRunId: v.optional(v.id("spectraAiRuns")),
+    aiExecutionId: v.optional(v.string()),
+    aiPending: v.optional(v.boolean()),
+    aiStateExpiresAt: v.optional(v.number()),
+    aiPreview: v.optional(v.object({ title: v.optional(v.string()), description: v.optional(v.string()), icon: v.optional(v.string()), color: v.optional(v.string()), startedAt: v.number() })),
     // Transitional compatibility for documents written before workspace pinning
     // moved to spectraWorkspaceItems.viewData. Seed repair removes this field.
     pinned: v.optional(v.boolean()),
@@ -1383,6 +1038,17 @@ export default defineSchema({
       v.literal("archived"),
       v.literal("deleted"),
     ),
+    aiState: v.optional(v.union(v.literal("creating"), v.literal("updating"), v.literal("edited"), v.literal("failed"))),
+    aiRunId: v.optional(v.id("spectraAiRuns")),
+    aiExecutionId: v.optional(v.string()),
+    aiProgress: v.optional(v.number()),
+    aiStateExpiresAt: v.optional(v.number()),
+    aiPreview: v.optional(v.object({
+      title: v.optional(v.string()),
+      summary: v.optional(v.string()),
+      content: v.optional(v.any()),
+      startedAt: v.number(),
+    })),
     createdFrom: v.optional(v.object({
       source: v.union(
         v.literal("chat"),
@@ -1528,6 +1194,24 @@ export default defineSchema({
     ownerUserId: v.id("users"),
     orgId: v.optional(v.id("orgs")),
     sourceSurface: v.union(v.literal("chat"), v.literal("workspace"), v.literal("artifact")),
+    phase: v.optional(v.union(
+      v.literal("created"),
+      v.literal("preparing"),
+      v.literal("planning"),
+      v.literal("reading"),
+      v.literal("retrieving"),
+      v.literal("creating"),
+      v.literal("updating"),
+      v.literal("applying"),
+      v.literal("streaming"),
+      v.literal("checking"),
+      v.literal("approval"),
+      v.literal("completed"),
+      v.literal("stopped"),
+      v.literal("interrupted"),
+      v.literal("partial"),
+      v.literal("failed"),
+    )),
     threadId: v.optional(v.id("spectraThreads")),
     workspaceId: v.optional(v.id("spectraWorkspaces")),
     artifactId: v.optional(v.id("spectraArtifacts")),
@@ -1550,6 +1234,27 @@ export default defineSchema({
     providerUsed: v.optional(v.string()),
     usage: v.optional(v.any()),
     sessionId: v.optional(v.string()),
+    submissionKey: v.optional(v.string()),
+    executionId: v.optional(v.string()),
+    lastRetryKey: v.optional(v.string()),
+    eventSequence: v.optional(v.number()),
+    traceDegraded: v.optional(v.boolean()),
+    approval: v.optional(v.object({
+      executionId: v.string(),
+      status: v.union(v.literal("pending"), v.literal("accepted"), v.literal("rejected"), v.literal("revised")),
+      reasons: v.array(v.string()),
+      revision: v.optional(v.string()),
+      requestedAt: v.number(),
+      claimedAt: v.optional(v.number()),
+      decidedAt: v.optional(v.number()),
+    })),
+    recoveryState: v.optional(v.union(v.literal("interrupted"), v.literal("partial"))),
+    retryable: v.optional(v.boolean()),
+    preservedPartial: v.optional(v.boolean()),
+    workerId: v.optional(v.string()),
+    leaseExpiresAt: v.optional(v.number()),
+    heartbeatAt: v.optional(v.number()),
+    startedAt: v.optional(v.number()),
     contextSnapshot: v.optional(v.any()),
     attemptCount: v.optional(v.number()),
     createdAt: v.number(),
@@ -1558,12 +1263,14 @@ export default defineSchema({
   })
     .index("by_owner_status", ["ownerUserId", "status"])
     .index("by_owner_created", ["ownerUserId", "createdAt"])
+    .index("by_owner_submission", ["ownerUserId", "submissionKey"])
     .index("by_workspace", ["workspaceId"])
     .index("by_thread", ["threadId"])
     .index("by_artifact", ["artifactId"]),
 
   spectraOperations: defineTable({
     runId: v.optional(v.id("spectraAiRuns")),
+    executionId: v.optional(v.string()),
     actorType: v.union(v.literal("user"), v.literal("ai"), v.literal("system")),
     type: v.string(),
     status: v.union(
@@ -1577,6 +1284,8 @@ export default defineSchema({
     output: v.optional(v.any()),
     affected: v.array(v.object({ type: v.string(), id: v.string() })),
     requiresConfirmation: v.optional(v.boolean()),
+    pendingArtifactId: v.optional(v.id("spectraArtifacts")),
+    pendingWorkspaceId: v.optional(v.id("spectraWorkspaces")),
     undoData: v.optional(v.any()),
     createdAt: v.number(),
     executedAt: v.optional(v.number()),
@@ -1626,6 +1335,34 @@ export default defineSchema({
     .index("by_run", ["runId"])
     .index("by_workspace_status", ["workspaceId", "status"])
     .index("by_artifact_status", ["artifactId", "status"]),
+
+  spectraRunEvents: defineTable({
+    runId: v.id("spectraAiRuns"),
+    executionId: v.string(),
+    sequence: v.number(),
+    type: v.string(),
+    payload: v.any(),
+    createdAt: v.number(),
+  })
+    .index("by_run_sequence", ["runId", "sequence"])
+    .index("by_run_created", ["runId", "createdAt"]),
+
+  spectraRunTabs: defineTable({
+    ownerUserId: v.id("users"),
+    orgId: v.optional(v.id("orgs")),
+    runId: v.id("spectraAiRuns"),
+    threadId: v.id("spectraThreads"),
+    workspaceId: v.optional(v.id("spectraWorkspaces")),
+    surface: v.union(v.literal("chat"), v.literal("workspace"), v.literal("artifact")),
+    selected: v.optional(v.boolean()),
+    hiddenAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_owner_updated", ["ownerUserId", "updatedAt"])
+    .index("by_owner_run", ["ownerUserId", "runId"])
+    .index("by_owner_thread", ["ownerUserId", "threadId"])
+    .index("by_thread", ["threadId"]),
 
   spectraFocusSpaces: defineTable({
     workspaceId: v.optional(v.id("spectraWorkspaces")),

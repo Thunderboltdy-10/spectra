@@ -33,8 +33,10 @@ import type { LucideIcon } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { blueprintMeta, type ArtifactCardView } from "./artifact-card";
 import type { SpectraArtifact, SpectraBlueprintKey } from "../data/api";
+import { requireBlueprint, requireArtifactTypeManifest } from "../blueprints/registry";
+import type { ArtifactTypeKey } from "../artifacts/types";
 
-type EditableBlueprintKey = SpectraBlueprintKey;
+type EditableBlueprintKey = ArtifactTypeKey;
 type SheetMode = "create" | "edit";
 
 export type ArtifactPayload = {
@@ -94,12 +96,7 @@ type PlannerTaskContent = {
   progressNote?: string;
   sourceRefs?: string[];
 };
-type ThreadReferenceContent = {
-  threadId?: string | null;
-  summary?: string;
-  linkedArtifactIds?: string[];
-};
-
+type ThreadReferenceContent = { threadId?: string | null; summary?: string; linkedArtifactIds?: string[] };
 export const blueprintChoices: Array<{ key: EditableBlueprintKey; label: string; icon: LucideIcon; description: string }> = [
   { key: "document", label: "Document", icon: FileText, description: "Notes, essay plans, and structured writing." },
   { key: "flashcard_deck", label: "Flashcard deck", icon: BookOpen, description: "A real deck with editable cards." },
@@ -120,18 +117,7 @@ function id(prefix: string) {
 }
 
 export function defaultArtifactSummary(blueprintKey: EditableBlueprintKey) {
-  switch (blueprintKey) {
-    case "document":
-      return "A structured document for notes, explanations, or drafts.";
-    case "flashcard_deck":
-      return "A study deck with editable prompts, answers, and hints.";
-    case "quiz":
-      return "A quiz with safe answer review basics.";
-    case "planner_task":
-      return "A task with status, priority, and a due date.";
-    case "thread_reference":
-      return "A reference to a useful Spectra conversation.";
-  }
+  return requireArtifactTypeManifest(blueprintKey).identity.description;
 }
 
 export function defaultArtifactTitle(blueprintKey: EditableBlueprintKey) {
@@ -139,18 +125,11 @@ export function defaultArtifactTitle(blueprintKey: EditableBlueprintKey) {
 }
 
 export function createDefaultArtifactPayload(blueprintKey: EditableBlueprintKey): ArtifactPayload {
-  const content: Record<EditableBlueprintKey, unknown> = {
-    document: { blocks: [{ id: "intro", type: "paragraph", text: "" }], outline: [] },
-    flashcard_deck: { cards: [{ id: "card-1", front: "", back: "", hint: "", confidence: "unknown", section: "Section 1" }], settings: { shuffle: true, revealMode: "click" } },
-    quiz: { questions: [{ id: "question-1", prompt: "", type: "multiple_choice", options: ["", "", "", ""], correctAnswer: "", explanation: "", difficulty: "medium", points: 1, timeLimitSeconds: 90 }], settings: { showAnswersImmediately: true, timed: false } },
-    planner_task: { description: "", status: "todo", priority: "medium", subtasks: [], attachments: [], linkedArtifactIds: [], linkedThreadIds: [], reminders: [], allDay: false, progressNote: "" },
-    thread_reference: { threadId: null, summary: "", linkedArtifactIds: [] },
-  };
   return {
     blueprintKey,
     title: defaultArtifactTitle(blueprintKey),
     summary: defaultArtifactSummary(blueprintKey),
-    content: content[blueprintKey],
+    content: structuredClone(requireBlueprint(blueprintKey).defaultContent),
     tags: [],
   };
 }
@@ -299,7 +278,8 @@ export function ArtifactBlueprintSheet({
   onClose: () => void;
   onSubmit: (payload: ArtifactPayload) => Promise<void> | void;
 }) {
-  const [blueprintKey, setBlueprintKey] = useState<EditableBlueprintKey>(artifact?.blueprintKey ?? initialBlueprintKey);
+  const artifactBlueprintKey = artifact?.blueprintKey === "thread_reference" ? initialBlueprintKey : artifact?.blueprintKey;
+  const [blueprintKey, setBlueprintKey] = useState<EditableBlueprintKey>(artifactBlueprintKey ?? initialBlueprintKey);
   const [title, setTitle] = useState(artifact?.title ?? defaultArtifactTitle(initialBlueprintKey));
   const [summary, setSummary] = useState(artifact?.summary ?? defaultArtifactSummary(initialBlueprintKey));
   const [documentDraft, setDocumentDraft] = useState(documentText(artifact?.content) || "");
@@ -410,7 +390,7 @@ export function ArtifactBlueprintSheet({
               {blueprintKey === "flashcard_deck" ? <DeckEditor cards={cards} setCards={setCards} /> : null}
               {blueprintKey === "quiz" ? <QuizEditor questions={questions} setQuestions={setQuestions} /> : null}
               {blueprintKey === "planner_task" ? <TaskEditor task={task} setTask={setTask} /> : null}
-              {blueprintKey === "thread_reference" ? <div className="flex min-h-[220px] items-center justify-center rounded-[9px] bg-[var(--bg-elevated)] p-6 text-center"><div><MessageSquare className="mx-auto h-8 w-8 text-[#8b6ff0]" /><p className="mt-3 text-[13px] leading-6 text-[var(--text-secondary)]">Thread artifacts are created from real conversations and continue in the shared conversation view.</p></div></div> : null}
+              {artifact?.blueprintKey === "thread_reference" ? <div className="flex min-h-[220px] items-center justify-center rounded-[9px] bg-[var(--bg-elevated)] p-6 text-center"><div><MessageSquare className="mx-auto h-8 w-8 text-[#8b6ff0]" /><p className="mt-3 text-[13px] leading-6 text-[var(--text-secondary)]">Thread artifacts continue in the shared conversation view.</p></div></div> : null}
             </section>
             <aside className="space-y-4">
               <div className="rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
@@ -854,5 +834,6 @@ function primaryButtonClass() {
 }
 
 export function blueprintKeyForCard(card: ArtifactCardView): EditableBlueprintKey {
+  if (card.blueprintKey === "thread_reference") throw new Error("Thread artifacts use their conversation surface.");
   return card.blueprintKey;
 }

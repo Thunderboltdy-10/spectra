@@ -5,6 +5,7 @@ import {
   AlertCircle,
   CheckCircle2,
   CircleHelp,
+  GitCompareArrows,
   Loader2,
   MessageSquare,
   RotateCcw,
@@ -21,7 +22,7 @@ import {
 } from "../data/api";
 import type { ResultCardStreamView } from "../ai/stream-events";
 
-const activeStatuses = new Set(["queued", "running", "awaiting_confirmation"]);
+const activeStatuses = new Set(["queued", "running", "awaiting_confirmation", "awaiting_resolution"]);
 let sharedTabs: SpectraRunTab[] = [];
 let sharedRefresh: Promise<void> | null = null;
 let sharedPollTimer: number | null = null;
@@ -214,6 +215,7 @@ export function DurableRunTabs({
           const running =
             tab.run.status === "queued" || tab.run.status === "running";
           const approval = tab.run.status === "awaiting_confirmation";
+          const conflict = tab.run.status === "awaiting_resolution";
           const cancelled = tab.run.status === "cancelled";
           const failed = tab.run.status === "failed";
           const needsAnswer =
@@ -223,6 +225,8 @@ export function DurableRunTabs({
             ? Loader2
             : approval
               ? ShieldCheck
+              : conflict
+                ? GitCompareArrows
               : needsAnswer
                 ? CircleHelp
               : cancelled
@@ -232,6 +236,8 @@ export function DurableRunTabs({
                   : CheckCircle2;
           const publicPhase = stopping
             ? "stopping"
+            : conflict
+              ? "review edit conflict"
             : needsAnswer
               ? "needs your answer"
             : cancelled

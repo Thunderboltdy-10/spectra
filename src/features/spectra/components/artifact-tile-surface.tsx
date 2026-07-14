@@ -3,7 +3,6 @@
 import { GripVertical, Maximize2, PanelRightClose, Plus, Scaling, X } from "lucide-react";
 import { useMemo, useState, type DragEvent, type ReactNode } from "react";
 import { useSpectraContextStore } from "@/stores/spectra-context-store";
-import type { ArtifactPayload } from "./artifact-blueprint-sheet";
 import { ArtifactStudio } from "./artifact-studio";
 import type { SpectraArtifact } from "../data/api";
 
@@ -21,8 +20,6 @@ type ArtifactTileSurfaceProps = {
   onAddArtifact?: (artifactId: string) => void;
   onFocusSet: () => void;
   onExitFocusSet: () => void;
-  onSave: (artifactId: string, payload: ArtifactPayload) => Promise<void> | void;
-  onRevert: (artifactId: string, versionId: string) => Promise<void> | void;
   onArchive?: (artifact: SpectraArtifact) => Promise<void> | void;
   onDirtyChange: (artifactId: string, dirty: boolean) => void;
   onContinueThread?: (threadId: string, title: string) => void;
@@ -42,8 +39,6 @@ export function ArtifactTileSurface({
   onAddArtifact,
   onFocusSet,
   onExitFocusSet,
-  onSave,
-  onRevert,
   onArchive,
   onDirtyChange,
   onContinueThread,
@@ -123,8 +118,6 @@ export function ArtifactTileSurface({
               onExpand={() => undefined}
               onActivateTab={() => undefined}
               onCloseTab={onCloseArtifact}
-              onSave={onSave}
-              onRevert={onRevert}
               onArchive={onArchive}
               onDirtyChange={onDirtyChange}
               onContinueThread={onContinueThread}

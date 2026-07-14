@@ -4,13 +4,17 @@ import { documentContentSchema } from "../blueprints/document";
 import { flashcardDeckContentSchema } from "../blueprints/flashcard-deck";
 import { plannerTaskContentSchema } from "../blueprints/planner-task";
 import { quizContentSchema } from "../blueprints/quiz";
+import {
+  agentContentSchema,
+  codeContentSchema,
+  presentationContentSchema,
+  sheetsContentSchema,
+  timetableContentSchema,
+  whiteboardContentSchema,
+} from "../artifacts/schemas";
+import { ARTIFACT_TYPE_KEYS } from "../artifacts/types";
 
-export const SPECTRA_BLUEPRINT_KEYS = [
-  "document",
-  "flashcard_deck",
-  "quiz",
-  "planner_task",
-] as const;
+export const SPECTRA_BLUEPRINT_KEYS = ARTIFACT_TYPE_KEYS;
 
 export const OPERATION_TYPES = [
   "artifact.create",
@@ -65,6 +69,12 @@ const artifactCreateInputSchema = z.discriminatedUnion("blueprintKey", [
   z.object({ blueprintKey: z.literal("flashcard_deck"), title: shortText, summary: summaryText.nullable(), content: flashcardDeckContentSchema, tags: tagsSchema, workspaceId: idText.nullable(), placement: z.enum(["context", "inbox"]), pinned: z.boolean().default(false), exclusivePin: z.boolean().default(false) }).strict(),
   z.object({ blueprintKey: z.literal("quiz"), title: shortText, summary: summaryText.nullable(), content: quizContentSchema, tags: tagsSchema, workspaceId: idText.nullable(), placement: z.enum(["context", "inbox"]), pinned: z.boolean().default(false), exclusivePin: z.boolean().default(false) }).strict(),
   z.object({ blueprintKey: z.literal("planner_task"), title: shortText, summary: summaryText.nullable(), content: plannerTaskContentSchema, tags: tagsSchema, workspaceId: idText.nullable(), placement: z.enum(["context", "inbox"]), pinned: z.boolean().default(false), exclusivePin: z.boolean().default(false) }).strict(),
+  z.object({ blueprintKey: z.literal("agent"), title: shortText, summary: summaryText.nullable(), content: agentContentSchema, tags: tagsSchema, workspaceId: idText.nullable(), placement: z.enum(["context", "inbox"]), pinned: z.boolean().default(false), exclusivePin: z.boolean().default(false) }).strict(),
+  z.object({ blueprintKey: z.literal("timetable"), title: shortText, summary: summaryText.nullable(), content: timetableContentSchema, tags: tagsSchema, workspaceId: idText.nullable(), placement: z.enum(["context", "inbox"]), pinned: z.boolean().default(false), exclusivePin: z.boolean().default(false) }).strict(),
+  z.object({ blueprintKey: z.literal("presentation"), title: shortText, summary: summaryText.nullable(), content: presentationContentSchema, tags: tagsSchema, workspaceId: idText.nullable(), placement: z.enum(["context", "inbox"]), pinned: z.boolean().default(false), exclusivePin: z.boolean().default(false) }).strict(),
+  z.object({ blueprintKey: z.literal("sheets"), title: shortText, summary: summaryText.nullable(), content: sheetsContentSchema, tags: tagsSchema, workspaceId: idText.nullable(), placement: z.enum(["context", "inbox"]), pinned: z.boolean().default(false), exclusivePin: z.boolean().default(false) }).strict(),
+  z.object({ blueprintKey: z.literal("code"), title: shortText, summary: summaryText.nullable(), content: codeContentSchema, tags: tagsSchema, workspaceId: idText.nullable(), placement: z.enum(["context", "inbox"]), pinned: z.boolean().default(false), exclusivePin: z.boolean().default(false) }).strict(),
+  z.object({ blueprintKey: z.literal("whiteboard"), title: shortText, summary: summaryText.nullable(), content: whiteboardContentSchema, tags: tagsSchema, workspaceId: idText.nullable(), placement: z.enum(["context", "inbox"]), pinned: z.boolean().default(false), exclusivePin: z.boolean().default(false) }).strict(),
 ]);
 
 function updateInput<T extends z.ZodTypeAny>(blueprintKey: (typeof SPECTRA_BLUEPRINT_KEYS)[number], content: T) {
@@ -84,6 +94,12 @@ const artifactUpdateInputSchema = z.union([
   updateInput("flashcard_deck", flashcardDeckContentSchema),
   updateInput("quiz", quizContentSchema),
   updateInput("planner_task", plannerTaskContentSchema),
+  updateInput("agent", agentContentSchema),
+  updateInput("timetable", timetableContentSchema),
+  updateInput("presentation", presentationContentSchema),
+  updateInput("sheets", sheetsContentSchema),
+  updateInput("code", codeContentSchema),
+  updateInput("whiteboard", whiteboardContentSchema),
 ]);
 const artifactArchiveInputSchema = z.object({ artifactId: idText }).strict();
 
@@ -264,6 +280,12 @@ export const SPECTRA_ARTIFACT_CONTENT_JSON_SCHEMAS = {
   flashcard_deck: deckContentJsonSchema,
   quiz: quizContentJsonSchema,
   planner_task: plannerContentJsonSchema,
+  agent: z.toJSONSchema(agentContentSchema),
+  timetable: z.toJSONSchema(timetableContentSchema),
+  presentation: z.toJSONSchema(presentationContentSchema),
+  sheets: z.toJSONSchema(sheetsContentSchema),
+  code: z.toJSONSchema(codeContentSchema),
+  whiteboard: z.toJSONSchema(whiteboardContentSchema),
 } as const;
 
 function artifactCreateVariant(blueprintKey: (typeof SPECTRA_BLUEPRINT_KEYS)[number], content: unknown) {
@@ -289,24 +311,35 @@ function artifactUpdateVariant(blueprintKey: (typeof SPECTRA_BLUEPRINT_KEYS)[num
 export const SPECTRA_PLAN_JSON_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["decision", "intent", "conversationTitle", "conversationSummary", "choices", "finalResponse", "operations"],
+  required: ["decision", "intent", "conversationTitle", "conversationSummary", "choices", "progressUpdates", "finalResponse", "operations"],
   properties: {
     decision: { enum: PLAN_DECISIONS },
     intent: { type: "object", additionalProperties: false, required: ["mode", "requestedArtifactTypes", "requestedVisibleArtifactCount", "targetArtifactId", "targetWorkspaceId"], properties: { mode: { enum: REQUEST_INTENT_MODES }, requestedArtifactTypes: { type: "array", items: { enum: SPECTRA_BLUEPRINT_KEYS }, maxItems: 5 }, requestedVisibleArtifactCount: { type: "integer", minimum: 0 }, targetArtifactId: nullableString, targetWorkspaceId: nullableString } },
     conversationTitle: nullableString,
     conversationSummary: nullableString,
     choices: { anyOf: [{ type: "object", additionalProperties: false, required: ["question", "options"], properties: { question: { type: "string" }, options: { type: "array", minItems: 2, maxItems: 4, items: { type: "object", additionalProperties: false, required: ["title", "description"], properties: { title: { type: "string" }, description: nullableString } } } } }, { type: "null" }] },
+    progressUpdates: {
+      type: "array",
+      maxItems: 5,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["title", "detail", "activity", "operationIndex", "artifactType", "regionHint"],
+        properties: {
+          title: { type: "string", minLength: 4, maxLength: 88 },
+          detail: { anyOf: [{ type: "string", maxLength: 240 }, { type: "null" }] },
+          activity: { enum: ["plan", "retrieve", "inspect", "create", "edit", "verify", "approval", "other"] },
+          operationIndex: { anyOf: [{ type: "integer", minimum: 0 }, { type: "null" }] },
+          artifactType: { anyOf: [{ enum: SPECTRA_BLUEPRINT_KEYS }, { type: "null" }] },
+          regionHint: { anyOf: [{ type: "string", maxLength: 160 }, { type: "null" }] },
+        },
+      },
+    },
     operations: {
       type: "array",
       items: { oneOf: [
-        artifactCreateVariant("document", documentContentJsonSchema),
-        artifactCreateVariant("flashcard_deck", deckContentJsonSchema),
-        artifactCreateVariant("quiz", quizContentJsonSchema),
-        artifactCreateVariant("planner_task", plannerContentJsonSchema),
-        artifactUpdateVariant("document", documentContentJsonSchema),
-        artifactUpdateVariant("flashcard_deck", deckContentJsonSchema),
-        artifactUpdateVariant("quiz", quizContentJsonSchema),
-        artifactUpdateVariant("planner_task", plannerContentJsonSchema),
+        ...SPECTRA_BLUEPRINT_KEYS.map((typeKey) => artifactCreateVariant(typeKey, SPECTRA_ARTIFACT_CONTENT_JSON_SCHEMAS[typeKey])),
+        ...SPECTRA_BLUEPRINT_KEYS.map((typeKey) => artifactUpdateVariant(typeKey, SPECTRA_ARTIFACT_CONTENT_JSON_SCHEMAS[typeKey])),
         { type: "object", additionalProperties: false, required: ["type", "input"], properties: { type: { const: "artifact.archive" }, input: { type: "object", additionalProperties: false, required: ["artifactId"], properties: { artifactId: { type: "string" } } } } },
         { type: "object", additionalProperties: false, required: ["type", "input"], properties: { type: { const: "workspace.create" }, input: { type: "object", additionalProperties: false, required: ["title", "description", "icon", "color"], properties: { title: { type: "string" }, description: nullableString, icon: { anyOf: [{ enum: ["Sparkles", "BookOpen", "Sprout", "BarChart3"] }, { type: "null" }] }, color: nullableString } } } },
         { type: "object", additionalProperties: false, required: ["type", "input"], properties: { type: { const: "workspace.update" }, input: { type: "object", additionalProperties: false, required: ["workspaceId", "title", "description", "icon", "color"], properties: { workspaceId: { type: "string" }, title: nullableString, description: nullableString, icon: { anyOf: [{ enum: ["Sparkles", "BookOpen", "Sprout", "BarChart3"] }, { type: "null" }] }, color: nullableString } } } },

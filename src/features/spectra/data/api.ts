@@ -1,6 +1,7 @@
+import type { ArtifactTypeKey } from "../artifacts/types";
 import type { ArtifactCardView } from "../components/artifact-card";
 
-export type SpectraBlueprintKey = ArtifactCardView["blueprintKey"];
+export type SpectraBlueprintKey = ArtifactTypeKey | "thread_reference";
 
 export type SpectraWorkspace = {
   _id: string;
@@ -17,6 +18,11 @@ export type SpectraWorkspace = {
   createdAt: number;
   updatedAt: number;
   lastActivityAt: number;
+  ownership?: "owned" | "shared";
+  accessLevel?: "read" | "modify" | null;
+  accessReason?: string;
+  isShared?: boolean;
+  sharedWithCount?: number;
 };
 
 export type SpectraArtifact = {
@@ -40,7 +46,12 @@ export type SpectraArtifact = {
     workspaceItemId: string;
     pinned?: boolean;
   }>;
-  placementStatus?: "inbox" | "workspace";
+  placementStatus?: "inbox" | "shared" | "workspace";
+  ownership?: "owned" | "shared";
+  accessLevel?: "read" | "modify" | null;
+  accessReason?: string;
+  isShared?: boolean;
+  sharedWithCount?: number;
   createdFrom?: {
     source: "chat" | "workspace" | "artifact" | "manual" | "ai";
     threadId?: string;
@@ -71,11 +82,17 @@ export type SpectraArtifactLink = {
 export type SpectraArtifactVersion = {
   _id: string;
   artifactId: string;
-  source: "manual" | "ai" | "revert";
+  source: "manual" | "ai" | "revert" | "import" | "restore" | "migration" | "checkpoint";
   runId?: string;
   before: { title: string; summary?: string; content: unknown; tags: string[] };
   after: { title: string; summary?: string; content: unknown; tags: string[] };
   summary?: string;
+  name?: string;
+  stateVectorHash?: string;
+  integrityHash?: string;
+  changeGroupIds?: string[];
+  creatorAccountIds?: string[];
+  provenance?: { regionIds?: string[]; clientId?: string; source?: string };
   createdAt: number;
 };
 
@@ -107,8 +124,8 @@ export type SpectraWorkspaceItem = {
 export type SpectraRun = {
   _id: string;
   executionId?: string;
-  status: "queued" | "running" | "awaiting_confirmation" | "completed" | "failed" | "cancelled";
-  phase?: "created" | "planning" | "reading" | "retrieving" | "applying" | "streaming" | "approval" | "completed" | "stopped" | "failed";
+  status: "queued" | "running" | "awaiting_confirmation" | "awaiting_resolution" | "completed" | "failed" | "cancelled";
+  phase?: "created" | "preparing" | "planning" | "reading" | "retrieving" | "creating" | "updating" | "applying" | "streaming" | "checking" | "approval" | "conflict" | "completed" | "stopped" | "interrupted" | "partial" | "failed";
   sourceSurface: "chat" | "workspace" | "artifact";
   threadId?: string;
   workspaceId?: string;
@@ -212,6 +229,11 @@ export type SpectraResultCard = {
     workspaceTitle?: string;
     attachmentNames?: string[];
     focusMode?: "global" | "workspace" | "artifact" | "selection" | "thread";
+    agentId?: string;
+    agentVersionId?: string;
+    agentTitle?: string;
+    agentRoutingReason?: string;
+    agentRoutingSource?: "automatic" | "continued" | "explicit";
   };
 };
 
@@ -219,13 +241,24 @@ export type SpectraOperation = {
   _id: string;
   runId?: string;
   type: string;
-  status: "proposed" | "executing" | "executed" | "failed" | "cancelled";
+  status: "proposed" | "executing" | "waiting" | "executed" | "failed" | "cancelled";
   input: unknown;
   output?: unknown;
   affected: Array<{ type: string; id: string }>;
   requiresConfirmation?: boolean;
   pendingArtifactId?: string;
   pendingWorkspaceId?: string;
+  conflict?: {
+    claimId: string;
+    artifactId: string;
+    clientId: string;
+    regionId: string;
+    blockerActorKind: "human" | "ai";
+    queuePosition: number;
+    baseSnapshot: unknown;
+    proposedSnapshot?: unknown;
+    createdAt: number;
+  };
   createdAt: number;
   executedAt?: number;
 };
@@ -251,6 +284,66 @@ export type SpectraRunTab = {
   card?: SpectraResultCard | null;
 };
 
+export type SpectraArtifactComment = {
+  _id: string;
+  artifactId: string;
+  parentCommentId?: string;
+  authorAccountId: string;
+  author: { accountId: string; name: string; avatarUrl?: string } | null;
+  body: string;
+  anchor: {
+    regionId: string;
+    fallbackExcerpt?: string;
+    geometry?: unknown;
+  };
+  mentionedAccountIds: string[];
+  mentions: Array<{ accountId: string; name: string; avatarUrl?: string }>;
+  status: "open" | "resolved" | "orphaned";
+  createdAt: number;
+  updatedAt: number;
+  resolvedAt?: number;
+  resolvedByAccountId?: string;
+};
+
+export type SpectraArtifactCommentNotification = {
+  _id: string;
+  artifactId: string;
+  commentId: string;
+  kind: "mention" | "reply" | "all_comments";
+  createdAt: number;
+  readAt?: number;
+  artifact: { artifactId: string; title: string; blueprintKey: SpectraBlueprintKey };
+  comment: { body: string; regionId: string };
+  author: { accountId: string; name: string; avatarUrl?: string } | null;
+};
+
+export type SpectraArtifactEmbed = {
+  embedId: string;
+  containerType: "artifact" | "thread";
+  containerId: string;
+  containerRegionId: string;
+  mode: "compact" | "expanded";
+  interaction: "read" | "interact" | "edit";
+  effectiveInteraction?: "read" | "interact" | "edit";
+  versionPolicy: "live" | "pinned";
+  contextPolicy: "none" | "summary" | "visible_region";
+  displayPreferences?: Record<string, unknown>;
+  state: "ready" | "no_access" | "deleted" | "archived" | "version_unavailable";
+  canRequestAccess?: boolean;
+  source?: {
+    artifactId: string;
+    title: string;
+    summary?: string;
+    blueprintKey: SpectraBlueprintKey;
+    tags?: string[];
+    updatedAt?: number;
+    snapshot?: { title?: string; summary?: string; tags?: string[]; content?: unknown };
+  };
+  version?: { versionId: string; createdAt: number; summary?: string; name?: string };
+  createdAt: number;
+  updatedAt: number;
+};
+
 export type SpectraOverview = {
   workspaces: SpectraWorkspace[];
   selectedWorkspaceId?: string;
@@ -263,12 +356,50 @@ export type SpectraOverview = {
   resultCards: SpectraResultCard[];
 };
 
+export type SpectraShareInvitation = {
+  invitationId: string;
+  resourceType: "workspace" | "artifact" | "agent";
+  resourceId: string;
+  level: "read" | "modify";
+  message?: string;
+  expiresAt?: number;
+  createdAt: number;
+  inviter: { accountId: string; name: string; avatarUrl?: string } | null;
+  resource: { title: string; typeKey: SpectraBlueprintKey | "workspace" };
+};
+
+export type SpectraSchoolMember = {
+  accountId: string;
+  name: string;
+  email: string;
+  avatarUrl?: string;
+  role: "student" | "teacher" | "school_admin";
+};
+
+export type SpectraShareEntry = {
+  invitationId: string;
+  status: "pending" | "accepted";
+  level: "read" | "modify";
+  expiresAt?: number;
+  acceptedAt?: number;
+  grantId?: string;
+  account: { accountId: string; name: string; email: string; avatarUrl?: string } | null;
+};
+
 type JsonRecord = Record<string, unknown>;
 
 const overviewCache = new Map<string, { value: SpectraOverview; cachedAt: number }>();
 const workspaceCache = new Map<string, { value: SpectraOverview["workspace"]; cachedAt: number }>();
 let workspacesCache: { value: SpectraWorkspace[]; cachedAt: number } | null = null;
 const CACHE_TTL = 5 * 60_000;
+const CACHE_LOCAL_ACTIONS = new Set([
+  "acquireRegionClaim",
+  "renewRegionClaim",
+  "releaseRegionClaim",
+  "resolveRegionConflict",
+  "hideResultCard",
+  "keepResultCard",
+]);
 
 export function peekSpectraWorkspace(workspaceId: string) {
   const cached = workspaceCache.get(workspaceId);
@@ -325,7 +456,7 @@ export async function getSpectraWorkspaces(force = false) {
 }
 
 export async function getSpectraArtifacts(params?: {
-  placement?: "all" | "inbox" | "workspace";
+  placement?: "all" | "inbox" | "shared" | "workspace";
   blueprintKey?: SpectraBlueprintKey | "all";
   search?: string;
 }) {
@@ -382,6 +513,20 @@ export async function getSpectraRunTabs(options: { includeHidden?: boolean; limi
   return promise;
 }
 
+export async function getSpectraShareInvitations() {
+  return readJson<{ invitations: SpectraShareInvitation[] }>(await fetch("/api/spectra?action=shareInvitations", { cache: "no-store" }));
+}
+
+export async function searchSpectraSchoolMembers(search: string, limit = 20) {
+  const qs = new URLSearchParams({ action: "schoolMembers", search, limit: String(limit) });
+  return readJson<{ members: SpectraSchoolMember[] }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+}
+
+export async function getSpectraShareState(resourceType: "workspace" | "artifact" | "agent", resourceId: string) {
+  const qs = new URLSearchParams({ action: "shareState", resourceType, resourceId });
+  return readJson<{ shares: SpectraShareEntry[] }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+}
+
 export async function getSpectraRunEvents(runId: string, after = 0) {
   const qs = new URLSearchParams({ action: "runEvents", runId, after: String(after) });
   const key = qs.toString();
@@ -393,14 +538,72 @@ export async function getSpectraRunEvents(runId: string, after = 0) {
   return promise;
 }
 
+export async function getSpectraOperationConflict(operationId: string) {
+  const qs = new URLSearchParams({ action: "operationConflict", operationId });
+  return readJson<{ conflict: {
+    runId: string;
+    executionId?: string;
+    operationId: string;
+    operationType: string;
+    input: unknown;
+    conflict: NonNullable<SpectraOperation["conflict"]>;
+    claimStatus: "active" | "queued" | "paused" | "released" | "rejected";
+    currentStateVectorHash: string;
+    currentSnapshot: unknown;
+  } }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+}
+
+export async function resolveSpectraOperationConflict(
+  operationId: string,
+  resolution: "apply" | "keep_current" | "merge" | "cancel",
+  mergedInput?: unknown,
+) {
+  return postSpectra<{ runId: string; operationId: string; queued: boolean }>({
+    action: "resolveAiArtifactConflict",
+    operationId,
+    resolution,
+    ...(mergedInput !== undefined ? { mergedInput } : {}),
+  });
+}
+
 export async function getSpectraArtifactVersions(artifactId: string, limit = 20) {
   const qs = new URLSearchParams({ action: "artifactVersions", artifactId, limit: String(limit) });
   return readJson<{ versions: SpectraArtifactVersion[] }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
 }
 
+export async function getSpectraArtifactComments(artifactId: string, includeResolved = false, limit = 200) {
+  const qs = new URLSearchParams({
+    action: "artifactComments",
+    artifactId,
+    includeResolved: String(includeResolved),
+    limit: String(limit),
+  });
+  return readJson<{ comments: SpectraArtifactComment[] }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+}
+
+export async function getSpectraArtifactCommentPreference(artifactId: string) {
+  const qs = new URLSearchParams({ action: "artifactCommentPreference", artifactId });
+  return readJson<{ mode: "all" | "mentions_replies" | "off" }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+}
+
+export async function getSpectraArtifactCommentNotifications(unreadOnly = false, limit = 50) {
+  const qs = new URLSearchParams({ action: "artifactCommentNotifications", unreadOnly: String(unreadOnly), limit: String(limit) });
+  return readJson<{ notifications: SpectraArtifactCommentNotification[] }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+}
+
 export async function getSpectraArtifactLinks(artifactId: string) {
   const qs = new URLSearchParams({ action: "artifactLinks", artifactId });
   return readJson<{ links: SpectraArtifactLink[] }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+}
+
+export async function getSpectraArtifactEmbeds(containerType: "artifact" | "thread", containerId: string) {
+  const qs = new URLSearchParams({ action: "artifactEmbeds", containerType, containerId });
+  return readJson<{ embeds: SpectraArtifactEmbed[] }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+}
+
+export async function getSpectraArtifactEmbed(embedId: string) {
+  const qs = new URLSearchParams({ action: "artifactEmbed", embedId });
+  return readJson<{ embed: SpectraArtifactEmbed }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
 }
 
 export async function getSpectraThreads(params?: { includeArchived?: boolean; limit?: number }) {
@@ -415,14 +618,25 @@ export async function getSpectraThread(threadId: string) {
   return readJson<SpectraThreadDetail>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
 }
 
+export async function clearSpectraRunAgent(runId: string) {
+  return readJson<{ cleared: boolean; threadId?: string }>(await fetch("/api/spectra/run", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "clear_agent", runId }),
+  }));
+}
+
 export async function postSpectra<T>(body: JsonRecord) {
   const value = await readJson<T>(await fetch("/api/spectra", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   }));
-  if (body.action !== "hideResultCard" && body.action !== "keepResultCard") {
+  if (typeof body.action !== "string" || !CACHE_LOCAL_ACTIONS.has(body.action)) {
     invalidateSpectraCache({ workspaceId: typeof body.workspaceId === "string" ? body.workspaceId : undefined });
+  }
+  if (typeof window !== "undefined" && typeof body.action === "string" && ["createWorkspace", "updateWorkspace", "deleteWorkspace"].includes(body.action)) {
+    window.dispatchEvent(new Event("spectra:workspaces-changed"));
   }
   return value;
 }
@@ -438,6 +652,8 @@ export function toArtifactCardView(artifact: SpectraArtifact): ArtifactCardView 
       ? placements.map((placement) => placement.workspaceTitle).join(", ")
       : "Unplaced",
     placement: artifact.placementStatus ?? (placements.length > 0 ? "workspace" : "inbox"),
+    shared: artifact.isShared,
+    accessLevel: artifact.accessLevel ?? undefined,
     aiState: artifact.aiState === "edited" && artifact.aiStateExpiresAt && artifact.aiStateExpiresAt <= Date.now() ? undefined : artifact.aiState,
     aiProgress: artifact.aiProgress,
   };

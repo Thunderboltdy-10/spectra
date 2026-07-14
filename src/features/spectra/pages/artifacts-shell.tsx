@@ -8,7 +8,10 @@ import {
   ChevronDown,
   Atom,
   Brain,
+  Bot,
   Calculator,
+  CalendarDays,
+  Code2,
   ExternalLink,
   FileText,
   Files,
@@ -21,13 +24,18 @@ import {
   LayoutGrid,
   List,
   Loader2,
+  Mail,
   MessageSquare,
   PanelTop,
   Plus,
   Search,
+  Share2,
   Sparkles,
   Sprout,
+  Table2,
   Trash2,
+  Presentation,
+  Workflow,
   X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -47,6 +55,7 @@ import { FloatingMenu } from "../components/floating-menu";
 import { DurableRunTabs } from "../components/durable-run-tabs";
 import { RunDetailPanel } from "../components/run-detail-panel";
 import { LiveThreadPanel } from "../components/live-thread-panel";
+import { ShareDialog } from "../components/share-dialog";
 import {
   artifactPlacements,
   artifactToCard,
@@ -58,15 +67,19 @@ import {
 import {
   getSpectraArtifacts,
   getSpectraOverview,
+  getSpectraShareInvitations,
   postSpectra,
   type SpectraArtifact,
   type SpectraBlueprintKey,
   type SpectraWorkspace,
   type SpectraResultCard,
+  type SpectraShareInvitation,
 } from "../data/api";
+import type { ArtifactTypeKey } from "../artifacts/types";
 
 type ArtifactMode = "list" | "board" | "grid";
 type ArtifactSort = "updated" | "created" | "title" | "type" | "workspace" | "activity";
+type ArtifactCollection = "mine" | "shared" | "invitations";
 type ArtifactHubTab = { id: string; label: string };
 
 function artifactHubTab(): ArtifactHubTab {
@@ -79,6 +92,12 @@ const filters: Array<{ key: "all" | SpectraBlueprintKey; label: string; icon: Lu
   { key: "flashcard_deck", label: "Decks", icon: BookOpen },
   { key: "quiz", label: "Quizzes", icon: HelpCircle },
   { key: "planner_task", label: "Tasks", icon: CalendarCheck2 },
+  { key: "agent", label: "Agents", icon: Bot },
+  { key: "timetable", label: "Timetables", icon: CalendarDays },
+  { key: "presentation", label: "Presentations", icon: Presentation },
+  { key: "sheets", label: "Sheets", icon: Table2 },
+  { key: "code", label: "Code", icon: Code2 },
+  { key: "whiteboard", label: "Whiteboards", icon: Workflow },
 ];
 
 function iconForWorkspace(workspace: SpectraWorkspace, index: number) {
@@ -181,6 +200,8 @@ export function ArtifactsShell() {
   const [workspaces, setWorkspaces] = useState<SpectraWorkspace[]>([]);
   const [resultCards, setResultCards] = useState<SpectraResultCard[]>([]);
   const [activeFilter, setActiveFilter] = useState<"all" | SpectraBlueprintKey>("all");
+  const [collection, setCollection] = useState<ArtifactCollection>("mine");
+  const [shareInvitations, setShareInvitations] = useState<SpectraShareInvitation[]>([]);
   const [mode, setMode] = useState<ArtifactMode>("list");
   const [search, setSearch] = useState("");
   const [sortMode, setSortMode] = useState<ArtifactSort>("updated");
@@ -202,8 +223,9 @@ export function ArtifactsShell() {
   const loadSequenceRef = useRef(0);
   const openedQueryArtifactRef = useRef<string | null>(null);
   const [placementAnchor, setPlacementAnchor] = useState<DOMRect | null>(null);
-  const [pendingCreateType, setPendingCreateType] = useState<SpectraBlueprintKey | null>(null);
+  const [pendingCreateType, setPendingCreateType] = useState<ArtifactTypeKey | null>(null);
   const [artifactDeletePending, setArtifactDeletePending] = useState<SpectraArtifact | null>(null);
+  const [shareTarget, setShareTarget] = useState<SpectraArtifact | null>(null);
   const createMenuRef = useOutsideClick<HTMLDivElement>(createMenuOpen, () => setCreateMenuOpen(false));
   const sortMenuRef = useOutsideClick<HTMLDivElement>(sortOpen, () => setSortOpen(false));
   const openObjects = useSpectraContextStore((state) => state.openObjects);
@@ -368,14 +390,16 @@ export function ArtifactsShell() {
     const sequence = ++loadSequenceRef.current;
     if (!quiet) setLoading(true);
     try {
-      const [artifactResult, overview] = await Promise.all([
+      const [artifactResult, invitationResult, overview] = await Promise.all([
         getSpectraArtifacts({
           placement: "all",
         }),
+        getSpectraShareInvitations(),
         metadataLoadedRef.current ? Promise.resolve(null) : getSpectraOverview(),
       ]);
       if (sequence !== loadSequenceRef.current) return artifactResult.artifacts;
       setAllArtifacts(artifactResult.artifacts);
+      setShareInvitations(invitationResult.invitations);
       if (overview) {
         metadataLoadedRef.current = true;
         setWorkspaces(sortSpectraWorkspaces(overview.workspaces));
@@ -391,14 +415,14 @@ export function ArtifactsShell() {
     }
   }, []);
 
-	  const openArtifactSurface = useCallback((artifact: SpectraArtifact) => {
-	    if (artifact.blueprintKey === "thread_reference") {
-	      const content = artifact.content && typeof artifact.content === "object" ? artifact.content as Record<string, unknown> : {};
-	      const targetThreadId = typeof content.threadId === "string" ? content.threadId : "";
-	      if (targetThreadId) { setLiveThread({ id: targetThreadId, title: artifact.title }); return; }
-	    }
-	    studio.openSplit(artifact);
-	  }, [setLiveThread, studio]);
+		  const openArtifactSurface = useCallback((artifact: SpectraArtifact) => {
+		    if (artifact.blueprintKey === "thread_reference") {
+		      const content = artifact.content && typeof artifact.content === "object" ? artifact.content as Record<string, unknown> : {};
+		      const targetThreadId = typeof content.threadId === "string" ? content.threadId : "";
+		      if (targetThreadId) { setLiveThread({ id: targetThreadId, title: artifact.title }); return; }
+		    }
+		    studio.openSplit(artifact);
+		  }, [setLiveThread, studio]);
 
 	  const runEngine = useSpectraRun({
     surface: composerThread ? "artifacts" : studio.activeArtifact ? "artifact" : "artifacts",
@@ -490,6 +514,9 @@ export function ArtifactsShell() {
   const artifacts = useMemo(() => {
     const needle = search.trim().toLowerCase();
     return allArtifacts.filter((artifact) => {
+      if (collection === "invitations") return false;
+      if (collection === "shared" && artifact.ownership !== "shared") return false;
+      if (collection === "mine" && artifact.ownership === "shared") return false;
       if (activeFilter !== "all" && artifact.blueprintKey !== activeFilter) return false;
       if (selectedWorkspaceId && !artifactPlacements(artifact).some((placement) => placement.workspaceId === selectedWorkspaceId)) return false;
       if (!needle) return true;
@@ -501,15 +528,15 @@ export function ArtifactsShell() {
       if (sortMode === "workspace") return (artifactPlacements(a)[0]?.workspaceTitle ?? "Unplaced").localeCompare(artifactPlacements(b)[0]?.workspaceTitle ?? "Unplaced");
       return b.updatedAt - a.updatedAt;
     });
-  }, [activeFilter, allArtifacts, search, selectedWorkspaceId, sortMode]);
-  const inbox = useMemo(() => artifacts.filter((artifact) => artifact.placementStatus === "inbox" || artifactPlacements(artifact).length === 0), [artifacts]);
+  }, [activeFilter, allArtifacts, collection, search, selectedWorkspaceId, sortMode]);
+  const inbox = useMemo(() => artifacts.filter((artifact) => artifactPlacements(artifact).length === 0), [artifacts]);
   const placed = useMemo(() => artifacts.filter((artifact) => artifact.placementStatus === "workspace" || artifactPlacements(artifact).length > 0), [artifacts]);
   const byWorkspace = useMemo(() => workspaces.map((workspace) => ({
     workspace,
     artifacts: placed.filter((artifact) => artifactPlacements(artifact).some((placement) => placement.workspaceId === workspace._id)),
   })), [placed, workspaces]);
 
-  function requestCreateArtifact(blueprintKey: SpectraBlueprintKey) {
+  function requestCreateArtifact(blueprintKey: ArtifactTypeKey) {
     if (!selectedWorkspaceId) {
       setPendingCreateType(blueprintKey);
       return;
@@ -538,35 +565,6 @@ export function ArtifactsShell() {
     } finally {
       setBusyKey(null);
     }
-  }
-
-  async function updateArtifact(artifactId: string, payload: ArtifactPayload) {
-    setBusyKey(`artifact:update:${artifactId}`);
-    try {
-      await postSpectra({
-        action: "updateArtifact",
-        artifactId,
-        title: payload.title,
-        summary: payload.summary,
-        content: payload.content,
-        tags: payload.tags,
-      });
-      toast.success("Artifact updated.");
-      await load(true);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not update artifact.");
-    } finally {
-      setBusyKey(null);
-    }
-  }
-
-  async function revertArtifactVersion(artifactId: string, versionId: string) {
-    setBusyKey(`artifact:revert:${artifactId}`);
-    try {
-      await postSpectra({ action: "revertArtifactVersion", artifactId, versionId });
-      toast.success("Artifact restored to the selected version.");
-      await load(true);
-    } finally { setBusyKey(null); }
   }
 
   async function archiveArtifact(artifact: SpectraArtifact) {
@@ -628,16 +626,31 @@ export function ArtifactsShell() {
     }
   }
 
+  async function respondToShareInvitation(invitationId: string, response: "accept" | "decline") {
+    setBusyKey(`invitation:${invitationId}`);
+    try {
+      await postSpectra({ action: response === "accept" ? "acceptShareInvitation" : "declineShareInvitation", invitationId });
+      toast.success(response === "accept" ? "Shared item added to your library." : "Invitation declined.");
+      await load(true);
+      if (response === "accept") setCollection("shared");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not update the invitation.");
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
   function placementMenu(artifact: SpectraArtifact, variant: "add" | "move") {
     const menuOpen = variant === "add" ? addMenuArtifactId === artifact._id : moveMenuArtifactId === artifact._id;
     const setMenu = variant === "add" ? setAddMenuArtifactId : setMoveMenuArtifactId;
+    const modifiableWorkspaces = workspaces.filter((workspace) => workspace.accessLevel !== "read");
     return (
       <div>
-        <button type="button" className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-45" disabled={workspaces.length === 0 || busyKey === `add:${artifact._id}`} onClick={(event) => { setPlacementAnchor(event.currentTarget.getBoundingClientRect()); setMenu(menuOpen ? null : artifact._id); }} aria-label={variant === "add" ? "Add to workspace" : "Move to workspace"} title={variant === "add" ? "Add to workspace" : "Move to workspace"}>
+        <button type="button" className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-45" disabled={modifiableWorkspaces.length === 0 || busyKey === `add:${artifact._id}`} onClick={(event) => { setPlacementAnchor(event.currentTarget.getBoundingClientRect()); setMenu(menuOpen ? null : artifact._id); }} aria-label={variant === "add" ? "Add to workspace" : "Place in another workspace"} title={variant === "add" ? "Add to workspace" : "Place in another workspace"}>
           {busyKey === `add:${artifact._id}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : variant === "add" ? <FolderPlus className="h-3.5 w-3.5" /> : <FolderInput className="h-3.5 w-3.5" />}
         </button>
         <FloatingMenu open={menuOpen} anchor={placementAnchor} onClose={() => setMenu(null)} width={260}>
-            {workspaces.map((workspace) => {
+            {modifiableWorkspaces.map((workspace) => {
               const alreadyPlaced = artifactPlacements(artifact).some((placement) => placement.workspaceId === workspace._id);
               return (
                 <button key={workspace._id} type="button" className={menuItemClass()} disabled={alreadyPlaced || busyKey === `add:${artifact._id}`} onClick={() => void addToWorkspace(artifact._id, workspace._id)}>
@@ -663,19 +676,21 @@ export function ArtifactsShell() {
       return (
         <div className="flex items-center gap-2">
           {openButton}
+          {artifact.ownership !== "shared" ? <button type="button" className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" onClick={() => setShareTarget(artifact)} aria-label="Share artifact" title="Share artifact"><Share2 className="h-3.5 w-3.5" /></button> : null}
           {placementMenu(artifact, "add")}
-          <button type="button" className="flex h-8 w-8 items-center justify-center text-[var(--text-secondary)] hover:text-[var(--danger)]" onClick={() => void permanentlyDeleteArtifact(artifact)} aria-label="Delete permanently"><Trash2 className="h-3.5 w-3.5" /></button>
+          {artifact.ownership !== "shared" ? <button type="button" className="flex h-8 w-8 items-center justify-center text-[var(--text-secondary)] hover:text-[var(--danger)]" onClick={() => void permanentlyDeleteArtifact(artifact)} aria-label="Delete permanently"><Trash2 className="h-3.5 w-3.5" /></button> : null}
         </div>
       );
     }
     return (
       <div className="flex items-center gap-2">
         {openButton}
+        {artifact.ownership !== "shared" ? <button type="button" className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" onClick={() => setShareTarget(artifact)} aria-label="Share artifact" title="Share artifact"><Share2 className="h-3.5 w-3.5" /></button> : null}
         {placementMenu(artifact, "move")}
         <button type="button" className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[color-mix(in_oklab,var(--danger)_7%,var(--bg-elevated))] hover:text-[var(--danger)]" disabled={busyKey === `remove:${firstPlacement.workspaceItemId}`} onClick={() => void removePlacement(firstPlacement.workspaceItemId)} aria-label="Remove from workspace" title="Remove from workspace">
           {busyKey === `remove:${firstPlacement.workspaceItemId}` ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />}
         </button>
-        <button type="button" className="flex h-8 w-8 items-center justify-center text-[var(--text-secondary)] hover:text-[var(--danger)]" onClick={() => void permanentlyDeleteArtifact(artifact)} aria-label="Delete permanently"><Trash2 className="h-3.5 w-3.5" /></button>
+        {artifact.ownership !== "shared" ? <button type="button" className="flex h-8 w-8 items-center justify-center text-[var(--text-secondary)] hover:text-[var(--danger)]" onClick={() => void permanentlyDeleteArtifact(artifact)} aria-label="Delete permanently"><Trash2 className="h-3.5 w-3.5" /></button> : null}
       </div>
     );
   }
@@ -700,6 +715,7 @@ export function ArtifactsShell() {
         <div className="relative flex min-h-0 flex-1">
       {pendingCreateType ? <div className="absolute inset-0 z-[90] flex items-center justify-center bg-[color-mix(in_oklab,var(--bg-primary)_72%,transparent)] backdrop-blur-[2px]" onPointerDown={() => setPendingCreateType(null)}><div className="w-[390px] rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[0_24px_70px_rgba(27,20,12,0.2)]" onPointerDown={(event) => event.stopPropagation()}><h2 className="font-display text-[19px] font-semibold text-[var(--text-primary)]">Choose a destination</h2><p className="mt-1 text-[12px] text-[var(--text-secondary)]">Create this {blueprintMeta[pendingCreateType].label.toLowerCase()} in a workspace or keep it unplaced.</p><div className="mt-4 max-h-[300px] space-y-1 overflow-y-auto"><button type="button" className={menuItemClass()} onClick={() => { const type = pendingCreateType; setPendingCreateType(null); void createArtifact(createDefaultArtifactPayload(type)); }}><LayoutGrid className="h-4 w-4" />Unplaced / inbox</button>{workspaces.map((target) => <button key={target._id} type="button" className={menuItemClass()} onClick={() => { const type = pendingCreateType; setPendingCreateType(null); void createArtifact(createDefaultArtifactPayload(type), target._id); }}>{target.title}</button>)}</div></div></div> : null}
       {artifactDeletePending ? <div className="absolute inset-0 z-[96] flex items-center justify-center bg-[color-mix(in_oklab,var(--bg-primary)_76%,transparent)] p-5 backdrop-blur-[2px]" onPointerDown={() => setArtifactDeletePending(null)}><div className="w-full max-w-[440px] rounded-[12px] border border-[color-mix(in_oklab,var(--danger)_24%,var(--border-default))] bg-[var(--bg-elevated)] p-5 shadow-[0_24px_70px_rgba(27,20,12,0.2)]" onPointerDown={(event) => event.stopPropagation()}><h2 className="font-display text-[21px] font-semibold text-[var(--text-primary)]">Delete {artifactDeletePending.title}?</h2><p className="mt-2 text-[13px] leading-5 text-[var(--text-secondary)]">The artifact, placements, version history, and linked run history will be permanently removed.</p><div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setArtifactDeletePending(null)} className="h-9 px-3 text-[12px] text-[var(--text-secondary)]">Cancel</button><button type="button" disabled={busyKey === `delete:${artifactDeletePending._id}`} onClick={() => void permanentlyDeleteArtifact(artifactDeletePending, true)} className="flex h-9 items-center gap-2 rounded-[8px] bg-[var(--danger)] px-3 text-[12px] font-medium text-white disabled:opacity-45">{busyKey === `delete:${artifactDeletePending._id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}Delete permanently</button></div></div></div> : null}
+      {shareTarget ? <ShareDialog open resourceType={shareTarget.blueprintKey === "agent" ? "agent" : "artifact"} resourceId={shareTarget._id} title={shareTarget.title} onClose={() => setShareTarget(null)} onChanged={async () => { await load(true); }} /> : null}
 	      {workSetIsolated && tiledArtifacts.length > 0 ? (
 	        <ArtifactTileSurface
 	          isolated
@@ -714,8 +730,6 @@ export function ArtifactsShell() {
 	          onAddArtifact={addArtifactTile}
 	          onFocusSet={() => setWorkSetIsolated(true)}
 	          onExitFocusSet={() => setWorkSetIsolated(false)}
-	          onSave={updateArtifact}
-	          onRevert={revertArtifactVersion}
 	          onArchive={archiveArtifact}
 	          onDirtyChange={studio.setDirty}
 	          onContinueThread={(threadId, title) => toggleContinuedThread(threadId, title)}
@@ -733,9 +747,8 @@ export function ArtifactsShell() {
           onExpand={studio.openTab}
           onActivateTab={studio.activateTab}
           onCloseTab={closeArtifactTab}
-          onSave={updateArtifact}
-          onRevert={revertArtifactVersion}
           onArchive={archiveArtifact}
+          onShare={(artifact) => setShareTarget(artifact)}
           onDirtyChange={studio.setDirty}
           onContinueThread={(threadId, title) => toggleContinuedThread(threadId, title)}
           continuedThreadId={composerThread?.id}
@@ -771,7 +784,7 @@ export function ArtifactsShell() {
                   <div className="absolute right-0 top-[calc(100%+8px)] z-30 w-[230px] rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[0_6px_18px_rgba(0,0,0,0.10)]">
                     {filters.filter((filter) => filter.key !== "all").map((filter) => {
                       const Icon = filter.icon;
-                      const key = filter.key as SpectraBlueprintKey;
+                      const key = filter.key as ArtifactTypeKey;
                       return (
                         <button
                           key={key}
@@ -793,7 +806,17 @@ export function ArtifactsShell() {
               </div>
             </div>
           </div>
-          <div className="mt-8 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+          <nav className="mt-7 flex items-end gap-6 border-b border-[var(--border-default)]" aria-label="Artifact collections">
+            {([
+              { key: "mine" as const, label: "My work", count: allArtifacts.filter((artifact) => artifact.ownership !== "shared").length, icon: Files },
+              { key: "shared" as const, label: "Shared", count: allArtifacts.filter((artifact) => artifact.ownership === "shared").length, icon: Share2 },
+              { key: "invitations" as const, label: "Invitations", count: shareInvitations.length, icon: Mail },
+            ]).map((item) => {
+              const Icon = item.icon;
+              return <button key={item.key} type="button" onClick={() => { setCollection(item.key); setSelectedWorkspaceId(""); setActiveFilter("all"); }} className={`relative flex h-10 items-center gap-2 px-0.5 text-[13px] font-medium transition ${collection === item.key ? "text-[var(--text-primary)]" : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"}`} aria-current={collection === item.key ? "page" : undefined}><Icon className="h-3.5 w-3.5" /><span>{item.label}</span>{item.count > 0 ? <span className="min-w-5 rounded-[5px] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-center text-[10px] text-[var(--text-secondary)]">{item.count}</span> : null}{collection === item.key ? <span className="absolute inset-x-0 -bottom-px h-0.5 bg-[var(--text-primary)]" /> : null}</button>;
+            })}
+          </nav>
+          {collection !== "invitations" ? <div className="mt-5 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
             <div className="flex flex-wrap gap-2">
               {filters.map((filter) => {
                 const Icon = filter.icon;
@@ -831,13 +854,14 @@ export function ArtifactsShell() {
               })}
             </div>
             </div>
-          </div>
+          </div> : null}
         </header>
         {loading ? <ArtifactsSkeleton /> : null}
-        {!loading && artifacts.length === 0 ? <EmptyArtifactsState /> : null}
-        {!loading && mode === "list" ? <GroupedList inbox={inbox} groups={byWorkspace} rowActions={rowActions} onOpen={openArtifactSurface} /> : null}
-        {!loading && mode === "board" ? <BoardColumns groups={byWorkspace} onOpen={openArtifactSurface} /> : null}
-        {mode === "grid" ? (
+        {!loading && collection === "invitations" ? <InvitationInbox invitations={shareInvitations} busyKey={busyKey} onRespond={respondToShareInvitation} /> : null}
+        {!loading && collection !== "invitations" && artifacts.length === 0 ? <EmptyArtifactsState /> : null}
+        {!loading && collection !== "invitations" && mode === "list" ? <GroupedList inbox={inbox} groups={byWorkspace} rowActions={rowActions} onOpen={openArtifactSurface} landingTitle={collection === "shared" ? "Shared with you" : "Unplaced"} landingDescription={collection === "shared" ? "Accepted artifacts that you have not placed in a workspace yet." : "Artifacts not yet placed in a workspace."} /> : null}
+        {!loading && collection !== "invitations" && mode === "board" ? <BoardColumns groups={byWorkspace} onOpen={openArtifactSurface} /> : null}
+        {collection !== "invitations" && mode === "grid" ? (
           <div className="mt-8 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {!loading ? artifacts.map((artifact) => <ArtifactCard key={artifact._id} artifact={artifactToCard(artifact)} actions={multiSelectMode ? undefined : rowActions(artifact)} onSelect={() => openArtifactSurface(artifact)} selectionMode={multiSelectMode} contextSelected={selectedContextIds.has(artifact._id)} onToggleContext={() => toggleContextArtifact(artifact)} />) : null}
           </div>
@@ -858,9 +882,8 @@ export function ArtifactsShell() {
           onExpand={studio.openTab}
           onActivateTab={studio.activateTab}
           onCloseTab={closeArtifactTab}
-          onSave={updateArtifact}
-          onRevert={revertArtifactVersion}
           onArchive={archiveArtifact}
+          onShare={(artifact) => setShareTarget(artifact)}
           onDirtyChange={studio.setDirty}
           onContinueThread={(threadId, title) => toggleContinuedThread(threadId, title)}
 	          continuedThreadId={composerThread?.id}
@@ -879,8 +902,6 @@ export function ArtifactsShell() {
 	          onAddArtifact={addArtifactTile}
 	          onFocusSet={() => setWorkSetIsolated(true)}
 	          onExitFocusSet={() => setWorkSetIsolated(false)}
-	          onSave={updateArtifact}
-	          onRevert={revertArtifactVersion}
 	          onArchive={archiveArtifact}
 	          onDirtyChange={studio.setDirty}
 	          onContinueThread={(threadId, title) => toggleContinuedThread(threadId, title)}
@@ -912,7 +933,7 @@ export function ArtifactsShell() {
                   <div className="my-1 h-px bg-[var(--border-subtle)]" />
                   {filters.filter((filter) => filter.key !== "all").map((filter) => {
                     const Icon = filter.icon;
-                    const key = filter.key as SpectraBlueprintKey;
+                    const key = filter.key as ArtifactTypeKey;
                     return (
                       <button key={key} type="button" className={menuItemClass()} disabled={busyKey === `artifact:create:${key}`} onClick={() => requestCreateArtifact(key)}>
                         {busyKey === `artifact:create:${key}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <Icon className="h-4 w-4" />}
@@ -980,16 +1001,52 @@ function WorkspacePicker({
   );
 }
 
+function InvitationInbox({
+  invitations,
+  busyKey,
+  onRespond,
+}: {
+  invitations: SpectraShareInvitation[];
+  busyKey: string | null;
+  onRespond: (invitationId: string, response: "accept" | "decline") => void;
+}) {
+  if (invitations.length === 0) {
+    return <div className="mt-8 flex min-h-[260px] items-center justify-center rounded-[10px] border border-dashed border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_42%,transparent)]"><div className="max-w-sm text-center"><div className="mx-auto flex h-11 w-11 items-center justify-center rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-secondary)]"><Mail className="h-4 w-4" /></div><h2 className="mt-4 font-display text-[20px] font-semibold text-[var(--text-primary)]">No pending invitations</h2><p className="mt-2 text-[13px] leading-6 text-[var(--text-secondary)]">New artifact and workspace invitations will wait here until you accept or decline them.</p></div></div>;
+  }
+  return (
+    <section className="mt-8" aria-labelledby="share-invitations-title">
+      <div className="mb-4"><h2 id="share-invitations-title" className="font-display text-[21px] font-semibold text-[var(--text-primary)]">Waiting for you</h2><p className="mt-1 text-[13px] text-[var(--text-secondary)]">Nothing appears in Shared until you accept. You can review the requested access first.</p></div>
+      <div className="grid gap-3 xl:grid-cols-2">
+        {invitations.map((invitation) => {
+          const artifactMeta = invitation.resource.typeKey !== "workspace" ? blueprintMeta[invitation.resource.typeKey] : null;
+          const Icon = artifactMeta?.icon ?? LayoutGrid;
+          const working = busyKey === `invitation:${invitation.invitationId}`;
+          return (
+            <article key={invitation.invitationId} className="rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[0_1px_2px_rgba(27,20,12,0.03)]">
+              <div className="flex items-start gap-3.5"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[9px] bg-[var(--bg-secondary)]" style={{ color: artifactMeta?.color ?? "var(--text-secondary)" }}><Icon className="h-[18px] w-[18px]" /></span><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-x-2 gap-y-1"><h3 className="truncate font-display text-[18px] font-semibold text-[var(--text-primary)]">{invitation.resource.title}</h3><span className="rounded-[5px] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--text-secondary)]">{invitation.resourceType === "workspace" ? "Workspace" : artifactMeta?.label ?? "Artifact"}</span></div><p className="mt-1 text-[12px] text-[var(--text-secondary)]"><span className="font-medium text-[var(--text-primary)]">{invitation.inviter?.name ?? "A school member"}</span> invited you with {invitation.level === "modify" ? "modify" : "read-only"} access.</p>{invitation.message ? <p className="mt-3 rounded-[7px] border-l-2 border-[var(--border-strong)] bg-[var(--bg-secondary)] px-3 py-2 text-[12px] leading-5 text-[var(--text-secondary)]">{invitation.message}</p> : null}</div></div>
+              <div className="mt-4 flex items-center justify-end gap-2 border-t border-[var(--border-subtle)] pt-3"><button type="button" disabled={working} onClick={() => onRespond(invitation.invitationId, "decline")} className="h-8 rounded-[7px] px-3 text-[12px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-45">Decline</button><button type="button" disabled={working} onClick={() => onRespond(invitation.invitationId, "accept")} className="inline-flex h-8 items-center gap-2 rounded-[7px] bg-[var(--text-primary)] px-3 text-[12px] font-medium text-[var(--bg-primary)] disabled:opacity-45">{working ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Share2 className="h-3.5 w-3.5" />}Accept</button></div>
+            </article>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 function GroupedList({
   inbox,
   groups,
   rowActions,
   onOpen,
+  landingTitle,
+  landingDescription,
 }: {
   inbox: SpectraArtifact[];
   groups: Array<{ workspace: SpectraWorkspace; artifacts: SpectraArtifact[] }>;
   rowActions: (artifact: SpectraArtifact) => ReactNode;
   onOpen: (artifact: SpectraArtifact) => void;
+  landingTitle: string;
+  landingDescription: string;
 }) {
   const [inboxExpanded, setInboxExpanded] = useState(false);
   return (
@@ -997,10 +1054,10 @@ function GroupedList({
       <section>
         <div className="mb-4">
           <div className="flex items-center gap-2">
-            <h2 className="font-display text-[20px] font-semibold text-[var(--text-primary)]">Unplaced</h2>
+            <h2 className="font-display text-[20px] font-semibold text-[var(--text-primary)]">{landingTitle}</h2>
             <span className="rounded-[6px] bg-[var(--bg-secondary)] px-1.5 text-[12px] text-[var(--text-secondary)]">{inbox.length}</span>
           </div>
-          <p className="mt-1 text-[13px] text-[var(--text-secondary)]">Artifacts not yet placed in a workspace.</p>
+          <p className="mt-1 text-[13px] text-[var(--text-secondary)]">{landingDescription}</p>
         </div>
         <div className="grid gap-3 xl:grid-cols-3">
           {inbox.slice(0, inboxExpanded ? inbox.length : 6).map((artifact) => <ArtifactCard key={artifact._id} artifact={artifactToCard(artifact)} actions={rowActions(artifact)} onSelect={() => onOpen(artifact)} />)}

@@ -1,14 +1,15 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
-import { getAccountByClerkId, getActiveMembership, getActorByClerkId } from "./identityShared";
+import { getAccountByClerkId, getAuthenticatedAccount, getAuthenticatedActor, getAuthenticatedIdentity, isPlatformOperatorEmail } from "./identityShared";
+import { writeAuditEvent } from "./auditShared";
 
 const normalizeEmail = (value: string) => value.trim().toLowerCase();
 const normalizeName = (value: string) => value.trim().replace(/\s+/g, " ").slice(0, 120) || "Spectra user";
 
 export const me = query({
-  args: { clerkId: v.string() },
-  handler: async (ctx, args) => {
-    const actor = await getActorByClerkId(ctx, args.clerkId);
+  args: {},
+  handler: async (ctx) => {
+    const actor = await getAuthenticatedActor(ctx);
     if (!actor) return null;
     return {
       accountId: actor.accountId,
@@ -24,26 +25,44 @@ export const me = query({
   },
 });
 
-export const registerVerifiedAccount = mutation({
+export const account = query({
+  args: {},
+  handler: async (ctx) => {
+    const current = await getAuthenticatedAccount(ctx);
+    if (!current) return null;
+    return {
+      accountId: current._id,
+      email: current.email,
+      emailVerified: current.emailVerified,
+      name: current.name,
+      avatarUrl: current.avatarUrl,
+      status: current.status,
+      platformOperator: isPlatformOperatorEmail(current.email),
+    };
+  },
+});
+
+export const registerSelf = mutation({
   args: {
-    clerkId: v.string(),
-    email: v.string(),
-    emailVerified: v.boolean(),
-    name: v.string(),
+    name: v.optional(v.string()),
     avatarUrl: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    if (!args.emailVerified) throw new Error("IDENTITY_EMAIL_UNVERIFIED: A verified email is required.");
-    const email = normalizeEmail(args.email);
+    const identity = await getAuthenticatedIdentity(ctx);
+    if (!identity.email || identity.emailVerified !== true) throw new Error("IDENTITY_EMAIL_UNVERIFIED: A verified email is required.");
+    const clerkId = identity.subject;
+    const email = normalizeEmail(identity.email);
     if (!email.includes("@")) throw new Error("IDENTITY_EMAIL_INVALID: A valid email is required.");
     const now = Date.now();
-    const existing = await getAccountByClerkId(ctx, args.clerkId);
+    const existing = await getAccountByClerkId(ctx, clerkId);
+    const name = normalizeName(args.name ?? identity.name ?? identity.givenName ?? identity.preferredUsername ?? "Spectra user");
+    const avatarUrl = args.avatarUrl ?? identity.pictureUrl;
     if (existing) {
       await ctx.db.patch(existing._id, {
         email,
         emailVerified: true,
-        name: normalizeName(args.name),
-        avatarUrl: args.avatarUrl,
+        name,
+        avatarUrl,
         lastSeenAt: now,
         updatedAt: now,
       });
@@ -51,74 +70,18 @@ export const registerVerifiedAccount = mutation({
     }
     const duplicate = await ctx.db.query("accounts").withIndex("by_email", (query) => query.eq("email", email)).unique();
     if (duplicate) throw new Error("IDENTITY_EMAIL_IN_USE: This verified email already belongs to another Spectra account.");
-    return ctx.db.insert("accounts", {
-      clerkId: args.clerkId,
+    const accountId = await ctx.db.insert("accounts", {
+      clerkId,
       email,
       emailVerified: true,
-      name: normalizeName(args.name),
-      avatarUrl: args.avatarUrl,
+      name,
+      avatarUrl,
       status: "active",
       lastSeenAt: now,
       createdAt: now,
       updatedAt: now,
     });
-  },
-});
-
-export const ensureDevelopmentActor = mutation({
-  args: {
-    clerkId: v.string(),
-    email: v.string(),
-    name: v.string(),
-    schoolName: v.string(),
-    schoolSlug: v.string(),
-  },
-  handler: async (ctx, args) => {
-    if (!args.clerkId.startsWith("dev_")) {
-      throw new Error("IDENTITY_DEV_ONLY: Development bootstrap requires a development identity.");
-    }
-    const now = Date.now();
-    let account = await getAccountByClerkId(ctx, args.clerkId);
-    if (!account) {
-      const accountId = await ctx.db.insert("accounts", {
-        clerkId: args.clerkId,
-        email: normalizeEmail(args.email),
-        emailVerified: true,
-        name: normalizeName(args.name),
-        status: "active",
-        lastSeenAt: now,
-        createdAt: now,
-        updatedAt: now,
-      });
-      account = await ctx.db.get(accountId);
-    }
-    if (!account) throw new Error("IDENTITY_BOOTSTRAP_FAILED: Account creation failed.");
-    const activeMembership = await getActiveMembership(ctx, account._id);
-    if (activeMembership) return { accountId: account._id, schoolId: activeMembership.schoolId };
-
-    const slug = args.schoolSlug.trim().toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "") || "local-spectra";
-    let school = await ctx.db.query("schools").withIndex("by_slug", (query) => query.eq("slug", slug)).unique();
-    if (!school) {
-      const schoolId = await ctx.db.insert("schools", {
-        name: normalizeName(args.schoolName),
-        slug,
-        verifiedDomains: [],
-        status: "active",
-        createdAt: now,
-        updatedAt: now,
-      });
-      school = await ctx.db.get(schoolId);
-    }
-    if (!school) throw new Error("IDENTITY_BOOTSTRAP_FAILED: School creation failed.");
-    await ctx.db.insert("schoolMemberships", {
-      accountId: account._id,
-      schoolId: school._id,
-      role: "student",
-      status: "active",
-      joinedAt: now,
-      createdAt: now,
-      updatedAt: now,
-    });
-    return { accountId: account._id, schoolId: school._id };
+    await writeAuditEvent(ctx, { actorAccountId: accountId, action: "identity.account.registered", targetType: "account", targetId: accountId, metadata: { emailVerified: true }, retentionClass: "security" });
+    return accountId;
   },
 });

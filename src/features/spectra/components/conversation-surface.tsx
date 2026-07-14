@@ -1,12 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { AlertCircle, ArrowDown, Check, ChevronDown, CircleDot, ExternalLink, FileText, FolderPlus, Loader2, MessageSquare, ShieldCheck, Wrench } from "lucide-react";
+import { AlertCircle, ArrowDown, Bot, Check, ChevronDown, CircleDot, ExternalLink, FileText, FolderPlus, GitCompareArrows, Loader2, MessageSquare, PencilLine, ShieldCheck, Sparkles, Undo2, Wrench } from "lucide-react";
 import { toast } from "sonner";
 import { RichText } from "@/components/chat/rich-text";
 import { cn } from "@/lib/utils";
 import { useSpectraRun, type SpectraLiveExchange } from "../ai/use-spectra-run";
-import { getSpectraThread, getSpectraWorkspaces, postSpectra, type SpectraArtifact, type SpectraThreadDetail, type SpectraThreadTrace, type SpectraWorkspace } from "../data/api";
+import { clearSpectraRunAgent, getSpectraOperationConflict, getSpectraThread, getSpectraWorkspaces, postSpectra, resolveSpectraOperationConflict, type SpectraArtifact, type SpectraOperation, type SpectraThreadDetail, type SpectraThreadTrace, type SpectraWorkspace } from "../data/api";
 import { CommandBar } from "./command-bar";
 import { ResultCardStack } from "./result-card";
 import { blueprintMeta } from "./artifact-card";
@@ -53,13 +53,89 @@ function ChoiceBlock({ question, options, selectedTitle, onChoose }: { question:
   return <section className="mt-4 overflow-hidden rounded-[11px] border border-[color-mix(in_oklab,var(--accent-cyan)_20%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_4%,var(--bg-elevated))] p-3" data-conversation-action="choice" aria-label="Choose one response"><div className="mb-2 text-[12px] font-semibold text-[var(--text-primary)]">{question}</div><div className={`grid gap-2 ${options.length === 2 ? "sm:grid-cols-2" : "grid-cols-1"}`}>{options.map((option, index) => <button key={`${option.title}:${index}`} type="button" disabled={Boolean(selected)} aria-pressed={selected === option.title} onClick={() => { setPending(option.title); Promise.resolve(onChoose?.(option, index)).catch((error) => { setPending(null); toast.error(error instanceof Error ? error.message : "Could not save that choice."); }); }} className={`group min-h-11 rounded-[9px] border px-3 py-2.5 text-left transition ${selected === option.title ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_10%,var(--bg-primary))]" : "border-[var(--border-default)] bg-[var(--bg-primary)] hover:-translate-y-0.5 hover:border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] hover:shadow-[0_5px_18px_rgba(27,20,12,0.06)] disabled:opacity-55"}`}><span className="block text-[12px] font-semibold text-[var(--text-primary)]">{option.title}</span>{option.description ? <span className="mt-1 block text-[11px] leading-4 text-[var(--text-secondary)]">{option.description}</span> : null}</button>)}</div>{selectedTitle ? <p className="mt-2 text-[10px] text-[var(--text-tertiary)]">Choice saved for this conversation.</p> : null}</section>;
 }
 
+function conflictSnapshot(value: unknown) {
+  try {
+    const formatted = JSON.stringify(value, null, 2);
+    return formatted.length > 1_800 ? `${formatted.slice(0, 1_800)}\n…` : formatted;
+  } catch {
+    return "This state could not be displayed safely.";
+  }
+}
+
+function ArtifactConflictResolution({ operation }: { operation: SpectraOperation }) {
+  const [detail, setDetail] = useState<Awaited<ReturnType<typeof getSpectraOperationConflict>>["conflict"] | null>(null);
+  const [busy, setBusy] = useState<"apply" | "keep_current" | "merge" | "cancel" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [mergeOpen, setMergeOpen] = useState(false);
+  const [mergeDraft, setMergeDraft] = useState("");
+  useEffect(() => {
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const load = async () => {
+      try {
+        const result = await getSpectraOperationConflict(operation._id);
+        if (!active) return;
+        setDetail(result.conflict);
+        setMergeDraft((current) => current || JSON.stringify(result.conflict.input, null, 2));
+        setError(null);
+        if (result.conflict.claimStatus === "queued") timer = setTimeout(load, 1_500);
+      } catch (cause) {
+        if (active) setError(cause instanceof Error ? cause.message : "Could not load the conflict.");
+      }
+    };
+    void load();
+    return () => { active = false; if (timer) clearTimeout(timer); };
+  }, [operation._id]);
+  const resolve = async (resolution: "apply" | "keep_current" | "merge" | "cancel") => {
+    setBusy(resolution);
+    setError(null);
+    try {
+      let mergedInput: unknown;
+      if (resolution === "merge") {
+        try {
+          mergedInput = JSON.parse(mergeDraft);
+        } catch {
+          throw new Error("The merged proposal is not valid JSON yet.");
+        }
+        if (!mergedInput || typeof mergedInput !== "object" || Array.isArray(mergedInput)) {
+          throw new Error("The merged proposal must remain an operation object.");
+        }
+      }
+      await resolveSpectraOperationConflict(operation._id, resolution, mergedInput);
+      window.dispatchEvent(new CustomEvent("spectra:threads-changed"));
+      window.dispatchEvent(new CustomEvent("spectra:runs-changed"));
+      toast.success(
+        resolution === "apply"
+          ? "Spectra's proposal is queued to apply."
+          : resolution === "merge"
+            ? "Your merged proposal is queued to apply."
+            : resolution === "cancel"
+              ? "The proposal was cancelled."
+              : "The current artifact was kept.",
+      );
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not resolve the conflict.");
+    } finally {
+      setBusy(null);
+    }
+  };
+  const available = detail?.claimStatus === "paused";
+  return <section className="mt-2 overflow-hidden rounded-[9px] border border-[color-mix(in_oklab,#d88922_24%,var(--border-default))] bg-[color-mix(in_oklab,#d88922_4%,var(--bg-elevated))]" aria-label="Resolve artifact edit conflict">
+    <header className="flex items-start gap-2.5 border-b border-[var(--border-subtle)] px-3 py-2.5"><GitCompareArrows className="mt-0.5 h-4 w-4 shrink-0 text-[#b46d15]" /><div className="min-w-0 flex-1"><div className="text-[11px] font-semibold text-[var(--text-primary)]">Same-region edit needs your decision</div><p className="mt-0.5 text-[10px] leading-4 text-[var(--text-secondary)]">{detail?.conflict.regionId ?? operation.conflict?.regionId ?? "This region"} {available ? "is now available." : "is still occupied. Spectra will not overwrite it."}</p></div></header>
+    {detail ? <div className="grid gap-px bg-[var(--border-subtle)] md:grid-cols-3"><div className="bg-[var(--bg-primary)] p-2.5"><div className="mb-1.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">Before Spectra</div><pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-[9px] leading-4 text-[var(--text-secondary)]">{conflictSnapshot(detail.conflict.baseSnapshot)}</pre></div><div className="bg-[var(--bg-primary)] p-2.5"><div className="mb-1.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">Current</div><pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-[9px] leading-4 text-[var(--text-secondary)]">{conflictSnapshot(detail.currentSnapshot)}</pre></div><div className="bg-[color-mix(in_oklab,var(--accent-cyan)_4%,var(--bg-primary))] p-2.5"><div className="mb-1.5 flex items-center gap-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-[var(--accent-cyan)]"><Sparkles className="h-3 w-3" />Spectra proposal</div><pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-[9px] leading-4 text-[var(--text-secondary)]">{conflictSnapshot(detail.conflict.proposedSnapshot ?? detail.input)}</pre></div></div> : <div className="flex items-center gap-2 px-3 py-4 text-[10px] text-[var(--text-tertiary)]"><Loader2 className="h-3.5 w-3.5 animate-spin" />Loading current and proposed states</div>}
+    {mergeOpen ? <div className="border-t border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-3"><div className="mb-2 flex items-center gap-2"><PencilLine className="h-3.5 w-3.5 text-[var(--accent-cyan)]" /><div><div className="text-[10px] font-semibold text-[var(--text-primary)]">Edit the merged operation</div><p className="mt-0.5 text-[9px] leading-4 text-[var(--text-tertiary)]">Adjust only the proposed fields you want Spectra to apply. The operation is validated again before it can touch the artifact.</p></div></div><textarea value={mergeDraft} onChange={(event) => setMergeDraft(event.target.value)} spellCheck={false} aria-label="Merged artifact operation" className="min-h-44 w-full resize-y rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2.5 font-mono text-[10px] leading-4 text-[var(--text-primary)] outline-none transition focus:border-[var(--accent-cyan)] focus:ring-2 focus:ring-[color-mix(in_oklab,var(--accent-cyan)_15%,transparent)]" /></div> : null}
+    {error ? <p role="alert" className="border-t border-[var(--border-subtle)] px-3 py-2 text-[10px] text-[var(--danger)]">{error}</p> : null}
+    <footer className="flex flex-wrap items-center justify-end gap-2 border-t border-[var(--border-subtle)] px-3 py-2.5"><button type="button" disabled={Boolean(busy)} onClick={() => void resolve("cancel")} className="min-h-8 rounded-[7px] px-2.5 text-[10px] font-medium text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] disabled:opacity-45">Cancel proposal</button><button type="button" disabled={Boolean(busy)} onClick={() => void resolve("keep_current")} className="min-h-8 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 text-[10px] font-semibold text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-45">{busy === "keep_current" ? "Keeping…" : "Keep current"}</button><button type="button" disabled={!detail || Boolean(busy)} onClick={() => { setError(null); setMergeOpen((open) => !open); }} className="min-h-8 rounded-[7px] border border-[color-mix(in_oklab,var(--accent-cyan)_32%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_5%,var(--bg-primary))] px-2.5 text-[10px] font-semibold text-[var(--accent-cyan)] hover:bg-[color-mix(in_oklab,var(--accent-cyan)_9%,var(--bg-primary))] disabled:opacity-45">{mergeOpen ? "Close merge" : "Edit & merge"}</button>{mergeOpen ? <button type="button" disabled={!available || Boolean(busy)} onClick={() => void resolve("merge")} className="min-h-8 rounded-[7px] bg-[var(--accent-cyan)] px-3 text-[10px] font-semibold text-white shadow-[0_5px_16px_color-mix(in_oklab,var(--accent-cyan)_20%,transparent)] disabled:cursor-not-allowed disabled:opacity-40">{busy === "merge" ? "Queuing…" : available ? "Apply merged edit" : "Waiting for region"}</button> : <button type="button" disabled={!available || Boolean(busy)} onClick={() => void resolve("apply")} className="min-h-8 rounded-[7px] bg-[var(--accent-cyan)] px-3 text-[10px] font-semibold text-white shadow-[0_5px_16px_color-mix(in_oklab,var(--accent-cyan)_20%,transparent)] disabled:cursor-not-allowed disabled:opacity-40">{busy === "apply" ? "Queuing…" : available ? "Apply proposal" : "Waiting for region"}</button>}</footer>
+  </section>;
+}
+
 function OperationalTrace({ trace }: { trace: SpectraThreadTrace }) {
-  const [open, setOpen] = useState(trace.run.status === "awaiting_confirmation" || trace.run.status === "failed");
+  const [open, setOpen] = useState(trace.run.status === "awaiting_confirmation" || trace.run.status === "awaiting_resolution" || trace.run.status === "failed");
   const failed = trace.run.status === "failed";
   return (
-    <div data-spectra-card="result" data-card-state={failed ? "failed" : trace.run.status === "awaiting_confirmation" ? "confirmation" : "normal"} className="mt-4 overflow-hidden">
+    <div data-spectra-card="result" data-card-state={failed ? "failed" : trace.run.status === "awaiting_confirmation" || trace.run.status === "awaiting_resolution" ? "confirmation" : "normal"} className="mt-4 overflow-hidden">
       <button type="button" onClick={() => setOpen((value) => !value)} className="flex w-full items-center gap-2.5 px-3 py-2 text-left hover:bg-[var(--bg-hover)]">
-        {failed ? <AlertCircle className="h-3.5 w-3.5 text-[var(--danger)]" /> : trace.run.status === "awaiting_confirmation" ? <ShieldCheck className="h-3.5 w-3.5 text-amber-600" /> : <Wrench className="h-3.5 w-3.5 text-[var(--accent-cyan)]" />}
+        {failed ? <AlertCircle className="h-3.5 w-3.5 text-[var(--danger)]" /> : trace.run.status === "awaiting_confirmation" ? <ShieldCheck className="h-3.5 w-3.5 text-amber-600" /> : trace.run.status === "awaiting_resolution" ? <GitCompareArrows className="h-3.5 w-3.5 text-[#b46d15]" /> : <Wrench className="h-3.5 w-3.5 text-[var(--accent-cyan)]" />}
         <span className="flex-1 text-[11px] font-semibold text-[var(--text-secondary)]">
           {trace.operations.length === 0 ? "Run" : `${trace.operations.length} ${trace.operations.length === 1 ? "action" : "actions"}`}
           <span className="ml-2 font-normal capitalize text-[var(--text-tertiary)]">{trace.run.status.replaceAll("_", " ")}</span>
@@ -74,7 +150,7 @@ function OperationalTrace({ trace }: { trace: SpectraThreadTrace }) {
               <span className="min-w-0 flex-1 truncate font-medium text-[var(--text-primary)]">{operationLabel(operation, trace.artifacts)}</span>
               <span className="capitalize text-[var(--text-tertiary)]">{operation.status}</span>
               {operation.affected.length > 0 ? <span className="ml-auto text-[10px] text-[var(--text-tertiary)]">{operation.affected.length} affected</span> : null}
-            </div>{operation.affected.length > 0 ? <div className="mt-1.5 pl-5 text-[10px] leading-4 text-[var(--text-tertiary)]">Updated {operation.affected.length} workspace object{operation.affected.length === 1 ? "" : "s"}.</div> : null}</div>)}
+            </div>{operation.affected.length > 0 ? <div className="mt-1.5 pl-5 text-[10px] leading-4 text-[var(--text-tertiary)]">Updated {operation.affected.length} workspace object{operation.affected.length === 1 ? "" : "s"}.</div> : null}{operation.status === "waiting" && operation.conflict ? <ArtifactConflictResolution operation={operation} /> : null}</div>)}
           </div>
         )}
       </div> : null}
@@ -122,8 +198,9 @@ function PersistedProgressTrace({ trace }: { trace: SpectraThreadTrace }) {
     (event) =>
       (!trace.run.executionId || event.executionId === trace.run.executionId) &&
       (event.type === "status" ||
+        event.type === "progress" ||
+        event.type === "agent_routed" ||
         event.type === "operation_preview" ||
-        event.type === "operation_result" ||
         event.type === "approval_accepted" ||
         event.type === "approval_rejected" ||
         event.type === "error" ||
@@ -136,9 +213,13 @@ function PersistedProgressTrace({ trace }: { trace: SpectraThreadTrace }) {
     const preview = event.type === "operation_preview" && payload.preview && typeof payload.preview === "object" ? payload.preview as { title?: unknown; action?: unknown } : null;
     const previewAction = preview?.action === "create" ? "Creating" : preview?.action === "update" ? "Updating" : preview?.action === "archive" ? "Preparing archive" : preview?.action === "workspace" ? "Organizing" : "Connecting";
     const previewTitle = preview && typeof preview.title === "string" ? (/^(creating|updating|organizing|connecting|preparing)\b/i.test(preview.title) ? preview.title.replace(/^Preparing\b/i, previewAction) : `${previewAction} ${preview.title}`) : null;
-    const message = typeof payload.message === "string" ? payload.message : previewTitle ? `${previewTitle} · Applying the validated change to the workspace` : event.type === "operation_result" ? "Checked result" : event.type === "approval_accepted" ? "Changes approved" : event.type === "approval_rejected" ? "Proposal rejected" : event.type === "stopped" ? "Stopped" : event.type === "interrupted" ? "Run interrupted" : event.type === "error" ? "Could not finish" : "Working";
-    const summary = message.includes(" · ") ? message.slice(message.indexOf(" · ") + 3).trim() : message;
-    return { id: event._id, title: progressTitle(message), summary, status: ((event.type === "error" || event.type === "interrupted") && trace.run.status !== "completed" ? "error" : index === rows.length - 1 && (trace.run.status === "queued" || trace.run.status === "running") ? "running" : "done") as "running" | "done" | "error", createdAt: event.createdAt };
+    const nativeTitle = event.type === "progress" && typeof payload.title === "string" ? payload.title : null;
+    const nativeDetail = event.type === "progress" && typeof payload.detail === "string" ? payload.detail : null;
+    const routedTitle = event.type === "agent_routed" && typeof payload.title === "string" ? `Using ${payload.title}` : null;
+    const routedDetail = event.type === "agent_routed" && typeof payload.reason === "string" ? payload.reason : null;
+    const message = typeof payload.message === "string" ? payload.message : nativeTitle ? `${nativeTitle}${nativeDetail ? ` · ${nativeDetail}` : ""}` : previewTitle ? `${previewTitle} · Applying the validated change to the workspace` : event.type === "operation_result" ? "Checked result" : event.type === "approval_accepted" ? "Changes approved" : event.type === "approval_rejected" ? "Proposal rejected" : event.type === "stopped" ? "Stopped" : event.type === "interrupted" ? "Run interrupted" : event.type === "error" ? "Could not finish" : "Working";
+    const summary = nativeDetail ?? (message.includes(" · ") ? message.slice(message.indexOf(" · ") + 3).trim() : message);
+    return { id: event._id, title: nativeTitle ?? routedTitle ?? progressTitle(message), summary: routedDetail ?? summary, status: ((event.type === "error" || event.type === "interrupted") && trace.run.status !== "completed" ? "error" : index === rows.length - 1 && (trace.run.status === "queued" || trace.run.status === "running") ? "running" : "done") as "running" | "done" | "error", createdAt: event.createdAt };
   });
   const steps = rawSteps.reduce<typeof rawSteps>((publicSteps, step) => {
     const existingIndex = publicSteps.findIndex((candidate) => candidate.title === step.title);
@@ -147,6 +228,41 @@ function PersistedProgressTrace({ trace }: { trace: SpectraThreadTrace }) {
     return publicSteps;
   }, []);
   return <ProgressTrace steps={steps} active={trace.run.status === "queued" || trace.run.status === "running"} />;
+}
+
+function AgentRoutingControl({ trace }: { trace: SpectraThreadTrace }) {
+  const [busy, setBusy] = useState(false);
+  const [ordinaryNext, setOrdinaryNext] = useState(false);
+  const event = [...(trace.events ?? [])].reverse().find((candidate) => candidate.type === "agent_routed");
+  const title = event && typeof event.payload.title === "string" ? event.payload.title : trace.cards.find((card) => card.provenance?.agentTitle)?.provenance?.agentTitle;
+  const reason = event && typeof event.payload.reason === "string" ? event.payload.reason : trace.cards.find((card) => card.provenance?.agentRoutingReason)?.provenance?.agentRoutingReason;
+  const source = event && typeof event.payload.source === "string" ? event.payload.source : trace.cards.find((card) => card.provenance?.agentRoutingSource)?.provenance?.agentRoutingSource;
+  if (!title) return null;
+
+  async function clearAgent() {
+    if (busy || ordinaryNext) return;
+    setBusy(true);
+    try {
+      await clearSpectraRunAgent(trace.run._id);
+      setOrdinaryNext(true);
+      window.dispatchEvent(new Event("spectra:threads-changed"));
+      toast.success("This thread will use ordinary Spectra next.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not change the thread agent.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <div className="mt-2 inline-flex max-w-full items-center gap-1.5 rounded-[7px] border border-[color-mix(in_oklab,var(--accent-cyan)_14%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--accent-cyan)_5%,var(--bg-elevated))] px-2 py-1 text-[10px] text-[var(--text-secondary)]" title={reason}>
+    <Bot className="h-3 w-3 shrink-0 text-[var(--accent-cyan)]" />
+    <span className="truncate font-semibold">{title}</span>
+    <span className="shrink-0 text-[9px] text-[var(--text-tertiary)]">{source === "continued" ? "retained" : source === "explicit" ? "selected" : "auto-routed"}</span>
+    <button type="button" disabled={busy || ordinaryNext} onClick={() => void clearAgent()} className="ml-1 inline-flex shrink-0 items-center gap-1 rounded-[5px] px-1.5 py-0.5 font-semibold hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)] disabled:opacity-65">
+      {busy ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : ordinaryNext ? <Check className="h-2.5 w-2.5" /> : <Undo2 className="h-2.5 w-2.5" />}
+      {ordinaryNext ? "Ordinary next" : "Use ordinary Spectra"}
+    </button>
+  </div>;
 }
 
 function ArtifactResult({ artifact, workspaces, onOpen }: { artifact: SpectraArtifact; workspaces: SpectraWorkspace[]; onOpen?: (id: string) => void }) {
@@ -312,7 +428,8 @@ export function ConversationSurface({
                   }} /> : null}
                   <div className="mt-2 text-[10px] text-[var(--text-tertiary)]">{messageMeta(message)}</div>
                   {trace && trace.run.providerUsed !== "Spectra" ? <PersistedProgressTrace trace={trace} /> : null}
-                  {trace && (trace.operations.length > 0 || ["failed", "cancelled", "awaiting_confirmation"].includes(trace.run.status)) ? <OperationalTrace trace={trace} /> : null}
+                  {trace ? <AgentRoutingControl trace={trace} /> : null}
+                  {trace && (trace.operations.length > 0 || ["failed", "cancelled", "awaiting_confirmation", "awaiting_resolution"].includes(trace.run.status)) ? <OperationalTrace trace={trace} /> : null}
 	                  {trace?.cards.some((card) => card.actions.some((action) => action.key === "confirm" || action.key === "cancel" || action.key === "reject")) ? <ResultCardStack cards={trace.cards.map((card) => ({ id: card._id, runId: card.runId, status: card.status, title: card.title, summary: card.summary, variant: card.variant, actions: card.actions, provenance: card.provenance, updatedAt: card.updatedAt }))} className="mt-4 !max-h-none" onOpen={onCardOpen} onAction={onCardAction} onRevise={onCardRevise} /> : null}
 	                  {trace?.artifacts.map((artifact) => <ArtifactResult key={artifact._id} artifact={artifact} workspaces={workspaces} onOpen={onOpenArtifact} />)}
 	                  {affectedWorkspaces.map((workspace) => <WorkspaceResult key={workspace._id} workspace={workspace} onOpen={onOpenWorkspace} />)}
@@ -324,7 +441,7 @@ export function ConversationSurface({
             {!liveExchange.runId || !persistedUserRunIds.has(liveExchange.runId) ? <article className={cn("relative", compact ? "mb-7" : "mb-10")}><div className="ml-auto max-w-[82%]"><div className="rounded-[18px_18px_5px_18px] border border-[color-mix(in_oklab,var(--accent-cyan)_16%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--accent-cyan)_5%,var(--bg-elevated))] px-4 py-3 text-[13px] leading-6 text-[var(--text-primary)]">{liveExchange.prompt}</div><div className="mt-1.5 text-right text-[10px] text-[var(--text-tertiary)]">Sending now</div></div></article> : null}
             {!liveExchange.runId || !persistedAssistantRunIds.has(liveExchange.runId) ? <article className={cn("relative", compact ? "mb-7" : "mb-10")}><div className="relative pl-7"><span className="absolute left-0 top-1.5 h-2 w-2 rounded-full bg-[var(--accent-cyan)] shadow-[0_0_0_4px_color-mix(in_oklab,var(--accent-cyan)_12%,transparent)]" /><ProgressTrace steps={liveExchange.steps} active={liveExchange.status !== "failed"} />{liveExchange.content ? <RichText content={liveExchange.content} className={cn("text-[14px] leading-7 text-[var(--text-primary)]", !compact && "sm:text-[15px]")} /> : <div className="flex items-center gap-2 py-1 text-[12px] text-[var(--text-tertiary)]"><Loader2 className="h-3.5 w-3.5 animate-spin" />Preparing response</div>}<div className="mt-2 text-[10px] text-[var(--text-tertiary)]">{liveExchange.status === "streaming" ? "Responding" : liveExchange.status}</div></div></article> : null}
           </> : null}
-          {!liveExchange ? unresolvedTraces.map((trace) => <div key={trace.run._id} className="mb-7 ml-7 rounded-[9px] bg-[var(--bg-secondary)] px-3.5 py-3"><div className="flex items-center gap-2 text-[11px] font-semibold text-[var(--text-secondary)]">{trace.run.status === "running" || trace.run.status === "queued" ? <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-cyan)]" /> : <AlertCircle className="h-3.5 w-3.5 text-[var(--danger)]" />}<span className="capitalize">{trace.run.status.replaceAll("_", " ")}</span></div><p className="mt-1 text-[10px] leading-4 text-[var(--text-tertiary)]">{trace.run.status === "running" ? "This response is still in progress. Saved text and progress will catch up here automatically." : trace.run.error ?? "No incomplete assistant message was saved."}</p>{trace.operations.length > 0 || ["failed", "cancelled", "awaiting_confirmation"].includes(trace.run.status) ? <OperationalTrace trace={trace} /> : null}</div>) : null}
+          {!liveExchange ? unresolvedTraces.map((trace) => <div key={trace.run._id} className="mb-7 ml-7 rounded-[9px] bg-[var(--bg-secondary)] px-3.5 py-3"><div className="flex items-center gap-2 text-[11px] font-semibold text-[var(--text-secondary)]">{trace.run.status === "running" || trace.run.status === "queued" ? <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-cyan)]" /> : trace.run.status === "awaiting_resolution" ? <GitCompareArrows className="h-3.5 w-3.5 text-[#b46d15]" /> : <AlertCircle className="h-3.5 w-3.5 text-[var(--danger)]" />}<span className="capitalize">{trace.run.status.replaceAll("_", " ")}</span></div><p className="mt-1 text-[10px] leading-4 text-[var(--text-tertiary)]">{trace.run.status === "running" ? "This response is still in progress. Saved text and progress will catch up here automatically." : trace.run.status === "awaiting_resolution" ? "The same semantic region changed concurrently. Review the preserved proposal below." : trace.run.error ?? "No incomplete assistant message was saved."}</p>{trace.operations.length > 0 || ["failed", "cancelled", "awaiting_confirmation", "awaiting_resolution"].includes(trace.run.status) ? <OperationalTrace trace={trace} /> : null}</div>) : null}
           {activeCards?.some((card) => card.variant !== "status" || card.status !== "completed") ? <ResultCardStack cards={activeCards.filter((card) => card.variant !== "status" || card.status !== "completed").slice(0, 2)} className="mt-5" onOpen={onCardOpen} onAction={onCardAction} onRevise={onCardRevise} /> : null}
         </div>
       </div>
@@ -350,7 +467,7 @@ export function ThreadConversation({ threadId, compact = false, showComposer = t
     return () => window.removeEventListener("spectra:threads-changed", refreshVisibleThread);
   }, [refresh]);
   useEffect(() => {
-  const active = detail?.traces.some((trace) => trace.run.status === "queued" || trace.run.status === "running" || trace.run.status === "awaiting_confirmation");
+  const active = detail?.traces.some((trace) => trace.run.status === "queued" || trace.run.status === "running" || trace.run.status === "awaiting_confirmation" || trace.run.status === "awaiting_resolution");
     if (!active) return;
     const timer = window.setInterval(() => void refresh().catch(() => undefined), 2_000);
     return () => window.clearInterval(timer);

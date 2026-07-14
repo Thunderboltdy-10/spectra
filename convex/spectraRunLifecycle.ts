@@ -2,6 +2,7 @@ export type SpectraRunStatus =
   | "queued"
   | "running"
   | "awaiting_confirmation"
+  | "awaiting_resolution"
   | "completed"
   | "failed"
   | "cancelled";
@@ -9,6 +10,7 @@ export type SpectraRunStatus =
 export type SpectraOperationStatus =
   | "proposed"
   | "executing"
+  | "waiting"
   | "executed"
   | "failed"
   | "cancelled";
@@ -17,6 +19,7 @@ const ACTIVE_STATUSES = new Set<SpectraRunStatus>([
   "queued",
   "running",
   "awaiting_confirmation",
+  "awaiting_resolution",
 ]);
 
 const TERMINAL_STATUSES = new Set<SpectraRunStatus>([
@@ -27,8 +30,9 @@ const TERMINAL_STATUSES = new Set<SpectraRunStatus>([
 
 const TRANSITIONS: Record<SpectraRunStatus, ReadonlySet<SpectraRunStatus>> = {
   queued: new Set(["queued", "running", "cancelled", "failed"]),
-  running: new Set(["running", "awaiting_confirmation", "completed", "failed", "cancelled"]),
-  awaiting_confirmation: new Set(["awaiting_confirmation", "running", "cancelled", "failed"]),
+  running: new Set(["running", "awaiting_confirmation", "awaiting_resolution", "completed", "failed", "cancelled"]),
+  awaiting_confirmation: new Set(["awaiting_confirmation", "queued", "running", "cancelled", "failed"]),
+  awaiting_resolution: new Set(["awaiting_resolution", "queued", "running", "cancelled", "failed"]),
   completed: new Set(["completed"]),
   failed: new Set(["failed"]),
   cancelled: new Set(["cancelled"]),
@@ -60,7 +64,7 @@ export function interruptionRecovery(
   hasPartialResponse: boolean,
 ) {
   const mayHaveCommitted = operationStatuses.some((status) =>
-    status === "executing" || status === "executed" || status === "failed"
+    status === "executing" || status === "waiting" || status === "executed" || status === "failed"
   );
   return {
     recoveryState: mayHaveCommitted || hasPartialResponse ? "partial" as const : "interrupted" as const,

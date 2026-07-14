@@ -1,8 +1,8 @@
 import { internalMutation, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
-import { getActorByClerkId } from "./identityShared";
-import { ensureThreadWorkspacePlacement } from "./spectraShared";
+import { getAuthenticatedActor } from "./identityShared";
+import { ensureThreadWorkspacePlacement, requireArtifactCapability } from "./spectraShared";
 import {
   canTransitionRunStatus,
   interruptionRecovery,
@@ -10,12 +10,14 @@ import {
   isTerminalRunStatus,
   requireCurrentExecution,
 } from "./spectraRunLifecycle";
+import { releaseClaimsForRun } from "./regionClaims";
 
 const vSurface = v.union(v.literal("chat"), v.literal("workspace"), v.literal("artifact"));
 const vRunStatus = v.union(
   v.literal("queued"),
   v.literal("running"),
   v.literal("awaiting_confirmation"),
+  v.literal("awaiting_resolution"),
   v.literal("completed"),
   v.literal("failed"),
   v.literal("cancelled"),
@@ -31,7 +33,7 @@ const vRunPhase = v.union(
   v.literal("created"), v.literal("preparing"), v.literal("planning"),
   v.literal("reading"), v.literal("retrieving"), v.literal("creating"),
   v.literal("updating"), v.literal("applying"), v.literal("streaming"),
-  v.literal("checking"), v.literal("approval"), v.literal("completed"),
+  v.literal("checking"), v.literal("approval"), v.literal("conflict"), v.literal("completed"),
   v.literal("stopped"), v.literal("interrupted"), v.literal("partial"),
   v.literal("failed"),
 );
@@ -42,18 +44,17 @@ const vResultAction = v.object({
   targetId: v.optional(v.string()),
 });
 
-async function requireActor(ctx: Parameters<typeof getActorByClerkId>[0], actorClerkId: string) {
-  const actor = await getActorByClerkId(ctx, actorClerkId);
-  if (!actor) throw new Error("Unauthorized");
+async function requireActor(ctx: Parameters<typeof getAuthenticatedActor>[0]) {
+  const actor = await getAuthenticatedActor(ctx);
+  if (!actor) throw new Error("AUTH_NO_SCHOOL: An active school membership is required.");
   return actor;
 }
 
 async function requireOwnedRun(
-  ctx: Parameters<typeof getActorByClerkId>[0],
-  actorClerkId: string,
+  ctx: Parameters<typeof getAuthenticatedActor>[0],
   runId: Id<"spectraAiRuns">,
 ) {
-  const actor = await requireActor(ctx, actorClerkId);
+  const actor = await requireActor(ctx);
   const run = await ctx.db.get(runId);
   if (!run || run.ownerAccountId !== actor._id || run.schoolId !== actor.schoolId) {
     throw new Error("AI run not found");
@@ -71,7 +72,6 @@ function provisionalTitle(prompt: string) {
 
 export const beginRun = mutation({
   args: {
-    actorClerkId: v.string(),
     sourceSurface: vSurface,
     userPrompt: v.string(),
     submissionKey: v.string(),
@@ -82,7 +82,7 @@ export const beginRun = mutation({
     messageMetadata: v.optional(v.any()),
   },
   handler: async (ctx, args) => {
-    const actor = await requireActor(ctx, args.actorClerkId);
+    const actor = await requireActor(ctx);
     const cleanPrompt = args.userPrompt.replace(/\u0000/g, "").trim().slice(0, 12_000);
     if (!cleanPrompt) throw new Error("Write a message before starting a run.");
     const existingRun = await ctx.db.query("spectraAiRuns")
@@ -185,7 +185,6 @@ export const beginRun = mutation({
 
 export const updateStatus = mutation({
   args: {
-    actorClerkId: v.string(),
     runId: v.id("spectraAiRuns"),
     status: vRunStatus,
     finalSummary: v.optional(v.string()),
@@ -205,7 +204,7 @@ export const updateStatus = mutation({
     approvalReasons: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
-    const { run } = await requireOwnedRun(ctx, args.actorClerkId, args.runId);
+    const { run } = await requireOwnedRun(ctx, args.runId);
     requireCurrentExecution(run.executionId, args.executionId);
     if (!canTransitionRunStatus(run.status, args.status)) throw new Error("This run has already moved to a newer state.");
     if (args.status === "awaiting_confirmation" && (!args.approvalReasons || args.approvalReasons.length === 0)) {
@@ -273,9 +272,9 @@ export const updateStatus = mutation({
 });
 
 export const appendEvent = mutation({
-  args: { actorClerkId: v.string(), runId: v.id("spectraAiRuns"), executionId: v.string(), type: v.string(), payload: v.any() },
+  args: { runId: v.id("spectraAiRuns"), executionId: v.string(), type: v.string(), payload: v.any() },
   handler: async (ctx, args) => {
-    const { run } = await requireOwnedRun(ctx, args.actorClerkId, args.runId);
+    const { run } = await requireOwnedRun(ctx, args.runId);
     if (run.executionId !== args.executionId) return { ignored: true, sequence: run.eventSequence ?? 0 };
     const terminal = isTerminalRunStatus(run.status);
     const terminalEvent = args.type === "final" || args.type === "error" || args.type === "stopped" || args.type === "interrupted" || args.type === "approval_rejected" || args.type === "approval_accepted" || args.type === "choice_selected";
@@ -297,13 +296,12 @@ export const appendEvent = mutation({
 
 export const appendEvents = mutation({
   args: {
-    actorClerkId: v.string(),
     runId: v.id("spectraAiRuns"),
     executionId: v.string(),
     events: v.array(v.object({ type: v.string(), payload: v.any() })),
   },
   handler: async (ctx, args) => {
-    const { run } = await requireOwnedRun(ctx, args.actorClerkId, args.runId);
+    const { run } = await requireOwnedRun(ctx, args.runId);
     if (run.executionId !== args.executionId || args.events.length === 0)
       return { ignored: true, sequence: run.eventSequence ?? 0, count: 0 };
     const terminalTypes = new Set(["final", "error", "stopped", "interrupted", "approval_rejected", "approval_accepted", "choice_selected"]);
@@ -341,13 +339,12 @@ export const appendEvents = mutation({
 
 export const claimExecution = mutation({
   args: {
-    actorClerkId: v.string(),
     runId: v.id("spectraAiRuns"),
     executionId: v.string(),
     workerId: v.string(),
   },
   handler: async (ctx, args) => {
-    const { run } = await requireOwnedRun(ctx, args.actorClerkId, args.runId);
+    const { run } = await requireOwnedRun(ctx, args.runId);
     requireCurrentExecution(run.executionId, args.executionId);
     if (run.status !== "queued" && run.status !== "running") throw new Error("This run is no longer available for execution.");
     const now = Date.now();
@@ -368,9 +365,9 @@ export const claimExecution = mutation({
 });
 
 export const heartbeat = mutation({
-  args: { actorClerkId: v.string(), runId: v.id("spectraAiRuns"), executionId: v.string(), workerId: v.string() },
+  args: { runId: v.id("spectraAiRuns"), executionId: v.string(), workerId: v.string() },
   handler: async (ctx, args) => {
-    const { run } = await requireOwnedRun(ctx, args.actorClerkId, args.runId);
+    const { run } = await requireOwnedRun(ctx, args.runId);
     if (run.executionId !== args.executionId || run.workerId !== args.workerId || (run.status !== "queued" && run.status !== "running")) return { alive: false };
     const now = Date.now();
     await ctx.db.patch(args.runId, { heartbeatAt: now, leaseExpiresAt: now + 2 * 60_000 });
@@ -379,9 +376,9 @@ export const heartbeat = mutation({
 });
 
 export const markTraceDegraded = mutation({
-  args: { actorClerkId: v.string(), runId: v.id("spectraAiRuns"), executionId: v.string() },
+  args: { runId: v.id("spectraAiRuns"), executionId: v.string() },
   handler: async (ctx, args) => {
-    const { run } = await requireOwnedRun(ctx, args.actorClerkId, args.runId);
+    const { run } = await requireOwnedRun(ctx, args.runId);
     if (run.executionId !== args.executionId) return { ignored: true };
     const now = Date.now();
     await ctx.db.patch(args.runId, { traceDegraded: true, updatedAt: now });
@@ -392,18 +389,18 @@ export const markTraceDegraded = mutation({
 });
 
 export const listEvents = query({
-  args: { actorClerkId: v.string(), runId: v.id("spectraAiRuns"), after: v.optional(v.number()), limit: v.optional(v.number()) },
+  args: { runId: v.id("spectraAiRuns"), after: v.optional(v.number()), limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
-    await requireOwnedRun(ctx, args.actorClerkId, args.runId);
+    await requireOwnedRun(ctx, args.runId);
     const rows = await ctx.db.query("spectraRunEvents").withIndex("by_run_sequence", (q) => q.eq("runId", args.runId).gt("sequence", args.after ?? 0)).take(Math.min(args.limit ?? 300, 800));
     return rows.sort((a, b) => a.sequence - b.sequence);
   },
 });
 
 export const listTabs = query({
-  args: { actorClerkId: v.string(), includeHidden: v.optional(v.boolean()), limit: v.optional(v.number()) },
+  args: { includeHidden: v.optional(v.boolean()), limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
-    const actor = await requireActor(ctx, args.actorClerkId);
+    const actor = await requireActor(ctx);
     const tabs = await ctx.db.query("spectraRunTabs").withIndex("by_account_updated", (q) => q.eq("ownerAccountId", actor._id)).order("desc").take(Math.min(args.limit ?? 80, 200));
     const canonicalByThread = new Map<string, (typeof tabs)[number]>();
     for (const tab of tabs.filter((row) => row.schoolId === actor.schoolId && (args.includeHidden || !row.hiddenAt))) {
@@ -472,9 +469,18 @@ export const reconcileStaleRuns = internalMutation({
       await ctx.db.insert("spectraRunEvents", { runId: run._id, executionId: run.executionId ?? "interrupted", sequence, type: "interrupted", payload: { type: "interrupted", runId: run._id, recoveryState: recovery.recoveryState, retryable: recovery.retryable, preservedPartial: recovery.preservedPartial }, createdAt: now });
       await ctx.db.patch(run._id, { eventSequence: sequence });
       const artifacts = await ctx.db.query("spectraArtifacts").withIndex("by_account_status", (q) => q.eq("ownerAccountId", run.ownerAccountId).eq("status", "active")).collect();
-      await Promise.all(artifacts.filter((artifact) => artifact.aiRunId === run._id && (artifact.aiState === "creating" || artifact.aiState === "updating")).map((artifact) => ctx.db.patch(artifact._id, { aiState: "failed", summary: artifact.aiState === "creating" ? "Spectra was interrupted while building this artifact. Retry the run to continue." : artifact.summary, updatedAt: now })));
+      await Promise.all(artifacts.filter((artifact) => artifact.aiRunId === run._id && (artifact.aiState === "creating" || artifact.aiState === "updating")).map((artifact) => ctx.db.patch(artifact._id, {
+        aiState: undefined,
+        aiRunId: undefined,
+        aiExecutionId: undefined,
+        aiStateExpiresAt: undefined,
+        aiProgress: undefined,
+        aiPreview: undefined,
+        summary: artifact.aiState === "creating" ? "Incomplete draft preserved from an interrupted Spectra run." : artifact.summary,
+        updatedAt: now,
+      })));
       const workspaces = await ctx.db.query("spectraWorkspaces").withIndex("by_account_activity", (q) => q.eq("ownerAccountId", run.ownerAccountId)).collect();
-      await Promise.all(workspaces.filter((workspace) => workspace.aiRunId === run._id && (workspace.aiState === "creating" || workspace.aiState === "updating")).map((workspace) => ctx.db.patch(workspace._id, { aiState: "failed", updatedAt: now })));
+      await Promise.all(workspaces.filter((workspace) => workspace.aiRunId === run._id && (workspace.aiState === "creating" || workspace.aiState === "updating")).map((workspace) => ctx.db.patch(workspace._id, { aiState: undefined, aiRunId: undefined, aiExecutionId: undefined, aiPreview: undefined, updatedAt: now })));
       interrupted += 1;
     }
     return { interrupted };
@@ -482,9 +488,9 @@ export const reconcileStaleRuns = internalMutation({
 });
 
 export const hideTab = mutation({
-  args: { actorClerkId: v.string(), runId: v.id("spectraAiRuns") },
+  args: { runId: v.id("spectraAiRuns") },
   handler: async (ctx, args) => {
-    const actor = await requireActor(ctx, args.actorClerkId);
+    const actor = await requireActor(ctx);
     const tab = await ctx.db.query("spectraRunTabs").withIndex("by_account_run", (q) => q.eq("ownerAccountId", actor._id).eq("runId", args.runId)).first();
     if (!tab || tab.schoolId !== actor.schoolId) return { runId: args.runId, hidden: false };
     await ctx.db.patch(tab._id, { hiddenAt: Date.now(), selected: false, updatedAt: Date.now() });
@@ -493,9 +499,9 @@ export const hideTab = mutation({
 });
 
 export const selectTab = mutation({
-  args: { actorClerkId: v.string(), runId: v.optional(v.id("spectraAiRuns")) },
+  args: { runId: v.optional(v.id("spectraAiRuns")) },
   handler: async (ctx, args) => {
-    const actor = await requireActor(ctx, args.actorClerkId);
+    const actor = await requireActor(ctx);
     const tabs = await ctx.db.query("spectraRunTabs").withIndex("by_account_updated", (q) => q.eq("ownerAccountId", actor._id)).collect();
     const now = Date.now();
     let selected = false;
@@ -510,9 +516,9 @@ export const selectTab = mutation({
 });
 
 export const claimConfirmation = mutation({
-  args: { actorClerkId: v.string(), runId: v.id("spectraAiRuns"), executionId: v.string() },
+  args: { runId: v.id("spectraAiRuns"), executionId: v.string() },
   handler: async (ctx, args) => {
-    const { run } = await requireOwnedRun(ctx, args.actorClerkId, args.runId);
+    const { run } = await requireOwnedRun(ctx, args.runId);
     requireCurrentExecution(run.executionId, args.executionId);
     if (run.status !== "awaiting_confirmation") throw new Error("This approval was already handled in another view.");
     if (!run.approval || run.approval.executionId !== args.executionId || run.approval.status !== "pending") throw new Error("This approval was already handled in another view.");
@@ -522,25 +528,39 @@ export const claimConfirmation = mutation({
     if (proposed.length === 0 || currentOperations.some((operation) => operation.status === "executing" || operation.status === "executed")) {
       throw new Error("This approval was already handled in another view.");
     }
+    const job = await ctx.db.query("spectraRunJobs").withIndex("by_run_execution", (q) => q.eq("runId", args.runId).eq("executionId", args.executionId)).unique();
+    if (!job || job.status === "cancelled" || job.status === "failed") throw new Error("The durable run job is unavailable. Retry the run instead.");
     const now = Date.now();
     await ctx.db.patch(args.runId, {
-      status: "running",
+      status: "queued",
       phase: "applying",
       approval: { ...run.approval, status: "accepted", claimedAt: now, decidedAt: now },
+      workerId: undefined,
+      leaseExpiresAt: undefined,
       heartbeatAt: now,
       updatedAt: now,
     });
-    await Promise.all(proposed.map((operation) => ctx.db.patch(operation._id, { status: "executing" })));
+    const payload = job.payload && typeof job.payload === "object" && !Array.isArray(job.payload) ? job.payload as Record<string, unknown> : {};
+    await ctx.db.patch(job._id, {
+      status: "queued",
+      payload: { ...payload, kind: "resume_operations", approvalAccepted: true },
+      availableAt: now,
+      workerId: undefined,
+      leaseExpiresAt: undefined,
+      completedAt: undefined,
+      lastError: undefined,
+      updatedAt: now,
+    });
     const cards = await ctx.db.query("spectraResultCards").withIndex("by_run", (q) => q.eq("runId", args.runId)).collect();
-    await Promise.all(cards.map((card) => ctx.db.patch(card._id, { status: "running", title: "Applying confirmed changes", actions: [], updatedAt: now })));
-    return { operationIds: proposed.map((operation) => operation._id) };
+    await Promise.all(cards.map((card) => ctx.db.patch(card._id, { status: "queued", title: "Applying confirmed changes", summary: "Your approval is saved. A durable worker will apply each authorized operation.", actions: [], updatedAt: now })));
+    return { operationIds: proposed.map((operation) => operation._id), queued: true };
   },
 });
 
 export const rejectConfirmation = mutation({
-  args: { actorClerkId: v.string(), runId: v.id("spectraAiRuns"), executionId: v.string() },
+  args: { runId: v.id("spectraAiRuns"), executionId: v.string() },
   handler: async (ctx, args) => {
-    const { run } = await requireOwnedRun(ctx, args.actorClerkId, args.runId);
+    const { run } = await requireOwnedRun(ctx, args.runId);
     requireCurrentExecution(run.executionId, args.executionId);
     if (run.status === "cancelled" && run.approval?.status === "rejected") return { alreadyRejected: true };
     if (run.status !== "awaiting_confirmation") throw new Error("This approval was already handled in another view.");
@@ -570,13 +590,12 @@ export const rejectConfirmation = mutation({
 
 export const reviseConfirmation = mutation({
   args: {
-    actorClerkId: v.string(),
     runId: v.id("spectraAiRuns"),
     executionId: v.string(),
     revision: v.string(),
   },
   handler: async (ctx, args) => {
-    const { run } = await requireOwnedRun(ctx, args.actorClerkId, args.runId);
+    const { run } = await requireOwnedRun(ctx, args.runId);
     requireCurrentExecution(run.executionId, args.executionId);
     if (run.status !== "awaiting_confirmation" || !run.approval || run.approval.status !== "pending" || run.approval.executionId !== args.executionId) {
       throw new Error("This approval was already handled in another view.");
@@ -623,17 +642,18 @@ export const reviseConfirmation = mutation({
 });
 
 export const stopRun = mutation({
-  args: { actorClerkId: v.string(), runId: v.id("spectraAiRuns"), executionId: v.string() },
+  args: { runId: v.id("spectraAiRuns"), executionId: v.string() },
   handler: async (ctx, args) => {
-    const { run } = await requireOwnedRun(ctx, args.actorClerkId, args.runId);
+    const { run } = await requireOwnedRun(ctx, args.runId);
     requireCurrentExecution(run.executionId, args.executionId);
     if (run.status === "cancelled") return { alreadyStopped: true, executionId: run.executionId };
-    if (run.status !== "queued" && run.status !== "running") throw new Error("This run is no longer active.");
+    if (run.status !== "queued" && run.status !== "running" && run.status !== "awaiting_resolution") throw new Error("This run is no longer active.");
     const operations = await ctx.db.query("spectraOperations").withIndex("by_run", (q) => q.eq("runId", args.runId)).collect();
     const currentOperations = operations.filter((operation) => operation.executionId === args.executionId);
-    if (currentOperations.some((operation) => operation.status === "executing" || operation.status === "executed")) throw new Error("This run has already started applying changes and can no longer be stopped safely.");
+    if (currentOperations.some((operation) => operation.status === "executing")) throw new Error("This run is currently committing an operation. Try stopping again once that atomic change settles.");
     const now = Date.now();
-    await Promise.all(currentOperations.filter((operation) => operation.status === "proposed").map((operation) => ctx.db.patch(operation._id, { status: "cancelled" })));
+    await Promise.all(currentOperations.filter((operation) => operation.status === "proposed" || operation.status === "waiting").map((operation) => ctx.db.patch(operation._id, { status: "cancelled", conflict: undefined })));
+    await releaseClaimsForRun(ctx, args.runId, now);
     const sequence = (run.eventSequence ?? 0) + 1;
     await ctx.db.patch(args.runId, { status: "cancelled", phase: "stopped", retryable: true, completedAt: now, heartbeatAt: now, workerId: undefined, leaseExpiresAt: undefined, eventSequence: sequence, updatedAt: now });
     await ctx.db.insert("spectraRunEvents", { runId: args.runId, executionId: args.executionId, sequence, type: "stopped", payload: { type: "stopped", runId: args.runId, partial: run.preservedPartial === true }, createdAt: now });
@@ -644,9 +664,9 @@ export const stopRun = mutation({
 });
 
 export const setSuggestedThreadMetadata = mutation({
-  args: { actorClerkId: v.string(), runId: v.id("spectraAiRuns"), executionId: v.string(), title: v.optional(v.string()), summary: v.optional(v.string()) },
+  args: { runId: v.id("spectraAiRuns"), executionId: v.string(), title: v.optional(v.string()), summary: v.optional(v.string()) },
   handler: async (ctx, args) => {
-    const { run } = await requireOwnedRun(ctx, args.actorClerkId, args.runId);
+    const { run } = await requireOwnedRun(ctx, args.runId);
     if (run.status !== "running" || run.executionId !== args.executionId) throw new Error("This title belongs to an older run attempt.");
     await ctx.db.patch(args.runId, {
       suggestedThreadTitle: args.title?.trim().slice(0, 88),
@@ -659,7 +679,6 @@ export const setSuggestedThreadMetadata = mutation({
 
 export const patchResultCard = mutation({
   args: {
-    actorClerkId: v.string(),
     resultCardId: v.id("spectraResultCards"),
     executionId: v.string(),
     title: v.optional(v.string()),
@@ -669,7 +688,7 @@ export const patchResultCard = mutation({
     provenance: v.optional(v.any()),
   },
   handler: async (ctx, args) => {
-    const actor = await requireActor(ctx, args.actorClerkId);
+    const actor = await requireActor(ctx);
     const card = await ctx.db.get(args.resultCardId);
     if (!card) throw new Error("Result card not found");
     const run = await ctx.db.get(card.runId);
@@ -688,9 +707,9 @@ export const patchResultCard = mutation({
 });
 
 export const get = query({
-  args: { actorClerkId: v.string(), runId: v.id("spectraAiRuns") },
+  args: { runId: v.id("spectraAiRuns") },
   handler: async (ctx, args) => {
-    const { run } = await requireOwnedRun(ctx, args.actorClerkId, args.runId);
+    const { run } = await requireOwnedRun(ctx, args.runId);
     const cards = await ctx.db.query("spectraResultCards").withIndex("by_run", (q) => q.eq("runId", args.runId)).collect();
     const operations = await ctx.db.query("spectraOperations").withIndex("by_run", (q) => q.eq("runId", args.runId)).collect();
     return { run, cards, operations };
@@ -698,9 +717,9 @@ export const get = query({
 });
 
 export const resetForRetry = mutation({
-  args: { actorClerkId: v.string(), runId: v.id("spectraAiRuns"), executionId: v.string(), retryKey: v.string() },
+  args: { runId: v.id("spectraAiRuns"), executionId: v.string(), retryKey: v.string() },
   handler: async (ctx, args) => {
-    const { run } = await requireOwnedRun(ctx, args.actorClerkId, args.runId);
+    const { run } = await requireOwnedRun(ctx, args.runId);
     if (run.status === "queued" && run.lastRetryKey === args.retryKey && run.executionId) {
       const cards = await ctx.db.query("spectraResultCards").withIndex("by_run", (q) => q.eq("runId", args.runId)).collect();
       return { runId: args.runId, resultCardId: cards[0]?._id, prompt: run.userPrompt, workspaceId: run.workspaceId, artifactId: run.artifactId, sourceSurface: run.sourceSurface, contextSnapshot: run.contextSnapshot, executionId: run.executionId, previousExecutionId: args.executionId, created: false };
@@ -786,7 +805,6 @@ export const resetForRetry = mutation({
 
 export const listResultCards = query({
   args: {
-    actorClerkId: v.string(),
     surface: v.optional(vSurface),
     workspaceId: v.optional(v.id("spectraWorkspaces")),
     artifactId: v.optional(v.id("spectraArtifacts")),
@@ -794,7 +812,7 @@ export const listResultCards = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    const actor = await requireActor(ctx, args.actorClerkId);
+    const actor = await requireActor(ctx);
     const limit = Math.max(1, Math.min(args.limit ?? 20, 100));
     const runs = await ctx.db.query("spectraAiRuns").withIndex("by_account_created", (q) => q.eq("ownerAccountId", actor._id)).order("desc").take(limit * 4);
     const allowed = runs.filter((run) => run.schoolId === actor.schoolId)
@@ -814,12 +832,11 @@ export const listResultCards = query({
 
 export const listRecent = query({
   args: {
-    actorClerkId: v.string(),
     surface: v.optional(vSurface),
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    const actor = await requireActor(ctx, args.actorClerkId);
+    const actor = await requireActor(ctx);
     const limit = Math.max(1, Math.min(args.limit ?? 20, 100));
     const runs = await ctx.db
       .query("spectraAiRuns")
@@ -835,11 +852,10 @@ export const listRecent = query({
 
 export const hideResultCard = mutation({
   args: {
-    actorClerkId: v.string(),
     resultCardId: v.id("spectraResultCards"),
   },
   handler: async (ctx, args) => {
-    const actor = await requireActor(ctx, args.actorClerkId);
+    const actor = await requireActor(ctx);
     const card = await ctx.db.get(args.resultCardId);
     if (!card) throw new Error("Result card not found");
     const run = await ctx.db.get(card.runId);
@@ -855,9 +871,9 @@ export const hideResultCard = mutation({
 });
 
 export const unhideResultCard = mutation({
-  args: { actorClerkId: v.string(), resultCardId: v.id("spectraResultCards") },
+  args: { resultCardId: v.id("spectraResultCards") },
   handler: async (ctx, args) => {
-    const actor = await requireActor(ctx, args.actorClerkId);
+    const actor = await requireActor(ctx);
     const card = await ctx.db.get(args.resultCardId);
     if (!card) throw new Error("Result card not found");
     const run = await ctx.db.get(card.runId);
@@ -868,9 +884,9 @@ export const unhideResultCard = mutation({
 });
 
 export const keepResultCard = mutation({
-  args: { actorClerkId: v.string(), resultCardId: v.id("spectraResultCards") },
+  args: { resultCardId: v.id("spectraResultCards") },
   handler: async (ctx, args) => {
-    const actor = await requireActor(ctx, args.actorClerkId);
+    const actor = await requireActor(ctx);
     const card = await ctx.db.get(args.resultCardId);
     if (!card) throw new Error("Result card not found");
     const run = await ctx.db.get(card.runId);
@@ -881,10 +897,46 @@ export const keepResultCard = mutation({
   },
 });
 
-export const setContextSnapshot = mutation({
-  args: { actorClerkId: v.string(), runId: v.id("spectraAiRuns"), executionId: v.string(), contextSnapshot: v.any() },
+export const setAgentRouting = mutation({
+  args: {
+    runId: v.id("spectraAiRuns"),
+    executionId: v.string(),
+    agentId: v.id("spectraArtifacts"),
+    confidence: v.number(),
+    reason: v.string(),
+    source: v.union(v.literal("automatic"), v.literal("continued"), v.literal("explicit")),
+  },
   handler: async (ctx, args) => {
-    const { run } = await requireOwnedRun(ctx, args.actorClerkId, args.runId);
+    const { run } = await requireOwnedRun(ctx, args.runId);
+    if ((run.status !== "queued" && run.status !== "running") || run.executionId !== args.executionId) throw new Error("This routing decision belongs to an older run attempt.");
+    const { artifact } = await requireArtifactCapability(ctx, args.agentId, "use");
+    if (artifact.blueprintKey !== "agent" || artifact.status !== "active") throw new Error("Agent not found");
+    const confidence = Math.max(0, Math.min(1, args.confidence));
+    const reason = args.reason.replace(/\s+/g, " ").trim().slice(0, 500);
+    const routing = { confidence, reason, source: args.source, reversible: true } as const;
+    const now = Date.now();
+    await ctx.db.patch(run._id, { selectedAgentId: artifact._id, selectedAgentVersionId: artifact.currentVersionId, agentRouting: routing, updatedAt: now });
+    if (run.threadId) await ctx.db.patch(run.threadId, { retainedAgentId: artifact._id, retainedAgentVersionId: artifact.currentVersionId, updatedAt: now });
+    return { agentId: artifact._id, versionId: artifact.currentVersionId, title: artifact.title, routing };
+  },
+});
+
+export const clearRetainedAgent = mutation({
+  args: { runId: v.id("spectraAiRuns") },
+  handler: async (ctx, args) => {
+    const { run } = await requireOwnedRun(ctx, args.runId);
+    if (!run.threadId) return { cleared: false };
+    const thread = await ctx.db.get(run.threadId);
+    if (!thread || thread.ownerAccountId !== run.ownerAccountId || thread.schoolId !== run.schoolId) throw new Error("Thread not found");
+    await ctx.db.patch(thread._id, { retainedAgentId: undefined, retainedAgentVersionId: undefined, updatedAt: Date.now() });
+    return { cleared: true, threadId: thread._id };
+  },
+});
+
+export const setContextSnapshot = mutation({
+  args: { runId: v.id("spectraAiRuns"), executionId: v.string(), contextSnapshot: v.any() },
+  handler: async (ctx, args) => {
+    const { run } = await requireOwnedRun(ctx, args.runId);
     if ((run.status !== "queued" && run.status !== "running") || run.executionId !== args.executionId) throw new Error("This context belongs to an older run attempt.");
     await ctx.db.patch(args.runId, { contextSnapshot: args.contextSnapshot, updatedAt: Date.now() });
     return { runId: args.runId };

@@ -32,6 +32,7 @@ import {
   Radio,
   RotateCcw,
   Save,
+  Share2,
   Sigma,
   Sparkles,
   Table2,
@@ -64,15 +65,15 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { SlashCommand } from "@/components/editor/slash-command-extension";
-import { createSlashCommandRenderer } from "@/components/editor/slash-command-renderer";
+import { SlashCommand } from "../editor/slash-command-extension";
+import { createSlashCommandRenderer } from "../editor/slash-command-renderer";
 import {
   spectraObjectKey,
   useSpectraContextStore,
 } from "@/stores/spectra-context-store";
-import { Callout } from "@/components/editor/extensions/callout-node";
-import { DragHandle } from "@/components/editor/extensions/drag-handle";
-import { Equation, InlineEquation } from "@/components/editor/extensions/equation-node";
+import { Callout } from "../editor/callout-node";
+import { DragHandle } from "../editor/drag-handle";
+import { Equation, InlineEquation } from "../editor/equation-node";
 import { blueprintMeta } from "./artifact-card";
 import {
   artifactPlacements,
@@ -80,7 +81,6 @@ import {
   formatShortDate,
   linkedArtifacts,
 } from "./spectra-view-model";
-import type { ArtifactPayload } from "./artifact-blueprint-sheet";
 import {
   getSpectraArtifactLinks,
   getSpectraArtifactVersions,
@@ -91,6 +91,12 @@ import {
 } from "../data/api";
 import { ThreadConversation } from "./conversation-surface";
 import { Tooltip } from "@/components/ui/tooltip";
+import { useArtifactLiveModel } from "../collaboration/use-artifact-live-model";
+import { ArtifactCommentsPanel, type ArtifactCommentRegion } from "./artifact-comments-panel";
+import { ArtifactEmbedsPanel } from "./artifact-embeds-panel";
+import { CollaborationPresenceIndicator } from "./collaboration-presence";
+import { changedArtifactRegionIds } from "../collaboration/artifact-yjs-model";
+import { isArtifactTypeKey } from "../artifacts/registry";
 
 type StudioMode = "closed" | "split" | "tab";
 type StudioTab = { artifactId: string; openedAt: number };
@@ -410,7 +416,7 @@ function ReadonlyArtifactSnapshot({
   );
 }
 
-type HumanChange = { label: string; before: string; after: string };
+type HumanChange = { label: string; before: string; after: string; path: string[]; regionId?: string };
 
 function humanizeKey(value: string) {
   return value
@@ -500,6 +506,7 @@ function humanDiff(
       label: humanFieldLabel(path),
       before: humanValue(before),
       after: humanValue(after),
+      path,
     });
   };
   visit(historical, current, []);
@@ -1137,9 +1144,8 @@ export function ArtifactStudio({
   onClose,
   onCloseTab,
   onExpand,
-  onSave,
-  onRevert,
   onArchive,
+  onShare,
   onDirtyChange,
   onContinueThread,
   continuedThreadId,
@@ -1158,12 +1164,8 @@ export function ArtifactStudio({
   onExpand: (artifact: SpectraArtifact) => void;
   onActivateTab: (artifactId: string) => void;
   onCloseTab: (artifactId: string) => void;
-  onSave: (
-    artifactId: string,
-    payload: ArtifactPayload,
-  ) => Promise<void> | void;
-  onRevert: (artifactId: string, versionId: string) => Promise<void> | void;
   onArchive?: (artifact: SpectraArtifact) => Promise<void> | void;
+  onShare?: (artifact: SpectraArtifact) => void;
   onDirtyChange: (artifactId: string, dirty: boolean) => void;
   onContinueThread?: (threadId: string, title: string) => void;
   continuedThreadId?: string | null;
@@ -1173,14 +1175,6 @@ export function ArtifactStudio({
   const width =
     panelWidth ??
     Math.round(typeof window === "undefined" ? 720 : window.innerWidth * 0.5);
-  const handleSave = useCallback(
-    (payload: ArtifactPayload) => onSave(artifact._id, payload),
-    [artifact._id, onSave],
-  );
-  const handleRevert = useCallback(
-    (versionId: string) => onRevert(artifact._id, versionId),
-    [artifact._id, onRevert],
-  );
   const handleClose = useCallback(
     () => (mode === "tab" ? onCloseTab(artifact._id) : onClose()),
     [artifact._id, mode, onClose, onCloseTab],
@@ -1278,9 +1272,12 @@ export function ArtifactStudio({
           sourceLabel={sourceLabel}
           onClose={handleClose}
           onExpand={() => onExpand(artifact)}
-          onSave={handleSave}
-          onRevert={handleRevert}
+          onOpenArtifact={(artifactId) => {
+            const source = artifacts.find((candidate) => candidate._id === artifactId);
+            if (source) onExpand(source);
+          }}
           onArchive={handleArchive}
+          onShare={onShare ? () => onShare(artifact) : undefined}
           onDirtyChange={handleDirtyChange}
           compact={compact}
         />
@@ -1594,9 +1591,9 @@ function ArtifactStudioEditor({
   sourceLabel,
   onClose,
   onExpand,
-  onSave,
-  onRevert,
+  onOpenArtifact,
   onArchive,
+  onShare,
   onDirtyChange,
   compact,
 }: {
@@ -1607,12 +1604,28 @@ function ArtifactStudioEditor({
   sourceLabel: string;
   onClose: () => void;
   onExpand: () => void;
-  onSave: (payload: ArtifactPayload) => Promise<void> | void;
-  onRevert: (versionId: string) => Promise<void> | void;
+  onOpenArtifact: (artifactId: string) => void;
   onArchive?: () => Promise<void> | void;
+  onShare?: () => void;
   onDirtyChange: (dirty: boolean) => void;
   compact: boolean;
 }) {
+  const permissionReadOnly = artifact.accessLevel === "read";
+  const initialLiveValue = useMemo(
+    () => ({
+      title: artifact.title,
+      ...(artifact.summary ? { summary: artifact.summary } : {}),
+      tags: artifact.tags ?? [],
+      content: artifact.content,
+    }),
+    [artifact.content, artifact.summary, artifact.tags, artifact.title],
+  );
+  const live = useArtifactLiveModel(
+    artifact._id,
+    artifact.blueprintKey,
+    initialLiveValue,
+  );
+  const readOnly = permissionReadOnly || (live.supported && !live.canEdit);
   const [title, setTitle] = useState(artifact.title);
   const [summary, setSummary] = useState(artifact.summary ?? "");
   const [tagDraft, setTagDraft] = useState((artifact.tags ?? []).join(", "));
@@ -1623,19 +1636,28 @@ function ArtifactStudioEditor({
   const [dirty, setDirty] = useState(false);
   const [closeDecisionOpen, setCloseDecisionOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [commentsOpen, setCommentsOpen] = useState(false);
+  const [embedsOpen, setEmbedsOpen] = useState(false);
   const [versions, setVersions] = useState<SpectraArtifactVersion[]>([]);
   const [historyBusy, setHistoryBusy] = useState<string | null>(null);
   const [historyView, setHistoryView] = useState<"changes" | "artifacts">("changes");
   const [previewVersion, setPreviewVersion] =
     useState<SpectraArtifactVersion | null>(null);
+  const [selectedRestoreRegions, setSelectedRestoreRegions] = useState<Set<string>>(() => new Set());
   const [remoteConflict, setRemoteConflict] = useState<ReturnType<
     typeof artifactEditorSnapshot
   > | null>(null);
   const [dismissedRemoteKey, setDismissedRemoteKey] = useState<string | null>(
     null,
   );
-  const [failedPreviewReviewed, setFailedPreviewReviewed] = useState(false);
   const [previewClock, setPreviewClock] = useState(() => Date.now());
+  const [syncBusy, setSyncBusy] = useState(false);
+  const [liveConflict, setLiveConflict] = useState<{
+    message: string;
+    claimId?: string;
+    regionId?: string;
+    queuePosition?: number;
+  } | null>(null);
   const meta = blueprintMeta[artifact.blueprintKey];
   const Icon = meta.icon;
   const dirtyRef = useRef(dirty);
@@ -1660,32 +1682,78 @@ function ArtifactStudioEditor({
     summary: boolean;
     tags: boolean;
   } | null>(null);
-  const backgroundSaveKeyRef = useRef<string | null>(null);
+  const localSyncKeysRef = useRef(new Set<string>());
+  const syncingRef = useRef(false);
   const reconciliationFrameRef = useRef<number | null>(null);
   const incomingSnapshot = useMemo(
-    () => artifactEditorSnapshot(artifact),
-    [artifact],
+    () => ({
+      title: live.liveValue.title,
+      summary: live.liveValue.summary ?? "",
+      tagDraft: live.liveValue.tags.join(", "),
+      content: live.liveValue.content,
+    }),
+    [live.liveValue],
   );
   const currentSnapshot = useMemo(
     () => ({ title, summary, tagDraft, content }),
     [content, summary, tagDraft, title],
   );
-  const previewDiff = useMemo(
-    () =>
-      previewVersion
-        ? humanDiff(
+  const synchronizeDraft = useCallback(async (snapshot = currentSnapshotRef.current) => {
+    if (artifact.blueprintKey === "thread_reference" || permissionReadOnly || syncingRef.current || !snapshot.title.trim()) return;
+    const key = snapshotKey(snapshot);
+    syncingRef.current = true;
+    localSyncKeysRef.current.add(key);
+    setSyncBusy(true);
+    setLiveConflict(null);
+    try {
+      if (!live.supported) throw new Error("ARTIFACT_LIVE_MODEL_UNAVAILABLE");
+      const result = await live.synchronize({
+        title: snapshot.title.trim(),
+        ...(snapshot.summary.trim() ? { summary: snapshot.summary.trim() } : {}),
+        content: snapshot.content,
+        tags: tagsFromDraft(snapshot.tagDraft),
+      });
+      if (result && "applied" in result && result.applied === false) {
+        localSyncKeysRef.current.delete(key);
+        const claim = "claim" in result ? result.claim : undefined;
+        setLiveConflict({
+          message: "This region is being edited by another collaborator. Your draft is preserved and queued without overwriting their work.",
+          claimId: claim?.claimId,
+          regionId: claim?.conflict?.regionId,
+          queuePosition: claim?.conflict?.queuePosition,
+        });
+      }
+    } catch (error) {
+      localSyncKeysRef.current.delete(key);
+      setLiveConflict({ message: error instanceof Error ? error.message : "This change could not be synchronized." });
+    } finally {
+      syncingRef.current = false;
+      setSyncBusy(false);
+    }
+  }, [artifact.blueprintKey, live, permissionReadOnly]);
+  const previewDiff = useMemo(() => {
+    if (!previewVersion) return [];
+    return humanDiff(
             {
               title: artifact.title,
               summary: artifact.summary,
               content: artifact.content,
               tags: artifact.tags,
             },
-            previewVersion.before,
-          )
-        : [],
-    [artifact, previewVersion],
-  );
+            previewVersion.after,
+          ).map((change) => {
+            if (change.path[0] === "title") return { ...change, regionId: "metadata:title" };
+            if (change.path[0] === "summary") return { ...change, regionId: "metadata:summary" };
+            if (change.path[0] === "tags") return { ...change, regionId: "metadata:tags" };
+            const contentPath = change.path[0] === "content" ? change.path.slice(1) : change.path;
+            const descriptor = live.modelSnapshot.regionIds.map((regionId) => live.model?.descriptor(regionId)).filter((entry): entry is NonNullable<typeof entry> => Boolean(entry)).filter((entry) => entry.path.every((segment, index) => String(contentPath[index]) === String(segment))).sort((left, right) => right.path.length - left.path.length)[0];
+            return { ...change, regionId: descriptor?.regionId ?? "artifact:structure" };
+          });
+  }, [artifact, live.model, live.modelSnapshot.regionIds, previewVersion]);
+
+  useEffect(() => setSelectedRestoreRegions(new Set()), [previewVersion?._id]);
   const aiPreviewActive = Boolean(artifact.aiPreview) && (
+    artifact.aiState === "creating" ||
     artifact.aiState === "updating" ||
     (artifact.aiState === "edited" && (artifact.aiStateExpiresAt ?? 0) > previewClock)
   );
@@ -1772,6 +1840,11 @@ function ArtifactStudioEditor({
         incomingKey !== snapshotKey(baseline) &&
         incomingKey !== dismissedRemoteKey
       ) {
+        if (localSyncKeysRef.current.delete(incomingKey)) {
+          setBaseline(incomingSnapshot);
+          setLiveConflict(null);
+          return;
+        }
         const aiMerge = aiMergeRef.current;
         if (aiMerge) {
           const local = currentSnapshotRef.current;
@@ -1808,7 +1881,6 @@ function ArtifactStudioEditor({
     setTagDraft(incomingSnapshot.tagDraft);
     setContent(incomingSnapshot.content);
     setBaseline(incomingSnapshot);
-    setFailedPreviewReviewed(false);
     // Reconciliation is a bounded render-cycle guard, not an editor mode. A
     // previously unbounded flag could swallow the first real keystroke after
     // opening or refreshing an artifact and leave Save permanently disabled.
@@ -1859,75 +1931,116 @@ function ArtifactStudioEditor({
   }, [artifact._id, dirty]);
 
   useEffect(() => {
-    function persistInBackground(keepalive: boolean) {
-      if (!dirtyRef.current) return;
-      const snapshot = currentSnapshotRef.current;
-      const key = snapshotKey(snapshot);
-      if (backgroundSaveKeyRef.current === key || !snapshot.title.trim())
-        return;
-      backgroundSaveKeyRef.current = key;
-      void fetch("/api/spectra", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "updateArtifact",
-          artifactId: artifact._id,
-          title: snapshot.title.trim(),
-          summary: snapshot.summary.trim() || undefined,
-          content: snapshot.content,
-          tags: tagsFromDraft(snapshot.tagDraft),
-        }),
-        keepalive,
-      }).catch(() => {
-        backgroundSaveKeyRef.current = null;
-      });
-    }
-    const onVisibility = () => {
-      if (document.visibilityState === "hidden") persistInBackground(false);
-    };
-    const onPageHide = () => persistInBackground(true);
-    document.addEventListener("visibilitychange", onVisibility);
-    window.addEventListener("pagehide", onPageHide);
-    return () => {
-      document.removeEventListener("visibilitychange", onVisibility);
-      window.removeEventListener("pagehide", onPageHide);
-    };
-  }, [artifact._id]);
+    if (!dirty || readOnly || busy || aiPreviewActive || liveConflict || syncBusy) return;
+    const timer = window.setTimeout(() => void synchronizeDraft(currentSnapshotRef.current), 650);
+    return () => window.clearTimeout(timer);
+  }, [aiPreviewActive, busy, dirty, liveConflict, readOnly, syncBusy, synchronizeDraft]);
+
+  useEffect(() => {
+    if (!liveConflict?.claimId || !live.transport) return;
+    const renew = () => void postSpectra({ action: "renewRegionClaim", claimId: liveConflict.claimId, clientId: live.transport!.clientId }).catch(() => undefined);
+    const timer = window.setInterval(renew, 9_000);
+    return () => window.clearInterval(timer);
+  }, [live.transport, liveConflict?.claimId]);
 
   function changeBase(
     next: Partial<{ title: string; summary: string; tagDraft: string }>,
   ) {
+    if (readOnly) return;
     userHasEditedRef.current = true;
-    if (next.title !== undefined) setTitle(next.title);
-    if (next.summary !== undefined) setSummary(next.summary);
-    if (next.tagDraft !== undefined) setTagDraft(next.tagDraft);
+    if (next.title !== undefined) {
+      live.transport?.setPresence({ activeRegionId: "metadata:title" });
+      setTitle(next.title);
+    }
+    if (next.summary !== undefined) {
+      live.transport?.setPresence({ activeRegionId: "metadata:summary" });
+      setSummary(next.summary);
+    }
+    if (next.tagDraft !== undefined) {
+      live.transport?.setPresence({ activeRegionId: "metadata:tags" });
+      setTagDraft(next.tagDraft);
+    }
   }
 
   function changeContent(next: unknown) {
+    if (readOnly) return;
     userHasEditedRef.current = true;
+    if (isArtifactTypeKey(artifact.blueprintKey)) {
+      try {
+        const regions = changedArtifactRegionIds(artifact.blueprintKey, content, next);
+        live.transport?.setPresence({ activeRegionId: regions[0] ?? "artifact:structure" });
+      } catch {
+        live.transport?.setPresence({ activeRegionId: "artifact:structure" });
+      }
+    }
     setContent(next);
   }
 
   async function save() {
+    if (readOnly || syncBusy) return;
     const trimmedTitle = title.trim();
     if (!trimmedTitle) return;
-    await onSave({
-      blueprintKey: artifact.blueprintKey,
-      title: trimmedTitle,
-      summary: summary.trim() || undefined,
-      content,
-      tags: tagsFromDraft(tagDraft),
-    });
-    setBaseline({
+    if (artifact.blueprintKey === "thread_reference") return;
+    const snapshot = {
       title: trimmedTitle,
       summary: summary.trim(),
       tagDraft: tagsFromDraft(tagDraft).join(", "),
       content,
-    });
+    };
+    await synchronizeDraft(snapshot);
+  }
+
+  async function discardQueuedDraft() {
+    if (liveConflict?.claimId && live.transport) {
+      await postSpectra({ action: "releaseRegionClaim", claimId: liveConflict.claimId, clientId: live.transport.clientId, resolution: "keep_current" }).catch(() => undefined);
+    }
+    reconcilingRemoteRef.current = true;
+    setTitle(incomingSnapshot.title);
+    setSummary(incomingSnapshot.summary);
+    setTagDraft(incomingSnapshot.tagDraft);
+    setContent(incomingSnapshot.content);
+    setBaseline(incomingSnapshot);
     setDirty(false);
     userHasEditedRef.current = false;
-    setRemoteConflict(null);
-    setDismissedRemoteKey(null);
+    setLiveConflict(null);
+    window.requestAnimationFrame(() => { reconcilingRemoteRef.current = false; });
+  }
+
+  async function restoreVersion(version: SpectraArtifactVersion, regionIds?: readonly string[]) {
+    if (readOnly || dirty) return;
+    setHistoryBusy(version._id);
+    try {
+      if (!live.supported) throw new Error("ARTIFACT_LIVE_MODEL_UNAVAILABLE");
+      const target = {
+        title: version.after.title,
+        ...(version.after.summary ? { summary: version.after.summary } : {}),
+        content: version.after.content,
+        tags: version.after.tags,
+      };
+      const incoming = {
+        title: target.title,
+        summary: target.summary ?? "",
+        tagDraft: target.tags.join(", "),
+        content: target.content,
+      };
+      if (!regionIds?.length) localSyncKeysRef.current.add(snapshotKey(incoming));
+      const result = regionIds?.length ? await live.restoreRegions(target, regionIds) : await live.synchronize(target);
+      if (result && "applied" in result && result.applied === false) {
+        const claim = "claim" in result ? result.claim : undefined;
+        setLiveConflict({ message: "A collaborator is editing a region included in this restore. Nothing was overwritten; the restore remains queued for review.", claimId: claim?.claimId, regionId: claim?.conflict?.regionId, queuePosition: claim?.conflict?.queuePosition });
+        return;
+      }
+      await postSpectra({
+        action: "commitArtifactRestore",
+        artifactId: artifact._id,
+        sourceVersionId: version._id,
+      });
+      setHistoryOpen(false);
+    } catch (error) {
+      setLiveConflict({ message: error instanceof Error ? error.message : "This restore could not be applied safely." });
+    } finally {
+      setHistoryBusy(null);
+    }
   }
 
   function keepLocalEdits() {
@@ -1948,20 +2061,6 @@ function ArtifactStudioEditor({
     setDismissedRemoteKey(null);
   }
 
-  function loadFailedAiPreview() {
-    if (!artifact.aiPreview) return;
-    userHasEditedRef.current = true;
-    if (artifact.aiPreview.title !== undefined)
-      setTitle(artifact.aiPreview.title);
-    if (artifact.aiPreview.summary !== undefined)
-      setSummary(artifact.aiPreview.summary);
-    if (artifact.aiPreview.content !== undefined)
-      setContent(artifact.aiPreview.content);
-    if (artifact.aiPreview.tags !== undefined)
-      setTagDraft(artifact.aiPreview.tags.join(", "));
-    setFailedPreviewReviewed(true);
-  }
-
   // Planner tasks already provide the purpose-built schedule/links sidebar
   // shown in their source-of-truth layout. Nesting the generic artifact
   // details rail beside it creates an unusable three-column editor.
@@ -1977,6 +2076,42 @@ function ArtifactStudioEditor({
     artifact.blueprintKey === "document"
       ? "min-h-0 flex-1 overflow-y-auto pb-5"
       : "min-h-0 flex-1 overflow-y-auto px-5 pb-5 pt-5";
+  const collaboratorCount = live.presence.filter(
+    (person) => person.clientId !== live.transport?.clientId,
+  ).length;
+  const currentAccountId = live.presence.find(
+    (person) => person.clientId === live.transport?.clientId,
+  )?.accountId;
+  const commentRegions = useMemo<ArtifactCommentRegion[]>(() => {
+    const semantic = live.modelSnapshot.regionIds.map((regionId) => {
+      const descriptor = live.model?.descriptor(regionId);
+      return {
+        regionId,
+        label: descriptor?.label || descriptor?.kind || regionId,
+        kind: descriptor?.kind,
+      };
+    });
+    return [
+      { regionId: "metadata:title", label: "Artifact title", kind: "metadata" },
+      { regionId: "metadata:summary", label: "Artifact summary", kind: "metadata" },
+      ...semantic,
+    ];
+  }, [live.model, live.modelSnapshot.regionIds]);
+  const syncLabel = permissionReadOnly
+    ? "Read-only"
+    : live.state === "permission_lost"
+      ? "Access removed"
+      : live.state === "reconnecting" || live.state === "unsynchronized"
+        ? "Reconnecting"
+        : live.state === "connecting" || live.state === "synchronizing"
+          ? "Synchronizing"
+          : syncBusy || live.unsynchronizedChanges > 0
+            ? "Synchronizing"
+            : dirty
+              ? "Waiting to sync"
+              : live.modelSnapshot.validity === "invalid"
+                ? "Needs attention"
+                : "Synchronized";
   const identityBlock = (
     <div className={`mx-auto flex w-full max-w-[1120px] items-start ${compact ? "gap-3 px-5 pb-5 pt-5" : "gap-4 px-7 pb-7 pt-8 sm:px-10"}`}>
       <span
@@ -1988,13 +2123,17 @@ function ArtifactStudioEditor({
       <div className="min-w-0 flex-1">
         <textarea
           value={title}
+          readOnly={readOnly}
           onChange={(event) => changeBase({ title: event.target.value })}
           rows={1}
+          onFocus={() => live.transport?.setPresence({ activeRegionId: "metadata:title" })}
           className={`min-h-10 w-full resize-none overflow-hidden bg-transparent font-display font-semibold leading-tight text-[var(--text-primary)] outline-none [field-sizing:content] ${compact ? "text-[26px]" : "text-[clamp(24px,2vw,34px)]"}`}
           placeholder="Untitled artifact"
         />
         <input
           value={summary}
+          readOnly={readOnly}
+          onFocus={() => live.transport?.setPresence({ activeRegionId: "metadata:summary" })}
           onChange={(event) => changeBase({ summary: event.target.value })}
           className="mt-1.5 w-full bg-transparent text-[13px] leading-6 text-[var(--text-secondary)] outline-none placeholder:text-[var(--text-tertiary)]"
           placeholder="Short useful summary"
@@ -2002,18 +2141,19 @@ function ArtifactStudioEditor({
       </div>
       <div className="hidden shrink-0 items-center gap-2 sm:flex">
         <span className="inline-flex items-center gap-1.5 text-[11px] text-[var(--text-secondary)]">
-          {dirty ? <Circle className="h-3 w-3 fill-[#d88922] text-[#d88922]" /> : <CheckCircle2 className="h-4 w-4 text-[var(--success)]" />}
-          {dirty ? "Unsaved" : "Saved"}
+          {syncLabel === "Synchronized" ? <CheckCircle2 className="h-4 w-4 text-[var(--success)]" /> : syncBusy || live.state === "connecting" || live.state === "synchronizing" ? <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-cyan)]" /> : <Circle className="h-3 w-3 fill-[#d88922] text-[#d88922]" />}
+          {syncLabel}
+          {collaboratorCount > 0 ? ` · ${collaboratorCount} here` : ""}
         </span>
         <button
           type="button"
-          aria-label="Save changes"
-          disabled={!dirty || busy || !title.trim()}
+          aria-label="Synchronize changes"
+          disabled={readOnly || !dirty || busy || syncBusy || !title.trim()}
           onClick={() => void save()}
           className="inline-flex h-9 items-center gap-1.5 rounded-[8px] px-2.5 text-[12px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-35"
         >
-          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-          Save
+          {busy || syncBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : syncLabel === "Synchronized" ? <Check className="h-4 w-4" /> : <Save className="h-4 w-4" />}
+          {permissionReadOnly ? "Read-only" : syncBusy ? "Syncing" : dirty ? "Sync now" : "Synced"}
         </button>
       </div>
     </div>
@@ -2042,6 +2182,10 @@ function ArtifactStudioEditor({
               </span>
           </div>
           <div className="flex shrink-0 items-center gap-2">
+            <CollaborationPresenceIndicator presence={live.presence} currentClientId={live.transport?.clientId} regions={commentRegions} />
+            {onShare ? <IconButton label="Share artifact" onClick={onShare} icon={Share2} /> : null}
+            <IconButton label="Comments" onClick={() => setCommentsOpen(true)} icon={MessageSquare} />
+            <IconButton label="Embedded artifacts" onClick={() => setEmbedsOpen(true)} icon={Link2} />
             {mode === "split" ? (
               <IconButton
                 label="Open as tab"
@@ -2068,40 +2212,11 @@ function ArtifactStudioEditor({
             />
           </div>
       </header>
-      {artifact.aiState === "failed" && artifact.aiPreview ? (
-        <section
-          className="shrink-0 border-b border-[color-mix(in_oklab,var(--danger)_24%,var(--border-default))] bg-[color-mix(in_oklab,var(--danger)_5%,var(--bg-primary))] px-5 py-3"
-          aria-live="polite"
-        >
-          <div className="flex flex-wrap items-center gap-3">
-            <AlertCircle className="h-4 w-4 shrink-0 text-[var(--danger)]" />
-            <div className="min-w-0 flex-1">
-              <div className="text-[11px] font-semibold text-[var(--text-primary)]">
-                The AI edit did not finish
-              </div>
-              <p className="mt-0.5 text-[10px] text-[var(--text-secondary)]">
-                {failedPreviewReviewed
-                  ? dirty
-                    ? "Preview loaded as unsaved edits. Review the fields below, then Save or discard them."
-                    : "Preview reviewed. It matches the current saved content, so there is nothing new to save."
-                  : "The proposed content is retained as a recoverable preview. Your saved version was not replaced."}
-              </p>
-            </div>
-            <button
-              type="button"
-              disabled={failedPreviewReviewed}
-              onClick={loadFailedAiPreview}
-              className="min-h-9 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[11px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:cursor-default disabled:opacity-55"
-            >
-              {failedPreviewReviewed
-                ? dirty
-                  ? "Preview loaded · review and save"
-                  : "Preview matches saved content"
-                : "Load preview for review"}
-            </button>
-          </div>
-        </section>
-      ) : null}
+      {permissionReadOnly ? <div className="shrink-0 border-y border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-5 py-2 text-[11px] text-[var(--text-secondary)]">Read-only access · You can inspect, comment, and place this artifact, but only a collaborator with modify access can change it.</div> : null}
+      {!permissionReadOnly && live.state === "permission_lost" ? <div role="alert" className="shrink-0 border-y border-[color-mix(in_oklab,var(--danger)_28%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--danger)_7%,var(--bg-primary))] px-5 py-2 text-[11px] text-[var(--danger)]">Your access changed while this artifact was open. Editing has stopped and no further changes will be queued.</div> : null}
+      {!permissionReadOnly && (live.state === "reconnecting" || live.state === "unsynchronized") ? <div role="status" className="shrink-0 border-y border-[color-mix(in_oklab,#d88922_26%,var(--border-subtle))] bg-[color-mix(in_oklab,#d88922_7%,var(--bg-primary))] px-5 py-2 text-[11px] text-[var(--text-secondary)]">Connection interrupted. Spectra is preserving the current visible draft, but editing is paused until synchronization is restored.</div> : null}
+      {liveConflict ? <div role="alert" className="flex shrink-0 items-center gap-3 border-y border-[color-mix(in_oklab,#d88922_28%,var(--border-subtle))] bg-[color-mix(in_oklab,#d88922_7%,var(--bg-primary))] px-5 py-2 text-[11px] text-[var(--text-secondary)]"><span className="min-w-0 flex-1">{liveConflict.message}{liveConflict.queuePosition ? ` · Queue position ${liveConflict.queuePosition}` : ""}</span><button type="button" onClick={() => void synchronizeDraft(currentSnapshotRef.current)} className="font-semibold text-[var(--text-primary)]">Try now</button><button type="button" onClick={() => void discardQueuedDraft()} className="font-semibold text-[var(--text-secondary)]">Keep current</button></div> : null}
+      {live.initializationError || live.modelSnapshot.validity === "invalid" ? <div role="alert" className="shrink-0 border-y border-[color-mix(in_oklab,var(--danger)_24%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--danger)_6%,var(--bg-primary))] px-5 py-2 text-[11px] text-[var(--danger)]">{live.initializationError ?? live.modelSnapshot.error ?? "The live artifact state needs recovery before editing can continue."}</div> : null}
       {remoteConflict ? (
         <div className="shrink-0 border-b border-[color-mix(in_oklab,#d88922_28%,var(--border-default))] bg-[color-mix(in_oklab,#d88922_7%,var(--bg-primary))] px-5 py-2.5">
           <div className="flex flex-wrap items-center gap-2 text-[12px] text-[var(--text-secondary)]">
@@ -2189,6 +2304,23 @@ function ArtifactStudioEditor({
           ) : null}
         </div>
       </main>
+      <ArtifactCommentsPanel
+        open={commentsOpen}
+        artifactId={artifact._id}
+        artifactTitle={title || artifact.title}
+        regions={commentRegions}
+        currentAccountId={currentAccountId}
+        onClose={() => setCommentsOpen(false)}
+      />
+      <ArtifactEmbedsPanel
+        open={embedsOpen}
+        containerId={artifact._id}
+        containerTitle={title || artifact.title}
+        artifacts={artifacts}
+        regions={commentRegions}
+        onOpenSource={onOpenArtifact}
+        onClose={() => setEmbedsOpen(false)}
+      />
       {closeDecisionOpen ? (
         <div
           className="absolute inset-0 z-[120] flex items-center justify-center bg-[color-mix(in_oklab,var(--bg-primary)_70%,transparent)] p-5 backdrop-blur-[2px]"
@@ -2267,15 +2399,17 @@ function ArtifactStudioEditor({
                         className={`flex w-full items-center gap-3 rounded-[10px] border px-3 py-3 text-left transition ${previewVersion?._id === version._id ? "border-[color-mix(in_oklab,var(--accent-cyan)_34%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-primary))] shadow-[inset_3px_0_0_var(--accent-cyan)]" : "border-transparent bg-[var(--bg-primary)] hover:border-[var(--border-default)] hover:bg-[var(--bg-hover)]"}`}
                       >
                         <span
-                          className={`h-2 w-2 shrink-0 rounded-full ${version.source === "ai" ? "bg-[var(--accent-cyan)]" : version.source === "revert" ? "bg-[#d88922]" : "bg-[var(--text-tertiary)]"}`}
+                          className={`h-2 w-2 shrink-0 rounded-full ${version.source === "ai" ? "bg-[var(--accent-cyan)]" : version.source === "revert" || version.source === "restore" ? "bg-[#d88922]" : version.source === "checkpoint" ? "bg-[#8b6ff0]" : "bg-[var(--text-tertiary)]"}`}
                         />
                         <span className="min-w-0 flex-1">
                           <span className="block truncate text-[12px] font-semibold text-[var(--text-primary)]">
                             {version.source === "ai"
                               ? "Spectra edit"
-                              : version.source === "revert"
+                              : version.source === "revert" || version.source === "restore"
                                 ? "Restored version"
-                                : "Manual save"}
+                                : version.source === "checkpoint"
+                                  ? "Before Spectra edit"
+                                  : "User edit"}
                           </span>
                           <span className="mt-0.5 block truncate text-[10px] text-[var(--text-tertiary)]">
                             {version.summary ?? "Saved artifact changes"} ·{" "}
@@ -2310,12 +2444,20 @@ function ArtifactStudioEditor({
                           </button>
                           <button
                             type="button"
+                            disabled={Boolean(historyBusy) || dirty || selectedRestoreRegions.size === 0}
+                            onClick={() => {
+                              void restoreVersion(previewVersion, [...selectedRestoreRegions]);
+                            }}
+                            className="flex h-9 items-center gap-1.5 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[11px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-35"
+                          >
+                            <RotateCcw className="h-3.5 w-3.5" />
+                            Restore {selectedRestoreRegions.size} selected
+                          </button>
+                          <button
+                            type="button"
                             disabled={Boolean(historyBusy) || dirty}
                             onClick={() => {
-                              setHistoryBusy(previewVersion._id);
-                              void Promise.resolve(onRevert(previewVersion._id))
-                                .then(() => setHistoryOpen(false))
-                                .finally(() => setHistoryBusy(null));
+                              void restoreVersion(previewVersion);
                             }}
                             className="flex h-9 items-center gap-1.5 rounded-[8px] bg-[var(--text-primary)] px-3 text-[11px] font-medium text-[var(--bg-primary)] disabled:opacity-35"
                           >
@@ -2330,7 +2472,7 @@ function ArtifactStudioEditor({
                         </div>
                         {historyView === "artifacts" ? (
                           <div className="grid min-h-0 flex-1 overflow-hidden md:grid-cols-2">
-                            <section className="min-h-0 overflow-auto border-b border-[var(--border-default)] md:border-b-0 md:border-r"><div className="sticky top-0 z-10 border-b border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--bg-primary)_92%,transparent)] px-5 py-2 text-[9px] font-semibold uppercase tracking-[.1em] text-[var(--danger)] backdrop-blur">Earlier version · read only</div><ReadonlyArtifactSnapshot blueprintKey={artifact.blueprintKey} snapshot={previewVersion.before} /></section>
+                            <section className="min-h-0 overflow-auto border-b border-[var(--border-default)] md:border-b-0 md:border-r"><div className="sticky top-0 z-10 border-b border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--bg-primary)_92%,transparent)] px-5 py-2 text-[9px] font-semibold uppercase tracking-[.1em] text-[var(--danger)] backdrop-blur">Selected version · read only</div><ReadonlyArtifactSnapshot blueprintKey={artifact.blueprintKey} snapshot={previewVersion.after} /></section>
                             <section className="min-h-0 overflow-auto"><div className="sticky top-0 z-10 border-b border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--bg-primary)_92%,transparent)] px-5 py-2 text-[9px] font-semibold uppercase tracking-[.1em] text-[var(--accent-cyan)] backdrop-blur">Current artifact · read only</div><ReadonlyArtifactSnapshot blueprintKey={artifact.blueprintKey} snapshot={{ title: artifact.title, summary: artifact.summary, content: artifact.content, tags: artifact.tags }} /></section>
                           </div>
                         ) : <div className="min-h-0 flex-1 space-y-3 overflow-auto p-4">
@@ -2340,7 +2482,7 @@ function ArtifactStudioEditor({
                               className="overflow-hidden rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)]"
                             >
                               <header className="border-b border-[var(--border-subtle)] px-4 py-2 text-[11px] font-semibold text-[var(--text-primary)]">
-                                {change.label}
+                                <label className="flex cursor-pointer items-center gap-2"><input type="checkbox" checked={Boolean(change.regionId && selectedRestoreRegions.has(change.regionId))} onChange={(event) => { if (!change.regionId) return; setSelectedRestoreRegions((current) => { const next = new Set(current); if (event.target.checked) next.add(change.regionId!); else next.delete(change.regionId!); return next; }); }} className="h-3.5 w-3.5 accent-[var(--accent-cyan)]" />{change.label}</label>
                               </header>
                               <div className="grid md:grid-cols-2">
                                 <div className="border-b border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--danger)_4%,var(--bg-primary))] p-4 md:border-b-0 md:border-r">

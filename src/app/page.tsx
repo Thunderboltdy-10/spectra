@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { LandingClient } from "./landing/landing-client";
-import { requireActor } from "@/lib/auth-server";
 import { hasClerkServerConfig } from "@/lib/clerk-config";
 
 export const metadata: Metadata = {
@@ -39,13 +38,7 @@ export default async function HomePage({
   if (hasClerkServerConfig()) {
     const authData = await auth();
     if (authData.userId) {
-      try {
-        await requireActor();
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "";
-        if (!message.startsWith("AUTH_NO_SCHOOL")) throw error;
-      }
-      redirect(`/chat${toQueryString(resolvedSearchParams)}`);
+      redirect(`/workspace${toQueryString(resolvedSearchParams)}`);
     }
   }
   return <LandingClient />;

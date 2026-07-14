@@ -41,6 +41,7 @@ import type {
   SpectraWorkspace,
   SpectraWorkspaceItem,
 } from "../data/api";
+import type { ArtifactTypeKey } from "../artifacts/types";
 
 export type ObjectLibraryEntry = {
   artifact?: SpectraArtifact;
@@ -82,11 +83,6 @@ function objectSummary(entry: ObjectLibraryEntry) {
   }
   if (entry.artifact?.aiState === "updating")
     return "Applying the requested changes…";
-  if (
-    entry.artifact?.aiState === "failed" &&
-    /spectra is building this artifact/i.test(entry.artifact.summary ?? "")
-  )
-    return "This draft stopped before completion. Retry its request to rebuild it.";
   return entry.artifact?.summary ?? entry.thread?.summaryShort ?? "Continue this conversation.";
 }
 function objectUpdatedAt(entry: ObjectLibraryEntry) { return entry.artifact?.updatedAt ?? entry.thread?.lastMessageAt ?? entry.thread?.updatedAt ?? entry.item?.updatedAt ?? 0; }
@@ -101,9 +97,9 @@ function objectAiState(entry: ObjectLibraryEntry) {
     entry.artifact.aiStateExpiresAt <= Date.now()
   )
     return "normal";
-  return state === "creating" || state === "updating" || state === "failed"
+  return state === "creating" || state === "updating"
     ? state
-    : state === "edited" || state === "generated"
+    : state === "edited"
       ? "edited"
       : "normal";
 }
@@ -151,7 +147,7 @@ export function ObjectLibrary({
   onMoveToWorkspace?: (entry: ObjectLibraryEntry, workspaceId: string) => void;
   onMoveToInbox?: (entry: ObjectLibraryEntry) => void;
   onCreateArtifact?: (
-    blueprintKey: SpectraBlueprintKey,
+    blueprintKey: ArtifactTypeKey,
     workspaceId?: string,
   ) => void;
   mode?: LibraryMode;
@@ -508,7 +504,7 @@ export function ObjectLibrary({
                   onClick={() => {
                     setCreateMenuKey(null);
                     onCreateArtifact(
-                      type.key as SpectraBlueprintKey,
+                      type.key as ArtifactTypeKey,
                       workspaceId,
                     );
                   }}

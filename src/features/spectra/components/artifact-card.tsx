@@ -1,16 +1,19 @@
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
-import { BookOpen, CalendarCheck2, Check, FileText, HelpCircle, MessageSquare } from "lucide-react";
+import { BookOpen, Bot, CalendarCheck2, CalendarDays, Check, Code2, FileText, HelpCircle, MessageSquare, Presentation, Share2, Table2, Workflow } from "lucide-react";
 import { cn } from "@/lib/utils";
+import type { ArtifactTypeKey } from "../artifacts/types";
 import { CardTypeIcon, SpectraCard, type SpectraCardState } from "./card-system";
 
 export type ArtifactCardView = {
   id: string;
   title: string;
-  blueprintKey: "document" | "thread_reference" | "flashcard_deck" | "quiz" | "planner_task";
+  blueprintKey: ArtifactTypeKey | "thread_reference";
   summary: string;
   meta: string;
-  placement: "inbox" | "workspace";
+  placement: "inbox" | "shared" | "workspace";
+  shared?: boolean;
+  accessLevel?: "read" | "modify";
   updatedAt?: number;
   pinned?: boolean;
   variant?: string;
@@ -25,6 +28,12 @@ export const blueprintMeta: Record<ArtifactCardView["blueprintKey"], { label: st
   flashcard_deck: { label: "Deck", icon: BookOpen, color: "#8b6ff0", soft: "color-mix(in oklab, #8b6ff0 8%, var(--bg-elevated))" },
   quiz: { label: "Quiz", icon: HelpCircle, color: "var(--mode-quiz)", soft: "color-mix(in oklab, var(--mode-quiz) 9%, var(--bg-elevated))" },
   planner_task: { label: "Task", icon: CalendarCheck2, color: "#d47a16", soft: "color-mix(in oklab, #d47a16 10%, var(--bg-elevated))" },
+  agent: { label: "Agent", icon: Bot, color: "#1785a5", soft: "color-mix(in oklab, #1785a5 9%, var(--bg-elevated))" },
+  timetable: { label: "Timetable", icon: CalendarDays, color: "#16735d", soft: "color-mix(in oklab, #16735d 9%, var(--bg-elevated))" },
+  presentation: { label: "Presentation", icon: Presentation, color: "#cf6d48", soft: "color-mix(in oklab, #cf6d48 9%, var(--bg-elevated))" },
+  sheets: { label: "Sheets", icon: Table2, color: "#2f855a", soft: "color-mix(in oklab, #2f855a 9%, var(--bg-elevated))" },
+  code: { label: "Code", icon: Code2, color: "#5166a8", soft: "color-mix(in oklab, #5166a8 9%, var(--bg-elevated))" },
+  whiteboard: { label: "Whiteboard", icon: Workflow, color: "#9a6a39", soft: "color-mix(in oklab, #9a6a39 9%, var(--bg-elevated))" },
 };
 
 export function ArtifactCard({
@@ -64,8 +73,6 @@ export function ArtifactCard({
           ? "updating"
           : artifact.aiState === "edited" || artifact.aiState === "generated"
             ? "edited"
-            : artifact.aiState === "failed"
-              ? "failed"
             : "normal";
 
   return (
@@ -97,6 +104,7 @@ export function ArtifactCard({
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-1.5 pr-5">
             <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">{meta.label}</span>
+            {artifact.shared ? <span className="inline-flex items-center text-[var(--text-tertiary)]" title={artifact.accessLevel === "read" ? "Shared with read-only access" : "Shared artifact"} aria-label={artifact.accessLevel === "read" ? "Shared with read-only access" : "Shared artifact"}><Share2 className="h-3 w-3" aria-hidden="true" /></span> : null}
             <span className="text-[10px] text-[var(--text-tertiary)]">•</span>
             <span className="min-w-0 truncate text-[11px] text-[var(--text-tertiary)]">{artifact.meta}</span>
           </div>

@@ -483,10 +483,7 @@ export function ContextFocusControl({
                             label: item.title,
                             workspaceId: item.placements?.[0]?.workspaceId,
                             source: "explicit",
-                            capability:
-                              item.blueprintKey === "thread_reference"
-                                ? "context"
-                                : "tile",
+                            capability: item.blueprintKey === "thread_reference" ? "context" : "tile",
                           })
                         }
                         className="flex w-full items-center gap-2 rounded-[7px] px-2 py-2 text-left hover:bg-[var(--bg-hover)]"

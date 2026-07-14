@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Webhook } from "svix";
-import { convexMutation } from "@/lib/convex-server";
 
 type ClerkWebhookEvent = {
   type: string;
@@ -81,13 +80,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true, skipped: true, reason: "verified_email_required" });
   }
 
-  const result = await convexMutation("identity:registerVerifiedAccount", {
-    clerkId,
-    email,
-    emailVerified: true,
-    name: getUserName(event.data),
-    avatarUrl: event.data?.image_url?.trim() || undefined,
-  });
-
-  return NextResponse.json({ ok: true, type: event.type, result });
+  // Account provisioning is deliberately session-bound. The signed Clerk JWT
+  // is the only authority accepted by Convex; webhook payload fields never
+  // create or mutate product identity directly.
+  return NextResponse.json({ ok: true, type: event.type, deferredToAuthenticatedSession: true });
 }

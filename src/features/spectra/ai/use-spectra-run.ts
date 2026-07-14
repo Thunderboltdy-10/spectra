@@ -200,7 +200,7 @@ export function useSpectraRun({
           if (workspaceId) return tab.workspaceId === workspaceId;
           return tab.surface === (surface === "artifacts" ? "artifact" : surface);
         });
-        const active = relevant.filter((tab) => tab.run.status === "queued" || tab.run.status === "running" || tab.run.status === "awaiting_confirmation");
+        const active = relevant.filter((tab) => tab.run.status === "queued" || tab.run.status === "running" || tab.run.status === "awaiting_confirmation" || tab.run.status === "awaiting_resolution");
         observedActive = active.length > 0;
         setObservedContinuationRunId(threadId ? active[0]?.runId ?? null : null);
         const observed = relevant.filter((tab) => active.some((row) => row.runId === tab.runId) || eventCursors.current.has(tab.runId));
@@ -216,7 +216,7 @@ export function useSpectraRun({
             let event: ReturnType<typeof parseSpectraStreamEvent>;
             try { event = parseSpectraStreamEvent(row.payload); } catch { continue; }
             if (event.type === "run_created" || event.type === "result_card" || event.type === "confirmation_required" || event.type === "final") upsert(event.card);
-            if (event.type === "text_delta" || event.type === "text_replace" || event.type === "status" || event.type === "operation_preview" || event.type === "operation_result") {
+            if (event.type === "text_delta" || event.type === "text_replace" || event.type === "status" || event.type === "progress" || event.type === "agent_routed" || event.type === "operation_preview" || event.type === "operation_result") {
               setLiveExchange((current) => {
                 const base = current?.runId === tab.runId ? current : {
                   id: `durable:${tab.runId}`,
@@ -230,13 +230,14 @@ export function useSpectraRun({
                 if (event.type === "text_delta") return { ...base, content: base.content + event.content, status: "streaming" };
                 if (event.type === "text_replace") return { ...base, content: event.content, status: "streaming" };
                 if (event.type === "status") return appendStep(base, event.message);
+                if (event.type === "progress") return appendStep(base, event.detail ? `${event.title} · ${event.detail}` : event.title);
+                if (event.type === "agent_routed") return appendStep(base, `Using ${event.title}: ${event.reason}`);
                 if (event.type === "operation_preview" && event.preview) return appendStep(base, event.preview.title);
-                if (event.type === "operation_result") return appendStep(base, "Checking result");
                 return base;
               });
             }
             if (event.type === "artifact_patch") dispatchArtifactPatch(event.artifactId, event.patch);
-            if (event.type === "run_created" || event.type === "thread_ready" || event.type === "operation_preview" || event.type === "operation_result" || event.type === "confirmation_required" || event.type === "approval_accepted" || event.type === "approval_rejected" || event.type === "choice_selected" || event.type === "interrupted" || event.type === "final") void onDataChanged?.();
+            if (event.type === "run_created" || event.type === "thread_ready" || event.type === "agent_routed" || event.type === "operation_preview" || event.type === "operation_result" || event.type === "confirmation_required" || event.type === "approval_accepted" || event.type === "approval_rejected" || event.type === "choice_selected" || event.type === "interrupted" || event.type === "final") void onDataChanged?.();
             // Durable history can replay an older attempt's terminal event
             // while a retry is already active. Its card keeps the history;
             // only the live request path raises a toast for a current failure.
@@ -336,8 +337,33 @@ export function useSpectraRun({
           const title = /^(creating|updating|organizing|connecting|preparing)\b/i.test(event.preview.title) ? event.preview.title.replace(/^Preparing\b/i, action) : `${action} ${event.preview.title}`;
           setLiveExchange((current) => current && (!liveExchangeId || current.id === liveExchangeId) ? appendStep({ ...current, runId: event.runId, status: "streaming" }, `${title} · Applying the validated change to the visible workspace`) : current);
         }
-        if (event.type === "operation_result") {
-          setLiveExchange((current) => current && (!liveExchangeId || current.id === liveExchangeId) ? appendStep({ ...current, runId: event.runId, status: "streaming" }, "Checking result") : current);
+        if (event.type === "progress") {
+          const message = event.detail ? `${event.title} · ${event.detail}` : event.title;
+          setLiveExchange((current) => current && (!liveExchangeId || current.id === liveExchangeId) ? appendStep({ ...current, runId: event.runId, status: "streaming" }, message) : current);
+          setCards((current) => current.map((card) => card.runId === event.runId ? {
+            ...card,
+            status: "running",
+            title: event.title,
+            summary: event.detail ?? event.regionHint ?? event.title,
+            updatedAt: Date.now(),
+          } : card));
+        }
+        if (event.type === "agent_routed") {
+          setLiveExchange((current) => current && (!liveExchangeId || current.id === liveExchangeId)
+            ? appendStep({ ...current, runId: event.runId, status: "streaming" }, `Using ${event.title}: ${event.reason}`)
+            : current);
+          setCards((current) => current.map((card) => card.runId === event.runId ? {
+            ...card,
+            provenance: {
+              ...(card.provenance ?? {}),
+              agentId: event.agentId,
+              agentVersionId: event.agentVersionId,
+              agentTitle: event.title,
+              agentRoutingReason: event.reason,
+              agentRoutingSource: event.source,
+            },
+            updatedAt: Date.now(),
+          } : card));
         }
         if (event.type === "final") {
           setLiveExchange((current) => current && (!liveExchangeId || current.id === liveExchangeId) ? { ...current, runId: event.runId, steps: current.steps.map((step) => step.status === "running" ? { ...step, status: "done" } : step), status: "streaming" } : current);
@@ -367,8 +393,8 @@ export function useSpectraRun({
         resolve(accepted);
       };
       setActiveRequestCount((count) => count + 1);
-      setLiveExchange({ id: exchangeId, prompt: clean, content: "", steps: [{ id: `${exchangeId}:start`, title: "Starting with your context", summary: "Keeping your workspace ready", status: "running", createdAt: Date.now() }], status: "starting", startedAt: Date.now() });
-      upsert({ id: optimisticCardId, runId: `pending:${exchangeId}`, status: "running", title: "Resolving the request", summary: clean, variant: "status", actions: [], updatedAt: Date.now() });
+      setLiveExchange({ id: exchangeId, prompt: clean, content: "", steps: [], status: "starting", startedAt: Date.now() });
+      upsert({ id: optimisticCardId, runId: `pending:${exchangeId}`, status: "running", title: "Spectra", summary: clean, variant: "status", actions: [], updatedAt: Date.now() });
       void consume(
         { action: "run", submissionKey: exchangeId, prompt: clean, surface, workspaceId, artifactId, threadId: durableThreadId.current, focusMode, selectedArtifactIds, explicitContextObjects, currentView, attachments },
         optimisticCardId,

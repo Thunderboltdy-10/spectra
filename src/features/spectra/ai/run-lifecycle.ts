@@ -40,7 +40,7 @@ export function markRunRunning(run: AIRun, now = Date.now()): AIRun {
 }
 
 export function completeRun(run: AIRun, finalSummary: string, now = Date.now()): AIRun {
-  if (run.status !== "queued" && run.status !== "running" && run.status !== "awaiting_confirmation") {
+  if (run.status !== "queued" && run.status !== "running" && run.status !== "awaiting_confirmation" && run.status !== "awaiting_resolution") {
     throw new Error(`Cannot complete ${run.status} run.`);
   }
   return {
@@ -100,5 +100,4 @@ export function createResultCardForRun(params: {
     updatedAt: now,
   };
 }
-
 

@@ -59,7 +59,7 @@ export function RunDetailPanel({ runId, card, onClose, onAction, onUseThread, on
   }, [detail]);
   const persistedCard = detail?.cards[0];
   const isPermanent = Boolean(detail?.run.threadId);
-  const displayCard: ResultCardStreamView | undefined = card ?? (persistedCard ? { id: persistedCard._id, runId: persistedCard.runId, status: persistedCard.status, title: persistedCard.title, summary: persistedCard.summary, variant: persistedCard.variant, actions: persistedCard.actions, updatedAt: persistedCard.updatedAt } : undefined);
+  const displayCard: ResultCardStreamView | undefined = card ?? (persistedCard ? { id: persistedCard._id, runId: persistedCard.runId, status: persistedCard.status, title: persistedCard.title, summary: persistedCard.summary, variant: persistedCard.variant, actions: persistedCard.actions, provenance: persistedCard.provenance, updatedAt: persistedCard.updatedAt } : undefined);
 
   async function keep(placeInWorkspace: boolean, navigate: boolean, createReference = true) {
     setBusy(navigate ? "continue" : "keep");

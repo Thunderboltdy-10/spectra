@@ -41,11 +41,11 @@ export function isPlatformOperatorEmail(email: string) {
   return operatorEmails().has(email.trim().toLowerCase());
 }
 
-async function readIdentity(clerkId: string) {
-  return convexQuery<{ clerkId: string }, IdentityContext | null>("identity:me", { clerkId });
+async function readIdentity() {
+  return convexQuery<Record<string, never>, IdentityContext | null>("identity:me", {});
 }
 
-async function ensureVerifiedClerkAccount(clerkId: string) {
+async function ensureVerifiedClerkAccount() {
   const profile = await currentUser();
   if (!profile) throw new Error("AUTH_PROFILE_UNAVAILABLE: The signed-in identity profile could not be loaded.");
   const primary = profile.emailAddresses.find((entry) => entry.id === profile.primaryEmailAddressId);
@@ -53,55 +53,28 @@ async function ensureVerifiedClerkAccount(clerkId: string) {
     .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
     .find((entry) => entry.verification?.status === "verified" && Boolean(entry.emailAddress));
   if (!verified) throw new Error("AUTH_EMAIL_UNVERIFIED: Verify your school email before using Spectra.");
-  await convexMutation("identity:registerVerifiedAccount", {
-    clerkId,
-    email: verified.emailAddress,
-    emailVerified: true,
+  await convexMutation("identity:registerSelf", {
     name: profile.fullName ?? profile.firstName ?? "Spectra user",
     avatarUrl: profile.imageUrl || undefined,
   });
 }
 
-async function requireLocalDevelopmentActor(): Promise<SessionActor> {
-  if (process.env.NODE_ENV === "production") {
-    throw new Error("AUTH_MISCONFIGURED: Clerk is required in production.");
-  }
-  const clerkId = "dev_local_spectra_user";
-  await convexMutation("identity:ensureDevelopmentActor", {
-    clerkId,
-    email: "local-user@spectra.dev",
-    name: "Local Spectra User",
-    schoolName: "Local Spectra School",
-    schoolSlug: "local-spectra-school",
-  });
-  const identity = await readIdentity(clerkId);
-  if (!identity) throw new Error("AUTH_BOOTSTRAP_FAILED: Development identity could not be initialized.");
-  return {
-    clerkId,
-    accountId: identity.accountId,
-    email: identity.email,
-    name: identity.name,
-    schoolId: identity.schoolId,
-    schoolRole: identity.schoolRole,
-    membershipId: identity.membershipId,
-  };
-}
-
 export async function requireActor(): Promise<SessionActor> {
-  if (!hasClerkServerConfig()) return requireLocalDevelopmentActor();
+  if (!hasClerkServerConfig()) throw new Error("AUTH_MISCONFIGURED: Clerk authentication is required.");
 
   let clerkId: string | null = null;
   try {
-    clerkId = (await auth()).userId;
+    const authState = await auth();
+    clerkId = authState.userId;
   } catch {
     throw new Error("AUTH_MISCONFIGURED: Clerk authentication failed.");
   }
   if (!clerkId) throw new Error("AUTH_NOT_SIGNED_IN: Sign in to continue.");
 
-  let identity = await readIdentity(clerkId);
+  let identity = await readIdentity();
   if (!identity) {
-    await ensureVerifiedClerkAccount(clerkId);
-    identity = await readIdentity(clerkId);
+    await ensureVerifiedClerkAccount();
+    identity = await readIdentity();
   }
   if (!identity) {
     throw new Error("AUTH_NO_SCHOOL: This account does not have an active school membership.");

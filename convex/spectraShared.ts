@@ -1,13 +1,20 @@
 import { v } from "convex/values";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
-import { getActorByClerkId } from "./identityShared";
+import { requireCapability, type Capability } from "./authorityShared";
+import { getAuthenticatedActor } from "./identityShared";
 
 export const vBlueprintKey = v.union(
   v.literal("document"),
   v.literal("flashcard_deck"),
   v.literal("quiz"),
   v.literal("planner_task"),
+  v.literal("agent"),
+  v.literal("timetable"),
+  v.literal("presentation"),
+  v.literal("sheets"),
+  v.literal("code"),
+  v.literal("whiteboard"),
 );
 
 export const vArtifactStatus = v.union(
@@ -26,38 +33,52 @@ export const vCreatedFromSource = v.union(
 );
 
 export type SpectraCtx = QueryCtx | MutationCtx;
-export type BlueprintKey = "document" | "flashcard_deck" | "quiz" | "planner_task";
+export type BlueprintKey =
+  | "document"
+  | "flashcard_deck"
+  | "quiz"
+  | "planner_task"
+  | "agent"
+  | "timetable"
+  | "presentation"
+  | "sheets"
+  | "code"
+  | "whiteboard";
 
-export async function requireSpectraActor(ctx: SpectraCtx, actorClerkId: string) {
-  const actor = await getActorByClerkId(ctx, actorClerkId);
-  if (!actor) throw new Error("Unauthorized");
+export async function requireSpectraActor(ctx: SpectraCtx) {
+  const actor = await getAuthenticatedActor(ctx);
+  if (!actor) throw new Error("AUTH_NO_SCHOOL: An active school membership is required.");
   return actor;
 }
 
-export async function requireOwnedWorkspace(
+export async function requireWorkspaceCapability(
   ctx: SpectraCtx,
-  actorClerkId: string,
   workspaceId: Id<"spectraWorkspaces">,
+  capability: Capability = "read",
 ) {
-  const actor = await requireSpectraActor(ctx, actorClerkId);
-  const workspace = await ctx.db.get(workspaceId);
-  if (!workspace || workspace.ownerAccountId !== actor._id || workspace.schoolId !== actor.schoolId) {
-    throw new Error("Workspace not found");
-  }
-  return { actor, workspace };
+  const decision = await requireCapability(ctx, "workspace", workspaceId, capability);
+  return {
+    actor: decision.actor,
+    workspace: decision.loaded.resource as Doc<"spectraWorkspaces">,
+    decision,
+    capabilities: decision.capabilities,
+  };
 }
 
-export async function requireOwnedArtifact(
+export async function requireArtifactCapability(
   ctx: SpectraCtx,
-  actorClerkId: string,
   artifactId: Id<"spectraArtifacts">,
+  capability: Capability = "read",
 ) {
-  const actor = await requireSpectraActor(ctx, actorClerkId);
-  const artifact = await ctx.db.get(artifactId);
-  if (!artifact || artifact.ownerAccountId !== actor._id || artifact.schoolId !== actor.schoolId) {
-    throw new Error("Artifact not found");
-  }
-  return { actor, artifact };
+  const candidate = await ctx.db.get(artifactId);
+  const resourceType = candidate?.blueprintKey === "agent" ? "agent" : "artifact";
+  const decision = await requireCapability(ctx, resourceType, artifactId, capability);
+  return {
+    actor: decision.actor,
+    artifact: decision.loaded.resource as Doc<"spectraArtifacts">,
+    decision,
+    capabilities: decision.capabilities,
+  };
 }
 
 export function normalizeArtifactId(ctx: SpectraCtx, sourceId: string) {
@@ -103,11 +124,51 @@ export function defaultArtifactContent(blueprintKey: BlueprintKey) {
       };
     case "planner_task":
       return {
+        id: "task-root",
         description: "",
         status: "todo",
         priority: "medium",
         linkedArtifactIds: [],
         linkedThreadIds: [],
+      };
+    case "agent":
+      return {
+        instructions: { regionId: "agent-instructions", text: "" },
+        skills: [],
+        tools: [],
+        resources: [],
+        routing: { enabled: true },
+      };
+    case "timetable":
+      return {
+        timezone: "UTC",
+        layers: [{ id: "personal", name: "Personal", kind: "personal", visible: true }],
+        events: [],
+      };
+    case "presentation":
+      return {
+        theme: { id: "spectra-default" },
+        slides: [{ id: "slide-1", title: "Untitled presentation", objects: [] }],
+      };
+    case "sheets":
+      return {
+        workbook: { calculationMode: "automatic", locale: "en-US" },
+        sheets: [{ id: "sheet-1", name: "Sheet 1", cells: {}, tables: [], charts: [] }],
+        activeSheetId: "sheet-1",
+      };
+    case "code":
+      return {
+        runtime: "browser",
+        entryFileId: "file-main",
+        files: [{ id: "file-main", path: "index.html", language: "html", source: "<main></main>" }],
+        visualisation: { enabled: true },
+      };
+    case "whiteboard":
+      return {
+        viewport: { x: 0, y: 0, zoom: 1 },
+        nodes: [],
+        edges: [],
+        layers: [{ id: "layer-1", name: "Canvas", visible: true, locked: false }],
       };
   }
 }
@@ -122,6 +183,18 @@ export function fallbackArtifactSummary(blueprintKey: BlueprintKey) {
       return "Quiz artifact with questions and review metadata.";
     case "planner_task":
       return "Planner task artifact with status and links.";
+    case "agent":
+      return "A reusable Spectra agent with scoped skills, tools, and resources.";
+    case "timetable":
+      return "A layered timetable and calendar for school and personal time.";
+    case "presentation":
+      return "A Spectra-native presentation with responsive slide objects.";
+    case "sheets":
+      return "A collaborative workbook for formulas, analysis, and charts.";
+    case "code":
+      return "A multi-file code and interactive visualisation artifact.";
+    case "whiteboard":
+      return "A collaborative spatial canvas for ideas and relationships.";
   }
 }
 
@@ -187,4 +260,3 @@ export function buildArtifactTextIndex(params: {
     .join("\n")
     .slice(0, 4000);
 }
-

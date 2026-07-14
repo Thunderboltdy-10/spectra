@@ -1,11 +1,12 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
-import { getActorByClerkId } from "./identityShared";
+import { getAuthenticatedActor } from "./identityShared";
+import { regionDomainsIntersect } from "./regionClaims";
 
-async function requireOwnedRun(ctx: Parameters<typeof getActorByClerkId>[0], actorClerkId: string, runId: Id<"spectraAiRuns">) {
-  const actor = await getActorByClerkId(ctx, actorClerkId);
-  if (!actor) throw new Error("Unauthorized");
+async function requireOwnedRun(ctx: Parameters<typeof getAuthenticatedActor>[0], runId: Id<"spectraAiRuns">) {
+  const actor = await getAuthenticatedActor(ctx);
+  if (!actor) throw new Error("AUTH_NO_SCHOOL: An active school membership is required.");
   const run = await ctx.db.get(runId);
   if (!run || run.ownerAccountId !== actor._id || run.schoolId !== actor.schoolId) throw new Error("AI run not found");
   return run;
@@ -13,13 +14,12 @@ async function requireOwnedRun(ctx: Parameters<typeof getActorByClerkId>[0], act
 
 export const recordPlan = mutation({
   args: {
-    actorClerkId: v.string(),
     runId: v.id("spectraAiRuns"),
     executionId: v.string(),
     operations: v.array(v.object({ type: v.string(), input: v.any(), requiresConfirmation: v.boolean() })),
   },
   handler: async (ctx, args) => {
-    const run = await requireOwnedRun(ctx, args.actorClerkId, args.runId);
+    const run = await requireOwnedRun(ctx, args.runId);
     if (run.status !== "running" || run.executionId !== args.executionId) throw new Error("This run attempt is no longer active");
     const now = Date.now();
     const operationIds = await Promise.all(args.operations.map((operation) => ctx.db.insert("spectraOperations", {
@@ -38,19 +38,42 @@ export const recordPlan = mutation({
 });
 
 export const listForRun = query({
-  args: { actorClerkId: v.string(), runId: v.id("spectraAiRuns") },
+  args: { runId: v.id("spectraAiRuns") },
   handler: async (ctx, args) => {
-    await requireOwnedRun(ctx, args.actorClerkId, args.runId);
+    await requireOwnedRun(ctx, args.runId);
     return ctx.db.query("spectraOperations").withIndex("by_run", (q) => q.eq("runId", args.runId)).collect();
   },
 });
 
+export const conflictForOperation = query({
+  args: { operationId: v.id("spectraOperations") },
+  handler: async (ctx, args) => {
+    const operation = await ctx.db.get(args.operationId);
+    if (!operation?.runId || operation.status !== "waiting" || !operation.conflict) throw new Error("REGION_CONFLICT_UNAVAILABLE");
+    const run = await requireOwnedRun(ctx, operation.runId);
+    const [artifact, claim] = await Promise.all([ctx.db.get(operation.conflict.artifactId), ctx.db.get(operation.conflict.claimId)]);
+    if (!artifact || !claim || artifact.schoolId !== run.schoolId) throw new Error("REGION_CONFLICT_UNAVAILABLE");
+    return {
+      runId: run._id,
+      executionId: operation.executionId,
+      operationId: operation._id,
+      operationType: operation.type,
+      input: operation.input,
+      conflict: operation.conflict,
+      claimStatus: claim.status,
+      artifactType: artifact.blueprintKey,
+      currentStateVectorHash: artifact.liveStateVectorHash ?? `initial:${artifact._id}`,
+      currentSnapshot: { title: artifact.title, summary: artifact.summary, content: artifact.content, tags: artifact.tags },
+    };
+  },
+});
+
 export const attachPendingArtifact = mutation({
-  args: { actorClerkId: v.string(), operationId: v.id("spectraOperations"), artifactId: v.id("spectraArtifacts"), executionId: v.string() },
+  args: { operationId: v.id("spectraOperations"), artifactId: v.id("spectraArtifacts"), executionId: v.string() },
   handler: async (ctx, args) => {
     const operation = await ctx.db.get(args.operationId);
     if (!operation?.runId || operation.status !== "proposed") throw new Error("Operation is no longer pending");
-    const run = await requireOwnedRun(ctx, args.actorClerkId, operation.runId);
+    const run = await requireOwnedRun(ctx, operation.runId);
     if (run.status !== "running" || operation.executionId !== run.executionId || run.executionId !== args.executionId) throw new Error("Operation belongs to an older run attempt");
     const artifact = await ctx.db.get(args.artifactId);
     if (!artifact || artifact.ownerAccountId !== run.ownerAccountId || artifact.aiRunId !== run._id || artifact.aiExecutionId !== run.executionId || artifact.aiState !== "creating") throw new Error("Pending artifact not found");
@@ -60,11 +83,11 @@ export const attachPendingArtifact = mutation({
 });
 
 export const attachPendingWorkspace = mutation({
-  args: { actorClerkId: v.string(), operationId: v.id("spectraOperations"), workspaceId: v.id("spectraWorkspaces"), executionId: v.string() },
+  args: { operationId: v.id("spectraOperations"), workspaceId: v.id("spectraWorkspaces"), executionId: v.string() },
   handler: async (ctx, args) => {
     const operation = await ctx.db.get(args.operationId);
     if (!operation?.runId || operation.status !== "proposed") throw new Error("Operation is no longer pending");
-    const run = await requireOwnedRun(ctx, args.actorClerkId, operation.runId);
+    const run = await requireOwnedRun(ctx, operation.runId);
     if (run.status !== "running" || operation.executionId !== run.executionId || run.executionId !== args.executionId) throw new Error("Operation belongs to an older run attempt");
     const workspace = await ctx.db.get(args.workspaceId);
     if (!workspace || workspace.ownerAccountId !== run.ownerAccountId || workspace.aiRunId !== run._id || workspace.aiExecutionId !== run.executionId || workspace.aiState !== "creating") throw new Error("Pending workspace not found");
@@ -74,11 +97,11 @@ export const attachPendingWorkspace = mutation({
 });
 
 export const claim = mutation({
-  args: { actorClerkId: v.string(), operationId: v.id("spectraOperations"), executionId: v.string() },
+  args: { operationId: v.id("spectraOperations"), executionId: v.string() },
   handler: async (ctx, args) => {
     const operation = await ctx.db.get(args.operationId);
     if (!operation?.runId) throw new Error("Operation not found");
-    const run = await requireOwnedRun(ctx, args.actorClerkId, operation.runId);
+    const run = await requireOwnedRun(ctx, operation.runId);
     if (run.status !== "running") throw new Error("This run is no longer allowed to apply changes");
     if (operation.executionId !== run.executionId || run.executionId !== args.executionId) throw new Error("Operation belongs to an older run attempt");
     if (operation.status !== "proposed") throw new Error("Operation is no longer pending");
@@ -88,11 +111,11 @@ export const claim = mutation({
 });
 
 export const assertClaimed = mutation({
-  args: { actorClerkId: v.string(), operationId: v.id("spectraOperations"), executionId: v.string() },
+  args: { operationId: v.id("spectraOperations"), executionId: v.string() },
   handler: async (ctx, args) => {
     const operation = await ctx.db.get(args.operationId);
     if (!operation?.runId) throw new Error("Operation not found");
-    const run = await requireOwnedRun(ctx, args.actorClerkId, operation.runId);
+    const run = await requireOwnedRun(ctx, operation.runId);
     if (run.status !== "running") throw new Error("This run is no longer allowed to apply changes");
     if (operation.executionId !== run.executionId || run.executionId !== args.executionId) throw new Error("Operation belongs to an older run attempt");
     if (operation.status !== "executing") throw new Error("Operation is no longer approved for execution");
@@ -102,14 +125,14 @@ export const assertClaimed = mutation({
 
 export const markExecuted = mutation({
   args: {
-    actorClerkId: v.string(), operationId: v.id("spectraOperations"), output: v.optional(v.any()),
+    operationId: v.id("spectraOperations"), output: v.optional(v.any()),
     executionId: v.string(),
     affected: v.array(v.object({ type: v.string(), id: v.string() })),
   },
   handler: async (ctx, args) => {
     const operation = await ctx.db.get(args.operationId);
     if (!operation?.runId) throw new Error("Operation not found");
-    const run = await requireOwnedRun(ctx, args.actorClerkId, operation.runId);
+    const run = await requireOwnedRun(ctx, operation.runId);
     if (run.status !== "running" || operation.executionId !== run.executionId || run.executionId !== args.executionId) throw new Error("Operation belongs to an older run attempt");
     if (operation.status !== "executing") throw new Error("Operation was not claimed for execution");
     await ctx.db.patch(args.operationId, { status: "executed", output: args.output, affected: args.affected, executedAt: Date.now() });
@@ -118,21 +141,153 @@ export const markExecuted = mutation({
 });
 
 export const markFailed = mutation({
-  args: { actorClerkId: v.string(), operationId: v.id("spectraOperations"), executionId: v.string(), error: v.string() },
+  args: { operationId: v.id("spectraOperations"), executionId: v.string(), error: v.string() },
   handler: async (ctx, args) => {
     const operation = await ctx.db.get(args.operationId);
     if (!operation?.runId) throw new Error("Operation not found");
-    const run = await requireOwnedRun(ctx, args.actorClerkId, operation.runId);
+    const run = await requireOwnedRun(ctx, operation.runId);
     if (operation.executionId !== run.executionId || run.executionId !== args.executionId) throw new Error("Operation belongs to an older run attempt");
     await ctx.db.patch(args.operationId, { status: "failed", output: { error: args.error }, executedAt: Date.now() });
     return { operationId: args.operationId };
   },
 });
 
-export const cancelPending = mutation({
-  args: { actorClerkId: v.string(), runId: v.id("spectraAiRuns"), executionId: v.string() },
+export const pauseForRegionConflict = mutation({
+  args: {
+    operationId: v.id("spectraOperations"),
+    executionId: v.string(),
+    artifactId: v.id("spectraArtifacts"),
+    claimId: v.id("regionClaims"),
+    clientId: v.string(),
+    regionId: v.string(),
+    blockerActorKind: v.union(v.literal("human"), v.literal("ai")),
+    queuePosition: v.number(),
+    baseSnapshot: v.optional(v.any()),
+    proposedSnapshot: v.optional(v.any()),
+  },
   handler: async (ctx, args) => {
-    const run = await requireOwnedRun(ctx, args.actorClerkId, args.runId);
+    const operation = await ctx.db.get(args.operationId);
+    if (!operation?.runId) throw new Error("Operation not found");
+    const run = await requireOwnedRun(ctx, operation.runId);
+    if (run.status !== "running" || operation.executionId !== run.executionId || run.executionId !== args.executionId || operation.status !== "executing") throw new Error("Operation is no longer available to pause");
+    const [artifact, claim] = await Promise.all([ctx.db.get(args.artifactId), ctx.db.get(args.claimId)]);
+    if (!artifact || artifact.schoolId !== run.schoolId || !claim || claim.operationId !== operation._id || claim.runId !== run._id || claim.clientId !== args.clientId || claim.status !== "queued") throw new Error("REGION_CONFLICT_STATE_INVALID");
+    const now = Date.now();
+    await ctx.db.patch(claim._id, { leaseExpiresAt: now + 7 * 24 * 60 * 60_000, updatedAt: now });
+    await ctx.db.patch(operation._id, {
+      status: "waiting",
+      conflict: {
+        claimId: claim._id,
+        artifactId: artifact._id,
+        clientId: args.clientId,
+        regionId: args.regionId.slice(0, 240),
+        blockerActorKind: args.blockerActorKind,
+        queuePosition: Math.max(1, Math.floor(args.queuePosition)),
+        baseSnapshot: args.baseSnapshot ?? { title: artifact.title, summary: artifact.summary, content: artifact.content, tags: artifact.tags },
+        proposedSnapshot: args.proposedSnapshot ?? artifact.aiPreview,
+        createdAt: now,
+      },
+    });
+    await ctx.db.patch(run._id, { status: "awaiting_resolution", phase: "conflict", workerId: undefined, leaseExpiresAt: undefined, heartbeatAt: now, updatedAt: now });
+    const cards = await ctx.db.query("spectraResultCards").withIndex("by_run", (q) => q.eq("runId", run._id)).collect();
+    await Promise.all(cards.map((card) => ctx.db.patch(card._id, {
+      status: "awaiting_resolution",
+      variant: "operation",
+      title: "Edit conflict",
+      summary: "Another collaborator changed the same region. Compare the current content with Spectra's proposal before applying it.",
+      actions: [{ key: "resolve_conflict", label: "Review conflict", targetType: "run", targetId: run._id }],
+      updatedAt: now,
+    })));
+    const job = await ctx.db.query("spectraRunJobs").withIndex("by_run_execution", (q) => q.eq("runId", run._id).eq("executionId", args.executionId)).unique();
+    if (job && job.status === "leased") await ctx.db.patch(job._id, { status: "completed", workerId: undefined, leaseExpiresAt: undefined, completedAt: now, updatedAt: now });
+    return { operationId: operation._id, runId: run._id, status: "awaiting_resolution" as const };
+  },
+});
+
+export const resumeAfterRegionConflict = mutation({
+  args: {
+    operationId: v.id("spectraOperations"),
+    executionId: v.string(),
+    resolution: v.union(v.literal("apply"), v.literal("keep_current"), v.literal("merge"), v.literal("cancel")),
+    mergedInput: v.optional(v.any()),
+    newBaseStateVectorHash: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const operation = await ctx.db.get(args.operationId);
+    if (!operation?.runId || operation.status !== "waiting" || !operation.conflict) throw new Error("REGION_CONFLICT_UNAVAILABLE");
+    const run = await requireOwnedRun(ctx, operation.runId);
+    if (run.status !== "awaiting_resolution" || run.executionId !== args.executionId || operation.executionId !== args.executionId) throw new Error("REGION_CONFLICT_RUN_STALE");
+    const claim = await ctx.db.get(operation.conflict.claimId);
+    const applying = args.resolution === "apply" || args.resolution === "merge";
+    const now = Date.now();
+    if (!claim || claim.operationId !== operation._id || claim.runId !== run._id || claim.actorAccountId !== run.ownerAccountId || (claim.status !== "queued" && claim.status !== "paused")) {
+      throw new Error("REGION_CONFLICT_NOT_RESOLVED: This proposal is no longer available.");
+    }
+    if (applying) {
+      if (!args.newBaseStateVectorHash || args.newBaseStateVectorHash.length < 16) throw new Error("REGION_CONFLICT_BASE_REQUIRED: Refresh the current artifact before applying.");
+      const active = (await ctx.db.query("regionClaims").withIndex("by_artifact_status", (q) => q.eq("artifactId", claim.artifactId).eq("status", "active")).collect())
+        .filter((candidate) => candidate.leaseExpiresAt > now);
+      if (active.some((candidate) => regionDomainsIntersect(candidate.overlapDomains, claim.overlapDomains))) {
+        throw new Error("REGION_CONFLICT_STILL_OCCUPIED: Wait for the active edit to finish.");
+      }
+      await ctx.db.patch(claim._id, {
+        status: "active",
+        resolution: args.resolution,
+        baseStateVectorHash: args.newBaseStateVectorHash,
+        queuePosition: undefined,
+        leaseExpiresAt: now + 45_000,
+        updatedAt: now,
+      });
+    } else {
+      await ctx.db.patch(claim._id, {
+        status: "rejected",
+        resolution: args.resolution,
+        queuePosition: undefined,
+        releasedAt: now,
+        updatedAt: now,
+      });
+    }
+    await ctx.db.patch(operation._id, {
+      status: applying ? "proposed" : "cancelled",
+      input: args.resolution === "merge" && args.mergedInput !== undefined ? args.mergedInput : operation.input,
+      conflict: undefined,
+    });
+    const job = await ctx.db.query("spectraRunJobs").withIndex("by_run_execution", (q) => q.eq("runId", run._id).eq("executionId", args.executionId)).unique();
+    if (!job) throw new Error("RUN_JOB_UNAVAILABLE: The durable operation queue is missing.");
+    const payload = job.payload && typeof job.payload === "object" && !Array.isArray(job.payload) ? job.payload as Record<string, unknown> : {};
+    await ctx.db.patch(job._id, {
+      status: "queued",
+      payload: {
+        ...payload,
+        kind: "resume_operations",
+        conflictOperationId: operation._id,
+        collaborationClientId: operation.conflict.clientId,
+      },
+      availableAt: now,
+      workerId: undefined,
+      leaseExpiresAt: undefined,
+      completedAt: undefined,
+      lastError: undefined,
+      updatedAt: now,
+    });
+    await ctx.db.patch(run._id, { status: "queued", phase: "applying", workerId: undefined, leaseExpiresAt: undefined, heartbeatAt: now, updatedAt: now });
+    const cards = await ctx.db.query("spectraResultCards").withIndex("by_run", (q) => q.eq("runId", run._id)).collect();
+    await Promise.all(cards.map((card) => ctx.db.patch(card._id, {
+      status: "queued",
+      variant: "operation",
+      title: applying ? "Applying the resolved edit" : "Continuing without the conflicting edit",
+      summary: applying ? "The region is available and the durable worker will apply the selected proposal." : "Spectra kept the current region and will continue with any remaining independent work.",
+      actions: [],
+      updatedAt: now,
+    })));
+    return { runId: run._id, operationId: operation._id, queued: true };
+  },
+});
+
+export const cancelPending = mutation({
+  args: { runId: v.id("spectraAiRuns"), executionId: v.string() },
+  handler: async (ctx, args) => {
+    const run = await requireOwnedRun(ctx, args.runId);
     if (run.executionId !== args.executionId) throw new Error("This run attempt is no longer active");
     const operations = await ctx.db.query("spectraOperations").withIndex("by_run", (q) => q.eq("runId", args.runId)).collect();
     const pending = operations.filter((operation) => operation.status === "proposed" && operation.executionId === args.executionId);
@@ -140,4 +295,3 @@ export const cancelPending = mutation({
     return { cancelled: pending.length };
   },
 });
-

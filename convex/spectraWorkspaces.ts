@@ -1,9 +1,11 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import {
-  requireOwnedWorkspace,
+  requireWorkspaceCapability,
   requireSpectraActor,
 } from "./spectraShared";
+import { evaluateAccess, listDirectlyGrantedResourceIds } from "./authorityShared";
+import type { Doc } from "./_generated/dataModel";
 
 const vDefaultView = v.union(
   v.literal("cards"),
@@ -19,29 +21,51 @@ function liveWorkspace<T extends { title: string; description?: string; icon?: s
 
 export const list = query({
   args: {
-    actorClerkId: v.string(),
     includeArchived: v.optional(v.boolean()),
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    const actor = await requireSpectraActor(ctx, args.actorClerkId);
+    const actor = await requireSpectraActor(ctx);
     const limit = Math.max(1, Math.min(args.limit ?? 30, 100));
-    const workspaces = await ctx.db
+    const owned = await ctx.db
       .query("spectraWorkspaces")
       .withIndex("by_account_activity", (q) => q.eq("ownerAccountId", actor._id))
       .order("desc")
       .take(limit * 2);
-    return workspaces
+    const grantedIds = await listDirectlyGrantedResourceIds(ctx, actor, "workspace");
+    const granted = (await Promise.all(grantedIds.map(async (resourceId) => {
+      const id = ctx.db.normalizeId("spectraWorkspaces", resourceId);
+      if (!id) return null;
+      const decision = await evaluateAccess(ctx, "workspace", id);
+      return decision.allowed ? decision.loaded.resource as Doc<"spectraWorkspaces"> : null;
+    }))).filter((workspace): workspace is Doc<"spectraWorkspaces"> => Boolean(workspace));
+    const workspaces = [...new Map([...owned, ...granted].map((workspace) => [workspace._id, workspace])).values()];
+    const visible = workspaces
       .filter((workspace) => workspace.schoolId === actor.schoolId)
       .filter((workspace) => args.includeArchived || workspace.status === "active")
-      .slice(0, limit)
-      .map(liveWorkspace);
+      .sort((a, b) => b.lastActivityAt - a.lastActivityAt)
+      .slice(0, limit);
+    return Promise.all(visible.map(async (workspace) => {
+      const [decision, invitations] = await Promise.all([
+        evaluateAccess(ctx, "workspace", workspace._id),
+        ctx.db.query("shareInvitations").withIndex("by_resource", (q) => q.eq("resourceType", "workspace").eq("resourceId", workspace._id)).collect(),
+      ]);
+      const ownership = workspace.ownerAccountId === actor.accountId ? "owned" as const : "shared" as const;
+      const activeInvitations = invitations.filter((invitation) => (invitation.status === "pending" || invitation.status === "accepted") && (!invitation.expiresAt || invitation.expiresAt > Date.now()));
+      return liveWorkspace({
+        ...workspace,
+        ownership,
+        accessLevel: decision.allowed ? decision.level : null,
+        accessReason: decision.reason,
+        isShared: ownership === "shared" || activeInvitations.length > 0,
+        sharedWithCount: ownership === "owned" ? new Set(activeInvitations.map((invitation) => invitation.inviteeAccountId)).size : undefined,
+      });
+    }));
   },
 });
 
 export const create = mutation({
   args: {
-    actorClerkId: v.string(),
     title: v.string(),
     description: v.optional(v.string()),
     icon: v.optional(v.string()),
@@ -49,7 +73,7 @@ export const create = mutation({
     defaultView: v.optional(vDefaultView),
   },
   handler: async (ctx, args) => {
-    const actor = await requireSpectraActor(ctx, args.actorClerkId);
+    const actor = await requireSpectraActor(ctx);
     const now = Date.now();
     return ctx.db.insert("spectraWorkspaces", {
       ownerAccountId: actor._id,
@@ -69,7 +93,6 @@ export const create = mutation({
 
 export const update = mutation({
   args: {
-    actorClerkId: v.string(),
     workspaceId: v.id("spectraWorkspaces"),
     title: v.optional(v.string()),
     description: v.optional(v.string()),
@@ -80,10 +103,10 @@ export const update = mutation({
     executionId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const { workspace } = await requireOwnedWorkspace(ctx, args.actorClerkId, args.workspaceId);
+    const { actor, workspace } = await requireWorkspaceCapability(ctx, args.workspaceId, "modify");
     if (args.runId) {
       const run = await ctx.db.get(args.runId);
-      if (!run || run.ownerAccountId !== workspace.ownerAccountId || run.status !== "running" || !args.executionId || run.executionId !== args.executionId) throw new Error("AI run not found");
+      if (!run || run.ownerAccountId !== actor.accountId || run.schoolId !== actor.schoolId || run.status !== "running" || !args.executionId || run.executionId !== args.executionId) throw new Error("AI run not found");
     }
     const patch: {
       title?: string;
@@ -118,9 +141,9 @@ export const update = mutation({
 });
 
 export const createPending = mutation({
-  args: { actorClerkId: v.string(), runId: v.id("spectraAiRuns"), executionId: v.string(), title: v.string(), description: v.optional(v.string()), icon: v.optional(v.string()), color: v.optional(v.string()) },
+  args: { runId: v.id("spectraAiRuns"), executionId: v.string(), title: v.string(), description: v.optional(v.string()), icon: v.optional(v.string()), color: v.optional(v.string()) },
   handler: async (ctx, args) => {
-    const actor = await requireSpectraActor(ctx, args.actorClerkId);
+    const actor = await requireSpectraActor(ctx);
     const run = await ctx.db.get(args.runId);
     if (!run || run.ownerAccountId !== actor._id || run.schoolId !== actor.schoolId || run.status !== "running" || run.executionId !== args.executionId) throw new Error("AI run not found");
     const now = Date.now();
@@ -130,9 +153,9 @@ export const createPending = mutation({
 });
 
 export const finalizePending = mutation({
-  args: { actorClerkId: v.string(), workspaceId: v.id("spectraWorkspaces"), runId: v.id("spectraAiRuns"), executionId: v.string(), title: v.string(), description: v.optional(v.string()), icon: v.optional(v.string()), color: v.optional(v.string()) },
+  args: { workspaceId: v.id("spectraWorkspaces"), runId: v.id("spectraAiRuns"), executionId: v.string(), title: v.string(), description: v.optional(v.string()), icon: v.optional(v.string()), color: v.optional(v.string()) },
   handler: async (ctx, args) => {
-    const { workspace } = await requireOwnedWorkspace(ctx, args.actorClerkId, args.workspaceId);
+    const { workspace } = await requireWorkspaceCapability(ctx, args.workspaceId, "modify");
     const run = await ctx.db.get(args.runId);
     if (!run || run.status !== "running" || run.executionId !== args.executionId || workspace.aiRunId !== args.runId || workspace.aiExecutionId !== args.executionId || workspace.aiState !== "creating") throw new Error("This pending workspace is no longer available.");
     const now = Date.now();
@@ -142,20 +165,20 @@ export const finalizePending = mutation({
 });
 
 export const stageAiPatch = mutation({
-  args: { actorClerkId: v.string(), workspaceId: v.id("spectraWorkspaces"), runId: v.id("spectraAiRuns"), executionId: v.string(), title: v.optional(v.string()), description: v.optional(v.string()), icon: v.optional(v.string()), color: v.optional(v.string()) },
+  args: { workspaceId: v.id("spectraWorkspaces"), runId: v.id("spectraAiRuns"), executionId: v.string(), title: v.optional(v.string()), description: v.optional(v.string()), icon: v.optional(v.string()), color: v.optional(v.string()) },
   handler: async (ctx, args) => {
-    const { workspace } = await requireOwnedWorkspace(ctx, args.actorClerkId, args.workspaceId);
+    const { actor, workspace } = await requireWorkspaceCapability(ctx, args.workspaceId, "modify");
     const run = await ctx.db.get(args.runId);
-    if (!run || run.ownerAccountId !== workspace.ownerAccountId || run.status !== "running" || run.executionId !== args.executionId) throw new Error("AI run not found");
+    if (!run || run.ownerAccountId !== actor.accountId || run.schoolId !== actor.schoolId || run.status !== "running" || run.executionId !== args.executionId) throw new Error("AI run not found");
     await ctx.db.patch(args.workspaceId, { aiState: "updating", aiRunId: args.runId, aiExecutionId: args.executionId, aiPreview: { title: args.title, description: args.description, icon: args.icon, color: args.color, startedAt: Date.now() }, updatedAt: Date.now() });
     return { workspaceId: args.workspaceId };
   },
 });
 
 export const settleForRun = mutation({
-  args: { actorClerkId: v.string(), runId: v.id("spectraAiRuns"), executionId: v.string(), outcome: v.union(v.literal("clear"), v.literal("failed")) },
+  args: { runId: v.id("spectraAiRuns"), executionId: v.string(), outcome: v.union(v.literal("clear"), v.literal("failed")) },
   handler: async (ctx, args) => {
-    const actor = await requireSpectraActor(ctx, args.actorClerkId);
+    const actor = await requireSpectraActor(ctx);
     const run = await ctx.db.get(args.runId);
     if (!run || run.ownerAccountId !== actor._id || run.schoolId !== actor.schoolId || run.executionId !== args.executionId) throw new Error("This run attempt is no longer active.");
     const rows = await ctx.db.query("spectraWorkspaces").withIndex("by_account_activity", (q) => q.eq("ownerAccountId", actor._id)).collect();
@@ -164,7 +187,7 @@ export const settleForRun = mutation({
     for (const workspace of affected) {
       if (workspace.aiPending) {
         await ctx.db.delete(workspace._id);
-      } else await ctx.db.patch(workspace._id, args.outcome === "clear" ? { aiState: undefined, aiRunId: undefined, aiExecutionId: undefined, aiPreview: undefined, updatedAt: now } : { aiState: "failed", updatedAt: now });
+      } else await ctx.db.patch(workspace._id, { aiState: undefined, aiRunId: undefined, aiExecutionId: undefined, aiPreview: undefined, updatedAt: now });
     }
     return { settled: affected.length };
   },
@@ -172,11 +195,10 @@ export const settleForRun = mutation({
 
 export const archive = mutation({
   args: {
-    actorClerkId: v.string(),
     workspaceId: v.id("spectraWorkspaces"),
   },
   handler: async (ctx, args) => {
-    await requireOwnedWorkspace(ctx, args.actorClerkId, args.workspaceId);
+    await requireWorkspaceCapability(ctx, args.workspaceId, "delete");
     await ctx.db.patch(args.workspaceId, {
       status: "archived",
       updatedAt: Date.now(),
@@ -188,12 +210,11 @@ export const archive = mutation({
 
 export const permanentlyDelete = mutation({
   args: {
-    actorClerkId: v.string(),
     workspaceId: v.id("spectraWorkspaces"),
     confirmation: v.string(),
   },
   handler: async (ctx, args) => {
-    const { workspace } = await requireOwnedWorkspace(ctx, args.actorClerkId, args.workspaceId);
+    const { workspace } = await requireWorkspaceCapability(ctx, args.workspaceId, "delete");
     const expected = `Remove ${workspace.title} permanently`;
     if (args.confirmation !== expected) throw new Error(`Type â€œ${expected}â€ to confirm`);
 
@@ -203,38 +224,13 @@ export const permanentlyDelete = mutation({
       .collect();
     const artifactIds = Array.from(new Set(items.filter((item) => item.sourceType === "artifact").map((item) => item.sourceId)));
 
-    let deletedArtifactCount = 0;
+    // Workspaces organize artifacts; they never own their content. Removing a
+    // workspace therefore detaches placements and provenance instead of
+    // cascading into artifacts, history, links, AI runs, or collaborators'
+    // work. Unplaced owned artifacts naturally return to Inbox.
     for (const sourceId of artifactIds) {
-      const allPlacements = await ctx.db
-        .query("spectraWorkspaceItems")
-        .withIndex("by_source", (q) => q.eq("sourceType", "artifact").eq("sourceId", sourceId))
-        .collect();
-      const otherVisiblePlacements = allPlacements.filter((placement) => placement.workspaceId !== args.workspaceId && placement.viewData.hidden !== true);
       const artifact = ctx.db.normalizeId("spectraArtifacts", sourceId);
-      if (artifact && otherVisiblePlacements.length === 0) {
-        const document = await ctx.db.get(artifact);
-        if (document) {
-          const artifactRuns = await ctx.db.query("spectraAiRuns").withIndex("by_artifact", (q) => q.eq("artifactId", artifact)).collect();
-          for (const run of artifactRuns) {
-            const [operations, cards] = await Promise.all([
-              ctx.db.query("spectraOperations").withIndex("by_run", (q) => q.eq("runId", run._id)).collect(),
-              ctx.db.query("spectraResultCards").withIndex("by_run", (q) => q.eq("runId", run._id)).collect(),
-            ]);
-            await Promise.all([...operations.map((operation) => ctx.db.delete(operation._id)), ...cards.map((card) => ctx.db.delete(card._id))]);
-            await ctx.db.delete(run._id);
-          }
-          await Promise.all(allPlacements.map((placement) => ctx.db.delete(placement._id)));
-          const [outgoingLinks, incomingLinks, versions] = await Promise.all([
-            ctx.db.query("spectraArtifactLinks").withIndex("by_source", (q) => q.eq("sourceArtifactId", artifact)).collect(),
-            ctx.db.query("spectraArtifactLinks").withIndex("by_target", (q) => q.eq("targetArtifactId", artifact)).collect(),
-            ctx.db.query("spectraArtifactVersions").withIndex("by_artifact_created", (q) => q.eq("artifactId", artifact)).collect(),
-          ]);
-          const linkedRows = [...new Map([...outgoingLinks, ...incomingLinks].map((link) => [link._id, link])).values()];
-          await Promise.all([...linkedRows.map((link) => ctx.db.delete(link._id)), ...versions.map((version) => ctx.db.delete(version._id))]);
-          await ctx.db.delete(artifact);
-          deletedArtifactCount += 1;
-        }
-      } else if (artifact) {
+      if (artifact) {
         const document = await ctx.db.get(artifact);
         if (document?.createdFrom?.workspaceId === args.workspaceId) {
           await ctx.db.patch(artifact, { createdFrom: { ...document.createdFrom, workspaceId: undefined } });
@@ -247,22 +243,19 @@ export const permanentlyDelete = mutation({
       if (current) await ctx.db.delete(item._id);
     }));
 
-    const runs = await ctx.db
+    const [threads, runs] = await Promise.all([
+      ctx.db.query("spectraThreads").withIndex("by_workspace", (q) => q.eq("workspaceId", args.workspaceId)).collect(),
+      ctx.db
       .query("spectraAiRuns")
       .withIndex("by_workspace", (q) => q.eq("workspaceId", args.workspaceId))
-      .collect();
-    for (const run of runs) {
-      const [operations, cards] = await Promise.all([
-        ctx.db.query("spectraOperations").withIndex("by_run", (q) => q.eq("runId", run._id)).collect(),
-        ctx.db.query("spectraResultCards").withIndex("by_run", (q) => q.eq("runId", run._id)).collect(),
-      ]);
-      await Promise.all([...operations.map((operation) => ctx.db.delete(operation._id)), ...cards.map((card) => ctx.db.delete(card._id))]);
-      await ctx.db.delete(run._id);
-    }
+      .collect(),
+    ]);
+    await Promise.all([
+      ...threads.map((thread) => ctx.db.patch(thread._id, { workspaceId: undefined, updatedAt: Date.now() })),
+      ...runs.map((run) => ctx.db.patch(run._id, { workspaceId: undefined, updatedAt: Date.now() })),
+    ]);
 
     await ctx.db.delete(args.workspaceId);
-    return { workspaceId: args.workspaceId, deletedArtifactCount, deletedRunCount: runs.length };
+    return { workspaceId: args.workspaceId, detachedArtifactCount: artifactIds.length, detachedThreadCount: threads.length, preservedRunCount: runs.length };
   },
 });
-
-

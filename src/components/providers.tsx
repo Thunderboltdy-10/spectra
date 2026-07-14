@@ -6,12 +6,26 @@ import { GlobalSettingsDrawer } from "@/components/global-settings-drawer";
 import { ThemeProvider } from "@/components/theme-provider";
 import { DynamicFavicon } from "@/components/spectra-logo";
 import { GlobalErrorBoundary } from "@/components/global-error-boundary";
+import { useAuth } from "@clerk/nextjs";
+import { ConvexReactClient } from "convex/react";
+import { ConvexProviderWithClerk } from "convex/react-clerk";
+
+const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
+const convexClient = convexUrl ? new ConvexReactClient(convexUrl) : null;
+
+function LiveDataProvider({ children }: { children: React.ReactNode }) {
+  if (!convexClient) throw new Error("NEXT_PUBLIC_CONVEX_URL is required.");
+  return <ConvexProviderWithClerk client={convexClient} useAuth={useAuth}>{children}</ConvexProviderWithClerk>;
+}
 
 export function Providers({ children }: { children: React.ReactNode }) {
+  const content = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+    ? <LiveDataProvider>{children}</LiveDataProvider>
+    : children;
   return (
     <GlobalErrorBoundary>
       <ThemeProvider>
-        {children}
+        {content}
         <DynamicFavicon />
         <GlobalSettingsDrawer />
         <CookieConsentManager />

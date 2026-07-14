@@ -41,7 +41,8 @@ describe("Wave 4 controlled operation engine", () => {
     const policy = evaluatePlanPolicy(plan.operations, { intent });
     expect(policy.visibleObjectCreations).toBe(1);
     expect(policy.requiresConfirmation).toBe(false);
-    expect(plan.operations[0]?.type === "artifact.create" && plan.operations[0].input.content.cards).toHaveLength(6);
+    const operation = plan.operations[0];
+    expect(operation?.type === "artifact.create" && operation.input.blueprintKey === "flashcard_deck" ? operation.input.content.cards : []).toHaveLength(6);
   });
 
   it("allows one typed create when the model reports an inconsistent zero visible count", () => {

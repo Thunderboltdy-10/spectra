@@ -82,7 +82,7 @@ export function artifactPlacements(artifact?: SpectraArtifact | null): NonNullab
   return artifact?.placements ?? [];
 }
 
-export function artifactPlacementStatus(artifact?: SpectraArtifact | null): "inbox" | "workspace" {
+export function artifactPlacementStatus(artifact?: SpectraArtifact | null): "inbox" | "shared" | "workspace" {
   const placements = artifactPlacements(artifact);
   return artifact?.placementStatus ?? (placements.length > 0 ? "workspace" : "inbox");
 }
@@ -95,7 +95,7 @@ export function demoMeta(artifact?: SpectraArtifact | null): DemoMeta {
   return spectraDemo as DemoMeta;
 }
 
-export function artifactToCard(artifact: SpectraArtifact, placement?: "inbox" | "workspace"): ArtifactCardView {
+export function artifactToCard(artifact: SpectraArtifact, placement?: "inbox" | "shared" | "workspace"): ArtifactCardView {
   const meta = demoMeta(artifact);
   const placements = artifactPlacements(artifact);
   return {
@@ -105,6 +105,8 @@ export function artifactToCard(artifact: SpectraArtifact, placement?: "inbox" | 
     summary: artifact.summary ?? "No summary yet.",
     meta: placements.length > 0 ? placements.map((item) => item.workspaceTitle).join(", ") : "Created recently",
     placement: placement ?? artifactPlacementStatus(artifact),
+    shared: artifact.isShared,
+    accessLevel: artifact.accessLevel ?? undefined,
     updatedAt: artifact.updatedAt,
     metrics: meta.metrics,
     aiState: artifact.aiState === "edited" && artifact.aiStateExpiresAt && artifact.aiStateExpiresAt <= Date.now() ? undefined : artifact.aiState,
@@ -122,6 +124,8 @@ export function workspaceItemToCard(item: SpectraWorkspaceItem): ArtifactCardVie
     summary: item.viewData.compactSummary ?? item.artifact.summary ?? "No summary yet.",
     meta: item.viewData.pinned ? "Pinned" : formatRelativeTime(item.updatedAt),
     placement: "workspace",
+    shared: item.artifact.isShared,
+    accessLevel: item.artifact.accessLevel ?? undefined,
     updatedAt: item.updatedAt,
     pinned: item.viewData.pinned,
     variant: item.viewData.cardVariant,

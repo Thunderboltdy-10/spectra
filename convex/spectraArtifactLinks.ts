@@ -1,7 +1,7 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
-import { requireOwnedArtifact, requireOwnedWorkspace, requireSpectraActor } from "./spectraShared";
+import { requireArtifactCapability, requireWorkspaceCapability, requireSpectraActor } from "./spectraShared";
 
 const vRelationType = v.union(
   v.literal("related"),
@@ -14,16 +14,16 @@ const vRelationType = v.union(
 );
 
 async function hydrate(ctx: Parameters<typeof requireSpectraActor>[0], artifactId: Id<"spectraArtifacts">) {
-  const artifact = await ctx.db.get(artifactId);
+  const { artifact } = await requireArtifactCapability(ctx, artifactId).catch(() => ({ artifact: null }));
   return artifact && artifact.status === "active"
     ? { id: artifact._id, title: artifact.title, summary: artifact.summary, blueprintKey: artifact.blueprintKey, updatedAt: artifact.updatedAt }
     : null;
 }
 
 export const listForArtifact = query({
-  args: { actorClerkId: v.string(), artifactId: v.id("spectraArtifacts"), limit: v.optional(v.number()) },
+  args: { artifactId: v.id("spectraArtifacts"), limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
-    await requireOwnedArtifact(ctx, args.actorClerkId, args.artifactId);
+    await requireArtifactCapability(ctx, args.artifactId);
     const limit = Math.max(1, Math.min(args.limit ?? 20, 50));
     const [outgoing, incoming] = await Promise.all([
       ctx.db.query("spectraArtifactLinks").withIndex("by_source", (q) => q.eq("sourceArtifactId", args.artifactId)).order("desc").take(limit),
@@ -38,7 +38,6 @@ export const listForArtifact = query({
 
 export const create = mutation({
   args: {
-    actorClerkId: v.string(),
     sourceArtifactId: v.id("spectraArtifacts"),
     targetArtifactId: v.id("spectraArtifacts"),
     relationType: vRelationType,
@@ -49,10 +48,10 @@ export const create = mutation({
     runId: v.optional(v.id("spectraAiRuns")),
   },
   handler: async (ctx, args) => {
-    const { actor } = await requireOwnedArtifact(ctx, args.actorClerkId, args.sourceArtifactId);
-    await requireOwnedArtifact(ctx, args.actorClerkId, args.targetArtifactId);
+    const { actor } = await requireArtifactCapability(ctx, args.sourceArtifactId, "modify");
+    await requireArtifactCapability(ctx, args.targetArtifactId);
     if (args.sourceArtifactId === args.targetArtifactId) throw new Error("An artifact cannot link to itself");
-    if (args.workspaceId) await requireOwnedWorkspace(ctx, args.actorClerkId, args.workspaceId);
+    if (args.workspaceId) await requireWorkspaceCapability(ctx, args.workspaceId, "modify");
     const existing = await ctx.db.query("spectraArtifactLinks")
       .withIndex("by_pair", (q) => q.eq("sourceArtifactId", args.sourceArtifactId).eq("targetArtifactId", args.targetArtifactId))
       .first();
@@ -87,14 +86,13 @@ export const create = mutation({
 });
 
 export const remove = mutation({
-  args: { actorClerkId: v.string(), linkId: v.id("spectraArtifactLinks") },
+  args: { linkId: v.id("spectraArtifactLinks") },
   handler: async (ctx, args) => {
-    const actor = await requireSpectraActor(ctx, args.actorClerkId);
     const link = await ctx.db.get(args.linkId);
-    if (!link || link.ownerAccountId !== actor._id || link.schoolId !== actor.schoolId) throw new Error("Artifact link not found");
+    if (!link) throw new Error("Artifact link not found");
+    await requireArtifactCapability(ctx, link.sourceArtifactId, "modify");
     await ctx.db.delete(args.linkId);
     return { linkId: args.linkId };
   },
 });
-
 

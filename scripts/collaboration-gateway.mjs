@@ -1,0 +1,286 @@
+import { Server } from "@hocuspocus/server";
+import { ConvexHttpClient } from "convex/browser";
+import { makeFunctionReference } from "convex/server";
+import { createHash, createHmac, randomBytes } from "node:crypto";
+import { jwtVerify } from "jose";
+import * as Y from "yjs";
+import * as decoding from "lib0/decoding";
+import { messageYjsSyncStep2, messageYjsUpdate } from "y-protocols/sync";
+
+const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL || process.env.CONVEX_URL;
+const tokenSecret = process.env.SPECTRA_COLLAB_TOKEN_SECRET;
+const bridgeKey = process.env.SPECTRA_COLLAB_BRIDGE_KEY;
+if (!convexUrl) throw new Error("COLLABORATION_CONVEX_URL_MISSING");
+if (!tokenSecret || tokenSecret.length < 32) throw new Error("COLLABORATION_TOKEN_CONFIG_MISSING");
+if (!bridgeKey || bridgeKey.length < 32) throw new Error("COLLABORATION_BRIDGE_CONFIG_MISSING");
+
+const convex = new ConvexHttpClient(convexUrl, { logger: false });
+const exchange = makeFunctionReference("collaborationGatewayBridge:exchange");
+const jwtKey = new TextEncoder().encode(tokenSecret);
+const META_MAP = "spectra:artifact-meta";
+const REGION_MAP = "spectra:artifact-regions";
+const REGION_MARKER = "$spectraRegion";
+const GATEWAY_PROTOCOL_VERSION = 1;
+
+function bridge(operation, payload) {
+  const payloadJson = JSON.stringify(payload);
+  const timestamp = Date.now();
+  const nonce = randomBytes(24).toString("base64url");
+  const digest = createHash("sha256").update(payloadJson).digest("base64url");
+  const signature = createHmac("sha256", bridgeKey).update([operation, timestamp, nonce, digest].join("|")).digest("base64url");
+  return convex.action(exchange, { operation, payloadJson, timestamp, nonce, signature });
+}
+
+function sessionClaims(payload, documentName) {
+  const required = ["artifactId", "roomId", "partitionKey", "documentName", "accountId", "schoolId", "clientId", "displayName", "level"];
+  for (const key of required) if (typeof payload[key] !== "string" || !payload[key]) throw new Error("COLLABORATION_TOKEN_INVALID");
+  if (payload.kind !== "spectra_collaboration" || payload.documentName !== documentName || typeof payload.policyVersion !== "number" || typeof payload.schemaVersion !== "number" || typeof payload.exp !== "number") throw new Error("COLLABORATION_TOKEN_INVALID");
+  return payload;
+}
+
+function presenceColor(accountId) {
+  const colors = ["#2f8f83", "#4c78c4", "#8a63c7", "#c06a42", "#a67c23", "#4f8a52", "#b85578", "#567f96"];
+  let hash = 0;
+  for (const character of accountId) hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
+  return colors[hash % colors.length];
+}
+
+function boundedPresence(value, max = 4_000) {
+  if (value === undefined) return undefined;
+  try {
+    return JSON.stringify(value).length <= max ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function expandProjection(value, regions, active = new Set()) {
+  if (value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 1 && typeof value[REGION_MARKER] === "string") {
+    const regionId = value[REGION_MARKER];
+    if (active.has(regionId)) throw new Error("COLLABORATION_PROJECTION_CYCLE");
+    const encoded = regions.get(regionId);
+    if (typeof encoded !== "string") throw new Error("COLLABORATION_PROJECTION_REGION_MISSING");
+    const nextActive = new Set(active);
+    nextActive.add(regionId);
+    return expandProjection(JSON.parse(encoded).value, regions, nextActive);
+  }
+  if (Array.isArray(value)) return value.map((entry) => expandProjection(entry, regions, active));
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, expandProjection(entry, regions, active)]));
+  return value;
+}
+
+function artifactProjection(document) {
+  const metadata = document.getMap(META_MAP);
+  if (metadata.get("initialized") !== true) return null;
+  const rootTemplate = metadata.get("rootTemplate");
+  const title = metadata.get("title");
+  const summary = metadata.get("summary");
+  const tags = metadata.get("tags");
+  const typeKey = metadata.get("typeKey");
+  const schemaVersion = metadata.get("schemaVersion");
+  if (typeof rootTemplate !== "string" || typeof title !== "string" || typeof typeKey !== "string" || typeof schemaVersion !== "number" || !Array.isArray(tags) || !tags.every((tag) => typeof tag === "string")) throw new Error("COLLABORATION_PROJECTION_INVALID");
+  const content = expandProjection(JSON.parse(rootTemplate), document.getMap(REGION_MAP));
+  const projection = JSON.stringify({ title, summary: typeof summary === "string" && summary ? summary : undefined, tags, typeKey, schemaVersion, content });
+  return projection.length <= 900_000 ? projection : null;
+}
+
+function artifactModelState(document) {
+  const metadata = document.getMap(META_MAP);
+  const sortedEntries = (map) => [...map.entries()].sort(([left], [right]) => left.localeCompare(right));
+  return {
+    metadata: sortedEntries(metadata),
+    regions: sortedEntries(document.getMap(REGION_MAP)),
+    descriptors: sortedEntries(document.getMap("spectra:artifact-region-descriptors")),
+  };
+}
+
+function changedArtifactRegions(before, after) {
+  if (!before) return ["artifact:structure"];
+  const beforeMeta = new Map(before.metadata);
+  const afterMeta = new Map(after.metadata);
+  const changed = new Set();
+  const structuralMetadata = ["initialized", "modelVersion", "typeKey", "schemaVersion", "rootTemplate"];
+  if (structuralMetadata.some((key) => JSON.stringify(beforeMeta.get(key)) !== JSON.stringify(afterMeta.get(key))) || JSON.stringify(before.descriptors) !== JSON.stringify(after.descriptors)) return ["artifact:structure"];
+  for (const field of ["title", "summary", "tags"]) if (JSON.stringify(beforeMeta.get(field)) !== JSON.stringify(afterMeta.get(field))) changed.add(`metadata:${field}`);
+  const beforeRegions = new Map(before.regions);
+  const afterRegions = new Map(after.regions);
+  for (const regionId of new Set([...beforeRegions.keys(), ...afterRegions.keys()])) if (beforeRegions.get(regionId) !== afterRegions.get(regionId)) changed.add(regionId);
+  return [...changed];
+}
+
+function extractYjsUpdate(frame) {
+  const decoder = decoding.createDecoder(frame);
+  decoding.readVarString(decoder);
+  const outerType = decoding.readVarUint(decoder);
+  if (outerType !== 0 && outerType !== 4) return null;
+  const syncType = decoding.readVarUint(decoder);
+  if (syncType !== messageYjsSyncStep2 && syncType !== messageYjsUpdate) return null;
+  return decoding.readVarUint8Array(decoder);
+}
+
+async function reauthorize(context) {
+  const now = Date.now();
+  if (context.authorizationCheckedAt && now - context.authorizationCheckedAt < 1_500) return context;
+  if (context.expiresAt <= Math.floor(now / 1000)) throw new Error("COLLABORATION_TOKEN_EXPIRED");
+  const result = await bridge("authorize", { accountId: context.accountId, artifactId: context.artifactId, partitionKey: context.partitionKey, policyVersion: context.policyVersion });
+  if (!result?.allowed) throw new Error("COLLABORATION_ACCESS_REVOKED");
+  context.canModify = result.canModify === true;
+  context.authorizationCheckedAt = now;
+  return context;
+}
+
+const server = new Server({
+  name: "spectra-collaboration",
+  port: Number(process.env.SPECTRA_COLLAB_PORT || 1234),
+  timeout: 30_000,
+  debounce: 2_000,
+  maxDebounce: 10_000,
+  quiet: true,
+  websocketOptions: { maxPayload: 256 * 1024 },
+  maxUnauthenticatedQueueSize: 256 * 1024,
+  maxUnauthenticatedQueueMessages: 64,
+  maxPendingDocuments: 4,
+
+  async onRequest({ request, response }) {
+    if (request.url !== "/_spectra/health") return;
+    response.writeHead(200, {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store",
+    });
+    response.end(JSON.stringify({
+      service: "spectra-collaboration-gateway",
+      protocolVersion: GATEWAY_PROTOCOL_VERSION,
+      status: "ready",
+    }));
+    // Hocuspocus uses an empty rejection to signal that a request hook has
+    // fully handled the response and its default welcome body should not run.
+    throw null;
+  },
+
+  async onAuthenticate({ token, documentName, connection }) {
+    const verified = await jwtVerify(token, jwtKey, { issuer: "spectra", audience: "spectra-collaboration-gateway", algorithms: ["HS256"] });
+    const claims = sessionClaims(verified.payload, documentName);
+    const context = {
+      artifactId: claims.artifactId,
+      roomId: claims.roomId,
+      partitionKey: claims.partitionKey,
+      accountId: claims.accountId,
+      schoolId: claims.schoolId,
+      clientId: claims.clientId,
+      displayName: claims.displayName,
+      policyVersion: claims.policyVersion,
+      schemaVersion: claims.schemaVersion,
+      expiresAt: claims.exp,
+      canModify: claims.level === "modify",
+      authorizationCheckedAt: 0,
+    };
+    await reauthorize(context);
+    connection.readOnly = !context.canModify;
+    return context;
+  },
+
+  async beforeHandleMessage({ context, document, update: frame }) {
+    await reauthorize(context);
+    const documentUpdate = extractYjsUpdate(frame);
+    if (!documentUpdate || documentUpdate.byteLength === 0) return;
+    if (documentUpdate.byteLength > 256 * 1024) throw new Error("COLLABORATION_GATEWAY_UPDATE_SIZE");
+    const before = artifactModelState(document);
+    const baseStateVectorHash = createHash("sha256").update(Y.encodeStateVector(document)).digest("base64url");
+    const scratch = new Y.Doc();
+    try {
+      Y.applyUpdate(scratch, Y.encodeStateAsUpdate(document));
+      Y.applyUpdate(scratch, documentUpdate);
+      const after = artifactModelState(scratch);
+      const regionIds = changedArtifactRegions(before, after);
+      if (regionIds.length === 0) return;
+      if (!context.canModify) throw new Error("COLLABORATION_READ_ONLY");
+      if (regionIds.length > 128) throw new Error("COLLABORATION_MODEL_CHANGE_UNRECOGNIZED");
+      const stateVectorHash = createHash("sha256").update(Y.encodeStateVector(scratch)).digest("base64url");
+      const updateHash = createHash("sha256").update(documentUpdate).digest("base64url");
+      const projectionJson = artifactProjection(scratch);
+      // Persist and authorize the exact semantic mutation before Hocuspocus is
+      // allowed to apply or broadcast it. A rejected claim can therefore never
+      // contaminate the shared in-memory document.
+      await bridge("append", {
+        artifactId: context.artifactId,
+        partitionKey: context.partitionKey,
+        accountId: context.accountId,
+        clientId: context.clientId,
+        policyVersion: context.policyVersion,
+        idempotencyKey: `${context.clientId}:${updateHash}`,
+        update: Buffer.from(documentUpdate).toString("base64"),
+        baseStateVectorHash,
+        stateVectorHash,
+        regionIds,
+        projectionJson,
+        projectionHash: projectionJson ? createHash("sha256").update(projectionJson).digest("base64url") : null,
+      });
+    } finally {
+      scratch.destroy();
+    }
+  },
+
+  async beforeHandleAwareness({ context, states }) {
+    if (!context) {
+      states.clear();
+      return;
+    }
+    await reauthorize(context);
+    for (const [clientId, state] of states) {
+      const supplied = state?.user && typeof state.user === "object" ? state.user : {};
+      states.set(clientId, {
+        user: {
+          clientId: context.clientId,
+          accountId: context.accountId,
+          name: context.displayName,
+          color: presenceColor(context.accountId),
+          ...(typeof supplied.activeRegionId === "string" ? { activeRegionId: supplied.activeRegionId.slice(0, 240) } : {}),
+          ...(boundedPresence(supplied.cursor) !== undefined ? { cursor: boundedPresence(supplied.cursor) } : {}),
+          ...(boundedPresence(supplied.selection) !== undefined ? { selection: boundedPresence(supplied.selection) } : {}),
+          ...(boundedPresence(supplied.viewport) !== undefined ? { viewport: boundedPresence(supplied.viewport) } : {}),
+        },
+      });
+    }
+  },
+
+  async onLoadDocument({ context }) {
+    await reauthorize(context);
+    const stored = await bridge("load", { artifactId: context.artifactId, partitionKey: context.partitionKey });
+    const updates = [];
+    if (stored?.snapshot?.update) updates.push(new Uint8Array(Buffer.from(stored.snapshot.update, "base64")));
+    for (const entry of stored?.updates ?? []) updates.push(new Uint8Array(Buffer.from(entry.update, "base64")));
+    return updates.length > 0 ? Y.mergeUpdates(updates) : new Y.Doc();
+  },
+
+  async onStoreDocument({ document, lastContext }) {
+    if (!lastContext) return;
+    await reauthorize(lastContext);
+    const stored = await bridge("load", { artifactId: lastContext.artifactId, partitionKey: lastContext.partitionKey });
+    const throughSequence = (stored?.nextSequence ?? 1) - 1;
+    const currentSnapshotSequence = stored?.snapshot?.throughSequence ?? 0;
+    if (!stored?.roomId || throughSequence <= currentSnapshotSequence || throughSequence <= 0) return;
+    const update = Y.encodeStateAsUpdate(document);
+    const stateVector = Y.encodeStateVector(document);
+    if (update.byteLength > 760 * 1024 || stateVector.byteLength > 128 * 1024) return;
+    await bridge("snapshot", {
+      artifactId: lastContext.artifactId,
+      partitionKey: lastContext.partitionKey,
+      roomId: stored.roomId,
+      throughSequence,
+      update: Buffer.from(update).toString("base64"),
+      stateVector: Buffer.from(stateVector).toString("base64"),
+      contentHash: createHash("sha256").update(update).digest("base64url"),
+      schemaVersion: stored.schemaVersion,
+    });
+  },
+});
+
+await server.listen();
+process.stdout.write(`Spectra collaboration gateway listening on ${process.env.SPECTRA_COLLAB_PORT || 1234}\n`);
+
+async function shutdown() {
+  await server.destroy();
+  process.exit(0);
+}
+process.once("SIGINT", shutdown);
+process.once("SIGTERM", shutdown);

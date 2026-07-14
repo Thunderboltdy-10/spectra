@@ -1,8 +1,8 @@
 import { internalMutation, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
-import { getActorByClerkId } from "./identityShared";
-import { ensureThreadWorkspacePlacement } from "./spectraShared";
+import { getAuthenticatedActor } from "./identityShared";
+import { ensureThreadWorkspacePlacement, requireArtifactCapability, requireWorkspaceCapability } from "./spectraShared";
 
 const vOrigin = v.union(v.literal("chat"), v.literal("workspace"), v.literal("artifact"));
 const vRole = v.union(v.literal("user"), v.literal("assistant"), v.literal("system"), v.literal("tool"));
@@ -24,18 +24,17 @@ function cleanContent(value: string) {
   return value.replace(/\u0000/g, "").trim().slice(0, 60_000);
 }
 
-async function requireActor(ctx: Parameters<typeof getActorByClerkId>[0], clerkId: string) {
-  const actor = await getActorByClerkId(ctx, clerkId);
-  if (!actor) throw new Error("Unauthorized");
+async function requireActor(ctx: Parameters<typeof getAuthenticatedActor>[0]) {
+  const actor = await getAuthenticatedActor(ctx);
+  if (!actor) throw new Error("AUTH_NO_SCHOOL: An active school membership is required.");
   return actor;
 }
 
 async function requireOwnedThread(
-  ctx: Parameters<typeof getActorByClerkId>[0],
-  clerkId: string,
+  ctx: Parameters<typeof getAuthenticatedActor>[0],
   threadId: Id<"spectraThreads">,
 ) {
-  const actor = await requireActor(ctx, clerkId);
+  const actor = await requireActor(ctx);
   const thread = await ctx.db.get(threadId);
   if (!thread || thread.ownerAccountId !== actor._id || thread.schoolId !== actor.schoolId || thread.status === "deleted") {
     throw new Error("Thread not found");
@@ -45,22 +44,15 @@ async function requireOwnedThread(
 
 export const create = mutation({
   args: {
-    actorClerkId: v.string(),
     title: v.optional(v.string()),
     origin: vOrigin,
     workspaceId: v.optional(v.id("spectraWorkspaces")),
     artifactId: v.optional(v.id("spectraArtifacts")),
   },
   handler: async (ctx, args) => {
-    const actor = await requireActor(ctx, args.actorClerkId);
-    if (args.workspaceId) {
-      const workspace = await ctx.db.get(args.workspaceId);
-      if (!workspace || workspace.ownerAccountId !== actor._id || workspace.schoolId !== actor.schoolId) throw new Error("Workspace not found");
-    }
-    if (args.artifactId) {
-      const artifact = await ctx.db.get(args.artifactId);
-      if (!artifact || artifact.ownerAccountId !== actor._id || artifact.schoolId !== actor.schoolId) throw new Error("Artifact not found");
-    }
+    const actor = await requireActor(ctx);
+    if (args.workspaceId) await requireWorkspaceCapability(ctx, args.workspaceId, "read");
+    if (args.artifactId) await requireArtifactCapability(ctx, args.artifactId, "read");
     const now = Date.now();
     const threadId = await ctx.db.insert("spectraThreads", {
       ownerAccountId: actor._id,
@@ -88,7 +80,6 @@ export const create = mutation({
 
 export const appendMessage = mutation({
   args: {
-    actorClerkId: v.string(),
     threadId: v.id("spectraThreads"),
     role: vRole,
     content: v.string(),
@@ -98,7 +89,7 @@ export const appendMessage = mutation({
     metadata: v.optional(v.any()),
   },
   handler: async (ctx, args) => {
-    const { thread } = await requireOwnedThread(ctx, args.actorClerkId, args.threadId);
+    const { thread } = await requireOwnedThread(ctx, args.threadId);
     const content = cleanContent(args.content);
     if (!content) throw new Error("Message content is required");
     if (args.clientMessageId) {
@@ -159,7 +150,6 @@ export const appendMessage = mutation({
 
 export const selectMessageChoice = mutation({
   args: {
-    actorClerkId: v.string(),
     messageId: v.id("spectraMessages"),
     choiceKey: v.string(),
     choiceTitle: v.string(),
@@ -167,7 +157,7 @@ export const selectMessageChoice = mutation({
   handler: async (ctx, args) => {
     const message = await ctx.db.get(args.messageId);
     if (!message) throw new Error("This choice is no longer available.");
-    await requireOwnedThread(ctx, args.actorClerkId, message.threadId);
+    await requireOwnedThread(ctx, message.threadId);
     const metadata = message.metadata && typeof message.metadata === "object" ? message.metadata as Record<string, unknown> : {};
     const existing = metadata.choiceSelection;
     if (existing && typeof existing === "object") {
@@ -192,9 +182,9 @@ export const selectMessageChoice = mutation({
 });
 
 export const list = query({
-  args: { actorClerkId: v.string(), includeArchived: v.optional(v.boolean()), limit: v.optional(v.number()) },
+  args: { includeArchived: v.optional(v.boolean()), limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
-    const actor = await requireActor(ctx, args.actorClerkId);
+    const actor = await requireActor(ctx);
     const limit = Math.max(1, Math.min(args.limit ?? 80, 200));
     const rows = await ctx.db.query("spectraThreads")
       .withIndex("by_account_status", (q) => q.eq("ownerAccountId", actor._id).eq("status", "active"))
@@ -211,9 +201,9 @@ export const list = query({
 });
 
 export const get = query({
-  args: { actorClerkId: v.string(), threadId: v.id("spectraThreads") },
+  args: { threadId: v.id("spectraThreads") },
   handler: async (ctx, args) => {
-    const { actor, thread } = await requireOwnedThread(ctx, args.actorClerkId, args.threadId);
+    const { actor, thread } = await requireOwnedThread(ctx, args.threadId);
     const messages = await ctx.db.query("spectraMessages").withIndex("by_thread_created", (q) => q.eq("threadId", args.threadId)).order("desc").take(160);
     messages.reverse();
     const runIds = [...new Set(messages.flatMap((message) => message.runId ? [message.runId] : []))];
@@ -240,13 +230,13 @@ export const get = query({
 
 export const update = mutation({
   args: {
-    actorClerkId: v.string(), threadId: v.id("spectraThreads"),
+    threadId: v.id("spectraThreads"),
     title: v.optional(v.string()), pinned: v.optional(v.boolean()),
     workspaceId: v.optional(v.union(v.id("spectraWorkspaces"), v.null())),
     status: v.optional(v.union(v.literal("active"), v.literal("archived"))),
   },
   handler: async (ctx, args) => {
-    const { actor, thread } = await requireOwnedThread(ctx, args.actorClerkId, args.threadId);
+    const { actor, thread } = await requireOwnedThread(ctx, args.threadId);
     if (args.workspaceId) {
       const workspace = await ctx.db.get(args.workspaceId);
       if (!workspace || workspace.ownerAccountId !== actor._id || workspace.schoolId !== actor.schoolId || workspace.status !== "active") throw new Error("Workspace not found");
@@ -281,7 +271,6 @@ export const update = mutation({
 
 export const applyGeneratedMetadata = mutation({
   args: {
-    actorClerkId: v.string(),
     threadId: v.id("spectraThreads"),
     runId: v.id("spectraAiRuns"),
     executionId: v.string(),
@@ -289,7 +278,7 @@ export const applyGeneratedMetadata = mutation({
     summary: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const { thread } = await requireOwnedThread(ctx, args.actorClerkId, args.threadId);
+    const { thread } = await requireOwnedThread(ctx, args.threadId);
     const run = await ctx.db.get(args.runId);
     if (!run || run.threadId !== args.threadId || run.status !== "running" || run.executionId !== args.executionId) throw new Error("This title belongs to an older run attempt.");
     const messageCount = thread.messageCount ?? 0;
@@ -314,11 +303,11 @@ export const applyGeneratedMetadata = mutation({
 
 export const createFromRun = mutation({
   args: {
-    actorClerkId: v.string(), runId: v.id("spectraAiRuns"),
+    runId: v.id("spectraAiRuns"),
     placeInWorkspace: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
-    const actor = await requireActor(ctx, args.actorClerkId);
+    const actor = await requireActor(ctx);
     const run = await ctx.db.get(args.runId);
     if (!run || run.ownerAccountId !== actor._id || run.schoolId !== actor.schoolId) throw new Error("AI run not found");
     if (!run.threadId) throw new Error("This older run has no conversation to keep.");
@@ -381,4 +370,3 @@ export const migrateLegacyThreadReferences = internalMutation({
     return { scanned: legacy.length, migrated, removed, complete: legacy.length < Math.max(1, Math.min(args.limit ?? 100, 500)) };
   },
 });
-

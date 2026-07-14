@@ -13,7 +13,6 @@ import { CommandBar } from "../components/command-bar";
 import { ContextFocusControl, GlobalSearch, type ComposerFocusMode } from "../components/context-controls";
 import { ArtifactStudio, useArtifactStudioState } from "../components/artifact-studio";
 import { LiveThreadPanel } from "../components/live-thread-panel";
-import type { ArtifactPayload } from "../components/artifact-blueprint-sheet";
 import { getSpectraArtifact, getSpectraOverview, getSpectraResultCards, getSpectraThread, getSpectraThreads, postSpectra, type SpectraArtifact, type SpectraResultCard, type SpectraThread, type SpectraThreadDetail, type SpectraWorkspace } from "../data/api";
 
 export function ChatShell() {
@@ -54,16 +53,19 @@ export function ChatShell() {
   }, []);
 
   const refresh = useCallback(async (nextThreadId?: string | null) => {
-    const [threadRows, overview, selected] = await Promise.all([
+    const [threadRows, overview] = await Promise.all([
       getSpectraThreads({ limit: 100 }),
       getSpectraOverview(),
-      nextThreadId ? getSpectraThread(nextThreadId) : Promise.resolve(null),
     ]);
+    const selected = nextThreadId
+      ? await getSpectraThread(nextThreadId).catch(() => null)
+      : null;
     setThreads(threadRows.threads);
     setWorkspaces(overview.workspaces);
     setArtifacts(overview.artifacts);
     if (nextThreadId === activeThreadRef.current) setDetail(selected);
     window.dispatchEvent(new Event("spectra:threads-changed"));
+    return { threadFound: !nextThreadId || Boolean(selected) };
   }, []);
 
   useEffect(() => {
@@ -73,11 +75,22 @@ export function ChatShell() {
     }
     activeThreadRef.current = requestedThreadId;
     setLoading(Boolean(requestedThreadId));
-    void refresh(requestedThreadId).catch((error) => toast.error(error instanceof Error ? error.message : "Could not load chat.")).finally(() => setLoading(false));
-  }, [composerThread?.id, requestedThreadId, refresh, setComposerThread]);
+    void refresh(requestedThreadId)
+      .then(({ threadFound }) => {
+        if (threadFound || !requestedThreadId || activeThreadRef.current !== requestedThreadId) return;
+        activeThreadRef.current = null;
+        setThreadId(null);
+        setDetail(null);
+        setComposerThread(null);
+        router.replace("/chat?new=1");
+        toast.message("That conversation is no longer available. Opened a new conversation instead.");
+      })
+      .catch((error) => toast.error(error instanceof Error ? error.message : "Could not load chat."))
+      .finally(() => setLoading(false));
+  }, [composerThread?.id, requestedThreadId, refresh, router, setComposerThread]);
 
   useEffect(() => {
-    if (!threadId || !detail?.traces.some((trace) => trace.run.status === "queued" || trace.run.status === "running" || trace.run.status === "awaiting_confirmation")) return;
+    if (!threadId || !detail?.traces.some((trace) => trace.run.status === "queued" || trace.run.status === "running" || trace.run.status === "awaiting_confirmation" || trace.run.status === "awaiting_resolution")) return;
     const timer = window.setInterval(() => void getSpectraThread(threadId).then(setDetail).catch(() => undefined), 750);
     return () => window.clearInterval(timer);
   }, [detail?.traces, threadId]);
@@ -131,17 +144,6 @@ export function ChatShell() {
     }
     studio.openSplit(artifact);
   }, [artifacts, composerThread?.id, setLiveThread, studio, threadId]);
-
-  const updateArtifact = useCallback(async (artifactId: string, payload: ArtifactPayload) => {
-    await postSpectra({ action: "updateArtifact", artifactId, title: payload.title, summary: payload.summary, content: payload.content, tags: payload.tags, source: "manual" });
-    toast.success("Artifact updated.");
-    await refresh(activeThreadRef.current);
-  }, [refresh]);
-  const revertArtifactVersion = useCallback(async (artifactId: string, versionId: string) => {
-    await postSpectra({ action: "revertArtifactVersion", artifactId, versionId });
-    toast.success("Artifact restored to the selected version.");
-    await refresh(activeThreadRef.current);
-  }, [refresh]);
 
   const focusedArtifact = studio.activeArtifact;
   useEffect(() => { setVisibleArtifactIds(focusedArtifact ? [focusedArtifact._id] : []); }, [focusedArtifact, setVisibleArtifactIds]);
@@ -280,7 +282,7 @@ export function ChatShell() {
         />
       </section>
 
-      {studio.isOpen && studio.activeArtifact ? <ArtifactStudio mode={studio.mode === "tab" ? "tab" : "split"} artifact={studio.activeArtifact} artifacts={artifacts} tabs={studio.tabs} dirtyIds={studio.dirtyIds} panelWidth={studioPanelWidth} sourceLabel="Chat" onPanelWidthChange={setStudioPanelWidth} onClose={studio.closeStudio} onExpand={studio.openTab} onActivateTab={studio.activateTab} onCloseTab={studio.closeTab} onSave={updateArtifact} onRevert={revertArtifactVersion} onDirtyChange={studio.setDirty} /> : null}
+      {studio.isOpen && studio.activeArtifact ? <ArtifactStudio mode={studio.mode === "tab" ? "tab" : "split"} artifact={studio.activeArtifact} artifacts={artifacts} tabs={studio.tabs} dirtyIds={studio.dirtyIds} panelWidth={studioPanelWidth} sourceLabel="Chat" onPanelWidthChange={setStudioPanelWidth} onClose={studio.closeStudio} onExpand={studio.openTab} onActivateTab={studio.activateTab} onCloseTab={studio.closeTab} onDirtyChange={studio.setDirty} /> : null}
       <div className="pointer-events-none absolute bottom-0 left-0 right-[var(--spectra-studio-width,0px)] z-50 bg-transparent px-4 pb-5 pt-2 sm:px-8 min-[1920px]:right-0"><div className="pointer-events-auto mx-auto max-w-[820px]">{pageComposer}</div></div>
 
       {liveThread ? <LiveThreadPanel threadId={liveThread.id} title={liveThread.title} width={liveThreadPanelWidth} onWidthChange={setLiveThreadPanelWidth} onClose={() => setLiveThread(null)} onOpenArtifact={openArtifact} onOpenWorkspace={selectWorkspaceContext} /> : null}

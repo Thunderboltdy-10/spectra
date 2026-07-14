@@ -1047,6 +1047,8 @@ export default defineSchema({
       title: v.optional(v.string()),
       summary: v.optional(v.string()),
       content: v.optional(v.any()),
+      tags: v.optional(v.array(v.string())),
+      changedPaths: v.optional(v.array(v.string())),
       startedAt: v.number(),
     })),
     createdFrom: v.optional(v.object({

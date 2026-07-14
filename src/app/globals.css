@@ -2019,8 +2019,8 @@ button:not(:disabled),
   transform: translate3d(-2px, -1px, 0);
 }
 
-.spectra-card:focus-within,
-[data-spectra-card]:focus-within {
+.spectra-card:focus-within:not(:has(input:focus, textarea:focus, [contenteditable="true"]:focus)),
+[data-spectra-card]:focus-within:not(:has(input:focus, textarea:focus, [contenteditable="true"]:focus)) {
   outline: 2px solid color-mix(in oklab, var(--card-focus) 38%, transparent);
   outline-offset: 2px;
 }
@@ -2089,6 +2089,19 @@ button:not(:disabled),
 .spectra-card--side::before,
 [data-spectra-card="side"]::before { width: 48%; opacity: .12; }
 
+/* Workspace columns are often narrower than the viewport when an artifact and
+   a live thread are open. Container queries keep the underlying workspace
+   useful instead of letting desktop media queries squeeze cards into slivers. */
+@container (max-width: 900px) {
+  .spectra-workspace-home-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .spectra-workspace-card-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
 [data-card-state="selected"],
 [data-card-state="focused"],
 [data-card-state="context"],
@@ -2132,7 +2145,7 @@ button:not(:disabled),
 [data-card-state="continued"]::before { animation: spectra-texture-drift 6s ease-in-out infinite alternate; }
 [data-card-state="drag-preview"] { opacity: .72; transform: scale(.985); box-shadow: 0 18px 38px -22px rgba(24,20,14,.42); }
 [data-card-state="drop-target"] { --card-accent: var(--accent-cyan); border-style: dashed; border-color: color-mix(in oklab, var(--accent-cyan) 62%, var(--card-border)); background: color-mix(in oklab, var(--accent-cyan) 6%, var(--card-paper)); }
-[data-card-state="edited"] { border-color: color-mix(in oklab, var(--card-accent) 34%, var(--card-border)); background: color-mix(in oklab, var(--card-accent) 3%, var(--card-paper)); }
+[data-card-state="edited"] { position: relative; overflow: hidden; border-color: color-mix(in oklab, var(--card-accent) 34%, var(--card-border)); background: color-mix(in oklab, var(--card-accent) 3%, var(--card-paper)); }
 [data-card-state="edited"]::after {
   content: "";
   position: absolute;
@@ -2152,6 +2165,12 @@ button:not(:disabled),
 
 [data-card-state="creating"],
 [data-card-state="updating"] {
+  /* List rows use the same live-state language as cards. Their working
+     highlight is an absolutely-positioned sweep, so they must establish and
+     clip their own paint box; otherwise the sweep is positioned against a
+     distant ancestor and washes across the entire workspace/editor split. */
+  position: relative;
+  overflow: hidden;
   background:
     radial-gradient(ellipse at 12% 50%, color-mix(in oklab, var(--accent-cyan) 17%, transparent), transparent 52%),
     linear-gradient(180deg, color-mix(in oklab, #eaf7ff 64%, transparent), transparent 62%),
@@ -2190,23 +2209,30 @@ button:not(:disabled),
 .spectra-artifact-studio[data-ai-state="creating"],
 .spectra-artifact-studio[data-ai-state="updating"] { isolation: isolate; }
 
-.spectra-artifact-main[data-ai-preview="true"]::after {
+.spectra-artifact-main [data-ai-region="true"] {
+  position: relative;
+  isolation: isolate;
+  border-color: color-mix(in oklab, var(--accent-cyan) 34%, var(--border-default));
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent-cyan) 7%, transparent), 0 12px 34px -28px color-mix(in oklab, var(--accent-cyan) 54%, transparent);
+  animation: spectra-content-settle 520ms cubic-bezier(.22,.72,.2,1) both;
+}
+
+.spectra-artifact-main [data-ai-region="true"]::after {
   content: "";
   position: absolute;
   z-index: 8;
-  inset: 0 auto 0 0;
-  width: 28%;
+  inset: 0;
   pointer-events: none;
-  background:
-    radial-gradient(ellipse at 55% 50%, color-mix(in oklab, white 56%, transparent), transparent 58%),
-    linear-gradient(96deg, transparent, color-mix(in oklab, var(--accent-cyan) 8%, transparent) 24%, color-mix(in oklab, var(--accent-cyan) 25%, transparent) 50%, transparent 83%);
-  mix-blend-mode: screen;
-  transform: translateX(-120%);
-  animation: spectra-workspace-flow 2.2s cubic-bezier(.4,0,.2,1) infinite;
+  border-radius: inherit;
+  background: linear-gradient(98deg, transparent 8%, color-mix(in oklab, var(--accent-cyan) 7%, transparent) 38%, color-mix(in oklab, white 28%, transparent) 50%, transparent 72%);
+  background-size: 230% 100%;
+  animation: spectra-region-materialize 1.55s cubic-bezier(.4,0,.2,1) infinite;
 }
 
-.spectra-artifact-main[data-ai-preview="true"] :is(.ProseMirror > *, .spectra-flashcard-studio textarea, .spectra-quiz-studio section, .spectra-planner-studio > section) {
-  animation: spectra-content-settle 520ms cubic-bezier(.22,.72,.2,1) both;
+@keyframes spectra-region-materialize {
+  from { background-position: 110% 0; opacity: .28; }
+  48% { opacity: .72; }
+  to { background-position: -110% 0; opacity: .18; }
 }
 
 @keyframes spectra-content-settle {
@@ -2565,8 +2591,9 @@ button:not(:disabled),
 }
 
 .spectra-wave-y :where(input, textarea, select):focus-visible {
-  border-color: color-mix(in oklab, var(--accent-cyan) 48%, var(--border-default)) !important;
-  box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent-cyan) 9%, transparent) !important;
+  border-color: var(--border-default) !important;
+  box-shadow: none !important;
+  outline: none !important;
 }
 
 .spectra-wave-y [data-spectra-card] {
@@ -2599,12 +2626,7 @@ button:not(:disabled),
 }
 
 .spectra-run-tab-strip::before {
-  content: "";
-  position: absolute;
-  inset: auto 14px -1px;
-  height: 1px;
-  pointer-events: none;
-  background: linear-gradient(90deg, transparent, color-mix(in oklab, var(--accent-cyan) 44%, transparent), transparent);
+  content: none;
 }
 
 .spectra-run-tab-strip [data-run-status="running"],
@@ -2644,19 +2666,17 @@ button:not(:disabled),
 }
 
 .spectra-artifact-header {
-  background: color-mix(in oklab, var(--bg-primary) 88%, transparent) !important;
-  backdrop-filter: blur(18px) saturate(1.08);
-  box-shadow: 0 1px 0 color-mix(in oklab, white 45%, transparent);
+  background: transparent !important;
+  box-shadow: none;
 }
 
-.spectra-artifact-header input:first-of-type {
+.spectra-artifact-header textarea:first-of-type {
   letter-spacing: -.032em;
 }
 
 .spectra-artifact-main {
   position: relative;
-  background-image: radial-gradient(circle at 1px 1px, color-mix(in oklab, var(--text-tertiary) 7%, transparent) .7px, transparent .8px);
-  background-size: 22px 22px;
+  background: color-mix(in oklab, var(--bg-primary) 97%, #f4efe6);
 }
 
 .spectra-document-studio,
@@ -2672,8 +2692,10 @@ button:not(:disabled),
 
 .spectra-document-studio {
   overflow: hidden;
-  border: 1px solid var(--wave-hairline, var(--border-default));
-  border-radius: 10px;
+  border: 0 !important;
+  border-radius: 0;
+  background: transparent !important;
+  box-shadow: none !important;
   min-height: calc(100vh - 210px);
 }
 
@@ -2685,6 +2707,10 @@ button:not(:disabled),
   backdrop-filter: blur(15px);
 }
 
+.spectra-document-toolbar {
+  box-shadow: 0 7px 22px -20px rgba(37, 27, 17, .35);
+}
+
 .spectra-document-studio .tiptap-root {
   max-width: 920px;
 }
@@ -2692,6 +2718,17 @@ button:not(:disabled),
 .spectra-document-studio .ProseMirror {
   color: color-mix(in oklab, var(--text-primary) 95%, #21170f);
   caret-color: var(--accent-cyan);
+}
+
+.spectra-document-studio .ProseMirror :is(p, li) {
+  font-family: var(--font-sans), sans-serif;
+  font-style: normal;
+  font-weight: 400;
+}
+
+.spectra-document-studio .ProseMirror blockquote {
+  font-family: var(--font-sans), sans-serif;
+  font-style: normal;
 }
 
 .spectra-document-studio .ProseMirror h1,
@@ -2709,12 +2746,34 @@ button:not(:disabled),
 }
 
 .spectra-document-studio .ProseMirror [data-callout="true"] {
+  position: relative;
   margin: 1.25rem 0;
   border: 1px solid color-mix(in oklab, var(--accent-mint) 30%, var(--border-default));
   border-radius: 9px;
   background: color-mix(in oklab, var(--accent-mint) 6%, var(--bg-elevated));
-  padding: .55rem .85rem .55rem 2rem;
+  padding: .7rem .95rem .7rem 2.55rem;
   box-shadow: inset 3px 0 color-mix(in oklab, var(--accent-mint) 68%, transparent);
+}
+
+.spectra-document-studio .ProseMirror [data-callout="true"]::before {
+  content: "✦";
+  position: absolute;
+  left: .9rem;
+  top: .72rem;
+  color: color-mix(in oklab, var(--accent-mint) 80%, var(--text-primary));
+  font-size: .88rem;
+  line-height: 1.35;
+}
+
+.spectra-document-studio .ProseMirror [data-callout-type="warning"] {
+  border-color: color-mix(in oklab, #d89832 30%, var(--border-default));
+  background: color-mix(in oklab, #f4c66b 8%, var(--bg-elevated));
+  box-shadow: inset 3px 0 color-mix(in oklab, #d89832 68%, transparent);
+}
+
+.spectra-document-studio .ProseMirror [data-callout-type="warning"]::before {
+  content: "◉";
+  color: #b87618;
 }
 
 .spectra-flashcard-studio textarea {
@@ -2756,6 +2815,112 @@ button:not(:disabled),
 
 .spectra-studio-details [data-spectra-card="side"] {
   background: color-mix(in oklab, var(--bg-elevated) 90%, transparent);
+  border: 1px solid var(--wave-hairline, var(--border-default));
+  border-radius: 9px;
+}
+
+/* Artifact-detail references use quiet paper, compact controls and a dense
+   three-column working canvas. Keep the semantics in React; this layer makes
+   the real controls read as one premium studio rather than generic form rows. */
+.spectra-artifact-studio[data-blueprint="quiz"] .spectra-quiz-studio {
+  border-radius: 12px;
+  box-shadow: 0 20px 54px -44px rgba(38, 31, 71, .42);
+}
+
+.spectra-artifact-studio[data-blueprint="quiz"] .spectra-quiz-studio > div:first-child {
+  min-height: 58px;
+  padding-inline: 18px;
+}
+
+.spectra-artifact-studio[data-blueprint="quiz"] .spectra-quiz-studio aside:first-of-type {
+  background: color-mix(in oklab, #8b6ff0 1.8%, var(--bg-elevated));
+}
+
+.spectra-artifact-studio[data-blueprint="quiz"] .spectra-quiz-studio aside:first-of-type button {
+  min-height: 47px;
+}
+
+.spectra-artifact-studio[data-blueprint="quiz"] .spectra-quiz-studio section textarea,
+.spectra-artifact-studio[data-blueprint="quiz"] .spectra-quiz-studio section input,
+.spectra-artifact-studio[data-blueprint="quiz"] .spectra-quiz-studio section select {
+  background: color-mix(in oklab, white 58%, var(--bg-primary));
+}
+
+.spectra-artifact-studio[data-blueprint="quiz"] .spectra-quiz-studio > div:last-child > aside:last-child {
+  background: color-mix(in oklab, var(--bg-primary) 95%, #f0ece3);
+}
+
+.spectra-artifact-studio[data-blueprint="flashcard_deck"] .spectra-flashcard-studio {
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid var(--wave-hairline, var(--border-default));
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--bg-elevated) 96%, transparent);
+  box-shadow: 0 20px 54px -44px rgba(45, 31, 82, .46);
+}
+
+.spectra-artifact-studio[data-blueprint="flashcard_deck"] .spectra-flashcard-studio > aside,
+.spectra-artifact-studio[data-blueprint="flashcard_deck"] .spectra-flashcard-studio > section {
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+.spectra-artifact-studio[data-blueprint="flashcard_deck"] .spectra-flashcard-studio > aside {
+  border-right: 1px solid var(--border-default) !important;
+  background: color-mix(in oklab, #8b6ff0 2%, var(--bg-elevated)) !important;
+}
+
+.spectra-artifact-studio[data-blueprint="flashcard_deck"] .spectra-flashcard-studio textarea {
+  min-height: 190px;
+  border-color: color-mix(in oklab, var(--border-default) 84%, transparent);
+  border-radius: 12px;
+  background: color-mix(in oklab, white 62%, var(--bg-primary));
+}
+
+.spectra-artifact-studio[data-blueprint="planner_task"] .spectra-planner-studio > section {
+  padding: 22px;
+  border-radius: 12px;
+}
+
+.spectra-artifact-studio[data-blueprint="planner_task"] .spectra-planner-studio textarea {
+  background: color-mix(in oklab, white 58%, var(--bg-primary));
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.spectra-artifact-studio[data-blueprint="planner_task"] .spectra-planner-studio select,
+.spectra-artifact-studio[data-blueprint="planner_task"] .spectra-planner-studio input {
+  background: color-mix(in oklab, white 52%, var(--bg-primary));
+}
+
+.spectra-studio-details {
+  border-radius: 12px !important;
+  box-shadow: 0 18px 48px -42px rgba(35, 27, 18, .4);
+}
+
+.spectra-studio-details > div:last-child {
+  max-height: calc(100vh - 250px);
+  overflow-y: auto;
+}
+
+.spectra-document-studio .ProseMirror blockquote {
+  margin: 1rem 0;
+  border: 1px solid color-mix(in oklab, var(--accent-mint) 34%, var(--border-default)) !important;
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--accent-mint) 7%, var(--bg-elevated));
+  padding: .7rem .9rem .7rem 2.2rem !important;
+  box-shadow: inset 3px 0 color-mix(in oklab, var(--accent-mint) 70%, transparent);
+}
+
+.spectra-document-studio .ProseMirror blockquote ~ blockquote {
+  border-color: color-mix(in oklab, #e2a03a 38%, var(--border-default)) !important;
+  background: color-mix(in oklab, #f3a62b 7%, var(--bg-elevated));
+  box-shadow: inset 3px 0 color-mix(in oklab, #e29b2d 72%, transparent);
+}
+
+.spectra-studio-details [data-spectra-card="side"] + [data-spectra-card="side"] {
+  margin-top: 12px;
 }
 
 .spectra-conversation {

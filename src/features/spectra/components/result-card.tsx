@@ -13,7 +13,8 @@ import { postSpectra } from "../data/api";
 export type ResultCardView = ResultCardStreamView;
 
 function tone(card: ResultCardView) {
-  if (card.status === "failed" || card.status === "cancelled") return "var(--danger)";
+  if (card.status === "failed") return "var(--danger)";
+  if (card.status === "cancelled") return "var(--warning)";
   if (card.status === "completed") return "var(--success)";
   if (card.actions.some((action) => action.key === "confirm")) return "#d88922";
   return "var(--accent-cyan)";
@@ -55,6 +56,7 @@ export function ResultCardStack({
   cards,
   className,
   onAction,
+  onRevise,
   onOpen,
   activeThreadId,
   activeRunId,
@@ -63,11 +65,14 @@ export function ResultCardStack({
   cards?: ResultCardView[];
   className?: string;
   onAction?: (card: ResultCardView, actionKey: string, targetId?: string) => void;
+  onRevise?: (card: ResultCardView, revision: string) => Promise<boolean | void> | boolean | void;
   onOpen?: (card: ResultCardView) => void;
   activeThreadId?: string | null;
   activeRunId?: string | null;
   onContinue?: (thread: { threadId: string; title: string; runId: string } | null) => void;
 }) {
+  const [revisingCardId, setRevisingCardId] = useState<string | null>(null);
+  const [revision, setRevision] = useState("");
   const [busyRunId, setBusyRunId] = useState<string | null>(null);
   const [threadIds, setThreadIds] = useState<Record<string, string>>({});
   const visibleCards = cards?.slice(0, 12) ?? [];
@@ -137,7 +142,7 @@ export function ResultCardStack({
                   onClick={(event) => event.stopPropagation()}
                 >
                   <span className="mr-1 text-[10px] font-medium text-[var(--text-secondary)]">
-                    Review before Spectra mutates objects.
+                    Review these changes before they are saved.
                   </span>
                   <button
                     type="button"
@@ -146,13 +151,30 @@ export function ResultCardStack({
                   >
                     Apply changes
                   </button>
+                  {onRevise || onAction ? <button
+                    type="button"
+                    className="rounded-[6px] px-2 py-1 text-[10px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                    onClick={() => setRevisingCardId((current) => current === card.id ? null : card.id)}
+                  >
+                    Ask for changes
+                  </button> : null}
                   <button
                     type="button"
                     className="rounded-[6px] px-2 py-1 text-[10px] font-semibold text-[var(--danger)] hover:bg-[color-mix(in_oklab,var(--danger)_8%,transparent)]"
                     onClick={() => onAction?.(card, "cancel", card.runId)}
                   >
-                    Reject proposal
+                    Reject
                   </button>
+                  {(onRevise || onAction) && revisingCardId === card.id ? <form className="mt-1 flex w-full gap-1.5" onSubmit={(event) => {
+                    event.preventDefault();
+                    const clean = revision.trim();
+                    if (!clean) return;
+                    Promise.resolve(onRevise ? onRevise(card, clean) : onAction?.(card, "revise", clean)).then((accepted) => {
+                      if (accepted === false) return;
+                      setRevision("");
+                      setRevisingCardId(null);
+                    });
+                  }}><input autoFocus value={revision} onChange={(event) => setRevision(event.target.value)} placeholder="What should Spectra change?" className="h-8 min-w-0 flex-1 rounded-[6px] bg-[var(--bg-elevated)] px-2.5 text-[11px] text-[var(--text-primary)] outline-none" /><button type="submit" disabled={!revision.trim()} className="h-8 rounded-[6px] bg-[var(--text-primary)] px-2.5 text-[10px] font-semibold text-[var(--bg-primary)] disabled:opacity-35">Send</button></form> : null}
                 </div>
               ) : null}
             </div>

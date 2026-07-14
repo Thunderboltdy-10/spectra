@@ -116,7 +116,21 @@ export const appendMessage = mutation({
         const existing = (await ctx.db.query("spectraMessages").withIndex("by_run", (q) => q.eq("runId", args.runId)).collect())
           .find((message) => message.role === "assistant");
         if (existing) {
-          await ctx.db.patch(existing._id, { content, metadata: args.metadata });
+          // A retry is a new attempt of the same canonical run. Replace the
+          // prior assistant attempt in place for identity, but move it to the
+          // current end of the conversation so a successful retry cannot stay
+          // stranded above newer trace rows or stale clarification UI.
+          const now = Date.now();
+          await ctx.db.patch(existing._id, {
+            content,
+            metadata: args.metadata,
+            createdAt: now,
+          });
+          await ctx.db.patch(args.threadId, {
+            lastMessageAt: now,
+            lastRunId: args.runId,
+            updatedAt: now,
+          });
           return existing._id;
         }
       }

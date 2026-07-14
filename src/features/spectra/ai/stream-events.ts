@@ -35,7 +35,7 @@ export const spectraStreamEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("text_delta"), runId: z.string(), content: z.string() }).strict(),
   z.object({ type: z.literal("text_replace"), runId: z.string(), content: z.string() }).strict(),
   z.object({ type: z.literal("status"), runId: z.string(), message: z.string() }).strict(),
-  z.object({ type: z.literal("operation_preview"), runId: z.string(), operationId: z.string(), operationType: z.string(), preview: z.object({ action: z.enum(["create", "update", "link", "place", "remove", "workspace"]), title: z.string(), blueprintKey: z.string().optional(), targetId: z.string().optional(), pendingArtifactId: z.string().optional() }).optional() }).strict(),
+  z.object({ type: z.literal("operation_preview"), runId: z.string(), operationId: z.string(), operationType: z.string(), preview: z.object({ action: z.enum(["create", "update", "archive", "link", "place", "remove", "workspace"]), title: z.string(), blueprintKey: z.string().optional(), targetId: z.string().optional(), pendingArtifactId: z.string().optional() }).optional() }).strict(),
   z.object({ type: z.literal("artifact_patch"), runId: z.string(), operationId: z.string(), artifactId: z.string(), patch: z.record(z.string(), z.unknown()) }).strict(),
   z.object({ type: z.literal("stopped"), runId: z.string(), partial: z.boolean() }).strict(),
   z.object({ type: z.literal("interrupted"), runId: z.string() }).strict(),

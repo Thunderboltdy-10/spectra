@@ -72,11 +72,41 @@ const threadMeta = { label: "Conversation", icon: MessageSquare, color: "#8b6ff0
 
 function objectId(entry: ObjectLibraryEntry) { return entry.artifact?._id ?? entry.thread?._id ?? entry.item?._id ?? "unknown"; }
 function objectTitle(entry: ObjectLibraryEntry) { return entry.artifact?.title ?? entry.thread?.title ?? "Untitled object"; }
-function objectSummary(entry: ObjectLibraryEntry) { return entry.artifact?.summary ?? entry.thread?.summaryShort ?? "Continue this conversation."; }
+function objectSummary(entry: ObjectLibraryEntry) {
+  if (entry.artifact?.aiState === "creating") {
+    const progress = entry.artifact.aiProgress ?? 0;
+    if (progress < 0.12) return "Draft shell ready · reading the request…";
+    if (progress < 0.72) return "Writing the artifact’s first sections…";
+    if (progress < 0.96) return "Filling in the remaining details…";
+    return "Checking the completed artifact…";
+  }
+  if (entry.artifact?.aiState === "updating")
+    return "Applying the requested changes…";
+  if (
+    entry.artifact?.aiState === "failed" &&
+    /spectra is building this artifact/i.test(entry.artifact.summary ?? "")
+  )
+    return "This draft stopped before completion. Retry its request to rebuild it.";
+  return entry.artifact?.summary ?? entry.thread?.summaryShort ?? "Continue this conversation.";
+}
 function objectUpdatedAt(entry: ObjectLibraryEntry) { return entry.artifact?.updatedAt ?? entry.thread?.lastMessageAt ?? entry.thread?.updatedAt ?? entry.item?.updatedAt ?? 0; }
 function objectCreatedAt(entry: ObjectLibraryEntry) { return entry.artifact?.createdAt ?? entry.thread?.createdAt ?? entry.item?.createdAt ?? 0; }
 function objectType(entry: ObjectLibraryEntry): ObjectType { return entry.thread ? "thread" : entry.artifact?.blueprintKey ?? "document"; }
 function objectMeta(entry: ObjectLibraryEntry) { return entry.thread ? threadMeta : blueprintMeta[entry.artifact?.blueprintKey ?? "document"]; }
+function objectAiState(entry: ObjectLibraryEntry) {
+  const state = entry.artifact?.aiState;
+  if (
+    state === "edited" &&
+    entry.artifact?.aiStateExpiresAt &&
+    entry.artifact.aiStateExpiresAt <= Date.now()
+  )
+    return "normal";
+  return state === "creating" || state === "updating" || state === "failed"
+    ? state
+    : state === "edited" || state === "generated"
+      ? "edited"
+      : "normal";
+}
 
 export function ObjectLibrary({
   entries,
@@ -503,7 +533,7 @@ export function ObjectLibrary({
       <article
         key={id}
         data-spectra-card="inbox"
-        data-card-state={dropTargetKey === "inbox" ? "drop-target" : draggingArtifactId === entry.artifact?._id ? "drag-preview" : selected ? "multi-selected" : "normal"}
+        data-card-state={dropTargetKey === "inbox" ? "drop-target" : draggingArtifactId === entry.artifact?._id ? "drag-preview" : selected ? "multi-selected" : objectAiState(entry)}
         data-interactive="true"
         draggable={Boolean(entry.artifact) && canDragMove && !selectionMode}
         className="relative min-h-[118px] overflow-hidden p-3"
@@ -729,7 +759,7 @@ export function ObjectLibrary({
               {populatedGroups.map((group) => (
                 <section
                   key={group.key}
-                  data-spectra-card="side"
+                  data-spectra-group="true"
                   data-card-state={dropTargetKey === group.key ? "drop-target" : "normal"}
                   className="overflow-hidden rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)]"
                   onDragOver={(event) => allowDrop(event, group.key)}
@@ -776,7 +806,7 @@ export function ObjectLibrary({
                         <div
                           key={`${group.key}:${entry.item?._id ?? id}`}
                           data-object-row="true"
-                          data-card-state={draggingArtifactId === entry.artifact?._id ? "drag-preview" : selectedArtifactId === id ? "focused" : contextSelected ? "multi-selected" : "normal"}
+                          data-card-state={draggingArtifactId === entry.artifact?._id ? "drag-preview" : selectedArtifactId === id ? "focused" : contextSelected ? "multi-selected" : objectAiState(entry)}
                           data-interactive="true"
                           draggable={Boolean(entry.artifact) && canDragMove && !selectionMode}
                           className="grid min-h-[58px] cursor-pointer grid-cols-[minmax(260px,1.2fr)_minmax(130px,0.6fr)_minmax(130px,0.5fr)_auto] items-center gap-4 border-b border-[var(--card-border-soft)] px-4 py-2.5 transition-colors last:border-b-0 hover:bg-[color-mix(in_oklab,var(--bg-hover)_58%,transparent)] data-[card-state=context]:bg-[color-mix(in_oklab,var(--card-focus)_5%,transparent)] data-[card-state=focused]:bg-[color-mix(in_oklab,var(--card-focus)_5%,transparent)]"
@@ -809,11 +839,13 @@ export function ObjectLibrary({
                             </div>
                           </div>
                           <div className="flex items-center gap-2 text-[12px] text-[var(--text-secondary)]">
-                            <span
-                              className="h-1.5 w-1.5 rounded-full"
-                              style={{ background: group.color }}
-                            />
-                            {workspaceName}
+                            {groupBy === "workspace" ? <>
+                              <span
+                                className="h-1.5 w-1.5 rounded-full"
+                                style={{ background: group.color }}
+                              />
+                              {workspaceName}
+                            </> : <span className="truncate">{objectSummary(entry)}</span>}
                           </div>
                           <div className="text-[12px] text-[var(--text-secondary)]">
                             Updated{" "}
@@ -861,10 +893,10 @@ export function ObjectLibrary({
       {showGroups && mode === "board" ? (
         <div className="mt-8 overflow-x-auto pb-6">
           <main
-            className="grid gap-3 pr-2"
+            className="grid w-full gap-3 pr-2"
             style={{
-              gridTemplateColumns: `repeat(${Math.max(populatedGroups.length, 1)}, clamp(300px, 27vw, 360px))`,
-              width: "max-content",
+              gridTemplateColumns: `repeat(${Math.max(populatedGroups.length, 1)}, minmax(260px, 1fr))`,
+              minWidth: `${Math.max(populatedGroups.length, 1) * 276}px`,
             }}
           >
             {populatedGroups.map((group) => {
@@ -901,9 +933,9 @@ export function ObjectLibrary({
                             key={`${group.key}:${entry.item?._id ?? id}`}
                             type="button"
                             data-spectra-card="board"
-                            data-card-state={contextSelected ? "context" : selectedArtifactId === id ? "focused" : "normal"}
+                            data-card-state={contextSelected ? "context" : selectedArtifactId === id ? "focused" : objectAiState(entry)}
                             data-interactive="true"
-                            className="flex min-h-[66px] w-full items-center gap-3 px-3 py-2 text-left"
+                            className="flex min-h-[82px] w-full items-start gap-3 px-3 py-3 text-left"
                             style={{ "--card-accent": meta.color } as CSSProperties}
                             onClick={() => activateEntry(entry)}
                           >

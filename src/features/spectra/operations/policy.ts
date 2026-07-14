@@ -1,15 +1,17 @@
 import type { ModelOperation, OperationInput, RequestIntent, SpectraOperationType } from "./schema";
 
 const DIRECT_OPERATION_TYPES = new Set<SpectraOperationType>([
-  "artifact.create", "artifact.update", "workspaceItem.add", "workspaceItem.hide", "thread.create",
+  "artifact.create", "artifact.update", "workspaceItem.add", "workspaceItem.hide", "workspaceItem.setPinned", "thread.create",
   "workspace.update", "artifact.link",
   "resultCard.create", "resultCard.update", "plannerTask.create", "quiz.create", "flashcardDeck.create",
 ]);
 
-const CONFIRMATION_OPERATION_TYPES = new Set<SpectraOperationType>(["workspace.create", "delete"]);
+const CONFIRMATION_OPERATION_TYPES = new Set<SpectraOperationType>(["workspace.create", "artifact.archive", "delete"]);
 
-export const MAX_OPERATIONS_PER_RUN = 8;
-export const MAX_ARTIFACTS_PER_RUN = 5;
+// Review thresholds are not execution ceilings. Broad work pauses for one
+// durable confirmation, then continues under the same lease/checkpoint model.
+export const REVIEW_OPERATIONS_THRESHOLD = 64;
+export const REVIEW_ARTIFACTS_THRESHOLD = 32;
 export const DIRECT_MUTATION_LIMIT = 3;
 
 export function operationRequiresConfirmation(operation: OperationInput) {
@@ -30,20 +32,21 @@ export type PlanPolicy = {
 };
 
 export function evaluatePlanPolicy(operations: ModelOperation[], options?: { intent?: RequestIntent }): PlanPolicy {
-  if (operations.length > MAX_OPERATIONS_PER_RUN) throw new Error(`A run may contain at most ${MAX_OPERATIONS_PER_RUN} operations.`);
   const artifactCreates = operations.filter((operation) => operation.type === "artifact.create").length;
-  if (artifactCreates > MAX_ARTIFACTS_PER_RUN) throw new Error(`A run may create at most ${MAX_ARTIFACTS_PER_RUN} artifacts.`);
 
   const reasons: string[] = [];
   if (operations.some((operation) => operation.type === "workspace.create")) reasons.push("Create a new workspace");
+  if (operations.some((operation) => operation.type === "artifact.archive")) reasons.push("Archive the selected artifact");
   if (artifactCreates > 1) reasons.push(`Create ${artifactCreates} visible artifacts`);
   if (operations.length > DIRECT_MUTATION_LIMIT) reasons.push(`Apply ${operations.length} changes`);
+  if (operations.length > REVIEW_OPERATIONS_THRESHOLD) reasons.push(`Review this ${operations.length}-step run before it begins`);
+  if (artifactCreates > REVIEW_ARTIFACTS_THRESHOLD) reasons.push(`Review creation of ${artifactCreates} visible artifacts`);
   const placementChanges = operations.filter((operation) => operation.type === "workspaceItem.add" || operation.type === "workspaceItem.hide").length;
   if (placementChanges > 1) reasons.push(`Change ${placementChanges} workspace placements`);
 
   // Cards and quiz questions are content inside one artifact and never increase this count.
-  if (options?.intent && options.intent.requestedVisibleArtifactCount > MAX_ARTIFACTS_PER_RUN) {
-    reasons.push(`The request covers ${options.intent.requestedVisibleArtifactCount} visible artifacts; propose a smaller batch first`);
+  if (options?.intent && options.intent.requestedVisibleArtifactCount > REVIEW_ARTIFACTS_THRESHOLD) {
+    reasons.push(`The request covers ${options.intent.requestedVisibleArtifactCount} visible artifacts`);
   }
 
   return { requiresConfirmation: reasons.length > 0, reasons, visibleObjectCreations: artifactCreates };

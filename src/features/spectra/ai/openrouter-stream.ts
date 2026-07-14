@@ -1,5 +1,7 @@
 export type OpenRouterUsage = {
   promptTokens?: number;
+  promptCacheHitTokens?: number;
+  promptCacheMissTokens?: number;
   completionTokens?: number;
   reasoningTokens?: number;
   totalTokens?: number;
@@ -11,6 +13,17 @@ export type OpenRouterPlanResult = {
   model?: string;
   provider?: string;
   usage?: OpenRouterUsage;
+};
+
+export type OpenRouterAgentToolCall = {
+  id: string;
+  name: string;
+  arguments: string;
+};
+
+export type OpenRouterAgentTurn = OpenRouterPlanResult & {
+  toolCalls: OpenRouterAgentToolCall[];
+  finishReason?: string;
 };
 
 function decodePartialJsonString(source: string, start: number) {
@@ -94,6 +107,18 @@ function normalizeUsage(value: unknown, elapsedMs: number): OpenRouterUsage | un
     : {};
   return {
     promptTokens: typeof usage.prompt_tokens === "number" ? usage.prompt_tokens : undefined,
+    promptCacheHitTokens:
+      typeof usage.prompt_cache_hit_tokens === "number"
+        ? usage.prompt_cache_hit_tokens
+        : usage.prompt_tokens_details &&
+            typeof usage.prompt_tokens_details === "object" &&
+            typeof (usage.prompt_tokens_details as Record<string, unknown>).cached_tokens === "number"
+          ? (usage.prompt_tokens_details as Record<string, number>).cached_tokens
+          : undefined,
+    promptCacheMissTokens:
+      typeof usage.prompt_cache_miss_tokens === "number"
+        ? usage.prompt_cache_miss_tokens
+        : undefined,
     completionTokens: typeof usage.completion_tokens === "number" ? usage.completion_tokens : undefined,
     reasoningTokens: typeof details.reasoning_tokens === "number" ? details.reasoning_tokens : undefined,
     totalTokens: typeof usage.total_tokens === "number" ? usage.total_tokens : undefined,
@@ -101,22 +126,91 @@ function normalizeUsage(value: unknown, elapsedMs: number): OpenRouterUsage | un
   };
 }
 
+function containsCompleteJsonObject(source: string) {
+  const start = source.indexOf("{");
+  if (start < 0) return false;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < source.length; index += 1) {
+    const character = source[index]!;
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') inString = false;
+      continue;
+    }
+    if (character === '"') { inString = true; continue; }
+    if (character === "{") depth += 1;
+    else if (character === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        try {
+          const value = JSON.parse(source.slice(start, index + 1));
+          return Boolean(value && typeof value === "object" && !Array.isArray(value));
+        } catch { return false; }
+      }
+    }
+  }
+  return false;
+}
+
+export class ProviderStreamStalledError extends Error {
+  constructor(timeoutMs: number) {
+    super(`The current DeepSeek route produced no meaningful stream data for ${Math.round(timeoutMs / 1_000)} seconds.`);
+    this.name = "ProviderStreamStalledError";
+  }
+}
+
+async function readStreamChunk(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  lastMeaningfulAt: number,
+  idleTimeoutMs?: number,
+) {
+  if (!idleTimeoutMs) return reader.read();
+  const remaining = Math.max(1, idleTimeoutMs - (Date.now() - lastMeaningfulAt));
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      reader.read(),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new ProviderStreamStalledError(idleTimeoutMs)), remaining);
+      }),
+    ]);
+  } catch (error) {
+    if (error instanceof ProviderStreamStalledError)
+      await reader.cancel("provider stream stalled").catch(() => undefined);
+    throw error;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export async function readOpenRouterResponse(
   response: Response,
   onPublicText?: (delta: string) => void,
   onReasoningText?: (delta: string) => void,
   onPlanText?: (text: string) => void,
+  idleTimeoutMs?: number,
 ): Promise<OpenRouterPlanResult> {
   const startedAt = Date.now();
   const contentType = response.headers.get("content-type") ?? "";
   if (!contentType.includes("text/event-stream")) {
     const payload = await response.json() as Record<string, unknown>;
+    if (!response.ok || payload.error) {
+      const error = payload.error && typeof payload.error === "object" ? payload.error as Record<string, unknown> : null;
+      throw new Error(typeof error?.message === "string" ? error.message : `The model request failed (${response.status}).`);
+    }
     const choices = Array.isArray(payload.choices) ? payload.choices as Array<Record<string, unknown>> : [];
     const message = choices[0]?.message && typeof choices[0].message === "object" ? choices[0].message as Record<string, unknown> : {};
     const content = message.content;
-    const text = typeof content === "string" ? content : Array.isArray(content)
+    const toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls as Array<Record<string, unknown>> : [];
+    const toolFunction = toolCalls[0]?.function && typeof toolCalls[0].function === "object" ? toolCalls[0].function as Record<string, unknown> : {};
+    const toolArguments = typeof toolFunction.arguments === "string" ? toolFunction.arguments : "";
+    const contentText = typeof content === "string" ? content : Array.isArray(content)
       ? content.map((part) => part && typeof part === "object" && typeof (part as Record<string, unknown>).text === "string" ? (part as Record<string, unknown>).text : "").join("")
       : "";
+    const text = toolArguments || contentText;
     const extracted = extractPartialJsonStringField(text, "finalResponse");
     if (extracted.value) onPublicText?.(extracted.value);
     onPlanText?.(text);
@@ -137,8 +231,12 @@ export async function readOpenRouterResponse(
   let model: string | undefined;
   let provider: string | undefined;
   let rawUsage: unknown;
+  let toolArguments = "";
+  let pendingJsonPayload = "";
+  let trailingError: Error | undefined;
+  let lastMeaningfulAt = Date.now();
   while (true) {
-    const { value, done } = await reader.read();
+    const { value, done } = await readStreamChunk(reader, lastMeaningfulAt, idleTimeoutMs);
     buffer += decoder.decode(value, { stream: !done });
     const lines = buffer.split("\n");
     buffer = lines.pop() ?? "";
@@ -146,17 +244,55 @@ export async function readOpenRouterResponse(
       if (!line.startsWith("data:")) continue;
       const raw = line.slice(5).trim();
       if (!raw || raw === "[DONE]") continue;
-      const chunk = JSON.parse(raw) as Record<string, unknown>;
+      let chunk: Record<string, unknown>;
+      try {
+        chunk = JSON.parse(pendingJsonPayload + raw) as Record<string, unknown>;
+        pendingJsonPayload = "";
+      } catch {
+        // A provider may split one SSE JSON event across multiple `data:`
+        // records. Preserve it for the next record. If the next record is a
+        // complete standalone event, discard only the malformed fragment and
+        // continue the authoritative stream instead of failing the whole run.
+        if (pendingJsonPayload) {
+          try {
+            chunk = JSON.parse(raw) as Record<string, unknown>;
+            pendingJsonPayload = "";
+          } catch {
+            pendingJsonPayload += raw;
+            continue;
+          }
+        } else {
+          pendingJsonPayload = raw;
+          continue;
+        }
+      }
       if (typeof chunk.model === "string") model = chunk.model;
       if (typeof chunk.provider === "string") provider = chunk.provider;
       if (chunk.usage) rawUsage = chunk.usage;
       const choices = Array.isArray(chunk.choices) ? chunk.choices as Array<Record<string, unknown>> : [];
       const delta = choices[0]?.delta && typeof choices[0].delta === "object" ? choices[0].delta as Record<string, unknown> : {};
       if (typeof delta.content === "string") {
+        if (delta.content) lastMeaningfulAt = Date.now();
         text += delta.content;
         onPlanText?.(text);
       }
-      if (typeof delta.reasoning === "string") onReasoningText?.(delta.reasoning);
+      if (Array.isArray(delta.tool_calls)) {
+        for (const toolCall of delta.tool_calls) {
+          if (!toolCall || typeof toolCall !== "object") continue;
+          const fn = (toolCall as Record<string, unknown>).function;
+          if (!fn || typeof fn !== "object") continue;
+          const args = (fn as Record<string, unknown>).arguments;
+          if (typeof args !== "string") continue;
+          if (args) lastMeaningfulAt = Date.now();
+          toolArguments += args;
+          text = toolArguments;
+          onPlanText?.(text);
+        }
+      }
+      if (typeof delta.reasoning === "string") {
+        if (delta.reasoning) lastMeaningfulAt = Date.now();
+        onReasoningText?.(delta.reasoning);
+      }
       if (Array.isArray(delta.reasoning_details)) {
         for (const detail of delta.reasoning_details) {
           if (detail && typeof detail === "object" && typeof (detail as Record<string, unknown>).text === "string") onReasoningText?.((detail as Record<string, unknown>).text as string);
@@ -168,9 +304,223 @@ export async function readOpenRouterResponse(
         emittedLength = publicText.length;
       }
       const error = chunk.error && typeof chunk.error === "object" ? chunk.error as Record<string, unknown> : null;
-      if (error) throw new Error(typeof error.message === "string" ? error.message : "The model stream failed.");
+      if (error) {
+        trailingError = new Error(typeof error.message === "string" ? error.message : "The model stream failed.");
+        break;
+      }
     }
-    if (done) break;
+    if (done || trailingError) break;
+  }
+  // Some routed providers append an error envelope after successfully
+  // streaming the complete structured response. The response can be fenced or
+  // have trailing transport text, so inspect the balanced JSON object rather
+  // than requiring the entire raw stream to be directly parseable.
+  if (trailingError) {
+    const hasPlanFields = text.includes('"operations"') && text.includes('"finalResponse"');
+    const hasCompleteOperations = extractCompleteJsonArrayItems(text, "operations").length > 0
+      || /"operations"\s*:\s*\[\s*\]/.test(text);
+    if (!containsCompleteJsonObject(text) && !(hasPlanFields && hasCompleteOperations)) throw trailingError;
   }
   return { text, model, provider, usage: normalizeUsage(rawUsage, Date.now() - startedAt) };
+}
+
+// Agent turns must preserve tool-call identity. Concatenating every streamed
+// function argument into one JSON string (which is acceptable for the legacy
+// single-plan tool) makes a real multi-tool loop impossible: parallel reads,
+// one-operation mutations, and tool-result correlation all lose their
+// boundaries. This parser is the transport boundary for the iterative harness.
+export async function readOpenRouterAgentTurn(
+  response: Response,
+  onText?: (delta: string) => void,
+  onReasoningText?: (delta: string) => void,
+  onToolArguments?: (call: OpenRouterAgentToolCall) => void,
+  idleTimeoutMs?: number,
+): Promise<OpenRouterAgentTurn> {
+  const startedAt = Date.now();
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.includes("text/event-stream")) {
+    const payload = (await response.json()) as Record<string, unknown>;
+    if (!response.ok || payload.error) {
+      const error = payload.error && typeof payload.error === "object"
+        ? (payload.error as Record<string, unknown>)
+        : null;
+      throw new Error(
+        typeof error?.message === "string"
+          ? error.message
+          : `The model request failed (${response.status}).`,
+      );
+    }
+    const choices = Array.isArray(payload.choices)
+      ? (payload.choices as Array<Record<string, unknown>>)
+      : [];
+    const choice = choices[0] ?? {};
+    const message = choice.message && typeof choice.message === "object"
+      ? (choice.message as Record<string, unknown>)
+      : {};
+    const text = typeof message.content === "string" ? message.content : "";
+    if (text) onText?.(text);
+    const toolCalls = (Array.isArray(message.tool_calls) ? message.tool_calls : [])
+      .flatMap((value, index) => {
+        if (!value || typeof value !== "object") return [];
+        const row = value as Record<string, unknown>;
+        const fn = row.function && typeof row.function === "object"
+          ? (row.function as Record<string, unknown>)
+          : {};
+        if (typeof fn.name !== "string") return [];
+        const call = {
+          id: typeof row.id === "string" ? row.id : `call-${index + 1}`,
+          name: fn.name,
+          arguments: typeof fn.arguments === "string" ? fn.arguments : "{}",
+        };
+        onToolArguments?.(call);
+        return [call];
+      });
+    return {
+      text,
+      toolCalls,
+      finishReason:
+        typeof choice.finish_reason === "string"
+          ? choice.finish_reason
+          : undefined,
+      model: typeof payload.model === "string" ? payload.model : undefined,
+      provider:
+        typeof payload.provider === "string" ? payload.provider : undefined,
+      usage: normalizeUsage(payload.usage, Date.now() - startedAt),
+    };
+  }
+
+  if (!response.body) throw new Error("OpenRouter returned an empty stream.");
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const calls = new Map<number, OpenRouterAgentToolCall>();
+  let buffer = "";
+  let pendingJsonPayload = "";
+  let text = "";
+  let model: string | undefined;
+  let provider: string | undefined;
+  let finishReason: string | undefined;
+  let rawUsage: unknown;
+  let trailingError: Error | undefined;
+  let lastMeaningfulAt = Date.now();
+  while (true) {
+    const { value, done } = await readStreamChunk(reader, lastMeaningfulAt, idleTimeoutMs);
+    buffer += decoder.decode(value, { stream: !done });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.startsWith("data:")) continue;
+      const raw = line.slice(5).trim();
+      if (!raw || raw === "[DONE]") continue;
+      let chunk: Record<string, unknown>;
+      try {
+        chunk = JSON.parse(pendingJsonPayload + raw) as Record<string, unknown>;
+        pendingJsonPayload = "";
+      } catch {
+        // DeepSeek-compatible routes occasionally emit one malformed fragment
+        // and then resume with a complete standalone event. Do not poison the
+        // remainder of the agent turn by concatenating every later event onto
+        // that fragment; prefer the authoritative standalone event when it is
+        // valid, while still supporting genuinely split data records.
+        if (pendingJsonPayload) {
+          try {
+            chunk = JSON.parse(raw) as Record<string, unknown>;
+            pendingJsonPayload = "";
+          } catch {
+            pendingJsonPayload += raw;
+            continue;
+          }
+        } else {
+          pendingJsonPayload = raw;
+          continue;
+        }
+      }
+      if (typeof chunk.model === "string") model = chunk.model;
+      if (typeof chunk.provider === "string") provider = chunk.provider;
+      if (chunk.usage) rawUsage = chunk.usage;
+      const choices = Array.isArray(chunk.choices)
+        ? (chunk.choices as Array<Record<string, unknown>>)
+        : [];
+      const choice = choices[0] ?? {};
+      if (typeof choice.finish_reason === "string")
+        finishReason = choice.finish_reason;
+      const delta = choice.delta && typeof choice.delta === "object"
+        ? (choice.delta as Record<string, unknown>)
+        : {};
+      if (typeof delta.content === "string") {
+        if (delta.content) lastMeaningfulAt = Date.now();
+        text += delta.content;
+        onText?.(delta.content);
+      }
+      if (typeof delta.reasoning === "string") {
+        if (delta.reasoning) lastMeaningfulAt = Date.now();
+        onReasoningText?.(delta.reasoning);
+      }
+      if (Array.isArray(delta.tool_calls)) {
+        for (const value of delta.tool_calls) {
+          if (!value || typeof value !== "object") continue;
+          const row = value as Record<string, unknown>;
+          const index = typeof row.index === "number" ? row.index : 0;
+          const previous = calls.get(index) ?? {
+            id: `call-${index + 1}`,
+            name: "",
+            arguments: "",
+          };
+          const fn = row.function && typeof row.function === "object"
+            ? (row.function as Record<string, unknown>)
+            : {};
+          const nameDelta = typeof fn.name === "string" ? fn.name : "";
+          const nextName = !nameDelta
+            ? previous.name
+            : !previous.name || nameDelta.startsWith(previous.name)
+              ? nameDelta
+              : previous.name.endsWith(nameDelta)
+                ? previous.name
+                : `${previous.name}${nameDelta}`;
+          const next = {
+            id:
+              typeof row.id === "string" && row.id
+                ? row.id
+                : previous.id,
+            name:
+              nextName,
+            arguments:
+              typeof fn.arguments === "string"
+                ? `${previous.arguments}${fn.arguments}`
+                : previous.arguments,
+          };
+          calls.set(index, next);
+          if (
+            (typeof fn.name === "string" && fn.name) ||
+            (typeof fn.arguments === "string" && fn.arguments)
+          )
+            lastMeaningfulAt = Date.now();
+          onToolArguments?.(next);
+        }
+      }
+      const error = chunk.error && typeof chunk.error === "object"
+        ? (chunk.error as Record<string, unknown>)
+        : null;
+      if (error) {
+        trailingError = new Error(
+          typeof error.message === "string"
+            ? error.message
+            : "The model stream failed.",
+        );
+        break;
+      }
+    }
+    if (done || trailingError) break;
+  }
+  if (trailingError && !text && calls.size === 0) throw trailingError;
+  return {
+    text,
+    toolCalls: [...calls.entries()]
+      .sort(([left], [right]) => left - right)
+      .map(([, call]) => call)
+      .filter((call) => call.name),
+    finishReason,
+    model,
+    provider,
+    usage: normalizeUsage(rawUsage, Date.now() - startedAt),
+  };
 }

@@ -218,6 +218,7 @@ export const setPinned = mutation({
     actorClerkId: v.string(),
     workspaceItemId: v.id("spectraWorkspaceItems"),
     pinned: v.boolean(),
+    exclusive: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const actor = await requireSpectraActor(ctx, args.actorClerkId);
@@ -228,6 +229,10 @@ export const setPinned = mutation({
       throw new Error("Workspace item not found");
     }
     const now = Date.now();
+    if (args.pinned && args.exclusive) {
+      const siblings = await ctx.db.query("spectraWorkspaceItems").withIndex("by_workspace", (q) => q.eq("workspaceId", item.workspaceId)).collect();
+      await Promise.all(siblings.filter((sibling) => sibling._id !== item._id && sibling.viewData.pinned).map((sibling) => ctx.db.patch(sibling._id, { viewData: { ...sibling.viewData, pinned: false }, updatedAt: Date.now() })));
+    }
     await ctx.db.patch(args.workspaceItemId, {
       viewData: { ...item.viewData, pinned: args.pinned },
       updatedAt: now,

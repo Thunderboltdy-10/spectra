@@ -1,25 +1,55 @@
 import { NextRequest } from "next/server";
+import JSON5 from "json5";
+import { jsonrepair } from "jsonrepair";
 import { ZodError } from "zod";
 import { requireActor } from "@/lib/auth-server";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
-import { allowSpectraProviderFallbacks, assertPrimarySpectraRouting, getSpectraModelId, getSpectraProviderRouting } from "@/features/spectra/ai/model-config";
-import { extractCompleteJsonArrayItems, readOpenRouterResponse, type OpenRouterUsage } from "@/features/spectra/ai/openrouter-stream";
-import { buildBoundedContextPacket, type EffectiveFocusMode } from "@/features/spectra/ai/context-builder";
+import {
+  allowSpectraProviderFallbacks,
+  assertPrimarySpectraRouting,
+  getSpectraModelId,
+  getSpectraProviderRouting,
+  SPECTRA_FALLBACK_PROVIDERS,
+} from "@/features/spectra/ai/model-config";
+import {
+  extractCompleteJsonArrayItems,
+  extractPartialJsonStringField,
+  readOpenRouterAgentTurn,
+  readOpenRouterResponse,
+  type OpenRouterUsage,
+} from "@/features/spectra/ai/openrouter-stream";
+import {
+  runSpectraAgentLoop,
+  type SpectraAgentMessage,
+} from "@/features/spectra/ai/agent-loop";
+import {
+  buildBoundedContextPacket,
+  type EffectiveFocusMode,
+} from "@/features/spectra/ai/context-builder";
 import { activeToolContractPrompt } from "@/features/spectra/ai/tool-contract";
+import { normalizeArtifactContent } from "@/features/spectra/ai/content-normalization";
+import {
+  shouldAllowAgentDiscovery,
+  shouldUseComplexReasoning,
+} from "@/features/spectra/ai/model-strategy";
 import { evaluatePlanPolicy } from "@/features/spectra/operations/policy";
 import {
   parseModelOperation,
   parseSpectraPlan,
   requestIntentSchema,
+  SPECTRA_ARTIFACT_CONTENT_JSON_SCHEMAS,
+  SPECTRA_BLUEPRINT_KEYS,
   SPECTRA_PLAN_JSON_SCHEMA,
   type ModelOperation,
   type SpectraPlan,
 } from "@/features/spectra/operations/schema";
-import { validatePlanAgainstIntent, type OwnedOperationReferences } from "@/features/spectra/operations/validate-plan";
+import {
+  validatePlanAgainstIntent,
+  type OwnedOperationReferences,
+} from "@/features/spectra/operations/validate-plan";
 import { validateBlueprintContent } from "@/features/spectra/blueprints/registry";
 
 export const runtime = "nodejs";
-export const maxDuration = 300;
 
 // The viewer may detach, navigate, or reconnect without cancelling the work.
 // Explicit stop requests target the run-owned controller instead.
@@ -39,7 +69,12 @@ type Body = {
   attachments?: AttachmentInput[];
   focusMode?: EffectiveFocusMode;
   selectedArtifactIds?: string[];
-  explicitContextObjects?: Array<{ type?: string; id?: string; label?: string; workspaceId?: string }>;
+  explicitContextObjects?: Array<{
+    type?: string;
+    id?: string;
+    label?: string;
+    workspaceId?: string;
+  }>;
   currentView?: string;
   submissionKey?: string;
 };
@@ -62,75 +97,196 @@ type PreparedAttachment = {
   extractedText?: string;
 };
 
-type StoredOperation = { _id: string; executionId?: string; type: string; input: unknown; status: "proposed" | "executing" | "executed" | "failed" | "cancelled"; requiresConfirmation?: boolean; pendingArtifactId?: string; pendingWorkspaceId?: string };
-type ResultAction = { key: string; label: string; targetType?: "artifact" | "thread" | "run" | "workspace"; targetId?: string };
-type Card = { _id: string; runId: string; status: "queued" | "running" | "awaiting_confirmation" | "completed" | "failed" | "cancelled"; title: string; summary?: string; variant: "status" | "artifact" | "thread" | "operation" | "error"; actions: ResultAction[]; provenance?: unknown; updatedAt: number };
-type RunState = { status: Card["status"]; sourceSurface: "chat" | "workspace" | "artifact"; threadId?: string; workspaceId?: string; artifactId?: string; userPrompt: string; finalSummary?: string; decision?: SpectraPlan["decision"]; planIntent?: unknown; executionId?: string; contextSnapshot?: { focusMode?: EffectiveFocusMode; selectedObjectIds?: string[]; explicitContextObjects?: Body["explicitContextObjects"]; currentView?: string } };
-type RunDetail = { run: RunState; cards: Card[]; operations: StoredOperation[] };
-type RetryReset = { runId: string; resultCardId?: string; prompt: string; workspaceId?: string; artifactId?: string; sourceSurface: RunState["sourceSurface"]; executionId: string; previousExecutionId: string; created: boolean; contextSnapshot?: RunState["contextSnapshot"] };
+type StoredOperation = {
+  _id: string;
+  executionId?: string;
+  type: string;
+  input: unknown;
+  status: "proposed" | "executing" | "executed" | "failed" | "cancelled";
+  requiresConfirmation?: boolean;
+  pendingArtifactId?: string;
+  pendingWorkspaceId?: string;
+};
+type ResultAction = {
+  key: string;
+  label: string;
+  targetType?: "artifact" | "thread" | "run" | "workspace";
+  targetId?: string;
+};
+type Card = {
+  _id: string;
+  runId: string;
+  status:
+    | "queued"
+    | "running"
+    | "awaiting_confirmation"
+    | "completed"
+    | "failed"
+    | "cancelled";
+  title: string;
+  summary?: string;
+  variant: "status" | "artifact" | "thread" | "operation" | "error";
+  actions: ResultAction[];
+  provenance?: unknown;
+  updatedAt: number;
+};
+type RunState = {
+  status: Card["status"];
+  sourceSurface: "chat" | "workspace" | "artifact";
+  threadId?: string;
+  workspaceId?: string;
+  artifactId?: string;
+  userPrompt: string;
+  finalSummary?: string;
+  decision?: SpectraPlan["decision"];
+  planIntent?: unknown;
+  executionId?: string;
+  contextSnapshot?: {
+    focusMode?: EffectiveFocusMode;
+    selectedObjectIds?: string[];
+    explicitContextObjects?: Body["explicitContextObjects"];
+    currentView?: string;
+  };
+};
+type RunDetail = {
+  run: RunState;
+  cards: Card[];
+  operations: StoredOperation[];
+};
+type RetryReset = {
+  runId: string;
+  resultCardId?: string;
+  prompt: string;
+  workspaceId?: string;
+  artifactId?: string;
+  sourceSurface: RunState["sourceSurface"];
+  executionId: string;
+  previousExecutionId: string;
+  created: boolean;
+  contextSnapshot?: RunState["contextSnapshot"];
+};
 
 function withJsExtension(functionName: string) {
   const [moduleName, exportName] = functionName.split(":");
-  return !moduleName || !exportName || moduleName.endsWith(".js") ? functionName : `${moduleName}.js:${exportName}`;
+  return !moduleName || !exportName || moduleName.endsWith(".js")
+    ? functionName
+    : `${moduleName}.js:${exportName}`;
 }
 
 function missingFunction(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
-  return message.includes("FunctionPathNotFound") || message.includes("Could not find public function");
+  return (
+    message.includes("FunctionPathNotFound") ||
+    message.includes("Could not find public function")
+  );
 }
 
 async function query<TArgs extends object, TResult>(name: string, args: TArgs) {
-  try { return await convexQuery<TArgs, TResult>(name, args); }
-  catch (error) { if (!missingFunction(error)) throw error; return convexQuery<TArgs, TResult>(withJsExtension(name), args); }
+  try {
+    return await convexQuery<TArgs, TResult>(name, args);
+  } catch (error) {
+    if (!missingFunction(error)) throw error;
+    return convexQuery<TArgs, TResult>(withJsExtension(name), args);
+  }
 }
 
-async function mutate<TArgs extends object, TResult>(name: string, args: TArgs) {
-  try { return await convexMutation<TArgs, TResult>(name, args); }
-  catch (error) { if (!missingFunction(error)) throw error; return convexMutation<TArgs, TResult>(withJsExtension(name), args); }
+async function mutate<TArgs extends object, TResult>(
+  name: string,
+  args: TArgs,
+) {
+  try {
+    return await convexMutation<TArgs, TResult>(name, args);
+  } catch (error) {
+    if (!missingFunction(error)) throw error;
+    return convexMutation<TArgs, TResult>(withJsExtension(name), args);
+  }
 }
 
 function streamCard(card: Card) {
-  return { id: card._id, runId: card.runId, status: card.status, title: card.title, summary: card.summary, variant: card.variant, actions: card.actions, provenance: card.provenance, updatedAt: card.updatedAt };
+  return {
+    id: card._id,
+    runId: card.runId,
+    status: card.status,
+    title: card.title,
+    summary: card.summary,
+    variant: card.variant,
+    actions: card.actions,
+    provenance: card.provenance,
+    updatedAt: card.updatedAt,
+  };
 }
 
 function safeJson(value: unknown) {
   return JSON.stringify(value, (_key, item) => {
-    if (typeof item === "string" && item.length > 4_000) return `${item.slice(0, 4_000)}…`;
-    if (Array.isArray(item) && item.length > 200) return [...item.slice(0, 200), "…"];
+    if (typeof item === "string" && item.length > 4_000)
+      return `${item.slice(0, 4_000)}…`;
+    if (Array.isArray(item) && item.length > 200)
+      return [...item.slice(0, 200), "…"];
     return item;
   });
 }
 
-async function prepareAttachments(input: AttachmentInput[] | undefined): Promise<PreparedAttachment[]> {
+async function prepareAttachments(
+  input: AttachmentInput[] | undefined,
+): Promise<PreparedAttachment[]> {
   const rows = Array.isArray(input) ? input.slice(0, 4) : [];
   let extractedCharacters = 0;
   const prepared: PreparedAttachment[] = [];
   for (const row of rows) {
-    const name = typeof row.name === "string" ? row.name.replace(/[\u0000-\u001f]/g, "").slice(0, 180) : "attachment";
-    const mimeType = typeof row.mimeType === "string" ? row.mimeType.slice(0, 120) : "application/octet-stream";
-    const size = typeof row.size === "number" && Number.isFinite(row.size) ? row.size : 0;
-    if (row.handling === "unsupported_image") throw new Error("Spectra cannot inspect image attachments yet. Use PDF, DOCX, or text for this run.");
+    const name =
+      typeof row.name === "string"
+        ? row.name.replace(/[\u0000-\u001f]/g, "").slice(0, 180)
+        : "attachment";
+    const mimeType =
+      typeof row.mimeType === "string"
+        ? row.mimeType.slice(0, 120)
+        : "application/octet-stream";
+    const size =
+      typeof row.size === "number" && Number.isFinite(row.size) ? row.size : 0;
+    if (row.handling === "unsupported_image")
+      throw new Error(
+        "Spectra cannot inspect image attachments yet. Use PDF, DOCX, or text for this run.",
+      );
     if (row.handling === "pdf") {
-      if (size > 10 * 1024 * 1024 || typeof row.data !== "string" || !row.data.startsWith("data:application/pdf;base64,")) throw new Error(`Invalid PDF attachment: ${name}`);
-      prepared.push({ name, mimeType: "application/pdf", size, handling: "pdf", data: row.data });
+      if (
+        size > 10 * 1024 * 1024 ||
+        typeof row.data !== "string" ||
+        !row.data.startsWith("data:application/pdf;base64,")
+      )
+        throw new Error(`Invalid PDF attachment: ${name}`);
+      prepared.push({
+        name,
+        mimeType: "application/pdf",
+        size,
+        handling: "pdf",
+        data: row.data,
+      });
       continue;
     }
     if (row.handling === "text") {
-      if (size > 2 * 1024 * 1024 || typeof row.data !== "string") throw new Error(`Invalid text attachment: ${name}`);
+      if (size > 2 * 1024 * 1024 || typeof row.data !== "string")
+        throw new Error(`Invalid text attachment: ${name}`);
       const remaining = Math.max(0, 80_000 - extractedCharacters);
-      const extractedText = row.data.replace(/\u0000/g, "").slice(0, Math.min(40_000, remaining));
+      const extractedText = row.data
+        .replace(/\u0000/g, "")
+        .slice(0, Math.min(40_000, remaining));
       extractedCharacters += extractedText.length;
       prepared.push({ name, mimeType, size, handling: "text", extractedText });
       continue;
     }
     if (row.handling === "docx") {
-      if (size > 8 * 1024 * 1024 || typeof row.data !== "string") throw new Error(`Invalid DOCX attachment: ${name}`);
+      if (size > 8 * 1024 * 1024 || typeof row.data !== "string")
+        throw new Error(`Invalid DOCX attachment: ${name}`);
       const encoded = row.data.split(",", 2)[1];
       if (!encoded) throw new Error(`Invalid DOCX attachment: ${name}`);
       const mammoth = await import("mammoth");
-      const result = await mammoth.extractRawText({ buffer: Buffer.from(encoded, "base64") });
+      const result = await mammoth.extractRawText({
+        buffer: Buffer.from(encoded, "base64"),
+      });
       const remaining = Math.max(0, 80_000 - extractedCharacters);
-      const extractedText = result.value.replace(/\u0000/g, "").slice(0, Math.min(40_000, remaining));
+      const extractedText = result.value
+        .replace(/\u0000/g, "")
+        .slice(0, Math.min(40_000, remaining));
       extractedCharacters += extractedText.length;
       prepared.push({ name, mimeType, size, handling: "docx", extractedText });
       continue;
@@ -142,6 +298,9 @@ async function prepareAttachments(input: AttachmentInput[] | undefined): Promise
 
 function systemPrompt(surface: Surface) {
   const common = `You are Spectra's controlled school-work planner. Return only the strict JSON plan.
+Emit top-level fields in this exact order: decision, intent, conversationTitle, conversationSummary, choices, progressUpdates, operations, finalResponse. Operations must precede finalResponse so Spectra can reveal genuine work as soon as each complete operation streams.
+
+progressUpdates is an array of zero to five short, user-facing stage updates. Use zero for greetings and immediate answers. For substantive work, write two to five specific updates in the form "Short title · Concrete detail" (for example "Structuring the lesson · Organizing the source material into three teachable sections"). These are transparent progress summaries, not hidden chain-of-thought: never include private deliberation, uncertainty dumps, secrets, policy text, or implementation language. Make each update describe real work this plan performs; avoid generic phrases such as "Thinking" or "Working".
 
 Available actions in this wave:\n${activeToolContractPrompt()}\nUse an action only when it materially advances the user's request. Do not call tools for small explanatory steps.
 
@@ -150,122 +309,2384 @@ First classify the request as answer, operate, clarify, or refuse. The intent mo
 When one bounded user choice would unblock the work, use decision=clarify and include choices with 2–4 distinct options. Each option needs a short title and may include one concise description. Do not use choices for ordinary rhetorical questions or confirmations already represented by operation policy. Otherwise choices must be null.
 
 The owned context is a bounded packet. effectiveFocus states the user's explicit primary context. selectedObjects are intentional and take priority over relevant/catalog objects. A continued thread supplies conversation history while focusedArtifact/workspace may remain additional working focus. Never imply access to omitted or full workspace content.
+If the context packet contains activeGoal, it is the authoritative unresolved task. The selected choice answers that task's question. Continue that request and never revive an older completed, rejected, or abandoned instruction from the same thread.
 
 For the first exchange, provide a specific conversationTitle of 2 to 4 words and a one-sentence conversationSummary. Avoid generic titles such as "Biology Question" or "New Conversation". On later exchanges, refresh conversationSummary when useful. Set conversationTitle again only if the conversation's purpose has materially clarified or changed; otherwise use null. Never rename for minor topic drift.
 
 Use operation ids only when the exact id is present in owned context. Never invent, combine, prefix, suffix, or transform an id. Never use an operation key as a database id. A flashcard deck is ONE artifact with content.cards[]. A quiz is ONE artifact with content.questions[]. Memory cues belong in each flashcard's hint. Multiple-choice correctAnswer must exactly match one option. Planner tasks use one planner_task artifact. Threads are first-class conversations and must never be created as artifacts.
+When a later operation must reference an artifact created earlier in the same plan, use the dependency id @created:<zero-based operation index> (for example @created:0). It may reference only a prior artifact.create operation. Use this for artifact.link and other declared dependency fields; Spectra resolves it to the committed owned id during execution. Never invent any other temporary id.
+For planner_task creation or updates, encode every requested date, status, priority, estimate, reminder, and subtask in operation.input.content—not only in the title, summary, or finalResponse. If the user requests N subtasks, content.subtasks must contain exactly N titled items. Never claim a task is due, scheduled, or subdivided unless the corresponding canonical content fields are present.
 
-artifact.create already places a new artifact according to placement; never add a separate workspaceItem.add for that newly generated artifact. For artifact.update include blueprintKey and return the complete canonical content for that blueprint.
+artifact.create already places a new artifact according to placement; never add a separate workspaceItem.add for that newly generated artifact. Set pinned=true when the new artifact should be important, and exclusivePin=true only when the user explicitly says it should be the only pinned item. For existing items use workspaceItem.setPinned. Never claim a pin changed unless one of those fields or operations performs it. For artifact.update include blueprintKey. Prefer contentPatch for narrow edits to an existing artifact instead of echoing its entire content. contentPatch.changes uses JSON Pointer paths into the canonical content (for example /questions/0/explanation or /cards/2/hint); indices must refer to existing array entries. Each change object contains only \`path\` and \`value\`; do not emit JSON Patch's \`op\` field. Use complete content only for broad rewrites.
+artifact.archive is destructive to the active workspace experience and always pauses for confirmation. Use it only when the user explicitly asks to archive the exact owned artifact; never substitute workspaceItem.hide or artifact.update.
+Every operations[] object must use the exact discriminator key \`type\` (for example {"type":"artifact.update","input":{...}}). Never put an operation name in an \`id\` key.
 
-Do not emit workspaceItem.add or workspaceItem.hide unless the user explicitly requested placement or removal. Do not mutate a focused artifact when the user asks for advice, says to ignore it, or asks to create a different object. If more than five visible artifacts are requested, ask to confirm a smaller batch using decision=clarify and zero operations. finalResponse is the clean answer/result, never progress text or future-tense filler.`;
-  if (surface === "chat") return `${common}\nThis is conversational chat. New artifacts use placement=inbox unless an owned workspace was explicitly requested.`;
-  if (surface === "workspace") return `${common}\nThis is an action-oriented workspace. A newly requested artifact defaults to placement=context and the current workspace. Keep finalResponse compact.`;
-  if (surface === "artifacts") return `${common}\nThis is the artifact library. New artifacts default to placement=inbox. A recently focused object is not an implicit mutation target.`;
+Do not emit workspaceItem.add or workspaceItem.hide unless the user explicitly requested placement or removal. Do not mutate a focused artifact when the user asks for advice, says to ignore it, or asks to create a different object. Large requested batches are valid: plan all requested work in bounded operations and let Spectra's approval and resumable execution layers govern the batch. finalResponse is the clean answer/result, never progress text or future-tense filler.`;
+  if (surface === "chat")
+    return `${common}\nThis is conversational chat. New artifacts use placement=inbox unless an owned workspace was explicitly requested.`;
+  if (surface === "workspace")
+    return `${common}\nThis is an action-oriented workspace. A newly requested artifact defaults to placement=context and the current workspace. Keep finalResponse compact.`;
+  if (surface === "artifacts")
+    return `${common}\nThis is the artifact library. New artifacts default to placement=inbox. A recently focused object is not an implicit mutation target.`;
   return `${common}\nThis is Artifact Studio. The open artifact is a strong context hint only when the prompt refers to it. Keep finalResponse compact.`;
 }
 
-function rows(value: unknown): Array<Record<string, unknown>> {
-  return Array.isArray(value) ? value.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object") : [];
+type UpdateTargetHint = {
+  artifactId: string;
+  blueprintKey: (typeof SPECTRA_BLUEPRINT_KEYS)[number];
+};
+
+function extractBalancedObjectProperty(source: string, property: string) {
+  const marker = new RegExp(
+    `(?:"${property}"|'${property}'|${property})\\s*:`,
+  ).exec(source);
+  if (!marker) return null;
+  const start = source.indexOf("{", marker.index + marker[0].length);
+  if (start < 0) return null;
+  let depth = 0;
+  let inString = false;
+  let quote = '"';
+  let escaped = false;
+  for (let index = start; index < source.length; index += 1) {
+    const character = source[index]!;
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === quote) inString = false;
+      continue;
+    }
+    if (character === '"' || character === "'") {
+      inString = true;
+      quote = character;
+    } else if (character === "{") depth += 1;
+    else if (character === "}" && --depth === 0)
+      return source.slice(start, index + 1);
+  }
+  return null;
 }
 
-function summarizeArtifact(artifact: Record<string, unknown>, includeContent = false) {
+function parseStreamedPlanText(
+  text: string,
+  updateTarget?: UpdateTargetHint,
+  expectedCreationBlueprint?: (typeof SPECTRA_BLUEPRINT_KEYS)[number],
+  defaultPlacement: "context" | "inbox" = "context",
+  ownedArtifactBlueprints: ReadonlyMap<
+    string,
+    (typeof SPECTRA_BLUEPRINT_KEYS)[number]
+  > = new Map(),
+) {
+  const normalized = text
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/, "");
+  const parseNormalized = (value: string) => {
+    // Model JSON is data, not executable code. JSON5 gives us a deterministic
+    // local recovery path for the harmless defects models occasionally emit
+    // (trailing commas, single quotes, comments, or unquoted keys). The
+    // canonical Zod/tool validation below remains authoritative, so tolerant
+    // parsing can never turn an invalid operation into an executable one.
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      try {
+        parsed = JSON5.parse(value);
+      } catch {
+        // A few JSON-mode providers preserve literal line breaks inside a
+        // quoted summary. That is invalid JSON but completely unambiguous to
+        // repair locally; doing so avoids a slow second model request for a
+        // transport-escaping defect.
+        let inString = false;
+        let escaped = false;
+        let sanitized = "";
+        for (const character of value) {
+          if (inString && (character === "\n" || character === "\r" || character === "\t")) {
+            if (character !== "\r") sanitized += character === "\t" ? "\\t" : "\\n";
+            continue;
+          }
+          sanitized += character;
+          if (inString) {
+            if (escaped) escaped = false;
+            else if (character === "\\") escaped = true;
+            else if (character === '"') inString = false;
+          } else if (character === '"') inString = true;
+        }
+        try {
+          parsed = JSON5.parse(sanitized);
+        } catch {
+          // `json_object` is advisory on a few routed providers. Recover the
+          // deterministic syntax mistakes it is designed for (unescaped
+          // quotes, missing commas/closers, Python literals, and fenced text)
+          // locally. Zod and the owned-reference guards below still decide
+          // whether the repaired data is safe to execute.
+          parsed = JSON.parse(jsonrepair(sanitized));
+        }
+      }
+    }
+    const raw = parsed as Record<string, unknown>;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw))
+      return parseSpectraPlan(raw);
+    const rawIntent =
+      raw.intent && typeof raw.intent === "object" && !Array.isArray(raw.intent)
+        ? (raw.intent as Record<string, unknown>)
+        : null;
+    if (rawIntent && Array.isArray(rawIntent.requestedArtifactTypes)) {
+      const aliases: Record<string, (typeof SPECTRA_BLUEPRINT_KEYS)[number]> = {
+        doc: "document",
+        docs: "document",
+        note: "document",
+        notes: "document",
+        flashcard: "flashcard_deck",
+        flashcards: "flashcard_deck",
+        deck: "flashcard_deck",
+        planner: "planner_task",
+        task: "planner_task",
+        study_task: "planner_task",
+        test: "quiz",
+      };
+      rawIntent.requestedArtifactTypes = rawIntent.requestedArtifactTypes.map(
+        (value) => {
+          if (typeof value !== "string") return value;
+          const key = value.trim().toLowerCase().replace(/[\s.-]+/g, "_");
+          return aliases[key] ?? key;
+        },
+      );
+    }
+    // Streaming-only presentation data never enters executable plan policy.
+    delete raw.progressUpdates;
+    if (
+      typeof raw.conversationTitle !== "string" ||
+      !raw.conversationTitle.trim()
+    )
+      raw.conversationTitle = null;
+    if (
+      typeof raw.conversationSummary !== "string" ||
+      !raw.conversationSummary.trim()
+    )
+      raw.conversationSummary = null;
+    if (!Array.isArray(raw.operations)) raw.operations = [];
+    else
+      raw.operations = raw.operations.map((operation) => {
+        if (
+          !operation ||
+          typeof operation !== "object" ||
+          Array.isArray(operation)
+        )
+          return operation;
+        let row = operation as Record<string, unknown>;
+        let inputRecord =
+          row.input &&
+          typeof row.input === "object" &&
+          !Array.isArray(row.input)
+            ? (row.input as Record<string, unknown>)
+            : null;
+        if (
+          inputRecord &&
+          (row.type === "artifact.create" || row.type === "artifact.update")
+        ) {
+          const input = { ...inputRecord };
+          // Routed tool callers occasionally place an artifact field beside
+          // `input` even though its meaning is unambiguous. Canonicalize these
+          // harmless envelope mistakes locally; ownership, blueprint, content,
+          // and policy validation still run on the resulting operation.
+          for (const field of [
+            "artifactId",
+            "blueprintKey",
+            "title",
+            "summary",
+            "content",
+            "contentPatch",
+            "tags",
+            "workspaceId",
+            "placement",
+            "pinned",
+            "exclusivePin",
+          ] as const) {
+            if (!(field in row)) continue;
+            if (!(field in input)) input[field] = row[field];
+            delete row[field];
+          }
+          row = { ...row, input };
+          inputRecord = input;
+        }
+        if (inputRecord && typeof inputRecord.blueprintKey === "string") {
+          const blueprint = inputRecord.blueprintKey.trim().toLowerCase().replace(/[\s.-]+/g, "_");
+          const aliases: Record<string, (typeof SPECTRA_BLUEPRINT_KEYS)[number]> = {
+            doc: "document",
+            docs: "document",
+            note: "document",
+            notes: "document",
+            study_notes: "document",
+            flashcard: "flashcard_deck",
+            flashcards: "flashcard_deck",
+            deck: "flashcard_deck",
+            flash_card_deck: "flashcard_deck",
+            quiz_builder: "quiz",
+            test: "quiz",
+            planner: "planner_task",
+            task: "planner_task",
+            study_task: "planner_task",
+          };
+          inputRecord.blueprintKey = aliases[blueprint]
+            ?? (/document|notes?/.test(blueprint) ? "document"
+              : /flash|deck/.test(blueprint) ? "flashcard_deck"
+                : /quiz|test/.test(blueprint) ? "quiz"
+                  : /planner|task/.test(blueprint) ? "planner_task" : blueprint);
+        }
+        // The model tool contract calls the discriminator an operation `id`.
+        // Some JSON-object providers therefore emit `{ id: "artifact.update",
+        // input: ... }` instead of `{ type: ... }`. It is the same declared enum
+        // value, so canonicalize the key locally and let all normal guards run.
+        if (
+          typeof row.type !== "string" &&
+          typeof row.id === "string" &&
+          [
+            "artifact.create",
+            "artifact.update",
+            "workspace.create",
+            "workspace.update",
+            "artifact.link",
+            "workspaceItem.add",
+            "workspaceItem.hide",
+            "workspaceItem.setPinned",
+          ].includes(row.id)
+        ) {
+          const { id: _operationId, ...rest } = row;
+          row = { ...rest, type: row.id };
+        }
+        // DeepSeek occasionally names an operation after the concrete artifact
+        // family (for example `flashcard.update`) even though its input has the
+        // exact canonical artifact operation shape. This is a harmless enum-label
+        // mismatch, not a reason to spend tens of seconds on another model call.
+        // Infer only from unambiguous ids/fields; the full schema, ownership, and
+        // blueprint guards below remain authoritative before anything executes.
+        if (inputRecord && typeof row.type === "string") {
+          const type = row.type
+            .trim()
+            .toLowerCase()
+            .replaceAll("_", ".")
+            .replaceAll("-", ".");
+          const canonicalTypes = new Set([
+            "artifact.create",
+            "artifact.update",
+            "workspace.create",
+            "workspace.update",
+            "artifact.link",
+            "workspaceitem.add",
+            "workspaceitem.hide",
+            "workspaceitem.setpinned",
+          ]);
+          if (!canonicalTypes.has(type)) {
+            const inferred =
+              typeof inputRecord.artifactId === "string" &&
+              (/(?:update|edit|patch|revise)/.test(type) ||
+                "content" in inputRecord ||
+                "contentPatch" in inputRecord ||
+                "title" in inputRecord ||
+                "summary" in inputRecord ||
+                "tags" in inputRecord)
+                ? "artifact.update"
+                : typeof inputRecord.workspaceId === "string" &&
+                    ("title" in inputRecord ||
+                      "description" in inputRecord ||
+                      "icon" in inputRecord ||
+                      "accent" in inputRecord)
+                  ? "workspace.update"
+                  : typeof inputRecord.blueprintKey === "string" &&
+                      ("content" in inputRecord || "placement" in inputRecord)
+                    ? "artifact.create"
+                    : null;
+            if (inferred) row = { ...row, type: inferred };
+          }
+        }
+        if (row.type === "artifact.create" && inputRecord) {
+          const input = { ...inputRecord };
+          // Some tool-schema renderers echo the concrete artifact family in an
+          // inner `type` field. The outer operation discriminator plus
+          // blueprintKey already carry that information.
+          delete input.type;
+          if (Array.isArray(input.placements)) {
+            const firstPlacement = input.placements.find(
+              (value) =>
+                value && typeof value === "object" && !Array.isArray(value),
+            ) as Record<string, unknown> | undefined;
+            if (
+              !("workspaceId" in input) &&
+              typeof firstPlacement?.workspaceId === "string"
+            )
+              input.workspaceId = firstPlacement.workspaceId;
+            if (
+              input.placement !== "context" &&
+              input.placement !== "inbox" &&
+              (firstPlacement?.placement === "context" ||
+                firstPlacement?.placement === "inbox")
+            )
+              input.placement = firstPlacement.placement;
+            delete input.placements;
+          }
+          const content =
+            input.content && typeof input.content === "object" && !Array.isArray(input.content)
+              ? { ...(input.content as Record<string, unknown>) }
+              : {};
+          if (!SPECTRA_BLUEPRINT_KEYS.includes(input.blueprintKey as (typeof SPECTRA_BLUEPRINT_KEYS)[number])) {
+            input.blueprintKey = expectedCreationBlueprint
+              ?? (Array.isArray(content.blocks) ? "document"
+                : Array.isArray(content.cards) ? "flashcard_deck"
+                  : Array.isArray(content.questions) ? "quiz"
+                    : Array.isArray(content.subtasks) || "status" in content || "dueAt" in content ? "planner_task" : input.blueprintKey);
+          }
+          if (input.blueprintKey === "document" && Array.isArray(content.blocks)) {
+            const blockAliases: Record<string, string> = {
+              text: "paragraph",
+              section: "heading",
+              title: "heading",
+              subheading: "heading",
+              h1: "heading",
+              h2: "heading",
+              h3: "heading",
+              bullet: "list",
+              bullets: "list",
+              bullet_list: "list",
+              ordered_list: "list",
+              formula: "math",
+              tip: "callout",
+              remember: "callout",
+              info: "callout",
+              note: "callout",
+              study_note: "callout",
+              collapsible: "callout",
+              accordion: "callout",
+              details: "callout",
+              highlight: "paragraph",
+            };
+            content.blocks = content.blocks.map((value, index) => {
+              if (!value || typeof value !== "object" || Array.isArray(value))
+                return { id: `block-${index + 1}`, type: "paragraph", text: String(value ?? "") };
+              const block = { ...(value as Record<string, unknown>) };
+              const rawType = typeof block.type === "string" ? block.type.trim().toLowerCase().replace(/[\s.-]+/g, "_") : "paragraph";
+              block.id = typeof block.id === "string" && block.id.trim() ? block.id : `block-${index + 1}`;
+              block.type = blockAliases[rawType] ?? rawType;
+              if (typeof block.text !== "string") {
+                if (typeof block.content === "string") block.text = block.content;
+                else if (typeof block.title === "string" && typeof block.body === "string") block.text = `${block.title}: ${block.body}`;
+                else if (typeof block.title === "string") block.text = block.title;
+                else if (Array.isArray(block.rows)) block.text = block.rows.map((row) => Array.isArray(row) ? row.join(" | ") : String(row)).join("\n");
+                else block.text = "";
+              }
+              if (block.type === "heading") {
+                const attrs = block.attrs && typeof block.attrs === "object" && !Array.isArray(block.attrs) ? { ...(block.attrs as Record<string, unknown>) } : {};
+                if (typeof attrs.level !== "number") attrs.level = typeof block.level === "number" ? block.level : 2;
+                block.attrs = attrs;
+              }
+              return block;
+            });
+            input.content = content;
+          }
+          if (SPECTRA_BLUEPRINT_KEYS.includes(input.blueprintKey as (typeof SPECTRA_BLUEPRINT_KEYS)[number]))
+            input.content = normalizeArtifactContent(input.blueprintKey as (typeof SPECTRA_BLUEPRINT_KEYS)[number], input.content);
+          if (!("summary" in input)) input.summary = null;
+          if (!Array.isArray(input.tags)) input.tags = typeof input.tags === "string" && input.tags.trim() ? [input.tags.trim()] : [];
+          if (!("workspaceId" in input)) input.workspaceId = null;
+          if (input.placement !== "context" && input.placement !== "inbox") input.placement = defaultPlacement;
+          if (typeof input.pinned !== "boolean") input.pinned = false;
+          if (typeof input.exclusivePin !== "boolean") input.exclusivePin = false;
+          row = { ...row, input };
+        }
+        if (row.type === "artifact.link" && inputRecord) {
+          const input = { ...inputRecord };
+          for (const field of ["label", "explanation", "workspaceId"] as const)
+            if (!(field in input)) input[field] = null;
+          row = { ...row, input };
+        }
+        if (
+          row.type !== "artifact.update" ||
+          !row.input ||
+          typeof row.input !== "object" ||
+          Array.isArray(row.input)
+        )
+          return row;
+        const input = { ...(row.input as Record<string, unknown>) };
+        // Some providers reuse the generic tool-schema `id` label for the
+        // artifact target inside an update. In this operation there is only one
+        // possible identifier, so translate it locally instead of spending a
+        // second model call asking for a key rename. Ownership and artifact
+        // validation still run before the operation can execute.
+        if (
+          typeof input.artifactId !== "string" &&
+          typeof input.id === "string"
+        ) {
+          input.artifactId = input.id;
+          delete input.id;
+        }
+        if (
+          typeof input.artifactId !== "string" &&
+          typeof input.targetArtifactId === "string"
+        ) {
+          input.artifactId = input.targetArtifactId;
+          delete input.targetArtifactId;
+        }
+        const ownedBlueprint =
+          typeof input.artifactId === "string"
+            ? ownedArtifactBlueprints.get(input.artifactId)
+            : undefined;
+        if (
+          (typeof input.blueprintKey !== "string" ||
+            !SPECTRA_BLUEPRINT_KEYS.includes(
+              input.blueprintKey as (typeof SPECTRA_BLUEPRINT_KEYS)[number],
+            )) &&
+          (ownedBlueprint ||
+            (updateTarget && input.artifactId === updateTarget.artifactId))
+        )
+          input.blueprintKey = ownedBlueprint ?? updateTarget!.blueprintKey;
+        if (typeof input.tags === "string")
+          input.tags = input.tags.trim() ? [input.tags.trim()] : [];
+        for (const field of ["title", "summary", "content", "tags"] as const)
+          if (!(field in input)) input[field] = null;
+        if (
+          input.blueprintKey === "document" &&
+          input.content &&
+          typeof input.content === "object" &&
+          !Array.isArray(input.content)
+        ) {
+          const content = { ...(input.content as Record<string, unknown>) };
+          if (Array.isArray(content.blocks)) {
+            const blockAliases: Record<string, string> = {
+              text: "paragraph",
+              section: "heading",
+              title: "heading",
+              subheading: "heading",
+              h1: "heading",
+              h2: "heading",
+              h3: "heading",
+              bullet: "list",
+              bullets: "list",
+              bullet_list: "list",
+              ordered_list: "list",
+              formula: "math",
+              tip: "callout",
+              remember: "callout",
+              info: "callout",
+              note: "callout",
+              study_note: "callout",
+              collapsible: "callout",
+              accordion: "callout",
+              details: "callout",
+              highlight: "paragraph",
+            };
+            content.blocks = content.blocks.map((value, index) => {
+              if (!value || typeof value !== "object" || Array.isArray(value))
+                return { id: `block-${index + 1}`, type: "paragraph", text: String(value ?? "") };
+              const block = { ...(value as Record<string, unknown>) };
+              const rawType = typeof block.type === "string" ? block.type.trim().toLowerCase().replace(/[\s.-]+/g, "_") : "paragraph";
+              block.id = typeof block.id === "string" && block.id.trim() ? block.id : `block-${index + 1}`;
+              block.type = blockAliases[rawType] ?? rawType;
+              if (typeof block.text !== "string") {
+                if (typeof block.content === "string") block.text = block.content;
+                else if (typeof block.title === "string" && typeof block.body === "string") block.text = `${block.title}: ${block.body}`;
+                else if (typeof block.title === "string") block.text = block.title;
+                else if (Array.isArray(block.rows)) block.text = block.rows.map((row) => Array.isArray(row) ? row.join(" | ") : String(row)).join("\n");
+                else block.text = "";
+              }
+              if (block.type === "heading") {
+                const attrs = block.attrs && typeof block.attrs === "object" && !Array.isArray(block.attrs) ? { ...(block.attrs as Record<string, unknown>) } : {};
+                if (typeof attrs.level !== "number") attrs.level = typeof block.level === "number" ? block.level : 2;
+                block.attrs = attrs;
+              }
+              return block;
+            });
+          }
+          input.content = content;
+        }
+        if (
+          SPECTRA_BLUEPRINT_KEYS.includes(input.blueprintKey as (typeof SPECTRA_BLUEPRINT_KEYS)[number]) &&
+          input.content !== null && input.content !== undefined
+        )
+          input.content = normalizeArtifactContent(input.blueprintKey as (typeof SPECTRA_BLUEPRINT_KEYS)[number], input.content);
+        if (
+          input.contentPatch &&
+          typeof input.contentPatch === "object" &&
+          !Array.isArray(input.contentPatch)
+        ) {
+          const contentPatch = input.contentPatch as Record<string, unknown>;
+          if (Array.isArray(contentPatch.changes))
+            input.contentPatch = {
+              ...contentPatch,
+              changes: contentPatch.changes.map((change) => {
+                if (
+                  !change ||
+                  typeof change !== "object" ||
+                  Array.isArray(change)
+                )
+                  return change;
+                const { op: _jsonPatchVerb, ...canonicalChange } =
+                  change as Record<string, unknown>;
+                return canonicalChange;
+              }),
+            };
+        }
+        // `json_object` providers commonly omit unchanged nullable fields. They
+        // are semantically identical to explicit nulls; normalizing them here
+        // prevents a correct contentPatch from being rejected and needlessly
+        // retried through another provider. Generated values are never altered.
+        for (const field of ["title", "summary", "content", "tags"] as const) {
+          if (!(field in input)) input[field] = null;
+        }
+        return { ...row, input };
+      });
+    const intent =
+      raw.intent && typeof raw.intent === "object" && !Array.isArray(raw.intent)
+        ? (raw.intent as Record<string, unknown>)
+        : {};
+    if (!Array.isArray(intent.requestedArtifactTypes))
+      intent.requestedArtifactTypes = [];
+    if (typeof intent.requestedVisibleArtifactCount !== "number")
+      intent.requestedVisibleArtifactCount = 0;
+    const createdBlueprints = (raw.operations as unknown[]).flatMap((operation: unknown) => {
+      if (!operation || typeof operation !== "object" || Array.isArray(operation)) return [];
+      const row = operation as Record<string, unknown>;
+      const input = row.input && typeof row.input === "object" && !Array.isArray(row.input) ? row.input as Record<string, unknown> : null;
+      return row.type === "artifact.create" && input && SPECTRA_BLUEPRINT_KEYS.includes(input.blueprintKey as (typeof SPECTRA_BLUEPRINT_KEYS)[number])
+        ? [input.blueprintKey as (typeof SPECTRA_BLUEPRINT_KEYS)[number]]
+        : [];
+    });
+    if (expectedCreationBlueprint && createdBlueprints.length > 0) {
+      intent.requestedVisibleArtifactCount = Math.max(
+        intent.requestedVisibleArtifactCount as number,
+        createdBlueprints.length,
+      );
+      intent.requestedArtifactTypes = [
+        ...new Set([
+          ...(intent.requestedArtifactTypes as Array<(typeof SPECTRA_BLUEPRINT_KEYS)[number]>),
+          ...createdBlueprints,
+        ]),
+      ];
+    }
+    if (
+      typeof intent.targetArtifactId !== "string" ||
+      !intent.targetArtifactId.trim()
+    )
+      intent.targetArtifactId = null;
+    if (
+      typeof intent.targetWorkspaceId !== "string" ||
+      !intent.targetWorkspaceId.trim()
+    )
+      intent.targetWorkspaceId = null;
+    raw.intent = intent;
+    if (
+      raw.choices &&
+      typeof raw.choices === "object" &&
+      !Array.isArray(raw.choices)
+    ) {
+      const choices = raw.choices as Record<string, unknown>;
+      if (Array.isArray(choices.options))
+        choices.options = choices.options.flatMap((option) => {
+          if (!option || typeof option !== "object" || Array.isArray(option))
+            return [];
+          const row = option as Record<string, unknown>;
+          const title = typeof row.title === "string" ? row.title.trim() : "";
+          return title
+            ? [
+                {
+                  title,
+                  description:
+                    typeof row.description === "string" &&
+                    row.description.trim()
+                      ? row.description.trim()
+                      : null,
+                },
+              ]
+            : [];
+        });
+    }
+    if (
+      raw.decision === "clarify" &&
+      (!raw.choices || typeof raw.choices !== "object")
+    ) {
+      const response =
+        typeof raw.finalResponse === "string" ? raw.finalResponse : "";
+      const candidates = [
+        [
+          /flashcards?|deck/i,
+          "Flashcard deck",
+          "Create recall cards for active study.",
+        ],
+        [/quiz/i, "Quiz", "Create practice questions with answers."],
+        [
+          /document|notes?/i,
+          "Study notes",
+          "Create a structured study document.",
+        ],
+        [/tasks?|planner/i, "Study task", "Create a planned task with steps."],
+      ].flatMap(([pattern, title, description]) =>
+        (pattern as RegExp).test(response)
+          ? [{ title: String(title), description: String(description) }]
+          : [],
+      );
+      if (candidates.length >= 2)
+        raw.choices = {
+          question:
+            response.slice(0, 500) || "Which study resource should I create?",
+          options: candidates.slice(0, 4),
+        };
+      else raw.choices = null;
+    }
+    return parseSpectraPlan(raw);
+  };
+  try {
+    return parseNormalized(normalized);
+  } catch (originalError) {
+    // Some providers occasionally finish after emitting every complete
+    // operation and finalResponse but before the outer JSON delimiters. Repair
+    // only missing structural closers; never alter strings or generated data.
+    const start = normalized.indexOf("{");
+    if (
+      start < 0 ||
+      !normalized.includes('"operations"') ||
+      !normalized.includes('"finalResponse"')
+    )
+      throw originalError;
+    let candidate = normalized.slice(start);
+    const stack: string[] = [];
+    let inString = false;
+    let escaped = false;
+    for (const character of candidate) {
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (character === "\\") escaped = true;
+        else if (character === '"') inString = false;
+        continue;
+      }
+      if (character === '"') inString = true;
+      else if (character === "{" || character === "[") stack.push(character);
+      else if (character === "}" && stack.at(-1) === "{") stack.pop();
+      else if (character === "]" && stack.at(-1) === "[") stack.pop();
+    }
+    const hasCompleteOperation =
+      extractCompleteJsonArrayItems(candidate, "operations").length > 0;
+    const hasCompleteEmptyOperations = /"operations"\s*:\s*\[\s*\]/.test(
+      candidate,
+    );
+    try {
+      if (inString) {
+        // With the enforced field order, a complete streamed operation followed
+        // by finalResponse means an unterminated trailing string cannot be part
+        // of executable content. Preserve the partial user-facing summary and
+        // close only that final string.
+        if (escaped || (!hasCompleteOperation && !hasCompleteEmptyOperations))
+          throw originalError;
+        candidate += '"';
+      }
+      if (stack.length === 0) throw originalError;
+      const repaired =
+        candidate.replace(/,\s*$/, "") +
+        stack
+          .reverse()
+          .map((character) => (character === "{" ? "}" : "]"))
+          .join("");
+      return parseNormalized(repaired);
+    } catch {
+      // A truncated clarification can never execute work. If the model has
+      // already committed to clarify and explicitly emitted zero operations,
+      // preserve its partial question instead of turning a safe conversational
+      // exchange into a failed run. Operational plans never use this fallback.
+      if (
+        !hasCompleteEmptyOperations ||
+        !/"decision"\s*:\s*"clarify"/.test(candidate)
+      )
+        throw originalError;
+      const responseMatch = candidate.match(
+        /"finalResponse"\s*:\s*"([\s\S]*)$/,
+      );
+      const partialResponse = responseMatch?.[1]
+        ?.replace(/\\u([0-9a-fA-F]{4})/g, (_match, hex: string) =>
+          String.fromCharCode(Number.parseInt(hex, 16)),
+        )
+        .replace(/\\n/g, "\n")
+        .replace(/\\r/g, "")
+        .replace(/\\t/g, " ")
+        .replace(/\\"/g, '"')
+        .replace(/\\\\/g, "\\")
+        .replace(/\s+/g, " ")
+        // Truncated outer JSON sometimes leaves its closing quote/braces in
+        // the recovered question. Those are transport syntax, not UI copy.
+        .replace(/(?:\\?["']\s*)?[}\]]+\s*$/g, "")
+        .replace(/\\?["']\s*$/g, "")
+        .trim()
+        .slice(0, 4_000);
+      if (!partialResponse || partialResponse.length < 12) throw originalError;
+      const requestedArtifactTypes = /flashcard|deck/i.test(candidate)
+        ? ["flashcard_deck" as const]
+        : /quiz/i.test(candidate)
+          ? ["quiz" as const]
+          : /planner|task/i.test(candidate)
+            ? ["planner_task" as const]
+            : /document|notes/i.test(candidate)
+              ? ["document" as const]
+              : [];
+      return parseSpectraPlan({
+        decision: "clarify",
+        intent: {
+          mode: "create",
+          requestedArtifactTypes,
+          requestedVisibleArtifactCount: requestedArtifactTypes.length ? 1 : 0,
+          targetArtifactId: null,
+          targetWorkspaceId: null,
+        },
+        conversationTitle: null,
+        conversationSummary: null,
+        choices: null,
+        operations: [],
+        finalResponse: partialResponse,
+      });
+    }
+  }
+}
+
+function describeInvalidPlanShape(text: string) {
+  try {
+    let raw: unknown;
+    try {
+      raw = JSON.parse(text);
+    } catch {
+      try {
+        raw = JSON5.parse(text);
+      } catch {
+        raw = JSON.parse(jsonrepair(text));
+      }
+    }
+    if (!raw || typeof raw !== "object" || Array.isArray(raw))
+      return { root: typeof raw };
+    const operations = Array.isArray((raw as Record<string, unknown>).operations)
+      ? ((raw as Record<string, unknown>).operations as unknown[])
+      : [];
+    return {
+      decision: (raw as Record<string, unknown>).decision,
+      operations: operations.slice(0, 12).map((value, index) => {
+        const row =
+          value && typeof value === "object" && !Array.isArray(value)
+            ? (value as Record<string, unknown>)
+            : {};
+        const input =
+          row.input && typeof row.input === "object" && !Array.isArray(row.input)
+            ? (row.input as Record<string, unknown>)
+            : {};
+        return {
+          index,
+          type: row.type ?? row.id,
+          rowKeys: Object.keys(row).sort(),
+          inputKeys: Object.keys(input).sort(),
+          blueprintKey: input.blueprintKey,
+          hasArtifactId:
+            typeof input.artifactId === "string" ||
+            typeof input.targetArtifactId === "string" ||
+            typeof input.id === "string",
+        };
+      }),
+    };
+  } catch {
+    return { unreadable: true, characters: text.length };
+  }
+}
+
+function fastConversationalPlan(prompt: string): SpectraPlan | null {
+  const clean = prompt.trim();
+  if (
+    /^(?:hi|hello|hey|hiya|good\s+(?:morning|afternoon|evening))[!.?\s]*$/i.test(
+      clean,
+    )
+  )
+    return parseSpectraPlan({
+      decision: "answer",
+      intent: {
+        mode: "answer",
+        requestedArtifactTypes: [],
+        requestedVisibleArtifactCount: 0,
+        targetArtifactId: null,
+        targetWorkspaceId: null,
+      },
+      conversationTitle: "Hello",
+      conversationSummary: "A new conversation with Spectra.",
+      choices: null,
+      operations: [],
+      finalResponse:
+        "Hi! What are you working on? I can explain a topic, help with an open artifact, or create study materials with you.",
+    });
+  const exact = clean
+    .match(/^reply\s+with\s+exactly\s*:\s*([\s\S]{1,4000})$/i)?.[1]
+    ?.trim();
+  if (exact)
+    return parseSpectraPlan({
+      decision: "answer",
+      intent: {
+        mode: "answer",
+        requestedArtifactTypes: [],
+        requestedVisibleArtifactCount: 0,
+        targetArtifactId: null,
+        targetWorkspaceId: null,
+      },
+      conversationTitle: "Exact Reply",
+      conversationSummary: "A precise requested response.",
+      choices: null,
+      operations: [],
+      finalResponse: exact.replace(/^(["'])|(["'])$/g, ""),
+    });
+  if (
+    /^(?:please\s+)?create\s+(?:a\s+)?study\s+resource(?:\s+for\s+me)?[.!?]*$/i.test(
+      clean,
+    )
+  )
+    return parseSpectraPlan({
+      decision: "clarify",
+      intent: {
+        mode: "create",
+        requestedArtifactTypes: [],
+        requestedVisibleArtifactCount: 0,
+        targetArtifactId: null,
+        targetWorkspaceId: null,
+      },
+      conversationTitle: "Study Resource Creation",
+      conversationSummary:
+        "Choosing the right format and subject for a new study resource.",
+      choices: {
+        question: "What type of study resource would you like to create?",
+        options: [
+          {
+            title: "Flashcard Deck",
+            description:
+              "A set of digital flashcards with questions and answers.",
+          },
+          {
+            title: "Quiz",
+            description:
+              "A multiple-choice or short-answer quiz for self-assessment.",
+          },
+          {
+            title: "Document",
+            description:
+              "Notes or a reference document with structured content.",
+          },
+          {
+            title: "Planner Task",
+            description: "A single task with details, due date, and subtasks.",
+          },
+        ],
+      },
+      operations: [],
+      finalResponse:
+        "Which kind of study resource should I create? Choose a format below, then tell me the topic you want it to cover.",
+    });
+  if (
+    /^flashcard\s+deck\s*:/i.test(clean) &&
+    !/\b(?:about|on|covering|topic|subject)\b/i.test(clean)
+  )
+    return parseSpectraPlan({
+      decision: "clarify",
+      intent: {
+        mode: "create",
+        requestedArtifactTypes: ["flashcard_deck"],
+        requestedVisibleArtifactCount: 1,
+        targetArtifactId: null,
+        targetWorkspaceId: null,
+      },
+      conversationTitle: null,
+      conversationSummary:
+        "Preparing a flashcard deck after the user selected its format.",
+      choices: null,
+      operations: [],
+      finalResponse:
+        "What topic should the flashcard deck cover? You can also include the level, card count, or any source material you want me to use.",
+    });
+  return null;
+}
+
+type ProvisionalCreation = {
+  blueprintKey: "document" | "flashcard_deck" | "quiz" | "planner_task";
+  label: string;
+  requestedTitle?: string;
+  clause: string;
+};
+
+/**
+ * Extract only explicit creation clauses. This is intentionally not a general
+ * intent parser: it is the safe contract detector that lets the harness fan
+ * out independent artifact writers without asking one completion to serialize
+ * all of their content.
+ */
+function provisionalCreations(prompt: string): ProvisionalCreation[] {
+  const requestShape = prompt.trim().replace(
+    /\b(?:do not|don't|dont|without)\s+(?:change|edit|update|modify|rewrite|replace)[^.?!]*(?:[.?!]|$)/gi,
+    " ",
+  );
+  const verbs = [
+    ...requestShape.matchAll(/\b(?:create|make|build|generate|write|draft)\b/gi),
+  ];
+  // Only a verb whose immediate direct object names an artifact starts a
+  // creation clause. This deliberately rejects prose such as a quoted
+  // subtask named "Write one correction" and instructions like "write a
+  // better explanation". Those verbs used to split the real task clause and
+  // could materialize duplicate pending artifacts before the model ran.
+  const targetedVerbs = verbs.flatMap((verb) => {
+    const start = (verb.index ?? 0) + verb[0].length;
+    const directObject = requestShape.slice(start, start + 64).split(
+      /\b(?:from|using|based\s+on|with\s+the\s+included)\b/i,
+      1,
+    )[0]?.split(/[.?!;]/, 1)[0]?.slice(0, 48) ?? "";
+    const candidates = [
+      { match: /\b(?:flashcards?|flashcard\s+deck|deck)\b/i.exec(directObject), blueprintKey: "flashcard_deck" as const, label: "Flashcard deck" },
+      { match: /\bquiz(?:zes)?\b/i.exec(directObject), blueprintKey: "quiz" as const, label: "Quiz" },
+      { match: /\b(?:planner\s+task|study\s+task|task)\b/i.exec(directObject), blueprintKey: "planner_task" as const, label: "Planner task" },
+      { match: /\b(?:document|notes?|guide|outline|summary)\b/i.exec(directObject), blueprintKey: "document" as const, label: "Document" },
+    ]
+      .filter((candidate) => candidate.match)
+      .sort((left, right) => left.match!.index - right.match!.index);
+    const target = candidates[0];
+    if (!target) return [];
+    return [{ verb, target }];
+  });
+  return targetedVerbs.map(({ verb, target }, index) => {
+    const start = (verb.index ?? 0) + verb[0].length;
+    const end = targetedVerbs[index + 1]?.verb.index ?? requestShape.length;
+    let rawClause = requestShape.slice(start, Math.min(end, start + 1_200));
+    const followingMutation = /[.?!;]\s+(?=(?:add|update|edit|revise|rewrite|rename|change|set|link|connect|relate|tag|move|pin|unpin|delete|remove|archive)\b)/i.exec(rawClause);
+    if (followingMutation) rawClause = rawClause.slice(0, followingMutation.index + 1);
+    const requestedTitle = rawClause
+      .match(/\b(?:titled|called|named)\s+["']([^"']{1,240})["']/i)?.[1]
+      ?.trim();
+    return {
+      blueprintKey: target.blueprintKey,
+      label: target.label,
+      requestedTitle: requestedTitle || undefined,
+      clause: `${verb[0]}${rawClause}`.trim(),
+    };
+  });
+}
+
+function provisionalSingleCreation(
+  prompt: string,
+): {
+  blueprintKey: "document" | "flashcard_deck" | "quiz" | "planner_task";
+  label: string;
+  requestedTitle?: string;
+} | null {
+  const clean = prompt.trim();
+  const requestShape = clean.replace(
+    /\b(?:do not|don't|dont|without)\s+(?:change|edit|update|modify|rewrite|replace)[^.?!]*(?:[.?!]|$)/gi,
+    " ",
+  );
+  if (
+    !/\b(?:create|make|build|generate|write|draft)\b/i.test(requestShape) ||
+    /\b(?:edit|update|revise|rewrite|rename|improve|change|set|fix|correct|replace)\b/i.test(
+      requestShape,
+    ) ||
+    /\b(?:documents?|decks?|quizzes|tasks?)\b[\s\S]{0,48}\b(?:and|plus|alongside)\b[\s\S]{0,48}\b(?:documents?|decks?|quizzes|tasks?)\b/i.test(requestShape) ||
+    /\b(?:two|three|four|five|six|seven|eight|nine|ten|\d+)\s+(?:documents?|decks?|quizzes|tasks?)\b/i.test(
+      requestShape,
+    )
+  )
+    return null;
+  const verbMatches = [
+    ...requestShape.matchAll(/\b(?:create|make|build|generate|write|draft)\b/gi),
+  ];
+  const explicitTargets = verbMatches.flatMap((verb, index) => {
+    const start = (verb.index ?? 0) + verb[0].length;
+    const end = verbMatches[index + 1]?.index ?? requestShape.length;
+    // Source objects commonly follow "from/using/based on". They are context,
+    // not the thing being created ("create a quiz from this deck"). Only the
+    // direct object before that boundary may drive a speculative shell.
+    const rawClause = requestShape.slice(start, Math.min(end, start + 260));
+    const targetClause = rawClause.split(
+      /\b(?:from|using|based\s+on|with\s+the\s+included)\b/i,
+      1,
+    )[0] ?? "";
+    const candidates = [
+      {
+        match: /\b(?:flashcards?|flashcard\s+deck|deck)\b/i.exec(targetClause),
+        blueprintKey: "flashcard_deck" as const,
+        label: "Flashcard deck",
+      },
+      {
+        match: /\bquiz(?:zes)?\b/i.exec(targetClause),
+        blueprintKey: "quiz" as const,
+        label: "Quiz",
+      },
+      {
+        match: /\b(?:planner\s+task|study\s+task|task)\b/i.exec(targetClause),
+        blueprintKey: "planner_task" as const,
+        label: "Planner task",
+      },
+      {
+        match: /\b(?:document|notes?|guide|outline|summary)\b/i.exec(targetClause),
+        blueprintKey: "document" as const,
+        label: "Document",
+      },
+    ]
+      .filter((candidate) => candidate.match)
+      .sort((left, right) => left.match!.index - right.match!.index);
+    return candidates[0] ? [candidates[0]] : [];
+  });
+  // A specialized terminal action is safe only for exactly one explicit
+  // output. Multi-output packs stay in the general typed operation harness.
+  const target = explicitTargets.length === 1 ? explicitTargets[0] : null;
+  if (target) {
+    const requestedTitle =
+      requestShape
+        .match(/\b(?:titled|called|named)\s+["“']([^"”']{1,240})["”']/i)?.[1]
+        ?.trim() || undefined;
+    return {
+      blueprintKey: target.blueprintKey,
+      label: target.label,
+      requestedTitle,
+    };
+  }
+  return null;
+}
+
+function parallelCreationContract(prompt: string) {
+  const creations = provisionalCreations(prompt);
+  if (creations.length > 6) return [];
+  if (creations.length < 2 && !hasNonCreationMutationIntent(prompt)) return [];
+  return creations;
+}
+
+function hasNonCreationMutationIntent(prompt: string) {
+  const requested = prompt.replace(
+    /\b(?:do not|don't|dont|without)\s+(?:change|edit|update|modify|rewrite|replace|delete|remove|move|pin|link)[^.?!]*(?:[.?!]|$)/gi,
+    " ",
+  );
+  // `correct` is overwhelmingly used as artifact content ("one correct
+  // answer") rather than as an imperative mutation. Treating it as a graph
+  // dependency caused ordinary quiz creation to launch a second coordination
+  // worker, add operations the user never requested, and lose the stable
+  // DeepSeek prompt prefix. Explicit correction requests still route through
+  // `fix`, `edit`, `revise`, or the general single-agent path.
+  return /\b(?:edit|update|revise|rewrite|rename|improve|change|set|fix|replace|delete|remove|archive|move|pin|unpin|link|connect|relate|reorganize|tag)\b/i.test(
+    requested,
+  );
+}
+
+function explicitPlannerSubtaskCount(prompt: string) {
+  const countPattern =
+    "(one|two|three|four|five|six|seven|eight|nine|ten|\\d+)";
+  const matches = [
+    new RegExp(`\\bexactly\\s+${countPattern}\\s+(?:[a-z-]+\\s+){0,2}subtasks?\\b`, "i"),
+    new RegExp(`\\b(?:add|create|give|include|make|set|have|contain|with)\\b[^.!?\\n]{0,48}\\b${countPattern}\\s+(?:[a-z-]+\\s+){0,2}subtasks?\\b`, "i"),
+    new RegExp(`\\b${countPattern}\\s+subtasks?\\s+(?:named|called|titled)\\b`, "i"),
+  ];
+  const raw = matches
+    .map((pattern) => pattern.exec(prompt)?.[1]?.toLowerCase())
+    .find(Boolean);
+  if (!raw) return undefined;
+  const wordCounts: Record<string, number> = {
+    one: 1, two: 2, three: 3, four: 4, five: 5,
+    six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+  };
+  return wordCounts[raw] ?? Number(raw);
+}
+
+function assertRequestedArtifactContent(
+  operations: ModelOperation[],
+  prompt: string,
+) {
+  const plannerOperation = operations.find(
+    (operation) =>
+      (operation.type === "artifact.create" ||
+        operation.type === "artifact.update") &&
+      operation.input.blueprintKey === "planner_task",
+  );
+  if (
+    plannerOperation &&
+    (plannerOperation.type === "artifact.create" ||
+      plannerOperation.type === "artifact.update")
+  ) {
+  const rawContent = plannerOperation.input.content;
+  if (rawContent && typeof rawContent === "object" && !Array.isArray(rawContent)) {
+    (plannerOperation.input as { content: unknown }).content =
+      reconcileExplicitPlannerRequirements(rawContent, prompt);
+  }
+  const content =
+    plannerOperation.input.content &&
+    typeof plannerOperation.input.content === "object" &&
+    !Array.isArray(plannerOperation.input.content)
+      ? (plannerOperation.input.content as Record<string, unknown>)
+      : {};
+  const requestedCount = explicitPlannerSubtaskCount(prompt);
+  const subtasks = Array.isArray(content.subtasks) ? content.subtasks : [];
+  const titledSubtasks = subtasks.filter(
+    (item) =>
+      item &&
+      typeof item === "object" &&
+      typeof (item as { title?: unknown }).title === "string" &&
+      String((item as { title: string }).title).trim(),
+  );
+  if (
+    requestedCount !== undefined &&
+    (subtasks.length < requestedCount || titledSubtasks.length < requestedCount)
+  )
+    throw new Error(
+      "The generated planner task omitted requested subtask titles.",
+    );
+  if (
+    /\bdue(?:\s+date)?(?:\s+to)?\s+tomorrow\b/i.test(prompt) &&
+    typeof content.dueAt !== "number"
+  )
+    throw new Error(
+      "The generated planner task omitted its requested due date.",
+    );
+  }
+
+  const countWords: Record<string, number> = {
+    one: 1,
+    two: 2,
+    three: 3,
+    four: 4,
+    five: 5,
+    six: 6,
+    seven: 7,
+    eight: 8,
+    nine: 9,
+    ten: 10,
+    eleven: 11,
+    twelve: 12,
+  };
+  const requestedItemCount = (
+    noun: "cards?" | "questions?",
+  ) => {
+    const raw = prompt
+      .match(
+        new RegExp(
+          `\\b(?:exactly\\s+)?(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|\\d{1,3})\\s+${noun}\\b`,
+          "i",
+        ),
+      )?.[1]
+      ?.toLowerCase();
+    return raw ? (countWords[raw] ?? Number(raw)) : undefined;
+  };
+  const deckCount = requestedItemCount("cards?");
+  const quizCount = requestedItemCount("questions?");
+  for (const operation of operations) {
+    if (
+      operation.type !== "artifact.create" &&
+      operation.type !== "artifact.update"
+    )
+      continue;
+    const operationContent =
+      operation.input.content &&
+      typeof operation.input.content === "object" &&
+      !Array.isArray(operation.input.content)
+        ? (operation.input.content as Record<string, unknown>)
+        : null;
+    if (
+      operation.input.blueprintKey === "flashcard_deck" &&
+      deckCount !== undefined &&
+      (!Array.isArray(operationContent?.cards) ||
+        operationContent.cards.length !== deckCount)
+    )
+      throw new Error(
+        `The generated deck must contain exactly ${deckCount} cards.`,
+      );
+    if (
+      operation.input.blueprintKey === "quiz" &&
+      quizCount !== undefined &&
+      (!Array.isArray(operationContent?.questions) ||
+        operationContent.questions.length !== quizCount)
+    )
+      throw new Error(
+        `The generated quiz must contain exactly ${quizCount} questions.`,
+      );
+  }
+}
+
+function explicitPlannerDueTime(prompt: string) {
+  const match = /\bdue\b[^.!?\n]{0,80}?\b(?:at|by|to)\s+(\d{1,2})(?::(\d{2}))?\s*(a\.?\s*m\.?|p\.?\s*m\.?)?\b/i.exec(prompt);
+  if (!match) return null;
+  let hours = Number(match[1]);
+  const minutes = Number(match[2] ?? "0");
+  const meridiem = match[3]?.replace(/[.\s]/g, "").toLowerCase();
+  if (!Number.isInteger(hours) || !Number.isInteger(minutes) || minutes > 59)
+    return null;
+  if (meridiem) {
+    if (hours < 1 || hours > 12) return null;
+    if (meridiem === "pm" && hours !== 12) hours += 12;
+    if (meridiem === "am" && hours === 12) hours = 0;
+  } else if (hours > 23) return null;
+  return { hours, minutes };
+}
+
+function tomorrowDueAt(prompt: string, existing?: unknown) {
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const explicitTime = explicitPlannerDueTime(prompt);
+  const existingDate = typeof existing === "number" ? new Date(existing) : null;
+  tomorrow.setHours(
+    explicitTime?.hours ?? existingDate?.getHours() ?? 12,
+    explicitTime?.minutes ?? existingDate?.getMinutes() ?? 0,
+    0,
+    0,
+  );
+  return tomorrow.getTime();
+}
+
+function dueAtWithExplicitTime(prompt: string, existing?: unknown) {
+  const requested = explicitPlannerDueTime(prompt);
+  if (!requested || typeof existing !== "number") return existing;
+  const date = new Date(existing);
+  date.setHours(requested.hours, requested.minutes, 0, 0);
+  return date.getTime();
+}
+
+function reconcileExplicitPlannerRequirements(value: unknown, prompt: string) {
+  const content = normalizeArtifactContent("planner_task", value) as Record<string, unknown>;
+  const requestedCount = explicitPlannerSubtaskCount(prompt);
+  const namedMarker = /\bsubtasks?\s+(?:named|called|titled)\b/i.exec(prompt);
+  if (namedMarker && requestedCount && Number.isFinite(requestedCount)) {
+    const namedTail = prompt.slice(namedMarker.index + namedMarker[0].length);
+    const requestedTitles = [
+      ...namedTail.matchAll(/["'“”]([^"'“”]{1,500})["'“”]/g),
+    ]
+      .map((match) => match[1]?.trim())
+      .filter((title): title is string => Boolean(title))
+      .slice(0, requestedCount);
+    if (requestedTitles.length === requestedCount) {
+      const existing = Array.isArray(content.subtasks) ? content.subtasks : [];
+      content.subtasks = requestedTitles.map((title, index) => {
+        const current =
+          existing[index] && typeof existing[index] === "object" && !Array.isArray(existing[index])
+            ? (existing[index] as Record<string, unknown>)
+            : {};
+        return {
+          ...current,
+          id:
+            typeof current.id === "string" && current.id.trim()
+              ? current.id
+              : `subtask-${index + 1}`,
+          title,
+          done: typeof current.done === "boolean" ? current.done : false,
+        };
+      });
+    }
+  }
+  if (/\bdue(?:\s+date)?(?:\s+to)?\s+tomorrow\b/i.test(prompt)) {
+    // Relative dates are an execution constraint, not prose. Resolve them in
+    // Spectra's local runtime and preserve an explicit/user-requested time so
+    // a correct model value is never flattened to the old noon placeholder.
+    content.dueAt = tomorrowDueAt(prompt, content.dueAt);
+  } else if (explicitPlannerDueTime(prompt) && typeof content.dueAt === "number") {
+    // Epochs authored by a remote provider are frequently UTC-oriented while
+    // the student's request and Planner Studio are local-time interactions.
+    // Reapply the explicit clock value in the runtime's local zone before the
+    // canonical write so “4 PM” cannot silently become 6 PM in Madrid.
+    content.dueAt = dueAtWithExplicitTime(prompt, content.dueAt);
+  }
+  return content;
+}
+
+function sanitizeArtifactUserFacingContent(value: unknown, context: unknown) {
+  const ownedIds = new Set<string>();
+  const collect = (candidate: unknown, key = "") => {
+    if (typeof candidate === "string") {
+      if (/(?:^_?id$|Id$|Ids$|Refs$)/.test(key) && candidate.length >= 6)
+        ownedIds.add(candidate);
+      return;
+    }
+    if (Array.isArray(candidate)) {
+      for (const item of candidate) collect(item, key);
+      return;
+    }
+    if (!candidate || typeof candidate !== "object") return;
+    for (const [childKey, child] of Object.entries(candidate as Record<string, unknown>))
+      collect(child, childKey);
+  };
+  collect(context);
+  const allowedSourceRefs = new Set<string>();
+  if (context && typeof context === "object" && !Array.isArray(context)) {
+    const record = context as Record<string, unknown>;
+    const selected = Array.isArray(record.selectedObjects)
+      ? record.selectedObjects
+      : [];
+    for (const item of selected) {
+      if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+      const id = (item as Record<string, unknown>).id;
+      if (typeof id === "string") allowedSourceRefs.add(id);
+    }
+    const focused = record.focusedArtifact;
+    if (focused && typeof focused === "object" && !Array.isArray(focused)) {
+      const id = (focused as Record<string, unknown>).id;
+      if (typeof id === "string") allowedSourceRefs.add(id);
+    }
+  }
+  const serializedContext = JSON.stringify(context);
+  for (const match of serializedContext.matchAll(
+    /"(?:_?id|artifactId|workspaceId|threadId|sourceId|workspaceItemId)"\s*:\s*"([^"]{12,})"/g,
+  ))
+    if (match[1]) ownedIds.add(match[1]);
+  const clean = (candidate: unknown, key = ""): unknown => {
+    if (typeof candidate === "string") {
+      if (/(?:^_?id$|Id$|Ids$|Refs$)/.test(key)) return candidate;
+      let result = candidate;
+      for (const id of ownedIds) result = result.replaceAll(`(${id})`, "").replaceAll(id, "");
+      // Convex ids are long opaque lowercase identifiers. They are valid in
+      // provenance fields, never in student-facing prose. This catches a
+      // provider echo even when a compact context projection renamed the
+      // source key before it reached this worker.
+      result = result.replace(/\(?\b[a-z0-9]{28,}\b\)?/gi, "");
+      return result
+        .replace(/\(\s*(?:id\s*:?)?\s*\)/gi, "")
+        .replace(/\bid\s*:\s*(?=[,.;]|$)/gi, "")
+        .replace(/\s+([,.;:])/g, "$1")
+        .replace(/ {2,}/g, " ")
+        .trim();
+    }
+    if (Array.isArray(candidate)) {
+      const cleaned = candidate.map((item) => clean(item, key));
+      if (key === "sourceRefs")
+        return cleaned.filter(
+          (item) =>
+            typeof item === "string" &&
+            (!/^[a-z0-9]{28,}$/i.test(item) || allowedSourceRefs.has(item)),
+        );
+      return cleaned;
+    }
+    if (!candidate || typeof candidate !== "object") return candidate;
+    return Object.fromEntries(
+      Object.entries(candidate as Record<string, unknown>).map(([childKey, child]) => [
+        childKey,
+        clean(child, childKey),
+      ]),
+    );
+  };
+  return clean(value);
+}
+
+function sanitizeModelOperationUserFacingContent(
+  operation: ModelOperation,
+  context: unknown,
+) {
+  const clean = (value: unknown) =>
+    sanitizeArtifactUserFacingContent(value, context);
+  const next = structuredClone(operation) as ModelOperation;
+  if (next.type === "artifact.create") {
+    next.input.title = String(clean(next.input.title));
+    next.input.summary = next.input.summary === null
+      ? null
+      : String(clean(next.input.summary));
+    next.input.content = clean(next.input.content) as typeof next.input.content;
+    next.input.tags = clean(next.input.tags) as string[];
+  } else if (next.type === "artifact.update") {
+    next.input.title = next.input.title === null
+      ? null
+      : String(clean(next.input.title));
+    next.input.summary = next.input.summary === null
+      ? null
+      : String(clean(next.input.summary));
+    if (next.input.content !== null)
+      next.input.content = clean(next.input.content) as typeof next.input.content;
+    if (next.input.tags !== null)
+      next.input.tags = clean(next.input.tags) as string[];
+    if (next.input.contentPatch) {
+      next.input.contentPatch.changes = next.input.contentPatch.changes.map(
+        (change) => ({
+          ...change,
+          // Values at declared identity/provenance paths are canonical ids,
+          // not student-facing prose. Every other patch value is sanitized so
+          // opaque ids cannot leak through a title, note, answer, or paragraph.
+          value: /(?:^|\/)(?:_?id|[a-z]+Ids?|sourceRefs)$/i.test(change.path)
+            ? change.value
+            : clean(change.value),
+        }),
+      );
+    }
+  } else if (next.type === "workspace.create") {
+    next.input.title = String(clean(next.input.title));
+    next.input.description = next.input.description === null
+      ? null
+      : String(clean(next.input.description));
+  } else if (next.type === "workspace.update") {
+    next.input.title = next.input.title === null
+      ? null
+      : String(clean(next.input.title));
+    next.input.description = next.input.description === null
+      ? null
+      : String(clean(next.input.description));
+  } else if (next.type === "artifact.link") {
+    next.input.label = next.input.label === null
+      ? null
+      : String(clean(next.input.label));
+    next.input.explanation = next.input.explanation === null
+      ? null
+      : String(clean(next.input.explanation));
+  }
+  return parseModelOperation(next);
+}
+
+function normalizeCreationSummary(
+  summary: unknown,
+  blueprintKey: (typeof SPECTRA_BLUEPRINT_KEYS)[number],
+  title: string,
+  content: unknown,
+  prompt: string,
+) {
+  const clean = typeof summary === "string" ? summary.trim() : "";
+  const placeholder =
+    !clean ||
+    /\b(?:building|creating|generating)\s+this\s+artifact\b/i.test(clean) ||
+    /^(?:quiz|document|deck|task)\s+artifact\b/i.test(clean);
+  if (!placeholder) return clean.slice(0, 320);
+  const record =
+    content && typeof content === "object" && !Array.isArray(content)
+      ? (content as Record<string, unknown>)
+      : {};
+  const about = prompt
+    .match(/\babout\s+(.+?)(?:\.\s*(?:Give|Include|Use|Make|Add)\b|[.!?]|$)/i)?.[1]
+    ?.trim();
+  const topic = about || title;
+  if (blueprintKey === "quiz") {
+    const count = Array.isArray(record.questions) ? record.questions.length : 0;
+    return `${count || "Practice"}-question quiz about ${topic}.`.slice(0, 320);
+  }
+  if (blueprintKey === "flashcard_deck") {
+    const count = Array.isArray(record.cards) ? record.cards.length : 0;
+    return `${count || "Study"}-card deck about ${topic}.`.slice(0, 320);
+  }
+  if (blueprintKey === "document") {
+    const blocks = Array.isArray(record.blocks) ? record.blocks.length : 0;
+    return `${blocks ? `${blocks}-block` : "Structured"} document about ${topic}.`.slice(0, 320);
+  }
+  const description =
+    typeof record.description === "string" ? record.description.trim() : "";
+  return (description || `Planner task for ${topic}.`).slice(0, 320);
+}
+
+function fastFocusedPlannerPlan(
+  prompt: string,
+  focusedArtifact:
+    | {
+        id?: unknown;
+        blueprintKey?: unknown;
+        title?: unknown;
+        content?: unknown;
+      }
+    | null
+    | undefined,
+): SpectraPlan | null {
+  const plannerFieldMutation =
+    /\b(?:set|change|correct|repair|update|add|fix)\b[^.!?\n]{0,36}\b(?:due\s+(?:date|time|tomorrow)|subtasks?)\b/i.test(prompt) ||
+    /\b(?:due\s+(?:date|time|tomorrow)|subtasks?)\b[^.!?\n]{0,36}\b(?:set|change|correct|repair|update|add|fix)\b/i.test(prompt) ||
+    /\bsubtasks?\s+(?:named|called|titled)\b/i.test(prompt);
+  if (
+    !focusedArtifact ||
+    focusedArtifact.blueprintKey !== "planner_task" ||
+    typeof focusedArtifact.id !== "string"
+  )
+    return null;
+  if (
+    !plannerFieldMutation
+  )
+    return null;
+  const current =
+    focusedArtifact.content &&
+    typeof focusedArtifact.content === "object" &&
+    !Array.isArray(focusedArtifact.content)
+      ? (structuredClone(focusedArtifact.content) as Record<string, unknown>)
+      : {};
+  const titleTail =
+    prompt.match(/(?:exact\s+titles?|titles?|named)\s*:\s*([^\n]+)$/i)?.[1] ??
+    prompt.match(/subtasks?\s+named\s+([^\n]+)$/i)?.[1];
+  const requestedCountText = prompt
+    .match(/\b(?:exactly\s+)?(one|two|three|four|five|\d+)\s+subtasks?\b/i)?.[1]
+    ?.toLowerCase();
+  const counts: Record<string, number> = {
+    one: 1,
+    two: 2,
+    three: 3,
+    four: 4,
+    five: 5,
+  };
+  const requestedCount = requestedCountText
+    ? (counts[requestedCountText] ?? Number(requestedCountText))
+    : 0;
+  const titles = titleTail
+    ? titleTail
+        .split(/\s*;\s*|\s+and\s+/i)
+        .map((value) => value.replace(/[.]+$/, "").trim())
+        .filter(Boolean)
+    : [];
+  if (requestedCount > 0 && titles.length !== requestedCount) return null;
+  const content = {
+    ...current,
+    ...(titles.length
+      ? {
+          subtasks: titles.map((title, index) => ({
+            id: `task-${Date.now()}-${index + 1}`,
+            title,
+            done: false,
+          })),
+        }
+      : {}),
+    ...(/\bdue(?:\s+date)?(?:\s+to)?\s+tomorrow\b/i.test(prompt)
+      ? { dueAt: tomorrowDueAt(prompt, current.dueAt) }
+      : explicitPlannerDueTime(prompt) && typeof current.dueAt === "number"
+        ? { dueAt: dueAtWithExplicitTime(prompt, current.dueAt) }
+      : {}),
+  };
+  return parseSpectraPlan({
+    decision: "operate",
+    intent: {
+      mode: "update",
+      requestedArtifactTypes: ["planner_task"],
+      requestedVisibleArtifactCount: 0,
+      targetArtifactId: focusedArtifact.id,
+      targetWorkspaceId: null,
+    },
+    conversationTitle: `Update ${typeof focusedArtifact.title === "string" ? focusedArtifact.title : "planner task"}`,
+    conversationSummary: "A focused planner-task field update.",
+    choices: null,
+    operations: [
+      {
+        type: "artifact.update",
+        input: {
+          artifactId: focusedArtifact.id,
+          blueprintKey: "planner_task",
+          title: null,
+          summary: null,
+          content,
+          tags: null,
+        },
+      },
+    ],
+    finalResponse: `Updated ${typeof focusedArtifact.title === "string" ? focusedArtifact.title : "the planner task"} with the requested schedule and subtasks.`,
+  });
+}
+
+function fastFocusedMetadataPlan(
+  prompt: string,
+  focusedArtifact:
+    | { id?: unknown; blueprintKey?: unknown; title?: unknown }
+    | null
+    | undefined,
+): SpectraPlan | null {
+  if (
+    !focusedArtifact ||
+    typeof focusedArtifact.id !== "string" ||
+    !["document", "flashcard_deck", "quiz", "planner_task"].includes(
+      String(focusedArtifact.blueprintKey),
+    )
+  )
+    return null;
+  // Keep this route deliberately narrow: one explicit title or summary field,
+  // with no request to alter semantic content. Ownership/version validation and
+  // execution still go through the normal guarded operation pipeline.
+  if (
+    /\b(?:cards?|questions?|subtasks?|content|body|section|answer|option|due|schedule|attachment)\b/i.test(
+      prompt,
+    ) &&
+    !/\bdo not change (?:any )?(?:cards?|questions?|content)\b/i.test(prompt)
+  )
+    return null;
+  const rename = prompt
+    .match(
+      /\brename\s+(?:this\s+|the\s+)?(?:open\s+)?(?:document|deck|quiz|task|artifact)?\s*to\s+(.+?)(?=\s+only\b|[.!]\s*(?:do|don['’]?t)|$)/i,
+    )?.[1]
+    ?.trim();
+  const summary = prompt
+    .match(
+      /\b(?:set|change|update)\s+(?:the\s+)?summary\s+to\s+(.+?)(?=\s+only\b|[.!]\s*(?:do|don['’]?t)|$)/i,
+    )?.[1]
+    ?.trim();
+  if (Boolean(rename) === Boolean(summary)) return null;
+  const currentTitle =
+    typeof focusedArtifact.title === "string"
+      ? focusedArtifact.title
+      : "artifact";
+  const nextTitle = rename || currentTitle;
+  return parseSpectraPlan({
+    decision: "operate",
+    intent: {
+      mode: "update",
+      requestedArtifactTypes: [String(focusedArtifact.blueprintKey)],
+      requestedVisibleArtifactCount: 0,
+      targetArtifactId: focusedArtifact.id,
+      targetWorkspaceId: null,
+    },
+    conversationTitle: rename
+      ? `Rename ${currentTitle}`
+      : `Update ${currentTitle} summary`,
+    conversationSummary: "A focused artifact metadata update.",
+    choices: null,
+    operations: [
+      {
+        type: "artifact.update",
+        input: {
+          artifactId: focusedArtifact.id,
+          blueprintKey: focusedArtifact.blueprintKey,
+          title: rename ?? null,
+          summary: summary ?? null,
+          content: null,
+          tags: null,
+        },
+      },
+    ],
+    finalResponse: rename
+      ? `Renamed ${currentTitle} to ${nextTitle}.`
+      : `Updated the summary for ${currentTitle}.`,
+  });
+}
+
+function fastFocusedQuizSettingsPlan(
+  prompt: string,
+  focusedArtifact:
+    | {
+        id?: unknown;
+        blueprintKey?: unknown;
+        title?: unknown;
+        content?: unknown;
+      }
+    | null
+    | undefined,
+): SpectraPlan | null {
+  if (
+    !focusedArtifact ||
+    focusedArtifact.blueprintKey !== "quiz" ||
+    typeof focusedArtifact.id !== "string"
+  )
+    return null;
+  const minutesText = prompt.match(
+    /\b(?:total\s+)?(?:quiz\s+)?(?:estimated\s+)?time\s+(?:to|of|is)\s+(?:exactly\s+)?(\d{1,3})\s*minutes?\b/i,
+  )?.[1];
+  const tagsText = prompt.match(
+    /\b(?:add|set|update)\s+(?:the\s+)?tags?\s+(?:to\s+)?(.+?)(?=\.\s|,\s+(?:and\s+)?(?:link|move|pin|create|edit|update)\b|\bkeep\b|\bdo not\b|\bwithout\b|$)/i,
+  )?.[1];
+  if (!minutesText && !tagsText) return null;
+  if (
+    /\b(?:rewrite|replace|change|edit|update)\s+(?:the\s+)?(?:questions?|answers?|options?|content)\b/i.test(
+      prompt,
+    )
+  )
+    return null;
+  const current =
+    focusedArtifact.content &&
+    typeof focusedArtifact.content === "object" &&
+    !Array.isArray(focusedArtifact.content)
+      ? (structuredClone(focusedArtifact.content) as Record<string, unknown>)
+      : {};
+  const questions = Array.isArray(current.questions)
+    ? current.questions.filter(
+        (question): question is Record<string, unknown> =>
+          Boolean(question) && typeof question === "object",
+      )
+    : [];
+  if (minutesText && questions.length === 0) return null;
+  const minutes = minutesText ? Number(minutesText) : undefined;
+  if (
+    minutes !== undefined &&
+    (!Number.isInteger(minutes) || minutes < 1 || minutes > 600)
+  )
+    return null;
+  const totalSeconds = minutes !== undefined ? minutes * 60 : undefined;
+  const baseSeconds =
+    totalSeconds !== undefined
+      ? Math.floor(totalSeconds / questions.length)
+      : undefined;
+  const remainder =
+    totalSeconds !== undefined ? totalSeconds % questions.length : 0;
+  const content =
+    totalSeconds === undefined
+      ? current
+      : {
+          ...current,
+          questions: questions.map((question, index) => ({
+            ...question,
+            timeLimitSeconds: baseSeconds! + (index < remainder ? 1 : 0),
+          })),
+        };
+  const tags = tagsText
+    ? tagsText
+        .split(/\s*,\s*|\s+and\s+/i)
+        .map((tag) =>
+          tag
+            .replace(/^and\s+/i, "")
+            .replace(/^["'“”]+|["'“”]+$/g, "")
+            .replace(/[.]+$/, "")
+            .trim(),
+        )
+        .filter(Boolean)
+        .slice(0, 16)
+    : null;
+  if (tagsText && !tags?.length) return null;
+  const currentTitle =
+    typeof focusedArtifact.title === "string"
+      ? focusedArtifact.title
+      : "the quiz";
+  const changes = [
+    minutes !== undefined ? `${minutes}-minute total` : "",
+    tags?.length ? `${tags.length} tags` : "",
+  ]
+    .filter(Boolean)
+    .join(" and ");
+  return parseSpectraPlan({
+    decision: "operate",
+    intent: {
+      mode: "update",
+      requestedArtifactTypes: ["quiz"],
+      requestedVisibleArtifactCount: 0,
+      targetArtifactId: focusedArtifact.id,
+      targetWorkspaceId: null,
+    },
+    conversationTitle: `Update ${currentTitle}`,
+    conversationSummary: "A focused quiz settings update.",
+    choices: null,
+    operations: [
+      {
+        type: "artifact.update",
+        input: {
+          artifactId: focusedArtifact.id,
+          blueprintKey: "quiz",
+          title: null,
+          summary: null,
+          content,
+          tags,
+        },
+      },
+    ],
+    finalResponse: `Updated ${currentTitle} with the requested ${changes}.`,
+  });
+}
+
+function fastFocusedDeckHintPlan(
+  prompt: string,
+  focusedArtifact:
+    | {
+        id?: unknown;
+        blueprintKey?: unknown;
+        title?: unknown;
+        content?: unknown;
+      }
+    | null
+    | undefined,
+): SpectraPlan | null {
+  if (
+    !focusedArtifact ||
+    focusedArtifact.blueprintKey !== "flashcard_deck" ||
+    typeof focusedArtifact.id !== "string"
+  )
+    return null;
+  if (!/\b(?:change|replace|set|update|improve|write|draft)\b/i.test(prompt))
+    return null;
+  // This route is intentionally limited to an explicitly supplied replacement
+  // value. Requests that need semantic writing still go to DeepSeek V4 Pro.
+  const ordinalText =
+    prompt.match(
+      /\b(?:the\s+)?(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|one|two|three|four|five|six|seven|eight|nine|ten|\d{1,3})(?:st|nd|rd|th)?\s+(?:flash)?card\b/i,
+    )?.[1] ??
+    prompt.match(
+      /\b(?:flash)?card\s+(?:number\s+)?(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|one|two|three|four|five|six|seven|eight|nine|ten|\d{1,3})(?:st|nd|rd|th)?\b/i,
+    )?.[1];
+  const ordinals: Record<string, number> = {
+    first: 1,
+    second: 2,
+    third: 3,
+    fourth: 4,
+    fifth: 5,
+    sixth: 6,
+    seventh: 7,
+    eighth: 8,
+    ninth: 9,
+    tenth: 10,
+    one: 1,
+    two: 2,
+    three: 3,
+    four: 4,
+    five: 5,
+    six: 6,
+    seven: 7,
+    eight: 8,
+    nine: 9,
+    ten: 10,
+  };
+  const cardNumber = ordinalText
+    ? (ordinals[ordinalText.toLowerCase()] ?? Number(ordinalText))
+    : 0;
+  // Natural requests often put the target between the field and value:
+  // "write a memory cue for only card three: ...".
+  const flexibleTargetHint = prompt.match(
+    /\b(?:memory\s+cue|hint)\b[^:]{0,120}:\s*([\s\S]+?)(?=\s+(?:preserve|keep|do not|don't)\b|$)/i,
+  )?.[1];
+  const exactHint =
+    flexibleTargetHint ??
+    prompt.match(
+      /\b(?:memory\s+cue|hint)\s*:\s*([\s\S]+?)(?=\s+(?:preserve|keep|do not|don['â€™]?t)\b|$)/i,
+    )?.[1] ??
+    prompt.match(
+      /\b(?:to\s+)?exactly\s*:\s*([\s\S]+?)(?=\s+(?:keep|do not|don['’]?t)\b|$)/i,
+    )?.[1] ??
+    prompt.match(
+      /\b(?:hint\s+)?to\s*:\s*([\s\S]+?)(?=\s+(?:keep|do not|don['’]?t)\b|$)/i,
+    )?.[1];
+  const hint = exactHint?.trim().replace(/^["“”']|["“”']$/g, "");
+  if (!hint || hint.length > 1_200 || !Number.isInteger(cardNumber)) return null;
+  const current =
+    focusedArtifact.content &&
+    typeof focusedArtifact.content === "object" &&
+    !Array.isArray(focusedArtifact.content)
+      ? (structuredClone(focusedArtifact.content) as Record<string, unknown>)
+      : {};
+  const cards = Array.isArray(current.cards)
+    ? current.cards.filter(
+        (card): card is Record<string, unknown> =>
+          Boolean(card) && typeof card === "object",
+      )
+    : [];
+  if (cardNumber < 1 || cardNumber > cards.length) return null;
+  const currentTitle =
+    typeof focusedArtifact.title === "string"
+      ? focusedArtifact.title
+      : "the deck";
+  return parseSpectraPlan({
+    decision: "operate",
+    intent: {
+      mode: "update",
+      requestedArtifactTypes: ["flashcard_deck"],
+      requestedVisibleArtifactCount: 0,
+      targetArtifactId: focusedArtifact.id,
+      targetWorkspaceId: null,
+    },
+    conversationTitle: `Update ${currentTitle}`,
+    conversationSummary: "A focused flashcard hint update.",
+    choices: null,
+    operations: [
+      {
+        type: "artifact.update",
+        input: {
+          artifactId: focusedArtifact.id,
+          blueprintKey: "flashcard_deck",
+          title: null,
+          summary: null,
+          content: null,
+          contentPatch: {
+            changes: [{ path: `/cards/${cardNumber - 1}/hint`, value: hint }],
+          },
+          tags: null,
+        },
+      },
+    ],
+    finalResponse: `Updated only card ${cardNumber}'s hint in ${currentTitle}.`,
+  });
+}
+
+function rows(value: unknown): Array<Record<string, unknown>> {
+  return Array.isArray(value)
+    ? value.filter(
+        (item): item is Record<string, unknown> =>
+          Boolean(item) && typeof item === "object",
+      )
+    : [];
+}
+
+function summarizeArtifact(
+  artifact: Record<string, unknown>,
+  includeContent = false,
+) {
   return {
     id: artifact._id,
     blueprintKey: artifact.blueprintKey,
     title: artifact.title,
     summary: artifact.summary,
-    placements: rows(artifact.placements).map((placement) => ({ workspaceId: placement.workspaceId, workspaceTitle: placement.workspaceTitle, workspaceItemId: placement.workspaceItemId })),
+    placements: rows(artifact.placements).map((placement) => ({
+      workspaceId: placement.workspaceId,
+      workspaceTitle: placement.workspaceTitle,
+      workspaceItemId: placement.workspaceItemId,
+    })),
     ...(includeContent ? { content: artifact.content } : {}),
   };
 }
 
-async function buildContext(actorClerkId: string, body: Pick<Body, "workspaceId" | "artifactId" | "threadId" | "focusMode" | "selectedArtifactIds" | "explicitContextObjects" | "currentView">, prompt = "") {
-  const explicitContextObjects = Array.isArray(body.explicitContextObjects) ? body.explicitContextObjects.filter((item) => item && typeof item.id === "string" && ["artifact", "workspace", "thread"].includes(String(item.type))).slice(0, 36) : [];
-  const explicitArtifactIdList = explicitContextObjects.filter((item) => item.type === "artifact").flatMap((item) => item.id ? [item.id] : []);
-  const selectedArtifactIds = [...new Set([...(Array.isArray(body.selectedArtifactIds) ? body.selectedArtifactIds : []), ...explicitArtifactIdList].filter((id): id is string => typeof id === "string" && id.length > 0))].slice(0, 24);
-  const focusMode = body.focusMode ?? (body.threadId ? "thread" : selectedArtifactIds.length ? "selection" : body.artifactId ? "artifact" : body.workspaceId ? "workspace" : "global");
-  const broadContextRequest = /\b(all|everything|search|find|across|compare|related|workspace|library|catalog|inbox)\b/i.test(prompt);
-  const shouldLoadArtifactCatalog = focusMode === "global" || focusMode === "workspace" || focusMode === "selection" || broadContextRequest;
-  const shouldLoadWorkspaceMap = focusMode === "global" || focusMode === "workspace" || focusMode === "selection" || explicitContextObjects.some((item) => item.type === "workspace");
-  const shouldLoadThreadMap = focusMode === "global" || focusMode === "thread" || explicitContextObjects.some((item) => item.type === "thread");
-  const shouldLoadActivity = focusMode === "global" || focusMode === "workspace";
-  const retrievalTerms = [...new Set(prompt.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((word) => word.length >= 4 && !/^(this|that|with|from|into|about|please|could|would|make|create|update|change|help)$/.test(word)))].slice(0, 6);
-  const [artifactRows, retrievedRows, workspaceRows, threadRows, workspace, focusedArtifact, threadDetail, recentRuns] = await Promise.all([
-    shouldLoadArtifactCatalog ? query<unknown & object, unknown>("spectraArtifacts:list", { actorClerkId, placement: "all", limit: 36 }) : Promise.resolve([]),
-    shouldLoadArtifactCatalog ? Promise.all(retrievalTerms.slice(0, 3).map((search) => query<unknown & object, unknown>("spectraArtifacts:list", { actorClerkId, placement: "all", search, limit: 8 }).catch(() => []))) : Promise.resolve([]),
-    shouldLoadWorkspaceMap ? query<unknown & object, unknown>("spectraWorkspaces:list", { actorClerkId, includeArchived: false, limit: 24 }) : Promise.resolve([]),
-    shouldLoadThreadMap ? query<unknown & object, unknown>("spectraThreads:list", { actorClerkId, includeArchived: false, limit: 40 }).catch(() => []) : Promise.resolve([]),
-    body.workspaceId ? query<unknown & object, unknown>("spectraWorkspaceItems:listForWorkspace", { actorClerkId, workspaceId: body.workspaceId }).catch(() => null) : Promise.resolve(null),
-    body.artifactId ? query<unknown & object, unknown>("spectraArtifacts:get", { actorClerkId, artifactId: body.artifactId }).catch(() => null) : Promise.resolve(null),
-    body.threadId ? query<unknown & object, unknown>("spectraThreads:get", { actorClerkId, threadId: body.threadId }).catch(() => null) : Promise.resolve(null),
-    shouldLoadActivity ? query<unknown & object, unknown>("spectraRuns:listRecent", { actorClerkId, limit: 8 }).catch(() => []) : Promise.resolve([]),
-  ]);
-  const selectedRows = await Promise.all(selectedArtifactIds.map((artifactId) => query<unknown & object, unknown>("spectraArtifacts:get", { actorClerkId, artifactId }).catch(() => null)));
-  const artifacts = [...rows(artifactRows), ...retrievedRows.flatMap((result) => rows(result)), ...(focusedArtifact && typeof focusedArtifact === "object" ? [focusedArtifact as Record<string, unknown>] : []), ...selectedRows.flatMap((row) => row && typeof row === "object" ? [row as Record<string, unknown>] : [])]
-    .filter((artifact, index, all) => all.findIndex((candidate) => candidate._id === artifact._id) === index);
-  const ownedArtifactIdSet = new Set(artifacts.flatMap((artifact) => typeof artifact._id === "string" ? [artifact._id] : []));
-  const ownedSelectedArtifactIds = selectedArtifactIds.filter((id) => ownedArtifactIdSet.has(id));
-  const linkedContextIds = [...new Set([...ownedSelectedArtifactIds, ...(body.artifactId ? [body.artifactId] : [])])].slice(0, 12);
-  const linkRows = await Promise.all(linkedContextIds.map(async (artifactId) => ({
-    artifactId,
-    links: rows(await query<unknown & object, unknown>("spectraArtifactLinks:listForArtifact", { actorClerkId, artifactId, limit: 8 }).catch(() => []))
-      .map((link) => ({ relationType: link.relationType, direction: link.direction, artifact: link.artifact })),
-  })));
-  const linksByArtifact = Object.fromEntries(linkRows.map((row) => [row.artifactId, row.links]));
-  const explicitWorkspaceIds = new Set(explicitContextObjects.filter((item) => item.type === "workspace").map((item) => item.id));
-  const explicitWorkspaceDetails = await Promise.all([...explicitWorkspaceIds].filter((id): id is string => typeof id === "string" && id !== body.workspaceId).slice(0, 3).map((workspaceId) => query<unknown & object, unknown>("spectraWorkspaceItems:listForWorkspace", { actorClerkId, workspaceId }).catch(() => null)));
-  const explicitWorkspaceObjectsById = new Map(explicitWorkspaceDetails.flatMap((detail) => {
-    if (!detail || typeof detail !== "object") return [];
-    const record = detail as Record<string, unknown>;
-    const workspace = record.workspace as Record<string, unknown> | undefined;
-    if (typeof workspace?._id !== "string") return [];
-    return [[workspace._id, rows(record.items).slice(0, 14).map((item) => item.artifact && typeof item.artifact === "object" ? summarizeArtifact(item.artifact as Record<string, unknown>) : { type: item.sourceType })] as const];
-  }));
-  const explicitThreadIds = new Set(explicitContextObjects.filter((item) => item.type === "thread").map((item) => item.id));
-  const explicitThreadDetails = await Promise.all([...explicitThreadIds].filter((id): id is string => typeof id === "string" && id !== body.threadId).slice(0, 3).map((threadId) => query<unknown & object, unknown>("spectraThreads:get", { actorClerkId, threadId }).catch(() => null)));
-  const explicitThreadExcerptById = new Map(explicitThreadDetails.flatMap((detail) => {
-    if (!detail || typeof detail !== "object") return [];
-    const record = detail as Record<string, unknown>;
-    const thread = record.thread as Record<string, unknown> | undefined;
-    if (typeof thread?._id !== "string") return [];
-    return [[thread._id, rows(record.messages).slice(-8).map((message) => ({ role: message.role, content: typeof message.content === "string" ? message.content.slice(0, 1_200) : "" }))] as const];
-  }));
-  const explicitArtifactIds = new Set(explicitContextObjects.filter((item) => item.type === "artifact").map((item) => item.id));
-  const contextReasons = Object.fromEntries(ownedSelectedArtifactIds.map((id) => [id, explicitArtifactIds.has(id) ? "explicit" : id === body.artifactId ? "open" : "visible"])) as Record<string, "open" | "selected" | "explicit" | "visible">;
-  const workspaces = rows(workspaceRows).map((item) => ({ id: item._id, title: item.title, description: item.description, explicit: explicitWorkspaceIds.has(String(item._id)), objects: explicitWorkspaceObjectsById.get(String(item._id)) }));
-  const threads = rows(threadRows).map((item) => ({ id: item._id, title: item.title, summary: item.summaryShort, workspaceId: item.workspaceId, lastMessageAt: item.lastMessageAt, explicit: explicitThreadIds.has(String(item._id)), contextExcerpt: explicitThreadExcerptById.get(String(item._id)) })).slice(0, 24);
-  const workspaceRecord = workspace && typeof workspace === "object" ? workspace as Record<string, unknown> : null;
-  const focusedRecord = focusedArtifact && typeof focusedArtifact === "object" ? focusedArtifact as Record<string, unknown> : null;
-  const conversation = threadDetail && typeof threadDetail === "object"
-    ? rows((threadDetail as Record<string, unknown>).messages).slice(-24).map((message) => ({ role: message.role, content: typeof message.content === "string" ? message.content.slice(0, 8_000) : "" }))
+async function buildContext(
+  actorClerkId: string,
+  body: Pick<
+    Body,
+    | "workspaceId"
+    | "artifactId"
+    | "threadId"
+    | "focusMode"
+    | "selectedArtifactIds"
+    | "explicitContextObjects"
+    | "currentView"
+  >,
+  prompt = "",
+) {
+  const explicitContextObjects = Array.isArray(body.explicitContextObjects)
+    ? body.explicitContextObjects
+        .filter(
+          (item) =>
+            item &&
+            typeof item.id === "string" &&
+            ["artifact", "workspace", "thread"].includes(String(item.type)),
+        )
+        .slice(0, 36)
     : [];
-  const currentWorkspace = workspaceRecord ? workspaceRecord.workspace as Record<string, unknown> | undefined : undefined;
+  const explicitArtifactIdList = explicitContextObjects
+    .filter((item) => item.type === "artifact")
+    .flatMap((item) => (item.id ? [item.id] : []));
+  const selectedArtifactIds = [
+    ...new Set(
+      [
+        ...(Array.isArray(body.selectedArtifactIds)
+          ? body.selectedArtifactIds
+          : []),
+        ...explicitArtifactIdList,
+      ].filter((id): id is string => typeof id === "string" && id.length > 0),
+    ),
+  ].slice(0, 24);
+  const focusMode =
+    body.focusMode ??
+    (body.threadId
+      ? "thread"
+      : selectedArtifactIds.length
+        ? "selection"
+        : body.artifactId
+          ? "artifact"
+          : body.workspaceId
+            ? "workspace"
+            : "global");
+  const lightweightConversation =
+    /^(?:hi|hello|hey|thanks|thank you|good (?:morning|afternoon|evening))[!?.,\s]*$/i.test(
+      prompt.trim(),
+    );
+  const broadContextRequest =
+    /\b(all|everything|search|find|across|compare|related|workspace|library|catalog|inbox)\b/i.test(
+      prompt,
+    );
+  const shouldLoadArtifactCatalog =
+    (focusMode === "global" && !lightweightConversation) ||
+    focusMode === "workspace" ||
+    focusMode === "selection" ||
+    broadContextRequest;
+  const shouldLoadWorkspaceMap =
+    (focusMode === "global" && !lightweightConversation) ||
+    focusMode === "workspace" ||
+    focusMode === "selection" ||
+    explicitContextObjects.some((item) => item.type === "workspace");
+  const shouldLoadThreadMap =
+    (focusMode === "global" && !lightweightConversation) ||
+    focusMode === "thread" ||
+    explicitContextObjects.some((item) => item.type === "thread");
+  const shouldLoadActivity =
+    (focusMode === "global" && !lightweightConversation) ||
+    focusMode === "workspace";
+  const retrievalTerms = [
+    ...new Set(
+      prompt
+        .toLowerCase()
+        .split(/[^\p{L}\p{N}]+/u)
+        .filter(
+          (word) =>
+            word.length >= 4 &&
+            !/^(this|that|with|from|into|about|please|could|would|make|create|update|change|help)$/.test(
+              word,
+            ),
+        ),
+    ),
+  ].slice(0, 6);
+  const [
+    artifactRows,
+    retrievedRows,
+    workspaceRows,
+    threadRows,
+    workspace,
+    focusedArtifact,
+    threadDetail,
+    recentRuns,
+  ] = await Promise.all([
+    shouldLoadArtifactCatalog
+      ? query<unknown & object, unknown>("spectraArtifacts:list", {
+          actorClerkId,
+          placement: "all",
+          limit: 36,
+        })
+      : Promise.resolve([]),
+    shouldLoadArtifactCatalog
+      ? Promise.all(
+          retrievalTerms
+            .slice(0, 3)
+            .map((search) =>
+              query<unknown & object, unknown>("spectraArtifacts:list", {
+                actorClerkId,
+                placement: "all",
+                search,
+                limit: 8,
+              }).catch(() => []),
+            ),
+        )
+      : Promise.resolve([]),
+    shouldLoadWorkspaceMap
+      ? query<unknown & object, unknown>("spectraWorkspaces:list", {
+          actorClerkId,
+          includeArchived: false,
+          limit: 24,
+        })
+      : Promise.resolve([]),
+    shouldLoadThreadMap
+      ? query<unknown & object, unknown>("spectraThreads:list", {
+          actorClerkId,
+          includeArchived: false,
+          limit: 40,
+        }).catch(() => [])
+      : Promise.resolve([]),
+    body.workspaceId
+      ? query<unknown & object, unknown>(
+          "spectraWorkspaceItems:listForWorkspace",
+          { actorClerkId, workspaceId: body.workspaceId },
+        ).catch(() => null)
+      : Promise.resolve(null),
+    body.artifactId
+      ? query<unknown & object, unknown>("spectraArtifacts:get", {
+          actorClerkId,
+          artifactId: body.artifactId,
+        }).catch(() => null)
+      : Promise.resolve(null),
+    body.threadId
+      ? query<unknown & object, unknown>("spectraThreads:get", {
+          actorClerkId,
+          threadId: body.threadId,
+        }).catch(() => null)
+      : Promise.resolve(null),
+    shouldLoadActivity
+      ? query<unknown & object, unknown>("spectraRuns:listRecent", {
+          actorClerkId,
+          limit: 8,
+        }).catch(() => [])
+      : Promise.resolve([]),
+  ]);
+  const selectedRows = await Promise.all(
+    selectedArtifactIds.map((artifactId) =>
+      query<unknown & object, unknown>("spectraArtifacts:get", {
+        actorClerkId,
+        artifactId,
+      }).catch(() => null),
+    ),
+  );
+  const artifacts = [
+    ...rows(artifactRows),
+    ...retrievedRows.flatMap((result) => rows(result)),
+    ...(focusedArtifact && typeof focusedArtifact === "object"
+      ? [focusedArtifact as Record<string, unknown>]
+      : []),
+    ...selectedRows.flatMap((row) =>
+      row && typeof row === "object" ? [row as Record<string, unknown>] : [],
+    ),
+  ].filter(
+    (artifact, index, all) =>
+      all.findIndex((candidate) => candidate._id === artifact._id) === index,
+  );
+  const ownedArtifactIdSet = new Set(
+    artifacts.flatMap((artifact) =>
+      typeof artifact._id === "string" ? [artifact._id] : [],
+    ),
+  );
+  const ownedSelectedArtifactIds = selectedArtifactIds.filter((id) =>
+    ownedArtifactIdSet.has(id),
+  );
+  const linkedContextIds = [
+    ...new Set([
+      ...ownedSelectedArtifactIds,
+      ...(body.artifactId ? [body.artifactId] : []),
+    ]),
+  ].slice(0, 12);
+  const linkRows = await Promise.all(
+    linkedContextIds.map(async (artifactId) => ({
+      artifactId,
+      links: rows(
+        await query<unknown & object, unknown>(
+          "spectraArtifactLinks:listForArtifact",
+          { actorClerkId, artifactId, limit: 8 },
+        ).catch(() => []),
+      ).map((link) => ({
+        relationType: link.relationType,
+        direction: link.direction,
+        artifact: link.artifact,
+      })),
+    })),
+  );
+  const linksByArtifact = Object.fromEntries(
+    linkRows.map((row) => [row.artifactId, row.links]),
+  );
+  const explicitWorkspaceIds = new Set(
+    explicitContextObjects
+      .filter((item) => item.type === "workspace")
+      .map((item) => item.id),
+  );
+  const explicitWorkspaceDetails = await Promise.all(
+    [...explicitWorkspaceIds]
+      .filter(
+        (id): id is string => typeof id === "string" && id !== body.workspaceId,
+      )
+      .slice(0, 3)
+      .map((workspaceId) =>
+        query<unknown & object, unknown>(
+          "spectraWorkspaceItems:listForWorkspace",
+          { actorClerkId, workspaceId },
+        ).catch(() => null),
+      ),
+  );
+  const explicitWorkspaceObjectsById = new Map(
+    explicitWorkspaceDetails.flatMap((detail) => {
+      if (!detail || typeof detail !== "object") return [];
+      const record = detail as Record<string, unknown>;
+      const workspace = record.workspace as Record<string, unknown> | undefined;
+      if (typeof workspace?._id !== "string") return [];
+      return [
+        [
+          workspace._id,
+          rows(record.items)
+            .slice(0, 14)
+            .map((item) =>
+              item.artifact && typeof item.artifact === "object"
+                ? summarizeArtifact(item.artifact as Record<string, unknown>)
+                : { type: item.sourceType },
+            ),
+        ] as const,
+      ];
+    }),
+  );
+  const explicitThreadIds = new Set(
+    explicitContextObjects
+      .filter((item) => item.type === "thread")
+      .map((item) => item.id),
+  );
+  const explicitThreadDetails = await Promise.all(
+    [...explicitThreadIds]
+      .filter(
+        (id): id is string => typeof id === "string" && id !== body.threadId,
+      )
+      .slice(0, 3)
+      .map((threadId) =>
+        query<unknown & object, unknown>("spectraThreads:get", {
+          actorClerkId,
+          threadId,
+        }).catch(() => null),
+      ),
+  );
+  const explicitThreadExcerptById = new Map(
+    explicitThreadDetails.flatMap((detail) => {
+      if (!detail || typeof detail !== "object") return [];
+      const record = detail as Record<string, unknown>;
+      const thread = record.thread as Record<string, unknown> | undefined;
+      if (typeof thread?._id !== "string") return [];
+      return [
+        [
+          thread._id,
+          rows(record.messages)
+            .slice(-8)
+            .map((message) => ({
+              role: message.role,
+              content:
+                typeof message.content === "string"
+                  ? message.content.slice(0, 1_200)
+                  : "",
+            })),
+        ] as const,
+      ];
+    }),
+  );
+  const explicitArtifactIds = new Set(
+    explicitContextObjects
+      .filter((item) => item.type === "artifact")
+      .map((item) => item.id),
+  );
+  const contextReasons = Object.fromEntries(
+    ownedSelectedArtifactIds.map((id) => [
+      id,
+      explicitArtifactIds.has(id)
+        ? "explicit"
+        : id === body.artifactId
+          ? "open"
+          : "visible",
+    ]),
+  ) as Record<string, "open" | "selected" | "explicit" | "visible">;
+  const workspaces = rows(workspaceRows).map((item) => ({
+    id: item._id,
+    title: item.title,
+    description: item.description,
+    explicit: explicitWorkspaceIds.has(String(item._id)),
+    objects: explicitWorkspaceObjectsById.get(String(item._id)),
+  }));
+  const threads = rows(threadRows)
+    .map((item) => ({
+      id: item._id,
+      title: item.title,
+      summary: item.summaryShort,
+      workspaceId: item.workspaceId,
+      lastMessageAt: item.lastMessageAt,
+      explicit: explicitThreadIds.has(String(item._id)),
+      contextExcerpt: explicitThreadExcerptById.get(String(item._id)),
+    }))
+    .slice(0, 24);
+  const workspaceRecord =
+    workspace && typeof workspace === "object"
+      ? (workspace as Record<string, unknown>)
+      : null;
+  const focusedRecord =
+    focusedArtifact && typeof focusedArtifact === "object"
+      ? (focusedArtifact as Record<string, unknown>)
+      : null;
+  const conversation =
+    threadDetail && typeof threadDetail === "object"
+      ? rows((threadDetail as Record<string, unknown>).messages)
+          .slice(-24)
+          .map((message) => ({
+            role: message.role,
+            content:
+              typeof message.content === "string"
+                ? message.content.slice(0, 8_000)
+                : "",
+          }))
+      : [];
+  const continuedThread =
+    threadDetail && typeof threadDetail === "object"
+      ? ((threadDetail as Record<string, unknown>).thread as
+          | Record<string, unknown>
+          | undefined)
+      : undefined;
+  const continuedMessages =
+    threadDetail && typeof threadDetail === "object"
+      ? rows((threadDetail as Record<string, unknown>).messages)
+      : [];
+  const continuedTraces =
+    threadDetail && typeof threadDetail === "object"
+      ? rows((threadDetail as Record<string, unknown>).traces)
+      : [];
+  // A choice is an answer to one specific unresolved request, not a new
+  // free-floating instruction. Bind it to the run that asked the question so
+  // long, reused threads cannot resurrect an unrelated earlier goal.
+  const selectedClarification = [...continuedMessages]
+    .reverse()
+    .find((message) => {
+      if (
+        message.role !== "assistant" ||
+        !message.metadata ||
+        typeof message.metadata !== "object"
+      )
+        return false;
+      const metadata = message.metadata as Record<string, unknown>;
+      const selection = metadata.choiceSelection;
+      if (!selection || typeof selection !== "object") return false;
+      const selectedTitle = (selection as Record<string, unknown>).title;
+      return (
+        typeof selectedTitle === "string" &&
+        prompt.toLowerCase().includes(selectedTitle.toLowerCase())
+      );
+    });
+  const clarificationMetadata =
+    selectedClarification?.metadata &&
+    typeof selectedClarification.metadata === "object"
+      ? (selectedClarification.metadata as Record<string, unknown>)
+      : null;
+  const clarificationSelection =
+    clarificationMetadata?.choiceSelection &&
+    typeof clarificationMetadata.choiceSelection === "object"
+      ? (clarificationMetadata.choiceSelection as Record<string, unknown>)
+      : null;
+  const clarificationTrace = selectedClarification?.runId
+    ? continuedTraces.find((trace) => {
+        const run = trace.run as Record<string, unknown> | undefined;
+        return run?._id === selectedClarification.runId;
+      })
+    : undefined;
+  const clarificationRun = clarificationTrace?.run as
+    | Record<string, unknown>
+    | undefined;
+  const activeGoal = selectedClarification
+    ? {
+        request: clarificationRun?.userPrompt,
+        question: selectedClarification.content,
+        selectedChoice: clarificationSelection?.title,
+        intent: clarificationRun?.planIntent,
+      }
+    : null;
+  const conversationMemory = continuedThread
+    ? {
+        title: continuedThread.title,
+        summary: continuedThread.summaryShort,
+        originInstructions: continuedMessages
+          .filter(
+            (message) =>
+              message.role === "user" && typeof message.content === "string",
+          )
+          .slice(0, 2)
+          .map((message) => message.content),
+      }
+    : null;
+  const currentWorkspace = workspaceRecord
+    ? (workspaceRecord.workspace as Record<string, unknown> | undefined)
+    : undefined;
   const contextPacket = buildBoundedContextPacket({
     prompt,
     focusMode,
     workspace: focusMode === "global" ? null : currentWorkspace,
     artifacts,
-    focusedArtifact: focusMode === "artifact" || focusMode === "thread" || focusMode === "selection" ? focusedRecord : null,
+    focusedArtifact:
+      focusMode === "artifact" ||
+      focusMode === "thread" ||
+      focusMode === "selection"
+        ? focusedRecord
+        : null,
     selectedArtifactIds: ownedSelectedArtifactIds,
     conversation,
+    conversationMemory,
+    activeGoal,
     currentView: body.currentView,
     linksByArtifact,
-    recentActivity: rows(recentRuns).filter((run) => !body.workspaceId || run.workspaceId === body.workspaceId).slice(0, 8).map((run) => ({ id: run._id, prompt: typeof run.userPrompt === "string" ? run.userPrompt.slice(0, 240) : "", status: run.status, finalSummary: typeof run.finalSummary === "string" ? run.finalSummary.slice(0, 320) : undefined, updatedAt: run.updatedAt })),
+    recentActivity: rows(recentRuns)
+      .filter(
+        (run) => !body.workspaceId || run.workspaceId === body.workspaceId,
+      )
+      .slice(0, 8)
+      .map((run) => ({
+        id: run._id,
+        prompt:
+          typeof run.userPrompt === "string"
+            ? run.userPrompt.slice(0, 240)
+            : "",
+        status: run.status,
+        finalSummary:
+          typeof run.finalSummary === "string"
+            ? run.finalSummary.slice(0, 320)
+            : undefined,
+        updatedAt: run.updatedAt,
+      })),
     workspaceMap: workspaces,
     threadMap: threads,
-    inboxMap: artifacts.filter((artifact) => rows(artifact.placements).length === 0).slice(0, 20).map((artifact) => summarizeArtifact(artifact)),
+    inboxMap: artifacts
+      .filter((artifact) => rows(artifact.placements).length === 0)
+      .slice(0, 20)
+      .map((artifact) => summarizeArtifact(artifact)),
     contextReasons,
     continuationThreadId: body.threadId,
   });
   return {
     workspaces,
     threads,
-    currentWorkspace: workspaceRecord ? {
-      id: (workspaceRecord.workspace as Record<string, unknown> | undefined)?._id,
-      title: (workspaceRecord.workspace as Record<string, unknown> | undefined)?.title,
-      items: rows(workspaceRecord.items).map((item) => ({ id: item._id, workspaceId: item.workspaceId, sourceType: item.sourceType, sourceId: item.sourceId, artifact: item.artifact && typeof item.artifact === "object" ? summarizeArtifact(item.artifact as Record<string, unknown>) : null })),
-    } : null,
-    focusedArtifact: focusedRecord ? summarizeArtifact(focusedRecord, true) : null,
+    currentWorkspace: workspaceRecord
+      ? {
+          id: (workspaceRecord.workspace as Record<string, unknown> | undefined)
+            ?._id,
+          title: (
+            workspaceRecord.workspace as Record<string, unknown> | undefined
+          )?.title,
+          items: rows(workspaceRecord.items).map((item) => ({
+            id: item._id,
+            workspaceId: item.workspaceId,
+            sourceType: item.sourceType,
+            sourceId: item.sourceId,
+            artifact:
+              item.artifact && typeof item.artifact === "object"
+                ? summarizeArtifact(item.artifact as Record<string, unknown>)
+                : null,
+          })),
+        }
+      : null,
+    focusedArtifact: focusedRecord
+      ? summarizeArtifact(focusedRecord, true)
+      : null,
     artifacts: artifacts.map((artifact) => summarizeArtifact(artifact)),
     conversation,
     currentThreadId: body.threadId ?? null,
@@ -275,44 +2696,102 @@ async function buildContext(actorClerkId: string, body: Pick<Body, "workspaceId"
   };
 }
 
-function ownedReferences(context: Awaited<ReturnType<typeof buildContext>>): OwnedOperationReferences {
+function ownedReferences(
+  context: Awaited<ReturnType<typeof buildContext>>,
+): OwnedOperationReferences {
   const artifactIds = new Set<string>();
   const artifactBlueprints = new Map<string, string>();
   const workspaceIds = new Set<string>();
-  const workspaceItems = new Map<string, { artifactId?: string; workspaceId: string }>();
-  for (const workspace of context.workspaces) if (typeof workspace.id === "string") workspaceIds.add(workspace.id);
+  const workspaceItems = new Map<
+    string,
+    { artifactId?: string; workspaceId: string }
+  >();
+  for (const workspace of context.workspaces)
+    if (typeof workspace.id === "string") workspaceIds.add(workspace.id);
   for (const artifact of context.artifacts) {
     if (typeof artifact.id === "string") {
       artifactIds.add(artifact.id);
-      if (typeof artifact.blueprintKey === "string") artifactBlueprints.set(artifact.id, artifact.blueprintKey);
+      if (typeof artifact.blueprintKey === "string")
+        artifactBlueprints.set(artifact.id, artifact.blueprintKey);
     }
     for (const placement of artifact.placements) {
-      if (typeof placement.workspaceId === "string") workspaceIds.add(placement.workspaceId);
-      if (typeof placement.workspaceItemId === "string" && typeof placement.workspaceId === "string") workspaceItems.set(placement.workspaceItemId, { artifactId: typeof artifact.id === "string" ? artifact.id : undefined, workspaceId: placement.workspaceId });
+      if (typeof placement.workspaceId === "string")
+        workspaceIds.add(placement.workspaceId);
+      if (
+        typeof placement.workspaceItemId === "string" &&
+        typeof placement.workspaceId === "string"
+      )
+        workspaceItems.set(placement.workspaceItemId, {
+          artifactId: typeof artifact.id === "string" ? artifact.id : undefined,
+          workspaceId: placement.workspaceId,
+        });
     }
   }
-  if (context.focusedArtifact && typeof context.focusedArtifact.id === "string") {
+  if (
+    context.focusedArtifact &&
+    typeof context.focusedArtifact.id === "string"
+  ) {
     artifactIds.add(context.focusedArtifact.id);
-    if (typeof context.focusedArtifact.blueprintKey === "string") artifactBlueprints.set(context.focusedArtifact.id, context.focusedArtifact.blueprintKey);
+    if (typeof context.focusedArtifact.blueprintKey === "string")
+      artifactBlueprints.set(
+        context.focusedArtifact.id,
+        context.focusedArtifact.blueprintKey,
+      );
   }
-  if (context.currentWorkspace?.id && typeof context.currentWorkspace.id === "string") workspaceIds.add(context.currentWorkspace.id);
+  if (
+    context.currentWorkspace?.id &&
+    typeof context.currentWorkspace.id === "string"
+  )
+    workspaceIds.add(context.currentWorkspace.id);
   for (const item of context.currentWorkspace?.items ?? []) {
-    if (typeof item.id === "string" && typeof item.workspaceId === "string") workspaceItems.set(item.id, { artifactId: item.sourceType === "artifact" && typeof item.sourceId === "string" ? item.sourceId : undefined, workspaceId: item.workspaceId });
+    if (typeof item.id === "string" && typeof item.workspaceId === "string")
+      workspaceItems.set(item.id, {
+        artifactId:
+          item.sourceType === "artifact" && typeof item.sourceId === "string"
+            ? item.sourceId
+            : undefined,
+        workspaceId: item.workspaceId,
+      });
   }
-  return { artifactIds, artifactBlueprints, workspaceIds, workspaceItems, threadIds: new Set([...context.threads.flatMap((thread) => typeof thread.id === "string" ? [thread.id] : []), ...(context.currentThreadId ? [context.currentThreadId] : [])]) };
+  return {
+    artifactIds,
+    artifactBlueprints,
+    workspaceIds,
+    workspaceItems,
+    threadIds: new Set([
+      ...context.threads.flatMap((thread) =>
+        typeof thread.id === "string" ? [thread.id] : [],
+      ),
+      ...(context.currentThreadId ? [context.currentThreadId] : []),
+    ]),
+  };
 }
 
 function normalizedReference(value: string) {
-  return value.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+  return value
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
 }
 
-function resolveNamedReference(value: string | null | undefined, candidates: Array<{ id: unknown; title: unknown }>) {
+function resolveNamedReference(
+  value: string | null | undefined,
+  candidates: Array<{ id: unknown; title: unknown }>,
+) {
   if (!value) return value;
-  const valid = candidates.flatMap((candidate) => typeof candidate.id === "string" && typeof candidate.title === "string" ? [{ id: candidate.id, title: candidate.title }] : []);
+  const valid = candidates.flatMap((candidate) =>
+    typeof candidate.id === "string" && typeof candidate.title === "string"
+      ? [{ id: candidate.id, title: candidate.title }]
+      : [],
+  );
   if (valid.some((candidate) => candidate.id === value)) return value;
   const needle = normalizedReference(value);
   if (!needle) return value;
-  const exact = valid.filter((candidate) => normalizedReference(candidate.title) === needle);
+  const exact = valid.filter(
+    (candidate) => normalizedReference(candidate.title) === needle,
+  );
   if (exact.length === 1) return exact[0]!.id;
   if (needle.length < 5) return value;
   const contained = valid.filter((candidate) => {
@@ -322,53 +2801,434 @@ function resolveNamedReference(value: string | null | undefined, candidates: Arr
   return contained.length === 1 ? contained[0]!.id : value;
 }
 
-function resolvePlanReferences(plan: SpectraPlan, context: Awaited<ReturnType<typeof buildContext>>) {
+function resolvePlanReferences(
+  plan: SpectraPlan,
+  context: Awaited<ReturnType<typeof buildContext>>,
+) {
   const next = structuredClone(plan) as SpectraPlan;
-  const artifactCandidates = context.artifacts.map((artifact) => ({ id: artifact.id, title: artifact.title }));
-  const workspaceCandidates = context.workspaces.map((workspace) => ({ id: workspace.id, title: workspace.title }));
-  const threadCandidates = context.threads.map((thread) => ({ id: thread.id, title: thread.title }));
-  const resolveArtifact = (value: string | null | undefined) => resolveNamedReference(value, artifactCandidates);
-  const resolveWorkspace = (value: string | null | undefined) => resolveNamedReference(value, workspaceCandidates);
-  const resolveThread = (value: string | null | undefined) => resolveNamedReference(value, threadCandidates);
-  next.intent.targetArtifactId = resolveArtifact(next.intent.targetArtifactId) ?? null;
-  next.intent.targetWorkspaceId = resolveWorkspace(next.intent.targetWorkspaceId) ?? null;
+  const artifactCandidates = context.artifacts.map((artifact) => ({
+    id: artifact.id,
+    title: artifact.title,
+  }));
+  const workspaceCandidates = context.workspaces.map((workspace) => ({
+    id: workspace.id,
+    title: workspace.title,
+  }));
+  const threadCandidates = context.threads.map((thread) => ({
+    id: thread.id,
+    title: thread.title,
+  }));
+  const resolveArtifact = (value: string | null | undefined) =>
+    resolveNamedReference(value, artifactCandidates);
+  const resolveWorkspace = (value: string | null | undefined) =>
+    resolveNamedReference(value, workspaceCandidates);
+  const resolveThread = (value: string | null | undefined) =>
+    resolveNamedReference(value, threadCandidates);
+  next.intent.targetArtifactId =
+    resolveArtifact(next.intent.targetArtifactId) ?? null;
+  next.intent.targetWorkspaceId =
+    resolveWorkspace(next.intent.targetWorkspaceId) ?? null;
   for (const operation of next.operations) {
     if (operation.type === "artifact.create") {
-      operation.input.workspaceId = resolveWorkspace(operation.input.workspaceId) ?? null;
+      operation.input.workspaceId =
+        resolveWorkspace(operation.input.workspaceId) ?? null;
       if (operation.input.blueprintKey === "planner_task") {
-        operation.input.content.linkedArtifactIds = (operation.input.content.linkedArtifactIds ?? []).map((id) => resolveArtifact(id) ?? id);
-        operation.input.content.linkedThreadIds = (operation.input.content.linkedThreadIds ?? []).map((id) => resolveThread(id) ?? id);
+        operation.input.content.linkedArtifactIds = (
+          operation.input.content.linkedArtifactIds ?? []
+        ).map((id) => resolveArtifact(id) ?? id);
+        operation.input.content.linkedThreadIds = (
+          operation.input.content.linkedThreadIds ?? []
+        ).map((id) => resolveThread(id) ?? id);
       }
     } else if (operation.type === "artifact.update") {
-      operation.input.artifactId = resolveArtifact(operation.input.artifactId) ?? operation.input.artifactId;
+      operation.input.artifactId =
+        resolveArtifact(operation.input.artifactId) ??
+        operation.input.artifactId;
     } else if (operation.type === "workspace.update") {
-      operation.input.workspaceId = resolveWorkspace(operation.input.workspaceId) ?? operation.input.workspaceId;
+      operation.input.workspaceId =
+        resolveWorkspace(operation.input.workspaceId) ??
+        operation.input.workspaceId;
     } else if (operation.type === "workspaceItem.add") {
-      operation.input.artifactId = resolveArtifact(operation.input.artifactId) ?? operation.input.artifactId;
-      operation.input.workspaceId = resolveWorkspace(operation.input.workspaceId) ?? operation.input.workspaceId;
+      operation.input.artifactId =
+        resolveArtifact(operation.input.artifactId) ??
+        operation.input.artifactId;
+      operation.input.workspaceId =
+        resolveWorkspace(operation.input.workspaceId) ??
+        operation.input.workspaceId;
     } else if (operation.type === "workspaceItem.hide") {
-      if (!context.currentWorkspace?.items.some((item) => item.id === operation.input.workspaceItemId)) {
+      if (
+        !context.currentWorkspace?.items.some(
+          (item) => item.id === operation.input.workspaceItemId,
+        )
+      ) {
         const artifactId = resolveArtifact(operation.input.workspaceItemId);
-        const matches = context.currentWorkspace?.items.filter((item) => item.sourceType === "artifact" && item.sourceId === artifactId) ?? [];
-        if (matches.length === 1 && typeof matches[0]!.id === "string") operation.input.workspaceItemId = matches[0]!.id;
+        const matches =
+          context.currentWorkspace?.items.filter(
+            (item) =>
+              item.sourceType === "artifact" && item.sourceId === artifactId,
+          ) ?? [];
+        if (matches.length === 1 && typeof matches[0]!.id === "string")
+          operation.input.workspaceItemId = matches[0]!.id;
+      }
+    } else if (operation.type === "workspaceItem.setPinned") {
+      if (
+        !context.currentWorkspace?.items.some(
+          (item) => item.id === operation.input.workspaceItemId,
+        )
+      ) {
+        const artifactId = resolveArtifact(operation.input.workspaceItemId);
+        const matches =
+          context.currentWorkspace?.items.filter(
+            (item) => item.sourceId === artifactId,
+          ) ?? [];
+        if (matches.length === 1 && typeof matches[0]!.id === "string")
+          operation.input.workspaceItemId = matches[0]!.id;
       }
     } else if (operation.type === "artifact.link") {
-      operation.input.sourceArtifactId = resolveArtifact(operation.input.sourceArtifactId) ?? operation.input.sourceArtifactId;
-      operation.input.targetArtifactId = resolveArtifact(operation.input.targetArtifactId) ?? operation.input.targetArtifactId;
-      operation.input.workspaceId = resolveWorkspace(operation.input.workspaceId) ?? null;
+      operation.input.sourceArtifactId =
+        resolveArtifact(operation.input.sourceArtifactId) ??
+        operation.input.sourceArtifactId;
+      operation.input.targetArtifactId =
+        resolveArtifact(operation.input.targetArtifactId) ??
+        operation.input.targetArtifactId;
+      operation.input.workspaceId =
+        resolveWorkspace(operation.input.workspaceId) ?? null;
     }
   }
   return parseSpectraPlan(next);
 }
 
-function resolveAndValidatePlan(plan: SpectraPlan, context: Awaited<ReturnType<typeof buildContext>>) {
-  const resolved = resolvePlanReferences(plan, context);
+function reconcileExplicitRequestContract(
+  plan: SpectraPlan,
+  prompt: string,
+) {
+  const requestedCreation = provisionalSingleCreation(prompt);
+  if (!requestedCreation || plan.decision !== "operate") return plan;
+  let retainedCreate = false;
+  const forbiddenUpdateNoun: Record<
+    (typeof SPECTRA_BLUEPRINT_KEYS)[number],
+    string
+  > = {
+    document: "documents?|notes?|guide|outline",
+    flashcard_deck: "(?:flashcard\s+)?decks?|flashcards?",
+    quiz: "quizzes?|quiz",
+    planner_task: "(?:planner\s+|study\s+)?tasks?",
+  };
+  const operations = plan.operations.filter((operation) => {
+    if (operation.type === "artifact.create") {
+      if (
+        operation.input.blueprintKey !== requestedCreation.blueprintKey ||
+        retainedCreate
+      )
+        return false;
+      retainedCreate = true;
+      return true;
+    }
+    if (operation.type !== "artifact.update") return true;
+    const noun = forbiddenUpdateNoun[operation.input.blueprintKey];
+    return !new RegExp(
+      `\\b(?:do not|don't|dont|without)\\s+(?:change|edit|update|modify|rewrite|replace)[^.!?]{0,100}\\b(?:${noun})\\b`,
+      "i",
+    ).test(prompt);
+  });
+  if (!retainedCreate) return plan;
+  const retained = operations.find(
+    (operation) => operation.type === "artifact.create",
+  );
+  const hasOtherMutations = operations.some(
+    (operation) => operation.type !== "artifact.create",
+  );
+  const targetedArtifactIds = [
+    ...new Set(
+      operations.flatMap((operation) => {
+        if (operation.type === "artifact.update" || operation.type === "artifact.archive")
+          return [operation.input.artifactId];
+        return [];
+      }),
+    ),
+  ];
+  return parseSpectraPlan({
+    ...plan,
+    intent: {
+      ...plan.intent,
+      mode: hasOtherMutations ? "mixed" : "create",
+      requestedArtifactTypes: [requestedCreation.blueprintKey],
+      requestedVisibleArtifactCount: 1,
+      // A mixed create + focused edit still has an authoritative edit target.
+      // Erasing it turns an exact owned update into artificial ambiguity during
+      // intent validation, even though the operation itself already names the
+      // canonical artifact.
+      targetArtifactId:
+        targetedArtifactIds.length === 1
+          ? targetedArtifactIds[0]!
+          : plan.intent.targetArtifactId,
+      targetWorkspaceId:
+        retained?.type === "artifact.create"
+          ? retained.input.workspaceId
+          : plan.intent.targetWorkspaceId,
+    },
+    operations,
+  });
+}
+
+function reconcileExplicitDocumentOperation(
+  operation: ModelOperation,
+  prompt: string,
+  focusedArtifact: unknown,
+): ModelOperation {
+  if (
+    operation.type !== "artifact.update" ||
+    operation.input.blueprintKey !== "document" ||
+    !focusedArtifact ||
+    typeof focusedArtifact !== "object" ||
+    Array.isArray(focusedArtifact)
+  )
+    return operation;
+  const artifact = focusedArtifact as Record<string, unknown>;
+  const content =
+    artifact.content &&
+    typeof artifact.content === "object" &&
+    !Array.isArray(artifact.content)
+      ? (artifact.content as Record<string, unknown>)
+      : null;
+  const blocks = Array.isArray(content?.blocks) ? content.blocks : [];
+
+  // Exact region repair requests are a contract, not a suggestion. The model
+  // still authors the operation, but the harness resolves the natural-language
+  // target against the canonical block tree so a plausible-looking JSON
+  // pointer cannot silently edit the heading (or no block at all).
+  const exactHeadingRepair = prompt.match(
+    /heading\s+that\s+currently\s+starts\s+["'“]([^"'”]+)["'”]\s+(?:back\s+)?to\s+exactly\s+["'“]([^"'”]+)["'”]/i,
+  );
+  const exactParagraphRepair = prompt.match(
+    /first\s+paragraph\s+under\s+(?:that|the)\s+heading(?:\s+with)?\s*:\s*["'“]([\s\S]+?)["'”](?=\s+(?:preserve|keep|leave)\b|\s*$)/i,
+  );
+  if (exactHeadingRepair && exactParagraphRepair) {
+    const startsWith = exactHeadingRepair[1]!.trim().toLowerCase();
+    const headingText = exactHeadingRepair[2]!.trim();
+    const headingIndex = blocks.findIndex((block) => {
+      if (!block || typeof block !== "object" || Array.isArray(block)) return false;
+      const row = block as Record<string, unknown>;
+      return (
+        typeof row.type === "string" &&
+        row.type.startsWith("heading") &&
+        typeof row.text === "string" &&
+        row.text.trim().toLowerCase().startsWith(startsWith)
+      );
+    });
+    const paragraphIndex = blocks.findIndex((block, index) =>
+      index > headingIndex &&
+      block !== null &&
+      typeof block === "object" &&
+      !Array.isArray(block) &&
+      (block as Record<string, unknown>).type === "paragraph",
+    );
+    if (headingIndex >= 0 && paragraphIndex >= 0) {
+      return parseModelOperation({
+        ...operation,
+        input: {
+          ...operation.input,
+          content: null,
+          contentPatch: {
+            changes: [
+              { path: `/blocks/${headingIndex}/text`, value: headingText },
+              {
+                path: `/blocks/${paragraphIndex}/text`,
+                value: exactParagraphRepair[1]!.trim(),
+              },
+            ],
+          },
+        },
+      });
+    }
+  }
+  const exactNthParagraph = prompt.match(
+    /(?:replace|set|rewrite)\s+(?:only\s+)?(?:the\s+)?(first|second|third)\s+paragraph\s+under\s+(?:the\s+)?["'“]?([^"'”:,.]+?)["'”]?\s+(?:with|to)\s*:\s*["'“]([\s\S]+?)["'”](?=\s+(?:preserve|keep|leave)\b|\s*$)/i,
+  );
+  if (exactNthParagraph) {
+    const ordinal = { first: 0, second: 1, third: 2 }[
+      exactNthParagraph[1]!.toLowerCase() as "first" | "second" | "third"
+    ];
+    const requestedHeading = exactNthParagraph[2]!.trim().toLowerCase();
+    const headingIndex = blocks.findIndex((block) => {
+      if (!block || typeof block !== "object" || Array.isArray(block)) return false;
+      const row = block as Record<string, unknown>;
+      return (
+        typeof row.type === "string" &&
+        row.type.startsWith("heading") &&
+        typeof row.text === "string" &&
+        row.text.trim().toLowerCase() === requestedHeading
+      );
+    });
+    if (headingIndex >= 0) {
+      const paragraphIndices: number[] = [];
+      for (let index = headingIndex + 1; index < blocks.length; index += 1) {
+        const block = blocks[index];
+        if (!block || typeof block !== "object" || Array.isArray(block)) continue;
+        const type = (block as Record<string, unknown>).type;
+        if (typeof type === "string" && type.startsWith("heading")) break;
+        if (type === "paragraph") paragraphIndices.push(index);
+      }
+      const paragraphIndex = paragraphIndices[ordinal];
+      if (paragraphIndex !== undefined)
+        return parseModelOperation({
+          ...operation,
+          input: {
+            ...operation.input,
+            content: null,
+            contentPatch: {
+              changes: [
+                {
+                  path: `/blocks/${paragraphIndex}/text`,
+                  value: exactNthParagraph[3]!.trim(),
+                },
+              ],
+            },
+          },
+        });
+    }
+  }
+  if (!operation.input.contentPatch) return operation;
+  const headingRequest = prompt.match(
+    /\b(?:first\s+)?paragraph\s+(?:directly\s+)?under\s+(?:the\s+)?["']?([^"',.]+?)["']?(?=\s+(?:so|to|and|while|without|with)\b|[,.;]|$)/i,
+  )?.[1]?.trim();
+  if (!headingRequest) return operation;
+  const normalizedHeading = headingRequest.toLowerCase();
+  const headingIndex = blocks.findIndex((block) => {
+    if (!block || typeof block !== "object" || Array.isArray(block)) return false;
+    const row = block as Record<string, unknown>;
+    const text = typeof row.text === "string" ? row.text.trim().toLowerCase() : "";
+    return (
+      typeof row.type === "string" &&
+      row.type.startsWith("heading") &&
+      (text === normalizedHeading || text.startsWith(`${normalizedHeading} `))
+    );
+  });
+  if (headingIndex < 0) return operation;
+  const paragraphIndex = blocks.findIndex((block, index) => {
+    if (index <= headingIndex || !block || typeof block !== "object" || Array.isArray(block))
+      return false;
+    const type = (block as Record<string, unknown>).type;
+    return type === "paragraph";
+  });
+  if (paragraphIndex < 0) return operation;
+  const textChanges = operation.input.contentPatch.changes.filter((change) =>
+    /^\/(?:content\/)?blocks\/\d+\/text$/.test(change.path),
+  );
+  if (textChanges.length !== 1) return operation;
+  const intendedPath = `/blocks/${paragraphIndex}/text`;
+  if (textChanges[0]!.path === intendedPath) return operation;
+  return parseModelOperation({
+    ...operation,
+    input: {
+      ...operation.input,
+      contentPatch: {
+        changes: operation.input.contentPatch.changes.map((change) =>
+          change === textChanges[0] ? { ...change, path: intendedPath } : change,
+        ),
+      },
+    },
+  });
+}
+
+function assertRequestedArtifactMutation(
+  operations: ModelOperation[],
+  prompt: string,
+) {
+  // Negative preservation constraints describe what must *not* change. Remove
+  // them before detecting a requested content mutation; otherwise a request
+  // such as "add a tag while preserving all content" is misread as an edit to
+  // the document body and a perfectly valid metadata-only operation is rejected.
+  const mutationPrompt = prompt
+    .replace(
+      /\b(?:while|and)\s+(?:preserv(?:e|ing)|keep(?:ing)?|leav(?:e|ing))\b[^.!?]{0,180}\b(?:content|text|paragraphs?|headings?|sections?|blocks?|questions?|answers?|cards?|subtasks?|explanations?|formulas?|tables?)\b[^.!?]*/gi,
+      " ",
+    )
+    .replace(
+      /\bwithout\s+(?:chang(?:e|ing)|edit(?:ing)?|rewrit(?:e|ing)|replac(?:e|ing)|remov(?:e|ing)|touch(?:ing)?|modif(?:y|ying)|alter(?:ing)?)\b[^.!?]{0,180}\b(?:content|text|paragraphs?|headings?|sections?|blocks?|questions?|answers?|cards?|subtasks?|explanations?|formulas?|tables?)\b[^.!?]*/gi,
+      " ",
+    );
+  const requestsContentChange =
+    /\b(?:rewrite|replace|edit|change|update|add|remove|delete|set|repair|fix)\b[^.!?]{0,180}\b(?:content|text|paragraph|heading|section|block|question|answer|card|subtask|explanation|formula|table)\b/i.test(
+      mutationPrompt,
+    ) ||
+    /\b(?:paragraph|heading|section|block|question|answer|card|subtask|explanation|formula|table)\b[^.!?]{0,180}\b(?:rewrite|replace|edit|change|update|add|remove|delete|set|repair|fix)\b/i.test(
+      mutationPrompt,
+    );
+  if (!requestsContentChange) return;
+  const updates = operations.filter(
+    (operation): operation is Extract<ModelOperation, { type: "artifact.update" }> =>
+      operation.type === "artifact.update",
+  );
+  if (
+    updates.length > 0 &&
+    updates.every(
+      (operation) =>
+        operation.input.content === null &&
+        (!operation.input.contentPatch ||
+          operation.input.contentPatch.changes.length === 0),
+    )
+  )
+    throw new Error(
+      "The proposed artifact update did not contain the requested content change.",
+    );
+}
+
+function reconcileExplicitDocumentRegions(
+  plan: SpectraPlan,
+  prompt: string,
+  context: Awaited<ReturnType<typeof buildContext>>,
+) {
+  const operations = plan.operations.map((operation) =>
+    reconcileExplicitDocumentOperation(
+      operation,
+      prompt,
+      context.focusedArtifact,
+    ),
+  );
+  return operations.some((operation, index) => operation !== plan.operations[index])
+    ? parseSpectraPlan({ ...plan, operations })
+    : plan;
+}
+
+function resolveAndValidatePlan(
+  plan: SpectraPlan,
+  context: Awaited<ReturnType<typeof buildContext>>,
+  prompt: string,
+) {
+  const reconciled = reconcileExplicitDocumentRegions(
+    reconcileExplicitRequestContract(plan, prompt),
+    prompt,
+    context,
+  );
+  const resolved = resolvePlanReferences(reconciled, context);
+  assertRequestedArtifactMutation(resolved.operations, prompt);
+  console.info("[spectra.plan.summary]", {
+    intent: resolved.intent,
+    operations: resolved.operations.map((operation) => ({
+      type: operation.type,
+      blueprintKey:
+        operation.type === "artifact.create" ||
+        operation.type === "artifact.update"
+          ? operation.input.blueprintKey
+          : undefined,
+    })),
+  });
   try {
     return validatePlanAgainstIntent(resolved, ownedReferences(context));
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
-    if (!/\b(reference|target|destination|owned id|database ids?)\b/i.test(message)) throw error;
-    const candidates = context.artifacts.slice(0, 3).flatMap((artifact) => typeof artifact.title === "string" ? [artifact.title] : []);
+    if (
+      !/\b(reference|target|destination|owned id|database ids?)\b/i.test(
+        message,
+      )
+    )
+      throw error;
+    const candidates = context.artifacts
+      .slice(0, 3)
+      .flatMap((artifact) =>
+        typeof artifact.title === "string" ? [artifact.title] : [],
+      );
     // Clarification is appropriate only for genuine ambiguity. If retrieval found
     // no viable owned target, treat the model operation as invalid so the run
     // records one safe recoverable error instead of silently converting it into
@@ -378,10 +3238,16 @@ function resolveAndValidatePlan(plan: SpectraPlan, context: Awaited<ReturnType<t
       ...resolved,
       decision: "clarify",
       operations: [],
-      choices: candidates.length >= 2 ? {
-        question: "Which Spectra object should I use?",
-        options: candidates.map((title) => ({ title, description: "Use this owned object as the target." })),
-      } : null,
+      choices:
+        candidates.length >= 2
+          ? {
+              question: "Which Spectra object should I use?",
+              options: candidates.map((title) => ({
+                title,
+                description: "Use this owned object as the target.",
+              })),
+            }
+          : null,
       finalResponse: candidates.length
         ? `I found relevant work, but the requested change could apply to more than one object. Choose ${candidates.map((title) => `“${title}”`).join(", ")}, or name a different object.`
         : "I can help with that, but I need the name of the Spectra object you want to change.",
@@ -389,72 +3255,1359 @@ function resolveAndValidatePlan(plan: SpectraPlan, context: Awaited<ReturnType<t
   }
 }
 
-async function callModel(surface: Surface, prompt: string, context: unknown, attachments: PreparedAttachment[], onPublicText?: (content: string, mode?: "delta" | "replace") => void, onReasoningText?: (delta: string) => void, signal?: AbortSignal, onPlanOperation?: (operation: unknown, index: number) => void) {
+const SPECTRA_AGENT_TOOLS = [
+  {
+    type: "function",
+    function: {
+      name: "search_objects",
+      description:
+        "Search the user's Spectra artifacts by meaning or title. Use this instead of guessing an object id or asking the user when a quick search can resolve the target.",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        required: ["query"],
+        properties: {
+          query: { type: "string", minLength: 1 },
+          blueprintKey: {
+            anyOf: [
+              { enum: SPECTRA_BLUEPRINT_KEYS },
+              { type: "null" },
+            ],
+          },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "read_artifact",
+      description:
+        "Read the current canonical content and metadata of one owned artifact before answering from it or proposing an edit.",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        required: ["artifactId"],
+        properties: { artifactId: { type: "string", minLength: 1 } },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "read_workspace",
+      description:
+        "Read one owned workspace's identity and current item map. Use it for organization, placement, or multi-object work.",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        required: ["workspaceId"],
+        properties: { workspaceId: { type: "string", minLength: 1 } },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "read_thread",
+      description:
+        "Read the recent messages and title of one owned Spectra conversation when its history is relevant.",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        required: ["threadId"],
+        properties: { threadId: { type: "string", minLength: 1 } },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "propose_operation",
+      description:
+        "Hand Spectra one complete typed mutation as soon as it is ready. Spectra validates and stages its visible preview, then returns an observation so you can continue. Use one call per independent mutation and do not repeat an accepted operation in submit_plan.",
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        required: ["workSummary", "operation"],
+        properties: {
+          workSummary: {
+            type: "string",
+            minLength: 1,
+            maxLength: 160,
+            description:
+              "A present-tense student-facing description of this exact change.",
+          },
+          operation: {
+            type: "object",
+            additionalProperties: true,
+            description:
+              "One canonical Spectra operation. The local Zod, ownership, policy, and version checks are authoritative.",
+          },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "submit_plan",
+      description:
+        "Submit the final answer and any requested typed mutations after you have gathered enough evidence. This ends the agent loop.",
+      // Keep the transport schema deliberately small. Repeating the complete
+      // artifact union in every agent turn added thousands of input tokens even
+      // to a one-line answer. The detailed contract remains in the system
+      // instruction and the canonical Zod/ownership/policy validators remain
+      // authoritative before any write. `plan` is data, never executable code.
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        required: ["plan"],
+        properties: {
+          plan: {
+            type: "object",
+            description:
+              "The complete Spectra plan matching the documented plan contract.",
+            // The model already emits individual mutations through
+            // propose_operation, and the canonical parser validates any
+            // residual operations before a write. Repeating the full union of
+            // four rich artifact schemas here added thousands of prompt tokens
+            // to every read/tool turn without adding an execution guarantee.
+            additionalProperties: true,
+          },
+        },
+      },
+    },
+  },
+] as const;
+
+const SINGLE_CREATION_TOOL_NAMES = {
+  document: "create_document",
+  flashcard_deck: "create_flashcard_deck",
+  quiz: "create_quiz",
+  planner_task: "create_planner_task",
+} as const;
+
+const COMPACT_COORDINATION_TOOL = {
+  type: "function" as const,
+  function: {
+    name: "submit_plan",
+    description:
+      "Submit only the non-creation mutations and links assigned to this coordination worker.",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      required: ["plan"],
+      properties: {
+        plan: {
+          type: "object",
+          // The canonical Zod, ownership, intent, and policy validators parse
+          // every nested operation before execution. Keeping the transport
+          // envelope open avoids repeating the enormous artifact-content union
+          // for a coordinator that is explicitly forbidden from creating one.
+          additionalProperties: true,
+        },
+      },
+    },
+  },
+} as const;
+
+function singleCreationAgentTool(
+  blueprintKey: (typeof SPECTRA_BLUEPRINT_KEYS)[number],
+) {
+  const labels = {
+    document: "document",
+    flashcard_deck: "flashcard deck",
+    quiz: "quiz",
+    planner_task: "planner task",
+  } as const;
+  return {
+    type: "function" as const,
+    function: {
+      name: SINGLE_CREATION_TOOL_NAMES[blueprintKey],
+      description: `Create the requested ${labels[blueprintKey]} and finish this task. Spectra streams these typed fields directly into the visible artifact and validates the same canonical contract before finalizing it.`,
+      parameters: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "title",
+          "workSummary",
+          "summary",
+          "content",
+          "tags",
+          "conversationTitle",
+          "conversationSummary",
+          "finalResponse",
+        ],
+        properties: {
+          title: { type: "string", minLength: 1, maxLength: 240 },
+          workSummary: {
+            type: "string",
+            minLength: 1,
+            maxLength: 120,
+            description:
+              "A short present-tense student-facing description of the specific content being built, without implementation language.",
+          },
+          summary: { anyOf: [{ type: "string", maxLength: 2_000 }, { type: "null" }] },
+          content: SPECTRA_ARTIFACT_CONTENT_JSON_SCHEMAS[blueprintKey],
+          tags: {
+            type: "array",
+            maxItems: 16,
+            items: { type: "string", minLength: 1, maxLength: 48 },
+          },
+          conversationTitle: {
+            anyOf: [{ type: "string", minLength: 1, maxLength: 64 }, { type: "null" }],
+          },
+          conversationSummary: {
+            anyOf: [{ type: "string", minLength: 1, maxLength: 320 }, { type: "null" }],
+          },
+          finalResponse: { type: "string", minLength: 1, maxLength: 4_000 },
+        },
+      },
+    },
+  } as const;
+}
+
+function blueprintForSingleCreationTool(name: string) {
+  return (Object.entries(SINGLE_CREATION_TOOL_NAMES).find(
+    ([, toolName]) => toolName === name,
+  )?.[0] ?? null) as (typeof SPECTRA_BLUEPRINT_KEYS)[number] | null;
+}
+
+function agentSystemPrompt(
+  surface: Surface,
+  singleCreationBlueprint?: (typeof SPECTRA_BLUEPRINT_KEYS)[number],
+) {
+  const finishInstruction = singleCreationBlueprint
+    ? `This request creates exactly one ${singleCreationBlueprint.replaceAll("_", " ")}. When ready, call ${SINGLE_CREATION_TOOL_NAMES[singleCreationBlueprint]} exactly once. Its typed fields are the artifact itself; do not wrap them in a plan or emit submit_plan.`
+    : "For requested mutations, call propose_operation once for each complete independent change as soon as it is ready, wait for Spectra's observation, and continue. Use exactly one tool call per turn. When all work is represented, call submit_plan exactly once. Its operations array contains only mutations not already accepted by propose_operation (normally []).";
+  return `${systemPrompt(surface)}
+
+You are running inside Spectra's agent harness. Do not guess missing context and do not preload everything. Use search_objects and the read tools whenever the compact orientation is insufficient. Do not repeat a read when the orientation or a prior tool result already contains the needed content. You may make as many distinct useful reads and typed actions as the task requires. ${finishInstruction} Never describe a mutation as complete before the terminal tool is accepted.`;
+}
+
+function artifactWorkerSystemPrompt(
+  blueprintKey: (typeof SPECTRA_BLUEPRINT_KEYS)[number],
+) {
+  const toolName = SINGLE_CREATION_TOOL_NAMES[blueprintKey];
+  const familyRules = {
+    document:
+      "Build a polished structured document from blocks. Use heading blocks for real sections, paragraph/list/callout/table/math blocks when they improve comprehension, and valid LaTeX in latex fields for equations. Honor exact section and length constraints.",
+    flashcard_deck:
+      "Build one deck whose cards are specific, independently useful retrieval prompts. Put memory cues in hint, keep front/back concise, use unique card ids, and honor exact card counts.",
+    quiz:
+      "Build one purposeful quiz. For multiple choice, correctAnswer must exactly equal one option and distractors must be plausible. Include useful explanations, varied difficulty when requested, unique question ids, and honor exact type/count constraints.",
+    planner_task:
+      "Build one actionable planner task. Encode every requested date, status, priority, estimate, reminder, attachment, source, and subtask in content. Use epoch milliseconds for dates, unique subtask ids, and honor exact subtask counts.",
+  } as const;
+  return `You are a focused Spectra artifact writer running on DeepSeek V4 Pro.
+Create exactly one ${blueprintKey.replaceAll("_", " ")} for the assignment. Call ${toolName} exactly once; its typed arguments are the artifact itself. Do not wrap it in a general plan and do not emit prose outside the tool call.
+
+${familyRules[blueprintKey]}
+
+Use the supplied compact Spectra context and attachments as evidence. Never invent object ids or claim to have read omitted content. sourceRefs may contain only ids actually present in context. Preserve the user's exact title, count, audience, scope, and formatting requirements. Content must be genuinely useful to a student, not a template or outline unless requested. Use unique stable ids inside content. Set workSummary to a precise present-tense phrase such as "Structuring the two review sections"; Spectra streams it into the live workspace but never includes it in the final answer. Keep summary and finalResponse human-facing and truthful. The canonical schema, ownership checks, approval policy, and post-commit verifier remain authoritative.`;
+}
+
+function coordinationWorkerSystemPrompt() {
+  return `You are Spectra's non-creation coordination worker running on DeepSeek V4 Pro. Return exactly one submit_plan tool call and no prose outside it.
+
+The harness is creating new artifacts concurrently. Your job is limited to requested changes to existing owned state and requested relationships. Never emit artifact.create or workspace.create. Valid operations are:
+- artifact.update with input {artifactId, blueprintKey, title, summary, content, contentPatch, tags}. Use null for unchanged scalar fields. Prefer contentPatch {changes:[{path,value}]} for a narrow content edit. Tags is the complete desired tag array when changed.
+- artifact.archive with input {artifactId} only when explicitly requested; Spectra will pause for confirmation.
+- artifact.link with input {sourceArtifactId, targetArtifactId, relationType, label, explanation, workspaceId}. relationType is related, supports, contradicts, source_for, generated_from, follow_up, or belongs_with.
+- workspace.update, workspaceItem.add, workspaceItem.hide, or workspaceItem.setPinned only when explicitly requested.
+
+Use only exact owned ids present in context. A new object may be referenced only by the exact @created:N dependency supplied in the assignment. The plan must contain decision, intent, conversationTitle, conversationSummary, choices, progressUpdates, operations, and finalResponse. progressUpdates contains one to three short present-tense student-facing descriptions of the specific coordination work and must appear before operations so it streams early. For work, decision is operate. intent includes mode, requestedArtifactTypes, requestedVisibleArtifactCount, targetArtifactId, and targetWorkspaceId. choices is null. Do not claim success before Spectra validates and commits the combined graph.`;
+}
+
+async function executeAgentReadTool(
+  actorClerkId: string,
+  call: { name: string; arguments: string },
+) {
+  let args: Record<string, unknown>;
+  try {
+    args = JSON.parse(call.arguments) as Record<string, unknown>;
+  } catch {
+    return {
+      ok: false,
+      code: "invalid_arguments",
+      message: "Arguments must be one valid JSON object.",
+    };
+  }
+  if (call.name === "search_objects") {
+    const search = typeof args.query === "string" ? args.query.trim() : "";
+    if (!search)
+      return { ok: false, code: "query_required", results: [] };
+    const found = rows(
+      await query<unknown & object, unknown>("spectraArtifacts:list", {
+        actorClerkId,
+        placement: "all",
+        search: search.slice(0, 240),
+        limit: 12,
+      }).catch(() => []),
+    );
+    const requestedBlueprint =
+      typeof args.blueprintKey === "string" ? args.blueprintKey : null;
+    return {
+      ok: true,
+      results: found
+        .filter(
+          (artifact) =>
+            !requestedBlueprint ||
+            artifact.blueprintKey === requestedBlueprint,
+        )
+        .slice(0, 10)
+        .map((artifact) => summarizeArtifact(artifact)),
+    };
+  }
+  if (call.name === "read_artifact") {
+    if (typeof args.artifactId !== "string")
+      return { ok: false, code: "artifact_id_required" };
+    const artifact = await query<unknown & object, unknown>(
+      "spectraArtifacts:get",
+      { actorClerkId, artifactId: args.artifactId },
+    ).catch(() => null);
+    return artifact && typeof artifact === "object"
+      ? {
+          ok: true,
+          artifact: summarizeArtifact(
+            artifact as Record<string, unknown>,
+            true,
+          ),
+        }
+      : { ok: false, code: "artifact_not_found" };
+  }
+  if (call.name === "read_workspace") {
+    if (typeof args.workspaceId !== "string")
+      return { ok: false, code: "workspace_id_required" };
+    const workspace = await query<unknown & object, unknown>(
+      "spectraWorkspaceItems:listForWorkspace",
+      { actorClerkId, workspaceId: args.workspaceId },
+    ).catch(() => null);
+    return workspace
+      ? { ok: true, workspace }
+      : { ok: false, code: "workspace_not_found" };
+  }
+  if (call.name === "read_thread") {
+    if (typeof args.threadId !== "string")
+      return { ok: false, code: "thread_id_required" };
+    const thread = await query<unknown & object, unknown>(
+      "spectraThreads:get",
+      { actorClerkId, threadId: args.threadId },
+    ).catch(() => null);
+    if (!thread || typeof thread !== "object")
+      return { ok: false, code: "thread_not_found" };
+    const record = thread as Record<string, unknown>;
+    return {
+      ok: true,
+      thread: record.thread,
+      messages: rows(record.messages)
+        .slice(-24)
+        .map((message) => ({
+          role: message.role,
+          content:
+            typeof message.content === "string"
+              ? message.content.slice(0, 3_000)
+              : message.content,
+        })),
+    };
+  }
+  return { ok: false, code: "unknown_tool" };
+}
+
+function promptDirectlyUsesFocusedContent(prompt: string) {
+  return (
+    /\b(?:this|open|current|visible|selected|from (?:this|the) (?:lesson|document|deck|quiz|task)|based on (?:this|the)|base (?:it|this|the change) on (?:this|the))\b/i.test(
+      prompt,
+    ) ||
+    (/\b(?:rewrite|replace|edit|update|change|set|repair|fix|add|remove)\b/i.test(
+      prompt,
+    ) &&
+      /\b(?:content|text|paragraphs?|headings?|sections?|blocks?|questions?|answers?|cards?|subtasks?|explanations?|formulas?|tables?|summary|title|progress note)\b/i.test(
+        prompt,
+      ))
+  );
+}
+
+function buildAgentOrientation(context: unknown, prompt: string) {
+  const record =
+    context && typeof context === "object" && !Array.isArray(context)
+      ? (context as Record<string, unknown>)
+      : {};
+  const compactMap = (value: unknown, limit: number) =>
+    rows(value)
+      .slice(0, limit)
+      .map((item) => ({
+        id: item.id ?? item._id,
+        title: item.title,
+        type: item.type ?? item.blueprintKey,
+        summary:
+          typeof item.summary === "string"
+            ? item.summary.slice(0, 360)
+            : undefined,
+        workspaceId: item.workspaceId,
+      }));
+  const focused =
+    record.focusedArtifact &&
+    typeof record.focusedArtifact === "object" &&
+    !Array.isArray(record.focusedArtifact)
+      ? (record.focusedArtifact as Record<string, unknown>)
+      : null;
+  const directlyUsesFocus =
+    Boolean(focused) &&
+    promptDirectlyUsesFocusedContent(prompt);
+  const selected = rows(record.selectedObjects).slice(0, 12);
+  const workspace =
+    record.workspace &&
+    typeof record.workspace === "object" &&
+    !Array.isArray(record.workspace)
+      ? (record.workspace as Record<string, unknown>)
+      : null;
+  return {
+    version: 3,
+    effectiveFocus: record.effectiveFocus,
+    currentView: record.currentView,
+    workspace: workspace
+      ? {
+          id: workspace.id,
+          title: workspace.title,
+          description: workspace.description,
+          activeArtifactCount: workspace.activeArtifactCount,
+          pinned: compactMap(workspace.pinned, 6),
+          relevant: compactMap(workspace.relevant, 8),
+        }
+      : null,
+    focusedArtifact: focused
+      ? directlyUsesFocus
+        ? focused
+        : {
+            id: focused.id,
+            title: focused.title,
+            type: focused.type,
+            summary: focused.summary,
+            placements: focused.placements,
+          }
+      : null,
+    selectedObjects: selected.map((item) => ({
+      ...item,
+      excerpt:
+        typeof item.excerpt === "string"
+          ? item.excerpt.slice(0, 1_600)
+          : undefined,
+    })),
+    workspaceMap: compactMap(record.workspaceMap, 18),
+    threadMap: compactMap(record.threadMap, 14),
+    inboxMap: compactMap(record.inboxMap, 10),
+    catalog: compactMap(record.catalog, 10),
+    conversation: Array.isArray(record.conversation)
+      ? record.conversation.slice(-16)
+      : [],
+    retrieval:
+      "Use search_objects/read_artifact/read_workspace/read_thread for omitted detail. Never infer missing content from a title.",
+  };
+}
+
+async function callModel(
+  surface: Surface,
+  prompt: string,
+  context: unknown,
+  attachments: PreparedAttachment[],
+  onPublicText?: (content: string, mode?: "delta" | "replace") => void,
+  onReasoningText?: (delta: string) => void,
+  signal?: AbortSignal,
+  onPlanOperation?: (operation: unknown, index: number) => void,
+  onRepairRetry?: () => void,
+  onProgressUpdate?: (message: string) => void,
+  onPartialCreation?: (preview: {
+    blueprintKey: (typeof SPECTRA_BLUEPRINT_KEYS)[number];
+    title?: string;
+    content: unknown;
+    itemCount: number;
+    itemLabel: string;
+  }, workerIndex?: number) => void,
+  actorClerkId?: string,
+  forcedSingleCreation?: ProvisionalCreation,
+  forceGeneralPlan = false,
+  forcedCoordination = false,
+) {
   const apiKey = process.env.OPENROUTER_API_KEY?.trim();
-  if (!apiKey) throw new Error("OpenRouter is not configured for Spectra runs.");
-  const textAttachments = attachments.filter((attachment) => attachment.extractedText).map((attachment) => `\n\nAttachment: ${attachment.name}\n${attachment.extractedText}`).join("");
-  const userText = `User request:\n${prompt}${textAttachments}\n\nOwned context (valid JSON):\n${safeJson(context)}`;
-  const pdfs = attachments.filter((attachment) => attachment.handling === "pdf" && attachment.data);
-  const userContent = pdfs.length === 0 ? userText : [
-    { type: "text", text: userText },
-    ...pdfs.map((attachment) => ({ type: "file", file: { filename: attachment.name, file_data: attachment.data } })),
-  ];
+  if (!apiKey)
+    throw new Error("OpenRouter is not configured for Spectra runs.");
+  const textAttachments = attachments
+    .filter((attachment) => attachment.extractedText)
+    .map(
+      (attachment) =>
+        `\n\nAttachment: ${attachment.name}\n${attachment.extractedText}`,
+    )
+    .join("");
+  const contextRecord =
+    context && typeof context === "object" && !Array.isArray(context)
+      ? (context as Record<string, unknown>)
+      : {};
+  // The compact packet contains canonical owned ids and blueprint families in
+  // several projections (focus, selection, workspace map). Build one trusted
+  // lookup so harmless provider omissions such as an update without a repeated
+  // blueprintKey can be repaired locally. This never resolves a title or an
+  // unknown id, so ownership and target ambiguity remain guarded downstream.
+  const ownedArtifactBlueprints = new Map<
+    string,
+    (typeof SPECTRA_BLUEPRINT_KEYS)[number]
+  >();
+  const collectOwnedArtifactBlueprints = (value: unknown, depth = 0) => {
+    if (depth > 7 || !value) return;
+    if (Array.isArray(value)) {
+      for (const item of value) collectOwnedArtifactBlueprints(item, depth + 1);
+      return;
+    }
+    if (typeof value !== "object") return;
+    const row = value as Record<string, unknown>;
+    const id =
+      typeof row.id === "string"
+        ? row.id
+        : typeof row._id === "string"
+          ? row._id
+          : null;
+    const rawBlueprint = row.blueprintKey ?? row.type;
+    if (
+      id &&
+      typeof rawBlueprint === "string" &&
+      SPECTRA_BLUEPRINT_KEYS.includes(
+        rawBlueprint as (typeof SPECTRA_BLUEPRINT_KEYS)[number],
+      )
+    )
+      ownedArtifactBlueprints.set(
+        id,
+        rawBlueprint as (typeof SPECTRA_BLUEPRINT_KEYS)[number],
+      );
+    for (const child of Object.values(row))
+      collectOwnedArtifactBlueprints(child, depth + 1);
+  };
+  collectOwnedArtifactBlueprints(contextRecord);
+  const focusedTarget =
+    contextRecord.focusedArtifact &&
+    typeof contextRecord.focusedArtifact === "object" &&
+    !Array.isArray(contextRecord.focusedArtifact)
+      ? (contextRecord.focusedArtifact as Record<string, unknown>)
+      : null;
+  const focusedType = focusedTarget?.type ?? focusedTarget?.blueprintKey;
+  const updateTarget: UpdateTargetHint | undefined =
+    typeof focusedTarget?.id === "string" &&
+    typeof focusedType === "string" &&
+    SPECTRA_BLUEPRINT_KEYS.includes(
+      focusedType as (typeof SPECTRA_BLUEPRINT_KEYS)[number],
+    )
+      ? {
+          artifactId: focusedTarget.id,
+          blueprintKey: focusedType as UpdateTargetHint["blueprintKey"],
+        }
+      : undefined;
+  const orientation = buildAgentOrientation(context, prompt);
+  const requestsBroadMutation =
+    /\b(?:create|move|reorganize)\b|\b(?:several|multiple|across|all artifacts)\b/i.test(
+      prompt,
+    ) ||
+    /\b(?:edit|update|change|rewrite|replace|repair|fix|remove|archive)\s+(?:absolutely\s+)?everything\b/i.test(
+      prompt,
+    );
+  const directFocusedMutation =
+    Boolean(updateTarget) &&
+    /\b(?:rewrite|replace|edit|update|change|set|repair|fix|add|remove)\b/i.test(
+      prompt,
+    ) &&
+    !requestsBroadMutation;
+  const directFocusedArchive =
+    Boolean(focusedTarget) &&
+    /\barchive\b/i.test(prompt) &&
+    !requestsBroadMutation;
+  const directFocusedAction = directFocusedMutation || directFocusedArchive;
+  const durableConversation = rows(orientation.conversation).flatMap(
+    (message): SpectraAgentMessage[] => {
+      const role = message.role;
+      const content = message.content;
+      if (
+        (role !== "user" && role !== "assistant") ||
+        typeof content !== "string" ||
+        !content.trim()
+      )
+        return [];
+      return [{ role, content: content.slice(0, 8_000) }];
+    },
+  );
+  // Keep the historical transcript as real ordered messages. Re-serializing
+  // it inside every new user packet destroys the byte-stable prefix that
+  // DeepSeek's native cache can reuse across continuation turns.
+  const currentOrientation = { ...orientation, conversation: undefined };
+  const userText = `Current date and time: ${new Date().toISOString()}\n\nUser request:\n${prompt}${textAttachments}\n\nCompact owned orientation (valid JSON):\n${safeJson(currentOrientation)}`;
+  const pdfs = attachments.filter(
+    (attachment) => attachment.handling === "pdf" && attachment.data,
+  );
+  const userContent =
+    pdfs.length === 0
+      ? userText
+      : [
+          { type: "text", text: userText },
+          ...pdfs.map((attachment) => ({
+            type: "file",
+            file: { filename: attachment.name, file_data: attachment.data },
+          })),
+        ];
   const primaryRouting = getSpectraProviderRouting("primary");
   assertPrimarySpectraRouting(primaryRouting);
+  const boundedSingleCreation = forceGeneralPlan
+    ? null
+    : (forcedSingleCreation ?? provisionalSingleCreation(prompt));
+  const singleCreationBlueprint = boundedSingleCreation?.blueprintKey;
+  const complexReasoningRequest = shouldUseComplexReasoning({
+    prompt,
+    attachmentCount: attachments.length,
+    boundedSingleCreation: Boolean(boundedSingleCreation),
+  });
+  const agentRequiresDiscovery = forcedSingleCreation || forcedCoordination
+    ? false
+    : shouldAllowAgentDiscovery({
+        prompt,
+        hasFocusedArtifact: Boolean(focusedTarget),
+      });
+  // This is a provider-health threshold, not a run limit. Long or complex work
+  // remains unbounded; only a route that emits no meaningful token/tool data is
+  // abandoned so the same DeepSeek V4 Pro request can continue elsewhere.
+  const providerIdleTimeoutMs = complexReasoningRequest ? 60_000 : 18_000;
   const baseBody = {
     model: getSpectraModelId(),
     temperature: 0.1,
+    // V4 Pro supports `high` and `xhigh`; an unsupported `low` value may be
+    // dropped and silently fall back to max reasoning. Narrow edits use the
+    // same V4 Pro weights without reasoning, while genuinely complex work uses
+    // the lowest supported reasoning tier. Guarded validation/execution stays
+    // authoritative in both modes.
+    reasoning: complexReasoningRequest
+      ? { effort: "high", exclude: true }
+      : { enabled: false, exclude: true },
     stream: true,
     stream_options: { include_usage: true },
     messages: [
       { role: "system", content: systemPrompt(surface) },
       { role: "user", content: userContent },
     ],
-    ...(pdfs.length > 0 ? { plugins: [{ id: "file-parser", pdf: { engine: "cloudflare-ai" } }] } : {}),
+    ...(pdfs.length > 0
+      ? { plugins: [{ id: "file-parser", pdf: { engine: "cloudflare-ai" } }] }
+      : {}),
   };
-  const request = (provider: ReturnType<typeof getSpectraProviderRouting>, strictOutput: boolean) => fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-      "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
-      "X-OpenRouter-Title": "Spectra AI Operation Engine",
-    },
-    body: JSON.stringify({
-      ...baseBody,
-      provider,
-      ...(strictOutput ? { response_format: { type: "json_schema", json_schema: { name: "spectra_operation_plan", strict: true, schema: SPECTRA_PLAN_JSON_SCHEMA } } } : {}),
-    }),
-    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(120_000)]) : AbortSignal.timeout(120_000),
-  });
-  console.info("[spectra.openrouter.request]", { model: baseBody.model, provider: primaryRouting, mode: "native-primary" });
-  let response = await request(primaryRouting, false);
+  type RequestMode = "initial" | "repair" | "fallback";
+  const request = (
+    provider: Record<string, unknown>,
+    mode: RequestMode,
+    repair?: { raw: string; error: unknown },
+    agentMessages?: SpectraAgentMessage[],
+  ) => {
+    const repairIssues =
+      repair?.error instanceof ZodError
+        ? repair.error.issues
+            .slice(0, 10)
+            .map(
+              (issue) => `${issue.path.join(".") || "plan"}: ${issue.message}`,
+            )
+            .join("\n")
+        : repair?.error instanceof Error
+          ? repair.error.message
+          : String(repair?.error ?? "Invalid plan");
+    const repairMessages = repair
+      ? [
+          {
+            role: "system",
+            content: `${systemPrompt(surface)}\n\nYou are repairing a previously generated plan. Preserve the user's requested meaning and every valid generated value. Correct only JSON syntax, missing nullable fields, invalid enum/schema shapes, and contradictions identified by validation. Return one complete JSON object and nothing else.`,
+          },
+          {
+            role: "user",
+            content: `Original user request:\n${prompt}\n\nValidation issues:\n${repairIssues}\n\nInvalid plan to repair:\n${repair.raw.slice(0, 48_000)}`,
+          },
+        ]
+      : baseBody.messages;
+    const agentMode = Boolean(agentMessages);
+    const firstAgentTurn =
+      agentMode &&
+      !agentMessages?.some((message) => message.role === "tool");
+    const focusedBlueprint =
+      typeof focusedType === "string" &&
+      SPECTRA_BLUEPRINT_KEYS.includes(
+        focusedType as (typeof SPECTRA_BLUEPRINT_KEYS)[number],
+      )
+        ? (focusedType as (typeof SPECTRA_BLUEPRINT_KEYS)[number])
+        : null;
+    const focusedUpdateSchema = focusedBlueprint
+      ? SPECTRA_PLAN_JSON_SCHEMA.properties.operations.items.oneOf.find(
+          (variant) =>
+            "properties" in variant &&
+            variant.properties.type.const === "artifact.update" &&
+            "properties" in variant.properties.input &&
+            "blueprintKey" in variant.properties.input.properties &&
+            variant.properties.input.properties.blueprintKey.const ===
+              focusedBlueprint,
+        )
+      : undefined;
+    const focusedArchiveSchema = SPECTRA_PLAN_JSON_SCHEMA.properties.operations.items.oneOf.find(
+      (variant) =>
+        "properties" in variant &&
+        variant.properties.type.const === "artifact.archive",
+    );
+    const focusedOperationSchema = directFocusedArchive
+      ? focusedArchiveSchema
+      : focusedUpdateSchema;
+    const terminalToolName = singleCreationBlueprint
+      ? SINGLE_CREATION_TOOL_NAMES[singleCreationBlueprint]
+      : "submit_plan";
+    const baseAgentTools = forcedCoordination
+      ? [COMPACT_COORDINATION_TOOL]
+      : singleCreationBlueprint
+      ? [
+          ...SPECTRA_AGENT_TOOLS.filter(
+            (tool) =>
+              tool.function.name !== "submit_plan" &&
+              tool.function.name !== "propose_operation",
+          ),
+          singleCreationAgentTool(singleCreationBlueprint),
+        ]
+      : SPECTRA_AGENT_TOOLS;
+    const agentTools =
+      directFocusedAction && focusedOperationSchema
+        ? baseAgentTools.map((tool) =>
+            tool.function.name === "propose_operation"
+              ? {
+                  ...tool,
+                  function: {
+                    ...tool.function,
+                    parameters: {
+                      type: "object",
+                      additionalProperties: false,
+                      required: ["workSummary", "operation"],
+                      properties: {
+                        workSummary: {
+                          type: "string",
+                          minLength: 1,
+                          maxLength: 160,
+                          description:
+                            "A present-tense student-facing description of this exact change.",
+                        },
+                        operation: focusedOperationSchema,
+                      },
+                    },
+                  },
+                }
+              : tool,
+          )
+        : baseAgentTools;
+    return fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer":
+          process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
+        "X-OpenRouter-Title": "Spectra AI Operation Engine",
+      },
+      body: JSON.stringify({
+        ...baseBody,
+        provider,
+        // DeepSeek's native endpoint accepts json_object reliably but rejects the
+        // strict json_schema form intermittently. Validation is enforced locally
+        // after the stream, including on the repair and fallback paths.
+        ...(agentMode
+          ? {
+              messages: agentMessages,
+              tools: agentTools,
+              tool_choice:
+                directFocusedAction && firstAgentTurn
+                  ? {
+                      type: "function",
+                      function: { name: "propose_operation" },
+                    }
+                  : agentRequiresDiscovery ||
+                      (!singleCreationBlueprint && !forcedCoordination)
+                  ? "auto"
+                  : {
+                    type: "function",
+                    function: { name: terminalToolName },
+                  },
+            }
+          : { response_format: { type: "json_object" } }),
+        ...(repair
+          ? {
+              messages: repairMessages,
+              reasoning: { enabled: false, exclude: true },
+            }
+          : mode === "fallback"
+            ? { reasoning: { enabled: false, exclude: true } }
+            : {}),
+      }),
+      // The run owns cancellation. Do not impose a hidden wall-clock cutoff on
+      // a legitimate long task; explicit Stop remains immediate through the
+      // run controller.
+      signal,
+    });
+  };
+  const modelStartedAt = Date.now();
+  const expectedCreationBlueprint = boundedSingleCreation?.blueprintKey;
+  const defaultPlacement = surface === "chat" || surface === "artifacts" ? "inbox" : "context";
+  const acceptedAgentOperations: ModelOperation[] = [];
+  const acceptedAgentWorkSummaries: string[] = [];
+  const parseAndCheckPlan = (text: string) => {
+    let candidateText = text;
+    if (acceptedAgentOperations.length) {
+      try {
+        let raw: Record<string, unknown>;
+        try {
+          raw = JSON.parse(text) as Record<string, unknown>;
+        } catch {
+          try {
+            raw = JSON5.parse(text) as Record<string, unknown>;
+          } catch {
+            raw = JSON.parse(jsonrepair(text)) as Record<string, unknown>;
+          }
+        }
+        const terminalOperations = Array.isArray(raw.operations)
+          ? raw.operations
+          : [];
+        raw.operations = [...acceptedAgentOperations, ...terminalOperations];
+        candidateText = JSON.stringify(raw);
+      } catch {
+        // Keep the provider text intact so the normal bounded repair path can
+        // explain malformed terminal metadata. Accepted typed operations stay
+        // staged and are never committed before a valid terminal envelope.
+      }
+    }
+    let parsed = parseStreamedPlanText(
+      candidateText,
+      updateTarget,
+      expectedCreationBlueprint,
+      defaultPlacement,
+      ownedArtifactBlueprints,
+    );
+    if (acceptedAgentOperations.length) {
+      const seen = new Set<string>();
+      const operations = [...acceptedAgentOperations, ...parsed.operations].filter(
+        (operation) => {
+          const key = JSON.stringify(operation);
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        },
+      );
+      parsed = parseSpectraPlan({ ...parsed, operations });
+    }
+    const cleanText = (value: string | null | undefined) =>
+      value == null
+        ? value
+        : String(sanitizeArtifactUserFacingContent(value, contextRecord));
+    parsed = parseSpectraPlan({
+      ...parsed,
+      conversationTitle: cleanText(parsed.conversationTitle),
+      conversationSummary: cleanText(parsed.conversationSummary),
+      choices: parsed.choices
+        ? sanitizeArtifactUserFacingContent(parsed.choices, contextRecord)
+        : null,
+      operations: parsed.operations.map((operation) =>
+        sanitizeModelOperationUserFacingContent(operation, contextRecord),
+      ),
+      finalResponse: cleanText(parsed.finalResponse) ?? "",
+    });
+    assertRequestedArtifactContent(parsed.operations, prompt);
+    return parsed;
+  };
+  const parseSingleCreationArguments = (
+    text: string,
+    blueprintKey: (typeof SPECTRA_BLUEPRINT_KEYS)[number],
+  ) => {
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      try {
+        parsed = JSON5.parse(text) as Record<string, unknown>;
+      } catch {
+        parsed = JSON.parse(jsonrepair(text)) as Record<string, unknown>;
+      }
+    }
+    const workspace =
+      contextRecord.workspace &&
+      typeof contextRecord.workspace === "object" &&
+      !Array.isArray(contextRecord.workspace)
+        ? (contextRecord.workspace as Record<string, unknown>)
+        : null;
+    const title =
+      typeof parsed.title === "string" && parsed.title.trim()
+        ? parsed.title.trim()
+        : `New ${blueprintKey.replaceAll("_", " ")}`;
+    const safeContent = sanitizeArtifactUserFacingContent(parsed.content, contextRecord);
+    const normalizedContent =
+      blueprintKey === "planner_task"
+        ? reconcileExplicitPlannerRequirements(safeContent, prompt)
+        : normalizeArtifactContent(blueprintKey, safeContent);
+    const plan = parseSpectraPlan({
+      decision: "operate",
+      intent: {
+        mode: "create",
+        requestedArtifactTypes: [blueprintKey],
+        requestedVisibleArtifactCount: 1,
+        targetArtifactId: null,
+        targetWorkspaceId:
+          defaultPlacement === "context" && typeof workspace?.id === "string"
+            ? workspace.id
+            : null,
+      },
+      conversationTitle:
+        typeof parsed.conversationTitle === "string" &&
+        parsed.conversationTitle.trim()
+          ? parsed.conversationTitle.trim().slice(0, 64)
+          : title.slice(0, 64),
+      conversationSummary:
+        typeof parsed.conversationSummary === "string" &&
+        parsed.conversationSummary.trim()
+          ? parsed.conversationSummary.trim().slice(0, 320)
+          : `Created ${title}.`.slice(0, 320),
+      choices: null,
+      operations: [
+        {
+          type: "artifact.create",
+          input: {
+            blueprintKey,
+            title,
+            summary: normalizeCreationSummary(
+              parsed.summary,
+              blueprintKey,
+              title,
+              normalizedContent,
+              prompt,
+            ),
+            content: normalizedContent,
+            tags: Array.isArray(parsed.tags) ? parsed.tags : [],
+            workspaceId:
+              defaultPlacement === "context" && typeof workspace?.id === "string"
+                ? workspace.id
+                : null,
+            placement: defaultPlacement,
+            pinned: false,
+            exclusivePin: false,
+          },
+        },
+      ],
+      finalResponse:
+        typeof parsed.finalResponse === "string" && parsed.finalResponse.trim()
+          ? parsed.finalResponse.trim()
+          : `Created ${title}.`,
+    });
+    assertRequestedArtifactContent(plan.operations, prompt);
+    return plan;
+  };
+  let response = new Response(null, { status: 503 });
   let emittedPublicText = "";
-  const emitPublic = (delta: string) => { emittedPublicText += delta; onPublicText?.(delta, "delta"); };
-  const replacePublic = (content: string) => { emittedPublicText = content; onPublicText?.(content, "replace"); };
+  const emitPublic = (delta: string) => {
+    emittedPublicText += delta;
+    onPublicText?.(delta, "delta");
+  };
+  const replacePublic = (content: string) => {
+    emittedPublicText = content;
+    onPublicText?.(content, "replace");
+  };
   let result: Awaited<ReturnType<typeof readOpenRouterResponse>> | undefined;
   let plan: SpectraPlan | undefined;
   let primaryFailure: unknown;
   let emittedOperationCount = 0;
+  let emittedProgressCount = 0;
+  let emittedPartialCreationItems = 0;
+  let emittedPartialCreationTitle = "";
+  let emittedWorkerProgress = "";
+  let latestPlanText = "";
+  const isRepairablePlanFailure = (error: unknown) =>
+    error instanceof SyntaxError ||
+    error instanceof ZodError ||
+    /plan|JSON|schema|structured|truncated|outer object|closing|unexpected character|position \d+|generated (?:deck|quiz|planner task).*(?:must|omitted)|requested (?:cards|questions|subtasks|due date)/i.test(
+      error instanceof Error ? error.message : "",
+    );
   const inspectPlan = (text: string) => {
+    latestPlanText = text;
+    const progressUpdates = extractCompleteJsonArrayItems(text, "progressUpdates");
+    while (emittedProgressCount < progressUpdates.length) {
+      const update = progressUpdates[emittedProgressCount];
+      emittedProgressCount += 1;
+      if (typeof update === "string" && update.trim())
+        onProgressUpdate?.(update.trim().slice(0, 280));
+    }
     const operations = extractCompleteJsonArrayItems(text, "operations");
     while (emittedOperationCount < operations.length) {
       const index = emittedOperationCount;
       emittedOperationCount += 1;
-      onPlanOperation?.(operations[index], index);
+      const streamed = operations[index];
+      if (
+        updateTarget &&
+        streamed &&
+        typeof streamed === "object" &&
+        !Array.isArray(streamed)
+      ) {
+        const row = streamed as Record<string, unknown>;
+        const input =
+          row.input && typeof row.input === "object" && !Array.isArray(row.input)
+            ? { ...(row.input as Record<string, unknown>) }
+            : null;
+        if (
+          row.type === "artifact.update" &&
+          input &&
+          input.artifactId === updateTarget.artifactId &&
+          typeof input.blueprintKey !== "string"
+        )
+          input.blueprintKey = updateTarget.blueprintKey;
+        onPlanOperation?.(input ? { ...row, input } : streamed, index);
+      } else onPlanOperation?.(streamed, index);
     }
   };
-  if (!response.ok) {
-    const detail = await response.text().catch(() => "");
-    primaryFailure = new Error(`DeepSeek provider request failed (${response.status})${detail ? `: ${detail.slice(0, 240)}` : ""}`);
-  } else {
-    try {
-      result = await readOpenRouterResponse(response, emitPublic, onReasoningText, inspectPlan);
-      if (!result.text.trim()) throw new Error("The Spectra model returned an empty plan.");
-      const normalizedText = result.text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
-      plan = parseSpectraPlan(JSON.parse(normalizedText));
-    } catch (error) {
-      primaryFailure = error;
+  const inspectPartialCreation = (text: string) => {
+    if (!expectedCreationBlueprint || !onPartialCreation) return;
+    const fieldByBlueprint = {
+      document: { field: "blocks", itemLabel: "block" },
+      flashcard_deck: { field: "cards", itemLabel: "card" },
+      quiz: { field: "questions", itemLabel: "question" },
+      planner_task: { field: "subtasks", itemLabel: "step" },
+    } as const;
+    const descriptor = fieldByBlueprint[expectedCreationBlueprint];
+    const items = extractCompleteJsonArrayItems(text, descriptor.field);
+    const partialTitle = extractPartialJsonStringField(text, "title").value.trim();
+    const workerProgress = extractPartialJsonStringField(text, "workSummary");
+    if (
+      workerProgress.complete &&
+      workerProgress.value.trim() &&
+      workerProgress.value.trim() !== emittedWorkerProgress
+    ) {
+      emittedWorkerProgress = workerProgress.value.trim();
+      onProgressUpdate?.(emittedWorkerProgress.slice(0, 120));
+    }
+    const titleChanged =
+      partialTitle.length > emittedPartialCreationTitle.length;
+    if (items.length <= emittedPartialCreationItems && !titleChanged) return;
+    emittedPartialCreationItems = items.length;
+    if (titleChanged) emittedPartialCreationTitle = partialTitle;
+    onPartialCreation({
+      blueprintKey: expectedCreationBlueprint,
+      title: partialTitle || undefined,
+      content: normalizeArtifactContent(expectedCreationBlueprint, {
+        [descriptor.field]: items,
+      }),
+      itemCount: items.length,
+      itemLabel: descriptor.itemLabel,
+    });
+  };
+  console.info("[spectra.openrouter.request]", {
+    model: baseBody.model,
+    provider: primaryRouting,
+    mode: "native-agent-primary",
+  });
+  try {
+    const initialMessages: SpectraAgentMessage[] = [
+      {
+        role: "system",
+        content: forcedSingleCreation
+          ? artifactWorkerSystemPrompt(forcedSingleCreation.blueprintKey)
+          : forcedCoordination
+            ? coordinationWorkerSystemPrompt()
+          : agentSystemPrompt(surface, singleCreationBlueprint),
+      },
+      ...durableConversation,
+      { role: "user", content: userContent },
+    ];
+    const agentResult = await runSpectraAgentLoop({
+      messages: initialMessages,
+      signal,
+      isTerminalTool: (call) =>
+        call.name === "submit_plan" ||
+        Boolean(blueprintForSingleCreationTool(call.name)),
+      // A direct focused edit is already complete once DeepSeek has authored
+      // one operation and Spectra has schema-validated and staged it. Asking
+      // the model to make a second call merely to wrap that accepted mutation
+      // in submit_plan adds latency and a second opportunity for contradiction.
+      // Discovery and multi-object work retain the open-ended agent loop.
+      isCompleteAfterTool: (call, toolResult) =>
+        directFocusedAction &&
+        call.name === "propose_operation" &&
+        Boolean(
+          toolResult &&
+            typeof toolResult === "object" &&
+            !Array.isArray(toolResult) &&
+            (toolResult as Record<string, unknown>).accepted === true,
+        ),
+      executeTool: async (call) => {
+        if (call.name === "propose_operation") {
+          let args: Record<string, unknown>;
+          try {
+            args = JSON.parse(call.arguments) as Record<string, unknown>;
+          } catch {
+            try {
+              args = JSON5.parse(call.arguments) as Record<string, unknown>;
+            } catch {
+              args = JSON.parse(jsonrepair(call.arguments)) as Record<string, unknown>;
+            }
+          }
+          try {
+            const operation = sanitizeModelOperationUserFacingContent(
+              reconcileExplicitDocumentOperation(
+                parseModelOperation(args.operation),
+                prompt,
+                contextRecord.focusedArtifact,
+              ),
+              contextRecord,
+            );
+            assertRequestedArtifactContent([operation], prompt);
+            assertRequestedArtifactMutation([operation], prompt);
+            const fingerprint = JSON.stringify(operation);
+            const existingIndex = acceptedAgentOperations.findIndex(
+              (candidate) => JSON.stringify(candidate) === fingerprint,
+            );
+            if (existingIndex >= 0)
+              return {
+                ok: true,
+                accepted: true,
+                duplicate: true,
+                operationIndex: existingIndex,
+                message: "This exact mutation is already staged.",
+              };
+            const index = acceptedAgentOperations.length;
+            acceptedAgentOperations.push(operation);
+            const workSummary =
+              typeof args.workSummary === "string" && args.workSummary.trim()
+                ? args.workSummary.trim().slice(0, 160)
+                : operationLabel(operation);
+            acceptedAgentWorkSummaries.push(workSummary);
+            onProgressUpdate?.(workSummary);
+            onPlanOperation?.(operation, index);
+            return {
+              ok: true,
+              accepted: true,
+              operationIndex: index,
+              preview: safeOperationPreview(operation),
+              message:
+                directFocusedAction
+                  ? "The requested focused mutation passed structural validation and its visible preview is staged. Call submit_plan now with no repeated operation and do not retrieve or propose additional work."
+                  : "The typed mutation passed structural validation and its visible preview is staged. Continue with remaining work or submit the final plan.",
+            };
+          } catch (error) {
+            return {
+              ok: false,
+              code: "invalid_operation",
+              message: publicError(error),
+            };
+          }
+        }
+        const progressByTool: Record<string, string> = {
+          search_objects: "Finding relevant work · Searching your Spectra library",
+          read_artifact: "Reading source material · Loading the current artifact",
+          read_workspace: "Reviewing the workspace · Mapping its current objects",
+          read_thread: "Reviewing the conversation · Loading relevant history",
+        };
+        const progress = progressByTool[call.name];
+        if (progress) onProgressUpdate?.(progress);
+        return actorClerkId
+          ? executeAgentReadTool(actorClerkId, call)
+          : {
+              ok: false,
+              code: "context_reads_unavailable",
+            };
+      },
+      requestTurn: async (messages, turn) => {
+        const startedAt = Date.now();
+        response = await request(primaryRouting, "initial", undefined, messages);
+        console.info("[spectra.openrouter.phase]", {
+          phase: turn === 1 ? "headers" : "agent_turn_headers",
+          turn,
+          elapsedMs: Date.now() - startedAt,
+          status: response.status,
+        });
+        if (!response.ok) {
+          const detail = await response.text().catch(() => "");
+          throw new Error(
+            `DeepSeek provider request failed (${response.status})${detail ? `: ${detail.slice(0, 240)}` : ""}`,
+          );
+        }
+        return readOpenRouterAgentTurn(
+          response,
+          undefined,
+          onReasoningText,
+          (call) => {
+            if (
+              call.name !== "submit_plan" &&
+              !blueprintForSingleCreationTool(call.name)
+            )
+              return;
+            inspectPartialCreation(call.arguments);
+            if (call.name === "submit_plan") inspectPlan(call.arguments);
+          },
+          providerIdleTimeoutMs,
+        );
+      },
+      onTurn: (turn, index) => {
+        console.info("[spectra.agent.turn]", {
+          index,
+          finishReason: turn.finishReason,
+          tools: turn.toolCalls.map((call) => call.name),
+          usage: turn.usage,
+        });
+        if (turn.text) inspectPlan(turn.text);
+      },
+    });
+    const terminalArguments = agentResult.terminalTool?.arguments.trim();
+    const terminalCreationBlueprint = agentResult.terminalTool
+      ? blueprintForSingleCreationTool(agentResult.terminalTool.name)
+      : null;
+    if (terminalCreationBlueprint && terminalArguments) {
+      latestPlanText = terminalArguments;
+      result = {
+        text: terminalArguments,
+        model: agentResult.model,
+        provider: agentResult.provider,
+        usage: agentResult.usage,
+      };
+      plan = parseSingleCreationArguments(
+        terminalArguments,
+        terminalCreationBlueprint,
+      );
+    }
+    if (
+      !plan &&
+      directFocusedAction &&
+      agentResult.completedTool?.name === "propose_operation" &&
+      acceptedAgentOperations.length === 1
+    ) {
+      const artifactTitle =
+        typeof focusedTarget?.title === "string" && focusedTarget.title.trim()
+          ? focusedTarget.title.trim()
+          : "the focused artifact";
+      const workSummary =
+        acceptedAgentWorkSummaries[0] ??
+        `Updating ${artifactTitle}`;
+      plan = parseSpectraPlan({
+        decision: "operate",
+        intent: {
+          mode: directFocusedArchive ? "archive" : "update",
+          requestedArtifactTypes: !directFocusedArchive && updateTarget
+            ? [updateTarget.blueprintKey]
+            : [],
+          requestedVisibleArtifactCount: 1,
+          targetArtifactId: updateTarget?.artifactId ?? null,
+          targetWorkspaceId:
+            typeof contextRecord.workspace === "object" &&
+            contextRecord.workspace &&
+            !Array.isArray(contextRecord.workspace) &&
+            typeof (contextRecord.workspace as Record<string, unknown>).id ===
+              "string"
+              ? ((contextRecord.workspace as Record<string, unknown>)
+                  .id as string)
+              : null,
+        },
+        conversationTitle: `${directFocusedArchive ? "Archive" : "Update"} ${artifactTitle}`.slice(0, 64),
+        conversationSummary: workSummary.slice(0, 320),
+        choices: null,
+        operations: acceptedAgentOperations,
+        finalResponse: `${workSummary.replace(/[.!?]+$/, "")}.`,
+      });
+      result = {
+        text: JSON.stringify(plan),
+        model: agentResult.model,
+        provider: agentResult.provider,
+        usage: agentResult.usage,
+      };
+    }
+    let planText = terminalArguments || agentResult.text.trim();
+    if (!terminalCreationBlueprint && terminalArguments) {
+      const balancedPlan = extractBalancedObjectProperty(
+        terminalArguments,
+        "plan",
+      );
+      if (balancedPlan) planText = balancedPlan;
+      try {
+        const wrapper = JSON.parse(terminalArguments) as Record<string, unknown>;
+        if (
+          wrapper.plan &&
+          typeof wrapper.plan === "object" &&
+          !Array.isArray(wrapper.plan)
+        )
+          planText = JSON.stringify(wrapper.plan);
+      } catch {
+        // The repair ladder below handles malformed terminal arguments.
+      }
+    }
+    if (!plan && !planText)
+      throw new Error("The Spectra model returned an empty plan.");
+    if (!plan) {
+      inspectPlan(planText);
+      plan = parseAndCheckPlan(planText);
+      result = {
+        text: planText,
+        model: agentResult.model,
+        provider: agentResult.provider,
+        usage: agentResult.usage,
+      };
+    }
+  } catch (error) {
+    primaryFailure = error;
+  }
+  if (primaryFailure) {
+    // A complete provider stream can still contain a malformed/truncated outer
+    // plan. Make one schema-constrained repair attempt before exposing failure.
+    // No operation has committed at this point, so this cannot replay a write.
+    const repairablePlanFailure = isRepairablePlanFailure(primaryFailure);
+    if (response.ok && repairablePlanFailure) {
+      onRepairRetry?.();
+      if (emittedPublicText) replacePublic("");
+      emittedOperationCount = 0;
+      emittedProgressCount = 0;
+      console.warn("[spectra.openrouter.repair_retry]", {
+        model: baseBody.model,
+        error: publicError(primaryFailure),
+        issues:
+          primaryFailure instanceof ZodError
+            ? primaryFailure.issues
+                .slice(0, 6)
+                .map((issue) => ({
+                  path: issue.path.join("."),
+                  code: issue.code,
+                  message: issue.message,
+                }))
+            : undefined,
+        rawMessage:
+          primaryFailure instanceof Error
+            ? primaryFailure.message
+            : String(primaryFailure),
+        invalidPlanCharacters: (result?.text ?? latestPlanText).length,
+        invalidPlanShape: describeInvalidPlanShape(
+          result?.text ?? latestPlanText,
+        ),
+      });
+      const repairStartedAt = Date.now();
+      const repairResponse = await request(primaryRouting, "repair", {
+        raw: result?.text ?? latestPlanText,
+        error: primaryFailure,
+      });
+      console.info("[spectra.openrouter.phase]", {
+        phase: "repair_headers",
+        elapsedMs: Date.now() - repairStartedAt,
+        status: repairResponse.status,
+      });
+      if (repairResponse.ok) {
+        try {
+          result = await readOpenRouterResponse(
+            repairResponse,
+            emitPublic,
+            onReasoningText,
+            inspectPlan,
+            providerIdleTimeoutMs,
+          );
+          if (!result.text.trim())
+            throw new Error(
+              "The Spectra repair attempt returned an empty plan.",
+            );
+          plan = parseAndCheckPlan(result.text);
+          primaryFailure = undefined;
+          response = repairResponse;
+        } catch (error) {
+          primaryFailure = error;
+        }
+      }
     }
   }
   if (primaryFailure) {
@@ -464,6 +4617,7 @@ async function callModel(surface: Surface, prompt: string, context: unknown, att
     }
     if (emittedPublicText) replacePublic("");
     emittedOperationCount = 0;
+    emittedProgressCount = 0;
     const fallbackRouting = getSpectraProviderRouting("fallback");
     console.warn("[spectra.openrouter.fallback]", {
       model: baseBody.model,
@@ -471,121 +4625,896 @@ async function callModel(surface: Surface, prompt: string, context: unknown, att
       primaryError: publicError(primaryFailure),
       provider: fallbackRouting,
     });
-    response = await request(fallbackRouting, true);
-    if (!response.ok) {
-      const fallbackDetail = await response.text().catch(() => "");
-      throw new Error(`OpenRouter fallback request failed (${response.status})${fallbackDetail ? `: ${fallbackDetail.slice(0, 240)}` : ""}`);
+    onProgressUpdate?.(
+      "Retrying through another DeepSeek route · Preserving the same requested outcome",
+    );
+    let fallbackFailure: unknown;
+    let fallbackResult: Awaited<ReturnType<typeof readOpenRouterResponse>> | undefined;
+    let selectedFallbackRouting: Record<string, unknown> = fallbackRouting;
+    for (const providerName of SPECTRA_FALLBACK_PROVIDERS) {
+      selectedFallbackRouting = {
+        order: [providerName],
+        only: [providerName],
+        allow_fallbacks: false,
+        require_parameters: true,
+      };
+      const fallbackStartedAt = Date.now();
+      response = await request(selectedFallbackRouting, "fallback");
+      console.info("[spectra.openrouter.phase]", {
+        phase: "fallback_headers",
+        provider: providerName,
+        elapsedMs: Date.now() - fallbackStartedAt,
+        status: response.status,
+      });
+      if (!response.ok) {
+        const fallbackDetail = await response.text().catch(() => "");
+        fallbackFailure = new Error(
+          `DeepSeek route ${providerName} failed (${response.status})${fallbackDetail ? `: ${fallbackDetail.slice(0, 240)}` : ""}`,
+        );
+        continue;
+      }
+      try {
+        fallbackResult = await readOpenRouterResponse(
+          response,
+          emitPublic,
+          onReasoningText,
+          inspectPlan,
+          providerIdleTimeoutMs,
+        );
+        if (!fallbackResult.text.trim())
+          throw new Error("The Spectra fallback model returned an empty plan.");
+        plan = parseAndCheckPlan(fallbackResult.text);
+        result = fallbackResult;
+        fallbackFailure = undefined;
+        break;
+      } catch (error) {
+        fallbackFailure = error;
+        if (emittedPublicText) replacePublic("");
+        emittedOperationCount = 0;
+        emittedProgressCount = 0;
+        // A completed response is more useful than a later route's transport
+        // failure. Repair this exact candidate once on the same DeepSeek V4 Pro
+        // route before moving on, and retain its text until that attempt ends.
+        if (
+          fallbackResult?.text.trim() &&
+          isRepairablePlanFailure(fallbackFailure)
+        ) {
+          onRepairRetry?.();
+          const fallbackRepairResponse = await request(
+            selectedFallbackRouting,
+            "repair",
+            { raw: fallbackResult.text, error: fallbackFailure },
+          );
+          console.info("[spectra.openrouter.phase]", {
+            phase: "fallback_repair_headers",
+            provider: providerName,
+            status: fallbackRepairResponse.status,
+          });
+          if (fallbackRepairResponse.ok) {
+            try {
+              const repairedResult = await readOpenRouterResponse(
+                fallbackRepairResponse,
+                emitPublic,
+                onReasoningText,
+                inspectPlan,
+                providerIdleTimeoutMs,
+              );
+              if (!repairedResult.text.trim())
+                throw new Error(
+                  "The Spectra fallback repair returned an empty plan.",
+                );
+              plan = parseAndCheckPlan(repairedResult.text);
+              result = repairedResult;
+              response = fallbackRepairResponse;
+              fallbackFailure = undefined;
+              break;
+            } catch (repairError) {
+              fallbackFailure = repairError;
+            }
+          }
+        }
+        fallbackResult = undefined;
+        onProgressUpdate?.(
+          "Trying the next DeepSeek route · keeping the same task and context",
+        );
+      }
     }
-    result = await readOpenRouterResponse(response, emitPublic, onReasoningText, inspectPlan);
-    if (!result.text.trim()) throw new Error("The Spectra fallback model returned an empty plan.");
-    const normalizedText = result.text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
-    plan = parseSpectraPlan(JSON.parse(normalizedText));
+    if (fallbackFailure) {
+      throw fallbackFailure;
+    }
   }
-  if (!result || !plan) throw new Error("The Spectra model did not return a valid plan.");
+  if (!result || !plan)
+    throw new Error("The Spectra model did not return a valid plan.");
   const usedProvider = result.provider?.toLowerCase();
   const usedFallback = usedProvider && usedProvider !== "deepseek";
-  if (usedFallback && !allowSpectraProviderFallbacks()) throw new Error(`Unexpected OpenRouter provider: ${result.provider}`);
-  console.info("[spectra.openrouter.response]", { model: result.model, provider: result.provider, fallback: Boolean(usedFallback) });
+  if (usedFallback && !allowSpectraProviderFallbacks())
+    throw new Error(`Unexpected OpenRouter provider: ${result.provider}`);
+  console.info("[spectra.openrouter.response]", {
+    model: result.model,
+    provider: result.provider,
+    fallback: Boolean(usedFallback),
+    elapsedMs: Date.now() - modelStartedAt,
+    usage: result.usage,
+  });
   if (!emittedPublicText) onPublicText?.(plan.finalResponse);
-  else if (plan.finalResponse.startsWith(emittedPublicText)) onPublicText?.(plan.finalResponse.slice(emittedPublicText.length));
-  return { plan, model: result.model, provider: result.provider, usage: result.usage };
+  else if (plan.finalResponse.startsWith(emittedPublicText))
+    onPublicText?.(plan.finalResponse.slice(emittedPublicText.length));
+  return {
+    plan,
+    model: result.model,
+    provider: result.provider,
+    usage: result.usage,
+  };
+}
+
+async function callParallelCreationWorkers(
+  surface: Surface,
+  prompt: string,
+  context: unknown,
+  attachments: PreparedAttachment[],
+  creations: ProvisionalCreation[],
+  callbacks: {
+    onPublicText?: (content: string, mode?: "delta" | "replace") => void;
+    onReasoningText?: (delta: string) => void;
+    signal?: AbortSignal;
+    onPlanOperation?: (operation: unknown, index: number) => void;
+    onRepairRetry?: () => void;
+    onProgressUpdate?: (message: string) => void;
+    onPartialCreation?: (
+      preview: {
+        blueprintKey: (typeof SPECTRA_BLUEPRINT_KEYS)[number];
+        title?: string;
+        content: unknown;
+        itemCount: number;
+        itemLabel: string;
+      },
+      index?: number,
+    ) => void;
+    actorClerkId?: string;
+  },
+  emitFinal = true,
+) {
+  callbacks.onProgressUpdate?.(
+    `Building ${creations.length} artifacts together · independent writers are working in parallel`,
+  );
+  const startedAt = Date.now();
+  const results = await Promise.all(
+    creations.map((creation, index) => {
+      const workerPrompt = [
+        `You are artifact worker ${index + 1} of ${creations.length}.`,
+        `Your only assignment is this explicit part of the user's request: ${creation.clause}`,
+        `Create exactly one ${creation.label.toLowerCase()}. Do not create, update, link, move, or describe any other artifact; other DeepSeek V4 Pro workers are handling the other independent outputs concurrently.`,
+        creation.requestedTitle
+          ? `The exact requested title is: ${creation.requestedTitle}`
+          : "Choose a concise title that is specific to this assigned artifact.",
+        "Use the compact Spectra context and attachments as source material whenever relevant.",
+      ].join("\n");
+      return callModel(
+        surface,
+        workerPrompt,
+        context,
+        attachments,
+        undefined,
+        callbacks.onReasoningText,
+        callbacks.signal,
+        (operation) => callbacks.onPlanOperation?.(operation, index),
+        callbacks.onRepairRetry,
+        (message) =>
+          callbacks.onProgressUpdate?.(
+            `${creation.label}: ${message.replace(/^[^·]+·?\s*/u, "")}`,
+          ),
+        (preview) => callbacks.onPartialCreation?.(preview, index),
+        callbacks.actorClerkId,
+        creation,
+      );
+    }),
+  );
+  const operations = results.flatMap((result) => result.plan.operations);
+  const titles = operations.flatMap((operation) =>
+    operation.type === "artifact.create" ? [operation.input.title] : [],
+  );
+  const plan = parseSpectraPlan({
+    decision: "operate",
+    intent: {
+      mode: "create",
+      requestedArtifactTypes: creations.map((creation) => creation.blueprintKey),
+      requestedVisibleArtifactCount: creations.length,
+      targetArtifactId: null,
+      targetWorkspaceId: null,
+    },
+    conversationTitle: `Create ${creations.length} study artifacts`,
+    conversationSummary: `Created ${titles.join(", ")}.`.slice(0, 320),
+    choices: null,
+    operations,
+    finalResponse: `Created ${titles.join(", ")}.`,
+  });
+  assertRequestedArtifactContent(plan.operations, prompt);
+  console.info("[spectra.parallel_workers.complete]", {
+    workerCount: results.length,
+    elapsedMs: Date.now() - startedAt,
+    models: [...new Set(results.map((result) => result.model))],
+    providers: [...new Set(results.map((result) => result.provider))],
+  });
+  if (emitFinal) callbacks.onPublicText?.(plan.finalResponse, "replace");
+  const usageFields = [
+    "promptTokens",
+    "promptCacheHitTokens",
+    "promptCacheMissTokens",
+    "completionTokens",
+    "reasoningTokens",
+    "totalTokens",
+  ] as const;
+  const usage = Object.fromEntries(
+    usageFields.map((field) => [
+      field,
+      results.reduce((sum, result) => sum + (result.usage?.[field] ?? 0), 0),
+    ]),
+  );
+  return {
+    plan,
+    model: results.map((result) => result.model).filter(Boolean).join(", "),
+    provider: results.map((result) => result.provider).filter(Boolean).join(", "),
+    usage: { ...usage, elapsedMs: Date.now() - startedAt },
+  };
+}
+
+function exactMixedMetadataPlan(
+  prompt: string,
+  context: unknown,
+): SpectraPlan | null {
+  const match = prompt.match(
+    /\badd\s+(?:the\s+)?tag\s+["'“]([^"'”]+)["'”]\s+to\s+["'“]([^"'”]+)["'”]/i,
+  );
+  if (!match) return null;
+  // This fast lane is intentionally limited to one explicit metadata action.
+  // Any additional non-creation verb keeps the general coordination agent.
+  const withoutMatchedAction = prompt.replace(match[0], " ");
+  if (
+    /\b(?:rename|move|link|pin|unpin|archive|delete|remove|reorganize|set\s+(?:the\s+)?(?:title|summary|status|priority)|update\s+(?:the\s+)?(?:content|text|body|questions?|cards?|subtasks?))\b/i.test(
+      withoutMatchedAction,
+    )
+  )
+    return null;
+  const requestedTag = match[1]!.trim();
+  const requestedTitle = match[2]!.trim().toLocaleLowerCase();
+  let found:
+    | {
+        id: string;
+        blueprintKey: (typeof SPECTRA_BLUEPRINT_KEYS)[number];
+        title: string;
+        tags: string[];
+      }
+    | undefined;
+  const visit = (value: unknown, depth = 0) => {
+    if (found || depth > 7 || !value) return;
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item, depth + 1);
+      return;
+    }
+    if (typeof value !== "object") return;
+    const row = value as Record<string, unknown>;
+    const id =
+      typeof row.id === "string"
+        ? row.id
+        : typeof row._id === "string"
+          ? row._id
+          : null;
+    const type = row.blueprintKey ?? row.type;
+    if (
+      id &&
+      typeof row.title === "string" &&
+      row.title.trim().toLocaleLowerCase() === requestedTitle &&
+      typeof type === "string" &&
+      SPECTRA_BLUEPRINT_KEYS.includes(
+        type as (typeof SPECTRA_BLUEPRINT_KEYS)[number],
+      )
+    ) {
+      found = {
+        id,
+        blueprintKey: type as (typeof SPECTRA_BLUEPRINT_KEYS)[number],
+        title: row.title.trim(),
+        tags: Array.isArray(row.tags)
+          ? row.tags.filter((tag): tag is string => typeof tag === "string")
+          : [],
+      };
+      return;
+    }
+    for (const child of Object.values(row)) visit(child, depth + 1);
+  };
+  visit(context);
+  if (!found || !requestedTag) return null;
+  const tags = [
+    ...found.tags,
+    ...(found.tags.some(
+      (tag) => tag.toLocaleLowerCase() === requestedTag.toLocaleLowerCase(),
+    )
+      ? []
+      : [requestedTag]),
+  ].slice(0, 16);
+  return parseSpectraPlan({
+    decision: "operate",
+    intent: {
+      mode: "update",
+      requestedArtifactTypes: [found.blueprintKey],
+      requestedVisibleArtifactCount: 0,
+      targetArtifactId: found.id,
+      targetWorkspaceId: null,
+    },
+    conversationTitle: `Tag ${found.title}`.slice(0, 64),
+    conversationSummary: `Added the requested tag to ${found.title}.`.slice(
+      0,
+      320,
+    ),
+    choices: null,
+    operations: [
+      {
+        type: "artifact.update",
+        input: {
+          artifactId: found.id,
+          blueprintKey: found.blueprintKey,
+          title: null,
+          summary: null,
+          content: null,
+          contentPatch: null,
+          tags,
+        },
+      },
+    ],
+    finalResponse: `Added “${requestedTag}” to ${found.title}.`,
+  });
+}
+
+async function callMixedTaskGraphWorkers(
+  surface: Surface,
+  prompt: string,
+  context: unknown,
+  attachments: PreparedAttachment[],
+  creations: ProvisionalCreation[],
+  callbacks: Parameters<typeof callParallelCreationWorkers>[5],
+) {
+  callbacks.onProgressUpdate?.(
+    `Coordinating ${creations.length + 1} workstreams · content and workspace changes are running together`,
+  );
+  const dependencyGuide = creations
+    .map(
+      (creation, index) =>
+        `@created:${index} = the new ${creation.label.toLowerCase()}${creation.requestedTitle ? ` titled "${creation.requestedTitle}"` : ""}`,
+    )
+    .join("\n");
+  const coordinationPrompt = `You are the coordination worker for a larger Spectra task.
+
+Independent DeepSeek V4 Pro workers are already creating these operations first:
+${dependencyGuide}
+
+Plan ONLY the remaining non-creation work requested by the user: updates to existing owned objects, workspace changes, placement, pinning, removal, and links. Do not emit artifact.create or workspace.create. When a link or supported dependency refers to a new artifact, use its exact @created:N id above. If no non-creation action remains, return decision=answer with zero operations. Do not claim the concurrently created artifacts are finished; the harness will combine and verify all work.
+
+Original user request:
+${prompt}`;
+  const startedAt = Date.now();
+  const deterministicCoordination = exactMixedMetadataPlan(prompt, context);
+  if (deterministicCoordination)
+    callbacks.onProgressUpdate?.(
+      "Applying the exact metadata change · no extra model pass needed",
+    );
+  const [creationResult, coordinationResult] = await Promise.all([
+    callParallelCreationWorkers(
+      surface,
+      prompt,
+      context,
+      attachments,
+      creations,
+      {
+        ...callbacks,
+        onPublicText: undefined,
+      },
+      false,
+    ),
+    deterministicCoordination
+      ? Promise.resolve({
+          plan: deterministicCoordination,
+          model: "spectra/typed-coordinator",
+          provider: "Spectra",
+          usage: undefined,
+        })
+      : callModel(
+      surface,
+      coordinationPrompt,
+      context,
+      attachments,
+      undefined,
+      callbacks.onReasoningText,
+      callbacks.signal,
+      (operation, index) =>
+        callbacks.onPlanOperation?.(operation, creations.length + index),
+      callbacks.onRepairRetry,
+      (message) => callbacks.onProgressUpdate?.(`Workspace: ${message}`),
+      undefined,
+      callbacks.actorClerkId,
+      undefined,
+      true,
+      true,
+    ),
+  ]);
+  if (
+    coordinationResult.plan.operations.some(
+      (operation) =>
+        operation.type === "artifact.create" || operation.type === "workspace.create",
+    )
+  )
+    throw new Error(
+      "The coordination worker duplicated an artifact creation assigned to another worker.",
+    );
+  const operations = [
+    ...creationResult.plan.operations,
+    ...coordinationResult.plan.operations,
+  ];
+  const titles = creationResult.plan.operations.flatMap((operation) =>
+    operation.type === "artifact.create" ? [operation.input.title] : [],
+  );
+  const plan = parseSpectraPlan({
+    decision: "operate",
+    intent: {
+      mode: "mixed",
+      requestedArtifactTypes: creations.map((creation) => creation.blueprintKey),
+      requestedVisibleArtifactCount: creations.length,
+      targetArtifactId: coordinationResult.plan.intent.targetArtifactId,
+      targetWorkspaceId: coordinationResult.plan.intent.targetWorkspaceId,
+    },
+    // The coordination worker is an internal graph node, not the owner of the
+    // conversation identity. Letting it name the thread produced titles such
+    // as "Harness Reliability Check coordination" in the student UI.
+    conversationTitle:
+      titles.length === 1 ? titles[0]!.slice(0, 64) : `Build ${creations.length} artifacts`,
+    conversationSummary:
+      `Built ${titles.join(", ")} and applied the related workspace changes.`.slice(
+        0,
+        320,
+      ),
+    choices: null,
+    operations,
+    finalResponse: `Created ${titles.join(", ")} and completed the related workspace changes.`,
+  });
+  assertRequestedArtifactContent(plan.operations, prompt);
+  callbacks.onPublicText?.(plan.finalResponse, "replace");
+  console.info("[spectra.task_graph.complete]", {
+    creationWorkers: creations.length,
+    coordinationOperations: coordinationResult.plan.operations.length,
+    elapsedMs: Date.now() - startedAt,
+  });
+  const creationUsage = creationResult.usage as OpenRouterUsage | undefined;
+  const coordinationUsage = coordinationResult.usage as
+    | OpenRouterUsage
+    | undefined;
+  return {
+    plan,
+    model: `${creationResult.model}, ${coordinationResult.model}`,
+    provider: `${creationResult.provider}, ${coordinationResult.provider}`,
+    usage: {
+      promptTokens:
+        (creationUsage?.promptTokens ?? 0) +
+        (coordinationUsage?.promptTokens ?? 0),
+      promptCacheHitTokens:
+        (creationUsage?.promptCacheHitTokens ?? 0) +
+        (coordinationUsage?.promptCacheHitTokens ?? 0),
+      promptCacheMissTokens:
+        (creationUsage?.promptCacheMissTokens ?? 0) +
+        (coordinationUsage?.promptCacheMissTokens ?? 0),
+      completionTokens:
+        (creationUsage?.completionTokens ?? 0) +
+        (coordinationUsage?.completionTokens ?? 0),
+      reasoningTokens:
+        (creationUsage?.reasoningTokens ?? 0) +
+        (coordinationUsage?.reasoningTokens ?? 0),
+      totalTokens:
+        (creationUsage?.totalTokens ?? 0) +
+        (coordinationUsage?.totalTokens ?? 0),
+      elapsedMs: Date.now() - startedAt,
+    },
+  };
 }
 
 function operationLabel(operation: ModelOperation) {
   if (operation.type === "artifact.create") {
-    if (operation.input.blueprintKey === "flashcard_deck") return "Creating flashcard deck";
+    if (operation.input.blueprintKey === "flashcard_deck")
+      return "Creating flashcard deck";
     if (operation.input.blueprintKey === "quiz") return "Creating quiz";
-    if (operation.input.blueprintKey === "planner_task") return "Creating planner task";
+    if (operation.input.blueprintKey === "planner_task")
+      return "Creating planner task";
     if (operation.input.blueprintKey === "document") return "Creating document";
     return "Creating artifact";
   }
   if (operation.type === "artifact.update") return "Updating artifact";
-  if (operation.type === "workspaceItem.add") return "Adding workspace placement";
-  if (operation.type === "workspaceItem.hide") return "Removing requested workspace placement";
+  if (operation.type === "artifact.archive") return "Archiving artifact";
+  if (operation.type === "workspaceItem.add")
+    return "Adding workspace placement";
+  if (operation.type === "workspaceItem.hide")
+    return "Removing requested workspace placement";
   if (operation.type === "workspace.update") return "Updating workspace";
   if (operation.type === "artifact.link") return "Linking artifacts";
   return "Creating workspace";
 }
 
 function operationPhases(operation: ModelOperation, workspaceTitle?: string) {
-  if (operation.type === "artifact.create" && operation.input.blueprintKey === "flashcard_deck") {
-    return [`Validating ${operation.input.content.cards.length} cards`, `Saving deck${workspaceTitle ? ` to ${workspaceTitle}` : " to Artifacts"}`];
+  if (
+    operation.type === "artifact.create" &&
+    operation.input.blueprintKey === "flashcard_deck"
+  ) {
+    return [
+      `Validating ${operation.input.content.cards.length} cards`,
+      `Saving deck${workspaceTitle ? ` to ${workspaceTitle}` : " to Artifacts"}`,
+    ];
   }
-  if (operation.type === "artifact.create" && operation.input.blueprintKey === "quiz") {
-    return [`Validating ${operation.input.content.questions.length} questions`, `Saving quiz${workspaceTitle ? ` to ${workspaceTitle}` : " to Artifacts"}`];
+  if (
+    operation.type === "artifact.create" &&
+    operation.input.blueprintKey === "quiz"
+  ) {
+    return [
+      `Validating ${operation.input.content.questions.length} questions`,
+      `Saving quiz${workspaceTitle ? ` to ${workspaceTitle}` : " to Artifacts"}`,
+    ];
   }
-  if (operation.type === "artifact.create" && operation.input.blueprintKey === "document") return [`Validating ${operation.input.content.blocks.length} document blocks`, `Saving document${workspaceTitle ? ` to ${workspaceTitle}` : " to Artifacts"}`];
-  if (operation.type === "artifact.create" && operation.input.blueprintKey === "planner_task") return ["Validating planner task", `Saving task${workspaceTitle ? ` to ${workspaceTitle}` : " to Artifacts"}`];
+  if (
+    operation.type === "artifact.create" &&
+    operation.input.blueprintKey === "document"
+  )
+    return [
+      `Validating ${operation.input.content.blocks.length} document blocks`,
+      `Saving document${workspaceTitle ? ` to ${workspaceTitle}` : " to Artifacts"}`,
+    ];
+  if (
+    operation.type === "artifact.create" &&
+    operation.input.blueprintKey === "planner_task"
+  )
+    return [
+      "Validating planner task",
+      `Saving task${workspaceTitle ? ` to ${workspaceTitle}` : " to Artifacts"}`,
+    ];
   return [operationLabel(operation)];
 }
 
 function progressiveArtifactFrames(blueprintKey: string, rawContent: unknown) {
   const content = rawContent as Record<string, unknown>;
-  const listKey = blueprintKey === "document" ? "blocks"
-    : blueprintKey === "flashcard_deck" ? "cards"
-      : blueprintKey === "quiz" ? "questions"
-        : null;
-  if (!listKey || !Array.isArray(content[listKey]) || content[listKey].length === 0) return [{ content, progress: 0.78 }];
+  const listKey =
+    blueprintKey === "document"
+      ? "blocks"
+      : blueprintKey === "flashcard_deck"
+        ? "cards"
+        : blueprintKey === "quiz"
+          ? "questions"
+          : null;
+  if (
+    !listKey ||
+    !Array.isArray(content[listKey]) ||
+    content[listKey].length === 0
+  )
+    return [{ content, progress: 0.78 }];
   const rows = content[listKey] as unknown[];
   const frameCount = Math.min(5, rows.length);
   return Array.from({ length: frameCount }, (_, index) => {
-    const count = Math.max(1, Math.ceil(rows.length * ((index + 1) / frameCount)));
-    return { content: { ...content, [listKey]: rows.slice(0, count) }, progress: Math.min(0.92, count / rows.length * 0.92) };
+    const count = Math.max(
+      1,
+      Math.ceil(rows.length * ((index + 1) / frameCount)),
+    );
+    return {
+      content: { ...content, [listKey]: rows.slice(0, count) },
+      progress: Math.min(0.92, (count / rows.length) * 0.92),
+    };
   });
 }
 
 function safeOperationPreview(operation: ModelOperation) {
-  if (operation.type === "artifact.create") return { action: "create" as const, title: operation.input.title, blueprintKey: operation.input.blueprintKey };
-  if (operation.type === "artifact.update") return { action: "update" as const, title: "Updating focused artifact", blueprintKey: operation.input.blueprintKey, targetId: operation.input.artifactId };
-  if (operation.type === "artifact.link") return { action: "link" as const, title: "Linking artifacts", targetId: operation.input.sourceArtifactId };
-  if (operation.type === "workspaceItem.add") return { action: "place" as const, title: "Adding artifact to workspace", targetId: operation.input.artifactId };
-  if (operation.type === "workspaceItem.hide") return { action: "remove" as const, title: "Removing workspace placement", targetId: operation.input.workspaceItemId };
-  return { action: "workspace" as const, title: operation.type === "workspace.create" ? operation.input.title : "Updating workspace", targetId: operation.type === "workspace.update" ? operation.input.workspaceId : undefined };
+  if (operation.type === "artifact.create")
+    return {
+      action: "create" as const,
+      title: operation.input.title,
+      blueprintKey: operation.input.blueprintKey,
+    };
+  if (operation.type === "artifact.update")
+    return {
+      action: "update" as const,
+      title: "Updating focused artifact",
+      blueprintKey: operation.input.blueprintKey,
+      targetId: operation.input.artifactId,
+    };
+  if (operation.type === "artifact.archive")
+    return {
+      action: "archive" as const,
+      title: "Archiving artifact",
+      targetId: operation.input.artifactId,
+    };
+  if (operation.type === "artifact.link")
+    return {
+      action: "link" as const,
+      title: "Linking artifacts",
+      targetId: operation.input.sourceArtifactId,
+    };
+  if (operation.type === "workspaceItem.add")
+    return {
+      action: "place" as const,
+      title: "Adding artifact to workspace",
+      targetId: operation.input.artifactId,
+    };
+  if (operation.type === "workspaceItem.hide")
+    return {
+      action: "remove" as const,
+      title: "Removing workspace placement",
+      targetId: operation.input.workspaceItemId,
+    };
+  return {
+    action: "workspace" as const,
+    title:
+      operation.type === "workspace.create"
+        ? operation.input.title
+        : "Updating workspace",
+    targetId:
+      operation.type === "workspace.update"
+        ? operation.input.workspaceId
+        : undefined,
+  };
 }
 
 function publicError(error: unknown) {
   if (error instanceof ZodError) {
     const issue = error.issues[0];
     const path = issue?.path.join(".") ?? "";
-    if (/artifactId|workspaceId|threadId|plannerItemId|operationId|sourceId|targetId|_id/i.test(path)) {
+    if (
+      /artifactId|workspaceId|threadId|plannerItemId|operationId|sourceId|targetId|_id/i.test(
+        path,
+      )
+    ) {
       return "Spectra could not match that request to an open or selected object. Choose the document or workspace you want to use, then try again.";
     }
     return "Spectra could not safely apply that plan. Try again with the relevant document or workspace selected.";
   }
-  if (error instanceof SyntaxError) return "Spectra could not safely read the response. Retry the run.";
-  const message = error instanceof Error ? error.message : "Spectra run failed.";
-  if (/\b(artifactId|workspaceId|threadId|plannerItemId|operationId|sourceId|targetId|object ID|database id)\b/i.test(message)) {
+  if (error instanceof SyntaxError)
+    return "I couldn't finish that response yet. Your work is unchanged, and you can try once more.";
+  const message =
+    error instanceof Error ? error.message : "Spectra run failed.";
+  if (
+    /\b(artifactId|workspaceId|threadId|plannerItemId|operationId|sourceId|targetId|object ID|database id)\b/i.test(
+      message,
+    )
+  ) {
     return "Spectra could not match that request to an open or selected object. Choose the document or workspace you want to use, then try again.";
   }
-  if (/\bJSON|schema|Zod|planner|operation|structured output|FunctionPathNotFound|Convex\b/i.test(message)) {
+  if (
+    /\bJSON|schema|Zod|planner|operation|structured output|FunctionPathNotFound|Convex\b/i.test(
+      message,
+    )
+  ) {
     return "Spectra could not safely complete that request. Try again, or choose the object you want Spectra to use.";
   }
-  if (/\b(OpenRouter|DeepSeek|provider|network|fetch failed|connection|stream failed)\b/i.test(message)) {
+  if (
+    /\b(OpenRouter|DeepSeek|provider|network|fetch failed|connection|stream failed)\b/i.test(
+      message,
+    )
+  ) {
     return "Spectra lost its model connection before the run could finish. Your saved context is intact; retry when the connection is stable.";
   }
   return message.length > 240 ? `${message.slice(0, 237)}…` : message;
 }
 
-async function executeOperation(actorClerkId: string, runId: string, operationId: string, operation: ModelOperation, context: { executionId: string; surface: Surface; threadId?: string; workspaceId?: string; selectedArtifactIds?: string[]; attachmentNames?: string[]; contextSummary?: string; pendingArtifactId?: string; pendingWorkspaceId?: string; preclaimed?: boolean }) {
-  await mutate(context.preclaimed ? "spectraOperations:assertClaimed" : "spectraOperations:claim", { actorClerkId, operationId, executionId: context.executionId });
+function readContentPointer(content: unknown, path: string) {
+  const segments = path
+    .slice(1)
+    .split("/")
+    .map((segment) => segment.replaceAll("~1", "/").replaceAll("~0", "~"));
+  let cursor = content;
+  for (const segment of segments) {
+    if (!cursor || typeof cursor !== "object") return undefined;
+    const key: string | number = Array.isArray(cursor) ? Number(segment) : segment;
+    if (Array.isArray(cursor) && !Number.isInteger(key)) return undefined;
+    cursor = (cursor as Record<string | number, unknown>)[key];
+  }
+  return cursor;
+}
+
+async function verifyCommittedOutcomes(
+  actorClerkId: string,
+  outcomes: Array<{
+    operation: ModelOperation;
+    affected: Array<{ type: string; id: string }>;
+  }>,
+) {
+  for (const outcome of outcomes) {
+    const operation = outcome.operation;
+    if (
+      operation.type !== "artifact.create" &&
+      operation.type !== "artifact.update" &&
+      operation.type !== "artifact.archive"
+    )
+      continue;
+    const artifactId =
+      operation.type === "artifact.update" || operation.type === "artifact.archive"
+        ? operation.input.artifactId
+        : outcome.affected.find((item) => item.type === "artifact")?.id;
+    if (!artifactId)
+      throw new Error("The requested artifact was not present after saving.");
+    const saved = await query<unknown & object, unknown>(
+      "spectraArtifacts:get",
+      { actorClerkId, artifactId },
+    );
+    if (!saved || typeof saved !== "object")
+      throw new Error("The saved artifact could not be verified.");
+    const artifact = saved as Record<string, unknown>;
+    if (operation.type === "artifact.archive") {
+      if (artifact.status !== "archived")
+        throw new Error("The artifact was not archived after confirmation.");
+      continue;
+    }
+    if (artifact.blueprintKey !== operation.input.blueprintKey)
+      throw new Error("The saved artifact type did not match the request.");
+    validateBlueprintContent(
+      operation.input.blueprintKey,
+      artifact.content,
+    );
+    if (operation.type === "artifact.update") {
+      if (
+        operation.input.title !== null &&
+        artifact.title !== operation.input.title
+      )
+        throw new Error("The saved artifact title did not match the requested change.");
+      if (
+        operation.input.summary !== null &&
+        artifact.summary !== operation.input.summary
+      )
+        throw new Error("The saved artifact summary did not match the requested change.");
+      if (
+        operation.input.tags !== null &&
+        JSON.stringify(artifact.tags ?? []) !== JSON.stringify(operation.input.tags)
+      )
+        throw new Error("The saved artifact topics did not match the requested change.");
+      for (const change of operation.input.contentPatch?.changes ?? []) {
+        const savedValue = readContentPointer(artifact.content, change.path);
+        if (JSON.stringify(savedValue) !== JSON.stringify(change.value))
+          throw new Error(
+            "The saved artifact did not contain the requested content change.",
+          );
+      }
+    }
+  }
+}
+
+function applyContentPatch(
+  content: unknown,
+  patch: { changes: Array<{ path: string; value: unknown }> },
+) {
+  const next = structuredClone(content) as unknown;
+  for (const change of patch.changes) {
+    const segments = change.path
+      .slice(1)
+      .split("/")
+      .map((segment) => segment.replaceAll("~1", "/").replaceAll("~0", "~"));
+    let cursor: unknown = next;
+    for (let index = 0; index < segments.length - 1; index += 1) {
+      const segment = segments[index]!;
+      if (
+        !cursor ||
+        typeof cursor !== "object" ||
+        ["__proto__", "prototype", "constructor"].includes(segment)
+      )
+        throw new Error(`Invalid content patch path: ${change.path}`);
+      const key: string | number = Array.isArray(cursor)
+        ? Number(segment)
+        : segment;
+      if (
+        Array.isArray(cursor) &&
+        (!Number.isInteger(key) ||
+          Number(key) < 0 ||
+          Number(key) >= cursor.length)
+      )
+        throw new Error(`Content patch index is out of range: ${change.path}`);
+      cursor = (cursor as Record<string | number, unknown>)[key];
+    }
+    const finalSegment = segments.at(-1)!;
+    if (
+      !cursor ||
+      typeof cursor !== "object" ||
+      ["__proto__", "prototype", "constructor"].includes(finalSegment)
+    )
+      throw new Error(`Invalid content patch path: ${change.path}`);
+    const finalKey: string | number = Array.isArray(cursor)
+      ? Number(finalSegment)
+      : finalSegment;
+    if (
+      Array.isArray(cursor) &&
+      (!Number.isInteger(finalKey) ||
+        Number(finalKey) < 0 ||
+        Number(finalKey) >= cursor.length)
+    )
+      throw new Error(`Content patch index is out of range: ${change.path}`);
+    (cursor as Record<string | number, unknown>)[finalKey] = structuredClone(
+      change.value,
+    );
+  }
+  if (
+    next &&
+    typeof next === "object" &&
+    !Array.isArray(next) &&
+    patch.changes.some((change) => /^\/(?:content\/)?blocks(?:\/|$)/.test(change.path))
+  ) {
+    // `tiptap` is a derived editor cache. Once canonical blocks change it must
+    // not shadow the AI's new content on the next render.
+    delete (next as Record<string, unknown>).tiptap;
+  }
+  return next;
+}
+
+async function executeOperation(
+  actorClerkId: string,
+  runId: string,
+  operationId: string,
+  operation: ModelOperation,
+  context: {
+    executionId: string;
+    surface: Surface;
+    threadId?: string;
+    workspaceId?: string;
+    selectedArtifactIds?: string[];
+    attachmentNames?: string[];
+    contextSummary?: string;
+    pendingArtifactId?: string;
+    pendingWorkspaceId?: string;
+    preclaimed?: boolean;
+  },
+) {
+  await mutate(
+    context.preclaimed
+      ? "spectraOperations:assertClaimed"
+      : "spectraOperations:claim",
+    { actorClerkId, operationId, executionId: context.executionId },
+  );
   let output: Record<string, unknown> = {};
   let affected: Array<{ type: string; id: string }> = [];
   if (operation.type === "artifact.create") {
     const input = operation.input;
-    const workspaceId = input.placement === "inbox" ? undefined : input.workspaceId ?? ((context.surface === "workspace" || context.surface === "artifact") ? context.workspaceId : undefined);
-    output = context.pendingArtifactId ? await mutate("spectraArtifacts:finalizePending", {
-      actorClerkId, artifactId: context.pendingArtifactId, runId, executionId: context.executionId, title: input.title, summary: input.summary ?? undefined, content: input.content, tags: input.tags,
-    }) as Record<string, unknown> : await mutate("spectraArtifacts:create", {
-      actorClerkId, blueprintKey: input.blueprintKey, title: input.title, summary: input.summary ?? undefined, content: input.content,
-      tags: input.tags, workspaceId, source: context.surface === "chat" ? "chat" : "ai", runId,
-      threadId: context.threadId, executionId: context.executionId,
-      sourceArtifactIds: context.selectedArtifactIds,
-      sourceThreadIds: context.threadId ? [context.threadId] : undefined,
-      sourceAttachmentNames: context.attachmentNames,
-      contextSummary: context.contextSummary,
-    }) as Record<string, unknown>;
-    if (typeof output.artifactId === "string") affected.push({ type: "artifact", id: output.artifactId });
-    if (typeof output.workspaceItemId === "string") affected.push({ type: "workspaceItem", id: output.workspaceItemId });
+    const workspaceId =
+      input.placement === "inbox"
+        ? undefined
+        : (input.workspaceId ??
+          (context.surface === "workspace" || context.surface === "artifact"
+            ? context.workspaceId
+            : undefined));
+    output = context.pendingArtifactId
+      ? ((await mutate("spectraArtifacts:finalizePending", {
+          actorClerkId,
+          artifactId: context.pendingArtifactId,
+          runId,
+          executionId: context.executionId,
+          title: input.title,
+          summary: input.summary ?? undefined,
+          content: input.content,
+          tags: input.tags,
+        })) as Record<string, unknown>)
+      : ((await mutate("spectraArtifacts:create", {
+          actorClerkId,
+          blueprintKey: input.blueprintKey,
+          title: input.title,
+          summary: input.summary ?? undefined,
+          content: input.content,
+          tags: input.tags,
+          workspaceId,
+          source: context.surface === "chat" ? "chat" : "ai",
+          runId,
+          threadId: context.threadId,
+          executionId: context.executionId,
+          sourceArtifactIds: context.selectedArtifactIds,
+          sourceThreadIds: context.threadId ? [context.threadId] : undefined,
+          sourceAttachmentNames: context.attachmentNames,
+          contextSummary: context.contextSummary,
+        })) as Record<string, unknown>);
+    if (typeof output.artifactId === "string")
+      affected.push({ type: "artifact", id: output.artifactId });
+    if (typeof output.workspaceItemId === "string")
+      affected.push({ type: "workspaceItem", id: output.workspaceItemId });
+    if (typeof output.workspaceItemId === "string" && input.pinned) {
+      await mutate("spectraWorkspaceItems:setPinned", {
+        actorClerkId,
+        workspaceItemId: output.workspaceItemId,
+        pinned: true,
+        exclusive: input.exclusivePin,
+      });
+    }
     if (typeof output.artifactId === "string") {
       for (const sourceArtifactId of context.selectedArtifactIds ?? []) {
         await mutate("spectraArtifactLinks:create", {
@@ -602,38 +5531,108 @@ async function executeOperation(actorClerkId: string, runId: string, operationId
     }
   } else if (operation.type === "artifact.update") {
     const input = operation.input;
-    if (input.content !== null) {
-      const artifact = await query<{ actorClerkId: string; artifactId: string }, { blueprintKey: string }>("spectraArtifacts:get", { actorClerkId, artifactId: input.artifactId });
-      if (artifact.blueprintKey !== input.blueprintKey) throw new Error("The artifact update blueprint does not match the owned artifact.");
-      const validated = validateBlueprintContent(artifact.blueprintKey, input.content);
-      if (!validated.success) throw new Error(`Invalid ${artifact.blueprintKey} update: ${validated.error.issues[0]?.message ?? "schema mismatch"}`);
+    let resolvedContent: unknown = input.content;
+    let resolvedArtifact: { blueprintKey: string; content: unknown } | null = null;
+    if (input.contentPatch) {
+      resolvedArtifact = await query<
+        { actorClerkId: string; artifactId: string },
+        { blueprintKey: string; content: unknown }
+      >("spectraArtifacts:get", { actorClerkId, artifactId: input.artifactId });
+      if (resolvedArtifact.blueprintKey !== input.blueprintKey)
+        throw new Error(
+          "The artifact update blueprint does not match the owned artifact.",
+        );
+      resolvedContent = applyContentPatch(resolvedArtifact.content, input.contentPatch);
     }
-    output = await mutate("spectraArtifacts:update", {
+    if (resolvedContent !== null) {
+      const artifact = resolvedArtifact ?? await query<
+        { actorClerkId: string; artifactId: string },
+        { blueprintKey: string; content: unknown }
+      >("spectraArtifacts:get", { actorClerkId, artifactId: input.artifactId });
+      if (artifact.blueprintKey !== input.blueprintKey)
+        throw new Error(
+          "The artifact update blueprint does not match the owned artifact.",
+        );
+      const validated = validateBlueprintContent(
+        artifact.blueprintKey,
+        resolvedContent,
+      );
+      if (!validated.success)
+        throw new Error(
+          `Invalid ${artifact.blueprintKey} update: ${validated.error.issues[0]?.message ?? "schema mismatch"}`,
+        );
+    }
+    output = (await mutate("spectraArtifacts:update", {
       actorClerkId,
       artifactId: input.artifactId,
       title: input.title ?? undefined,
       summary: input.summary ?? undefined,
-      content: input.content ?? undefined,
+      content: resolvedContent ?? undefined,
       tags: input.tags ?? undefined,
       source: "ai",
       runId,
       executionId: context.executionId,
-    }) as Record<string, unknown>;
+    })) as Record<string, unknown>;
     affected = [{ type: "artifact", id: input.artifactId }];
+  } else if (operation.type === "artifact.archive") {
+    output = (await mutate("spectraArtifacts:archive", {
+      actorClerkId,
+      artifactId: operation.input.artifactId,
+    })) as Record<string, unknown>;
+    affected = [{ type: "artifact", id: operation.input.artifactId }];
   } else if (operation.type === "workspaceItem.add") {
-    output = await mutate("spectraWorkspaceItems:addArtifact", { actorClerkId, ...operation.input }) as Record<string, unknown>;
-    affected = [{ type: "artifact", id: operation.input.artifactId }, { type: "workspace", id: operation.input.workspaceId }];
+    output = (await mutate("spectraWorkspaceItems:addArtifact", {
+      actorClerkId,
+      ...operation.input,
+    })) as Record<string, unknown>;
+    affected = [
+      { type: "artifact", id: operation.input.artifactId },
+      { type: "workspace", id: operation.input.workspaceId },
+    ];
   } else if (operation.type === "workspaceItem.hide") {
-    output = await mutate("spectraWorkspaceItems:hide", { actorClerkId, workspaceItemId: operation.input.workspaceItemId }) as Record<string, unknown>;
+    output = (await mutate("spectraWorkspaceItems:hide", {
+      actorClerkId,
+      workspaceItemId: operation.input.workspaceItemId,
+    })) as Record<string, unknown>;
     affected = [{ type: "workspaceItem", id: operation.input.workspaceItemId }];
-    if (typeof output.workspaceId === "string") affected.push({ type: "workspace", id: output.workspaceId });
-    if (typeof output.sourceId === "string" && output.sourceType === "artifact") affected.push({ type: "artifact", id: output.sourceId });
+    if (typeof output.workspaceId === "string")
+      affected.push({ type: "workspace", id: output.workspaceId });
+    if (typeof output.sourceId === "string" && output.sourceType === "artifact")
+      affected.push({ type: "artifact", id: output.sourceId });
+  } else if (operation.type === "workspaceItem.setPinned") {
+    output = (await mutate("spectraWorkspaceItems:setPinned", {
+      actorClerkId,
+      ...operation.input,
+    })) as Record<string, unknown>;
+    affected = [{ type: "workspaceItem", id: operation.input.workspaceItemId }];
   } else if (operation.type === "workspace.create") {
-    const workspaceId = context.pendingWorkspaceId ? (await mutate<unknown & object, { workspaceId: string }>("spectraWorkspaces:finalizePending", { actorClerkId, workspaceId: context.pendingWorkspaceId, runId, executionId: context.executionId, title: operation.input.title, description: operation.input.description ?? undefined, icon: operation.input.icon ?? undefined, color: operation.input.color ?? undefined })).workspaceId : await mutate("spectraWorkspaces:create", { actorClerkId, title: operation.input.title, description: operation.input.description ?? undefined, icon: operation.input.icon ?? undefined, color: operation.input.color ?? undefined }) as string;
+    const workspaceId = context.pendingWorkspaceId
+      ? (
+          await mutate<unknown & object, { workspaceId: string }>(
+            "spectraWorkspaces:finalizePending",
+            {
+              actorClerkId,
+              workspaceId: context.pendingWorkspaceId,
+              runId,
+              executionId: context.executionId,
+              title: operation.input.title,
+              description: operation.input.description ?? undefined,
+              icon: operation.input.icon ?? undefined,
+              color: operation.input.color ?? undefined,
+            },
+          )
+        ).workspaceId
+      : ((await mutate("spectraWorkspaces:create", {
+          actorClerkId,
+          title: operation.input.title,
+          description: operation.input.description ?? undefined,
+          icon: operation.input.icon ?? undefined,
+          color: operation.input.color ?? undefined,
+        })) as string);
     output = { workspaceId };
     affected = [{ type: "workspace", id: workspaceId }];
   } else if (operation.type === "workspace.update") {
-    output = await mutate("spectraWorkspaces:update", {
+    output = (await mutate("spectraWorkspaces:update", {
       actorClerkId,
       workspaceId: operation.input.workspaceId,
       title: operation.input.title ?? undefined,
@@ -642,10 +5641,10 @@ async function executeOperation(actorClerkId: string, runId: string, operationId
       color: operation.input.color ?? undefined,
       runId,
       executionId: context.executionId,
-    }) as Record<string, unknown>;
+    })) as Record<string, unknown>;
     affected = [{ type: "workspace", id: operation.input.workspaceId }];
   } else if (operation.type === "artifact.link") {
-    output = await mutate("spectraArtifactLinks:create", {
+    output = (await mutate("spectraArtifactLinks:create", {
       actorClerkId,
       sourceArtifactId: operation.input.sourceArtifactId,
       targetArtifactId: operation.input.targetArtifactId,
@@ -655,15 +5654,49 @@ async function executeOperation(actorClerkId: string, runId: string, operationId
       workspaceId: operation.input.workspaceId ?? undefined,
       createdBy: "ai",
       runId,
-    }) as Record<string, unknown>;
-    affected = [{ type: "artifact", id: operation.input.sourceArtifactId }, { type: "artifact", id: operation.input.targetArtifactId }];
+    })) as Record<string, unknown>;
+    affected = [
+      { type: "artifact", id: operation.input.sourceArtifactId },
+      { type: "artifact", id: operation.input.targetArtifactId },
+    ];
   }
-  await mutate("spectraOperations:markExecuted", { actorClerkId, operationId, executionId: context.executionId, output, affected });
+  await mutate("spectraOperations:markExecuted", {
+    actorClerkId,
+    operationId,
+    executionId: context.executionId,
+    output,
+    affected,
+  });
   return affected;
 }
 
+function resolveCreatedArtifactDependencies(
+  operation: ModelOperation,
+  createdArtifactIds: ReadonlyMap<number, string>,
+): ModelOperation {
+  if (operation.type !== "artifact.link") return operation;
+  const resolve = (value: string) => {
+    const match = /^@created:(\d+)$/.exec(value);
+    if (!match) return value;
+    const artifactId = createdArtifactIds.get(Number(match[1]));
+    if (!artifactId) throw new Error("A dependent artifact operation ran before its source artifact was ready.");
+    return artifactId;
+  };
+  return {
+    ...operation,
+    input: {
+      ...operation.input,
+      sourceArtifactId: resolve(operation.input.sourceArtifactId),
+      targetArtifactId: resolve(operation.input.targetArtifactId),
+    },
+  };
+}
+
 async function latestCard(actorClerkId: string, runId: string) {
-  const value = await query<{ actorClerkId: string; runId: string }, RunDetail>("spectraRuns:get", { actorClerkId, runId });
+  const value = await query<{ actorClerkId: string; runId: string }, RunDetail>(
+    "spectraRuns:get",
+    { actorClerkId, runId },
+  );
   const card = value.cards[0];
   if (!card) throw new Error("Result card not found");
   return card;
@@ -708,11 +5741,22 @@ async function inferWorkspaceForRun(actorClerkId: string, body: Body) {
   if (body.workspaceId) return body.workspaceId;
   if (!body.artifactId) return undefined;
   try {
-    const artifact = await query<unknown & object, { placements?: Array<{ workspaceId?: string }> }>("spectraArtifacts:get", {
+    const artifact = await query<
+      unknown & object,
+      { placements?: Array<{ workspaceId?: string }> }
+    >("spectraArtifacts:get", {
       actorClerkId,
       artifactId: body.artifactId,
     });
-    const workspaceIds = [...new Set((artifact.placements ?? []).flatMap((placement) => typeof placement.workspaceId === "string" ? [placement.workspaceId] : []))];
+    const workspaceIds = [
+      ...new Set(
+        (artifact.placements ?? []).flatMap((placement) =>
+          typeof placement.workspaceId === "string"
+            ? [placement.workspaceId]
+            : [],
+        ),
+      ),
+    ];
     return workspaceIds.length === 1 ? workspaceIds[0] : undefined;
   } catch {
     return undefined;
@@ -721,20 +5765,43 @@ async function inferWorkspaceForRun(actorClerkId: string, body: Body) {
 
 function ndjson(task: (emit: (event: unknown) => void) => Promise<void>) {
   const encoder = new TextEncoder();
-  return new Response(new ReadableStream({
-    start(controller) {
-      let attached = true;
-      const emit = (event: unknown) => {
-        if (!attached) return;
-        try { controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`)); }
-        catch { attached = false; }
-      };
-      void task(emit).catch((error) => emit({ type: "error", message: publicError(error) })).finally(() => { try { controller.close(); } catch {} });
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        let attached = true;
+        const emit = (event: unknown) => {
+          if (!attached) return;
+          try {
+            controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+          } catch {
+            attached = false;
+          }
+        };
+        void task(emit)
+          .catch((error) =>
+            emit({ type: "error", message: publicError(error) }),
+          )
+          .finally(() => {
+            try {
+              controller.close();
+            } catch {}
+          });
+      },
+    }),
+    {
+      headers: {
+        "Content-Type": "application/x-ndjson; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        "X-Content-Type-Options": "nosniff",
+      },
     },
-  }), { headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-cache, no-transform", "X-Content-Type-Options": "nosniff" } });
+  );
 }
 
-function launchRunTask(task: (emit: (event: unknown) => void) => Promise<void>, immediateEvents: unknown[]) {
+function launchRunTask(
+  task: (emit: (event: unknown) => void) => Promise<void>,
+  immediateEvents: unknown[],
+) {
   // Keep the worker inside the streaming response. `after()` is bounded by the
   // route lifetime and previously abandoned longer provider calls; the lease
   // reconciler then surfaced an interruption minutes later. The ReadableStream
@@ -746,9 +5813,47 @@ function launchRunTask(task: (emit: (event: unknown) => void) => Promise<void>, 
   });
 }
 
-async function runAttempt(params: { actorClerkId: string; runId: string; resultCardId: string; executionId: string; workerId: string; prompt: string; surface: Surface; threadId?: string; workspaceId?: string; artifactId?: string; focusMode?: EffectiveFocusMode; selectedArtifactIds?: string[]; explicitContextObjects?: Body["explicitContextObjects"]; currentView?: string; attachments?: PreparedAttachment[]; signal?: AbortSignal }, emit: (event: unknown) => void) {
-  await mutate("spectraRuns:claimExecution", { actorClerkId: params.actorClerkId, runId: params.runId, executionId: params.executionId, workerId: params.workerId });
+async function runAttempt(
+  params: {
+    actorClerkId: string;
+    runId: string;
+    resultCardId: string;
+    executionId: string;
+    workerId: string;
+    prompt: string;
+    surface: Surface;
+    threadId?: string;
+    workspaceId?: string;
+    artifactId?: string;
+    focusMode?: EffectiveFocusMode;
+    selectedArtifactIds?: string[];
+    explicitContextObjects?: Body["explicitContextObjects"];
+    currentView?: string;
+    attachments?: PreparedAttachment[];
+    signal?: AbortSignal;
+  },
+  emit: (event: unknown) => void,
+) {
+  const attemptStartedAt = Date.now();
+  let phaseStartedAt = attemptStartedAt;
+  const recordPhase = (phase: string) => {
+    const now = Date.now();
+    console.info("[spectra.run.phase]", {
+      runId: params.runId,
+      phase,
+      elapsedMs: now - phaseStartedAt,
+      totalMs: now - attemptStartedAt,
+    });
+    phaseStartedAt = now;
+  };
+  await mutate("spectraRuns:claimExecution", {
+    actorClerkId: params.actorClerkId,
+    runId: params.runId,
+    executionId: params.executionId,
+    workerId: params.workerId,
+  });
   let card = await latestCard(params.actorClerkId, params.runId);
+  recordPhase("claim_and_initial_card");
   let commitStarted = false;
   let publicText = "";
   let lastPersistedLength = 0;
@@ -756,31 +5861,314 @@ async function runAttempt(params: { actorClerkId: string; runId: string; resultC
   let markedStreaming = false;
   let partialWrite: Promise<unknown> = Promise.resolve();
   let eventWrite: Promise<unknown> = Promise.resolve();
+  let eventFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  let queuedEvents: Array<{ type: string; payload: Record<string, unknown> }> = [];
+  const progressiveWrites: Promise<unknown>[] = [];
   let eventPersistenceFailed = false;
   const leaseController = new AbortController();
-  const executionSignal = params.signal ? AbortSignal.any([params.signal, leaseController.signal]) : leaseController.signal;
+  const executionSignal = params.signal
+    ? AbortSignal.any([params.signal, leaseController.signal])
+    : leaseController.signal;
   const heartbeat = setInterval(() => {
-    void mutate<unknown & object, { alive: boolean }>("spectraRuns:heartbeat", { actorClerkId: params.actorClerkId, runId: params.runId, executionId: params.executionId, workerId: params.workerId }).then((result) => { if (!result.alive) leaseController.abort(); }).catch(() => null);
+    void mutate<unknown & object, { alive: boolean }>("spectraRuns:heartbeat", {
+      actorClerkId: params.actorClerkId,
+      runId: params.runId,
+      executionId: params.executionId,
+      workerId: params.workerId,
+    })
+      .then((result) => {
+        if (!result.alive) leaseController.abort();
+      })
+      .catch(() => null);
   }, 5_000);
+  const persistQueuedEvents = () => {
+    if (eventFlushTimer) {
+      clearTimeout(eventFlushTimer);
+      eventFlushTimer = null;
+    }
+    const events = queuedEvents;
+    queuedEvents = [];
+    if (events.length === 0) return eventWrite;
+    eventWrite = eventWrite
+      .then(() =>
+        mutate("spectraRuns:appendEvents", {
+          actorClerkId: params.actorClerkId,
+          runId: params.runId,
+          executionId: params.executionId,
+          events,
+        }),
+      )
+      .catch(() => {
+        eventPersistenceFailed = true;
+        return null;
+      });
+    return eventWrite;
+  };
   const publish = (event: Record<string, unknown>) => {
     emit(event);
-    eventWrite = eventWrite.then(() => mutate("spectraRuns:appendEvent", { actorClerkId: params.actorClerkId, runId: params.runId, executionId: params.executionId, type: String(event.type ?? "status"), payload: event })).catch(() => { eventPersistenceFailed = true; return null; });
+    const type = String(event.type ?? "status");
+    queuedEvents.push({ type, payload: event });
+    if (["final", "error", "stopped", "interrupted", "confirmation_required"].includes(type))
+      void persistQueuedEvents();
+    else if (!eventFlushTimer)
+      eventFlushTimer = setTimeout(() => void persistQueuedEvents(), 1_500);
   };
   const flushEvents = async () => {
+    await persistQueuedEvents();
     await eventWrite;
-    if (eventPersistenceFailed) await mutate("spectraRuns:markTraceDegraded", { actorClerkId: params.actorClerkId, runId: params.runId, executionId: params.executionId }).catch(() => null);
+    if (eventPersistenceFailed)
+      await mutate("spectraRuns:markTraceDegraded", {
+        actorClerkId: params.actorClerkId,
+        runId: params.runId,
+        executionId: params.executionId,
+      }).catch(() => null);
   };
   try {
-    await mutate("spectraRuns:updateStatus", { actorClerkId: params.actorClerkId, runId: params.runId, executionId: params.executionId, status: "running", phase: "planning", resultTitle: "Resolving the request", resultSummary: params.artifactId ? "Loading the focused artifact" : params.workspaceId ? "Loading the active workspace map" : "Resolving the requested objects", resultActions: [] });
-    publish({ type: "status", runId: params.runId, message: params.artifactId ? "Loading the focused artifact" : params.workspaceId ? "Loading the active workspace map" : "Resolving the requested objects" });
-    await mutate("spectraRuns:updateStatus", { actorClerkId: params.actorClerkId, runId: params.runId, executionId: params.executionId, status: "running", phase: "reading", resultTitle: "Reading context", resultSummary: "Reading the visible and selected work", resultActions: [] });
-    const context = await buildContext(params.actorClerkId, { workspaceId: params.workspaceId, artifactId: params.artifactId, threadId: params.threadId, focusMode: params.focusMode, selectedArtifactIds: params.selectedArtifactIds, explicitContextObjects: params.explicitContextObjects, currentView: params.currentView }, params.prompt);
-    await mutate("spectraRuns:updateStatus", { actorClerkId: params.actorClerkId, runId: params.runId, executionId: params.executionId, status: "running", phase: "retrieving", resultTitle: "Finding relevant work", resultSummary: "Matching the request to the workspace map", resultActions: [] });
-    const focusedObjectCount = context.selectedArtifactIds.length || (context.focusedArtifact ? 1 : 0);
-    publish({ type: "status", runId: params.runId, message: focusedObjectCount ? `Sending ${focusedObjectCount} focused object${focusedObjectCount === 1 ? "" : "s"} to DeepSeek` : params.workspaceId ? "Sending a bounded workspace summary to DeepSeek" : "Sending the request to DeepSeek" });
-    const persistedConversation = context.conversation.at(-1)?.role === "user" && context.conversation.at(-1)?.content === params.prompt
-      ? context.conversation.slice(0, -1)
-      : context.conversation;
+    await mutate("spectraRuns:updateStatus", {
+      actorClerkId: params.actorClerkId,
+      runId: params.runId,
+      executionId: params.executionId,
+      status: "running",
+      phase: "planning",
+      resultTitle: "Resolving the request",
+      resultSummary: params.artifactId
+        ? "Loading the focused artifact"
+        : params.workspaceId
+          ? "Loading the active workspace map"
+          : "Resolving the requested objects",
+      resultActions: [],
+    });
+    publish({
+      type: "status",
+      runId: params.runId,
+      message: params.artifactId
+        ? "Loading the focused artifact"
+        : params.workspaceId
+          ? "Loading the active workspace map"
+          : "Resolving the requested objects",
+    });
+    const immediatePlan =
+      fastConversationalPlan(params.prompt);
+    if (immediatePlan) {
+      publicText = immediatePlan.finalResponse;
+      publish({
+        type: "status",
+        runId: params.runId,
+        message: "Answering immediately",
+      });
+      publish({
+        type: "text_replace",
+        runId: params.runId,
+        content: immediatePlan.finalResponse,
+      });
+      if (
+        params.threadId &&
+        (immediatePlan.conversationTitle || immediatePlan.conversationSummary)
+      )
+        await mutate("spectraThreads:applyGeneratedMetadata", {
+          actorClerkId: params.actorClerkId,
+          threadId: params.threadId,
+          runId: params.runId,
+          executionId: params.executionId,
+          title: immediatePlan.conversationTitle ?? undefined,
+          summary: immediatePlan.conversationSummary ?? undefined,
+        });
+      await mutate("spectraOperations:recordPlan", {
+        actorClerkId: params.actorClerkId,
+        runId: params.runId,
+        executionId: params.executionId,
+        operations: [],
+      });
+      const title =
+        immediatePlan.decision === "clarify" ? "Needs clarification" : "Answer";
+      const provenance = {
+        threadId: params.threadId,
+        workspaceId: params.workspaceId,
+        focusMode: params.focusMode ?? (params.threadId ? "thread" : "global"),
+      };
+      await mutate("spectraRuns:updateStatus", {
+        actorClerkId: params.actorClerkId,
+        runId: params.runId,
+        executionId: params.executionId,
+        status: "completed",
+        decision: immediatePlan.decision,
+        planIntent: immediatePlan.intent,
+        finalSummary: immediatePlan.finalResponse,
+        resultTitle: title,
+        resultSummary: immediatePlan.finalResponse,
+        resultVariant: "status",
+        resultActions: [],
+        provenance,
+        modelUsed: "spectra/deterministic",
+        providerUsed: "Spectra",
+      });
+      await saveAssistantMessage({
+        actorClerkId: params.actorClerkId,
+        threadId: params.threadId,
+        runId: params.runId,
+        executionId: params.executionId,
+        content: immediatePlan.finalResponse,
+        decision: immediatePlan.decision,
+        model: "spectra/deterministic",
+        provider: "Spectra",
+        choices: immediatePlan.choices,
+      });
+      card = await latestCard(params.actorClerkId, params.runId);
+      publish({
+        type: "final",
+        runId: params.runId,
+        summary: immediatePlan.finalResponse,
+        card: streamCard(card),
+      });
+      await flushEvents();
+      return;
+    }
+    await mutate("spectraRuns:updateStatus", {
+      actorClerkId: params.actorClerkId,
+      runId: params.runId,
+      executionId: params.executionId,
+      status: "running",
+      phase: "reading",
+      resultTitle: "Reading context",
+      resultSummary: "Reading the visible and selected work",
+      resultActions: [],
+    });
+    const earlyPendingByIndex = new Map<number, string>();
+    const earlyPendingBlueprintByIndex = new Map<
+      number,
+      (typeof SPECTRA_BLUEPRINT_KEYS)[number]
+    >();
+    const earlyPendingWorkspaceByIndex = new Map<number, string>();
+    const enrichedPreviewArtifactIds = new Set<string>();
+    let streamedCreationPreview = false;
+    const signalsFocusedEdit =
+      Boolean(params.artifactId) &&
+      /\b(?:rename|edit|update|transform|rewrite|write|draft|add|remove|reorganize|change|set|replace|fix|correct)\b/i.test(
+        params.prompt,
+      );
+    if (params.artifactId && signalsFocusedEdit) {
+      publish({
+        type: "operation_preview",
+        runId: params.runId,
+        operationId: "focused-preview",
+        operationType: "artifact.update",
+        preview: {
+          action: "update",
+          title: "Preparing the focused artifact",
+          targetId: params.artifactId,
+        },
+      });
+      // Paint the canonical card as active immediately without persisting an
+      // empty artifact-wide preview. The validated operation later supplies
+      // exact paths and content, so only the real region begins to shimmer.
+      publish({
+        type: "artifact_patch",
+        runId: params.runId,
+        operationId: "focused-preview",
+        artifactId: params.artifactId,
+        patch: { progress: 0.08, changedPaths: [] },
+      });
+      publish({
+        type: "status",
+        runId: params.runId,
+        message: "Preparing the open artifact for live changes",
+      });
+    }
+    // A focused-artifact request is overwhelmingly an edit, even when the
+    // user naturally says "write a hint" or "draft a better summary". Only
+    // materialize a creation shell there when they explicitly ask for a new,
+    // separate object. This prevents invisible orphan shells on every edit.
+    // An open artifact is often the source or update target for a larger task;
+    // it must not disable explicit creation work in that same request.
+    const parallelCreations = parallelCreationContract(params.prompt);
+    const provisionalCreation =
+      !params.artifactId || /\b(?:new|another|separate)\b/i.test(params.prompt)
+        ? provisionalSingleCreation(params.prompt)
+        : null;
+    const provisionalShells = parallelCreations.length
+      ? parallelCreations
+      : provisionalCreation
+        ? [provisionalCreation]
+        : [];
+    for (const [provisionalIndex, shell] of provisionalShells.entries()) {
+      const provisionalTitle =
+        shell.requestedTitle ?? `New ${shell.label.toLowerCase()}`;
+      const workspaceId =
+        params.surface === "workspace" || params.surface === "artifact"
+          ? params.workspaceId
+          : undefined;
+      const pending = await mutate<unknown & object, { artifactId: string }>(
+        "spectraArtifacts:createPending",
+        {
+          actorClerkId: params.actorClerkId,
+          blueprintKey: shell.blueprintKey,
+          title: provisionalTitle,
+          workspaceId,
+          runId: params.runId,
+          executionId: params.executionId,
+          threadId: params.threadId,
+        },
+      );
+      earlyPendingByIndex.set(provisionalIndex, pending.artifactId);
+      earlyPendingBlueprintByIndex.set(provisionalIndex, shell.blueprintKey);
+      publish({
+        type: "status",
+        runId: params.runId,
+        message: `Preparing a ${shell.label.toLowerCase()} shell`,
+      });
+      publish({
+        type: "operation_preview",
+        runId: params.runId,
+        operationId: `preview-${provisionalIndex + 1}`,
+        operationType: "artifact.create",
+        preview: {
+          action: "create",
+          title: provisionalTitle,
+          blueprintKey: shell.blueprintKey,
+          pendingArtifactId: pending.artifactId,
+        },
+      });
+    }
+    const context = await buildContext(
+      params.actorClerkId,
+      {
+        workspaceId: params.workspaceId,
+        artifactId: params.artifactId,
+        threadId: params.threadId,
+        focusMode: params.focusMode,
+        selectedArtifactIds: params.selectedArtifactIds,
+        explicitContextObjects: params.explicitContextObjects,
+        currentView: params.currentView,
+      },
+      params.prompt,
+    );
+    recordPhase("context_ready");
+    await mutate("spectraRuns:updateStatus", {
+      actorClerkId: params.actorClerkId,
+      runId: params.runId,
+      executionId: params.executionId,
+      status: "running",
+      phase: "retrieving",
+      resultTitle: "Finding relevant work",
+      resultSummary: "Matching the request to the workspace map",
+      resultActions: [],
+    });
+    const focusedObjectCount =
+      context.selectedArtifactIds.length || (context.focusedArtifact ? 1 : 0);
+    publish({
+      type: "status",
+      runId: params.runId,
+      message: focusedObjectCount
+        ? `Sending ${focusedObjectCount} focused object${focusedObjectCount === 1 ? "" : "s"} to DeepSeek`
+        : params.workspaceId
+          ? "Sending a bounded workspace summary to DeepSeek"
+          : "Sending the request to DeepSeek",
+    });
+    const persistedConversation =
+      context.conversation.at(-1)?.role === "user" &&
+      context.conversation.at(-1)?.content === params.prompt
+        ? context.conversation.slice(0, -1)
+        : context.conversation;
     const conversation = persistedConversation.slice(-30);
     await mutate("spectraRuns:setContextSnapshot", {
       actorClerkId: params.actorClerkId,
@@ -805,218 +6193,1022 @@ async function runAttempt(params: { actorClerkId: string; runId: string; resultC
       threadId: params.threadId,
       workspaceId: params.workspaceId,
       workspaceTitle,
-      attachmentNames: params.attachments?.map((attachment) => attachment.name) ?? [],
+      attachmentNames:
+        params.attachments?.map((attachment) => attachment.name) ?? [],
       focusMode: context.focusMode,
     };
-    const earlyPendingByIndex = new Map<number, string>();
-    const earlyPendingWorkspaceByIndex = new Map<number, string>();
-    const earlyUpdatedArtifactIds = new Set<string>();
-    const progressiveWrites: Promise<unknown>[] = [];
     const owned = ownedReferences(context);
-    if (params.artifactId && context.focusedArtifact?.title) publish({ type: "status", runId: params.runId, message: `Reviewing ${context.focusedArtifact.title}` });
-    else if (workspaceTitle) publish({ type: "status", runId: params.runId, message: `Reviewing ${workspaceTitle} context` });
-    const modelResult = await callModel(
-      params.surface,
-      params.prompt,
-      { ...context.packet, conversation },
-      params.attachments ?? [],
-      (content, mode) => {
-        if (!markedStreaming) { markedStreaming = true; eventWrite = eventWrite.then(() => mutate("spectraRuns:updateStatus", { actorClerkId: params.actorClerkId, runId: params.runId, executionId: params.executionId, status: "running", phase: "streaming", resultTitle: "Writing response" })).catch(() => null); }
-        publicText = mode === "replace" ? content : publicText + content;
-        publish({ type: mode === "replace" ? "text_replace" : "text_delta", runId: params.runId, content });
-        const now = Date.now();
-        if (params.threadId && publicText.trim() && (publicText.length - lastPersistedLength >= 120 || now - lastPersistedAt >= 300)) {
-          lastPersistedLength = publicText.length;
-          lastPersistedAt = now;
-          const snapshot = publicText;
-          partialWrite = partialWrite.then(() => mutate("spectraThreads:appendMessage", {
-            actorClerkId: params.actorClerkId,
-            threadId: params.threadId!,
-            role: "assistant",
-            content: snapshot,
-            runId: params.runId,
-            executionId: params.executionId,
-            metadata: { partial: true, hasOperationalTrace: true },
-          })).catch(() => null);
-        }
-      },
-      undefined,
-      executionSignal,
-      (rawOperation, index) => {
-        const progressiveWrite = (async () => {
-          let operation: ModelOperation;
-          try { operation = parseModelOperation(rawOperation); } catch { return; }
-          if (operation.type === "artifact.create") {
-            const workspaceId = operation.input.placement === "inbox" ? undefined : operation.input.workspaceId ?? ((params.surface === "workspace" || params.surface === "artifact") ? params.workspaceId : undefined);
-            const pending = await mutate<unknown & object, { artifactId: string }>("spectraArtifacts:createPending", { actorClerkId: params.actorClerkId, blueprintKey: operation.input.blueprintKey, title: operation.input.title, workspaceId, runId: params.runId, executionId: params.executionId, threadId: params.threadId });
-            earlyPendingByIndex.set(index, pending.artifactId);
-            publish({ type: "operation_preview", runId: params.runId, operationId: `preview-${index + 1}`, operationType: operation.type, preview: { ...safeOperationPreview(operation), pendingArtifactId: pending.artifactId } });
-            const frames = progressiveArtifactFrames(operation.input.blueprintKey, operation.input.content);
-            for (let frameIndex = 0; frameIndex < frames.length; frameIndex += 1) {
-              const frame = frames[frameIndex]!;
-              await mutate("spectraArtifacts:patchPendingContent", { actorClerkId: params.actorClerkId, artifactId: pending.artifactId, runId: params.runId, executionId: params.executionId, content: frame.content, progress: frame.progress, summary: `Building ${operation.input.title} · ${Math.round(frame.progress * 100)}%` });
-              publish({ type: "artifact_patch", runId: params.runId, operationId: `preview-${index + 1}`, artifactId: pending.artifactId, patch: { content: frame.content, progress: frame.progress } });
-              if (frameIndex < frames.length - 1) await new Promise((resolve) => setTimeout(resolve, 90));
-            }
-          } else if (operation.type === "artifact.update" && owned.artifactIds.has(operation.input.artifactId)) {
-            earlyUpdatedArtifactIds.add(operation.input.artifactId);
-            const frames = operation.input.content ? progressiveArtifactFrames(operation.input.blueprintKey, operation.input.content) : [{ content: undefined, progress: 0.86 }];
-            for (let frameIndex = 0; frameIndex < frames.length; frameIndex += 1) {
-              const frame = frames[frameIndex]!;
-              await mutate("spectraArtifacts:stageAiPatch", { actorClerkId: params.actorClerkId, artifactId: operation.input.artifactId, runId: params.runId, executionId: params.executionId, title: operation.input.title ?? undefined, summary: operation.input.summary ?? undefined, content: frame.content });
-              publish({ type: "artifact_patch", runId: params.runId, operationId: `preview-${index + 1}`, artifactId: operation.input.artifactId, patch: { title: operation.input.title, summary: operation.input.summary, content: frame.content, progress: frame.progress } });
-              if (frameIndex < frames.length - 1) await new Promise((resolve) => setTimeout(resolve, 120));
-            }
-          } else if (operation.type === "workspace.create") {
-            const pending = await mutate<unknown & object, { workspaceId: string }>("spectraWorkspaces:createPending", { actorClerkId: params.actorClerkId, runId: params.runId, executionId: params.executionId, title: operation.input.title, description: operation.input.description ?? undefined, icon: operation.input.icon ?? undefined, color: operation.input.color ?? undefined });
-            earlyPendingWorkspaceByIndex.set(index, pending.workspaceId);
-            publish({ type: "operation_preview", runId: params.runId, operationId: `preview-${index + 1}`, operationType: operation.type, preview: safeOperationPreview(operation) });
-          } else if (operation.type === "workspace.update" && owned.workspaceIds.has(operation.input.workspaceId)) {
-            await mutate("spectraWorkspaces:stageAiPatch", { actorClerkId: params.actorClerkId, workspaceId: operation.input.workspaceId, runId: params.runId, executionId: params.executionId, title: operation.input.title ?? undefined, description: operation.input.description ?? undefined, icon: operation.input.icon ?? undefined, color: operation.input.color ?? undefined });
-            publish({ type: "operation_preview", runId: params.runId, operationId: `preview-${index + 1}`, operationType: operation.type, preview: safeOperationPreview(operation) });
-          }
-        })().catch(() => null);
-        progressiveWrites.push(progressiveWrite);
-      },
-    );
-    await partialWrite;
-    await Promise.all(progressiveWrites);
-    const plan = resolveAndValidatePlan(modelResult.plan, context);
-    if (!params.threadId && (plan.conversationTitle || plan.conversationSummary)) {
-      await mutate("spectraRuns:setSuggestedThreadMetadata", { actorClerkId: params.actorClerkId, runId: params.runId, executionId: params.executionId, title: plan.conversationTitle ?? undefined, summary: plan.conversationSummary ?? undefined });
-    }
-    if (params.threadId && (plan.conversationTitle || plan.conversationSummary)) {
-      await mutate("spectraThreads:applyGeneratedMetadata", {
-        actorClerkId: params.actorClerkId,
-        threadId: params.threadId,
+    if (params.artifactId && context.focusedArtifact?.title)
+      publish({
+        type: "status",
         runId: params.runId,
-        executionId: params.executionId,
-        title: plan.conversationTitle ?? undefined,
-        summary: plan.conversationSummary ?? undefined,
+        message: `Reviewing ${context.focusedArtifact.title}`,
       });
+    else if (workspaceTitle)
+      publish({
+        type: "status",
+        runId: params.runId,
+        message: `Reviewing ${workspaceTitle} context`,
+      });
+    // Deterministic focused tools are whole-request shortcuts. Never let one
+    // recognized field (for example a tag) swallow a larger create+link task;
+    // mixed work belongs to the dependency-aware task graph below.
+    const focusedToolPlan = parallelCreations.length
+      ? null
+      : (fastConversationalPlan(params.prompt) ??
+        fastFocusedPlannerPlan(params.prompt, context.focusedArtifact) ??
+        fastFocusedDeckHintPlan(params.prompt, context.focusedArtifact) ??
+        fastFocusedQuizSettingsPlan(params.prompt, context.focusedArtifact) ??
+        fastFocusedMetadataPlan(params.prompt, context.focusedArtifact));
+    if (focusedToolPlan) {
+      publish({
+        type: "status",
+        runId: params.runId,
+        message: "Applying the requested focused fields",
+      });
+      const focusedOperation = focusedToolPlan.operations[0];
+      if (
+        focusedOperation?.type === "artifact.update" &&
+        focusedOperation.input.contentPatch &&
+        context.focusedArtifact?.content !== undefined
+      ) {
+        const changedPaths = focusedOperation.input.contentPatch.changes.map((change) => change.path);
+        publish({
+          type: "artifact_patch",
+          runId: params.runId,
+          operationId: "focused-preview",
+          artifactId: focusedOperation.input.artifactId,
+          patch: {
+            content: applyContentPatch(context.focusedArtifact.content, focusedOperation.input.contentPatch),
+            contentPatch: focusedOperation.input.contentPatch,
+            changedPaths,
+            progress: 0.82,
+          },
+        });
+      }
     }
+    const invokeModel: typeof callModel = parallelCreations.length
+      ? (
+          surface,
+          prompt,
+          modelContext,
+          attachments,
+          onPublicText,
+          onReasoningText,
+          signal,
+          onPlanOperation,
+          onRepairRetry,
+          onProgressUpdate,
+          onPartialCreation,
+          actorClerkId,
+        ) => {
+          const callbacks = {
+              onPublicText,
+              onReasoningText,
+              signal,
+              onPlanOperation,
+              onRepairRetry,
+              onProgressUpdate,
+              onPartialCreation,
+              actorClerkId,
+            };
+          return hasNonCreationMutationIntent(params.prompt)
+            ? callMixedTaskGraphWorkers(
+                surface,
+                prompt,
+                modelContext,
+                attachments,
+                parallelCreations,
+                callbacks,
+              )
+            : callParallelCreationWorkers(
+                surface,
+                prompt,
+                modelContext,
+                attachments,
+                parallelCreations,
+                callbacks,
+              );
+        }
+      : callModel;
+    const modelResult = focusedToolPlan
+      ? {
+          plan: focusedToolPlan,
+          model: "spectra/focused-tools",
+          provider: "Spectra",
+          usage: undefined,
+        }
+      : await invokeModel(
+          params.surface,
+          params.prompt,
+          {
+            ...context.packet,
+            // The bounded packet normally carries only a focused excerpt.
+            // A direct region edit needs the canonical block/field tree once;
+            // including it here prevents a redundant read_artifact turn while
+            // broad and ambiguous work keeps the compact on-demand strategy.
+            ...(promptDirectlyUsesFocusedContent(params.prompt) &&
+            context.focusedArtifact
+              ? { focusedArtifact: context.focusedArtifact }
+              : {}),
+            conversation,
+          },
+          params.attachments ?? [],
+          (content, mode) => {
+            if (!markedStreaming) {
+              markedStreaming = true;
+              eventWrite = eventWrite
+                .then(() =>
+                  mutate("spectraRuns:updateStatus", {
+                    actorClerkId: params.actorClerkId,
+                    runId: params.runId,
+                    executionId: params.executionId,
+                    status: "running",
+                    phase: "streaming",
+                    resultTitle: "Writing response",
+                  }),
+                )
+                .catch(() => null);
+            }
+            publicText = mode === "replace" ? content : publicText + content;
+            // Hold success-facing prose until the strict plan validates and
+            // guarded operations commit. Progress and artifact previews remain
+            // live, but a failed run can no longer leave behind a false
+            // assistant claim that the requested changes succeeded.
+          },
+          undefined,
+          executionSignal,
+          (rawOperation, index) => {
+            const progressiveWrite = (async () => {
+              let operation: ModelOperation;
+              try {
+                operation = parseModelOperation(rawOperation);
+              } catch {
+                return;
+              }
+              assertRequestedArtifactContent([operation], params.prompt);
+              if (operation.type === "artifact.create") {
+                if (streamedCreationPreview)
+                  await Promise.all(progressiveWrites);
+                const workspaceId =
+                  operation.input.placement === "inbox"
+                    ? undefined
+                    : (operation.input.workspaceId ??
+                      (params.surface === "workspace" ||
+                      params.surface === "artifact"
+                        ? params.workspaceId
+                        : undefined));
+                const existingPendingId =
+                  earlyPendingBlueprintByIndex.get(index) ===
+                  operation.input.blueprintKey
+                    ? earlyPendingByIndex.get(index)
+                    : undefined;
+                const pendingArtifactId =
+                  existingPendingId ??
+                  (
+                    await mutate<unknown & object, { artifactId: string }>(
+                      "spectraArtifacts:createPending",
+                      {
+                        actorClerkId: params.actorClerkId,
+                        blueprintKey: operation.input.blueprintKey,
+                        title: operation.input.title,
+                        workspaceId,
+                        runId: params.runId,
+                        executionId: params.executionId,
+                        threadId: params.threadId,
+                      },
+                    )
+                  ).artifactId;
+                earlyPendingByIndex.set(index, pendingArtifactId);
+                earlyPendingBlueprintByIndex.set(
+                  index,
+                  operation.input.blueprintKey,
+                );
+                publish({
+                  type: "operation_preview",
+                  runId: params.runId,
+                  operationId: `preview-${index + 1}`,
+                  operationType: operation.type,
+                  preview: {
+                    ...safeOperationPreview(operation),
+                    pendingArtifactId,
+                  },
+                });
+                const frames = streamedCreationPreview
+                  ? [
+                      {
+                        content: operation.input.content,
+                        progress: 0.94,
+                      },
+                    ]
+                  : progressiveArtifactFrames(
+                      operation.input.blueprintKey,
+                      operation.input.content,
+                    );
+                for (
+                  let frameIndex = 0;
+                  frameIndex < frames.length;
+                  frameIndex += 1
+                ) {
+                  const frame = frames[frameIndex]!;
+                  await mutate("spectraArtifacts:patchPendingContent", {
+                    actorClerkId: params.actorClerkId,
+                    artifactId: pendingArtifactId,
+                    runId: params.runId,
+                    executionId: params.executionId,
+                    content: frame.content,
+                    progress: frame.progress,
+                    // Progress belongs to aiProgress/the live trace. Never
+                    // overwrite durable artifact metadata with an ephemeral
+                    // implementation status, especially when an approval can
+                    // leave the pending shell visible for several minutes.
+                    summary: operation.input.summary ?? undefined,
+                  });
+                  publish({
+                    type: "artifact_patch",
+                    runId: params.runId,
+                    operationId: `preview-${index + 1}`,
+                    artifactId: pendingArtifactId,
+                    patch: { content: frame.content, progress: frame.progress },
+                  });
+                  if (frameIndex < frames.length - 1)
+                    await new Promise((resolve) => setTimeout(resolve, 90));
+                }
+              } else if (
+                operation.type === "artifact.update" &&
+                owned.artifactIds.has(operation.input.artifactId)
+              ) {
+                let previewContent: unknown =
+                  operation.input.content ?? undefined;
+                if (operation.input.contentPatch) {
+                  const current = await query<
+                    { actorClerkId: string; artifactId: string },
+                    { content: unknown }
+                  >("spectraArtifacts:get", {
+                    actorClerkId: params.actorClerkId,
+                    artifactId: operation.input.artifactId,
+                  });
+                  previewContent = applyContentPatch(
+                    current.content,
+                    operation.input.contentPatch,
+                  );
+                }
+                const changedPaths =
+                  operation.input.contentPatch?.changes.map(
+                    (change) => change.path,
+                  ) ?? (operation.input.content !== null ? ["/"] : []);
+                // Existing-artifact previews are one validated overlay, not a
+                // sequence of remote database writes. Replaying a full deck or
+                // quiz through many Convex mutations added several seconds after
+                // the model had already finished and repeatedly remounted the
+                // editor. The client animates the one real changed region while
+                // the canonical commit remains independently guarded.
+                await mutate("spectraArtifacts:stageAiPatch", {
+                  actorClerkId: params.actorClerkId,
+                  artifactId: operation.input.artifactId,
+                  runId: params.runId,
+                  executionId: params.executionId,
+                  title: operation.input.title ?? undefined,
+                  summary: operation.input.summary ?? undefined,
+                  content: previewContent,
+                  tags: operation.input.tags ?? undefined,
+                  changedPaths,
+                });
+                enrichedPreviewArtifactIds.add(operation.input.artifactId);
+                publish({
+                  type: "artifact_patch",
+                  runId: params.runId,
+                  operationId: `preview-${index + 1}`,
+                  artifactId: operation.input.artifactId,
+                  patch: {
+                    title: operation.input.title,
+                    summary: operation.input.summary,
+                    content: previewContent,
+                    tags: operation.input.tags,
+                    changedPaths,
+                    progress: 0.9,
+                  },
+                });
+              } else if (operation.type === "workspace.create") {
+                const pending = await mutate<
+                  unknown & object,
+                  { workspaceId: string }
+                >("spectraWorkspaces:createPending", {
+                  actorClerkId: params.actorClerkId,
+                  runId: params.runId,
+                  executionId: params.executionId,
+                  title: operation.input.title,
+                  description: operation.input.description ?? undefined,
+                  icon: operation.input.icon ?? undefined,
+                  color: operation.input.color ?? undefined,
+                });
+                earlyPendingWorkspaceByIndex.set(index, pending.workspaceId);
+                publish({
+                  type: "operation_preview",
+                  runId: params.runId,
+                  operationId: `preview-${index + 1}`,
+                  operationType: operation.type,
+                  preview: safeOperationPreview(operation),
+                });
+              } else if (
+                operation.type === "workspace.update" &&
+                owned.workspaceIds.has(operation.input.workspaceId)
+              ) {
+                await mutate("spectraWorkspaces:stageAiPatch", {
+                  actorClerkId: params.actorClerkId,
+                  workspaceId: operation.input.workspaceId,
+                  runId: params.runId,
+                  executionId: params.executionId,
+                  title: operation.input.title ?? undefined,
+                  description: operation.input.description ?? undefined,
+                  icon: operation.input.icon ?? undefined,
+                  color: operation.input.color ?? undefined,
+                });
+                publish({
+                  type: "operation_preview",
+                  runId: params.runId,
+                  operationId: `preview-${index + 1}`,
+                  operationType: operation.type,
+                  preview: safeOperationPreview(operation),
+                });
+              }
+            })().catch(() => null);
+            progressiveWrites.push(progressiveWrite);
+          },
+          () =>
+            publish({
+              type: "status",
+              runId: params.runId,
+              message: "The first response was incomplete · retrying once",
+            }),
+          (message) => {
+            publish({ type: "status", runId: params.runId, message });
+            // Durable tabs are rendered from the canonical result card, while
+            // the open conversation uses the live event stream. Persist each
+            // sparse, meaningful phase so both surfaces tell the same story
+            // and refresh does not fall back to a stale generic label.
+            const authoredTitle = message
+              .replace(/^Workspace:\s*/i, "")
+              .split(/\s*(?:\u00b7|\u00c2\u00b7)\s*/u)[0]
+              ?.replace(/:\s*$/, "")
+              .trim();
+            eventWrite = eventWrite
+              .then(() =>
+                mutate("spectraRuns:patchResultCard", {
+                  actorClerkId: params.actorClerkId,
+                  resultCardId: params.resultCardId,
+                  executionId: params.executionId,
+                  title: authoredTitle?.slice(0, 88) || "Working on the request",
+                  summary: message.slice(0, 320),
+                }),
+              )
+              .catch(() => null);
+          },
+          ({ blueprintKey, title, content, itemCount, itemLabel }, workerIndex = 0) => {
+            streamedCreationPreview = true;
+            console.info("[spectra.run.partial_creation]", {
+              runId: params.runId,
+              blueprintKey,
+              itemCount,
+              itemLabel,
+              titleCharacters: title?.length ?? 0,
+              totalMs: Date.now() - attemptStartedAt,
+            });
+            const progressiveWrite = (async () => {
+              const pendingArtifactId = earlyPendingByIndex.get(workerIndex);
+              if (
+                !pendingArtifactId ||
+                earlyPendingBlueprintByIndex.get(workerIndex) !== blueprintKey
+              )
+                return;
+              const progress = Math.min(0.82, 0.14 + itemCount * 0.11);
+              await mutate("spectraArtifacts:patchPendingContent", {
+                actorClerkId: params.actorClerkId,
+                artifactId: pendingArtifactId,
+                runId: params.runId,
+                executionId: params.executionId,
+                content,
+                progress,
+                title,
+              });
+              publish({
+                type: "artifact_patch",
+                runId: params.runId,
+                operationId: `preview-${workerIndex + 1}`,
+                artifactId: pendingArtifactId,
+                patch: {
+                  blueprintKey,
+                  content,
+                  progress,
+                  itemCount,
+                },
+              });
+              publish({
+                type: "status",
+                runId: params.runId,
+                message: `Writing ${itemLabel} ${itemCount} · visible in ${title || "the new artifact"}`,
+              });
+            })().catch(() => null);
+            progressiveWrites.push(progressiveWrite);
+          },
+          params.actorClerkId,
+          provisionalCreation
+            ? { ...provisionalCreation, clause: params.prompt }
+            : undefined,
+        );
+    recordPhase("model_ready");
+    await partialWrite;
+    const progressiveWritesReady = Promise.all(progressiveWrites);
+    const plan = resolveAndValidatePlan(
+      modelResult.plan,
+      context,
+      params.prompt,
+    );
+    publish({
+      type: "status",
+      runId: params.runId,
+      message: "Validated the requested changes",
+    });
+    assertRequestedArtifactContent(plan.operations, params.prompt);
+    const metadataWrite =
+      plan.conversationTitle || plan.conversationSummary
+        ? params.threadId
+          ? mutate("spectraThreads:applyGeneratedMetadata", {
+              actorClerkId: params.actorClerkId,
+              threadId: params.threadId,
+              runId: params.runId,
+              executionId: params.executionId,
+              title: plan.conversationTitle ?? undefined,
+              summary: plan.conversationSummary ?? undefined,
+            }).catch(() => null)
+          : mutate("spectraRuns:setSuggestedThreadMetadata", {
+              actorClerkId: params.actorClerkId,
+              runId: params.runId,
+              executionId: params.executionId,
+              title: plan.conversationTitle ?? undefined,
+              summary: plan.conversationSummary ?? undefined,
+            }).catch(() => null)
+        : Promise.resolve(null);
     const policy = evaluatePlanPolicy(plan.operations, { intent: plan.intent });
-    const stored = await mutate<{ actorClerkId: string; runId: string; executionId: string; operations: Array<{ type: string; input: unknown; requiresConfirmation: boolean }> }, { operationIds: string[] }>("spectraOperations:recordPlan", {
+    publish({
+      type: "status",
+      runId: params.runId,
+      message: "Recording the safe operation plan",
+    });
+    const storedWrite = mutate<
+      {
+        actorClerkId: string;
+        runId: string;
+        executionId: string;
+        operations: Array<{
+          type: string;
+          input: unknown;
+          requiresConfirmation: boolean;
+        }>;
+      },
+      { operationIds: string[] }
+    >("spectraOperations:recordPlan", {
       actorClerkId: params.actorClerkId,
       runId: params.runId,
       executionId: params.executionId,
-      operations: plan.operations.map((operation) => ({ type: operation.type, input: operation.input, requiresConfirmation: policy.requiresConfirmation })),
+      operations: plan.operations.map((operation) => ({
+        type: operation.type,
+        input: operation.input,
+        requiresConfirmation: policy.requiresConfirmation,
+      })),
     });
+    const [stored] = await Promise.all([
+      storedWrite,
+      metadataWrite,
+      progressiveWritesReady,
+    ]);
+    recordPhase("plan_recorded");
     const pendingArtifacts = new Map<string, string>();
     for (let index = 0; index < stored.operationIds.length; index += 1) {
       const operationId = stored.operationIds[index]!;
       const operation = plan.operations[index];
       let pendingArtifactId: string | undefined;
-      if (operation?.type === "artifact.create" && !policy.requiresConfirmation) {
-        pendingArtifactId = earlyPendingByIndex.get(index);
+      if (
+        operation?.type === "artifact.create" &&
+        !policy.requiresConfirmation
+      ) {
+        pendingArtifactId =
+          earlyPendingBlueprintByIndex.get(index) ===
+          operation.input.blueprintKey
+            ? earlyPendingByIndex.get(index)
+            : undefined;
         if (!pendingArtifactId) {
-          const workspaceId = operation.input.placement === "inbox" ? undefined : operation.input.workspaceId ?? ((params.surface === "workspace" || params.surface === "artifact") ? params.workspaceId : undefined);
-          const pending = await mutate<unknown & object, { artifactId: string }>("spectraArtifacts:createPending", { actorClerkId: params.actorClerkId, blueprintKey: operation.input.blueprintKey, title: operation.input.title, workspaceId, runId: params.runId, executionId: params.executionId, threadId: params.threadId });
+          const workspaceId =
+            operation.input.placement === "inbox"
+              ? undefined
+              : (operation.input.workspaceId ??
+                (params.surface === "workspace" || params.surface === "artifact"
+                  ? params.workspaceId
+                  : undefined));
+          const pending = await mutate<
+            unknown & object,
+            { artifactId: string }
+          >("spectraArtifacts:createPending", {
+            actorClerkId: params.actorClerkId,
+            blueprintKey: operation.input.blueprintKey,
+            title: operation.input.title,
+            workspaceId,
+            runId: params.runId,
+            executionId: params.executionId,
+            threadId: params.threadId,
+          });
           pendingArtifactId = pending.artifactId;
+          earlyPendingByIndex.set(index, pendingArtifactId);
+          earlyPendingBlueprintByIndex.set(
+            index,
+            operation.input.blueprintKey,
+          );
         }
         pendingArtifacts.set(operationId, pendingArtifactId);
       }
-      if (operation?.type === "artifact.create" && earlyPendingByIndex.get(index)) {
+      if (
+        operation?.type === "artifact.create" &&
+        earlyPendingByIndex.get(index) &&
+        earlyPendingBlueprintByIndex.get(index) ===
+          operation.input.blueprintKey
+      ) {
         pendingArtifactId = earlyPendingByIndex.get(index);
         pendingArtifacts.set(operationId, pendingArtifactId!);
-        await mutate("spectraOperations:attachPendingArtifact", { actorClerkId: params.actorClerkId, operationId, artifactId: pendingArtifactId, executionId: params.executionId });
+        await mutate("spectraOperations:attachPendingArtifact", {
+          actorClerkId: params.actorClerkId,
+          operationId,
+          artifactId: pendingArtifactId,
+          executionId: params.executionId,
+        });
       }
-      if (operation?.type === "workspace.create" && earlyPendingWorkspaceByIndex.get(index)) {
-        await mutate("spectraOperations:attachPendingWorkspace", { actorClerkId: params.actorClerkId, operationId, workspaceId: earlyPendingWorkspaceByIndex.get(index)!, executionId: params.executionId });
+      if (
+        operation?.type === "workspace.create" &&
+        earlyPendingWorkspaceByIndex.get(index)
+      ) {
+        await mutate("spectraOperations:attachPendingWorkspace", {
+          actorClerkId: params.actorClerkId,
+          operationId,
+          workspaceId: earlyPendingWorkspaceByIndex.get(index)!,
+          executionId: params.executionId,
+        });
       }
-      publish({ type: "operation_preview", runId: params.runId, operationId, operationType: operation?.type ?? "unknown", preview: operation ? { ...safeOperationPreview(operation), pendingArtifactId } : undefined });
+      publish({
+        type: "operation_preview",
+        runId: params.runId,
+        operationId,
+        operationType: operation?.type ?? "unknown",
+        preview: operation
+          ? { ...safeOperationPreview(operation), pendingArtifactId }
+          : undefined,
+      });
     }
 
     if (plan.decision !== "operate") {
-      const title = plan.decision === "clarify" ? "Needs clarification" : plan.decision === "refuse" ? "Unable to apply" : "Answer";
-      await mutate("spectraRuns:updateStatus", { actorClerkId: params.actorClerkId, runId: params.runId, executionId: params.executionId, status: "completed", decision: plan.decision, planIntent: plan.intent, finalSummary: plan.finalResponse, resultTitle: title, resultSummary: plan.finalResponse, resultVariant: "status", resultActions: [], provenance, modelUsed: modelResult.model, providerUsed: modelResult.provider, usage: modelResult.usage });
-      await saveAssistantMessage({ actorClerkId: params.actorClerkId, threadId: params.threadId, runId: params.runId, executionId: params.executionId, content: plan.finalResponse, decision: plan.decision, model: modelResult.model, provider: modelResult.provider, usage: modelResult.usage, choices: plan.choices });
+      if (provisionalCreation)
+        await mutate("spectraArtifacts:discardPendingForRun", {
+          actorClerkId: params.actorClerkId,
+          runId: params.runId,
+          executionId: params.executionId,
+        }).catch(() => null);
+      const title =
+        plan.decision === "clarify"
+          ? "Needs clarification"
+          : plan.decision === "refuse"
+            ? "Unable to apply"
+            : "Answer";
+      await mutate("spectraRuns:updateStatus", {
+        actorClerkId: params.actorClerkId,
+        runId: params.runId,
+        executionId: params.executionId,
+        status: "completed",
+        decision: plan.decision,
+        planIntent: plan.intent,
+        finalSummary: plan.finalResponse,
+        resultTitle: title,
+        resultSummary: plan.finalResponse,
+        resultVariant: "status",
+        resultActions: [],
+        provenance,
+        modelUsed: modelResult.model,
+        providerUsed: modelResult.provider,
+        usage: modelResult.usage,
+      });
+      await saveAssistantMessage({
+        actorClerkId: params.actorClerkId,
+        threadId: params.threadId,
+        runId: params.runId,
+        executionId: params.executionId,
+        content: plan.finalResponse,
+        decision: plan.decision,
+        model: modelResult.model,
+        provider: modelResult.provider,
+        usage: modelResult.usage,
+        choices: plan.choices,
+      });
       card = await latestCard(params.actorClerkId, params.runId);
-      publish({ type: "final", runId: params.runId, summary: plan.finalResponse, card: streamCard(card) });
+      publish({ type: "text_replace", runId: params.runId, content: plan.finalResponse });
+      publish({
+        type: "final",
+        runId: params.runId,
+        summary: plan.finalResponse,
+        card: streamCard(card),
+      });
       await flushEvents();
       return;
     }
 
     if (policy.requiresConfirmation) {
       const actions: ResultAction[] = [
-        { key: "confirm", label: "Confirm", targetType: "run", targetId: params.runId },
-        { key: "cancel", label: "Cancel", targetType: "run", targetId: params.runId },
+        {
+          key: "confirm",
+          label: "Confirm",
+          targetType: "run",
+          targetId: params.runId,
+        },
+        {
+          key: "cancel",
+          label: "Cancel",
+          targetType: "run",
+          targetId: params.runId,
+        },
       ];
-      await mutate("spectraRuns:updateStatus", { actorClerkId: params.actorClerkId, runId: params.runId, executionId: params.executionId, status: "awaiting_confirmation", phase: "approval", approvalReasons: policy.reasons, decision: plan.decision, planIntent: plan.intent, finalSummary: plan.finalResponse, resultTitle: "Confirmation required", resultSummary: policy.reasons.join(" · "), resultVariant: "operation", resultActions: actions, provenance, modelUsed: modelResult.model, providerUsed: modelResult.provider, usage: modelResult.usage });
-      await saveAssistantMessage({ actorClerkId: params.actorClerkId, threadId: params.threadId, runId: params.runId, executionId: params.executionId, content: plan.finalResponse, decision: plan.decision, awaitingConfirmation: true, model: modelResult.model, provider: modelResult.provider, usage: modelResult.usage });
+      await mutate("spectraRuns:updateStatus", {
+        actorClerkId: params.actorClerkId,
+        runId: params.runId,
+        executionId: params.executionId,
+        status: "awaiting_confirmation",
+        phase: "approval",
+        approvalReasons: policy.reasons,
+        decision: plan.decision,
+        planIntent: plan.intent,
+        finalSummary: plan.finalResponse,
+        resultTitle: "Confirmation required",
+        resultSummary: policy.reasons.join(" · "),
+        resultVariant: "operation",
+        resultActions: actions,
+        provenance,
+        modelUsed: modelResult.model,
+        providerUsed: modelResult.provider,
+        usage: modelResult.usage,
+      });
+      await saveAssistantMessage({
+        actorClerkId: params.actorClerkId,
+        threadId: params.threadId,
+        runId: params.runId,
+        executionId: params.executionId,
+        content: plan.finalResponse,
+        decision: plan.decision,
+        awaitingConfirmation: true,
+        model: modelResult.model,
+        provider: modelResult.provider,
+        usage: modelResult.usage,
+      });
       card = await latestCard(params.actorClerkId, params.runId);
-      publish({ type: "confirmation_required", runId: params.runId, reasons: policy.reasons, card: streamCard(card) });
+      publish({ type: "text_replace", runId: params.runId, content: plan.finalResponse });
+      publish({
+        type: "confirmation_required",
+        runId: params.runId,
+        reasons: policy.reasons,
+        card: streamCard(card),
+      });
       await flushEvents();
       return;
     }
 
-    await mutate("spectraRuns:updateStatus", { actorClerkId: params.actorClerkId, runId: params.runId, executionId: params.executionId, status: "running", phase: "applying", resultTitle: "Applying changes", resultSummary: "Updating the workspace", resultActions: [] });
+    await mutate("spectraRuns:updateStatus", {
+      actorClerkId: params.actorClerkId,
+      runId: params.runId,
+      executionId: params.executionId,
+      status: "running",
+      phase: "applying",
+      resultTitle: "Applying changes",
+      resultSummary: "Updating the workspace",
+      resultActions: [],
+    });
     const allAffected: Array<{ type: string; id: string }> = [];
+    const operationOutcomes: Array<{
+      operation: ModelOperation;
+      affected: Array<{ type: string; id: string }>;
+    }> = [];
+    const createdArtifactIds = new Map<number, string>();
     for (let index = 0; index < plan.operations.length; index += 1) {
-      const operation = plan.operations[index]!;
+      const operation = resolveCreatedArtifactDependencies(plan.operations[index]!, createdArtifactIds);
       const operationId = stored.operationIds[index]!;
       if (operation.type === "artifact.update") {
-        if (!earlyUpdatedArtifactIds.has(operation.input.artifactId)) await mutate("spectraArtifacts:stageAiPatch", { actorClerkId: params.actorClerkId, artifactId: operation.input.artifactId, runId: params.runId, executionId: params.executionId, title: operation.input.title ?? undefined, summary: operation.input.summary ?? undefined, content: operation.input.content ?? undefined });
-        publish({ type: "artifact_patch", runId: params.runId, operationId, artifactId: operation.input.artifactId, patch: { title: operation.input.title, summary: operation.input.summary, content: operation.input.content } });
+        const changedPaths =
+          operation.input.contentPatch?.changes.map((change) => change.path) ??
+          (operation.input.content !== null ? ["/"] : []);
+        if (!enrichedPreviewArtifactIds.has(operation.input.artifactId))
+          await mutate("spectraArtifacts:stageAiPatch", {
+            actorClerkId: params.actorClerkId,
+            artifactId: operation.input.artifactId,
+            runId: params.runId,
+            executionId: params.executionId,
+            title: operation.input.title ?? undefined,
+            summary: operation.input.summary ?? undefined,
+            content: operation.input.content ?? undefined,
+            tags: operation.input.tags ?? undefined,
+            changedPaths,
+          });
+        publish({
+          type: "artifact_patch",
+          runId: params.runId,
+          operationId,
+          artifactId: operation.input.artifactId,
+          patch: {
+            title: operation.input.title,
+            summary: operation.input.summary,
+            content: operation.input.content,
+            contentPatch: operation.input.contentPatch,
+            tags: operation.input.tags,
+            changedPaths,
+          },
+        });
       }
-      for (const phase of operationPhases(operation, typeof workspaceTitle === "string" ? workspaceTitle : undefined)) {
-        await mutate("spectraRuns:patchResultCard", { actorClerkId: params.actorClerkId, resultCardId: params.resultCardId, executionId: params.executionId, title: operationLabel(operation), summary: phase });
+      const phases = operationPhases(
+        operation,
+        typeof workspaceTitle === "string" ? workspaceTitle : undefined,
+      );
+      for (const phase of phases)
         publish({ type: "status", runId: params.runId, message: phase });
-      }
+      const lastPhase = phases.at(-1);
+      if (lastPhase)
+        await mutate("spectraRuns:patchResultCard", {
+          actorClerkId: params.actorClerkId,
+          resultCardId: params.resultCardId,
+          executionId: params.executionId,
+          title: operationLabel(operation),
+          summary: lastPhase,
+        });
       publish({ type: "operation_commit", runId: params.runId, operationId });
       try {
         commitStarted = true;
-        const affected = await executeOperation(params.actorClerkId, params.runId, operationId, operation, {
-          executionId: params.executionId,
-          surface: params.surface,
-          threadId: params.threadId,
-          workspaceId: params.workspaceId,
-          selectedArtifactIds: context.selectedArtifactIds,
-          attachmentNames: params.attachments?.map((attachment) => attachment.name),
-          contextSummary: context.selectedArtifactIds.length
-            ? `Based on ${context.selectedArtifactIds.length} selected artifact${context.selectedArtifactIds.length === 1 ? "" : "s"}${params.threadId ? " and a continued thread" : ""}`
-            : params.threadId ? "Based on a continued thread and visible focus" : params.artifactId ? "Based on the open artifact" : params.workspaceId ? "Based on workspace context" : "Based on global context",
-          pendingArtifactId: pendingArtifacts.get(operationId),
-          pendingWorkspaceId: earlyPendingWorkspaceByIndex.get(index),
-        });
+        const affected = await executeOperation(
+          params.actorClerkId,
+          params.runId,
+          operationId,
+          operation,
+          {
+            executionId: params.executionId,
+            surface: params.surface,
+            threadId: params.threadId,
+            workspaceId: params.workspaceId,
+            selectedArtifactIds: context.selectedArtifactIds,
+            attachmentNames: params.attachments?.map(
+              (attachment) => attachment.name,
+            ),
+            contextSummary: context.selectedArtifactIds.length
+              ? `Based on ${context.selectedArtifactIds.length} selected artifact${context.selectedArtifactIds.length === 1 ? "" : "s"}${params.threadId ? " and a continued thread" : ""}`
+              : params.threadId
+                ? "Based on a continued thread and visible focus"
+                : params.artifactId
+                  ? "Based on the open artifact"
+                  : params.workspaceId
+                    ? "Based on workspace context"
+                    : "Based on global context",
+            pendingArtifactId: pendingArtifacts.get(operationId),
+            pendingWorkspaceId: earlyPendingWorkspaceByIndex.get(index),
+          },
+        );
         allAffected.push(...affected);
-        publish({ type: "operation_result", runId: params.runId, operationId, affected });
+        if (operation.type === "artifact.create") {
+          const artifactId = affected.find((item) => item.type === "artifact")?.id;
+          if (artifactId) createdArtifactIds.set(index, artifactId);
+        }
+        operationOutcomes.push({ operation, affected });
+        publish({
+          type: "operation_result",
+          runId: params.runId,
+          operationId,
+          affected,
+        });
       } catch (error) {
         const pendingArtifactId = pendingArtifacts.get(operationId);
-        if (pendingArtifactId) await mutate("spectraArtifacts:markAiState", { actorClerkId: params.actorClerkId, artifactId: pendingArtifactId, runId: params.runId, executionId: params.executionId, state: "failed" }).catch(() => null);
-        if (operation.type === "artifact.update") await mutate("spectraArtifacts:markAiState", { actorClerkId: params.actorClerkId, artifactId: operation.input.artifactId, runId: params.runId, executionId: params.executionId, state: "failed" }).catch(() => null);
-        await mutate("spectraOperations:markFailed", { actorClerkId: params.actorClerkId, operationId, executionId: params.executionId, error: publicError(error) }).catch(() => null);
+        if (pendingArtifactId)
+          await mutate("spectraArtifacts:markAiState", {
+            actorClerkId: params.actorClerkId,
+            artifactId: pendingArtifactId,
+            runId: params.runId,
+            executionId: params.executionId,
+            state: "failed",
+          }).catch(() => null);
+        if (operation.type === "artifact.update")
+          await mutate("spectraArtifacts:markAiState", {
+            actorClerkId: params.actorClerkId,
+            artifactId: operation.input.artifactId,
+            runId: params.runId,
+            executionId: params.executionId,
+            state: "failed",
+          }).catch(() => null);
+        await mutate("spectraOperations:markFailed", {
+          actorClerkId: params.actorClerkId,
+          operationId,
+          executionId: params.executionId,
+          error: publicError(error),
+        }).catch(() => null);
         throw error;
       }
     }
+    publish({
+      type: "status",
+      runId: params.runId,
+      message: "Checking the saved result · Verifying the requested objects",
+    });
+    await verifyCommittedOutcomes(params.actorClerkId, operationOutcomes);
+    recordPhase("operations_committed_and_verified");
+    // A speculative shell is finalized by a matching artifact.create. If the
+    // final plan instead updates, answers, or creates a different object, it
+    // must not leak into the workspace. Finalized artifacts no longer have the
+    // pending AI state, so this only removes unused provisional shells.
+    if (provisionalCreation)
+      await mutate("spectraArtifacts:discardPendingForRun", {
+        actorClerkId: params.actorClerkId,
+        runId: params.runId,
+        executionId: params.executionId,
+      }).catch(() => null);
     const artifact = allAffected.find((item) => item.type === "artifact");
-    const actions: ResultAction[] = artifact ? [{ key: "open", label: "Open", targetType: "artifact", targetId: artifact.id }] : [];
-    await mutate("spectraRuns:updateStatus", { actorClerkId: params.actorClerkId, runId: params.runId, executionId: params.executionId, status: "completed", decision: plan.decision, planIntent: plan.intent, finalSummary: plan.finalResponse, resultTitle: "Done", resultSummary: plan.finalResponse, resultVariant: artifact ? "artifact" : "status", resultActions: actions, provenance, modelUsed: modelResult.model, providerUsed: modelResult.provider, usage: modelResult.usage });
-    await saveAssistantMessage({ actorClerkId: params.actorClerkId, threadId: params.threadId, runId: params.runId, executionId: params.executionId, content: plan.finalResponse, decision: plan.decision, affected: allAffected, model: modelResult.model, provider: modelResult.provider, usage: modelResult.usage });
+    const actions: ResultAction[] = artifact
+      ? [
+          {
+            key: "open",
+            label: "Open",
+            targetType: "artifact",
+            targetId: artifact.id,
+          },
+        ]
+      : [];
+    await Promise.all([
+      mutate("spectraRuns:updateStatus", {
+        actorClerkId: params.actorClerkId,
+        runId: params.runId,
+        executionId: params.executionId,
+        status: "completed",
+        decision: plan.decision,
+        planIntent: plan.intent,
+        finalSummary: plan.finalResponse,
+        resultTitle: "Done",
+        resultSummary: plan.finalResponse,
+        resultVariant: artifact ? "artifact" : "status",
+        resultActions: actions,
+        provenance,
+        modelUsed: modelResult.model,
+        providerUsed: modelResult.provider,
+        usage: modelResult.usage,
+      }),
+      saveAssistantMessage({
+        actorClerkId: params.actorClerkId,
+        threadId: params.threadId,
+        runId: params.runId,
+        executionId: params.executionId,
+        content: plan.finalResponse,
+        decision: plan.decision,
+        affected: allAffected,
+        model: modelResult.model,
+        provider: modelResult.provider,
+        usage: modelResult.usage,
+      }),
+    ]);
     card = await latestCard(params.actorClerkId, params.runId);
-    publish({ type: "final", runId: params.runId, summary: plan.finalResponse, card: streamCard(card) });
+    recordPhase("final_state_persisted");
+    publish({ type: "text_replace", runId: params.runId, content: plan.finalResponse });
+    publish({
+      type: "final",
+      runId: params.runId,
+      summary: plan.finalResponse,
+      card: streamCard(card),
+    });
     await flushEvents();
   } catch (error) {
-    if ((error instanceof DOMException && error.name === "AbortError") || executionSignal.aborted) {
-      await mutate("spectraOperations:cancelPending", { actorClerkId: params.actorClerkId, runId: params.runId, executionId: params.executionId }).catch(() => null);
-      await mutate("spectraArtifacts:discardPendingForRun", { actorClerkId: params.actorClerkId, runId: params.runId, executionId: params.executionId }).catch(() => null);
-      await mutate("spectraArtifacts:settleStagedForRun", { actorClerkId: params.actorClerkId, runId: params.runId, executionId: params.executionId, outcome: "clear" }).catch(() => null);
-      await mutate("spectraWorkspaces:settleForRun", { actorClerkId: params.actorClerkId, runId: params.runId, executionId: params.executionId, outcome: "clear" }).catch(() => null);
+    console.error("[spectra.run.failure]", {
+      runId: params.runId,
+      executionId: params.executionId,
+      commitStarted,
+      publicTextLength: publicText.length,
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+    // A streamed operation preview may still be writing when final plan parsing
+    // or validation fails. Let those writes finish before cleanup so a late
+    // stage cannot resurrect an `updating` artifact after the run is terminal.
+    await Promise.allSettled(progressiveWrites);
+    const stoppedExternally = await query<
+      { actorClerkId: string; runId: string },
+      RunDetail
+    >("spectraRuns:get", {
+      actorClerkId: params.actorClerkId,
+      runId: params.runId,
+    })
+      .then((detail) => detail.run.status === "cancelled")
+      .catch(() => false);
+    if (
+      (error instanceof DOMException && error.name === "AbortError") ||
+      executionSignal.aborted ||
+      stoppedExternally
+    ) {
+      await mutate("spectraOperations:cancelPending", {
+        actorClerkId: params.actorClerkId,
+        runId: params.runId,
+        executionId: params.executionId,
+      }).catch(() => null);
+      await mutate("spectraArtifacts:discardPendingForRun", {
+        actorClerkId: params.actorClerkId,
+        runId: params.runId,
+        executionId: params.executionId,
+      }).catch(() => null);
+      await mutate("spectraArtifacts:settleStagedForRun", {
+        actorClerkId: params.actorClerkId,
+        runId: params.runId,
+        executionId: params.executionId,
+        outcome: "clear",
+      }).catch(() => null);
+      await mutate("spectraWorkspaces:settleForRun", {
+        actorClerkId: params.actorClerkId,
+        runId: params.runId,
+        executionId: params.executionId,
+        outcome: "clear",
+      }).catch(() => null);
       await partialWrite;
-      await mutate("spectraRuns:updateStatus", { actorClerkId: params.actorClerkId, runId: params.runId, executionId: params.executionId, status: "cancelled", resultTitle: "Stopped", resultSummary: publicText.trim() ? "Stopped by you. The partial response is saved in this thread." : "Stopped before the response began. You can retry when ready.", resultActions: [{ key: "retry", label: "Retry", targetType: "run", targetId: params.runId }] }).catch(() => null);
-      publish({ type: "stopped", runId: params.runId, partial: Boolean(publicText.trim()) });
+      await mutate("spectraRuns:updateStatus", {
+        actorClerkId: params.actorClerkId,
+        runId: params.runId,
+        executionId: params.executionId,
+        status: "cancelled",
+        resultTitle: "Stopped",
+        resultSummary: publicText.trim()
+          ? "Stopped by you. The partial response is saved in this thread."
+          : "Stopped before the response began. You can retry when ready.",
+        resultActions: [
+          {
+            key: "retry",
+            label: "Retry",
+            targetType: "run",
+            targetId: params.runId,
+          },
+        ],
+      }).catch(() => null);
+      publish({
+        type: "stopped",
+        runId: params.runId,
+        partial: Boolean(publicText.trim()),
+      });
       await flushEvents();
       return;
     }
     const message = publicError(error);
-    await mutate("spectraOperations:cancelPending", { actorClerkId: params.actorClerkId, runId: params.runId, executionId: params.executionId }).catch(() => null);
-    await mutate("spectraArtifacts:failPendingForRun", { actorClerkId: params.actorClerkId, runId: params.runId, executionId: params.executionId }).catch(() => null);
-    await mutate("spectraArtifacts:settleStagedForRun", { actorClerkId: params.actorClerkId, runId: params.runId, executionId: params.executionId, outcome: "failed" }).catch(() => null);
-    await mutate("spectraWorkspaces:settleForRun", { actorClerkId: params.actorClerkId, runId: params.runId, executionId: params.executionId, outcome: "failed" }).catch(() => null);
-    const resultSummary = commitStarted ? `${message} Review the affected objects before submitting a follow-up command.` : message;
-    await mutate("spectraRuns:updateStatus", { actorClerkId: params.actorClerkId, runId: params.runId, executionId: params.executionId, status: "failed", error: message, resultTitle: "Run failed", resultSummary, resultVariant: "error", resultActions: commitStarted ? [] : [{ key: "retry", label: "Retry", targetType: "run", targetId: params.runId }] }).catch(() => null);
-    card = await latestCard(params.actorClerkId, params.runId).catch(() => card);
-    publish({ type: "error", runId: params.runId, message, card: card ? streamCard(card) : undefined });
+    await mutate("spectraOperations:cancelPending", {
+      actorClerkId: params.actorClerkId,
+      runId: params.runId,
+      executionId: params.executionId,
+    }).catch(() => null);
+    await mutate("spectraArtifacts:failPendingForRun", {
+      actorClerkId: params.actorClerkId,
+      runId: params.runId,
+      executionId: params.executionId,
+    }).catch(() => null);
+    await mutate("spectraArtifacts:settleStagedForRun", {
+      actorClerkId: params.actorClerkId,
+      runId: params.runId,
+      executionId: params.executionId,
+      outcome: "failed",
+    }).catch(() => null);
+    await mutate("spectraWorkspaces:settleForRun", {
+      actorClerkId: params.actorClerkId,
+      runId: params.runId,
+      executionId: params.executionId,
+      outcome: "failed",
+    }).catch(() => null);
+    const resultSummary = commitStarted
+      ? `${message} Review the affected objects before submitting a follow-up command.`
+      : message;
+    await mutate("spectraRuns:updateStatus", {
+      actorClerkId: params.actorClerkId,
+      runId: params.runId,
+      executionId: params.executionId,
+      status: "failed",
+      error: message,
+      resultTitle: "Run failed",
+      resultSummary,
+      resultVariant: "error",
+      resultActions: commitStarted
+        ? []
+        : [
+            {
+              key: "retry",
+              label: "Retry",
+              targetType: "run",
+              targetId: params.runId,
+            },
+          ],
+    }).catch(() => null);
+    card = await latestCard(params.actorClerkId, params.runId).catch(
+      () => card,
+    );
+    publish({
+      type: "error",
+      runId: params.runId,
+      message,
+      card: card ? streamCard(card) : undefined,
+    });
     await flushEvents();
   } finally {
     clearInterval(heartbeat);
@@ -1024,66 +7216,129 @@ async function runAttempt(params: { actorClerkId: string; runId: string; resultC
 }
 
 function surfaceFromRun(run: RunState): Surface {
-  if (run.sourceSurface === "artifact") return run.artifactId ? "artifact" : "artifacts";
+  if (run.sourceSurface === "artifact")
+    return run.artifactId ? "artifact" : "artifacts";
   return run.sourceSurface;
 }
 
 export async function POST(request: NextRequest) {
   const actor = await requireActor();
-  const body = await request.json() as Body;
+  const body = (await request.json()) as Body;
   const action = body.action ?? "run";
 
   if (action === "run") {
     const prompt = body.prompt?.trim();
     const surface = body.surface;
-    if (!prompt || prompt.length > 12_000) return new Response("Invalid prompt", { status: 400 });
-    if (!surface || !["chat", "workspace", "artifacts", "artifact"].includes(surface)) return new Response("Invalid surface", { status: 400 });
-	    const sourceSurface = surface === "artifacts" ? "artifact" : surface;
-	    let attachments: PreparedAttachment[];
-	    try { attachments = await prepareAttachments(body.attachments); }
-	    catch (error) { return new Response(publicError(error), { status: 400 }); }
-	    const placementWorkspaceId = await inferWorkspaceForRun(actor.clerkId, body);
-	    let created: { runId: string; resultCardId: string; threadId: string; executionId: string; created: boolean };
-	    try { created = await mutate<unknown & object, { runId: string; resultCardId: string; threadId: string; executionId: string; created: boolean }>("spectraRuns:beginRun", {
-	      actorClerkId: actor.clerkId, sourceSurface, userPrompt: prompt,
-	      submissionKey: body.submissionKey?.trim() || crypto.randomUUID(),
-	      threadId: body.threadId?.trim() || undefined, workspaceId: placementWorkspaceId,
-	      artifactId: body.artifactId, modelUsed: getSpectraModelId(),
-	      messageMetadata: { attachments: attachments.map(({ name, mimeType, size, handling }) => ({ name, mimeType, size, handling })) },
-	    }); } catch (error) { return new Response(publicError(error), { status: 409 }); }
-	    const threadId = created.threadId;
-	    if (!created.created) {
-	      const card = await latestCard(actor.clerkId, created.runId);
-	      return ndjson(async (emit) => { emit({ type: "run_created", runId: created.runId, card: streamCard(card) }); emit({ type: "thread_ready", runId: created.runId, threadId }); });
-	    }
-	    const executionController = new AbortController();
-	    const workerId = `next:${crypto.randomUUID()}`;
-	    activeRunControllers.set(created.runId, executionController);
-	    const task = async (emit: (event: unknown) => void) => {
-	      try { await runAttempt({
-	      actorClerkId: actor.clerkId,
-	      runId: created.runId,
-	      resultCardId: created.resultCardId,
-	      executionId: created.executionId,
-	      workerId,
-      prompt,
-      surface,
-      threadId,
-	      workspaceId: placementWorkspaceId,
-      artifactId: body.artifactId,
-      focusMode: body.focusMode,
-      selectedArtifactIds: body.selectedArtifactIds,
-      explicitContextObjects: body.explicitContextObjects,
-      currentView: body.currentView,
-      attachments,
-      signal: executionController.signal,
-    }, emit); } finally { if (activeRunControllers.get(created.runId) === executionController) activeRunControllers.delete(created.runId); }
-	    };
-	    const initialCard = await latestCard(actor.clerkId, created.runId);
-	    return launchRunTask(task, [
-	      { type: "run_created", runId: created.runId, card: streamCard(initialCard) },
-	      { type: "thread_ready", runId: created.runId, threadId },
-	    ]);
+    if (!prompt)
+      return new Response("Invalid prompt", { status: 400 });
+    if (
+      !surface ||
+      !["chat", "workspace", "artifacts", "artifact"].includes(surface)
+    )
+      return new Response("Invalid surface", { status: 400 });
+    const sourceSurface = surface === "artifacts" ? "artifact" : surface;
+    let attachments: PreparedAttachment[];
+    try {
+      attachments = await prepareAttachments(body.attachments);
+    } catch (error) {
+      return new Response(publicError(error), { status: 400 });
+    }
+    const placementWorkspaceId = await inferWorkspaceForRun(
+      actor.clerkId,
+      body,
+    );
+    let created: {
+      runId: string;
+      resultCardId: string;
+      threadId: string;
+      executionId: string;
+      created: boolean;
+    };
+    try {
+      created = await mutate<
+        unknown & object,
+        {
+          runId: string;
+          resultCardId: string;
+          threadId: string;
+          executionId: string;
+          created: boolean;
+        }
+      >("spectraRuns:beginRun", {
+        actorClerkId: actor.clerkId,
+        sourceSurface,
+        userPrompt: prompt,
+        submissionKey: body.submissionKey?.trim() || crypto.randomUUID(),
+        threadId: body.threadId?.trim() || undefined,
+        workspaceId: placementWorkspaceId,
+        artifactId: body.artifactId,
+        modelUsed: getSpectraModelId(),
+        messageMetadata: {
+          attachments: attachments.map(
+            ({ name, mimeType, size, handling }) => ({
+              name,
+              mimeType,
+              size,
+              handling,
+            }),
+          ),
+        },
+      });
+    } catch (error) {
+      return new Response(publicError(error), { status: 409 });
+    }
+    const threadId = created.threadId;
+    if (!created.created) {
+      const card = await latestCard(actor.clerkId, created.runId);
+      return ndjson(async (emit) => {
+        emit({
+          type: "run_created",
+          runId: created.runId,
+          card: streamCard(card),
+        });
+        emit({ type: "thread_ready", runId: created.runId, threadId });
+      });
+    }
+    const executionController = new AbortController();
+    const workerId = `next:${crypto.randomUUID()}`;
+    activeRunControllers.set(created.runId, executionController);
+    const task = async (emit: (event: unknown) => void) => {
+      try {
+        await runAttempt(
+          {
+            actorClerkId: actor.clerkId,
+            runId: created.runId,
+            resultCardId: created.resultCardId,
+            executionId: created.executionId,
+            workerId,
+            prompt,
+            surface,
+            threadId,
+            workspaceId: placementWorkspaceId,
+            artifactId: body.artifactId,
+            focusMode: body.focusMode,
+            selectedArtifactIds: body.selectedArtifactIds,
+            explicitContextObjects: body.explicitContextObjects,
+            currentView: body.currentView,
+            attachments,
+            signal: executionController.signal,
+          },
+          emit,
+        );
+      } finally {
+        if (activeRunControllers.get(created.runId) === executionController)
+          activeRunControllers.delete(created.runId);
+      }
+    };
+    const initialCard = await latestCard(actor.clerkId, created.runId);
+    return launchRunTask(task, [
+      {
+        type: "run_created",
+        runId: created.runId,
+        card: streamCard(initialCard),
+      },
+      { type: "thread_ready", runId: created.runId, threadId },
+    ]);
   }
 
   const runId = body.runId?.trim();
@@ -1095,128 +7350,512 @@ export async function POST(request: NextRequest) {
   let expectedExecutionId = body.executionId?.trim();
   if (!expectedExecutionId) {
     try {
-      const detail = await query<unknown & object, RunDetail>("spectraRuns:get", { actorClerkId: actor.clerkId, runId });
+      const detail = await query<unknown & object, RunDetail>(
+        "spectraRuns:get",
+        { actorClerkId: actor.clerkId, runId },
+      );
       expectedExecutionId = detail.run.executionId;
     } catch {
       return new Response("Run not found", { status: 404 });
     }
   }
-  if (!expectedExecutionId) return new Response("This run has no active execution.", { status: 409 });
+  if (!expectedExecutionId)
+    return new Response("This run has no active execution.", { status: 409 });
 
   if (action === "stop") {
     let stopped: { alreadyStopped: boolean; executionId?: string };
-    try { stopped = await mutate<unknown & object, { alreadyStopped: boolean; executionId?: string }>("spectraRuns:stopRun", { actorClerkId: actor.clerkId, runId, executionId: expectedExecutionId }); }
-    catch (error) { return new Response(publicError(error), { status: 409 }); }
+    try {
+      stopped = await mutate<
+        unknown & object,
+        { alreadyStopped: boolean; executionId?: string }
+      >("spectraRuns:stopRun", {
+        actorClerkId: actor.clerkId,
+        runId,
+        executionId: expectedExecutionId,
+      });
+    } catch (error) {
+      return new Response(publicError(error), { status: 409 });
+    }
     const controller = activeRunControllers.get(runId);
     controller?.abort();
-    await mutate("spectraArtifacts:discardPendingForRun", { actorClerkId: actor.clerkId, runId, executionId: stopped.executionId }).catch(() => null);
-    await mutate("spectraArtifacts:settleStagedForRun", { actorClerkId: actor.clerkId, runId, executionId: stopped.executionId, outcome: "clear" }).catch(() => null);
-    await mutate("spectraWorkspaces:settleForRun", { actorClerkId: actor.clerkId, runId, executionId: stopped.executionId, outcome: "clear" }).catch(() => null);
+    await mutate("spectraArtifacts:discardPendingForRun", {
+      actorClerkId: actor.clerkId,
+      runId,
+      executionId: stopped.executionId,
+    }).catch(() => null);
+    await mutate("spectraArtifacts:settleStagedForRun", {
+      actorClerkId: actor.clerkId,
+      runId,
+      executionId: stopped.executionId,
+      outcome: "clear",
+    }).catch(() => null);
+    await mutate("spectraWorkspaces:settleForRun", {
+      actorClerkId: actor.clerkId,
+      runId,
+      executionId: stopped.executionId,
+      outcome: "clear",
+    }).catch(() => null);
     return new Response(null, { status: 204 });
   }
 
   if (action === "retry") {
     const retryKey = body.submissionKey?.trim() || crypto.randomUUID();
-    const current = await query<{ actorClerkId: string; runId: string }, RunDetail>("spectraRuns:get", { actorClerkId: actor.clerkId, runId });
-    if (current.run.executionId !== expectedExecutionId) return new Response("This run attempt is no longer current. Refresh it and try again.", { status: 409 });
-    await mutate("spectraOperations:cancelPending", { actorClerkId: actor.clerkId, runId, executionId: expectedExecutionId }).catch(() => null);
-    await mutate("spectraArtifacts:discardPendingForRun", { actorClerkId: actor.clerkId, runId, executionId: expectedExecutionId }).catch(() => null);
-    await mutate("spectraArtifacts:settleStagedForRun", { actorClerkId: actor.clerkId, runId, executionId: expectedExecutionId, outcome: "clear" }).catch(() => null);
-    await mutate("spectraWorkspaces:settleForRun", { actorClerkId: actor.clerkId, runId, executionId: expectedExecutionId, outcome: "clear" }).catch(() => null);
+    const current = await query<
+      { actorClerkId: string; runId: string },
+      RunDetail
+    >("spectraRuns:get", { actorClerkId: actor.clerkId, runId });
+    if (current.run.executionId !== expectedExecutionId)
+      return new Response(
+        "This run attempt is no longer current. Refresh it and try again.",
+        { status: 409 },
+      );
+    await mutate("spectraOperations:cancelPending", {
+      actorClerkId: actor.clerkId,
+      runId,
+      executionId: expectedExecutionId,
+    }).catch(() => null);
+    await mutate("spectraArtifacts:discardPendingForRun", {
+      actorClerkId: actor.clerkId,
+      runId,
+      executionId: expectedExecutionId,
+    }).catch(() => null);
+    await mutate("spectraArtifacts:settleStagedForRun", {
+      actorClerkId: actor.clerkId,
+      runId,
+      executionId: expectedExecutionId,
+      outcome: "clear",
+    }).catch(() => null);
+    await mutate("spectraWorkspaces:settleForRun", {
+      actorClerkId: actor.clerkId,
+      runId,
+      executionId: expectedExecutionId,
+      outcome: "clear",
+    }).catch(() => null);
     let reset: RetryReset;
-    try { reset = await mutate<unknown & object, RetryReset>("spectraRuns:resetForRetry", { actorClerkId: actor.clerkId, runId, executionId: expectedExecutionId, retryKey }); }
-    catch (error) { return new Response(publicError(error), { status: 409 }); }
-    if (!reset.resultCardId) return new Response("Result card not found", { status: 409 });
+    try {
+      reset = await mutate<unknown & object, RetryReset>(
+        "spectraRuns:resetForRetry",
+        {
+          actorClerkId: actor.clerkId,
+          runId,
+          executionId: expectedExecutionId,
+          retryKey,
+        },
+      );
+    } catch (error) {
+      return new Response(publicError(error), { status: 409 });
+    }
+    if (!reset.resultCardId)
+      return new Response("Result card not found", { status: 409 });
     if (!reset.created) {
       const card = await latestCard(actor.clerkId, runId);
-      return ndjson(async (emit) => emit({ type: "run_created", runId, card: streamCard(card) }));
+      return ndjson(async (emit) =>
+        emit({ type: "run_created", runId, card: streamCard(card) }),
+      );
     }
-    const run: RunState = { status: "queued", sourceSurface: reset.sourceSurface, workspaceId: reset.workspaceId, artifactId: reset.artifactId, userPrompt: reset.prompt };
-    const state = await query<{ actorClerkId: string; runId: string }, RunDetail>("spectraRuns:get", { actorClerkId: actor.clerkId, runId });
+    const run: RunState = {
+      status: "queued",
+      sourceSurface: reset.sourceSurface,
+      workspaceId: reset.workspaceId,
+      artifactId: reset.artifactId,
+      userPrompt: reset.prompt,
+    };
+    const state = await query<
+      { actorClerkId: string; runId: string },
+      RunDetail
+    >("spectraRuns:get", { actorClerkId: actor.clerkId, runId });
     const executionController = new AbortController();
     const workerId = `next:${crypto.randomUUID()}`;
     activeRunControllers.set(runId, executionController);
     const task = async (emit: (event: unknown) => void) => {
-      try { await runAttempt({ actorClerkId: actor.clerkId, runId, resultCardId: reset.resultCardId!, executionId: reset.executionId, workerId, prompt: reset.prompt, surface: surfaceFromRun(run), threadId: state.run.threadId, workspaceId: reset.workspaceId, artifactId: reset.artifactId, focusMode: reset.contextSnapshot?.focusMode, selectedArtifactIds: reset.contextSnapshot?.selectedObjectIds, explicitContextObjects: reset.contextSnapshot?.explicitContextObjects, currentView: reset.contextSnapshot?.currentView, attachments: [], signal: executionController.signal }, emit); }
-      finally { if (activeRunControllers.get(runId) === executionController) activeRunControllers.delete(runId); }
+      try {
+        await runAttempt(
+          {
+            actorClerkId: actor.clerkId,
+            runId,
+            resultCardId: reset.resultCardId!,
+            executionId: reset.executionId,
+            workerId,
+            prompt: reset.prompt,
+            surface: surfaceFromRun(run),
+            threadId: state.run.threadId,
+            workspaceId: reset.workspaceId,
+            artifactId: reset.artifactId,
+            focusMode: reset.contextSnapshot?.focusMode,
+            selectedArtifactIds: reset.contextSnapshot?.selectedObjectIds,
+            explicitContextObjects:
+              reset.contextSnapshot?.explicitContextObjects,
+            currentView: reset.contextSnapshot?.currentView,
+            attachments: [],
+            signal: executionController.signal,
+          },
+          emit,
+        );
+      } finally {
+        if (activeRunControllers.get(runId) === executionController)
+          activeRunControllers.delete(runId);
+      }
     };
     const initialCard = await latestCard(actor.clerkId, runId);
-    return launchRunTask(task, [{ type: "run_created", runId, card: streamCard(initialCard) }, { type: "thread_ready", runId, threadId: state.run.threadId }]);
+    return launchRunTask(task, [
+      { type: "run_created", runId, card: streamCard(initialCard) },
+      { type: "thread_ready", runId, threadId: state.run.threadId },
+    ]);
   }
 
   if (action === "cancel") {
-    const state = await query<{ actorClerkId: string; runId: string }, RunDetail>("spectraRuns:get", { actorClerkId: actor.clerkId, runId });
-    if (!state.run.executionId) return new Response("This older approval cannot be resumed safely. Start a new thread instead.", { status: 409 });
-    if (state.run.status !== "awaiting_confirmation" && state.run.status !== "cancelled") return new Response("This approval was already handled in another view.", { status: 409 });
+    const state = await query<
+      { actorClerkId: string; runId: string },
+      RunDetail
+    >("spectraRuns:get", { actorClerkId: actor.clerkId, runId });
+    if (!state.run.executionId)
+      return new Response(
+        "This older approval cannot be resumed safely. Start a new thread instead.",
+        { status: 409 },
+      );
+    if (
+      state.run.status !== "awaiting_confirmation" &&
+      state.run.status !== "cancelled"
+    )
+      return new Response(
+        "This approval was already handled in another view.",
+        { status: 409 },
+      );
     let rejection: { alreadyRejected: boolean };
-    try { rejection = await mutate<unknown & object, { alreadyRejected: boolean }>("spectraRuns:rejectConfirmation", { actorClerkId: actor.clerkId, runId, executionId: state.run.executionId }); }
-    catch (error) { return new Response(publicError(error), { status: 409 }); }
-    await mutate("spectraArtifacts:discardPendingForRun", { actorClerkId: actor.clerkId, runId, executionId: state.run.executionId }).catch(() => null);
-    await mutate("spectraArtifacts:settleStagedForRun", { actorClerkId: actor.clerkId, runId, executionId: state.run.executionId, outcome: "clear" }).catch(() => null);
-    await mutate("spectraWorkspaces:settleForRun", { actorClerkId: actor.clerkId, runId, executionId: state.run.executionId, outcome: "clear" }).catch(() => null);
-    await saveAssistantMessage({ actorClerkId: actor.clerkId, threadId: state.run.threadId, runId, executionId: state.run.executionId, content: "No proposed changes were applied.", decision: state.run.decision, awaitingConfirmation: false });
-    if (!rejection.alreadyRejected && state.run.executionId) await mutate("spectraRuns:appendEvent", { actorClerkId: actor.clerkId, runId, executionId: state.run.executionId, type: "approval_rejected", payload: { type: "approval_rejected", runId } });
+    try {
+      rejection = await mutate<unknown & object, { alreadyRejected: boolean }>(
+        "spectraRuns:rejectConfirmation",
+        {
+          actorClerkId: actor.clerkId,
+          runId,
+          executionId: state.run.executionId,
+        },
+      );
+    } catch (error) {
+      return new Response(publicError(error), { status: 409 });
+    }
+    await mutate("spectraArtifacts:discardPendingForRun", {
+      actorClerkId: actor.clerkId,
+      runId,
+      executionId: state.run.executionId,
+    }).catch(() => null);
+    await mutate("spectraArtifacts:settleStagedForRun", {
+      actorClerkId: actor.clerkId,
+      runId,
+      executionId: state.run.executionId,
+      outcome: "clear",
+    }).catch(() => null);
+    await mutate("spectraWorkspaces:settleForRun", {
+      actorClerkId: actor.clerkId,
+      runId,
+      executionId: state.run.executionId,
+      outcome: "clear",
+    }).catch(() => null);
+    await saveAssistantMessage({
+      actorClerkId: actor.clerkId,
+      threadId: state.run.threadId,
+      runId,
+      executionId: state.run.executionId,
+      content: "No proposed changes were applied.",
+      decision: state.run.decision,
+      awaitingConfirmation: false,
+    });
+    if (!rejection.alreadyRejected && state.run.executionId)
+      await mutate("spectraRuns:appendEvent", {
+        actorClerkId: actor.clerkId,
+        runId,
+        executionId: state.run.executionId,
+        type: "approval_rejected",
+        payload: { type: "approval_rejected", runId },
+      });
     const card = await latestCard(actor.clerkId, runId);
-    return ndjson(async (emit) => emit({ type: "final", runId, summary: "No proposed changes were applied.", card: streamCard(card) }));
+    return ndjson(async (emit) =>
+      emit({
+        type: "final",
+        runId,
+        summary: "No proposed changes were applied.",
+        card: streamCard(card),
+      }),
+    );
+  }
+
+  if (action === "revise") {
+    const revision = body.revision?.trim();
+    if (!revision) return new Response("Describe what Spectra should revise", { status: 400 });
+    const state = await query<{ actorClerkId: string; runId: string }, RunDetail>("spectraRuns:get", { actorClerkId: actor.clerkId, runId });
+    if (!state.run.executionId) return new Response("This older approval cannot be revised safely. Start a new thread instead.", { status: 409 });
+    try {
+      await mutate("spectraRuns:reviseConfirmation", { actorClerkId: actor.clerkId, runId, executionId: state.run.executionId, revision });
+    } catch (error) {
+      return new Response(publicError(error), { status: 409 });
+    }
+    await Promise.all([
+      mutate("spectraArtifacts:discardPendingForRun", { actorClerkId: actor.clerkId, runId, executionId: state.run.executionId }).catch(() => null),
+      mutate("spectraArtifacts:settleStagedForRun", { actorClerkId: actor.clerkId, runId, executionId: state.run.executionId, outcome: "clear" }).catch(() => null),
+      mutate("spectraWorkspaces:settleForRun", { actorClerkId: actor.clerkId, runId, executionId: state.run.executionId, outcome: "clear" }).catch(() => null),
+    ]);
+    await saveAssistantMessage({
+      actorClerkId: actor.clerkId,
+      threadId: state.run.threadId,
+      runId,
+      executionId: state.run.executionId,
+      content: `I have returned that proposal for revision: ${revision}`,
+      decision: state.run.decision,
+      awaitingConfirmation: false,
+    });
+    const card = await latestCard(actor.clerkId, runId);
+    return ndjson(async (emit) => emit({ type: "final", runId, summary: "Proposal returned for revision.", card: streamCard(card) }));
   }
 
   if (action === "confirm") {
-    const state = await query<{ actorClerkId: string; runId: string }, RunDetail>("spectraRuns:get", { actorClerkId: actor.clerkId, runId });
+    const state = await query<
+      { actorClerkId: string; runId: string },
+      RunDetail
+    >("spectraRuns:get", { actorClerkId: actor.clerkId, runId });
     const approvalExecutionId = state.run.executionId;
-    if (!approvalExecutionId) return new Response("This older approval cannot be resumed safely. Start a new thread instead.", { status: 409 });
-    if (state.run.status !== "awaiting_confirmation") return new Response("Run is not awaiting confirmation", { status: 409 });
+    if (!approvalExecutionId)
+      return new Response(
+        "This older approval cannot be resumed safely. Start a new thread instead.",
+        { status: 409 },
+      );
+    if (state.run.status !== "awaiting_confirmation")
+      return new Response("Run is not awaiting confirmation", { status: 409 });
     const intent = requestIntentSchema.parse(state.run.planIntent);
-    const proposed = state.operations.filter((row) => row.status === "proposed" && (!row.executionId || row.executionId === state.run.executionId));
-    if (!proposed.some((row) => row.requiresConfirmation) || proposed.length === 0) return new Response("No confirmable operations", { status: 409 });
-    const operations = proposed.map((row) => parseModelOperation({ type: row.type, input: row.input }));
-    const contextBody = { workspaceId: state.run.workspaceId, artifactId: state.run.artifactId, threadId: state.run.threadId, focusMode: state.run.contextSnapshot?.focusMode, selectedArtifactIds: state.run.contextSnapshot?.selectedObjectIds, explicitContextObjects: state.run.contextSnapshot?.explicitContextObjects, currentView: state.run.contextSnapshot?.currentView };
-    const context = await buildContext(actor.clerkId, contextBody, state.run.userPrompt);
-    validatePlanAgainstIntent({ decision: "operate", intent, finalResponse: state.run.finalSummary ?? "Confirmed changes completed.", operations }, ownedReferences(context));
+    const proposed = state.operations.filter(
+      (row) =>
+        row.status === "proposed" &&
+        (!row.executionId || row.executionId === state.run.executionId),
+    );
+    if (
+      !proposed.some((row) => row.requiresConfirmation) ||
+      proposed.length === 0
+    )
+      return new Response("No confirmable operations", { status: 409 });
+    const operations = proposed.map((row) =>
+      parseModelOperation({ type: row.type, input: row.input }),
+    );
+    const contextBody = {
+      workspaceId: state.run.workspaceId,
+      artifactId: state.run.artifactId,
+      threadId: state.run.threadId,
+      focusMode: state.run.contextSnapshot?.focusMode,
+      selectedArtifactIds: state.run.contextSnapshot?.selectedObjectIds,
+      explicitContextObjects: state.run.contextSnapshot?.explicitContextObjects,
+      currentView: state.run.contextSnapshot?.currentView,
+    };
+    const context = await buildContext(
+      actor.clerkId,
+      contextBody,
+      state.run.userPrompt,
+    );
+    validatePlanAgainstIntent(
+      {
+        decision: "operate",
+        intent,
+        finalResponse: state.run.finalSummary ?? "Confirmed changes completed.",
+        operations,
+      },
+      ownedReferences(context),
+    );
     evaluatePlanPolicy(operations, { intent });
     return ndjson(async (emit) => {
       let commitStarted = false;
       try {
-        const claim = await mutate<unknown & object, { operationIds: string[] }>("spectraRuns:claimConfirmation", { actorClerkId: actor.clerkId, runId, executionId: state.run.executionId });
-        if (state.run.executionId) await mutate("spectraRuns:appendEvent", { actorClerkId: actor.clerkId, runId, executionId: state.run.executionId, type: "approval_accepted", payload: { type: "approval_accepted", runId } });
+        const claim = await mutate<
+          unknown & object,
+          { operationIds: string[] }
+        >("spectraRuns:claimConfirmation", {
+          actorClerkId: actor.clerkId,
+          runId,
+          executionId: state.run.executionId,
+        });
+        if (state.run.executionId)
+          await mutate("spectraRuns:appendEvent", {
+            actorClerkId: actor.clerkId,
+            runId,
+            executionId: state.run.executionId,
+            type: "approval_accepted",
+            payload: { type: "approval_accepted", runId },
+          });
         const allAffected: Array<{ type: string; id: string }> = [];
+        const createdArtifactIds = new Map<number, string>();
         for (let index = 0; index < operations.length; index += 1) {
-          const operation = operations[index]!;
+          const operation = resolveCreatedArtifactDependencies(operations[index]!, createdArtifactIds);
           const row = proposed[index]!;
-          if (!claim.operationIds.includes(row._id)) throw new Error("This approval was already handled in another view.");
-          for (const phase of operationPhases(operation, typeof context.currentWorkspace?.title === "string" ? context.currentWorkspace.title : undefined)) {
+          if (!claim.operationIds.includes(row._id))
+            throw new Error(
+              "This approval was already handled in another view.",
+            );
+          for (const phase of operationPhases(
+            operation,
+            typeof context.currentWorkspace?.title === "string"
+              ? context.currentWorkspace.title
+              : undefined,
+          )) {
             const event = { type: "status", runId, message: phase };
             emit(event);
-            if (state.run.executionId) await mutate("spectraRuns:appendEvent", { actorClerkId: actor.clerkId, runId, executionId: state.run.executionId, type: "status", payload: event });
+            if (state.run.executionId)
+              await mutate("spectraRuns:appendEvent", {
+                actorClerkId: actor.clerkId,
+                runId,
+                executionId: state.run.executionId,
+                type: "status",
+                payload: event,
+              });
           }
-          const commitEvent = { type: "operation_commit", runId, operationId: row._id };
+          const commitEvent = {
+            type: "operation_commit",
+            runId,
+            operationId: row._id,
+          };
           emit(commitEvent);
-          if (state.run.executionId) await mutate("spectraRuns:appendEvent", { actorClerkId: actor.clerkId, runId, executionId: state.run.executionId, type: "operation_commit", payload: commitEvent });
+          if (state.run.executionId)
+            await mutate("spectraRuns:appendEvent", {
+              actorClerkId: actor.clerkId,
+              runId,
+              executionId: state.run.executionId,
+              type: "operation_commit",
+              payload: commitEvent,
+            });
           commitStarted = true;
-          const affected = await executeOperation(actor.clerkId, runId, row._id, operation, { executionId: approvalExecutionId, surface: surfaceFromRun(state.run), threadId: state.run.threadId, workspaceId: state.run.workspaceId, selectedArtifactIds: context.selectedArtifactIds, contextSummary: context.selectedArtifactIds.length ? `Based on ${context.selectedArtifactIds.length} selected artifacts` : undefined, pendingArtifactId: row.pendingArtifactId, pendingWorkspaceId: row.pendingWorkspaceId, preclaimed: true });
+          const affected = await executeOperation(
+            actor.clerkId,
+            runId,
+            row._id,
+            operation,
+            {
+              executionId: approvalExecutionId,
+              surface: surfaceFromRun(state.run),
+              threadId: state.run.threadId,
+              workspaceId: state.run.workspaceId,
+              selectedArtifactIds: context.selectedArtifactIds,
+              contextSummary: context.selectedArtifactIds.length
+                ? `Based on ${context.selectedArtifactIds.length} selected artifacts`
+                : undefined,
+              pendingArtifactId: row.pendingArtifactId,
+              pendingWorkspaceId: row.pendingWorkspaceId,
+              preclaimed: true,
+            },
+          );
           allAffected.push(...affected);
-          const resultEvent = { type: "operation_result", runId, operationId: row._id, affected };
+          if (operation.type === "artifact.create") {
+            const artifactId = affected.find((item) => item.type === "artifact")?.id;
+            if (artifactId) createdArtifactIds.set(index, artifactId);
+          }
+          const resultEvent = {
+            type: "operation_result",
+            runId,
+            operationId: row._id,
+            affected,
+          };
           emit(resultEvent);
-          if (state.run.executionId) await mutate("spectraRuns:appendEvent", { actorClerkId: actor.clerkId, runId, executionId: state.run.executionId, type: "operation_result", payload: resultEvent });
+          if (state.run.executionId)
+            await mutate("spectraRuns:appendEvent", {
+              actorClerkId: actor.clerkId,
+              runId,
+              executionId: state.run.executionId,
+              type: "operation_result",
+              payload: resultEvent,
+            });
         }
-        const summary = state.run.finalSummary || "Confirmed changes completed.";
+        const summary =
+          state.run.finalSummary || "Confirmed changes completed.";
         const artifact = allAffected.find((item) => item.type === "artifact");
-        await mutate("spectraRuns:updateStatus", { actorClerkId: actor.clerkId, runId, executionId: state.run.executionId, status: "completed", finalSummary: summary, resultTitle: "Done", resultSummary: summary, resultVariant: artifact ? "artifact" : "status", resultActions: artifact ? [{ key: "open", label: "Open", targetType: "artifact", targetId: artifact.id }] : [] });
-        if (state.run.executionId) await mutate("spectraRuns:appendEvent", { actorClerkId: actor.clerkId, runId, executionId: state.run.executionId, type: "final", payload: { type: "final", runId, summary, card: streamCard(await latestCard(actor.clerkId, runId)) } });
-        await saveAssistantMessage({ actorClerkId: actor.clerkId, threadId: state.run.threadId, runId, executionId: state.run.executionId, content: summary, decision: state.run.decision, affected: allAffected });
+        await mutate("spectraRuns:updateStatus", {
+          actorClerkId: actor.clerkId,
+          runId,
+          executionId: state.run.executionId,
+          status: "completed",
+          finalSummary: summary,
+          resultTitle: "Done",
+          resultSummary: summary,
+          resultVariant: artifact ? "artifact" : "status",
+          resultActions: artifact
+            ? [
+                {
+                  key: "open",
+                  label: "Open",
+                  targetType: "artifact",
+                  targetId: artifact.id,
+                },
+              ]
+            : [],
+        });
+        if (state.run.executionId)
+          await mutate("spectraRuns:appendEvent", {
+            actorClerkId: actor.clerkId,
+            runId,
+            executionId: state.run.executionId,
+            type: "final",
+            payload: {
+              type: "final",
+              runId,
+              summary,
+              card: streamCard(await latestCard(actor.clerkId, runId)),
+            },
+          });
+        await saveAssistantMessage({
+          actorClerkId: actor.clerkId,
+          threadId: state.run.threadId,
+          runId,
+          executionId: state.run.executionId,
+          content: summary,
+          decision: state.run.decision,
+          affected: allAffected,
+        });
         const card = await latestCard(actor.clerkId, runId);
         emit({ type: "final", runId, summary, card: streamCard(card) });
       } catch (error) {
         const message = publicError(error);
         if (/already handled in another view/i.test(message)) {
-          const card = await latestCard(actor.clerkId, runId).catch(() => undefined);
-          emit({ type: "error", runId, message, card: card ? streamCard(card) : undefined });
+          const card = await latestCard(actor.clerkId, runId).catch(
+            () => undefined,
+          );
+          emit({
+            type: "error",
+            runId,
+            message,
+            card: card ? streamCard(card) : undefined,
+          });
           return;
         }
-        await mutate("spectraOperations:cancelPending", { actorClerkId: actor.clerkId, runId, executionId: state.run.executionId }).catch(() => null);
-        const resultSummary = commitStarted ? `${message} Review the affected objects before submitting a follow-up command.` : message;
-        await mutate("spectraRuns:updateStatus", { actorClerkId: actor.clerkId, runId, executionId: state.run.executionId, status: "failed", error: message, resultTitle: "Run failed", resultSummary, resultVariant: "error", resultActions: commitStarted ? [] : [{ key: "retry", label: "Retry", targetType: "run", targetId: runId }] }).catch(() => null);
-        const card = await latestCard(actor.clerkId, runId).catch(() => undefined);
-        emit({ type: "error", runId, message, card: card ? streamCard(card) : undefined });
+        await mutate("spectraOperations:cancelPending", {
+          actorClerkId: actor.clerkId,
+          runId,
+          executionId: state.run.executionId,
+        }).catch(() => null);
+        const resultSummary = commitStarted
+          ? `${message} Review the affected objects before submitting a follow-up command.`
+          : message;
+        await mutate("spectraRuns:updateStatus", {
+          actorClerkId: actor.clerkId,
+          runId,
+          executionId: state.run.executionId,
+          status: "failed",
+          error: message,
+          resultTitle: "Run failed",
+          resultSummary,
+          resultVariant: "error",
+          resultActions: commitStarted
+            ? []
+            : [
+                {
+                  key: "retry",
+                  label: "Retry",
+                  targetType: "run",
+                  targetId: runId,
+                },
+              ],
+        }).catch(() => null);
+        const card = await latestCard(actor.clerkId, runId).catch(
+          () => undefined,
+        );
+        emit({
+          type: "error",
+          runId,
+          message,
+          card: card ? streamCard(card) : undefined,
+        });
       }
     });
   }

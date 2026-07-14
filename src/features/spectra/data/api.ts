@@ -31,7 +31,7 @@ export type SpectraArtifact = {
   aiRunId?: string;
   aiProgress?: number;
   aiStateExpiresAt?: number;
-  aiPreview?: { title?: string; summary?: string; content?: unknown; startedAt: number };
+  aiPreview?: { title?: string; summary?: string; content?: unknown; tags?: string[]; changedPaths?: string[]; startedAt: number };
   createdAt: number;
   updatedAt: number;
   placements?: Array<{
@@ -248,6 +248,7 @@ export type SpectraRunTab = {
   updatedAt: number;
   run: SpectraRun;
   thread: SpectraThread;
+  card?: SpectraResultCard | null;
 };
 
 export type SpectraOverview = {
@@ -365,16 +366,31 @@ export async function getSpectraRunDetail(runId: string) {
   return readJson<SpectraRunDetail>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
 }
 
+const runTabsRequests = new Map<string, { at: number; promise: Promise<{ runTabs: SpectraRunTab[] }> }>();
+const runEventRequests = new Map<string, { at: number; promise: Promise<{ events: SpectraRunEvent[] }> }>();
+
 export async function getSpectraRunTabs(options: { includeHidden?: boolean; limit?: number } = {}) {
   const qs = new URLSearchParams({ action: "runTabs" });
   if (options.includeHidden) qs.set("includeHidden", "true");
   if (options.limit) qs.set("limit", String(options.limit));
-  return readJson<{ runTabs: SpectraRunTab[] }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+  const key = qs.toString();
+  const existing = runTabsRequests.get(key);
+  if (existing && Date.now() - existing.at < 1_100) return existing.promise;
+  const promise = fetch(`/api/spectra?${key}`, { cache: "no-store" }).then((response) => readJson<{ runTabs: SpectraRunTab[] }>(response));
+  runTabsRequests.set(key, { at: Date.now(), promise });
+  void promise.catch(() => { if (runTabsRequests.get(key)?.promise === promise) runTabsRequests.delete(key); });
+  return promise;
 }
 
 export async function getSpectraRunEvents(runId: string, after = 0) {
   const qs = new URLSearchParams({ action: "runEvents", runId, after: String(after) });
-  return readJson<{ events: SpectraRunEvent[] }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+  const key = qs.toString();
+  const existing = runEventRequests.get(key);
+  if (existing && Date.now() - existing.at < 850) return existing.promise;
+  const promise = fetch(`/api/spectra?${key}`, { cache: "no-store" }).then((response) => readJson<{ events: SpectraRunEvent[] }>(response));
+  runEventRequests.set(key, { at: Date.now(), promise });
+  void promise.catch(() => { if (runEventRequests.get(key)?.promise === promise) runEventRequests.delete(key); });
+  return promise;
 }
 
 export async function getSpectraArtifactVersions(artifactId: string, limit = 20) {

@@ -161,7 +161,10 @@ export async function ensureThreadWorkspacePlacement(
     sourceId: params.threadId,
     viewData: {
       compactSummary: params.summary,
-      pinned: params.pinned ?? true,
+      // Importance is an explicit user choice. Every creation path, including
+      // direct thread creation and run-backed creation, starts unpinned unless
+      // the caller deliberately promotes the item.
+      pinned: params.pinned ?? false,
       hidden: false,
     },
     layout: { view: "cards" },

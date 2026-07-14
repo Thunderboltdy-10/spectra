@@ -218,9 +218,12 @@ export const useSpectraContextStore = create<SpectraContextState>()(persist((set
   openObject: (object) => set((state) => {
     const key = spectraObjectKey(object);
     const movesOutOfTiles = object.type === "artifact" && object.presentation !== "tile" && state.tileArtifactIds.includes(object.id);
+    const isAuxiliaryPanel = object.presentation === "thread-panel" || object.presentation === "run-panel";
     return {
       openObjects: upsertOpenObject(state.openObjects, object),
-      activeOpenObjectKey: key,
+      // A side panel is additive working context. Opening it must not steal the
+      // primary rail/tab identity from the artifact or workspace beneath it.
+      activeOpenObjectKey: isAuxiliaryPanel ? state.activeOpenObjectKey : key,
       tileArtifactIds: movesOutOfTiles ? state.tileArtifactIds.filter((id) => id !== object.id) : state.tileArtifactIds,
       tileSizes: movesOutOfTiles ? Object.fromEntries(Object.entries(state.tileSizes).filter(([id]) => id !== object.id)) : state.tileSizes,
       tilesIsolated: movesOutOfTiles && state.tileArtifactIds.length === 1 ? false : state.tilesIsolated,

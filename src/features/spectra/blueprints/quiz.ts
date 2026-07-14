@@ -4,7 +4,7 @@ import type { ArtifactBlueprint } from "../core";
 const quizQuestionSchema = z.object({
     id: z.string().trim().min(1),
     prompt: z.string().trim().min(1),
-    type: z.enum(["multiple_choice", "short_answer"]),
+    type: z.enum(["multiple_choice", "short_answer", "true_false", "select_all", "ordering"]),
     options: z.array(z.string()).optional(),
     correctAnswer: z.string().trim().min(1),
     explanation: z.string().optional(),
@@ -14,10 +14,10 @@ const quizQuestionSchema = z.object({
     timeLimitSeconds: z.number().positive().optional(),
     feedback: z.string().optional(),
   }).passthrough().superRefine((question, ctx) => {
-    if (question.type !== "multiple_choice") return;
+    if (question.type === "short_answer") return;
     const options = (question.options ?? []).map((option) => option.trim()).filter(Boolean);
-    if (options.length < 2) ctx.addIssue({ code: "custom", path: ["options"], message: "Multiple-choice questions require at least two options" });
-    if (options.length > 0 && !options.includes(question.correctAnswer)) {
+    if (options.length < 2) ctx.addIssue({ code: "custom", path: ["options"], message: "Choice and ordering questions require at least two options" });
+    if ((question.type === "multiple_choice" || question.type === "true_false") && options.length > 0 && !options.includes(question.correctAnswer)) {
       ctx.addIssue({ code: "custom", path: ["correctAnswer"], message: "The correct answer must match one of the options" });
     }
   });

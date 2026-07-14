@@ -16,6 +16,15 @@ function EquationView({ node, selected, updateAttributes }: NodeViewProps) {
   </NodeViewWrapper>;
 }
 
+function InlineEquationView({ node, selected, updateAttributes }: NodeViewProps) {
+  const latex = typeof node.attrs.latex === "string" ? node.attrs.latex : "";
+  const html = useMemo(() => katex.renderToString(latex || "\\text{equation}", { throwOnError: false, displayMode: false, strict: "ignore" }), [latex]);
+  return <NodeViewWrapper as="span" className={`spectra-equation spectra-equation-inline ${selected ? "is-selected" : ""}`} data-inline-equation="true">
+    <span className="spectra-equation-preview" dangerouslySetInnerHTML={{ __html: html }} />
+    {selected ? <input value={latex} onChange={(event) => updateAttributes({ latex: event.target.value })} className="spectra-equation-source" aria-label="Inline LaTeX equation source" placeholder="e.g. 2n = 4" /> : null}
+  </NodeViewWrapper>;
+}
+
 export const Equation = Node.create({
   name: "equation",
   group: "block",
@@ -32,4 +41,16 @@ export const Equation = Node.create({
   parseHTML() { return [{ tag: "div[data-equation]" }, { tag: "span[data-equation]" }]; },
   renderHTML({ HTMLAttributes }) { return [HTMLAttributes.display === "inline" ? "span" : "div", mergeAttributes(HTMLAttributes, { "data-equation": "true" })]; },
   addNodeView() { return ReactNodeViewRenderer(EquationView); },
+});
+
+export const InlineEquation = Node.create({
+  name: "inlineEquation",
+  group: "inline",
+  inline: true,
+  atom: true,
+  selectable: true,
+  addAttributes() { return { latex: { default: "" } }; },
+  parseHTML() { return [{ tag: "span[data-inline-equation]" }]; },
+  renderHTML({ HTMLAttributes }) { return ["span", mergeAttributes(HTMLAttributes, { "data-inline-equation": "true" })]; },
+  addNodeView() { return ReactNodeViewRenderer(InlineEquationView); },
 });

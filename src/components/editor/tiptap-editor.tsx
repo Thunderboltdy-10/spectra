@@ -216,6 +216,8 @@ export function TiptapEditor({
       StarterKit.configure({
         heading: { levels: [1, 2, 3] },
         codeBlock: { languageClassPrefix: "language-" },
+        link: false,
+        underline: false,
       }),
       Placeholder.configure({
         placeholder,

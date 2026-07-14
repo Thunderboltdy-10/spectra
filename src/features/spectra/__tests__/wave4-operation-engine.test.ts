@@ -44,6 +44,18 @@ describe("Wave 4 controlled operation engine", () => {
     expect(plan.operations[0]?.type === "artifact.create" && plan.operations[0].input.content.cards).toHaveLength(6);
   });
 
+  it("allows one typed create when the model reports an inconsistent zero visible count", () => {
+    const intent = createIntent(0);
+    const plan = parseSpectraPlan({ decision: "operate", intent, finalResponse: "Created one deck.", operations: [deckOperation()] });
+    expect(() => validatePlanAgainstIntent(plan, references)).not.toThrow();
+  });
+
+  it("allows one repeated requested type when the model counted artifact types instead of objects", () => {
+    const intent = { ...createIntent(1), mode: "mixed" as const };
+    const plan = parseSpectraPlan({ decision: "operate", intent, finalResponse: "Created two requested decks.", operations: [deckOperation(), deckOperation("Second requested deck")] });
+    expect(() => validatePlanAgainstIntent(plan, references)).not.toThrow();
+  });
+
   it("requires confirmation for workspace creation and multiple visible artifacts", () => {
     const intent = { ...createIntent(2), mode: "mixed" as const };
     const plan = parseSpectraPlan({
@@ -60,6 +72,28 @@ describe("Wave 4 controlled operation engine", () => {
     expect(policy.requiresConfirmation).toBe(true);
     expect(policy.reasons.join(" ")).toMatch(/workspace/i);
     expect(policy.reasons.join(" ")).toMatch(/2 visible artifacts/i);
+  });
+
+  it("accepts an owned archive request but always requires confirmation", () => {
+    const intent = {
+      mode: "archive" as const,
+      requestedArtifactTypes: [] as Array<"document" | "flashcard_deck" | "quiz" | "planner_task">,
+      requestedVisibleArtifactCount: 0,
+      targetArtifactId: "artifact-real",
+      targetWorkspaceId: "workspace-real",
+    };
+    const plan = parseSpectraPlan({
+      decision: "operate",
+      intent,
+      finalResponse: "Archive the selected artifact after confirmation.",
+      operations: [
+        { type: "artifact.archive", input: { artifactId: "artifact-real" } },
+      ],
+    });
+    expect(() => validatePlanAgainstIntent(plan, references)).not.toThrow();
+    const policy = evaluatePlanPolicy(plan.operations, { intent });
+    expect(policy.requiresConfirmation).toBe(true);
+    expect(policy.reasons.join(" ")).toMatch(/archive/i);
   });
 
   it("rejects malformed quiz content before execution", () => {

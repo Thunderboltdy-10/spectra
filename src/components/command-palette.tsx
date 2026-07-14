@@ -66,6 +66,7 @@ function CommandPaletteHotkeys() {
   const { query, visualState } = useKBar((state) => ({
     visualState: state.visualState,
   }));
+  const returnFocusRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -73,6 +74,7 @@ function CommandPaletteHotkeys() {
       if (isModK) {
         event.preventDefault();
         event.stopPropagation();
+        if (visualState !== "showing" && visualState !== "animating-in") returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
         query.toggle();
         return;
       }
@@ -83,6 +85,7 @@ function CommandPaletteHotkeys() {
       ) {
         event.preventDefault();
         query.toggle();
+        requestAnimationFrame(() => returnFocusRef.current?.focus());
       }
     };
 

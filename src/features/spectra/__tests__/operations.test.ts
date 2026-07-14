@@ -5,6 +5,7 @@ import {
   parseOperationInput,
 } from "@/features/spectra/operations";
 import { parseSpectraPlan } from "@/features/spectra/operations/schema";
+import { validatePlanAgainstIntent } from "@/features/spectra/operations/validate-plan";
 
 describe("Spectra operation policy", () => {
   it("allows safe direct artifact creation", () => {
@@ -52,5 +53,63 @@ describe("Spectra operation policy", () => {
       operations: [],
     });
     expect(plan.intent.mode).toBe("answer");
+  });
+
+  it("accepts bounded content patches for narrow canonical edits", () => {
+    const plan = parseSpectraPlan({
+      decision: "operate",
+      intent: { mode: "update", requestedArtifactTypes: ["quiz"], requestedVisibleArtifactCount: 0, targetArtifactId: "quiz-1", targetWorkspaceId: null },
+      conversationTitle: "Update quiz timing",
+      conversationSummary: "A focused quiz patch.",
+      choices: null,
+      operations: [{
+        type: "artifact.update",
+        input: {
+          artifactId: "quiz-1",
+          blueprintKey: "quiz",
+          title: null,
+          summary: null,
+          content: null,
+          contentPatch: { changes: [{ path: "/questions/0/timeLimitSeconds", value: 72 }] },
+          tags: null,
+        },
+      }],
+      finalResponse: "Updated the quiz timing.",
+    });
+    expect(plan.operations[0]?.type).toBe("artifact.update");
+    if (plan.operations[0]?.type === "artifact.update") expect(plan.operations[0].input.contentPatch?.changes[0]?.path).toBe("/questions/0/timeLimitSeconds");
+  });
+
+  it("treats omitted unchanged update fields as null", () => {
+    const plan = parseSpectraPlan({
+      decision: "operate",
+      intent: { mode: "update", requestedArtifactTypes: ["flashcard_deck"], requestedVisibleArtifactCount: 0, targetArtifactId: "deck-1", targetWorkspaceId: null },
+      operations: [{
+        type: "artifact.update",
+        input: {
+          artifactId: "deck-1",
+          blueprintKey: "flashcard_deck",
+          contentPatch: { changes: [{ path: "/cards/1/hint", value: "Matrix cue" }] },
+        },
+      }],
+      finalResponse: "Updated the hint.",
+    });
+    expect(plan.operations[0]?.type).toBe("artifact.update");
+    if (plan.operations[0]?.type === "artifact.update") {
+      expect(plan.operations[0].input).toMatchObject({ title: null, summary: null, content: null, tags: null });
+    }
+  });
+
+  it("allows a later operation to depend on an artifact created earlier in the same task graph", () => {
+    const plan = parseSpectraPlan({
+      decision: "operate",
+      intent: { mode: "mixed", requestedArtifactTypes: ["document"], requestedVisibleArtifactCount: 1, targetArtifactId: null, targetWorkspaceId: "workspace-1" },
+      operations: [
+        { type: "artifact.create", input: { blueprintKey: "document", title: "Review", summary: null, content: { blocks: [{ id: "intro", type: "paragraph", text: "Review" }] }, tags: [], workspaceId: "workspace-1", placement: "context", pinned: false, exclusivePin: false } },
+        { type: "artifact.link", input: { sourceArtifactId: "@created:0", targetArtifactId: "source-1", relationType: "generated_from", label: null, explanation: null, workspaceId: "workspace-1" } },
+      ],
+      finalResponse: "Created and linked the review.",
+    });
+    expect(() => validatePlanAgainstIntent(plan, { artifactIds: new Set(["source-1"]), workspaceIds: new Set(["workspace-1"]), workspaceItems: new Map() })).not.toThrow();
   });
 });

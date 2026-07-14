@@ -11,11 +11,10 @@ import { useSpectraContext } from "../hooks/use-spectra-context";
 import { ConversationSurface } from "../components/conversation-surface";
 import { CommandBar } from "../components/command-bar";
 import { ContextFocusControl, GlobalSearch, type ComposerFocusMode } from "../components/context-controls";
-import { DurableRunTabs } from "../components/durable-run-tabs";
 import { ArtifactStudio, useArtifactStudioState } from "../components/artifact-studio";
 import { LiveThreadPanel } from "../components/live-thread-panel";
 import type { ArtifactPayload } from "../components/artifact-blueprint-sheet";
-import { getSpectraOverview, getSpectraResultCards, getSpectraThread, getSpectraThreads, postSpectra, type SpectraArtifact, type SpectraResultCard, type SpectraThread, type SpectraThreadDetail, type SpectraWorkspace } from "../data/api";
+import { getSpectraArtifact, getSpectraOverview, getSpectraResultCards, getSpectraThread, getSpectraThreads, postSpectra, type SpectraArtifact, type SpectraResultCard, type SpectraThread, type SpectraThreadDetail, type SpectraWorkspace } from "../data/api";
 
 export function ChatShell() {
   const router = useRouter();
@@ -35,6 +34,7 @@ export function ChatShell() {
   const [chatWorkspaceId, setChatWorkspaceId] = useState<string | null>(null);
   const [focusModeOverride, setFocusModeOverride] = useState<ComposerFocusMode | null>(null);
   const [welcome, setWelcome] = useState("Welcome back.");
+  const [welcomeKicker, setWelcomeKicker] = useState("A calm place to think clearly");
   const [studioPanelWidth, setStudioPanelWidth] = useState(700);
   const [liveThreadPanelWidth, setLiveThreadPanelWidth] = useState(560);
   const activeThreadRef = useRef<string | null>(requestedThreadId);
@@ -47,8 +47,10 @@ export function ChatShell() {
   const { composerThread, setComposerThread, explicitContextIds: selectedContextIds, contextArtifactIds, explicitContextObjects, clearExplicitContext, toggleExplicitArtifact, setVisibleArtifactIds, setActiveWorkspaceContext } = useSpectraContext(artifacts, workspaces);
 
   useEffect(() => {
-    const hour = new Date().getHours();
-    setWelcome(hour < 5 ? "Still thinking? Let’s make it lighter." : hour < 12 ? "Good morning. Let’s get one thing moving." : hour < 18 ? "Good afternoon. What can we make clearer?" : "Good evening. Let’s finish something worthwhile.");
+    const now = new Date();
+    const hour = now.getHours();
+    setWelcome(hour < 5 ? "A quiet hour for a clearer thought." : hour < 12 ? "Good morning. What shall we make easier?" : hour < 18 ? "Good afternoon. Let’s make something click." : "Good evening. Let’s end on a satisfying note.");
+    setWelcomeKicker(`${new Intl.DateTimeFormat(undefined, { weekday: "long" }).format(now)} · Your study room is ready`);
   }, []);
 
   const refresh = useCallback(async (nextThreadId?: string | null) => {
@@ -66,11 +68,13 @@ export function ChatShell() {
 
   useEffect(() => {
     setThreadId(requestedThreadId);
-    if (!requestedThreadId) setComposerThread(null);
+    if (requestedThreadId !== (composerThread?.id ?? null)) {
+      setComposerThread(requestedThreadId ? { id: requestedThreadId, title: "Conversation" } : null);
+    }
     activeThreadRef.current = requestedThreadId;
     setLoading(Boolean(requestedThreadId));
     void refresh(requestedThreadId).catch((error) => toast.error(error instanceof Error ? error.message : "Could not load chat.")).finally(() => setLoading(false));
-  }, [requestedThreadId, refresh, setComposerThread]);
+  }, [composerThread?.id, requestedThreadId, refresh, setComposerThread]);
 
   useEffect(() => {
     if (!threadId || !detail?.traces.some((trace) => trace.run.status === "queued" || trace.run.status === "running" || trace.run.status === "awaiting_confirmation")) return;
@@ -92,13 +96,32 @@ export function ChatShell() {
   }, []);
 
   const studio = useArtifactStudioState("spectra.shared.artifactStudio", artifacts);
+  const clearedWorkspaceArtifactRef = useRef(false);
+  useEffect(() => {
+    if (clearedWorkspaceArtifactRef.current) return;
+    clearedWorkspaceArtifactRef.current = true;
+    studio.closeStudio();
+    closePresentation("split");
+    closePresentation("tab");
+    closePresentation("tile");
+  }, [closePresentation, studio]);
   const setLiveThread = useCallback((thread: { id: string; title: string } | null) => {
     if (thread) openObject({ type: "thread", id: thread.id, label: thread.title, presentation: "thread-panel", workspaceId: chatWorkspaceId ?? undefined });
     else closePresentation("thread-panel");
   }, [chatWorkspaceId, closePresentation, openObject]);
   const openArtifact = useCallback((artifactId: string) => {
     const artifact = artifacts.find((item) => item._id === artifactId);
-    if (!artifact) { toast.error("That artifact is no longer available."); return; }
+    if (!artifact) {
+      // Result cards can arrive before the broad overview projection includes a
+      // newly created Inbox artifact. Resolve the canonical object directly so
+      // its primary action never behaves like a dead focus-only click.
+      void getSpectraArtifact(artifactId).then(({ artifact: resolved }) => {
+        setArtifacts((current) => [...current.filter((item) => item._id !== resolved._id), resolved]);
+        setHistoryOpen(false);
+        studio.openSplit(resolved);
+      }).catch(() => toast.error("That artifact is no longer available."));
+      return;
+    }
     setHistoryOpen(false);
     if (artifact.blueprintKey === "thread_reference") {
       const content = artifact.content && typeof artifact.content === "object" ? artifact.content as Record<string, unknown> : {};
@@ -210,7 +233,7 @@ export function ChatShell() {
 
   return (
     <div className="spectra-wave-y relative flex h-full min-h-0 bg-[var(--bg-primary)]">
-      <section className="flex min-w-0 flex-1 flex-col">
+      <section className={studio.mode === "tab" ? "hidden" : "flex min-w-0 flex-1 flex-col"}>
         <header className="flex h-14 shrink-0 items-center justify-between border-b border-[var(--border-subtle)] px-5 sm:px-7">
           <div className="min-w-0">
             <AnimatePresence mode="popLayout" initial={false}><motion.div key={visibleTitle} initial={{ opacity: 0, y: 3 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -3 }} transition={{ duration: 0.18 }} className="truncate font-display text-[18px] font-semibold text-[var(--text-primary)]">{visibleTitle}</motion.div></AnimatePresence>
@@ -247,17 +270,18 @@ export function ChatShell() {
 	          onChoice={(choice) => void runEngine.run(choice.description ? `${choice.title}: ${choice.description}` : choice.title)}
           activeCards={activeCards}
           onCardAction={(card, action, target) => void runEngine.onCardAction(card, action, target)}
-          empty={<div className="mx-auto flex min-h-[58vh] w-full max-w-[820px] flex-col justify-center py-10 text-left">
-            <span className="flex h-11 w-11 items-center justify-center rounded-[11px] bg-[color-mix(in_oklab,var(--accent-cyan)_9%,var(--bg-elevated))] text-[var(--accent-cyan)] shadow-[0_8px_28px_rgba(24,20,14,0.06)]"><Sparkles className="h-5 w-5" /></span>
-            <h1 className="mt-5 font-display text-[36px] font-semibold tracking-[-0.025em] text-[var(--text-primary)]">{welcome}</h1>
-            <p className="mt-2 max-w-[560px] text-[14px] leading-6 text-[var(--text-secondary)]">Ask directly, or choose a room to give Spectra the right objects and subject context from the first message.</p>
+          onCardRevise={(card, revision) => runEngine.revise(card, revision)}
+          empty={<div className="mx-auto flex min-h-[clamp(420px,50vh,620px)] w-full max-w-[820px] flex-col justify-center py-8 text-left">
+            <div className="flex items-center gap-3"><span className="flex h-11 w-11 items-center justify-center rounded-[11px] bg-[color-mix(in_oklab,var(--accent-cyan)_9%,var(--bg-elevated))] text-[var(--accent-cyan)] shadow-[0_8px_28px_rgba(24,20,14,0.06)]"><Sparkles className="h-5 w-5" /></span><span className="rounded-full border border-[color-mix(in_oklab,var(--accent-cyan)_16%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--accent-cyan)_4%,transparent)] px-3 py-1.5 text-[10px] font-medium tracking-[0.02em] text-[var(--text-secondary)]">{welcomeKicker}</span></div>
+            <h1 className="mt-5 max-w-[720px] font-display text-[38px] font-semibold leading-[1.08] tracking-[-0.03em] text-[var(--text-primary)]">{welcome}</h1>
+            <p className="mt-3 max-w-[590px] text-[14px] leading-6 text-[var(--text-secondary)]">Bring a half-formed question, a difficult topic, or a whole workspace. Spectra can explain, build, and revise alongside you.</p>
             {workspaces.length > 0 ? <div className="mt-8 grid gap-3 sm:grid-cols-2">{workspaces.slice(0, 6).map((workspace) => { const selected = chatWorkspaceId === workspace._id; const count = artifacts.filter((artifact) => artifact.placements?.some((placement) => placement.workspaceId === workspace._id)).length; return <button key={workspace._id} type="button" data-spectra-card="workspace" data-card-state={selected ? "active" : "normal"} data-interactive="true" onClick={() => selectWorkspaceContext(selected ? null : workspace._id)} className="group min-h-[112px] p-4 text-left" style={{ "--card-accent": "var(--accent-cyan)" } as CSSProperties}><span className="relative flex items-start gap-3"><span className="spectra-card-type-icon h-9 w-9 text-[var(--accent-cyan)]"><FolderPlus className="h-4 w-4" /></span><span className="min-w-0 flex-1"><span className="flex items-center gap-2 text-[14px] font-semibold text-[var(--text-primary)]">{workspace.title}{selected ? <CheckCircle2 className="h-4 w-4 text-[var(--success)]" /> : null}</span><span className="mt-1 line-clamp-2 text-[11px] leading-5 text-[var(--text-secondary)]">{workspace.description ?? `${count} objects ready as context`}</span><span className="mt-2 flex items-center gap-1 text-[10px] font-medium text-[var(--text-tertiary)]">{selected ? "Context selected" : `Start here · ${count} objects`}<ArrowRight className="h-3 w-3 transition group-hover:translate-x-0.5" /></span></span></span></button>; })}</div> : null}
           </div>}
         />
       </section>
 
       {studio.isOpen && studio.activeArtifact ? <ArtifactStudio mode={studio.mode === "tab" ? "tab" : "split"} artifact={studio.activeArtifact} artifacts={artifacts} tabs={studio.tabs} dirtyIds={studio.dirtyIds} panelWidth={studioPanelWidth} sourceLabel="Chat" onPanelWidthChange={setStudioPanelWidth} onClose={studio.closeStudio} onExpand={studio.openTab} onActivateTab={studio.activateTab} onCloseTab={studio.closeTab} onSave={updateArtifact} onRevert={revertArtifactVersion} onDirtyChange={studio.setDirty} /> : null}
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-50 bg-transparent px-4 pb-5 pt-2 sm:px-8"><div className="pointer-events-auto mx-auto max-w-[820px]"><DurableRunTabs workspaceId={scopedWorkspaceId} onOpen={(_runId, selectedThreadId, selectedTitle) => setLiveThread({ id: selectedThreadId, title: selectedTitle })} onStop={(runId) => runEngine.stop(runId)} />{pageComposer}</div></div>
+      <div className="pointer-events-none absolute bottom-0 left-0 right-[var(--spectra-studio-width,0px)] z-50 bg-transparent px-4 pb-5 pt-2 sm:px-8 min-[1920px]:right-0"><div className="pointer-events-auto mx-auto max-w-[820px]">{pageComposer}</div></div>
 
       {liveThread ? <LiveThreadPanel threadId={liveThread.id} title={liveThread.title} width={liveThreadPanelWidth} onWidthChange={setLiveThreadPanelWidth} onClose={() => setLiveThread(null)} onOpenArtifact={openArtifact} onOpenWorkspace={selectWorkspaceContext} /> : null}
 

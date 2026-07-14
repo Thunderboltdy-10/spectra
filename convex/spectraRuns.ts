@@ -142,7 +142,10 @@ export const beginRun = mutation({
       threadId,
       workspaceId,
       summary: "Conversation in progress",
-      pinned: true,
+      // A conversation belongs in its workspace immediately, but ordinary
+      // creation must not silently promote it to the user's important shelf.
+      // Pinning is an explicit organizational choice.
+      pinned: false,
     });
     const executionId = `${now.toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
     const runId = await ctx.db.insert("spectraAiRuns", {
@@ -292,6 +295,50 @@ export const appendEvent = mutation({
   },
 });
 
+export const appendEvents = mutation({
+  args: {
+    actorClerkId: v.string(),
+    runId: v.id("spectraAiRuns"),
+    executionId: v.string(),
+    events: v.array(v.object({ type: v.string(), payload: v.any() })),
+  },
+  handler: async (ctx, args) => {
+    const { run } = await requireOwnedRun(ctx, args.actorClerkId, args.runId);
+    if (run.executionId !== args.executionId || args.events.length === 0)
+      return { ignored: true, sequence: run.eventSequence ?? 0, count: 0 };
+    const terminalTypes = new Set(["final", "error", "stopped", "interrupted", "approval_rejected", "approval_accepted", "choice_selected"]);
+    const batchHasTerminal = args.events.some((event) => terminalTypes.has(event.type));
+    const allowed = isTerminalRunStatus(run.status) && !batchHasTerminal
+      ? args.events.filter((event) => terminalTypes.has(event.type))
+      : args.events;
+    if (allowed.length === 0)
+      return { ignored: true, sequence: run.eventSequence ?? 0, count: 0 };
+    const existingTerminalTypes = new Set(
+      (await ctx.db.query("spectraRunEvents").withIndex("by_run_sequence", (q) => q.eq("runId", args.runId)).collect())
+        .filter((event) => event.executionId === args.executionId && terminalTypes.has(event.type))
+        .map((event) => event.type),
+    );
+    const unique = allowed.filter((event) => !terminalTypes.has(event.type) || !existingTerminalTypes.has(event.type));
+    if (unique.length === 0)
+      return { ignored: true, sequence: run.eventSequence ?? 0, count: 0 };
+    const now = Date.now();
+    let sequence = run.eventSequence ?? 0;
+    for (const event of unique) {
+      sequence += 1;
+      await ctx.db.insert("spectraRunEvents", {
+        runId: args.runId,
+        executionId: args.executionId,
+        sequence,
+        type: event.type.slice(0, 80),
+        payload: event.payload,
+        createdAt: now,
+      });
+    }
+    await ctx.db.patch(args.runId, { eventSequence: sequence, heartbeatAt: now, updatedAt: now });
+    return { ignored: false, sequence, count: unique.length };
+  },
+});
+
 export const claimExecution = mutation({
   args: {
     actorClerkId: v.string(),
@@ -363,7 +410,14 @@ export const listTabs = query({
       const existing = canonicalByThread.get(tab.threadId);
       if (!existing || tab.updatedAt > existing.updatedAt) canonicalByThread.set(tab.threadId, tab);
     }
-    return (await Promise.all([...canonicalByThread.values()].map(async (tab) => ({ ...tab, run: await ctx.db.get(tab.runId), thread: await ctx.db.get(tab.threadId) })))).filter((tab) => tab.run && tab.thread);
+    return (await Promise.all([...canonicalByThread.values()].map(async (tab) => {
+      const [run, thread, cards] = await Promise.all([
+        ctx.db.get(tab.runId),
+        ctx.db.get(tab.threadId),
+        ctx.db.query("spectraResultCards").withIndex("by_run", (q) => q.eq("runId", tab.runId)).collect(),
+      ]);
+      return { ...tab, run, thread, card: cards.sort((a, b) => b.updatedAt - a.updatedAt)[0] ?? null };
+    }))).filter((tab) => tab.run && tab.thread);
   },
 });
 
@@ -432,7 +486,7 @@ export const hideTab = mutation({
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx, args.actorClerkId);
     const tab = await ctx.db.query("spectraRunTabs").withIndex("by_owner_run", (q) => q.eq("ownerUserId", actor._id).eq("runId", args.runId)).first();
-    if (!tab || tab.orgId !== actor.orgId) throw new Error("Run tab not found");
+    if (!tab || tab.orgId !== actor.orgId) return { runId: args.runId, hidden: false };
     await ctx.db.patch(tab._id, { hiddenAt: Date.now(), selected: false, updatedAt: Date.now() });
     return { runId: args.runId };
   },
@@ -451,8 +505,7 @@ export const selectTab = mutation({
       if (tab.selected !== next) await ctx.db.patch(tab._id, { selected: next, updatedAt: now });
       selected ||= next;
     }
-    if (args.runId && !selected) throw new Error("Run tab not found");
-    return { runId: args.runId };
+    return { runId: args.runId, selected };
   },
 });
 
@@ -704,6 +757,27 @@ export const resetForRetry = mutation({
       hiddenAt: undefined,
       updatedAt: now,
     })));
+    const priorAssistantMessages = (
+      await ctx.db
+        .query("spectraMessages")
+        .withIndex("by_run", (q) => q.eq("runId", args.runId))
+        .collect()
+    ).filter((message) => message.role === "assistant");
+    await Promise.all(
+      priorAssistantMessages.map((message) => {
+        const metadata =
+          message.metadata && typeof message.metadata === "object"
+            ? (message.metadata as Record<string, unknown>)
+            : {};
+        return ctx.db.patch(message._id, {
+          metadata: {
+            ...metadata,
+            choices: null,
+            retrying: true,
+          },
+        });
+      }),
+    );
     const tabs = await ctx.db.query("spectraRunTabs").withIndex("by_owner_run", (q) => q.eq("ownerUserId", run.ownerUserId).eq("runId", args.runId)).collect();
     await Promise.all(tabs.map((tab) => ctx.db.patch(tab._id, { hiddenAt: undefined, selected: true, updatedAt: now })));
     return { runId: args.runId, resultCardId: cards[0]?._id, prompt: run.userPrompt, workspaceId: run.workspaceId, artifactId: run.artifactId, sourceSurface: run.sourceSurface, contextSnapshot: run.contextSnapshot, executionId, previousExecutionId, created: true };

@@ -197,6 +197,23 @@ export const create = mutation({
       });
     }
 
+    const created = {
+      title,
+      summary,
+      content: args.content ?? defaultArtifactContent(args.blueprintKey as BlueprintKey),
+      tags: args.tags ?? [],
+    };
+    await ctx.db.insert("spectraArtifactVersions", {
+      artifactId,
+      ownerUserId: actor._id,
+      source: args.source === "ai" ? "ai" : "manual",
+      runId: args.runId,
+      before: { title: "Untitled artifact", summary: undefined, content: null, tags: [] },
+      after: created,
+      summary: args.source === "ai" ? "Created with Spectra" : "Artifact created",
+      createdAt: now,
+    });
+
     return { artifactId, workspaceItemId };
   },
 });
@@ -237,6 +254,18 @@ export const finalizePending = mutation({
     const title = args.title.trim() || artifact.title;
     const summary = args.summary?.trim() || fallbackArtifactSummary(artifact.blueprintKey as BlueprintKey);
     const tags = args.tags ?? [];
+    const before = { title: artifact.title, summary: artifact.summary, content: artifact.content, tags: artifact.tags };
+    const after = { title, summary, content: args.content, tags };
+    await ctx.db.insert("spectraArtifactVersions", {
+      artifactId: args.artifactId,
+      ownerUserId: artifact.ownerUserId,
+      source: "ai",
+      runId: args.runId,
+      before,
+      after,
+      summary: "Created with Spectra",
+      createdAt: now,
+    });
     await ctx.db.patch(args.artifactId, { title, summary, content: args.content, tags, textIndex: buildArtifactTextIndex({ title, summary, content: args.content, tags }), aiState: "edited", aiExecutionId: undefined, aiStateExpiresAt: now + 8_000, aiProgress: undefined, aiPreview: undefined, updatedAt: now });
     const placements = await ctx.db.query("spectraWorkspaceItems").withIndex("by_source", (q) => q.eq("sourceType", "artifact").eq("sourceId", args.artifactId)).collect();
     await Promise.all(placements.map((placement) => ctx.db.patch(placement._id, { viewData: { ...placement.viewData, compactSummary: summary }, updatedAt: now })));
@@ -245,24 +274,25 @@ export const finalizePending = mutation({
 });
 
 export const patchPendingContent = mutation({
-  args: { actorClerkId: v.string(), artifactId: v.id("spectraArtifacts"), runId: v.id("spectraAiRuns"), executionId: v.string(), content: v.any(), progress: v.number(), summary: v.optional(v.string()) },
+  args: { actorClerkId: v.string(), artifactId: v.id("spectraArtifacts"), runId: v.id("spectraAiRuns"), executionId: v.string(), content: v.any(), progress: v.number(), title: v.optional(v.string()), summary: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const { artifact } = await requireOwnedArtifact(ctx, args.actorClerkId, args.artifactId);
     const run = await ctx.db.get(args.runId);
     if (!run || run.status !== "running" || run.executionId !== args.executionId || artifact.aiRunId !== args.runId || artifact.aiExecutionId !== args.executionId || artifact.aiState !== "creating") throw new Error("This pending artifact is no longer editable by that run.");
     const progress = Math.max(0, Math.min(0.98, args.progress));
-    await ctx.db.patch(args.artifactId, { content: args.content, summary: args.summary ?? artifact.summary, aiProgress: progress, updatedAt: Date.now() });
+    const title = args.title?.trim() || artifact.title;
+    await ctx.db.patch(args.artifactId, { title, content: args.content, summary: args.summary ?? artifact.summary, textIndex: `${title} ${args.summary ?? artifact.summary ?? ""}`, aiProgress: progress, updatedAt: Date.now() });
     return { artifactId: args.artifactId, progress };
   },
 });
 
 export const stageAiPatch = mutation({
-  args: { actorClerkId: v.string(), artifactId: v.id("spectraArtifacts"), runId: v.id("spectraAiRuns"), executionId: v.string(), title: v.optional(v.string()), summary: v.optional(v.string()), content: v.optional(v.any()) },
+  args: { actorClerkId: v.string(), artifactId: v.id("spectraArtifacts"), runId: v.id("spectraAiRuns"), executionId: v.string(), title: v.optional(v.string()), summary: v.optional(v.string()), content: v.optional(v.any()), tags: v.optional(v.array(v.string())), changedPaths: v.optional(v.array(v.string())) },
   handler: async (ctx, args) => {
     const { artifact } = await requireOwnedArtifact(ctx, args.actorClerkId, args.artifactId);
     const run = await ctx.db.get(args.runId);
     if (!run || run.ownerUserId !== artifact.ownerUserId || run.status !== "running" || run.executionId !== args.executionId) throw new Error("This run is no longer allowed to preview changes.");
-    await ctx.db.patch(args.artifactId, { aiState: "updating", aiRunId: args.runId, aiExecutionId: args.executionId, aiPreview: { title: args.title, summary: args.summary, content: args.content, startedAt: Date.now() }, updatedAt: Date.now() });
+    await ctx.db.patch(args.artifactId, { aiState: "updating", aiRunId: args.runId, aiExecutionId: args.executionId, aiPreview: { title: args.title, summary: args.summary, content: args.content, tags: args.tags, changedPaths: args.changedPaths, startedAt: Date.now() }, updatedAt: Date.now() });
     return { artifactId: args.artifactId };
   },
 });
@@ -292,8 +322,20 @@ export const failPendingForRun = mutation({
     if (!run || run.ownerUserId !== actor._id || run.orgId !== actor.orgId || run.executionId !== args.executionId) throw new Error("This run attempt is no longer active.");
     const artifacts = await ctx.db.query("spectraArtifacts").withIndex("by_owner_status", (q) => q.eq("ownerUserId", actor._id).eq("status", "active")).collect();
     const pending = artifacts.filter((artifact) => artifact.orgId === actor.orgId && artifact.aiRunId === args.runId && artifact.aiExecutionId === args.executionId && artifact.aiState === "creating");
-    await Promise.all(pending.map((artifact) => ctx.db.patch(artifact._id, { aiState: "failed", summary: "Spectra could not finish this artifact. Retry the run or remove this draft.", updatedAt: Date.now() })));
-    return { failed: pending.length };
+    let removed = 0;
+    await Promise.all(pending.map(async (artifact) => {
+      // A provisional shell with no generated content is not useful work. Do
+      // not leave an empty red artifact behind after an internal format error.
+      if ((artifact.aiProgress ?? 0) <= 0.05) {
+        const placements = await ctx.db.query("spectraWorkspaceItems").withIndex("by_source", (q) => q.eq("sourceType", "artifact").eq("sourceId", artifact._id)).collect();
+        await Promise.all(placements.map((placement) => ctx.db.delete(placement._id)));
+        await ctx.db.delete(artifact._id);
+        removed += 1;
+        return;
+      }
+      await ctx.db.patch(artifact._id, { aiState: "failed", summary: "This draft stopped before it was complete. Retry to continue from the request.", updatedAt: Date.now() });
+    }));
+    return { failed: pending.length - removed, removed };
   },
 });
 
@@ -306,7 +348,12 @@ export const settleStagedForRun = mutation({
     const artifacts = await ctx.db.query("spectraArtifacts").withIndex("by_owner_status", (q) => q.eq("ownerUserId", actor._id).eq("status", "active")).collect();
     const staged = artifacts.filter((artifact) => artifact.orgId === actor.orgId && artifact.aiRunId === args.runId && artifact.aiExecutionId === args.executionId && artifact.aiState === "updating");
     const now = Date.now();
-    await Promise.all(staged.map((artifact) => ctx.db.patch(artifact._id, args.outcome === "clear" ? { aiState: undefined, aiRunId: undefined, aiExecutionId: undefined, aiPreview: undefined, updatedAt: now } : { aiState: "failed", updatedAt: now })));
+    await Promise.all(staged.map((artifact) => {
+      const previewHasContent = artifact.aiPreview?.title !== undefined || artifact.aiPreview?.summary !== undefined || artifact.aiPreview?.content !== undefined || artifact.aiPreview?.tags !== undefined;
+      return ctx.db.patch(artifact._id, args.outcome === "clear" || !previewHasContent
+        ? { aiState: undefined, aiRunId: undefined, aiExecutionId: undefined, aiPreview: undefined, updatedAt: now }
+        : { aiState: "failed", updatedAt: now });
+    }));
     return { settled: staged.length };
   },
 });
@@ -407,8 +454,16 @@ export const update = mutation({
       aiState: args.source === "ai" ? "edited" : artifact.aiState === "failed" ? undefined : artifact.aiState,
       aiRunId: args.source === "ai" ? args.runId : artifact.aiState === "failed" ? undefined : artifact.aiRunId,
       aiExecutionId: args.source === "ai" || artifact.aiState === "failed" ? undefined : artifact.aiExecutionId,
-      aiStateExpiresAt: args.source === "ai" ? now + 8_000 : artifact.aiStateExpiresAt,
-      aiPreview: args.source === "ai" || artifact.aiState === "failed" ? undefined : artifact.aiPreview,
+      aiStateExpiresAt: args.source === "ai" ? now + 2_200 : artifact.aiStateExpiresAt,
+      aiPreview: args.source === "ai"
+        ? {
+            ...(artifact.aiPreview ?? { startedAt: now }),
+            content: after.content,
+            changedPaths: artifact.aiPreview?.changedPaths ?? (args.content === undefined ? [] : ["/"]),
+          }
+        : artifact.aiState === "failed"
+          ? undefined
+          : artifact.aiPreview,
       aiProgress: args.source === "ai" || artifact.aiState === "failed" ? undefined : artifact.aiProgress,
       updatedAt: now,
     });

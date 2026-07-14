@@ -890,7 +890,7 @@ export function ArtifactsShell() {
 	      )}
 	        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 bg-transparent px-2 pb-3 pt-2 sm:px-5 sm:pb-5 lg:px-8" style={activeRunPanelId ? { right: "var(--spectra-run-panel-width, 680px)" } : undefined}>
           <div className="pointer-events-auto mx-auto max-w-[880px]">
-	            <DurableRunTabs workspaceId={selectedWorkspaceId || undefined} onOpen={(_runId, threadId, title) => { setActiveRunPanelId(null); setLiveThread({ id: threadId, title }); }} onStop={(runId) => runEngine.stop(runId)} />
+	            <DurableRunTabs workspaceId={selectedWorkspaceId || undefined} onOpen={(_runId, threadId, title) => { setActiveRunPanelId(null); setLiveThread({ id: threadId, title }); }} onStop={(runId) => runEngine.stop(runId)} onRetry={(runId) => void runEngine.retry(runId)} />
 	            {multiSelectMode ? <SelectionActionBar count={selectedContextIds.size} onClear={clearSelection} onExit={() => { clearSelection(); setMultiSelectMode(false); }} onAddToContext={() => { const count = selectedContextIds.size; commitSelection(); setFocusModeOverride("selection"); setMultiSelectMode(false); toast.success(`${count} object${count === 1 ? "" : "s"} added to context.`); }} onTile={openSelectedArtifactsInTiles} /> : null}
             <CommandBar
               placeholder={composerThread ? `Continue ${composerThread.title}...` : studio.activeArtifact ? `Act on ${studio.activeArtifact.title}...` : "Ask across all objects..."}

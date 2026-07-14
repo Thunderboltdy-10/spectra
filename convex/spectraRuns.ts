@@ -1,7 +1,7 @@
 import { internalMutation, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
-import { getUserByClerkId } from "./helpers";
+import { getActorByClerkId } from "./identityShared";
 import { ensureThreadWorkspacePlacement } from "./spectraShared";
 import {
   canTransitionRunStatus,
@@ -42,20 +42,20 @@ const vResultAction = v.object({
   targetId: v.optional(v.string()),
 });
 
-async function requireActor(ctx: Parameters<typeof getUserByClerkId>[0], actorClerkId: string) {
-  const actor = await getUserByClerkId(ctx, actorClerkId);
+async function requireActor(ctx: Parameters<typeof getActorByClerkId>[0], actorClerkId: string) {
+  const actor = await getActorByClerkId(ctx, actorClerkId);
   if (!actor) throw new Error("Unauthorized");
   return actor;
 }
 
 async function requireOwnedRun(
-  ctx: Parameters<typeof getUserByClerkId>[0],
+  ctx: Parameters<typeof getActorByClerkId>[0],
   actorClerkId: string,
   runId: Id<"spectraAiRuns">,
 ) {
   const actor = await requireActor(ctx, actorClerkId);
   const run = await ctx.db.get(runId);
-  if (!run || run.ownerUserId !== actor._id || run.orgId !== actor.orgId) {
+  if (!run || run.ownerAccountId !== actor._id || run.schoolId !== actor.schoolId) {
     throw new Error("AI run not found");
   }
   return { actor, run };
@@ -86,7 +86,7 @@ export const beginRun = mutation({
     const cleanPrompt = args.userPrompt.replace(/\u0000/g, "").trim().slice(0, 12_000);
     if (!cleanPrompt) throw new Error("Write a message before starting a run.");
     const existingRun = await ctx.db.query("spectraAiRuns")
-      .withIndex("by_owner_submission", (q) => q.eq("ownerUserId", actor._id).eq("submissionKey", args.submissionKey))
+      .withIndex("by_account_submission", (q) => q.eq("ownerAccountId", actor._id).eq("submissionKey", args.submissionKey))
       .first();
     if (existingRun) {
       const existingCard = await ctx.db.query("spectraResultCards").withIndex("by_run", (q) => q.eq("runId", existingRun._id)).first();
@@ -95,7 +95,7 @@ export const beginRun = mutation({
     }
 
     let thread = args.threadId ? await ctx.db.get(args.threadId) : null;
-    if (args.threadId && (!thread || thread.ownerUserId !== actor._id || thread.orgId !== actor.orgId || thread.status !== "active")) throw new Error("That conversation is no longer available.");
+    if (args.threadId && (!thread || thread.ownerAccountId !== actor._id || thread.schoolId !== actor.schoolId || thread.status !== "active")) throw new Error("That conversation is no longer available.");
     let requestedWorkspaceId = args.workspaceId;
     if (!thread && !requestedWorkspaceId && args.artifactId) {
       const placements = await ctx.db.query("spectraWorkspaceItems")
@@ -105,7 +105,7 @@ export const beginRun = mutation({
         .filter((item) => item.viewData.hidden !== true)
         .sort((a, b) => b.updatedAt - a.updatedAt)) {
         const workspace = await ctx.db.get(placement.workspaceId);
-        if (workspace && workspace.ownerUserId === actor._id && workspace.orgId === actor.orgId && workspace.status === "active") {
+        if (workspace && workspace.ownerAccountId === actor._id && workspace.schoolId === actor.schoolId && workspace.status === "active") {
           requestedWorkspaceId = workspace._id;
           break;
         }
@@ -113,11 +113,11 @@ export const beginRun = mutation({
     }
     if (requestedWorkspaceId) {
       const workspace = await ctx.db.get(requestedWorkspaceId);
-      if (!workspace || workspace.ownerUserId !== actor._id || workspace.orgId !== actor.orgId || workspace.status !== "active") throw new Error("That workspace is no longer available.");
+      if (!workspace || workspace.ownerAccountId !== actor._id || workspace.schoolId !== actor.schoolId || workspace.status !== "active") throw new Error("That workspace is no longer available.");
     }
     if (args.artifactId) {
       const artifact = await ctx.db.get(args.artifactId);
-      if (!artifact || artifact.ownerUserId !== actor._id || artifact.orgId !== actor.orgId || artifact.status === "deleted") throw new Error("That artifact is no longer available.");
+      if (!artifact || artifact.ownerAccountId !== actor._id || artifact.schoolId !== actor.schoolId || artifact.status === "deleted") throw new Error("That artifact is no longer available.");
     }
     if (thread) {
       const activeRun = (await ctx.db.query("spectraAiRuns").withIndex("by_thread", (q) => q.eq("threadId", thread!._id)).collect())
@@ -132,7 +132,7 @@ export const beginRun = mutation({
     let threadId = thread?._id;
     if (!threadId) {
       threadId = await ctx.db.insert("spectraThreads", {
-        ownerUserId: actor._id, orgId: actor.orgId, title, origin: args.sourceSurface,
+        ownerAccountId: actor._id, schoolId: actor.schoolId, title, origin: args.sourceSurface,
         workspaceId, artifactId: args.artifactId, status: "active", messageCount: 0,
         createdAt: now, updatedAt: now,
       });
@@ -149,7 +149,7 @@ export const beginRun = mutation({
     });
     const executionId = `${now.toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
     const runId = await ctx.db.insert("spectraAiRuns", {
-      ownerUserId: actor._id, orgId: actor.orgId, sourceSurface: args.sourceSurface,
+      ownerAccountId: actor._id, schoolId: actor.schoolId, sourceSurface: args.sourceSurface,
       threadId, workspaceId, artifactId: args.artifactId, status: "queued", userPrompt: cleanPrompt,
       modelUsed: args.modelUsed, submissionKey: args.submissionKey, executionId, eventSequence: 1,
       phase: "created", heartbeatAt: now, attemptCount: 1, createdAt: now, updatedAt: now,
@@ -165,16 +165,16 @@ export const beginRun = mutation({
     if (workspaceId) {
       await ctx.db.patch(workspaceId, { updatedAt: now, lastActivityAt: now });
     }
-    const openTabs = await ctx.db.query("spectraRunTabs").withIndex("by_owner_updated", (q) => q.eq("ownerUserId", actor._id)).collect();
-    await Promise.all(openTabs.filter((tab) => tab.orgId === actor.orgId && !tab.hiddenAt && tab.selected).map((tab) => ctx.db.patch(tab._id, { selected: false, updatedAt: now })));
-    const threadTabs = openTabs.filter((tab) => tab.orgId === actor.orgId && tab.threadId === threadId).sort((a, b) => b.updatedAt - a.updatedAt);
+    const openTabs = await ctx.db.query("spectraRunTabs").withIndex("by_account_updated", (q) => q.eq("ownerAccountId", actor._id)).collect();
+    await Promise.all(openTabs.filter((tab) => tab.schoolId === actor.schoolId && !tab.hiddenAt && tab.selected).map((tab) => ctx.db.patch(tab._id, { selected: false, updatedAt: now })));
+    const threadTabs = openTabs.filter((tab) => tab.schoolId === actor.schoolId && tab.threadId === threadId).sort((a, b) => b.updatedAt - a.updatedAt);
     const canonicalTab = threadTabs[0];
     if (canonicalTab) {
       await ctx.db.patch(canonicalTab._id, { runId, workspaceId, surface: args.sourceSurface, selected: true, hiddenAt: undefined, updatedAt: now });
       await Promise.all(threadTabs.slice(1).map((tab) => ctx.db.patch(tab._id, { selected: false, hiddenAt: now, updatedAt: now })));
     } else {
       await ctx.db.insert("spectraRunTabs", {
-        ownerUserId: actor._id, orgId: actor.orgId, runId, threadId, workspaceId,
+        ownerAccountId: actor._id, schoolId: actor.schoolId, runId, threadId, workspaceId,
         surface: args.sourceSurface, selected: true, createdAt: now, updatedAt: now,
       });
     }
@@ -404,9 +404,9 @@ export const listTabs = query({
   args: { actorClerkId: v.string(), includeHidden: v.optional(v.boolean()), limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx, args.actorClerkId);
-    const tabs = await ctx.db.query("spectraRunTabs").withIndex("by_owner_updated", (q) => q.eq("ownerUserId", actor._id)).order("desc").take(Math.min(args.limit ?? 80, 200));
+    const tabs = await ctx.db.query("spectraRunTabs").withIndex("by_account_updated", (q) => q.eq("ownerAccountId", actor._id)).order("desc").take(Math.min(args.limit ?? 80, 200));
     const canonicalByThread = new Map<string, (typeof tabs)[number]>();
-    for (const tab of tabs.filter((row) => row.orgId === actor.orgId && (args.includeHidden || !row.hiddenAt))) {
+    for (const tab of tabs.filter((row) => row.schoolId === actor.schoolId && (args.includeHidden || !row.hiddenAt))) {
       const existing = canonicalByThread.get(tab.threadId);
       if (!existing || tab.updatedAt > existing.updatedAt) canonicalByThread.set(tab.threadId, tab);
     }
@@ -471,9 +471,9 @@ export const reconcileStaleRuns = internalMutation({
       const sequence = (run.eventSequence ?? 0) + 1;
       await ctx.db.insert("spectraRunEvents", { runId: run._id, executionId: run.executionId ?? "interrupted", sequence, type: "interrupted", payload: { type: "interrupted", runId: run._id, recoveryState: recovery.recoveryState, retryable: recovery.retryable, preservedPartial: recovery.preservedPartial }, createdAt: now });
       await ctx.db.patch(run._id, { eventSequence: sequence });
-      const artifacts = await ctx.db.query("spectraArtifacts").withIndex("by_owner_status", (q) => q.eq("ownerUserId", run.ownerUserId).eq("status", "active")).collect();
+      const artifacts = await ctx.db.query("spectraArtifacts").withIndex("by_account_status", (q) => q.eq("ownerAccountId", run.ownerAccountId).eq("status", "active")).collect();
       await Promise.all(artifacts.filter((artifact) => artifact.aiRunId === run._id && (artifact.aiState === "creating" || artifact.aiState === "updating")).map((artifact) => ctx.db.patch(artifact._id, { aiState: "failed", summary: artifact.aiState === "creating" ? "Spectra was interrupted while building this artifact. Retry the run to continue." : artifact.summary, updatedAt: now })));
-      const workspaces = await ctx.db.query("spectraWorkspaces").withIndex("by_owner_activity", (q) => q.eq("ownerUserId", run.ownerUserId)).collect();
+      const workspaces = await ctx.db.query("spectraWorkspaces").withIndex("by_account_activity", (q) => q.eq("ownerAccountId", run.ownerAccountId)).collect();
       await Promise.all(workspaces.filter((workspace) => workspace.aiRunId === run._id && (workspace.aiState === "creating" || workspace.aiState === "updating")).map((workspace) => ctx.db.patch(workspace._id, { aiState: "failed", updatedAt: now })));
       interrupted += 1;
     }
@@ -485,8 +485,8 @@ export const hideTab = mutation({
   args: { actorClerkId: v.string(), runId: v.id("spectraAiRuns") },
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx, args.actorClerkId);
-    const tab = await ctx.db.query("spectraRunTabs").withIndex("by_owner_run", (q) => q.eq("ownerUserId", actor._id).eq("runId", args.runId)).first();
-    if (!tab || tab.orgId !== actor.orgId) return { runId: args.runId, hidden: false };
+    const tab = await ctx.db.query("spectraRunTabs").withIndex("by_account_run", (q) => q.eq("ownerAccountId", actor._id).eq("runId", args.runId)).first();
+    if (!tab || tab.schoolId !== actor.schoolId) return { runId: args.runId, hidden: false };
     await ctx.db.patch(tab._id, { hiddenAt: Date.now(), selected: false, updatedAt: Date.now() });
     return { runId: args.runId };
   },
@@ -496,11 +496,11 @@ export const selectTab = mutation({
   args: { actorClerkId: v.string(), runId: v.optional(v.id("spectraAiRuns")) },
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx, args.actorClerkId);
-    const tabs = await ctx.db.query("spectraRunTabs").withIndex("by_owner_updated", (q) => q.eq("ownerUserId", actor._id)).collect();
+    const tabs = await ctx.db.query("spectraRunTabs").withIndex("by_account_updated", (q) => q.eq("ownerAccountId", actor._id)).collect();
     const now = Date.now();
     let selected = false;
     for (const tab of tabs) {
-      if (tab.orgId !== actor.orgId || tab.hiddenAt) continue;
+      if (tab.schoolId !== actor.schoolId || tab.hiddenAt) continue;
       const next = Boolean(args.runId && tab.runId === args.runId);
       if (tab.selected !== next) await ctx.db.patch(tab._id, { selected: next, updatedAt: now });
       selected ||= next;
@@ -673,7 +673,7 @@ export const patchResultCard = mutation({
     const card = await ctx.db.get(args.resultCardId);
     if (!card) throw new Error("Result card not found");
     const run = await ctx.db.get(card.runId);
-    if (!run || run.ownerUserId !== actor._id || run.orgId !== actor.orgId) throw new Error("Result card not found");
+    if (!run || run.ownerAccountId !== actor._id || run.schoolId !== actor.schoolId) throw new Error("Result card not found");
     requireCurrentExecution(run.executionId, args.executionId);
     await ctx.db.patch(args.resultCardId, {
       title: args.title ?? card.title,
@@ -778,7 +778,7 @@ export const resetForRetry = mutation({
         });
       }),
     );
-    const tabs = await ctx.db.query("spectraRunTabs").withIndex("by_owner_run", (q) => q.eq("ownerUserId", run.ownerUserId).eq("runId", args.runId)).collect();
+    const tabs = await ctx.db.query("spectraRunTabs").withIndex("by_account_run", (q) => q.eq("ownerAccountId", run.ownerAccountId).eq("runId", args.runId)).collect();
     await Promise.all(tabs.map((tab) => ctx.db.patch(tab._id, { hiddenAt: undefined, selected: true, updatedAt: now })));
     return { runId: args.runId, resultCardId: cards[0]?._id, prompt: run.userPrompt, workspaceId: run.workspaceId, artifactId: run.artifactId, sourceSurface: run.sourceSurface, contextSnapshot: run.contextSnapshot, executionId, previousExecutionId, created: true };
   },
@@ -796,8 +796,8 @@ export const listResultCards = query({
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx, args.actorClerkId);
     const limit = Math.max(1, Math.min(args.limit ?? 20, 100));
-    const runs = await ctx.db.query("spectraAiRuns").withIndex("by_owner_created", (q) => q.eq("ownerUserId", actor._id)).order("desc").take(limit * 4);
-    const allowed = runs.filter((run) => run.orgId === actor.orgId)
+    const runs = await ctx.db.query("spectraAiRuns").withIndex("by_account_created", (q) => q.eq("ownerAccountId", actor._id)).order("desc").take(limit * 4);
+    const allowed = runs.filter((run) => run.schoolId === actor.schoolId)
       .filter((run) => !args.surface || run.sourceSurface === args.surface)
       .filter((run) => !args.workspaceId || run.workspaceId === args.workspaceId)
       .filter((run) => !args.artifactId || run.artifactId === args.artifactId);
@@ -823,11 +823,11 @@ export const listRecent = query({
     const limit = Math.max(1, Math.min(args.limit ?? 20, 100));
     const runs = await ctx.db
       .query("spectraAiRuns")
-      .withIndex("by_owner_created", (q) => q.eq("ownerUserId", actor._id))
+      .withIndex("by_account_created", (q) => q.eq("ownerAccountId", actor._id))
       .order("desc")
       .take(limit * 3);
     return runs
-      .filter((run) => run.orgId === actor.orgId)
+      .filter((run) => run.schoolId === actor.schoolId)
       .filter((run) => (args.surface ? run.sourceSurface === args.surface : true))
       .slice(0, limit);
   },
@@ -843,7 +843,7 @@ export const hideResultCard = mutation({
     const card = await ctx.db.get(args.resultCardId);
     if (!card) throw new Error("Result card not found");
     const run = await ctx.db.get(card.runId);
-    if (!run || run.ownerUserId !== actor._id || run.orgId !== actor.orgId) {
+    if (!run || run.ownerAccountId !== actor._id || run.schoolId !== actor.schoolId) {
       throw new Error("Result card not found");
     }
     await ctx.db.patch(args.resultCardId, {
@@ -861,7 +861,7 @@ export const unhideResultCard = mutation({
     const card = await ctx.db.get(args.resultCardId);
     if (!card) throw new Error("Result card not found");
     const run = await ctx.db.get(card.runId);
-    if (!run || run.ownerUserId !== actor._id || run.orgId !== actor.orgId) throw new Error("Result card not found");
+    if (!run || run.ownerAccountId !== actor._id || run.schoolId !== actor.schoolId) throw new Error("Result card not found");
     await ctx.db.patch(args.resultCardId, { hiddenAt: undefined, updatedAt: Date.now() });
     return { resultCardId: args.resultCardId };
   },
@@ -874,7 +874,7 @@ export const keepResultCard = mutation({
     const card = await ctx.db.get(args.resultCardId);
     if (!card) throw new Error("Result card not found");
     const run = await ctx.db.get(card.runId);
-    if (!run || run.ownerUserId !== actor._id || run.orgId !== actor.orgId) throw new Error("Result card not found");
+    if (!run || run.ownerAccountId !== actor._id || run.schoolId !== actor.schoolId) throw new Error("Result card not found");
     const now = Date.now();
     await ctx.db.patch(args.resultCardId, { keptAt: now, hiddenAt: undefined, updatedAt: now });
     return { resultCardId: args.resultCardId };

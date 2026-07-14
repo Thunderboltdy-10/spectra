@@ -1,169 +1,101 @@
-# Product decisions requiring review
-
-Recommendations are defaults for planning, not silent authorization. “Can begin” means unaffected foundations may proceed; the choice must be resolved before the named dependent work ships.
-
-## D-01 Tenant identity and multi-school membership
-
-Question: can one user belong to several schools with one global identity?
-
-Options: (A) one account, multiple memberships; strongest portability and correct operator model, more tenant-switching UX. (B) one account per school; simpler boundary, duplicate identity/memory and painful transfers. Recommendation: A, with memory explicitly scoped and an always-visible active school. Change: core user/org schema and navigation. Can begin: no—the identity migration depends on it.
-
-## D-02 Platform operator entry into schools
-
-Question: what authority does superadmin receive inside a school?
-
-Options: (A) labeled, time-boxed operator session, read-only default, reason and explicit write elevation; accountable and least-privilege. (B) silent full impersonation; convenient but destroys audit meaning and privacy. (C) separate platform-only interface; safer but duplicates school management and violates the requested shared interface. Recommendation: A; do not impersonate students. Can begin: operator/session foundation yes; privileged actions wait for approval.
-
-## D-03 Grant inheritance
-
-Question: does workspace access grant access to placed artifacts?
-
-Options: (A) no automatic inheritance; explicit/bulk grants, clear isolation but more sharing steps. (B) full inheritance; simple but easy leakage. (C) configurable artifact “inherit audience” flag with impact preview. Recommendation: C, default on for artifacts created in a shared workspace and explicit when placing existing private artifacts. Parent access never overrides stricter classification. Can begin: registry yes; sharing UX waits.
-
-## D-04 Public sharing
-
-Question: permit public artifacts/agents in the first release?
-
-Options: disabled; school-only; or revocable public view/use links with school policy, expiry, non-indexed default. Recommendation: public only for agents and explicitly published artifacts after governance, abuse, copyright, moderation, and rate controls; disabled during foundation release. Can begin: yes.
-
-## D-05 Artifact content storage
-
-Question: one generic content store or type-specific stores?
-
-Options: generic tagged blobs ease registry/migrations but weaken indexes; fully type-specific tables improve constraints but multiply infrastructure; hybrid base artifact plus typed content adapters/stores. Recommendation: hybrid. Can begin: no—registry/schema work depends on it.
-
-## D-06 Collaboration provider
-
-Question: self-host Yjs transport or use a managed collaboration service?
-
-Options: managed reduces operational work but adds cost/vendor/data-region constraints; self-host provides control and Convex integration but requires gateway reliability; Automerge local-first is credible if offline becomes dominant. Recommendation: benchmark managed Yjs and self-hosted Yjs with Tiptap/whiteboard fixtures, decide on data region, 50-user load, reconnect, cost, and revocation. Keep adapter vendor-neutral. Can begin: adapters/prototype yes; production transport no.
-
-## D-07 Offline editing promise
-
-Question: is offline a launch guarantee?
-
-Options: full local-first all suitable artifacts; opportunistic local draft/reconnect; online-first with explicit outage state. Recommendation: opportunistic for document/deck/task first, online-required for assessed submissions, publishing, code execution, integration refresh, and admin. Can begin: yes.
-
-## D-08 Secret infrastructure
-
-Question: which managed KMS/vault and deployment region?
-
-Options depend on production cloud. Recommendation: envelope encryption with a managed secret service, rotation/audit, and secret references only in Convex. Do not implement application-managed encryption keys. Can begin: connector schemas yes; credential storage no.
-
-## D-09 ManageBac scope
-
-Question: initial integration breadth?
-
-Options: broad all discovered categories; or narrow identity/classes/assignments/resources/timetable then CAS/assessments. Recommendation: capability-driven narrow pilot, adding only verified endpoints and policies. Current token remains read-only. Can begin: contract discovery yes.
-
-## D-10 Memory defaults and retention
-
-Question: opt-in versus on-by-default, and retention values?
-
-Options: explicit opt-in maximizes trust but weak discovery; on-by-default with controls provides value but raises school/privacy concerns; school-configured default plus user control. Recommendation: opt-in pilot for inferred memory, explicit “remember” always available; school policy may disable categories but not force private inference. Proposed retention in 03. Can begin: schema/evals yes; capture no.
-
-## D-11 School-admin safeguarding access
-
-Question: should any workflow permit access to private student content?
-
-Options: never through admin; narrowly defined safeguarding case with legal basis, dual authorization, notification policy, and audit; routine admin access. Recommendation: no routine access; design safeguarding separately only after legal/product review. Can begin: admin excluding such access yes.
-
-## D-12 Analytics privacy threshold
-
-Question: minimum cohort for teacher/creator/school analytics?
-
-Options: 3, 5, 10, or differential-privacy mechanisms. Recommendation: suppress below 5 initially, aggregate time buckets, never expose prompts; evaluate higher thresholds for sensitive dimensions. Can begin: aggregate pipeline yes.
-
-## D-13 Agent resource-derived use
-
-Question: may use-only students benefit from teacher resources they cannot directly open?
-
-Options: require direct resource access; allow derived answers under teacher/license policy with anti-extraction controls; forbid protected resources. Recommendation: allow explicit derived-use bindings with disclosure, citation rules, extraction tests, and no source reproduction; mark schemes require stricter policy. Can begin: resource binding model yes.
-
-## D-14 Automatic agent selection
-
-Question: can Spectra automatically choose a specialized agent?
-
-Options: explicit only; suggest then user confirms; auto-select above confidence with visible override. Recommendation: suggestions first; later auto-select only after routing evals and user setting. Default remains Spectra. Can begin: explicit selection yes.
-
-## D-15 Code runtimes and hosting
-
-Question: which languages and whether published experiences receive URLs?
-
-Options: browser-only TS/JS/HTML/CSS safest; remote isolated Python plus compiled runners expands learning; broad container execution maximizes flexibility and risk. Recommendation: browser React/TypeScript visualization runtime first, isolated Python second, compiled languages as versioned execution profiles; no public hosting until abuse/cost/privacy review. Can begin: file/editor/preview shell yes.
-
-## D-16 Visualization authoring standard
-
-Question: default generated stack?
-
-Options: vanilla HTML/CSS/JS; React/TypeScript plus scoped utility tokens; language-neutral runtime SDK. Recommendation: React/TypeScript with Spectra component/tokens SDK and optional scoped Tailwind-compatible utilities; exported artifacts include locked dependencies. Can begin: SDK design waits for approval.
-
-## D-17 Presentation export fidelity
-
-Question: prioritize editable PPTX fidelity or Spectra-native presentation quality?
-
-Options: native-first with PDF/video and best-effort PPTX; constrained slide model for high PPTX editability; dual advanced/native and portable modes. Recommendation: native-first plus documented PPTX fidelity tiers; do not limit the editor to PowerPoint’s common denominator. Can begin: scene model yes.
-
-## D-18 Assessment/quiz boundary
-
-Question: will Spectra support graded high-stakes assessment or learning/practice only initially?
-
-Options: practice/formative; teacher-assigned with gradebook export; high-stakes proctored. Recommendation: practice and formative assignments first. High-stakes requires identity, accommodations, integrity, appeals, immutable submission, and regulatory work. Can begin: quiz product yes.
-
-## D-19 Additional artifacts
-
-Question: approve dataset and portfolio as first-class artifact types?
-
-Options: features inside code/document; or first-class types. Recommendation: both. Dataset needs schema/profiling/range collaboration and reproducible visualizations; portfolio needs evidence/reflection/outcome structure and CAS provenance. Imported assessment remains an external record, class remains a workspace/context, and resource collection remains a library/view. Can begin: artifact registry yes.
-
-## D-20 Version retention
-
-Question: retention and storage tiers by plan/school?
-
-Options: unlimited; fixed count/time; policy-based hot/cold with protected published/assessed versions. Recommendation: policy-based, with reference-counted assets and protected milestones; publish transparent quotas. Can begin: content-addressing yes.
-
-## UI reference disposition
-
-| Image                       | Decision                      | Required change                                                                                |
-| --------------------------- | ----------------------------- | ---------------------------------------------------------------------------------------------- |
-| 01 mission control          | adjust                        | permission/source states, role-aware nav, live run and narrow layouts                          |
-| 02 superadmin               | adjust                        | operator-session banner, freshness, incident/request drill-down; remove artifact-like actions  |
-| 03 school admin             | adjust                        | governance, privacy thresholds, groups/classes, messaging, integration/audit depth             |
-| 04 ManageBac                | adjust                        | verified capability matrix, credential rotation, identity queue, read-only overlay semantics   |
-| 05 agent library            | keep/adjust                   | privacy/use-right/version health and explicit Use versus Add                                   |
-| 06 agent studio             | adjust                        | guided training, evals, release/version flow, privacy-safe analytics                           |
-| 07 presentation             | keep/adjust                   | collaboration/history/export/present states and narrow layouts                                 |
-| 08 code visualization       | replace key details           | default React/TS runtime, sandbox status, files/dependencies; do not imply Python-only support |
-| 09 whiteboard               | keep/adjust                   | layers, large-board navigation, accessibility, AI region-conflict states                       |
-| 10 timetable                | adjust                        | source badges/overlays, timezone/recurrence, approval and conflict states                      |
-| existing document/deck/quiz | preserve language, supplement | collaboration/history/embed/import/export and dense/narrow states                              |
-| existing planner task       | replace shell                 | bring into current Spectra shell and timetable/source model                                    |
-
-Regenerate/supplement before implementation: share/permission dialog; memory controls; version comparison; embed modes/no-access; human/AI conflict; ManageBac identity/quarantine preview; agent training/eval/publish; dataset; CAS portfolio; mobile/narrow/tiled variants; offline/reconnect/permission-lost states.
-
-## Decision tasks
-
-### PD-01 Review and record decisions D-01 through D-08 before foundation implementation
+# Resolved product decisions
+
+All decisions below are resolved and authoritative for implementation. Do not pause to re-ask them unless implementation reveals a genuinely new consequence not covered here.
+
+| ID | Resolved decision | Architectural/product consequence |
+|---|---|---|
+| D-01 | One active school membership per normal account | Enforce a unique active membership invariant; transfer/offboarding clears school-scoped state before another school activates |
+| D-02 | Superadmin school access is operational | SUPER_ADMIN_EMAILS creates platform eligibility; entering a school creates a labeled, audited, time-boxed operator session, never membership or student impersonation |
+| D-03 | Ordinary capability parity | Students, teachers, school admins, and superadmins can create/use/share every ordinary artifact and agent; roles only add management pages |
+| D-04 | Future groups/classes are optional infrastructure | Core product and agent creation/routing do not depend on teacher-only or class-only workflows |
+| D-05 | Artifacts private by default | Direct sharing UX exposes read-only/modify; public is explicit and never default |
+| D-06 | Workspace access normally reaches artifacts | Create workspace grant projections; permit per-person per-artifact removal/narrowing and explain access source |
+| D-07 | Extensible permission backend, simple current UX | Store fine capabilities for future evolution without exposing manager/editor/commenter complexity now; agent deletion remains creator-only |
+| D-08 | No commercial limits yet | Meter storage/model/bandwidth/execution/import/activity efficiently; enforcement defaults off; superadmin can configure/simulate/adjust per-school limits for later activation |
+| D-09 | Self-hosted Yjs collaboration | Use provider abstraction, authenticated room tokens, persistence/compaction, presence, and revocation; document future managed migration |
+| D-10 | Online-first, no offline editing | Remove offline queues/promises/states; network loss stops durable editing and shows reconnecting/unsynchronized/recovery honestly |
+| D-11 | Pragmatic server-side secrets | Keep secrets out of browser, AI context, ordinary logs, and client-visible records; use restricted authenticated encryption, rotation, fingerprint, and audit without unnecessary vault cost |
+| D-12 | No small-cohort analytics suppression | Extensive admin/superadmin operational analytics are allowed without private content; teacher analytics remain limited to useful owned-agent/assigned-experience outcomes |
+| D-13 | Automatic specialized-agent routing | Medium/high confidence routes without confirmation; selection visible/reversible; low confidence uses Spectra; continued thread normally retains agent |
+| D-14 | Load only the chosen agent | Retrieve compact candidate descriptors, then load selected instructions/skills/tools/resources/context; never inject every agent at startup |
+| D-15 | Memory enabled by default | Durable background capture/consolidation; approximately 1,000 initial tokens as adaptable target; inspect/correct/delete/pause/control; no memory progress trace |
+| D-16 | Live persistence replaces manual save | “Saved” means synchronized, authorized, valid live state; humans/AI operate before named version; no manual save gate |
+| D-17 | Exclusive overlapping semantic regions | Same line/block/object/card side/quiz field/option/Sheet cell-range/task field/canvas node queues or pauses; non-overlap remains concurrent; never silent overwrite |
+| D-18 | History separates meaningful human and every coherent AI edit | Group human sessions/idle boundaries; create user checkpoint before AI if needed; every AI operation batch produces AI-attributed version; restore creates new current version |
+| D-19 | Adaptive native progress protocol | No rigid checklist/generic repeated titles; active model emits concise hidden structured operation-specific events; runtime strips/validates/synchronizes; no naming model; no memory maintenance titles |
+| D-20 | Real ephemeral artifact-aware AI effects | Actual regions animate deliberately; independent effects concurrent; normal state fully restored after all terminal outcomes; reduced motion complete |
+| D-21 | On-demand artifact skills | Each type defines purpose/selection/regions/inspection/operations/preservation/validation/approvals/links/effects; ordinary runtime contains only compact selection/composition guidance |
+| D-22 | Progressive disclosure and fully working controls | Common actions obvious, advanced options in inspectors/expanders, redundant controls removed, every visible control verified live |
+| D-23 | General-purpose artifacts cover structured school work | CAS converts into existing artifacts/workspaces; structured calculation, analysis, and graphing belong to Sheets |
+| D-24 | Sheets is first-class | Full workbook/cell/formula/table/filter/chart/import/export/collaboration/history/AI/embed product matching 16_sheets_editor.png |
+| D-25 | Code stores any language; initial execution is focused | Execute browser web, React/TypeScript, HTML/CSS/JS, and Python first; add interpreted languages pragmatically; compiled execution not initially required |
+| D-26 | Interactive visualisations use a Spectra design skill | Enforce typography/color/component/motion/layout/accessibility so rendered/embedded experiences are polished and approachable |
+| D-27 | Spectra-native presentations win | Do not constrain scene model to PowerPoint; still implement staged PPTX import/export with fidelity reports and recovery |
+| D-28 | Major-format migration is mandatory | Every applicable type documents major formats, stages, quarantine, unsupported features, fidelity, recovery, and exports; never silently discard |
+| D-29 | Quizzes are practice/formative only | No graded/high-stakes/proctored product; responses/feedback remain formative and permission-safe |
+| D-30 | ManageBac token is read-only across every tenant capability | Inspect screenshot/reference, verify/document/test all readable routes, never assume old contracts, never call writes |
+| D-31 | Strict ManageBac identity | Match authenticated verified school email to exactly one account, store provider ID server-side, reject client IDs, never reveal alternatives |
+| D-32 | Automatic first ManageBac sync | Idempotently create current-class workspaces, timetable layers, source-linked assignments/tasks/deadlines/assessments/resources/links with progress/summary, no per-item approval |
+| D-33 | Later ManageBac sync preserves user work | Hash/version detection, safe automatic updates, overlay preservation, tombstones/detach, no duplicate workspaces, review ambiguous/consequential conflict |
+| D-34 | UI references are implementation specifications | All 21 surfaces must be functionally complete and visually extremely close through screenshot/fix loops; AI effects/history/embeds apply to every type |
+| D-35 | One primary agent only | No sub-agents for any stage. Independent verification is temporally separate after all implementation boxes complete |
+| D-36 | Delete legacy agents and chat modes before clean rebuild | Remove the entire old agent implementation and its schemas/routes/resources/UI/runtime coupling. Remove the full old study-mode taxonomy and selector—including quiz, flashcard, image, research, tutor, marker, exam, coach, explain, document, auto, and similar branches. Keep general conversation and the new artifact plans conceptually distinct; new Quiz/Flashcard artifacts and the future Agent artifact are clean implementations, not compatibility continuations |
+
+## UI reference dispositions
+
+All references in docs/spectra-rebuild/spectra-next-generation-ui are “implement and match”, not keep/adjust/replace suggestions:
+
+1. Document editor — includes canonical localized blue AI effect.
+2. Flashcard deck editor — remove manual Save card/discard semantics in favor of live sync while preserving visual composition.
+3. Quiz builder — remove redundant correct-answer selector; one clear correct control while preserving layout.
+4. Planner task editor — full current-shell target.
+5. Home — complete Mission Control.
+6–9. Workspace List/Board/Timeline/Canvas — all complete views, not screenshots-only modes.
+10–12. Superadmin, school admin, ManageBac — complete operational products with privacy and read-only source corrections above.
+13–14. Agent library/guided creation — universal users, automatic routing additions.
+15. Presentation — native-first with migration.
+16. Sheets — complete first-class product.
+17. Code/visualisation — any source language, focused runtimes, approachable Spectra design skill.
+18. Whiteboard — complete collaborative spatial product.
+19. Timetable/calendar — source/overlay and planning product.
+20. History comparison — shared for every artifact type.
+21. Embedded artifacts — shared for every artifact type.
+
+When a reference visibly conflicts with a resolved decision, preserve its composition and quality while applying the decision: no manual-save gate, no redundant quiz correct selector, no storage enforcement, no private moderation access, and no misleading write-back to ManageBac.
+
+## Decision implementation tasks
+
+### PD-01 Encode D-01 through D-12 in identity, authority, collaboration, administration, analytics, metering, and secret schemas/tests/UI
 
 - [ ] Implemented
 - [ ] Verified
 
-### PD-02 Review and record decisions D-09 through D-14 before school/memory/agent pilots
+### PD-02 Encode D-13 through D-22 in agent routing, memory, live persistence, region control, history, progress, effects, artifact skills, and control design
 
 - [ ] Implemented
 - [ ] Verified
 
-### PD-03 Review and record decisions D-15 through D-20 before rich-artifact release work
+### PD-03 Encode D-23 through D-29 in the artifact registry, Sheets, code, visualisation, presentation, import framework, and formative quiz boundary
 
 - [ ] Implemented
 - [ ] Verified
 
-### PD-04 Regenerate and approve the required UI references before frontend implementation
+### PD-04 Encode D-30 through D-33 in ManageBac capability discovery, identity, first sync, and later sync
 
 - [ ] Implemented
 - [ ] Verified
 
-### PD-05 Propagate each approved decision into schemas, plans, acceptance suites, and migration order
+### PD-05 Match and functionally verify D-34 across all 21 references and every artifact’s AI/history/embed adaptations
+
+- [ ] Implemented
+- [ ] Verified
+
+### PD-06 Enforce D-35 across the complete persistent-goal lifecycle and compaction reload protocol
+
+- [ ] Implemented
+- [ ] Verified
+
+### PD-07 Encode D-36 in deletion, schema, AI runtime, navigation, prompts, tests, and clean Agent/Quiz/Flashcard replacement boundaries
 
 - [ ] Implemented
 - [ ] Verified

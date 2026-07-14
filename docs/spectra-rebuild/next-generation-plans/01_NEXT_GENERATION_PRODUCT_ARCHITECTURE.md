@@ -30,7 +30,7 @@ The active product is more coherent than older repository documentation suggests
 
 ## Principal and tenant model
 
-User identity is global. A user can hold zero or more memberships in schools. A membership has status, role set, capabilities, cohort metadata, and dates; role is not stored on the user. Classes and groups contain memberships, not copied users. A platform operator is an independently evaluated principal derived from a normalized allowlist in SUPER_ADMIN_EMAILS and an authenticated session; it is not silently bootstrapped into a school admin role.
+User identity is global, but a normal account may have at most one active school membership. A membership has status, management-role additions, capabilities, cohort metadata, and dates; role does not reduce ordinary product capability. Students, teachers, school admins, and superadmins can create, use, and share the same artifacts and agents. Classes/groups are future distribution/discussion structures, not core prerequisites. A platform operator is derived from normalized SUPER_ADMIN_EMAILS and an authenticated session; entering a school creates a labeled operational session, never a second membership or silent school-admin bootstrap.
 
 A request establishes an actor context: user identity, active school, membership, platform-operator eligibility, optional time-boxed operator delegation, and request provenance. Every backend query/mutation evaluates this context. Client-side role gating is display only.
 
@@ -53,15 +53,15 @@ All externally visible IDs are opaque. All records carry tenant scope where appl
 
 ## Read and write paths
 
-Metadata and activity use Convex reactive queries, scoped by server-side authorization. High-frequency collaborative content uses an authenticated Yjs transport with short-lived room tokens; the service persists append-only updates and periodic snapshots. Ordinary mutations, comments, grants, versions, and activity remain Convex transactions. This hybrid avoids pushing every keystroke through whole-document mutations while retaining a single authoritative policy/audit plane.
+Metadata and activity use Convex reactive queries, scoped by server-side authorization. High-frequency collaborative content uses a self-hosted authenticated Yjs service behind a transport abstraction with short-lived room tokens, append-only updates, and periodic snapshots. Ordinary mutations, comments, grants, region claims, versions, and activity remain Convex transactions. Spectra is online-first: no offline editing or offline mutation queue. Network loss stops new durable edits, reports reconnecting/unsynchronized state honestly, and reconciles authorized in-flight state after reconnect.
 
-AI and import writes never bypass domain commands. A command validates actor, artifact type, schema, base version/state vector, target regions, rate/budget, and approval requirements. Successful commands append activity and change-group records transactionally. Collaborative content changes are committed into a named change group before an artifact version can reference them.
+AI and import writes never bypass domain commands. A command validates actor, artifact type, schema, current live state vector, stable target regions, active region ownership, rate/budget, and approval requirements. One actor holds an exclusive claim for an overlapping semantic region; non-overlapping regions remain concurrent. Conflicting work queues or pauses for visible resolution and never silently overwrites. Live synchronized state is authoritative before a named version. If AI starts over uncheckpointed human state, create a user-authored checkpoint first; every coherent AI batch then creates an AI-attributed change group/version.
 
 ## Event and consistency model
 
 - Strong transaction: authority changes, artifact lifecycle, placement, approval claim, operation idempotency, version creation.
 - Eventually consistent: search index, embeddings, aggregates, thumbnails, suggested relationships, memory consolidation.
-- Ephemeral: presence, cursors, active selection, typing, transient AI working trace.
+- Ephemeral: presence, cursors, active selection, region claims/leases, typing, transient AI working trace.
 - Durable but append-only: audit, run events, connector sync log, collaboration updates until compacted.
 
 Every eventually consistent projection stores source version and processing status. UI must disclose stale or failed projections without replacing source content. Jobs are idempotent and leased; retries use deterministic keys.
@@ -70,14 +70,15 @@ Every eventually consistent projection stores source version and processing stat
 
 Create permission-filtered search fragments per artifact region, external record, resource, thread excerpt, and memory claim. The query planner first applies tenant and grant filters, then lexical/vector ranking, then diversity and token budgets. Retrieval results include source version, reason, sensitivity, and allowed use. Re-check access at assembly time so stale indexes cannot leak revoked content.
 
-The context manifest is durable and inspectable: continued thread, explicit focus, visible objects, selected agent/version, workspace, retrieved evidence, memory capsule, and excluded items/reasons. This preserves the current useful distinction between continuation and context while making agent selection a separate axis.
+The context manifest is durable and inspectable: continued thread, explicit focus, visible objects, selected/routed agent version, workspace, retrieved evidence, memory capsule, on-demand artifact skill, and excluded items/reasons. Medium-to-high-confidence routing automatically loads only the chosen agent’s relevant instructions, skills, tools, resource bindings, and specialized context. Low confidence uses ordinary Spectra. Continuation, focus, workspace, and agent remain separate axes.
 
 ## Security and privacy invariants
 
 - No school boundary, resource grant, or agent resource binding is inferred from a title, email string, or client request alone.
-- A parent artifact, workspace, thread, embed, or agent never escalates access to a referenced source.
+- Artifacts are private by default. Direct sharing exposes read-only or modify; workspace access normally propagates to placed artifacts, with explicit per-artifact access removal. Public access is always explicit. The backend capability model remains extensible without complicating the current UX.
+- A parent thread, embed, agent, or cross-artifact reference never escalates access to its source. Workspace propagation is an explicit grant projection and respects artifact exceptions.
 - Student prompts and private work remain unavailable to teacher agent creators and school admins unless the student explicitly shares them or a narrowly defined safeguarding/legal process is invoked and audited.
-- Secret values never enter Convex documents, browser payloads, logs, AI context, or general audit metadata; only vault references do.
+- Secret values never enter client-visible Convex documents, browser payloads, ordinary logs, AI context, or general audit metadata. Use pragmatic restricted server-side encryption with rotation/fingerprints/audit; an expensive external vault is optional, not a prerequisite.
 - Memory, search, analytics, and embeddings inherit source scope and deletion.
 - Restore creates a new version; audit history is append-only and separately retained.
 - Deleting an artifact revokes room tokens immediately, tombstones search, schedules content/asset deletion, and retains only legally required minimal audit data.
@@ -88,10 +89,10 @@ These controls support data minimization, purpose limitation, accuracy, retentio
 
 | Failure                           | Required behavior                                                                                                 |
 | --------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| Convex unavailable                | local collaborative draft may continue only if room authorization is still valid; metadata actions queue visibly  |
-| collaboration gateway unavailable | fall back to read-only last snapshot or local unsynced draft; never pretend saved                                 |
+| Convex unavailable                | stop new durable metadata/domain actions, show reconnecting, retain only the current in-memory field for explicit copy/recovery |
+| collaboration gateway unavailable | stop durable editing, show reconnecting/unsynchronized, retain current in-memory field only; never pretend saved or queue offline work |
 | AI worker dies                    | lease expires, new worker resumes from checkpoint/idempotency ledger                                              |
-| permission revoked mid-session    | invalidate subscriptions and room token, stop writes, preserve unsent local copy for export only if policy allows |
+| permission revoked mid-session    | invalidate subscriptions and room token, stop writes/runs, offer copy of the currently edited field only if policy allows; never queue upload |
 | connector partially fails         | retain prior normalized records, mark affected capabilities stale, expose item-level errors                       |
 | search/memory projection lags     | show source content normally; omit or label stale suggestions                                                     |
 | schema migration fails            | keep old schema reader in offline migration tooling only, roll back deployment, never in product runtime          |
@@ -102,8 +103,9 @@ These controls support data minimization, purpose limitation, accuracy, retentio
 - Presence/cursor updates coalesced to at most 10 Hz per active user and dropped when off-screen.
 - No whole-artifact upload for a normal keystroke or object move.
 - Initial artifact shell under 200 KB compressed excluding on-demand media; type editor loaded on demand.
-- Initial AI context reports a token estimate and respects the budgets in the memory and runtime plans.
-- Large whiteboards, decks, datasets, and histories virtualize rendering and fetch by viewport/page/range.
+- Initial AI context reports a token estimate and follows memory/runtime relevance targets without treating roughly 1,000 memory tokens as a quality-damaging absolute ceiling.
+- Large whiteboards, decks, Sheets workbooks, and histories virtualize rendering and fetch by viewport/page/range.
+- Storage, bandwidth, rendering, collaboration, and model usage are fully metered and optimized. Commercial enforcement remains disabled; superadmin can configure/simulate per-school limits for later activation without schema redesign.
 
 ## Architecture tasks
 
@@ -112,7 +114,7 @@ These controls support data minimization, purpose limitation, accuracy, retentio
 - [ ] Implemented
 - [ ] Verified
 
-### A-02 Implement global identity, multi-school memberships, groups/classes, and active actor context
+### A-02 Implement global identity, at-most-one active school membership, ordinary role parity, and operational superadmin school context
 
 - [ ] Implemented
 - [ ] Verified
@@ -127,12 +129,12 @@ These controls support data minimization, purpose limitation, accuracy, retentio
 - [ ] Implemented
 - [ ] Verified
 
-### A-05 Implement collaboration transport, snapshot/update persistence, and outage recovery
+### A-05 Implement abstracted self-hosted Yjs transport, snapshot/update persistence, online-only reconnect, and outage recovery
 
 - [ ] Implemented
 - [ ] Verified
 
-### A-06 Implement typed domain commands, activity, audit, idempotency, and projection jobs
+### A-06 Implement typed domain commands, exclusive overlapping-region control, activity, audit, idempotency, metering, and projection jobs
 
 - [ ] Implemented
 - [ ] Verified

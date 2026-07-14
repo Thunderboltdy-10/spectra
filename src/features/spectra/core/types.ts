@@ -18,8 +18,8 @@ export type TimestampMs = number;
 
 export type Workspace = {
   id: SpectraId<"workspaces">;
-  ownerUserId: string;
-  orgId?: string;
+  ownerAccountId: string;
+  schoolId?: string;
   title: string;
   description?: string;
   icon?: string;
@@ -60,8 +60,8 @@ export type ArtifactLink = {
 
 export type Artifact = {
   id: SpectraId<"artifacts">;
-  ownerUserId: string;
-  orgId?: string;
+  ownerAccountId: string;
+  schoolId?: string;
   blueprintKey: string;
   title: string;
   summary?: string;
@@ -111,8 +111,8 @@ export type WorkspaceItem = {
 
 export type Thread = {
   id: SpectraId<"threads">;
-  ownerUserId: string;
-  orgId?: string;
+  ownerAccountId: string;
+  schoolId?: string;
   title: string;
   summaryShort?: string;
   summaryLong?: string;
@@ -137,8 +137,8 @@ export type Message = {
 
 export type AIRun = {
   id: SpectraId<"aiRuns">;
-  ownerUserId: string;
-  orgId?: string;
+  ownerAccountId: string;
+  schoolId?: string;
   sourceSurface: SpectraSurface;
   threadId?: SpectraId<"threads">;
   workspaceId?: SpectraId<"workspaces">;
@@ -199,3 +199,5 @@ export type FocusSpace = {
   createdAt: TimestampMs;
   updatedAt: TimestampMs;
 };
+
+

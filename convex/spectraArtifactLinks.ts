@@ -69,8 +69,8 @@ export const create = mutation({
     }
     const createdBy = args.createdBy ?? "user";
     const linkId = await ctx.db.insert("spectraArtifactLinks", {
-      ownerUserId: actor._id,
-      orgId: actor.orgId,
+      ownerAccountId: actor._id,
+      schoolId: actor.schoolId,
       sourceArtifactId: args.sourceArtifactId,
       targetArtifactId: args.targetArtifactId,
       relationType: args.relationType,
@@ -91,8 +91,10 @@ export const remove = mutation({
   handler: async (ctx, args) => {
     const actor = await requireSpectraActor(ctx, args.actorClerkId);
     const link = await ctx.db.get(args.linkId);
-    if (!link || link.ownerUserId !== actor._id || link.orgId !== actor.orgId) throw new Error("Artifact link not found");
+    if (!link || link.ownerAccountId !== actor._id || link.schoolId !== actor.schoolId) throw new Error("Artifact link not found");
     await ctx.db.delete(args.linkId);
     return { linkId: args.linkId };
   },
 });
+
+

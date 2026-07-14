@@ -2,7 +2,7 @@
 
 ## Product principle
 
-Spectra should feel familiar because it remembers high-value, correct, scoped information—not because it stores everything. Memory is a derived, permission-bound intelligence layer. Source artifacts, threads, external records, and audit events remain the evidence. A memory claim never grants access and never outranks its source.
+Spectra memory is enabled by default and should feel useful because it remembers high-value, correct, scoped information—not because it stores everything. Memory is a derived, permission-bound intelligence layer. Source artifacts, threads, external records, and audit events remain the evidence. A memory claim never grants access and never outranks its source. Users retain inspect, correct, delete, pause, export, and category/scope controls.
 
 ## Research-informed alternatives
 
@@ -29,22 +29,22 @@ Claim types initially: declared fact, inferred preference, correction, decision,
 
 Candidate capture occurs only after explicit “remember” requests or strong product signals: a direct correction, repeated stable preference, accepted recurring workflow, explicit decision, or durable commitment. A lightweight classifier proposes type/scope/confidence/sensitivity and evidence. Deterministic rules reject secrets, credentials, transient task text, raw school records, other users’ private content, duplicate propositions, and low-confidence inference.
 
-Candidates merge with semantically equivalent claims, supersede contradictions, or remain proposed until confirmation. Repetition increases evidence, not duplicate records. Model-generated reflection may suggest claims in a queue; it cannot activate sensitive or cross-scope claims autonomously. Consolidation is idempotent and measured for precision, not volume.
+Candidates merge with semantically equivalent claims, supersede contradictions, or remain proposed until confirmation where sensitivity/uncertainty requires it. Repetition increases evidence, not duplicate records. Model-generated reflection may suggest claims in a queue; it cannot activate sensitive or cross-scope claims autonomously. Capture, consolidation, capsule regeneration, expiry, and embedding updates run in durable background jobs. They never appear as “Updating memory” or similar user-facing AI progress events. Consolidation is idempotent and measured for precision, not volume.
 
-## Exact context budgets
+## Initial-context targets
 
 Memory is separate from continued thread and focused artifact content.
 
-| Layer                        |    Default | Hard maximum | Entry rule                                           |
-| ---------------------------- | ---------: | -----------: | ---------------------------------------------------- |
-| user capsule                 | 220 tokens |          300 | stable active claims useful across work              |
-| active workspace capsule     |        300 |          400 | conventions, objectives, active decisions            |
-| current workflow/corrections |        120 |          180 | directly relevant recent pattern or mistake          |
-| relationship hints           |         60 |          100 | only actors/resources already in permitted context   |
-| school-safe profile          |         60 |          100 | role/course/timezone facts allowed in this school    |
-| total initial memory         |        760 |        1,080 | omit empty layers; never fill quota for its own sake |
+| Layer                        | Target | Typical upper range | Entry rule                                           |
+| ---------------------------- | -----: | ------------------: | ---------------------------------------------------- |
+| user capsule                 | 250 tokens | 350 | stable active claims useful across work              |
+| active workspace capsule     | 320 tokens | 450 | conventions, objectives, active decisions            |
+| current workflow/corrections | 150 tokens | 250 | directly relevant recent pattern or mistake          |
+| relationship hints           | 80 tokens  | 150 | only actors/resources already in permitted context   |
+| school-safe profile          | 80 tokens  | 150 | role/course/timezone facts allowed in this school    |
+| total initial memory         | approximately 880 tokens | approximately 1,350 | relevance and accuracy outrank an arbitrary hard cap |
 
-First-pass deeper retrieval is capped at 1,500 tokens and eight claims/evidence snippets. A tool may request a second pass up to 4,000 tokens when the task demonstrably needs old context. Absolute memory/retrieval ceiling is 8,000 tokens and requires a logged reason. The context manifest records estimates and actual tokens. Artifact-level capsules are not injected globally; a focused artifact gets its normal artifact context serializer.
+Approximately 1,000 initial tokens is a design target, not a strict ceiling. Testing may increase or reduce a layer when usefulness, accuracy, latency, or model behavior justifies it. First-pass deeper retrieval targets 1,500 tokens and eight claims/evidence snippets; a tool may request a second pass around 4,000 tokens when the task needs old context. Very large retrieval requires a logged reason and evaluation, but no fixed ceiling should damage a legitimate task. The context manifest records estimates and actual tokens. Artifact-level capsules are not injected globally; a focused artifact uses its type serializer/on-demand skill.
 
 ## Retrieval
 
@@ -62,7 +62,7 @@ Workspace owners/managers may manage workspace conventions, not members’ priva
 
 Every claim has one explicit scope: private user global, private user within school, workspace, shared artifact convention, or system product preference. School-derived facts cannot flow to another school. Other people’s identities appear only as relationship references already visible to the user. Agent runs write memory for the invoking user, never the agent creator. ManageBac records remain external evidence and are not copied into global user memory.
 
-Deletion, offboarding, and school transfer invalidate scope. Retention defaults: rejected candidates 30 days, retrieval logs 30 days with minimized text, inactive inferred claims 180 days unless reconfirmed, declared facts until changed/deleted, capsules regenerated on any source change. Exact values require D-10 approval.
+Deletion, offboarding, and school transfer invalidate scope. A user cannot carry school-private memory into a new school. Retention defaults: rejected candidates 30 days, retrieval logs 30 days with minimized text, inactive inferred claims 180 days unless reconfirmed, declared facts until changed/deleted, capsules regenerated on any source change. These defaults are resolved and remain configurable through policy.
 
 ## Failure strategy and evaluation
 
@@ -87,7 +87,7 @@ Evaluate precision of useful recall, harmful/incorrect recall, cross-scope leaka
 - [ ] Implemented
 - [ ] Verified
 
-### MEM-04 Enforce the exact initial and deeper-retrieval token budgets in context manifests
+### MEM-04 Implement measured approximately-1,000-token initial targets, adaptive expansion, deeper retrieval, and context accounting without a quality-damaging hard ceiling
 
 - [ ] Implemented
 - [ ] Verified
@@ -117,7 +117,7 @@ Evaluate precision of useful recall, harmful/incorrect recall, cross-scope leaka
 - [ ] Implemented
 - [ ] Verified
 
-### MEM-10 Pilot opt-in capture and graduate categories only after measured precision thresholds
+### MEM-10 Enable memory by default, run capture/consolidation silently in background, exclude maintenance from progress traces, and graduate categories through measured precision/usefulness gates
 
 - [ ] Implemented
 - [ ] Verified

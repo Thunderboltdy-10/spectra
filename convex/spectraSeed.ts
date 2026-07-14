@@ -435,12 +435,12 @@ export const ensureDemoData = mutation({
     const now = Date.now();
     const existingWorkspaces = await ctx.db
       .query("spectraWorkspaces")
-      .withIndex("by_owner_status", (q) => q.eq("ownerUserId", actor._id).eq("status", "active"))
+      .withIndex("by_account_status", (q) => q.eq("ownerAccountId", actor._id).eq("status", "active"))
       .collect();
     const workspaceIds = new Map<string, Id<"spectraWorkspaces">>();
 
     for (const [workspaceIndex, demo] of demoWorkspaces.entries()) {
-      const existing = existingWorkspaces.find((workspace) => workspace.title === demo.title && workspace.orgId === actor.orgId);
+      const existing = existingWorkspaces.find((workspace) => workspace.title === demo.title && workspace.schoolId === actor.schoolId);
       if (existing) {
         workspaceIds.set(demo.key, existing._id);
         const needsRepair = existing.pinned !== undefined || !existing.description || !existing.icon || !existing.color;
@@ -454,8 +454,8 @@ export const ensureDemoData = mutation({
       }
       const workspaceTime = now - (demoWorkspaces.length - workspaceIndex) * 26 * 60 * 60 * 1000;
       const workspaceId = await ctx.db.insert("spectraWorkspaces", {
-        ownerUserId: actor._id,
-        orgId: actor.orgId,
+        ownerAccountId: actor._id,
+        schoolId: actor.schoolId,
         title: demo.title,
         description: demo.description,
         icon: demo.icon,
@@ -471,7 +471,7 @@ export const ensureDemoData = mutation({
 
     const existingArtifacts = await ctx.db
       .query("spectraArtifacts")
-      .withIndex("by_owner_status", (q) => q.eq("ownerUserId", actor._id).eq("status", "active"))
+      .withIndex("by_account_status", (q) => q.eq("ownerAccountId", actor._id).eq("status", "active"))
       .collect();
     const artifactIds = new Map<string, Id<"spectraArtifacts">>();
 
@@ -481,7 +481,7 @@ export const ensureDemoData = mutation({
       // Real threads are seeded/provided by the canonical thread system.
       if (demo.blueprintKey === "thread_reference") continue;
       const workspaceId = demo.workspaceKey ? workspaceIds.get(demo.workspaceKey) : undefined;
-      const existing = existingArtifacts.find((artifact) => artifact.title === demo.title && artifact.blueprintKey === demo.blueprintKey && artifact.orgId === actor.orgId);
+      const existing = existingArtifacts.find((artifact) => artifact.title === demo.title && artifact.blueprintKey === demo.blueprintKey && artifact.schoolId === actor.schoolId);
       const artifactTime = now - (artifactIndex + 2) * 43 * 60 * 1000;
       const content = artifactContent(demo.blueprintKey, {
         key: demo.key,
@@ -489,8 +489,8 @@ export const ensureDemoData = mutation({
         relations: demo.relations,
       });
       const artifactId = existing?._id ?? await ctx.db.insert("spectraArtifacts", {
-        ownerUserId: actor._id,
-        orgId: actor.orgId,
+        ownerAccountId: actor._id,
+        schoolId: actor.schoolId,
         blueprintKey: demo.blueprintKey,
         title: demo.title,
         summary: demo.summary || fallbackArtifactSummary(demo.blueprintKey),
@@ -572,8 +572,8 @@ export const ensureDemoData = mutation({
       const artifactId = demo.artifactKey ? artifactIds.get(demo.artifactKey) : undefined;
       const runCreatedAt = now - (runCount + 1) * 52 * 60 * 1000;
       const runId = await ctx.db.insert("spectraAiRuns", {
-        ownerUserId: actor._id,
-        orgId: actor.orgId,
+        ownerAccountId: actor._id,
+        schoolId: actor.schoolId,
         sourceSurface: "workspace",
         workspaceId,
         artifactId,
@@ -611,3 +611,5 @@ export const ensureDemoData = mutation({
     };
   },
 });
+
+

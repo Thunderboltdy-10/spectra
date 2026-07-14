@@ -1,63 +1,72 @@
 # Quiz artifact plan
 
-## Scope and boundary
+## Product boundary and reference contract
 
-The quiz inherits the artifact standard. Initial positioning is practice and formative assessment, not high-stakes proctoring (D-18). Preserve the reference builder’s question rail, types, options, difficulty, points, timing, Bloom/standards/media, preview, and structured progressive AI work.
+Quiz is strictly practice and formative learning. Do not implement high-stakes assessment, proctoring, punitive grading, locked-down browsers, or consequential gradebook decisions. `03_quiz_builder.png` is the executable full-screen specification for shell, question rail, type, options, difficulty, points, timing, objectives/standards/media, preview, and progressive AI work. The answer-option design is corrected to one clear way to mark an option correct; the reference’s redundant selector is not duplicated. Every other visible control must function.
 
-## Domain model
+Quizzes are private by default with read-only/modify sharing, workspace exceptions, and explicit public practice mode only. Answer keys, rubrics, peer responses, and attempts remain permission-separated.
 
-Quiz content includes instructions, sections, stable questions, question types (single/multiple choice, true/false, short/long response, numeric, matching, ordering, fill/cloze), options, answers/rubrics, feedback, points, difficulty, objectives/standards, sources, media, randomization pools, timing, accommodations policy, attempt policy, publish state. Answers/rubrics can be permission-separated from student viewers.
+## Model, attempts, and editing
 
-Attempts/submissions are immutable user-owned/assignment-scoped records with quizVersionId, randomized presentation manifest, responses, timing, accommodations, submit state, score components, feedback release, grader decisions, and audit. Editing a published quiz creates a draft/new version; active attempts stay pinned. Restore never changes a submitted attempt.
+Content includes instructions, sections, stable questions/fields/options, single/multiple choice, true/false, short/long response, numeric, matching, ordering, fill/cloze, formative answer/rubric/explanation, feedback, optional practice points, difficulty, objectives/standards, sources, media, randomization pools, timing guidance, accommodations, attempt policy, and published-practice state.
 
-Collaboration covers authoring, with presence/comments per question/field. Students taking an attempt do not share an authoring room. AI can plan coverage, generate questions progressively, edit selected questions, validate answer correctness and ambiguity, generate rubrics/explanations, and run quality/bias/accessibility checks. It cannot grade subjective work as final without configured human review.
+Attempts are immutable user-owned or assignment-scoped learning records pinned to a quiz version and randomized presentation manifest. They store responses, timing, submit state, formative score components, released feedback, and audit. Editing a published practice quiz creates a draft/new version; active attempts remain pinned. Restore never changes submitted attempts. Subjective AI feedback is clearly advisory and can require configured human review.
 
-## Experience, permissions, failures
+Common question/option actions are obvious; advanced standards, pools, timing, accommodations, and release settings use progressive disclosure. The one correct-answer affordance updates the canonical answer model and preview consistently.
 
-Builder, preview/test, assigned-attempt, results/review, compact card, interactive embed, and history are distinct representations. Embedded attempts state their mode and identity; public embeds are practice only. Autosave responses locally/server-side with clear offline/submit behavior. Submission is idempotent and online-authorized.
+## Live collaboration, AI, effects, and history
 
-Question import/export supports QTI if selected after feasibility work, plus CSV for simple types and PDF/print. Missing media, invalid scoring, duplicate correct answers, stale published versions, lost connectivity, and interrupted submission have explicit recovery.
+Authoring uses self-hosted Yjs/domain operations with live synchronized validity. Stable regions include question field, answer option, correct state, rubric, feedback, source, and quiz setting. Same region has exclusive ownership/conflict control; independent questions/options may update concurrently. Presence and comments are field-aware. Attempt response sync is online-first and idempotent: network loss shows reconnect/unsynchronized state and prevents unsafe submission, without offline editing promises or local offline queues.
 
-Migrate current quiz content into stable questions and versioned answer permissions. Existing test responses, if any, require a separate privacy/integrity audit before migration.
+The on-demand quiz skill defines formative purpose, selection, regions, operations, inspection, preservation, validation, approval, related source artifacts, and effects. AI can plan coverage, generate questions progressively, edit selected fields, validate correctness/ambiguity, generate explanations/rubrics, and run bias/accessibility/source-coverage checks. It never converts advisory formative feedback into a high-stakes decision.
+
+Real effects occur on the actual question/option/correct-state/rubric being produced or changed; independent operations animate concurrently and all effects clear after terminal states. Human authoring sessions and every coherent AI batch are distinct history entries. AI checkpoints live unversioned user work first. Universal comparison is question-aware; restore creates a new current quiz version.
+
+## Imports, representations, failures, migration
+
+Staged import supports QTI 2.x after feasibility validation, Moodle XML where feasible, CSV/TSV for mapped simple types, and structured JSON; export supports QTI where supported, CSV/JSON, and print/PDF. Import quarantine scans archives/media, preserves originals, maps fields explicitly, reports unsupported interactions/scoring/media/metadata and fidelity, and never silently upgrades content into high-stakes behavior.
+
+Builder, preview/practice, assigned practice attempt, results/review, compact card, interactive live/pinned embed, comparison/history, narrow, touch, and reduced-motion states are complete. Handle missing media/source, invalid answer configuration, duplicate correct states, stale versions, reconnect, interrupted idempotent submission, revoked access, partial AI generation, conflict, import quarantine, and unavailable feedback.
 
 ## Tasks
 
-### QUIZ-01 Define quiz/question/rubric schemas, publish lifecycle, validation, and answer visibility
+### QUIZ-01 Define formative quiz/question/option/rubric schemas, stable regions, practice publish lifecycle, validation, and answer visibility
 
 - [ ] Implemented
 - [ ] Verified
 
-### QUIZ-02 Define immutable attempt/submission/version pinning, autosave, accommodations, grading, and release
+### QUIZ-02 Define immutable practice attempts, version pinning, online synchronization, idempotent submission, accommodations, advisory feedback, and release
 
 - [ ] Implemented
 - [ ] Verified
 
-### QUIZ-03 Build builder, preview, attempt, results, card, embed, history, and responsive states
+### QUIZ-03 Build exact reference builder with one correct-answer control plus preview/attempt/results/card/embed/history/responsive states and every control functional
 
 - [ ] Implemented
 - [ ] Verified
 
-### QUIZ-04 Implement author collaboration, question comments, versions, and published-draft branching
+### QUIZ-04 Implement live author collaboration, field-aware comments/presence, region claims/conflicts, reconnect/recovery, coherent versions, user-before-AI checkpoints, and restore
 
 - [ ] Implemented
 - [ ] Verified
 
-### QUIZ-05 Implement AI coverage, generation, edit, rubric, ambiguity, correctness, bias, and accessibility checks
+### QUIZ-05 Implement on-demand skill, AI coverage/generation/edit/explanation/rubric/ambiguity/correctness/bias/accessibility checks, real region effects, and cleanup
 
 - [ ] Implemented
 - [ ] Verified
 
-### QUIZ-06 Implement assignment/privacy policies and prove no answer/rubric or peer-response leakage
+### QUIZ-06 Implement private-default/assignment/public-practice permission policies and prove no answer, rubric, response, prompt, thread, or peer leakage
 
 - [ ] Implemented
 - [ ] Verified
 
-### QUIZ-07 Implement QTI/CSV/print import/export with quarantine and fidelity reports
+### QUIZ-07 Implement QTI/Moodle XML/CSV/TSV/JSON import and supported export/print with quarantine, mapping, fidelity, recovery, and tests
 
 - [ ] Implemented
 - [ ] Verified
 
-### QUIZ-08 Migrate current quizzes and prove submission idempotency, offline recovery, restore, and scale
+### QUIZ-08 Migrate current quizzes, remove legacy branches, and prove every actual UI control, formative boundary, scale, mixed collaboration, history, embeds, and recovery
 
 - [ ] Implemented
 - [ ] Verified
+

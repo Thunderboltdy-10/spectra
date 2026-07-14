@@ -183,7 +183,7 @@ export const hide = mutation({
     const item = await ctx.db.get(args.workspaceItemId);
     if (!item) throw new Error("Workspace item not found");
     const workspace = await ctx.db.get(item.workspaceId);
-    if (!workspace || workspace.ownerUserId !== actor._id || workspace.orgId !== actor.orgId) {
+    if (!workspace || workspace.ownerAccountId !== actor._id || workspace.schoolId !== actor.schoolId) {
       throw new Error("Workspace item not found");
     }
     const now = Date.now();
@@ -225,7 +225,7 @@ export const setPinned = mutation({
     const item = await ctx.db.get(args.workspaceItemId);
     if (!item) throw new Error("Workspace item not found");
     const workspace = await ctx.db.get(item.workspaceId);
-    if (!workspace || workspace.ownerUserId !== actor._id || workspace.orgId !== actor.orgId) {
+    if (!workspace || workspace.ownerAccountId !== actor._id || workspace.schoolId !== actor.schoolId) {
       throw new Error("Workspace item not found");
     }
     const now = Date.now();
@@ -241,3 +241,5 @@ export const setPinned = mutation({
     return { workspaceItemId: args.workspaceItemId, pinned: args.pinned };
   },
 });
+
+

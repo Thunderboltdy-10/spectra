@@ -1,458 +1,129 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
-import dynamic from "next/dynamic";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { toast } from "sonner";
-import { ChatSidebar } from "@/components/chat/chat-sidebar";
-import { useSidebar } from "@/context/sidebar-context";
+import type { ReactNode } from "react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { FolderKanban, LibraryBig, MessageSquareText, Settings2 } from "lucide-react";
+import { SpectraLogo } from "@/components/spectra-logo";
 import { cn } from "@/lib/utils";
-import type { GuidedTourStep } from "@/components/ui/guided-tour";
 
-const GuidedTour = dynamic(
-  () => import("@/components/ui/guided-tour").then((module) => module.GuidedTour),
-  { ssr: false },
-);
-
-const PAGE_TOUR_VERSION = "v1";
-const BASE_TOUR_STEPS: GuidedTourStep[] = [
-  {
-    selector: '[data-tour="utility-tour"]',
-    title: "Global tour control",
-    description: "Open guided tours from here on any screen.",
-    position: "left",
-  },
-  {
-    selector: '[data-tour="sidebar-pages"]',
-    title: "Sidebar pages",
-    description: "Use this rail to move across core pages without losing context.",
-    position: "right",
-  },
-  {
-    selector: '[data-tour="utility-feedback"]',
-    title: "Feedback",
-    description: "Send feedback from anywhere without leaving your current page.",
-    position: "left",
-  },
-];
-
-const PAGE_TOUR_STEPS: Record<string, GuidedTourStep[]> = {
-  "/flashcards": [
-    {
-      selector: '[data-tour="flashcards-header"]',
-      title: "Flashcard studio",
-      description: "Start due-card review, toggle shuffle, and refresh your queues from here.",
-      position: "bottom",
-    },
-    {
-      selector: '[data-tour="flashcards-decks"]',
-      title: "Deck list",
-      description: "Select any saved deck to focus review on one topic at a time.",
-      position: "right",
-    },
-    {
-      selector: '[data-tour="flashcards-review"]',
-      title: "Review workspace",
-      description: "Flip cards, jump with dot navigation, and rate difficulty to schedule next review.",
-      position: "left",
-    },
-  ],
-  "/bookmarks": [
-    {
-      selector: '[data-tour="bookmarks-header"]',
-      title: "Bookmarks hub",
-      description: "This page stores your saved highlights from chat.",
-      position: "bottom",
-    },
-    {
-      selector: '[data-tour="bookmarks-search"]',
-      title: "Search bookmarks",
-      description: "Filter by topic or phrase to find key explanations quickly.",
-      position: "bottom",
-    },
-    {
-      selector: '[data-tour="bookmarks-list"]',
-      title: "Grouped highlights",
-      description: "Bookmarks are grouped by chat so you can reopen context instantly.",
-      position: "top",
-    },
-  ],
-  "/achievements": [
-    {
-      selector: '[data-tour="achievements-header"]',
-      title: "Progress milestones",
-      description: "Track streaks, XP, and completion from this summary area.",
-      position: "bottom",
-    },
-    {
-      selector: '[data-tour="achievements-overview"]',
-      title: "Quick metrics",
-      description: "These cards summarize XP, current streak, and overall completion rate.",
-      position: "bottom",
-    },
-    {
-      selector: '[data-tour="achievements-grid"]',
-      title: "Badge catalog",
-      description: "Completed badges are sorted first, with pending goals listed after.",
-      position: "top",
-    },
-  ],
-  "/artifacts": [
-    {
-      selector: '[data-tour="artifacts-header"]',
-      title: "Artifacts workspace",
-      description: "Your living workspace for study plans, flashcards, artifacts, documents, and more.",
-      position: "bottom",
-    },
-  ],
-  "/analytics": [
-    {
-      selector: '[data-tour="analytics-header"]',
-      title: "Analytics overview",
-      description: "Use this page to monitor learning patterns and study outcomes.",
-      position: "bottom",
-    },
-    {
-      selector: '[data-tour="analytics-stats"]',
-      title: "Key stats",
-      description: "Top-line metrics show streak, message volume, topics, and quiz performance.",
-      position: "bottom",
-    },
-    {
-      selector: '[data-tour="analytics-charts"]',
-      title: "Trend panels",
-      description: "These charts track activity, study-time rhythm, and mode/quiz trends.",
-      position: "top",
-    },
-  ],
-  "/models": [
-    {
-      selector: '[data-tour="models-header"]',
-      title: "Model atlas",
-      description: "Use this page to compare models by capability, context size, and task fit.",
-      position: "bottom",
-    },
-    {
-      selector: '[data-tour="models-search-models"]',
-      title: "Model-first search",
-      description: "Search models first, then narrow by provider when needed.",
-      position: "bottom",
-    },
-    {
-      selector: '[data-tour="models-provider-panel"]',
-      title: "Provider panel",
-      description: "Filter by provider and open leaderboard insights without leaving this screen.",
-      position: "left",
-    },
-  ],
-  "/agents": [
-    {
-      selector: '[data-tour="agents-header"]',
-      title: "Agents workspace",
-      description: "Create and manage specialist agents tailored to your workflows.",
-      position: "bottom",
-    },
-    {
-      selector: '[data-tour="agents-search"]',
-      title: "Semantic search",
-      description: "Search by intent, topic, or skill and filter agents in one pass.",
-      position: "bottom",
-    },
-    {
-      selector: '[data-tour="agents-filters"]',
-      title: "Quick filters",
-      description: "Use category and visibility filters to narrow large agent libraries.",
-      position: "bottom",
-    },
-    {
-      selector: '[data-tour="agents-grid"]',
-      title: "Agent catalog",
-      description: "Open an agent to edit prompts, resources, and preferred modes.",
-      position: "top",
-    },
-    {
-      selector: '[data-tour="agents-create"]',
-      title: "Create flow",
-      description: "Launch the guided builder or switch to manual prompt mode when needed.",
-      position: "left",
-    },
-    {
-      selector: '[data-tour="utility-tour"]',
-      title: "Replay tours",
-      description: "Re-open this tour any time while you work with agents.",
-      position: "left",
-    },
-    {
-      selector: '[data-tour="utility-feedback"]',
-      title: "Report agent issues",
-      description: "Share broken prompts or filtering issues directly from this page.",
-      position: "left",
-    },
-  ],
-  "/admin": [
-    {
-      selector: '[data-tour="admin-header"]',
-      title: "Admin workspace",
-      description: "Manage school controls, permissions, and operational settings in one place.",
-      position: "bottom",
-    },
-    {
-      selector: '[data-tour="admin-controls"]',
-      title: "Control center",
-      description: "Update user roles and core admin toggles from this section.",
-      position: "top",
-    },
-  ],
-  "/admin/school": [
-    {
-      selector: '[data-tour="school-admin-header"]',
-      title: "School dashboard",
-      description: "Use this overview to jump into members, branding, SOUL, and analytics.",
-      position: "bottom",
-    },
-  ],
-  "/admin/school/soul": [
-    {
-      selector: '[data-tour="soul-header"]',
-      title: "SOUL policy workspace",
-      description: "Define institutional guidance that shapes tutoring behavior across your school.",
-      position: "bottom",
-    },
-    {
-      selector: '[data-tour="soul-sections"]',
-      title: "Guidance sections",
-      description: "Switch between mission, pedagogy, tone, and policy sections quickly.",
-      position: "bottom",
-    },
-    {
-      selector: '[data-tour="soul-editor"]',
-      title: "Editor",
-      description: "Write and save section content, then publish when ready.",
-      position: "right",
-    },
-    {
-      selector: '[data-tour="soul-test-panel"]',
-      title: "Preview impact",
-      description: "Test sample prompts to preview how published SOUL guidance is injected.",
-      position: "left",
-    },
-  ],
-  "/admin/school/branding": [
-    {
-      selector: '[data-tour="branding-header"]',
-      title: "Branding controls",
-      description: "Manage logo and color identity for your school workspace.",
-      position: "bottom",
-    },
-    {
-      selector: '[data-tour="branding-logo"]',
-      title: "Logo upload",
-      description: "Upload or replace your school logo with live updates.",
-      position: "right",
-    },
-    {
-      selector: '[data-tour="branding-colors"]',
-      title: "Theme colors",
-      description: "Set primary and accent colors with immediate visual feedback.",
-      position: "right",
-    },
-    {
-      selector: '[data-tour="branding-preview"]',
-      title: "Live preview",
-      description: "Validate the look before saving it for your whole organization.",
-      position: "left",
-    },
-  ],
-  "/super-admin/feedback": [
-    {
-      selector: '[data-tour="super-feedback-header"]',
-      title: "Feedback inbox",
-      description: "Review incoming reports and triage them quickly.",
-      position: "bottom",
-    },
-    {
-      selector: '[data-tour="super-feedback-filters"]',
-      title: "AI categories",
-      description: "Filter by status, user category, and AI-generated bucket.",
-      position: "bottom",
-    },
-    {
-      selector: '[data-tour="super-feedback-list"]',
-      title: "Thread list",
-      description: "Open each report, inspect metadata, and send replies.",
-      position: "top",
-    },
-  ],
-};
-
-const NON_BLOCKING_TOUR_PATHS = new Set(["/workspace"]);
-
-function AppShellInner({
-  children,
-  fullBleed,
-  noScroll,
-  contentClassName,
-}: {
-  children: React.ReactNode;
-  fullBleed: boolean;
-  noScroll: boolean;
-  contentClassName?: string;
-}) {
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
-  const router = useRouter();
-  const sidebar = useSidebar();
-  const [tourOpen, setTourOpen] = useState(false);
-
-  const selectedChatId =
-    pathname === "/chat"
-      ? (searchParams.get("threadId") ?? "")
-      : "";
-  const pageTourSteps = useMemo(
-    () => PAGE_TOUR_STEPS[pathname] ?? BASE_TOUR_STEPS,
-    [pathname],
-  );
-  const pageTourKey = useMemo(
-    () => (pageTourSteps.length > 0 ? `ai-school-tour:${pathname}:${PAGE_TOUR_VERSION}` : null),
-    [pageTourSteps.length, pathname],
-  );
-
-  useEffect(() => {
-    if (!pageTourKey) {
-      setTourOpen(false);
-      return;
-    }
-    if (NON_BLOCKING_TOUR_PATHS.has(pathname)) {
-      setTourOpen(false);
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      if (window.sessionStorage.getItem('tour-dismissed-' + pathname) === "1") {
-        return;
-      }
-      try {
-        if (window.localStorage.getItem(pageTourKey) !== "1") {
-          setTourOpen(true);
-        }
-      } catch {
-        // noop
-      }
-    }, 420);
-    return () => window.clearTimeout(timer);
-  }, [pageTourKey, pathname]);
-
-  useEffect(() => {
-    const onOpenTour = () => {
-      if (pageTourSteps.length > 0) {
-        setTourOpen(true);
-      }
-    };
-    window.addEventListener("ai-school:open-tour", onOpenTour);
-    return () => window.removeEventListener("ai-school:open-tour", onOpenTour);
-  }, [pageTourSteps.length]);
-
-  function markPageTourSeen() {
-    if (!pageTourKey) return;
-    try {
-      window.sessionStorage.setItem('tour-dismissed-' + pathname, '1');
-      window.localStorage.setItem(pageTourKey, "1");
-    } catch {
-      // Ignore storage failures.
-    }
-  }
-
-  return (
-    <div className="flex h-screen overflow-hidden bg-[var(--bg-primary)] text-[var(--text-primary)]">
-      <aside
-        className={`hidden h-full transition-[width] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] md:block ${sidebar.sidebarOpen ? "w-[clamp(220px,18vw,280px)]" : "w-[64px]"}`}
-      >
-        <ChatSidebar
-          chats={sidebar.filteredChats}
-          selectedChatId={selectedChatId}
-          search={sidebar.search}
-          collapsed={!sidebar.sidebarOpen}
-          onToggleCollapse={() => sidebar.setSidebarOpen((prev) => !prev)}
-          onSearchChange={sidebar.setSearch}
-          onSelectChat={(chatId) => router.push(`/chat?threadId=${encodeURIComponent(chatId)}`)}
-          onNewChat={() => {
-            try {
-              window.localStorage.removeItem("ai-school:lastActiveChatId");
-              window.localStorage.removeItem("ai-school:lastActiveChatTimestamp");
-            } catch {
-              // Ignore storage failures.
-            }
-            router.push(`/chat?new=1&fresh=${Date.now()}`);
-            window.dispatchEvent(new Event("ai-school:new-chat"));
-          }}
-          onDeleteChat={(chatId) => {
-            void sidebar.deleteChat(chatId).catch((error: unknown) =>
-              toast.error(error instanceof Error ? error.message : "Failed to delete chat"),
-            );
-          }}
-          onRenameChat={(chatId, title) => {
-            void sidebar.renameChat(chatId, title).catch((error: unknown) =>
-              toast.error(error instanceof Error ? error.message : "Failed to rename chat"),
-            );
-          }}
-          onOpenSettings={() => {
-            window.dispatchEvent(new Event("ai-school:toggle-settings"));
-          }}
-          onPinChat={sidebar.pinChat}
-          pinnedChatIds={sidebar.pinnedChatIds}
-          role={sidebar.role}
-          isSuperAdmin={sidebar.isSuperAdmin}
-          userSpending={sidebar.userSpending}
-          userMemorySummary={sidebar.userMemorySummary}
-          orgName={sidebar.orgName}
-          orgLogoUrl={sidebar.orgLogoUrl}
-        />
-      </aside>
-
-      <div className={cn("min-w-0 flex-1", noScroll ? "overflow-hidden" : "overflow-y-auto")}>
-        <main
-          className={cn(
-            "w-full",
-            noScroll ? "h-full" : "px-3 py-5 sm:px-6 lg:px-10",
-            fullBleed ? "max-w-none" : "mx-auto max-w-6xl",
-            contentClassName,
-          )}
-        >
-          {children}
-        </main>
-      </div>
-
-
-      {pageTourSteps.length > 0 ? (
-        <GuidedTour
-          open={tourOpen}
-          steps={pageTourSteps}
-          onClose={() => {
-            markPageTourSeen();
-            setTourOpen(false);
-          }}
-          onComplete={markPageTourSeen}
-        />
-      ) : null}
-    </div>
-  );
-}
-
-export function AppShell({
-  children,
-  fullBleed = false,
-  noScroll = false,
-  contentClassName,
-}: {
-  children: React.ReactNode;
+type AppShellProps = {
+  children: ReactNode;
   fullBleed?: boolean;
   noScroll?: boolean;
   contentClassName?: string;
-}) {
+};
+
+const destinations = [
+  { href: "/chat", label: "Spectra", icon: MessageSquareText },
+  { href: "/workspace", label: "Workspaces", icon: FolderKanban },
+  { href: "/artifacts", label: "Artifacts", icon: LibraryBig },
+] as const;
+
+function ShellNavigation() {
+  const pathname = usePathname();
+
   return (
-    <Suspense fallback={<div className="h-screen" />}>
-      <AppShellInner fullBleed={fullBleed} noScroll={noScroll} contentClassName={contentClassName}>
+    <>
+      <aside
+        aria-label="Primary navigation"
+        className="fixed inset-y-0 left-0 z-40 hidden w-[76px] flex-col border-r md:flex"
+        style={{
+          borderColor: "var(--border-default)",
+          background:
+            "linear-gradient(180deg, color-mix(in oklab, var(--bg-elevated) 94%, var(--brand-primary) 6%) 0%, var(--bg-elevated) 48%, color-mix(in oklab, var(--bg-elevated) 96%, var(--brand-accent) 4%) 100%)",
+        }}
+      >
+        <Link
+          href="/chat"
+          aria-label="Open Spectra"
+          className="mx-auto mt-4 grid size-11 place-items-center rounded-2xl outline-none transition-transform hover:scale-[1.04] focus-visible:ring-2 focus-visible:ring-[var(--brand-primary)]"
+        >
+          <SpectraLogo size={34} />
+        </Link>
+
+        <nav className="mt-8 flex flex-1 flex-col items-center gap-2 px-2">
+          {destinations.map(({ href, label, icon: Icon }) => {
+            const active = pathname === href || pathname.startsWith(`${href}/`);
+            return (
+              <Link
+                key={href}
+                href={href}
+                aria-current={active ? "page" : undefined}
+                className={cn(
+                  "group relative grid size-12 place-items-center rounded-2xl outline-none transition-[background,color,transform] duration-200",
+                  active
+                    ? "text-[var(--brand-primary)]"
+                    : "text-[var(--text-tertiary)] hover:-translate-y-px hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]",
+                )}
+                style={active ? { background: "color-mix(in oklab, var(--brand-primary) 11%, var(--bg-elevated))" } : undefined}
+              >
+                {active ? (
+                  <span
+                    aria-hidden="true"
+                    className="absolute -left-2 h-6 w-[3px] rounded-r-full bg-[var(--brand-primary)]"
+                  />
+                ) : null}
+                <Icon size={20} strokeWidth={active ? 2 : 1.7} />
+                <span className="pointer-events-none absolute left-[58px] z-50 hidden whitespace-nowrap rounded-lg border px-2.5 py-1.5 text-xs font-semibold shadow-lg group-hover:block group-focus-visible:block" style={{ borderColor: "var(--border-default)", background: "var(--bg-elevated)", color: "var(--text-primary)" }}>
+                  {label}
+                </span>
+              </Link>
+            );
+          })}
+        </nav>
+
+        <button
+          type="button"
+          aria-label="Settings"
+          onClick={() => window.dispatchEvent(new Event("ai-school:toggle-settings"))}
+          className="mx-auto mb-4 grid size-11 place-items-center rounded-2xl text-[var(--text-tertiary)] outline-none transition-colors hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)] focus-visible:ring-2 focus-visible:ring-[var(--brand-primary)]"
+        >
+          <Settings2 size={19} strokeWidth={1.7} />
+        </button>
+      </aside>
+
+      <nav
+        aria-label="Primary navigation"
+        className="fixed inset-x-3 bottom-3 z-50 flex h-16 items-center justify-around rounded-[22px] border px-2 shadow-[0_18px_60px_-22px_rgba(11,18,36,.55)] backdrop-blur-xl md:hidden"
+        style={{ borderColor: "var(--border-default)", background: "color-mix(in oklab, var(--bg-elevated) 88%, transparent)" }}
+      >
+        {destinations.map(({ href, label, icon: Icon }) => {
+          const active = pathname === href || pathname.startsWith(`${href}/`);
+          return (
+            <Link
+              key={href}
+              href={href}
+              aria-current={active ? "page" : undefined}
+              className={cn(
+                "flex min-w-[72px] flex-col items-center gap-1 rounded-xl px-3 py-2 text-[10px] font-semibold",
+                active ? "text-[var(--brand-primary)]" : "text-[var(--text-tertiary)]",
+              )}
+            >
+              <Icon size={19} strokeWidth={active ? 2.1 : 1.7} />
+              {label}
+            </Link>
+          );
+        })}
+      </nav>
+    </>
+  );
+}
+
+export function AppShell({ children, fullBleed = false, noScroll = false, contentClassName }: AppShellProps) {
+  return (
+    <div className="min-h-dvh bg-[var(--bg-primary)] text-[var(--text-primary)] md:pl-[76px]">
+      <ShellNavigation />
+      <main
+        className={cn(
+          "relative min-h-dvh pb-24 md:pb-0",
+          noScroll && "h-dvh min-h-0 overflow-hidden",
+          !fullBleed && "mx-auto w-full max-w-[1540px] px-5 py-6 sm:px-8 lg:px-10",
+          contentClassName,
+        )}
+      >
         {children}
-      </AppShellInner>
-    </Suspense>
+      </main>
+    </div>
   );
 }

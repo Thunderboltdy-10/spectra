@@ -1,13 +1,13 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
-import { getUserByClerkId } from "./helpers";
+import { getActorByClerkId } from "./identityShared";
 
-async function requireOwnedRun(ctx: Parameters<typeof getUserByClerkId>[0], actorClerkId: string, runId: Id<"spectraAiRuns">) {
-  const actor = await getUserByClerkId(ctx, actorClerkId);
+async function requireOwnedRun(ctx: Parameters<typeof getActorByClerkId>[0], actorClerkId: string, runId: Id<"spectraAiRuns">) {
+  const actor = await getActorByClerkId(ctx, actorClerkId);
   if (!actor) throw new Error("Unauthorized");
   const run = await ctx.db.get(runId);
-  if (!run || run.ownerUserId !== actor._id || run.orgId !== actor.orgId) throw new Error("AI run not found");
+  if (!run || run.ownerAccountId !== actor._id || run.schoolId !== actor.schoolId) throw new Error("AI run not found");
   return run;
 }
 
@@ -53,7 +53,7 @@ export const attachPendingArtifact = mutation({
     const run = await requireOwnedRun(ctx, args.actorClerkId, operation.runId);
     if (run.status !== "running" || operation.executionId !== run.executionId || run.executionId !== args.executionId) throw new Error("Operation belongs to an older run attempt");
     const artifact = await ctx.db.get(args.artifactId);
-    if (!artifact || artifact.ownerUserId !== run.ownerUserId || artifact.aiRunId !== run._id || artifact.aiExecutionId !== run.executionId || artifact.aiState !== "creating") throw new Error("Pending artifact not found");
+    if (!artifact || artifact.ownerAccountId !== run.ownerAccountId || artifact.aiRunId !== run._id || artifact.aiExecutionId !== run.executionId || artifact.aiState !== "creating") throw new Error("Pending artifact not found");
     await ctx.db.patch(args.operationId, { pendingArtifactId: args.artifactId });
     return { operationId: args.operationId };
   },
@@ -67,7 +67,7 @@ export const attachPendingWorkspace = mutation({
     const run = await requireOwnedRun(ctx, args.actorClerkId, operation.runId);
     if (run.status !== "running" || operation.executionId !== run.executionId || run.executionId !== args.executionId) throw new Error("Operation belongs to an older run attempt");
     const workspace = await ctx.db.get(args.workspaceId);
-    if (!workspace || workspace.ownerUserId !== run.ownerUserId || workspace.aiRunId !== run._id || workspace.aiExecutionId !== run.executionId || workspace.aiState !== "creating") throw new Error("Pending workspace not found");
+    if (!workspace || workspace.ownerAccountId !== run.ownerAccountId || workspace.aiRunId !== run._id || workspace.aiExecutionId !== run.executionId || workspace.aiState !== "creating") throw new Error("Pending workspace not found");
     await ctx.db.patch(args.operationId, { pendingWorkspaceId: args.workspaceId });
     return { operationId: args.operationId };
   },
@@ -140,3 +140,4 @@ export const cancelPending = mutation({
     return { cancelled: pending.length };
   },
 });
+

@@ -1,7 +1,7 @@
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
-import { getUserByClerkId } from "./helpers";
+import { getActorByClerkId } from "./identityShared";
 
 export const vBlueprintKey = v.union(
   v.literal("document"),
@@ -29,7 +29,7 @@ export type SpectraCtx = QueryCtx | MutationCtx;
 export type BlueprintKey = "document" | "flashcard_deck" | "quiz" | "planner_task";
 
 export async function requireSpectraActor(ctx: SpectraCtx, actorClerkId: string) {
-  const actor = await getUserByClerkId(ctx, actorClerkId);
+  const actor = await getActorByClerkId(ctx, actorClerkId);
   if (!actor) throw new Error("Unauthorized");
   return actor;
 }
@@ -41,7 +41,7 @@ export async function requireOwnedWorkspace(
 ) {
   const actor = await requireSpectraActor(ctx, actorClerkId);
   const workspace = await ctx.db.get(workspaceId);
-  if (!workspace || workspace.ownerUserId !== actor._id || workspace.orgId !== actor.orgId) {
+  if (!workspace || workspace.ownerAccountId !== actor._id || workspace.schoolId !== actor.schoolId) {
     throw new Error("Workspace not found");
   }
   return { actor, workspace };
@@ -54,7 +54,7 @@ export async function requireOwnedArtifact(
 ) {
   const actor = await requireSpectraActor(ctx, actorClerkId);
   const artifact = await ctx.db.get(artifactId);
-  if (!artifact || artifact.ownerUserId !== actor._id || artifact.orgId !== actor.orgId) {
+  if (!artifact || artifact.ownerAccountId !== actor._id || artifact.schoolId !== actor.schoolId) {
     throw new Error("Artifact not found");
   }
   return { actor, artifact };
@@ -187,3 +187,4 @@ export function buildArtifactTextIndex(params: {
     .join("\n")
     .slice(0, 4000);
 }
+

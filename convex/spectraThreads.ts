@@ -1,7 +1,7 @@
 import { internalMutation, mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
-import { getUserByClerkId } from "./helpers";
+import { getActorByClerkId } from "./identityShared";
 import { ensureThreadWorkspacePlacement } from "./spectraShared";
 
 const vOrigin = v.union(v.literal("chat"), v.literal("workspace"), v.literal("artifact"));
@@ -24,20 +24,20 @@ function cleanContent(value: string) {
   return value.replace(/\u0000/g, "").trim().slice(0, 60_000);
 }
 
-async function requireActor(ctx: Parameters<typeof getUserByClerkId>[0], clerkId: string) {
-  const actor = await getUserByClerkId(ctx, clerkId);
+async function requireActor(ctx: Parameters<typeof getActorByClerkId>[0], clerkId: string) {
+  const actor = await getActorByClerkId(ctx, clerkId);
   if (!actor) throw new Error("Unauthorized");
   return actor;
 }
 
 async function requireOwnedThread(
-  ctx: Parameters<typeof getUserByClerkId>[0],
+  ctx: Parameters<typeof getActorByClerkId>[0],
   clerkId: string,
   threadId: Id<"spectraThreads">,
 ) {
   const actor = await requireActor(ctx, clerkId);
   const thread = await ctx.db.get(threadId);
-  if (!thread || thread.ownerUserId !== actor._id || thread.orgId !== actor.orgId || thread.status === "deleted") {
+  if (!thread || thread.ownerAccountId !== actor._id || thread.schoolId !== actor.schoolId || thread.status === "deleted") {
     throw new Error("Thread not found");
   }
   return { actor, thread };
@@ -55,16 +55,16 @@ export const create = mutation({
     const actor = await requireActor(ctx, args.actorClerkId);
     if (args.workspaceId) {
       const workspace = await ctx.db.get(args.workspaceId);
-      if (!workspace || workspace.ownerUserId !== actor._id || workspace.orgId !== actor.orgId) throw new Error("Workspace not found");
+      if (!workspace || workspace.ownerAccountId !== actor._id || workspace.schoolId !== actor.schoolId) throw new Error("Workspace not found");
     }
     if (args.artifactId) {
       const artifact = await ctx.db.get(args.artifactId);
-      if (!artifact || artifact.ownerUserId !== actor._id || artifact.orgId !== actor.orgId) throw new Error("Artifact not found");
+      if (!artifact || artifact.ownerAccountId !== actor._id || artifact.schoolId !== actor.schoolId) throw new Error("Artifact not found");
     }
     const now = Date.now();
     const threadId = await ctx.db.insert("spectraThreads", {
-      ownerUserId: actor._id,
-      orgId: actor.orgId,
+      ownerAccountId: actor._id,
+      schoolId: actor.schoolId,
       title: args.title?.trim().slice(0, 88) || "New thread",
       origin: args.origin,
       workspaceId: args.workspaceId,
@@ -109,7 +109,7 @@ export const appendMessage = mutation({
     }
     if (args.runId) {
       const run = await ctx.db.get(args.runId);
-      if (!args.executionId || !run || run.ownerUserId !== thread.ownerUserId || run.threadId !== args.threadId || run.executionId !== args.executionId) throw new Error("AI run not found");
+      if (!args.executionId || !run || run.ownerAccountId !== thread.ownerAccountId || run.threadId !== args.threadId || run.executionId !== args.executionId) throw new Error("AI run not found");
       const partial = args.metadata && typeof args.metadata === "object" && (args.metadata as { partial?: unknown }).partial === true;
       if (partial && run.status !== "running") throw new Error("This run is no longer streaming.");
       if (args.role === "assistant") {
@@ -197,14 +197,14 @@ export const list = query({
     const actor = await requireActor(ctx, args.actorClerkId);
     const limit = Math.max(1, Math.min(args.limit ?? 80, 200));
     const rows = await ctx.db.query("spectraThreads")
-      .withIndex("by_owner_status", (q) => q.eq("ownerUserId", actor._id).eq("status", "active"))
+      .withIndex("by_account_status", (q) => q.eq("ownerAccountId", actor._id).eq("status", "active"))
       .order("desc")
       .take(limit * 2);
     const archived = args.includeArchived
-      ? await ctx.db.query("spectraThreads").withIndex("by_owner_status", (q) => q.eq("ownerUserId", actor._id).eq("status", "archived")).order("desc").take(limit)
+      ? await ctx.db.query("spectraThreads").withIndex("by_account_status", (q) => q.eq("ownerAccountId", actor._id).eq("status", "archived")).order("desc").take(limit)
       : [];
     return [...rows, ...archived]
-      .filter((thread) => thread.orgId === actor.orgId)
+      .filter((thread) => thread.schoolId === actor.schoolId)
       .sort((a, b) => (b.lastMessageAt ?? b.updatedAt) - (a.lastMessageAt ?? a.updatedAt))
       .slice(0, limit);
   },
@@ -230,7 +230,7 @@ export const get = query({
       const artifacts = (await Promise.all(artifactIds.map(async (id) => {
         const artifactId = ctx.db.normalizeId("spectraArtifacts", id);
         const artifact = artifactId ? await ctx.db.get(artifactId) : null;
-        return artifact && artifact.ownerUserId === thread.ownerUserId ? artifact : null;
+        return artifact && artifact.ownerAccountId === thread.ownerAccountId ? artifact : null;
       }))).filter(Boolean);
       return { run, operations, cards, events: events.sort((a, b) => a.sequence - b.sequence), artifacts };
     }));
@@ -249,7 +249,7 @@ export const update = mutation({
     const { actor, thread } = await requireOwnedThread(ctx, args.actorClerkId, args.threadId);
     if (args.workspaceId) {
       const workspace = await ctx.db.get(args.workspaceId);
-      if (!workspace || workspace.ownerUserId !== actor._id || workspace.orgId !== actor.orgId || workspace.status !== "active") throw new Error("Workspace not found");
+      if (!workspace || workspace.ownerAccountId !== actor._id || workspace.schoolId !== actor.schoolId || workspace.status !== "active") throw new Error("Workspace not found");
     }
     const nextWorkspaceId = args.workspaceId === undefined ? thread.workspaceId : args.workspaceId ?? undefined;
     const now = Date.now();
@@ -320,10 +320,10 @@ export const createFromRun = mutation({
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx, args.actorClerkId);
     const run = await ctx.db.get(args.runId);
-    if (!run || run.ownerUserId !== actor._id || run.orgId !== actor.orgId) throw new Error("AI run not found");
+    if (!run || run.ownerAccountId !== actor._id || run.schoolId !== actor.schoolId) throw new Error("AI run not found");
     if (!run.threadId) throw new Error("This older run has no conversation to keep.");
     const thread = await ctx.db.get(run.threadId);
-    if (!thread || thread.ownerUserId !== actor._id || thread.status === "deleted") throw new Error("Thread not found");
+    if (!thread || thread.ownerAccountId !== actor._id || thread.status === "deleted") throw new Error("Thread not found");
     const workspaceItemId = args.placeInWorkspace
       ? await ensureThreadWorkspacePlacement(ctx, {
         threadId: thread._id,
@@ -353,7 +353,7 @@ export const migrateLegacyThreadReferences = internalMutation({
       const placements = await ctx.db.query("spectraWorkspaceItems")
         .withIndex("by_source", (q) => q.eq("sourceType", "artifact").eq("sourceId", artifact._id))
         .collect();
-      if (thread && thread.ownerUserId === artifact.ownerUserId && thread.orgId === artifact.orgId && thread.status !== "deleted") {
+      if (thread && thread.ownerAccountId === artifact.ownerAccountId && thread.schoolId === artifact.schoolId && thread.status !== "deleted") {
         const destination = thread.workspaceId ?? placements.find((item) => item.viewData.hidden !== true)?.workspaceId;
         if (destination && !thread.workspaceId) await ctx.db.patch(thread._id, { workspaceId: destination, updatedAt: Date.now() });
         await ensureThreadWorkspacePlacement(ctx, {
@@ -381,3 +381,4 @@ export const migrateLegacyThreadReferences = internalMutation({
     return { scanned: legacy.length, migrated, removed, complete: legacy.length < Math.max(1, Math.min(args.limit ?? 100, 500)) };
   },
 });
+

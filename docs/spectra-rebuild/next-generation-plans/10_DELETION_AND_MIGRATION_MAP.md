@@ -4,6 +4,8 @@
 
 This is Phase 1, before replacement construction. First capture reversible data exports and dependency baselines; then remove product runtime code. Do not preserve compatibility routes, wrappers, schema aliases, hidden navigation, renamed legacy modules, or “temporary” fake services. Generated Convex files are regenerated after exports disappear; they are not hand-edited.
 
+Plan lock precedes Phase 1: remove all retired artifact-plan/type references and register `artifacts/10_SHEETS.md` as the complete structured-data, calculation, analysis, and graphing product. No compatibility type key, registry entry, route, checklist, UI promise, or migration wrapper survives.
+
 The failure ledger records: failure ID, deleted symbol/file, importer/test, expected replacement plan/task, owner, phase, and disposition. A red build is acceptable temporarily; an unowned failure is not.
 
 ## Pre-removal evidence and data disposition
@@ -15,6 +17,8 @@ The failure ledger records: failure ID, deleted symbol/file, importer/test, expe
 | ManageBac         | integration owner, non-secret capability/config metadata, user overlays, source IDs/hashes/timestamps | encrypted token ciphertext, guessed endpoint availability, copied source payload as artifacts |
 | admin             | active organizations, users, invitations, branding, verified domains, policy-relevant settings        | old role assumptions, analytics snapshots, demo seeds                                         |
 | superadmin        | organization lifecycle/limits and auditable operator actions worth retaining                          | hard-coded operator identity, platform aggregate caches                                       |
+| agents            | encrypted rollback export of definitions, resource references, collaborators, and ownership only      | old prompts, visibility/accessLevel, mode/model heuristics, analytics, routes, or published state as new truth |
+| chat modes        | no product-data migration; retain only ordinary conversation content that can render without a mode    | old mode labels/settings, prompts, parsers, reveal components, routes, or analytics            |
 
 Exports are encrypted, access-controlled, hash-manifested, time-limited, and tested for restore into offline migration tooling. Secrets are revoked and never included.
 
@@ -54,7 +58,7 @@ Exports are encrypted, access-controlled, hash-manifested, time-limited, and tes
 - Remove orgs.managebacConfig in full: encryptedToken, baseUrl, enabled, studentMappings, sync fields, discovery/capability fields.
 - Drop managebacUserLinks and all indexes.
 - Remove managebac_sync source-type variants and managebacItemId fields from artifacts, plannerItems, notes/other legacy tables; remove cleanup and hydration logic from users.ts, userLifecycle.ts, plannerItems.ts, artifacts.ts, notes.ts, notifications.ts, auditLog.ts, accessRequests.ts, constants.ts.
-- Remove MANAGEBAC_API_TOKEN and MANAGEBAC_BASE_URL from .env.example and runtime validators during the deletion phase. If an undeclared MANAGEBAC_ENCRYPTION_KEY exists in deployments, revoke/remove it too. The replacement later declares vault configuration and development credential injection through approved secret tooling, not the old env contract.
+- Remove MANAGEBAC_API_TOKEN and MANAGEBAC_BASE_URL from .env.example and runtime validators during the deletion phase. If an undeclared MANAGEBAC_ENCRYPTION_KEY exists in deployments, revoke/remove it too. The replacement later declares restricted authenticated server-secret encryption/key configuration and approved development credential injection, not the old env contract or a mandatory external vault.
 - Regenerate convex/\_generated/api.d.ts and data model types after removals.
 
 ### Tests and docs
@@ -104,9 +108,29 @@ Exports are encrypted, access-controlled, hash-manifested, time-limited, and tes
 - Remove superadmin cases from auth, API integration, access-state, invitation, usage/storage, feedback, audit, and school lifecycle tests. Add failures to the replacement ledger rather than weakening expectations.
 - Remove old fixed-email, org-switch, reset-platform-data, and dashboard claims across docs and generated Convex API types.
 
+## Legacy agent deletion map
+
+Delete the entire pre-rebuild agent implementation before constructing the new Agent artifact:
+
+- Delete `src/app/agents/**`, `src/app/api/agents/**`, `src/components/agents/**`, `convex/agents.ts`, legacy agent-matching/model-feedback utilities/tests, and old agent navigation/onboarding/catalog/editor surfaces.
+- Remove `agents` and `agentModelStats` tables and old agent fields/indexes from chats, resources/chunks, artifacts, workspaces, usage, analytics, and user-lifecycle cascades. Old resource ownership/bindings are exported for rollback but do not remain as compatibility fields.
+- Remove selected-agent state, manual agent chips/pickers, old auto-matching, old agent prompt injection, old agent-specific retrieval scopes, model/mode preferences, usage increments, and collaborator semantics from the legacy chat/orchestrator.
+- Remove old agent API expectations, fixtures, generated API types, seeds, and docs. Do not map the old implementation behind the new reference UI.
+- Later phases build the universal Agent artifact, immutable versions, resource bindings, skills/tools/evals, sharing, and automatic routing from the new plans and new schema namespaces. An optional future user-controlled importer may inspect the encrypted rollback export, but no automatic migration or runtime adapter is allowed.
+
+## Obsolete chat-mode deletion map
+
+Delete the full legacy study-mode system while retaining ordinary conversation and the new artifact blueprints:
+
+- Delete `src/lib/modes.ts`, `src/lib/contracts/studyModes.ts`, `src/components/chat/chat-mode-selector.tsx`, mode analytics components, mode-specific prompt/config registries, and mode selection/suggestion UI.
+- Remove the old taxonomy (`auto`, `tutor`, `marker`, `exam`, `draft_coach`, `quiz`, `flashcard`, `research`, `explain`, `document`, `general`, `image`, and aliases) from shared validators/types, chat/message schema, API request/response contracts, preferences, URL params, routing/classification, model selection, telemetry, tests, and seed data.
+- Delete old mode-specific generation/render paths such as quiz reveal/parser/view, flashcard chat generation, image chat route/reveal/gallery coupling, research-mode subagent/tool orchestration, and document-mode special cases. Preserve only independently justified generic tools/assets that the new adaptive runtime or first-class artifacts later adopt through new contracts.
+- General conversation becomes the only chat baseline. Research is an adaptive retrieval/tool operation; image creation is an operation/resource; Quiz and Flashcard Deck are first-class artifacts. None is a chat mode.
+- Remove old mode query parameters, badges, persistence, progress strings, and analytics breakdowns. Historical messages must render without requiring a mode value; migration strips or archives the old label without changing message content.
+
 ## Cross-cutting integration audit
 
-Run repository searches for: managebac, userMemory, memoryEntries, personalSoul, userSoul, orgSoul, schoolAdmin, superAdmin, SUPER_ADMIN, isAdminLikeActor, managebac_sync, managebacItemId, platformStats, and every removed Convex API symbol. Search source, scripts, tests, docs, environment files, lock/config files, generated types, CI, seed data, fixtures, and deployment configuration. Zero runtime hits is the gate; historical archive references must carry a non-authoritative banner.
+Run repository searches for: managebac, userMemory, memoryEntries, personalSoul, userSoul, orgSoul, schoolAdmin, superAdmin, SUPER_ADMIN, isAdminLikeActor, managebac_sync, managebacItemId, platformStats, legacy agents/agentModelStats/agent matching, StudyMode/vStudyMode/MODE_REGISTRY/chat mode selector, every retired mode literal/route/component, and every removed Convex API symbol. Search source, scripts, tests, docs, environment files, lock/config files, generated types, CI, seed data, fixtures, and deployment configuration. Zero runtime hits is the gate; historical archive references must carry a non-authoritative banner.
 
 Inspect these indirect integration zones even if string search is clean: auth/session actor shape; schema validators/unions; cascade deletion; cron registration; notification kinds; audit action unions; usage aggregation; route navigation; command palette; onboarding; Clerk webhook; seed/demo; model prompts/tool descriptions; import restrictions; live acceptance scripts; environment deployment secrets.
 
@@ -114,11 +138,18 @@ Inspect these indirect integration zones even if string search is clean: auth/se
 
 Phase 2 begins only after deleted runtime symbols have zero imports and every failure is mapped. The new domains use new schema/function namespaces and are built to plans 03–05. Offline migration scripts may read exports; product runtime may not. Delete migration readers after signed migration completion and retention window.
 
+Replacement identity must not reintroduce old users.role semantics as an ordinary capability gate. It supports at most one active school membership and separate operational superadmin sessions. Replacement secrets use pragmatic restricted server-side encryption and no old ManageBac env/token wrapper. Replacement analytics/metering may migrate safe aggregates but never old private-content access assumptions or cohort suppression.
+
 ## Deletion tasks
+
+### DEL-00 Remove retired artifact-plan/type references and register Sheets as the structured-data, calculation, analysis, and graphing product
+
+- [ ] Implemented
+- [ ] Verified
 
 ### DEL-01 Capture encrypted exports, hashes, schema counts, active import graph, and rollback rehearsal
 
-- [ ] Implemented
+- [x] Implemented
 - [ ] Verified
 
 ### DEL-02 Delete old memory/personal-soul/org-soul UI, APIs, backend, schema, jobs, utilities, tests, and docs
@@ -141,27 +172,37 @@ Phase 2 begins only after deleted runtime symbols have zero imports and every fa
 - [ ] Implemented
 - [ ] Verified
 
-### DEL-06 Regenerate Convex/API types and create the complete compile/schema/test/runtime failure ledger
+### DEL-06 Delete the entire legacy agent UI, APIs, backend, schema, resources/collaboration/routing coupling, tests, seeds, and docs
 
 - [ ] Implemented
 - [ ] Verified
 
-### DEL-07 Prove zero runtime imports, routes, cron jobs, schema aliases, env dependencies, and navigation entries
+### DEL-07 Delete the complete obsolete chat-mode taxonomy, selector, persistence, prompts, renderers, routes, analytics, tests, and mode-specific runtime branches without deleting the new Quiz/Flashcard artifact blueprints
 
 - [ ] Implemented
 - [ ] Verified
 
-### DEL-08 Resolve each failure only through its planned replacement; reject stubs and compatibility wrappers
+### DEL-08 Regenerate Convex/API types and create the complete compile/schema/test/runtime failure ledger
 
 - [ ] Implemented
 - [ ] Verified
 
-### DEL-09 Migrate validated identity/overlay/source records and reconcile counts/hashes
+### DEL-09 Prove zero runtime imports, routes, cron jobs, schema aliases, env dependencies, navigation entries, old agent symbols, and chat-mode branches
 
 - [ ] Implemented
 - [ ] Verified
 
-### DEL-10 Revoke secrets, expire exports/readers, remove migration tooling, and sign deletion completion
+### DEL-10 Resolve each failure only through its planned replacement; reject stubs and compatibility wrappers
+
+- [ ] Implemented
+- [ ] Verified
+
+### DEL-11 Migrate validated identity/overlay/source records and mode-free historical conversations; reconcile counts/hashes
+
+- [ ] Implemented
+- [ ] Verified
+
+### DEL-12 Revoke secrets, expire exports/readers, remove migration tooling, and sign deletion completion
 
 - [ ] Implemented
 - [ ] Verified

@@ -9,7 +9,13 @@ type ClerkWebhookEvent = {
     first_name?: string | null;
     last_name?: string | null;
     username?: string | null;
-    email_addresses?: Array<{ email_address?: string | null }>;
+    primary_email_address_id?: string | null;
+    image_url?: string | null;
+    email_addresses?: Array<{
+      id?: string;
+      email_address?: string | null;
+      verification?: { status?: string | null } | null;
+    }>;
   };
 };
 
@@ -36,9 +42,13 @@ function getUserName(event: ClerkWebhookEvent["data"]) {
   return full || event?.username?.trim() || "Student";
 }
 
-function getUserEmail(event: ClerkWebhookEvent["data"]) {
-  const email = event?.email_addresses?.[0]?.email_address?.trim();
-  return email || "unknown@example.com";
+function getVerifiedEmail(event: ClerkWebhookEvent["data"]) {
+  const candidates = event?.email_addresses ?? [];
+  const primary = candidates.find((entry) => entry.id === event?.primary_email_address_id);
+  const verified = [primary, ...candidates]
+    .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
+    .find((entry) => entry.verification?.status === "verified" && Boolean(entry.email_address?.trim()));
+  return verified?.email_address?.trim().toLowerCase() ?? null;
 }
 
 export async function POST(request: NextRequest) {
@@ -66,10 +76,17 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Missing Clerk user id in webhook payload." }, { status: 400 });
   }
 
-  const result = await convexMutation("users:syncFromWebhook", {
+  const email = getVerifiedEmail(event.data);
+  if (!email) {
+    return NextResponse.json({ ok: true, skipped: true, reason: "verified_email_required" });
+  }
+
+  const result = await convexMutation("identity:registerVerifiedAccount", {
     clerkId,
-    email: getUserEmail(event.data),
+    email,
+    emailVerified: true,
     name: getUserName(event.data),
+    avatarUrl: event.data?.image_url?.trim() || undefined,
   });
 
   return NextResponse.json({ ok: true, type: event.type, result });

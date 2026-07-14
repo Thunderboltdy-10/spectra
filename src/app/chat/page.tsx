@@ -10,9 +10,6 @@ export default async function ChatPage() {
     await requireActor();
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
-    if (message.startsWith("AUTH_NO_ACCESS") || message.startsWith("AUTH_ORG_INACTIVE")) {
-      redirect(message.startsWith("AUTH_ORG_INACTIVE") ? "/request-access?reason=inactive" : "/request-access");
-    }
     if (message.startsWith("AUTH_NOT_SIGNED_IN")) {
       redirect("/sign-in?redirect_url=/chat");
     }

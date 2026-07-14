@@ -28,11 +28,11 @@ export const list = query({
     const limit = Math.max(1, Math.min(args.limit ?? 30, 100));
     const workspaces = await ctx.db
       .query("spectraWorkspaces")
-      .withIndex("by_owner_activity", (q) => q.eq("ownerUserId", actor._id))
+      .withIndex("by_account_activity", (q) => q.eq("ownerAccountId", actor._id))
       .order("desc")
       .take(limit * 2);
     return workspaces
-      .filter((workspace) => workspace.orgId === actor.orgId)
+      .filter((workspace) => workspace.schoolId === actor.schoolId)
       .filter((workspace) => args.includeArchived || workspace.status === "active")
       .slice(0, limit)
       .map(liveWorkspace);
@@ -52,8 +52,8 @@ export const create = mutation({
     const actor = await requireSpectraActor(ctx, args.actorClerkId);
     const now = Date.now();
     return ctx.db.insert("spectraWorkspaces", {
-      ownerUserId: actor._id,
-      orgId: actor.orgId,
+      ownerAccountId: actor._id,
+      schoolId: actor.schoolId,
       title: args.title.trim() || "Untitled workspace",
       description: args.description?.trim() || undefined,
       icon: args.icon?.trim() || "Sparkles",
@@ -83,7 +83,7 @@ export const update = mutation({
     const { workspace } = await requireOwnedWorkspace(ctx, args.actorClerkId, args.workspaceId);
     if (args.runId) {
       const run = await ctx.db.get(args.runId);
-      if (!run || run.ownerUserId !== workspace.ownerUserId || run.status !== "running" || !args.executionId || run.executionId !== args.executionId) throw new Error("AI run not found");
+      if (!run || run.ownerAccountId !== workspace.ownerAccountId || run.status !== "running" || !args.executionId || run.executionId !== args.executionId) throw new Error("AI run not found");
     }
     const patch: {
       title?: string;
@@ -122,9 +122,9 @@ export const createPending = mutation({
   handler: async (ctx, args) => {
     const actor = await requireSpectraActor(ctx, args.actorClerkId);
     const run = await ctx.db.get(args.runId);
-    if (!run || run.ownerUserId !== actor._id || run.orgId !== actor.orgId || run.status !== "running" || run.executionId !== args.executionId) throw new Error("AI run not found");
+    if (!run || run.ownerAccountId !== actor._id || run.schoolId !== actor.schoolId || run.status !== "running" || run.executionId !== args.executionId) throw new Error("AI run not found");
     const now = Date.now();
-    const workspaceId = await ctx.db.insert("spectraWorkspaces", { ownerUserId: actor._id, orgId: actor.orgId, title: args.title.trim() || "New workspace", description: args.description?.trim() || "Awaiting your approval", icon: args.icon ?? "Sparkles", color: args.color ?? "cyan", status: "active", defaultView: "library", aiState: "creating", aiRunId: args.runId, aiExecutionId: args.executionId, aiPending: true, createdAt: now, updatedAt: now, lastActivityAt: now });
+    const workspaceId = await ctx.db.insert("spectraWorkspaces", { ownerAccountId: actor._id, schoolId: actor.schoolId, title: args.title.trim() || "New workspace", description: args.description?.trim() || "Awaiting your approval", icon: args.icon ?? "Sparkles", color: args.color ?? "cyan", status: "active", defaultView: "library", aiState: "creating", aiRunId: args.runId, aiExecutionId: args.executionId, aiPending: true, createdAt: now, updatedAt: now, lastActivityAt: now });
     return { workspaceId };
   },
 });
@@ -146,7 +146,7 @@ export const stageAiPatch = mutation({
   handler: async (ctx, args) => {
     const { workspace } = await requireOwnedWorkspace(ctx, args.actorClerkId, args.workspaceId);
     const run = await ctx.db.get(args.runId);
-    if (!run || run.ownerUserId !== workspace.ownerUserId || run.status !== "running" || run.executionId !== args.executionId) throw new Error("AI run not found");
+    if (!run || run.ownerAccountId !== workspace.ownerAccountId || run.status !== "running" || run.executionId !== args.executionId) throw new Error("AI run not found");
     await ctx.db.patch(args.workspaceId, { aiState: "updating", aiRunId: args.runId, aiExecutionId: args.executionId, aiPreview: { title: args.title, description: args.description, icon: args.icon, color: args.color, startedAt: Date.now() }, updatedAt: Date.now() });
     return { workspaceId: args.workspaceId };
   },
@@ -157,9 +157,9 @@ export const settleForRun = mutation({
   handler: async (ctx, args) => {
     const actor = await requireSpectraActor(ctx, args.actorClerkId);
     const run = await ctx.db.get(args.runId);
-    if (!run || run.ownerUserId !== actor._id || run.orgId !== actor.orgId || run.executionId !== args.executionId) throw new Error("This run attempt is no longer active.");
-    const rows = await ctx.db.query("spectraWorkspaces").withIndex("by_owner_activity", (q) => q.eq("ownerUserId", actor._id)).collect();
-    const affected = rows.filter((workspace) => workspace.orgId === actor.orgId && workspace.aiRunId === args.runId && workspace.aiExecutionId === args.executionId);
+    if (!run || run.ownerAccountId !== actor._id || run.schoolId !== actor.schoolId || run.executionId !== args.executionId) throw new Error("This run attempt is no longer active.");
+    const rows = await ctx.db.query("spectraWorkspaces").withIndex("by_account_activity", (q) => q.eq("ownerAccountId", actor._id)).collect();
+    const affected = rows.filter((workspace) => workspace.schoolId === actor.schoolId && workspace.aiRunId === args.runId && workspace.aiExecutionId === args.executionId);
     const now = Date.now();
     for (const workspace of affected) {
       if (workspace.aiPending) {
@@ -195,7 +195,7 @@ export const permanentlyDelete = mutation({
   handler: async (ctx, args) => {
     const { workspace } = await requireOwnedWorkspace(ctx, args.actorClerkId, args.workspaceId);
     const expected = `Remove ${workspace.title} permanently`;
-    if (args.confirmation !== expected) throw new Error(`Type “${expected}” to confirm`);
+    if (args.confirmation !== expected) throw new Error(`Type â€œ${expected}â€ to confirm`);
 
     const items = await ctx.db
       .query("spectraWorkspaceItems")
@@ -264,3 +264,5 @@ export const permanentlyDelete = mutation({
     return { workspaceId: args.workspaceId, deletedArtifactCount, deletedRunCount: runs.length };
   },
 });
+
+

@@ -12,8 +12,8 @@ function mockActor() {
     email: "student@spectra.test",
     name: "Spectra Student",
     role: "student",
-    orgId: "org_1",
-    userId: "user_1",
+    schoolId: "school_1",
+    userId: "account_1",
     onboardingComplete: true,
   };
 }
@@ -271,3 +271,5 @@ describe("Spectra API route", () => {
     expect(convexMutation).toHaveBeenCalledWith("spectraThreads:update", { actorClerkId: "user_spectra", threadId: "thread_1", title: undefined, pinned: undefined, workspaceId: "workspace_1", status: undefined });
   });
 });
+
+

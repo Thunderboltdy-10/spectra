@@ -54,22 +54,22 @@ export const list = query({
     const rows = blueprintKey
       ? await ctx.db
         .query("spectraArtifacts")
-        .withIndex("by_owner_blueprint", (q) => q.eq("ownerUserId", actor._id).eq("blueprintKey", blueprintKey))
+        .withIndex("by_account_blueprint", (q) => q.eq("ownerAccountId", actor._id).eq("blueprintKey", blueprintKey))
         .order("desc")
         .take(limit * 3)
       : await ctx.db
         .query("spectraArtifacts")
-        .withIndex("by_owner_status_updated", (q) => q.eq("ownerUserId", actor._id).eq("status", baseStatus))
+        .withIndex("by_account_status_updated", (q) => q.eq("ownerAccountId", actor._id).eq("status", baseStatus))
         .order("desc")
         .take(limit * 3);
 
     const needle = args.search?.trim().toLowerCase();
     const activeWorkspaces = await ctx.db
       .query("spectraWorkspaces")
-      .withIndex("by_owner_status", (q) => q.eq("ownerUserId", actor._id).eq("status", "active"))
+      .withIndex("by_account_status", (q) => q.eq("ownerAccountId", actor._id).eq("status", "active"))
       .collect();
     const placementRows = (await Promise.all(activeWorkspaces
-      .filter((workspace) => workspace.orgId === actor.orgId)
+      .filter((workspace) => workspace.schoolId === actor.schoolId)
       .map(async (workspace) => ({
         workspace,
         items: await ctx.db.query("spectraWorkspaceItems").withIndex("by_workspace", (q) => q.eq("workspaceId", workspace._id)).collect(),
@@ -80,7 +80,7 @@ export const list = query({
     for (const placement of placementRows) placementsByArtifact.set(placement.sourceId, [...(placementsByArtifact.get(placement.sourceId) ?? []), placement]);
 
     const artifacts = rows
-        .filter((artifact) => artifact.orgId === actor.orgId)
+        .filter((artifact) => artifact.schoolId === actor.schoolId)
         .filter((artifact) => artifact.blueprintKey !== "thread_reference")
         .filter((artifact) => artifact.status === baseStatus)
         .filter((artifact) => !needle || `${artifact.title}\n${artifact.summary ?? ""}\n${artifact.blueprintKey}\n${artifact.textIndex ?? ""}\n${(placementsByArtifact.get(artifact._id) ?? []).map((placement) => placement.workspaceTitle).join("\n")}`.toLowerCase().includes(needle))
@@ -110,7 +110,7 @@ export const get = query({
   },
   handler: async (ctx, args) => {
     const { actor, artifact } = await requireOwnedArtifact(ctx, args.actorClerkId, args.artifactId);
-    if (artifact.orgId !== actor.orgId || artifact.blueprintKey === "thread_reference") throw new Error("Artifact not found");
+    if (artifact.schoolId !== actor.schoolId || artifact.blueprintKey === "thread_reference") throw new Error("Artifact not found");
     const placements = await listPlacementsForArtifact(ctx, args.artifactId);
     return {
       ...artifact,
@@ -142,7 +142,7 @@ export const create = mutation({
     const actor = await requireSpectraActor(ctx, args.actorClerkId);
     if (args.runId) {
       const run = await ctx.db.get(args.runId);
-      if (!run || run.ownerUserId !== actor._id || run.orgId !== actor.orgId || run.status !== "running" || !args.executionId || run.executionId !== args.executionId) throw new Error("This run is no longer allowed to create artifacts.");
+      if (!run || run.ownerAccountId !== actor._id || run.schoolId !== actor.schoolId || run.status !== "running" || !args.executionId || run.executionId !== args.executionId) throw new Error("This run is no longer allowed to create artifacts.");
     }
     if (args.workspaceId) {
       await requireOwnedWorkspace(ctx, args.actorClerkId, args.workspaceId);
@@ -152,8 +152,8 @@ export const create = mutation({
     const title = args.title.trim() || "Untitled artifact";
     const summary = args.summary?.trim() || fallbackArtifactSummary(args.blueprintKey as BlueprintKey);
     const artifactId = await ctx.db.insert("spectraArtifacts", {
-      ownerUserId: actor._id,
-      orgId: actor.orgId,
+      ownerAccountId: actor._id,
+      schoolId: actor.schoolId,
       blueprintKey: args.blueprintKey,
       title,
       summary,
@@ -205,7 +205,7 @@ export const create = mutation({
     };
     await ctx.db.insert("spectraArtifactVersions", {
       artifactId,
-      ownerUserId: actor._id,
+      ownerAccountId: actor._id,
       source: args.source === "ai" ? "ai" : "manual",
       runId: args.runId,
       before: { title: "Untitled artifact", summary: undefined, content: null, tags: [] },
@@ -223,13 +223,13 @@ export const createPending = mutation({
   handler: async (ctx, args) => {
     const actor = await requireSpectraActor(ctx, args.actorClerkId);
     const run = await ctx.db.get(args.runId);
-    if (!run || run.ownerUserId !== actor._id || run.orgId !== actor.orgId || run.status !== "running" || run.executionId !== args.executionId) throw new Error("AI run not found");
+    if (!run || run.ownerAccountId !== actor._id || run.schoolId !== actor.schoolId || run.status !== "running" || run.executionId !== args.executionId) throw new Error("AI run not found");
     if (args.workspaceId) await requireOwnedWorkspace(ctx, args.actorClerkId, args.workspaceId);
     const now = Date.now();
     const title = args.title.trim() || "Creating artifact";
     const summary = "Spectra is building this artifact now.";
     const artifactId = await ctx.db.insert("spectraArtifacts", {
-      ownerUserId: actor._id, orgId: actor.orgId, blueprintKey: args.blueprintKey,
+      ownerAccountId: actor._id, schoolId: actor.schoolId, blueprintKey: args.blueprintKey,
       title, summary, content: defaultArtifactContent(args.blueprintKey as BlueprintKey),
       textIndex: `${title} ${summary}`, tags: [], status: "active", aiState: "creating", aiRunId: args.runId, aiExecutionId: args.executionId, aiProgress: 0.05,
       createdFrom: { source: "ai", workspaceId: args.workspaceId, runId: args.runId, threadId: args.threadId },
@@ -258,7 +258,7 @@ export const finalizePending = mutation({
     const after = { title, summary, content: args.content, tags };
     await ctx.db.insert("spectraArtifactVersions", {
       artifactId: args.artifactId,
-      ownerUserId: artifact.ownerUserId,
+      ownerAccountId: artifact.ownerAccountId,
       source: "ai",
       runId: args.runId,
       before,
@@ -291,7 +291,7 @@ export const stageAiPatch = mutation({
   handler: async (ctx, args) => {
     const { artifact } = await requireOwnedArtifact(ctx, args.actorClerkId, args.artifactId);
     const run = await ctx.db.get(args.runId);
-    if (!run || run.ownerUserId !== artifact.ownerUserId || run.status !== "running" || run.executionId !== args.executionId) throw new Error("This run is no longer allowed to preview changes.");
+    if (!run || run.ownerAccountId !== artifact.ownerAccountId || run.status !== "running" || run.executionId !== args.executionId) throw new Error("This run is no longer allowed to preview changes.");
     await ctx.db.patch(args.artifactId, { aiState: "updating", aiRunId: args.runId, aiExecutionId: args.executionId, aiPreview: { title: args.title, summary: args.summary, content: args.content, tags: args.tags, changedPaths: args.changedPaths, startedAt: Date.now() }, updatedAt: Date.now() });
     return { artifactId: args.artifactId };
   },
@@ -302,9 +302,9 @@ export const discardPendingForRun = mutation({
   handler: async (ctx, args) => {
     const actor = await requireSpectraActor(ctx, args.actorClerkId);
     const run = await ctx.db.get(args.runId);
-    if (!run || run.ownerUserId !== actor._id || run.orgId !== actor.orgId || run.executionId !== args.executionId) throw new Error("This run attempt is no longer active.");
-    const artifacts = await ctx.db.query("spectraArtifacts").withIndex("by_owner_status", (q) => q.eq("ownerUserId", actor._id).eq("status", "active")).collect();
-    const pending = artifacts.filter((artifact) => artifact.orgId === actor.orgId && artifact.aiRunId === args.runId && artifact.aiExecutionId === args.executionId && (artifact.aiState === "creating" || (artifact.aiState === "failed" && artifact.createdFrom?.runId === args.runId)));
+    if (!run || run.ownerAccountId !== actor._id || run.schoolId !== actor.schoolId || run.executionId !== args.executionId) throw new Error("This run attempt is no longer active.");
+    const artifacts = await ctx.db.query("spectraArtifacts").withIndex("by_account_status", (q) => q.eq("ownerAccountId", actor._id).eq("status", "active")).collect();
+    const pending = artifacts.filter((artifact) => artifact.schoolId === actor.schoolId && artifact.aiRunId === args.runId && artifact.aiExecutionId === args.executionId && (artifact.aiState === "creating" || (artifact.aiState === "failed" && artifact.createdFrom?.runId === args.runId)));
     for (const artifact of pending) {
       const placements = await ctx.db.query("spectraWorkspaceItems").withIndex("by_source", (q) => q.eq("sourceType", "artifact").eq("sourceId", artifact._id)).collect();
       await Promise.all(placements.map((placement) => ctx.db.delete(placement._id)));
@@ -319,9 +319,9 @@ export const failPendingForRun = mutation({
   handler: async (ctx, args) => {
     const actor = await requireSpectraActor(ctx, args.actorClerkId);
     const run = await ctx.db.get(args.runId);
-    if (!run || run.ownerUserId !== actor._id || run.orgId !== actor.orgId || run.executionId !== args.executionId) throw new Error("This run attempt is no longer active.");
-    const artifacts = await ctx.db.query("spectraArtifacts").withIndex("by_owner_status", (q) => q.eq("ownerUserId", actor._id).eq("status", "active")).collect();
-    const pending = artifacts.filter((artifact) => artifact.orgId === actor.orgId && artifact.aiRunId === args.runId && artifact.aiExecutionId === args.executionId && artifact.aiState === "creating");
+    if (!run || run.ownerAccountId !== actor._id || run.schoolId !== actor.schoolId || run.executionId !== args.executionId) throw new Error("This run attempt is no longer active.");
+    const artifacts = await ctx.db.query("spectraArtifacts").withIndex("by_account_status", (q) => q.eq("ownerAccountId", actor._id).eq("status", "active")).collect();
+    const pending = artifacts.filter((artifact) => artifact.schoolId === actor.schoolId && artifact.aiRunId === args.runId && artifact.aiExecutionId === args.executionId && artifact.aiState === "creating");
     let removed = 0;
     await Promise.all(pending.map(async (artifact) => {
       // A provisional shell with no generated content is not useful work. Do
@@ -344,9 +344,9 @@ export const settleStagedForRun = mutation({
   handler: async (ctx, args) => {
     const actor = await requireSpectraActor(ctx, args.actorClerkId);
     const run = await ctx.db.get(args.runId);
-    if (!run || run.ownerUserId !== actor._id || run.orgId !== actor.orgId || run.executionId !== args.executionId) throw new Error("This run attempt is no longer active.");
-    const artifacts = await ctx.db.query("spectraArtifacts").withIndex("by_owner_status", (q) => q.eq("ownerUserId", actor._id).eq("status", "active")).collect();
-    const staged = artifacts.filter((artifact) => artifact.orgId === actor.orgId && artifact.aiRunId === args.runId && artifact.aiExecutionId === args.executionId && artifact.aiState === "updating");
+    if (!run || run.ownerAccountId !== actor._id || run.schoolId !== actor.schoolId || run.executionId !== args.executionId) throw new Error("This run attempt is no longer active.");
+    const artifacts = await ctx.db.query("spectraArtifacts").withIndex("by_account_status", (q) => q.eq("ownerAccountId", actor._id).eq("status", "active")).collect();
+    const staged = artifacts.filter((artifact) => artifact.schoolId === actor.schoolId && artifact.aiRunId === args.runId && artifact.aiExecutionId === args.executionId && artifact.aiState === "updating");
     const now = Date.now();
     await Promise.all(staged.map((artifact) => {
       const previewHasContent = artifact.aiPreview?.title !== undefined || artifact.aiPreview?.summary !== undefined || artifact.aiPreview?.content !== undefined || artifact.aiPreview?.tags !== undefined;
@@ -386,12 +386,12 @@ export const revertVersion = mutation({
   handler: async (ctx, args) => {
     const { artifact } = await requireOwnedArtifact(ctx, args.actorClerkId, args.artifactId);
     const version = await ctx.db.get(args.versionId);
-    if (!version || version.artifactId !== args.artifactId || version.ownerUserId !== artifact.ownerUserId) throw new Error("Artifact version not found");
+    if (!version || version.artifactId !== args.artifactId || version.ownerAccountId !== artifact.ownerAccountId) throw new Error("Artifact version not found");
     const target = version.before as { title: string; summary?: string; content: unknown; tags: string[] };
     const now = Date.now();
     await ctx.db.insert("spectraArtifactVersions", {
       artifactId: args.artifactId,
-      ownerUserId: artifact.ownerUserId,
+      ownerAccountId: artifact.ownerAccountId,
       source: "revert",
       before: { title: artifact.title, summary: artifact.summary, content: artifact.content, tags: artifact.tags },
       after: target,
@@ -437,7 +437,7 @@ export const update = mutation({
     if (JSON.stringify(before) === JSON.stringify(after)) return { artifactId: args.artifactId };
     await ctx.db.insert("spectraArtifactVersions", {
       artifactId: args.artifactId,
-      ownerUserId: artifact.ownerUserId,
+      ownerAccountId: artifact.ownerAccountId,
       source: args.source ?? "manual",
       runId: args.runId,
       before,
@@ -546,3 +546,5 @@ export const artifactStillExists = query({
     return artifact.status !== "deleted";
   },
 });
+
+

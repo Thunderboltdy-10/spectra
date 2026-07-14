@@ -32,13 +32,15 @@ Each type registers one manifest in code and validation tooling:
 | identity         | stable typeKey, display name, icon, category, minimum app version                 |
 | schemas          | content schema by version, metadata extension, operation input/output schemas     |
 | renderers        | full, panel, compact card, embed compact/expanded, print/export, historical       |
-| editor           | route/component, responsive breakpoints, selection/anchor model, autosave policy  |
+| editor           | route/component, responsive breakpoints, selection/anchor model, live-sync/validity policy |
 | operations       | inspect, create, patch, reorganize, validate, summarize, duplicate, import/export |
+| aiSkill          | on-demand purpose/selection, regions, operations, preservation, approvals, links, effects |
 | collaboration    | CRDT/domain adapter, awareness payload, comment anchors, conflict policy          |
 | history          | snapshot strategy, meaningful-version triggers, diff and partial-restore adapter  |
 | context          | search fragmenter, context serializer, token estimator, redaction rules           |
 | lifecycle        | template, duplicate, move/place, archive, trash, purge, restore rules             |
-| capabilities     | canPresent, canExecute, canAssess, canEmbedInteractively, canWorkOffline          |
+| capabilities     | canPresent, canExecute, canAssessFormatively, canEmbedInteractively               |
+| interoperability | major formats, staged import/export, fidelity, quarantine, recovery                |
 | migrations       | ordered schema migrations, compatibility window, fixture corpus                   |
 | quality          | accessibility contract, performance budgets, security risks, acceptance suites    |
 
@@ -48,11 +50,13 @@ Unknown type keys are quarantined and render recoverable metadata, never coerced
 
 Content must have a discriminated, schema-validated root. Do not store arbitrary v.any payloads as the only contract. Large binary assets live in object storage; content stores stable asset references and accessibility metadata.
 
-Every editable unit exposes a stable regionId. Regions form an artifact-specific tree or graph and declare kind, parent, order/geometry, readable text/semantic data, edit capability, validation rules, and content version. IDs survive reordering and ordinary rewrites. JSON Pointer may be an internal transport for simple fields, but AI tools target semantic regions and domain operations rather than brittle array indexes.
+Every editable unit exposes a stable regionId. Regions form an artifact-specific tree or graph and declare kind, parent, order/geometry, readable text/semantic data, edit capability, validation rules, and live state vector. IDs survive reordering and ordinary rewrites. Granularity includes lines, blocks, slide objects, card sides, quiz fields/options, Sheet cells/ranges, task fields, canvas nodes, and equivalent type regions. JSON Pointer may be an internal transport for simple fields, but AI targets semantic regions and domain operations rather than brittle array indexes.
+
+An exclusive active claim protects the smallest safe overlapping semantic region. Non-overlapping claims proceed concurrently. A second actor targeting an occupied region queues or pauses and receives current/base/proposed state plus explicit resolution. Claim expiry, disconnect, cancellation, permission change, and worker failure release it deterministically. No artifact may fall back to silent last-write-wins for overlapping human or AI changes.
 
 ## Save and state model
 
-Human editing uses optimistic local state with visible sync states: saved, saving, offline changes, conflict/permission lost, validation blocked. Collaborative types sync incremental operations; non-collaborative settings use debounced transactions. “Saved” means persisted and authorized, not merely updated in React state.
+There is no manual save boundary and no offline editing. Humans and AI work against current live state, including changes not yet grouped into a named version. Collaborative types persist incremental operations through self-hosted Yjs; transactional settings use reactive domain mutations. Visible states are synchronizing, synchronized, reconnecting, unsynchronized, invalid, conflict/queued, and permission lost. “Saved” or “Synchronized” means durable, authorized, and schema-valid—not merely React state. Network loss stops new durable edits and never creates an offline queue.
 
 Validation has three levels: local structural validation, transactional domain invariants, and asynchronous quality checks. Invalid partial AI content may be visible while pending, but publish/export/assessment actions are disabled with actionable errors.
 
@@ -69,13 +73,15 @@ An artifact adapter must let AI:
 7. preview or request approval for destructive, broad, assessed, published, or scheduling changes;
 8. resume idempotently after interruption.
 
-Blue working traces attach to real targeted regions. Creating traces may sweep a new shell and then individual regions; editing traces highlight only affected regions; checking traces show validation targets. They are ephemeral projections of durable operation state, not fabricated animations.
+Blue working traces attach to real targeted regions, not only cards. Text forms/replaces/morphs in place; options/answer state, Sheet ranges/charts, slide objects, task properties, canvas nodes, and other regions perform type-specific transitions tied to committed operations. Independent edits may animate concurrently and may trail backend output slightly for legibility. Effects are refined rather than electrical/noisy, reconcile to durable state, and fully clear on completion, failure, rejection, cancellation, reconnect, or permission loss. Reduced motion uses restrained outlines/state labels. They are ephemeral projections of durable operation state, never decorative fabrication.
 
-If a user changes a targeted region after the AI base version, the adapter may safely rebase commutative operations, retarget by stable regionId, or pause with a three-way preview. It must not silently overwrite. Rejection cancels proposed operations and preserves unrelated completed work. Partial failure records completed, skipped, failed, and compensatable operations.
+If a user changes a targeted region after the AI base state, the adapter may safely rebase a provably commutative operation, retarget by stable regionId, or pause with a three-way preview. It must not silently overwrite. Before AI edits an artifact with uncheckpointed human changes, history creates a coherent user-attributed checkpoint. Each coherent AI operation batch then creates its own AI-attributed history entry. Rejection cancels proposed operations and preserves unrelated completed work. Partial failure records completed, skipped, failed, and compensatable operations and clears all ephemeral effects.
+
+Each type ships a dedicated on-demand AI skill. It explains purpose/selection criteria, semantic regions, bounded inspection, every typed operation, preservation, validation, approvals, relationships/embeds, import behavior, and working effects. Ordinary runtime context contains only a compact cross-artifact selection/composition guide; it never injects all artifact skills into every request.
 
 ## Collaboration and permissions
 
-Shared roles are owner, manager, editor, commenter, viewer, and type-specific use. Delete-owner-only may be imposed by type; agents require it. Grants can target user, group/class, school, or public audience where policy permits. The policy engine evaluates resource classification, membership, grant, link policy, and operation capability.
+Artifacts are private by default. The primary sharing UX offers read-only and modify. Workspace access normally projects to its artifacts, while an explicit artifact exception removes access for a person. Public access is always explicit and never default. Internally, extensible capabilities cover ownership, sharing, deletion, restore, comments, use, and future fine-grained needs without exposing them prematurely. Agents retain creator-only deletion.
 
 Presence includes user identity/color, viewport, active region, selection/cursor, and last-seen lease; it is ephemeral. Comment anchors are durable semantic anchors with fallback excerpt/geometry and orphan recovery. AI appears as a distinct collaborator with run identity and cannot acquire broader access than its invoking actor plus selected agent resource rights.
 
@@ -88,10 +94,10 @@ All types implement:
 - full screen: complete product with Details, History, Comments, Share, Activity areas;
 - embed compact/expanded: permission-safe and responsive;
 - historical renderer: faithful read-only past state beside current;
-- pending/error/deleted/no-access/offline states;
+- pending/error/deleted/no-access/reconnecting/unsynchronized/permission-lost states;
 - print/export representation where meaningful.
 
-Layouts must support 320 px narrow panels, keyboard-only use, reduced motion, 200% zoom, screen-reader landmarks, high contrast, and touch targets. Type-specific shortcuts never override global safety/navigation shortcuts without disclosure.
+Layouts must support 320 px narrow panels, keyboard-only use, reduced motion, 200% zoom, screen-reader landmarks, high contrast, and touch targets. Common actions remain obvious; advanced/rare configuration uses inspectors or expandable sections. Redundant controls are removed and every rendered control must function. Type-specific shortcuts never override global safety/navigation shortcuts without disclosure.
 
 ## Search, context, relationships, and memory
 
@@ -101,7 +107,9 @@ Relationships are links, not access inheritance. Suggested relations remain sugg
 
 ## History and lifecycle
 
-Low-level CRDT updates are compacted into snapshots. Product versions are created at publish, explicit save point, AI change-group completion, import, restore, major structural change, or elapsed activity boundary. Minor changes are grouped by actor and idle window. Restore creates a new version. Partial restore submits normal validated operations. Historical assets and external-resource versions remain resolvable or clearly unavailable.
+Low-level CRDT updates are compacted into snapshots. Product versions are created at meaningful human editing-session/idle boundaries, mandatory pre-AI user checkpoints, every coherent AI run/operation batch, import, restore, publish, or major structural change. They are not created per keystroke. Human and AI attribution is visually distinct. Restore creates a new version; partial restore submits ordinary validated region operations. Historical assets and external-resource versions remain resolvable or clearly unavailable.
+
+Every applicable type defines the major formats users already own, staged support, import preview, isolated parsing, unsupported-feature quarantine, itemized fidelity report, recovery/download-original path, and useful exports. Import cannot silently flatten, discard, or execute macros/code. Importing existing work is a release requirement, not deferred polish.
 
 Duplication creates new identity/owner, copies allowed content/assets, records origin, resets comments/activity/grants unless explicitly chosen, and never copies agent usage history. Moving changes placement only. Archive preserves links and access; trash hides ordinary retrieval; purge cascades search, embeddings, sync rooms, embeds, assets, and memory evidence according to retention policy.
 
@@ -121,17 +129,17 @@ A type generator should scaffold manifest, schemas, adapters, fixtures, renderer
 - [ ] Implemented
 - [ ] Verified
 
-### AS-03 Build stable semantic region addressing and typed operation adapters
+### AS-03 Build stable semantic region addressing, exclusive overlapping-region claims, visible conflict resolution, and typed operation adapters
 
 - [ ] Implemented
 - [ ] Verified
 
-### AS-04 Build pending shells, progressive mutation, real working traces, checkpoints, and recovery
+### AS-04 Build pending shells, progressive mutation, type-specific real region effects, full cleanup, checkpoints, and recovery
 
 - [ ] Implemented
 - [ ] Verified
 
-### AS-05 Build shared save, validation, offline, conflict, and permission-loss states
+### AS-05 Build live synchronization/validity, online-only reconnect, conflict/queue, and permission-loss states with no manual or offline save boundary
 
 - [ ] Implemented
 - [ ] Verified
@@ -146,12 +154,12 @@ A type generator should scaffold manifest, schemas, adapters, fixtures, renderer
 - [ ] Implemented
 - [ ] Verified
 
-### AS-08 Build search fragmentation, context serialization, redaction, and token accounting
+### AS-08 Build on-demand artifact skills, compact selection guide, search fragmentation, context serialization, redaction, and token accounting
 
 - [ ] Implemented
 - [ ] Verified
 
-### AS-09 Build versions, diffs, restore, import/export, templates, duplicate, archive, and purge hooks
+### AS-09 Build human-session/pre-AI/AI versions, type-aware diffs/restore, major-format import quarantine/fidelity/export, templates, duplicate, archive, and purge hooks
 
 - [ ] Implemented
 - [ ] Verified
@@ -161,7 +169,7 @@ A type generator should scaffold manifest, schemas, adapters, fixtures, renderer
 - [ ] Implemented
 - [ ] Verified
 
-### AS-11 Prove accessibility, responsive layouts, keyboard behavior, and performance budgets
+### AS-11 Prove every visible control, progressive disclosure, accessibility, responsive layouts, keyboard/touch behavior, working-effect cleanup, and performance budgets in the actual UI
 
 - [ ] Implemented
 - [ ] Verified

@@ -29,40 +29,39 @@ Handle build timeout, dependency outage/malware, runtime crash, infinite output,
 ### CODE-01 Define file-tree, manifest, runtime/dependency, network, test, dataset, asset, and publish schemas
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### CODE-02 Build source/rendered/non-programmer views, editor/files/problems/tests/console/preview, card/embed/history
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### CODE-03 Build Spectra visualization SDK/tokens and accessible generation/design conformance checks
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### CODE-04 Implement browser sandbox/CSP/SDK bridge and isolated remote execution profiles
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### CODE-05 Implement file collaboration, presence, comments, proposal workspace, content-addressed history, and restore
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### CODE-06 Implement AI plan/create/patch/build/test/debug/accessibility with progressive traces and approvals
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### CODE-07 Implement dependency scanning, quotas, egress, secrets, cancellation, logs, and abuse controls
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### CODE-08 Prove isolation, resource limits, accessibility, reproducible rebuild, conflicts, and source preservation
 
 - [ ] Implemented
-- [ ] Independently verified
-
+- [ ] Verified

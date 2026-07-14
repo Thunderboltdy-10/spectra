@@ -25,35 +25,34 @@ Handle missing/revoked evidence, changed external source, stale verification, in
 ### PORT-01 Define entries, reflections, outcomes, evidence, source links, audience views, and verification schemas
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### PORT-02 Build timeline/grid/story, coverage, review, publish, card/embed/history, and export experiences
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### PORT-03 Implement private/reviewer/published grants, audience preview, comments/suggestions, and verification workflow
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### PORT-04 Implement ManageBac CAS import, provenance, overlay, stale rebase, detach, and deletion behavior
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### PORT-05 Implement AI import/organize/reflect/map/gap/narrative tools with anti-fabrication checks
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### PORT-06 Implement meaningful versions, partial restore, stale verification, and evidence reference retention
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### PORT-07 Prove privacy, audience preview, source/evidence failure, accessibility, offline recovery, and export fidelity
 
 - [ ] Implemented
-- [ ] Independently verified
-
+- [ ] Verified

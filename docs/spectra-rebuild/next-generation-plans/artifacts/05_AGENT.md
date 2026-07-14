@@ -21,35 +21,34 @@ Migration exports old agent definitions/resources/collaborators for owner review
 ### AGART-01 Define content, immutable release, resource binding, skill, eval, feedback, and aggregate schemas
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### AGART-02 Build catalog/detail/training/test/permissions/versions/analytics and chat-chip representations
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### AGART-03 Implement draft collaboration, comments, publish gates, history, rollback, and owner-only deletion
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### AGART-04 Implement AI training, coverage, skill/eval generation, weakness analysis, and improvement proposals
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### AGART-05 Prove invocation privacy, source protection, audience revocation, and aggregate thresholds
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### AGART-06 Migrate old agents into reviewed drafts and remove old agent routes/schema/runtime
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### AGART-07 Prove accessibility, catalog scale, version pinning, regression blocks, and owner offboarding
 
 - [ ] Implemented
-- [ ] Independently verified
-
+- [ ] Verified

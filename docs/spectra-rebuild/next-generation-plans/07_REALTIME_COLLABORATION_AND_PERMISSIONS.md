@@ -4,12 +4,12 @@
 
 Convex reactive queries are the right metadata/activity foundation: a query subscription reruns when dependencies change, and optimistic updates can make ordinary mutations immediate ([Convex realtime](https://docs.convex.dev/realtime), [optimistic updates](https://docs.convex.dev/client/react/optimistic-updates)). They are not by themselves a rich-text or freeform-canvas concurrency protocol.
 
-| Content approach | Strength | Cost/risk |
-|---|---|---|
-| last-write-wins JSON mutations | simple | lost edits, whole-document bandwidth, poor offline |
-| domain operational transform | precise central control | high per-type algorithm cost |
-| Automerge | local-first documents, built-in sync/history model | larger integration shift, smaller Tiptap ecosystem |
-| Yjs | mature CRDT, Tiptap/ProseMirror fit, awareness, subdocuments | must design authenticated provider, persistence, compaction |
+| Content approach               | Strength                                                     | Cost/risk                                                   |
+| ------------------------------ | ------------------------------------------------------------ | ----------------------------------------------------------- |
+| last-write-wins JSON mutations | simple                                                       | lost edits, whole-document bandwidth, poor offline          |
+| domain operational transform   | precise central control                                      | high per-type algorithm cost                                |
+| Automerge                      | local-first documents, built-in sync/history model           | larger integration shift, smaller Tiptap ecosystem          |
+| Yjs                            | mature CRDT, Tiptap/ProseMirror fit, awareness, subdocuments | must design authenticated provider, persistence, compaction |
 
 Recommend Convex for authorized durable metadata/comments/activity/grants and Yjs for suitable live content. Yjs awareness is deliberately ephemeral and should not be persisted as document history ([Yjs awareness](https://docs.yjs.dev/getting-started/adding-awareness)); collaborative editor patterns are documented here: [Yjs collaborative editor](https://docs.yjs.dev/getting-started/a-collaborative-editor). Prototype self-hosted versus managed transport before D-06; do not couple the artifact protocol to a vendor.
 
@@ -59,50 +59,49 @@ Coalesce cursor updates, send state-vector diffs, compact by update count/bytes/
 ### RTC-01 Implement centralized resource grants, policy explanations, public links, and invariants
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### RTC-02 Prototype Yjs managed versus self-hosted transport and decide D-06 with measurements
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### RTC-03 Implement short-lived room tokens, policy versions, revocation disconnect, and gateway limits
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### RTC-04 Implement update logs, snapshots, state vectors, compaction, and corruption recovery
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### RTC-05 Implement ephemeral presence, cursors, selections, viewports, and accessible collaborator indicators
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### RTC-06 Implement semantic comments, mentions, orphan recovery, resolution, and notification preferences
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### RTC-07 Implement change groups and meaningful activity without keystroke noise
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### RTC-08 Implement AI conflict detection, safe rebase, pause/compare, rejection, and partial recovery
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### RTC-09 Implement offline queues, permission/schema recheck, reconnect, and revoked-access recovery
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### RTC-10 Prove bandwidth, scale, packet-failure, restart, revocation, and cross-tenant isolation
 
 - [ ] Implemented
-- [ ] Independently verified
-
+- [ ] Verified

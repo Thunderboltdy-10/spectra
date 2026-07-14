@@ -23,35 +23,34 @@ Virtualize slide thumbnails, lazy-load assets, cache render previews, and keep e
 ### PRES-01 Define scene graph, theme/master/layout, notes, media, embed, transition, and accessibility schemas
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### PRES-02 Build rail/canvas/panels/notes, presenter, card/embed/history, and responsive review modes
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### PRES-03 Implement layout, guides, grouping, layers, components, media, charts, keyboard, and reading order
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### PRES-04 Implement realtime scene/text collaboration, presence, comments, versions, and partial restore
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### PRES-05 Implement narrative-first AI outline/slides/theme/edit/notes/check with progressive traces
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### PRES-06 Implement pinned presenting, PDF/media output, and tiered PPTX import/export reports
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### PRES-07 Prove accessibility, render performance, large decks, missing assets, conflicts, and recovery
 
 - [ ] Implemented
-- [ ] Independently verified
-
+- [ ] Verified

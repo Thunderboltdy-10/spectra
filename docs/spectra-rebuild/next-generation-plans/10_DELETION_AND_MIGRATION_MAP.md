@@ -8,13 +8,13 @@ The failure ledger records: failure ID, deleted symbol/file, importer/test, expe
 
 ## Pre-removal evidence and data disposition
 
-| Domain | Export before delete | Do not migrate as truth |
-|---|---|---|
-| memory | active userMemory/userMemoryEntries, status/source/scope timestamps, user preference consent | model summaries, embeddings, duplicate/inferred claims without provenance |
-| org/personal soul | source documents only if user/school owns and explicitly wants export | chunks/capsules as new memory |
-| ManageBac | integration owner, non-secret capability/config metadata, user overlays, source IDs/hashes/timestamps | encrypted token ciphertext, guessed endpoint availability, copied source payload as artifacts |
-| admin | active organizations, users, invitations, branding, verified domains, policy-relevant settings | old role assumptions, analytics snapshots, demo seeds |
-| superadmin | organization lifecycle/limits and auditable operator actions worth retaining | hard-coded operator identity, platform aggregate caches |
+| Domain            | Export before delete                                                                                  | Do not migrate as truth                                                                       |
+| ----------------- | ----------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| memory            | active userMemory/userMemoryEntries, status/source/scope timestamps, user preference consent          | model summaries, embeddings, duplicate/inferred claims without provenance                     |
+| org/personal soul | source documents only if user/school owns and explicitly wants export                                 | chunks/capsules as new memory                                                                 |
+| ManageBac         | integration owner, non-secret capability/config metadata, user overlays, source IDs/hashes/timestamps | encrypted token ciphertext, guessed endpoint availability, copied source payload as artifacts |
+| admin             | active organizations, users, invitations, branding, verified domains, policy-relevant settings        | old role assumptions, analytics snapshots, demo seeds                                         |
+| superadmin        | organization lifecycle/limits and auditable operator actions worth retaining                          | hard-coded operator identity, platform aggregate caches                                       |
 
 Exports are encrypted, access-controlled, hash-manifested, time-limited, and tested for restore into offline migration tooling. Secrets are revoked and never included.
 
@@ -37,7 +37,7 @@ Exports are encrypted, access-controlled, hash-manifested, time-limited, and tes
 
 ### Tests and docs
 
-- Delete or replace src/lib/__tests__/memory-compaction.test.ts, post-process-memory-routing.test.ts, post-process-free-tier-memory.test.ts and memory-specific cases in retrieval.test.ts, retrieval-search-tier.test.ts, runtime-contract.test.ts, routing tests, auto-settings.test.ts, api-routes.integration.test.ts, notes-route.integration.test.ts, artifacts-route.integration.test.ts, editor tests, and scenario evals.
+- Delete or replace src/lib/**tests**/memory-compaction.test.ts, post-process-memory-routing.test.ts, post-process-free-tier-memory.test.ts and memory-specific cases in retrieval.test.ts, retrieval-search-tier.test.ts, runtime-contract.test.ts, routing tests, auto-settings.test.ts, api-routes.integration.test.ts, notes-route.integration.test.ts, artifacts-route.integration.test.ts, editor tests, and scenario evals.
 - Remove obsolete memory/soul claims from root README/old audits, docs/spectra-rebuild/00_AGENT_KICKOFF_PROMPT.md, 01_PRODUCT_DECISIONS.md, 05_REBUILD_EXECUTION_PLAN.md, 06_DELETION_AND_MIGRATION_POLICY.md, SPECTRA_PRODUCT_SOURCE_OF_TRUTH.md, SPECTRA_LIVE_ACCEPTANCE_PLAN.md, SPECTRA_AGENT_HARNESS_DESIGN.md, Wave plans, and generated audits. Preserve historical files only under a clearly labeled archive that is excluded from source-of-truth search.
 
 ## ManageBac deletion map
@@ -55,11 +55,11 @@ Exports are encrypted, access-controlled, hash-manifested, time-limited, and tes
 - Drop managebacUserLinks and all indexes.
 - Remove managebac_sync source-type variants and managebacItemId fields from artifacts, plannerItems, notes/other legacy tables; remove cleanup and hydration logic from users.ts, userLifecycle.ts, plannerItems.ts, artifacts.ts, notes.ts, notifications.ts, auditLog.ts, accessRequests.ts, constants.ts.
 - Remove MANAGEBAC_API_TOKEN and MANAGEBAC_BASE_URL from .env.example and runtime validators during the deletion phase. If an undeclared MANAGEBAC_ENCRYPTION_KEY exists in deployments, revoke/remove it too. The replacement later declares vault configuration and development credential injection through approved secret tooling, not the old env contract.
-- Regenerate convex/_generated/api.d.ts and data model types after removals.
+- Regenerate convex/\_generated/api.d.ts and data model types after removals.
 
 ### Tests and docs
 
-- Delete src/lib/__tests__/managebac-crypto.test.ts, managebac-mapper.test.ts, managebac-normalizer.test.ts and ManageBac cases in retrieval, API integration, routing, runtime-context, scenario, artifacts/planner tests and scripts/live-route-validation.ts.
+- Delete src/lib/**tests**/managebac-crypto.test.ts, managebac-mapper.test.ts, managebac-normalizer.test.ts and ManageBac cases in retrieval, API integration, routing, runtime-context, scenario, artifacts/planner tests and scripts/live-route-validation.ts.
 - Remove old endpoint and sync claims from all product/Wave/live-acceptance/generated documents enumerated in the memory section. The new 04 plan becomes canonical only after review.
 
 ## Admin deletion map
@@ -119,50 +119,49 @@ Phase 2 begins only after deleted runtime symbols have zero imports and every fa
 ### DEL-01 Capture encrypted exports, hashes, schema counts, active import graph, and rollback rehearsal
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### DEL-02 Delete old memory/personal-soul/org-soul UI, APIs, backend, schema, jobs, utilities, tests, and docs
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### DEL-03 Delete old ManageBac UI, APIs, backend, fields, cron, env, utilities, tests, and docs
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### DEL-04 Delete old admin UI, APIs, backend, permission rules, schema, tests, and docs
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### DEL-05 Delete old superadmin UI, APIs, backend, aggregates, fixed identity, tests, and docs
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### DEL-06 Regenerate Convex/API types and create the complete compile/schema/test/runtime failure ledger
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### DEL-07 Prove zero runtime imports, routes, cron jobs, schema aliases, env dependencies, and navigation entries
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### DEL-08 Resolve each failure only through its planned replacement; reject stubs and compatibility wrappers
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### DEL-09 Migrate validated identity/overlay/source records and reconcile counts/hashes
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### DEL-10 Revoke secrets, expire exports/readers, remove migration tooling, and sign deletion completion
 
 - [ ] Implemented
-- [ ] Independently verified
-
+- [ ] Verified

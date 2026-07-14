@@ -25,40 +25,39 @@ Migrate current quiz content into stable questions and versioned answer permissi
 ### QUIZ-01 Define quiz/question/rubric schemas, publish lifecycle, validation, and answer visibility
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### QUIZ-02 Define immutable attempt/submission/version pinning, autosave, accommodations, grading, and release
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### QUIZ-03 Build builder, preview, attempt, results, card, embed, history, and responsive states
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### QUIZ-04 Implement author collaboration, question comments, versions, and published-draft branching
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### QUIZ-05 Implement AI coverage, generation, edit, rubric, ambiguity, correctness, bias, and accessibility checks
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### QUIZ-06 Implement assignment/privacy policies and prove no answer/rubric or peer-response leakage
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### QUIZ-07 Implement QTI/CSV/print import/export with quarantine and fidelity reports
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### QUIZ-08 Migrate current quizzes and prove submission idempotency, offline recovery, restore, and scale
 
 - [ ] Implemented
-- [ ] Independently verified
-
+- [ ] Verified

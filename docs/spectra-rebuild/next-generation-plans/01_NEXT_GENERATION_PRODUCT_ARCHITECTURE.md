@@ -14,19 +14,19 @@ The active product is more coherent than older repository documentation suggests
 
 ## Target topology
 
-| Bounded context | Owns | Does not own |
-|---|---|---|
-| Identity | global user, verified emails, sessions | school role or resource rights |
-| Tenancy | school, membership, group, class, invitation | platform-operator eligibility |
-| Authority | capabilities, grants, policy decisions, revocation | content |
-| Artifacts | identity, lifecycle, typed content reference, schema version | workspace placement or thread history |
-| Collaboration | CRDT streams, awareness, comments, change groups | durable artifact metadata |
-| Workspaces | placements, views, grouping, pinned state | artifact content |
-| Threads/runs | messages, context manifest, approvals, run events | artifact truth |
-| Intelligence | memories, relationships, retrieval plans, suggestions | source authority |
-| School data | connectors, external records, sync runs, mappings, overlays | user-authored artifact state |
-| Operations | school admin and platform operations | private student work by default |
-| Metering | model/storage/action usage and cost allocation | prompt content unless explicitly sampled with consent |
+| Bounded context | Owns                                                         | Does not own                                          |
+| --------------- | ------------------------------------------------------------ | ----------------------------------------------------- |
+| Identity        | global user, verified emails, sessions                       | school role or resource rights                        |
+| Tenancy         | school, membership, group, class, invitation                 | platform-operator eligibility                         |
+| Authority       | capabilities, grants, policy decisions, revocation           | content                                               |
+| Artifacts       | identity, lifecycle, typed content reference, schema version | workspace placement or thread history                 |
+| Collaboration   | CRDT streams, awareness, comments, change groups             | durable artifact metadata                             |
+| Workspaces      | placements, views, grouping, pinned state                    | artifact content                                      |
+| Threads/runs    | messages, context manifest, approvals, run events            | artifact truth                                        |
+| Intelligence    | memories, relationships, retrieval plans, suggestions        | source authority                                      |
+| School data     | connectors, external records, sync runs, mappings, overlays  | user-authored artifact state                          |
+| Operations      | school admin and platform operations                         | private student work by default                       |
+| Metering        | model/storage/action usage and cost allocation               | prompt content unless explicitly sampled with consent |
 
 ## Principal and tenant model
 
@@ -86,15 +86,15 @@ These controls support data minimization, purpose limitation, accuracy, retentio
 
 ## Failure and recovery
 
-| Failure | Required behavior |
-|---|---|
-| Convex unavailable | local collaborative draft may continue only if room authorization is still valid; metadata actions queue visibly |
-| collaboration gateway unavailable | fall back to read-only last snapshot or local unsynced draft; never pretend saved |
-| AI worker dies | lease expires, new worker resumes from checkpoint/idempotency ledger |
-| permission revoked mid-session | invalidate subscriptions and room token, stop writes, preserve unsent local copy for export only if policy allows |
-| connector partially fails | retain prior normalized records, mark affected capabilities stale, expose item-level errors |
-| search/memory projection lags | show source content normally; omit or label stale suggestions |
-| schema migration fails | keep old schema reader in offline migration tooling only, roll back deployment, never in product runtime |
+| Failure                           | Required behavior                                                                                                 |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Convex unavailable                | local collaborative draft may continue only if room authorization is still valid; metadata actions queue visibly  |
+| collaboration gateway unavailable | fall back to read-only last snapshot or local unsynced draft; never pretend saved                                 |
+| AI worker dies                    | lease expires, new worker resumes from checkpoint/idempotency ledger                                              |
+| permission revoked mid-session    | invalidate subscriptions and room token, stop writes, preserve unsent local copy for export only if policy allows |
+| connector partially fails         | retain prior normalized records, mark affected capabilities stale, expose item-level errors                       |
+| search/memory projection lags     | show source content normally; omit or label stale suggestions                                                     |
+| schema migration fails            | keep old schema reader in offline migration tooling only, roll back deployment, never in product runtime          |
 
 ## Performance budgets
 
@@ -110,50 +110,49 @@ These controls support data minimization, purpose limitation, accuracy, retentio
 ### A-01 Define schemas, indexes, retention classes, and data ownership for every bounded context
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### A-02 Implement global identity, multi-school memberships, groups/classes, and active actor context
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### A-03 Implement centralized policy evaluation and resource grants with revocation propagation
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### A-04 Replace HTTP polling metadata paths with authorized reactive queries
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### A-05 Implement collaboration transport, snapshot/update persistence, and outage recovery
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### A-06 Implement typed domain commands, activity, audit, idempotency, and projection jobs
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### A-07 Implement permission-filtered search, retrieval, and durable context manifests
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### A-08 Implement deletion, retention, export, legal-hold, and tenant-offboarding workflows
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### A-09 Prove latency, bandwidth, reconnect, revocation, and cross-tenant isolation budgets
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### A-10 Migrate active Spectra entities without compatibility code in the final runtime
 
 - [ ] Implemented
-- [ ] Independently verified
-
+- [ ] Verified

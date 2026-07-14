@@ -68,60 +68,59 @@ The frontend-design skill is required during later implementation, as requested.
 ### ADM-01 Remove the obsolete admin/superadmin implementation and hard-coded platform identity
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### ADM-02 Implement role bundles, capabilities, last-owner invariants, and privileged step-up
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### ADM-03 Implement SUPER_ADMIN_EMAILS parsing and time-boxed labeled operator sessions
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### ADM-04 Implement school creation, activation, suspension, offboarding, export, and purge sagas
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### ADM-05 Build people, invitations, groups/classes, seats, lifecycle, and role-management surfaces
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### ADM-06 Build messaging, announcements, delivery, rate limits, and communication audit
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### ADM-07 Build school usage/adoption, governance, agents/resources, integrations, feedback, and profile areas
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### ADM-08 Build platform schools, health, operations, cost, incidents, requests, and security areas
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### ADM-09 Implement privacy-safe aggregates, cohort suppression, freshness, and anomaly handling
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### ADM-10 Implement immutable privileged audit and audit-of-audit access
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### ADM-11 Apply the frontend-design skill and shared Spectra shell during implementation
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### ADM-12 Prove cross-school isolation, no private-content access, operator expiry, and destructive recovery
 
 - [ ] Implemented
-- [ ] Independently verified
-
+- [ ] Verified

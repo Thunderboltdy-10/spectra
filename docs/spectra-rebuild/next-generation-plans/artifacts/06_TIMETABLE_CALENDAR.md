@@ -25,40 +25,39 @@ Initial migration imports valid planner dates and separately verified ManageBac 
 ### CAL-01 Define layers, sources, series/occurrences, timezone, availability, overlays, reminders, and links
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### CAL-02 Build week/day/month/agenda/timetable, card/embed/history, print, and accessible agenda
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### CAL-03 Implement recurrence/DST, occurrence edits, conflicts, free/busy, notification, and range loading
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### CAL-04 Implement permission-filtered shared/private/external layers, comments, and collaborative planning
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### CAL-05 Implement ManageBac projections, source overlays, refresh, rebase, detach, and deletion behavior
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### CAL-06 Implement AI planning/replanning with constraints, explanations, previews, and approvals
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### CAL-07 Implement ICS interoperability and document connector fidelity/limitations
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### CAL-08 Migrate dated work and prove DST, recurrence, privacy, stale source, restore, and offline recovery
 
 - [ ] Implemented
-- [ ] Independently verified
-
+- [ ] Verified

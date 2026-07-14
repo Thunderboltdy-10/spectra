@@ -60,60 +60,59 @@ Preserve the library’s clear catalog, categories, cards, creator/resource sign
 ### AG-01 Remove the old agent table, routes, pages, permissions, utilities, and tests after migration export
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### AG-02 Register agent as a conforming artifact with owner-only deletion and immutable versions
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### AG-03 Build guided intent, audience, resource, behavior, skill, evaluation, and publish training
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### AG-04 Implement versioned resource bindings, audience compatibility, revocation, and source protection
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### AG-05 Implement typed skills/tools, least privilege, approvals, budgets, and injection defenses
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### AG-06 Implement private invocation threads and prove creator/admin isolation from student sessions
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### AG-07 Implement audience grants, use/modify distinction, catalog discovery, follows, and placements
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### AG-08 Implement explicit selection and explainable router suggestions independently of context/continuation
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### AG-09 Implement eval suites, test lab, staged publishing, rollback, and regression gates
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### AG-10 Implement consented feedback, privacy-safe aggregates, and evaluated improvement proposals
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### AG-11 Build library and studio responsive, accessible, empty/error/revoked-resource states
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### AG-12 Red-team resource leakage, prompt injection, harmful learning, version drift, and audience revocation
 
 - [ ] Implemented
-- [ ] Independently verified
-
+- [ ] Verified

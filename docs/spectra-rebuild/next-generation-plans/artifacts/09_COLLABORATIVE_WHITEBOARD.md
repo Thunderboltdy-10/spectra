@@ -29,35 +29,34 @@ Handle dropped updates, duplicate objects, corrupted geometry, missing assets/fo
 ### BOARD-01 Define scene graph, pages/frames/layers, nodes/connectors, geometry, sources, and accessibility order
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### BOARD-02 Build canvas/tools/minimap/layers/search/outline/templates/present/card/embed/history representations
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### BOARD-03 Implement partitioned CRDT sync, viewport loading, presence, coalesced drag, comments, and offline recovery
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### BOARD-04 Implement spatial index, level of detail, worker layout, compaction, quotas, and large-board telemetry
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### BOARD-05 Implement AI spatial inspect/create/connect/group/layout/reorganize with proposal and conflict handling
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### BOARD-06 Implement snapshots, synchronized comparison, partial restore/remapping, and PNG/SVG/PDF interchange
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### BOARD-07 Prove spatial/keyboard accessibility, 50-user collaboration, huge boards, asset failure, and revocation
 
 - [ ] Implemented
-- [ ] Independently verified
-
+- [ ] Verified

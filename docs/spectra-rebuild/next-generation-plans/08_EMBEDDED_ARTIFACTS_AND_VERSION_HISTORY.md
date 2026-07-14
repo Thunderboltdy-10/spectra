@@ -48,50 +48,49 @@ Current history stores whole before/after any payloads and previews “before”
 ### EVH-01 Implement permission-independent embed records, modes, version policy, and no-access states
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### EVH-02 Implement every type’s compact/expanded/edit embed adapter and responsive loading/error states
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### EVH-03 Implement sandboxed interactive embed SDK, CSP, typed events, budgets, and accessibility bridge
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### EVH-04 Implement permission-checked context contribution and provenance chains
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### EVH-05 Implement change groups, meaningful-version triggers, attribution, named checkpoints, and integrity hashes
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### EVH-06 Implement per-type snapshot/delta/content-addressing and compaction strategies
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### EVH-07 Build timeline, single left comparison panel, synchronized navigation, and type-aware diffs
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### EVH-08 Implement full and partial restore as new validated versions with approval/conflict handling
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### EVH-09 Implement retention, reference-counted assets, cold loading, deletion, and corruption repair
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### EVH-10 Migrate useful current versions and prove no permission escalation through embeds or history
 
 - [ ] Implemented
-- [ ] Independently verified
-
+- [ ] Verified

@@ -23,40 +23,39 @@ Migrate existing deck content into stable sections/cards, preserve placements/li
 ### DECK-01 Define sections, card variants, rich regions, sources, validation, and private study schema
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### DECK-02 Build authoring, bulk operations, templates, search/filter, preview, study, and responsive representations
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### DECK-03 Implement collaboration, presence, comments, meaningful versions, and content-only restore
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### DECK-04 Implement typed AI coverage/create/edit/rebalance/deduplicate operations and region traces
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### DECK-05 Implement private scheduling/attempts and privacy-safe assigned-deck aggregates
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### DECK-06 Implement permission-safe embeds, context, citations, and source-revocation behavior
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### DECK-07 Implement CSV/TSV/package import/export, print, quarantine, and fidelity reports
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### DECK-08 Migrate current decks/study records and prove scale, privacy, restore, and concurrent reorder
 
 - [ ] Implemented
-- [ ] Independently verified
-
+- [ ] Verified

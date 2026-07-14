@@ -24,17 +24,17 @@ Teachers/admins receive class or school data only through explicit provider capa
 
 ## Data categories and product representations
 
-| Provider category | Canonical Spectra representation | Visibility |
-|---|---|---|
-| personal profile/enrolment | external person summary, not artifact | mapped user and authorized staff |
-| class/group/membership | external class plus optional class workspace projection | member or authorized teacher/admin |
-| assignment/deadline | external record plus optional planner-task overlay | personal/class policy |
-| assessment | trusted external assessment record; optional derived study plan/quiz | never silently editable |
-| timetable | external event source feeding timetable artifact | mapped user/class |
-| CAS experience/reflection/evidence | external records; user may create a portfolio artifact | mapped user and provider-authorized staff |
-| public class resource/file | resource object/version usable in workspace or agent | audience from source policy |
-| school-wide public file | school resource catalog, not copied artifact | school audience |
-| discussion/announcement | external feed item or linked thread if import is explicit | source audience |
+| Provider category                  | Canonical Spectra representation                                     | Visibility                                |
+| ---------------------------------- | -------------------------------------------------------------------- | ----------------------------------------- |
+| personal profile/enrolment         | external person summary, not artifact                                | mapped user and authorized staff          |
+| class/group/membership             | external class plus optional class workspace projection              | member or authorized teacher/admin        |
+| assignment/deadline                | external record plus optional planner-task overlay                   | personal/class policy                     |
+| assessment                         | trusted external assessment record; optional derived study plan/quiz | never silently editable                   |
+| timetable                          | external event source feeding timetable artifact                     | mapped user/class                         |
+| CAS experience/reflection/evidence | external records; user may create a portfolio artifact               | mapped user and provider-authorized staff |
+| public class resource/file         | resource object/version usable in workspace or agent                 | audience from source policy               |
+| school-wide public file            | school resource catalog, not copied artifact                         | school audience                           |
+| discussion/announcement            | external feed item or linked thread if import is explicit            | source audience                           |
 
 External records are immutable normalized snapshots with providerRecordId, recordType, sourceModifiedAt, fetchedAt, payloadVersion, normalized fields, classification, audience scope, provenance URL, hash, and tombstone. Raw payload retention is minimized and encrypted where retained for debugging. User-created overlays hold notes, completion, reminders, tags, alternative schedule, placement, and linked artifacts. Overlays never overwrite source fields.
 
@@ -68,60 +68,59 @@ Preserve the image’s Overview, Import Preview, Sync History, Settings, Field M
 ### MB-01 Remove every old ManageBac route, function, field, cron, env dependency, utility, and test
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### MB-02 Obtain tenant API reference/changelog and build a verified read-only capability manifest
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### MB-03 Implement vault-backed credentials, validation, rotation, egress policy, and redacted audit
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### MB-04 Implement school-scoped identity resolution and ambiguous/no-match admin workflows
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### MB-05 Implement external records, normalized relations, tombstones, quarantine, and retention
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### MB-06 Implement rate-limited incremental sync, reconciliation, retry, and sync observability
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### MB-07 Implement personal/class/school authorization and purpose-coded AI retrieval tools
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### MB-08 Implement overlays, provenance, refresh, stale-change, detach, and source-deletion UX
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### MB-09 Implement reviewed imports into tasks, timetable, workspaces, resources, and portfolios
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### MB-10 Build admin integration, import preview, identity queue, health, mapping, and sync-history surfaces
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### MB-11 Prove no cross-student retrieval, secret leakage, schema coercion, or unbounded API enumeration
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### MB-12 Pilot with sanitized fixtures and one school before production-wide enablement
 
 - [ ] Implemented
-- [ ] Independently verified
-
+- [ ] Verified

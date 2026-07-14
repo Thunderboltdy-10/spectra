@@ -6,14 +6,14 @@ Spectra should feel familiar because it remembers high-value, correct, scoped in
 
 ## Research-informed alternatives
 
-| Approach | Strength | Failure mode | Decision |
-|---|---|---|---|
-| One growing profile/SOUL file | simple and cheap to inject | duplication, stale claims, weak provenance, unbounded editorial power | use only as a generated capped capsule |
-| Structured claims | correction, scope, provenance, expiry, querying | more schema and consolidation work | canonical memory truth |
-| Event-derived memory | reconstructable and auditable | noisy and expensive without consolidation | evidence layer, not prompt payload |
-| Embedding store | semantic recall | opaque ranking and stale/unauthorized chunks | secondary candidate retrieval |
-| Knowledge graph | relationships and multi-hop discovery | complexity and false edges | typed relations over high-confidence claims, not universal graph first |
-| Model-written summaries | compact and fluent | can invent or erase nuance | generated projection with citations and hard caps |
+| Approach                      | Strength                                        | Failure mode                                                          | Decision                                                               |
+| ----------------------------- | ----------------------------------------------- | --------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| One growing profile/SOUL file | simple and cheap to inject                      | duplication, stale claims, weak provenance, unbounded editorial power | use only as a generated capped capsule                                 |
+| Structured claims             | correction, scope, provenance, expiry, querying | more schema and consolidation work                                    | canonical memory truth                                                 |
+| Event-derived memory          | reconstructable and auditable                   | noisy and expensive without consolidation                             | evidence layer, not prompt payload                                     |
+| Embedding store               | semantic recall                                 | opaque ranking and stale/unauthorized chunks                          | secondary candidate retrieval                                          |
+| Knowledge graph               | relationships and multi-hop discovery           | complexity and false edges                                            | typed relations over high-confidence claims, not universal graph first |
+| Model-written summaries       | compact and fluent                              | can invent or erase nuance                                            | generated projection with citations and hard caps                      |
 
 Hermes demonstrates the value of small startup files—its MEMORY.md and USER.md are tightly bounded—while OpenClaw combines curated memory, daily evidence, and hybrid retrieval. Anthropic’s context guidance emphasizes curation/compaction as context grows. OpenAI exposes conversation state and file search as separable state/retrieval primitives. Spectra should combine these ideas rather than choosing a single flat file: [Hermes memory](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/features/memory.md), [OpenClaw memory](https://docs.openclaw.ai/concepts/memory), [Anthropic context windows](https://platform.claude.com/docs/en/build-with-claude/context-windows), [OpenAI conversation state](https://developers.openai.com/api/docs/guides/conversation-state), [OpenAI file search](https://developers.openai.com/api/docs/guides/tools-file-search).
 
@@ -35,14 +35,14 @@ Candidates merge with semantically equivalent claims, supersede contradictions, 
 
 Memory is separate from continued thread and focused artifact content.
 
-| Layer | Default | Hard maximum | Entry rule |
-|---|---:|---:|---|
-| user capsule | 220 tokens | 300 | stable active claims useful across work |
-| active workspace capsule | 300 | 400 | conventions, objectives, active decisions |
-| current workflow/corrections | 120 | 180 | directly relevant recent pattern or mistake |
-| relationship hints | 60 | 100 | only actors/resources already in permitted context |
-| school-safe profile | 60 | 100 | role/course/timezone facts allowed in this school |
-| total initial memory | 760 | 1,080 | omit empty layers; never fill quota for its own sake |
+| Layer                        |    Default | Hard maximum | Entry rule                                           |
+| ---------------------------- | ---------: | -----------: | ---------------------------------------------------- |
+| user capsule                 | 220 tokens |          300 | stable active claims useful across work              |
+| active workspace capsule     |        300 |          400 | conventions, objectives, active decisions            |
+| current workflow/corrections |        120 |          180 | directly relevant recent pattern or mistake          |
+| relationship hints           |         60 |          100 | only actors/resources already in permitted context   |
+| school-safe profile          |         60 |          100 | role/course/timezone facts allowed in this school    |
+| total initial memory         |        760 |        1,080 | omit empty layers; never fill quota for its own sake |
 
 First-pass deeper retrieval is capped at 1,500 tokens and eight claims/evidence snippets. A tool may request a second pass up to 4,000 tokens when the task demonstrably needs old context. Absolute memory/retrieval ceiling is 8,000 tokens and requires a logged reason. The context manifest records estimates and actual tokens. Artifact-level capsules are not injected globally; a focused artifact gets its normal artifact context serializer.
 
@@ -75,50 +75,49 @@ Evaluate precision of useful recall, harmful/incorrect recall, cross-scope leaka
 ### MEM-01 Remove the obsolete memory, personal soul, and organization soul implementation
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### MEM-02 Implement claims, evidence, relations, capsules, retrieval events, indexes, and retention
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### MEM-03 Implement candidate policy, deduplication, contradiction, supersession, and consolidation
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### MEM-04 Enforce the exact initial and deeper-retrieval token budgets in context manifests
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### MEM-05 Implement permission-first hybrid retrieval with citations and exclusion reasons
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### MEM-06 Build private inspect, correct, dispute, forget, export, and pause controls
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### MEM-07 Implement workspace conventions without exposing member-private memory
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### MEM-08 Implement deletion propagation, capsule invalidation, expiry, and offboarding
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### MEM-09 Build precision, contamination, injection, correction, deletion, latency, and token-budget evals
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### MEM-10 Pilot opt-in capture and graduate categories only after measured precision thresholds
 
 - [ ] Implemented
-- [ ] Independently verified
-
+- [ ] Verified

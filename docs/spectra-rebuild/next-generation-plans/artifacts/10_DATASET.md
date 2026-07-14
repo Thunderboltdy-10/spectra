@@ -25,35 +25,34 @@ Handle malformed encodings, schema drift, duplicate keys, huge files, formula er
 ### DATA-01 Define schema, chunks, rows/columns, classifications, provenance, transforms, formulas, and chart metadata
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### DATA-02 Build grid/schema/profile/transform/chart/card/embed/history with virtualization and responsive review
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### DATA-03 Implement async CSV/TSV/JSON/Parquet import/export, detection, quarantine, and fidelity reports
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### DATA-04 Implement range collaboration, transactional schema edits, comments, presence, conflict, and versions
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### DATA-05 Implement typed AI profile/clean/join/formula/chart operations with previews and lineage
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### DATA-06 Implement column/row policy, redaction, sensitive-export approval, quotas, and compute isolation
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### DATA-07 Prove large-data performance, reproducibility, privacy, import failure, partial restore, and source revocation
 
 - [ ] Implemented
-- [ ] Independently verified
-
+- [ ] Verified

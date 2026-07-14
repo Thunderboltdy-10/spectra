@@ -23,40 +23,39 @@ Handle overdue, missing timezone, invalid recurrence, notification failure, revo
 ### TASK-01 Define task, subtask, recurrence, reminder, assignee, source, and overlay schemas
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### TASK-02 Build capture/full/panel/card/embed/history and timetable projection experiences
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### TASK-03 Implement collaboration and domain merges for fields, subtasks, assignment, and completion
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### TASK-04 Implement timezone/DST, recurrence exceptions, notification delivery, retry, and deduplication
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### TASK-05 Implement ManageBac source overlays, provenance, stale compare, rebase, detach, and deletion
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### TASK-06 Implement AI create/decompose/estimate/plan/edit with preservation and approval policies
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### TASK-07 Implement permissions for assignees/watchers/shared tasks and private personal overlays
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### TASK-08 Migrate current tasks with timezone report and prove reminders, concurrency, restore, and offline recovery
 
 - [ ] Implemented
-- [ ] Independently verified
-
+- [ ] Verified

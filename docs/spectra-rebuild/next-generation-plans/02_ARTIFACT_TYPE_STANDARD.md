@@ -27,20 +27,20 @@ Pending creation creates an authorized shell and operation reservation before co
 
 Each type registers one manifest in code and validation tooling:
 
-| Manifest section | Required definition |
-|---|---|
-| identity | stable typeKey, display name, icon, category, minimum app version |
-| schemas | content schema by version, metadata extension, operation input/output schemas |
-| renderers | full, panel, compact card, embed compact/expanded, print/export, historical |
-| editor | route/component, responsive breakpoints, selection/anchor model, autosave policy |
-| operations | inspect, create, patch, reorganize, validate, summarize, duplicate, import/export |
-| collaboration | CRDT/domain adapter, awareness payload, comment anchors, conflict policy |
-| history | snapshot strategy, meaningful-version triggers, diff and partial-restore adapter |
-| context | search fragmenter, context serializer, token estimator, redaction rules |
-| lifecycle | template, duplicate, move/place, archive, trash, purge, restore rules |
-| capabilities | canPresent, canExecute, canAssess, canEmbedInteractively, canWorkOffline |
-| migrations | ordered schema migrations, compatibility window, fixture corpus |
-| quality | accessibility contract, performance budgets, security risks, acceptance suites |
+| Manifest section | Required definition                                                               |
+| ---------------- | --------------------------------------------------------------------------------- |
+| identity         | stable typeKey, display name, icon, category, minimum app version                 |
+| schemas          | content schema by version, metadata extension, operation input/output schemas     |
+| renderers        | full, panel, compact card, embed compact/expanded, print/export, historical       |
+| editor           | route/component, responsive breakpoints, selection/anchor model, autosave policy  |
+| operations       | inspect, create, patch, reorganize, validate, summarize, duplicate, import/export |
+| collaboration    | CRDT/domain adapter, awareness payload, comment anchors, conflict policy          |
+| history          | snapshot strategy, meaningful-version triggers, diff and partial-restore adapter  |
+| context          | search fragmenter, context serializer, token estimator, redaction rules           |
+| lifecycle        | template, duplicate, move/place, archive, trash, purge, restore rules             |
+| capabilities     | canPresent, canExecute, canAssess, canEmbedInteractively, canWorkOffline          |
+| migrations       | ordered schema migrations, compatibility window, fixture corpus                   |
+| quality          | accessibility contract, performance budgets, security risks, acceptance suites    |
 
 Unknown type keys are quarantined and render recoverable metadata, never coerced into a document.
 
@@ -114,60 +114,59 @@ A type generator should scaffold manifest, schemas, adapters, fixtures, renderer
 ### AS-01 Define and validate the shared artifact envelope and lifecycle state machine
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### AS-02 Build the type registry, manifest schema, lazy loading, and unknown-type quarantine
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### AS-03 Build stable semantic region addressing and typed operation adapters
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### AS-04 Build pending shells, progressive mutation, real working traces, checkpoints, and recovery
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### AS-05 Build shared save, validation, offline, conflict, and permission-loss states
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### AS-06 Build card, panel, full, embed, print, and historical renderer contracts
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### AS-07 Build grants, collaboration adapters, presence, comments, and activity hooks
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### AS-08 Build search fragmentation, context serialization, redaction, and token accounting
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### AS-09 Build versions, diffs, restore, import/export, templates, duplicate, archive, and purge hooks
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### AS-10 Build the type scaffold, migration runner, fixture corpus, and CI conformance suite
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### AS-11 Prove accessibility, responsive layouts, keyboard behavior, and performance budgets
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### AS-12 Migrate the four current blueprint types and remove hard-coded type branching
 
 - [ ] Implemented
-- [ ] Independently verified
-
+- [ ] Verified

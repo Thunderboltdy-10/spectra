@@ -25,45 +25,44 @@ Offline changes are explicit. Invalid paste is sanitized with recovery preview. 
 ### DOC-01 Define versioned content schema, stable regions, properties, citations, embeds, and assets
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### DOC-02 Build full/panel/card/embed/history/print renderers and responsive editor shell
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### DOC-03 Implement formatting, tables, code/math, media, citations, outline, find, templates, and focus mode
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### DOC-04 Implement Yjs text collaboration, presence, anchored comments, offline/reconnect, and versions
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### DOC-05 Implement typed AI block operations, proposals, progressive traces, preservation, and verification
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### DOC-06 Implement permission-safe search/context/relationships and embedded-source behavior
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### DOC-07 Implement DOCX/PDF/Markdown/HTML import/export with fidelity and failure reports
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### DOC-08 Migrate current documents, versions, links, placements, and assets; remove legacy branches
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### DOC-09 Prove accessibility, large-document performance, concurrent edits, restore, and data-loss recovery
 
 - [ ] Implemented
-- [ ] Independently verified
-
+- [ ] Verified

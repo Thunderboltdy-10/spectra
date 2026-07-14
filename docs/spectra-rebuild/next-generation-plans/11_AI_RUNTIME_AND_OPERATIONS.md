@@ -41,50 +41,49 @@ Measure begin acknowledgement, context ready, first meaningful progress, first s
 ### AI-01 Split HTTP handlers, orchestration, workers, model adapters, tools, and artifact operations
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### AI-02 Implement leased durable attempts, heartbeats, checkpoints, resume, stop, and idempotency
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### AI-03 Implement reconnectable sequenced event projection independent of viewer lifetime
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### AI-04 Implement durable permission-checked context manifests and adaptive token budgets
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### AI-05 Implement registry-driven typed operations, risk policy, previews, approvals, and compensators
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### AI-06 Implement pending shells, region streaming, checkpoints, traces, verification, and partial recovery
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### AI-07 Implement concurrent-edit rebase, branch/proposal, conflict UI, and reauthorization
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### AI-08 Implement tool sandboxing, injection defenses, budgets, and safe observability
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### AI-09 Build per-artifact and cross-system evaluation suites with latency/quality/security gates
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### AI-10 Migrate active runs/tools and remove the process-local controller path
 
 - [ ] Implemented
-- [ ] Independently verified
-
+- [ ] Verified

@@ -124,20 +124,20 @@ Options: unlimited; fixed count/time; policy-based hot/cold with protected publi
 
 ## UI reference disposition
 
-| Image | Decision | Required change |
-|---|---|---|
-| 01 mission control | adjust | permission/source states, role-aware nav, live run and narrow layouts |
-| 02 superadmin | adjust | operator-session banner, freshness, incident/request drill-down; remove artifact-like actions |
-| 03 school admin | adjust | governance, privacy thresholds, groups/classes, messaging, integration/audit depth |
-| 04 ManageBac | adjust | verified capability matrix, credential rotation, identity queue, read-only overlay semantics |
-| 05 agent library | keep/adjust | privacy/use-right/version health and explicit Use versus Add |
-| 06 agent studio | adjust | guided training, evals, release/version flow, privacy-safe analytics |
-| 07 presentation | keep/adjust | collaboration/history/export/present states and narrow layouts |
-| 08 code visualization | replace key details | default React/TS runtime, sandbox status, files/dependencies; do not imply Python-only support |
-| 09 whiteboard | keep/adjust | layers, large-board navigation, accessibility, AI region-conflict states |
-| 10 timetable | adjust | source badges/overlays, timezone/recurrence, approval and conflict states |
-| existing document/deck/quiz | preserve language, supplement | collaboration/history/embed/import/export and dense/narrow states |
-| existing planner task | replace shell | bring into current Spectra shell and timetable/source model |
+| Image                       | Decision                      | Required change                                                                                |
+| --------------------------- | ----------------------------- | ---------------------------------------------------------------------------------------------- |
+| 01 mission control          | adjust                        | permission/source states, role-aware nav, live run and narrow layouts                          |
+| 02 superadmin               | adjust                        | operator-session banner, freshness, incident/request drill-down; remove artifact-like actions  |
+| 03 school admin             | adjust                        | governance, privacy thresholds, groups/classes, messaging, integration/audit depth             |
+| 04 ManageBac                | adjust                        | verified capability matrix, credential rotation, identity queue, read-only overlay semantics   |
+| 05 agent library            | keep/adjust                   | privacy/use-right/version health and explicit Use versus Add                                   |
+| 06 agent studio             | adjust                        | guided training, evals, release/version flow, privacy-safe analytics                           |
+| 07 presentation             | keep/adjust                   | collaboration/history/export/present states and narrow layouts                                 |
+| 08 code visualization       | replace key details           | default React/TS runtime, sandbox status, files/dependencies; do not imply Python-only support |
+| 09 whiteboard               | keep/adjust                   | layers, large-board navigation, accessibility, AI region-conflict states                       |
+| 10 timetable                | adjust                        | source badges/overlays, timezone/recurrence, approval and conflict states                      |
+| existing document/deck/quiz | preserve language, supplement | collaboration/history/embed/import/export and dense/narrow states                              |
+| existing planner task       | replace shell                 | bring into current Spectra shell and timetable/source model                                    |
 
 Regenerate/supplement before implementation: share/permission dialog; memory controls; version comparison; embed modes/no-access; human/AI conflict; ManageBac identity/quarantine preview; agent training/eval/publish; dataset; CAS portfolio; mobile/narrow/tiled variants; offline/reconnect/permission-lost states.
 
@@ -146,25 +146,24 @@ Regenerate/supplement before implementation: share/permission dialog; memory con
 ### PD-01 Review and record decisions D-01 through D-08 before foundation implementation
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### PD-02 Review and record decisions D-09 through D-14 before school/memory/agent pilots
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### PD-03 Review and record decisions D-15 through D-20 before rich-artifact release work
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### PD-04 Regenerate and approve the required UI references before frontend implementation
 
 - [ ] Implemented
-- [ ] Independently verified
+- [ ] Verified
 
 ### PD-05 Propagate each approved decision into schemas, plans, acceptance suites, and migration order
 
 - [ ] Implemented
-- [ ] Independently verified
-
+- [ ] Verified

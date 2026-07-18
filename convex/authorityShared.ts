@@ -124,8 +124,11 @@ export async function evaluateAccessForActor(
   const inherited = resourceType === "artifact" || resourceType === "agent"
     ? await inheritedArtifactAccess(ctx, actor, loaded.resource._id as Id<"spectraArtifacts">)
     : { level: null, denied: false, sources: [] };
-  if (inherited.denied) return { allowed: false as const, level: null, capabilities: [] as Capability[], actor, loaded, reason: "artifact_exception" as const, sources: inherited.sources };
-  const level = direct.level && inherited.level ? combineLevel(direct.level, inherited.level) : direct.level ?? inherited.level;
+  if (inherited.denied && !direct.level) return { allowed: false as const, level: null, capabilities: [] as Capability[], actor, loaded, reason: "artifact_exception" as const, sources: inherited.sources };
+  // Artifact exceptions narrow only workspace-projected access. A deliberate
+  // direct invitation is an independent grant and therefore takes precedence.
+  const inheritedLevel = inherited.denied ? null : inherited.level;
+  const level = direct.level && inheritedLevel ? combineLevel(direct.level, inheritedLevel) : direct.level ?? inheritedLevel;
   if (!level) return { allowed: false as const, level: null, capabilities: [] as Capability[], actor, loaded, reason: "private" as const, sources: [] };
   return { allowed: true as const, level, capabilities: capabilitiesForLevel(level), actor, loaded, reason: direct.level ? "grant" as const : "workspace_inheritance" as const, sources: [...direct.sources, ...inherited.sources] };
 }
@@ -158,6 +161,37 @@ export async function bumpPolicyVersion(ctx: MutationCtx, resourceType: Resource
     if (artifactId) {
       const rooms = await ctx.db.query("collaborationRooms").withIndex("by_artifact_partition", (q) => q.eq("artifactId", artifactId)).collect();
       await Promise.all(rooms.map((room) => ctx.db.patch(room._id, { policyVersion: version, updatedAt: now })));
+    }
+  }
+  if (resourceType === "workspace") {
+    const workspaceId = ctx.db.normalizeId("spectraWorkspaces", resourceId);
+    const workspace = workspaceId ? await ctx.db.get(workspaceId) : null;
+    if (workspace) {
+      const placements = await ctx.db.query("spectraWorkspaceItems").withIndex("by_workspace", (q) => q.eq("workspaceId", workspace._id)).collect();
+      const affectedArtifactIds = new Set<Id<"spectraArtifacts">>();
+      for (const placement of placements) {
+        if (placement.sourceType !== "artifact" || placement.viewData.hidden) continue;
+        const artifactId = ctx.db.normalizeId("spectraArtifacts", placement.sourceId);
+        const artifact = artifactId ? await ctx.db.get(artifactId) : null;
+        if (!artifact || artifact.status === "deleted" || artifact.schoolId !== workspace.schoolId) continue;
+        const projectsAccess = placement.accessProjection === true
+          || (placement.accessProjection === undefined && artifact.ownerAccountId === workspace.ownerAccountId);
+        if (projectsAccess) affectedArtifactIds.add(artifact._id);
+      }
+      for (const artifactId of affectedArtifactIds) {
+        const artifact = await ctx.db.get(artifactId);
+        if (!artifact) continue;
+        const artifactResourceType = artifact.blueprintKey === "agent" ? "agent" as const : "artifact" as const;
+        const artifactPolicy = await ctx.db.query("resourcePolicies").withIndex("by_resource", (q) => q.eq("resourceType", artifactResourceType).eq("resourceId", artifact._id)).unique();
+        const artifactVersion = (artifactPolicy?.version ?? 0) + 1;
+        if (artifactPolicy) {
+          await ctx.db.patch(artifactPolicy._id, { version: artifactVersion, updatedByAccountId: actorAccountId, updatedAt: now });
+        } else {
+          await ctx.db.insert("resourcePolicies", { resourceType: artifactResourceType, resourceId: artifact._id, schoolId: artifact.schoolId, version: artifactVersion, publicEnabled: false, updatedByAccountId: actorAccountId, createdAt: now, updatedAt: now });
+        }
+        const rooms = await ctx.db.query("collaborationRooms").withIndex("by_artifact_partition", (q) => q.eq("artifactId", artifact._id)).collect();
+        await Promise.all(rooms.map((room) => ctx.db.patch(room._id, { policyVersion: artifactVersion, updatedAt: now })));
+      }
     }
   }
   return version;

@@ -152,10 +152,11 @@ export class StructuredLogger {
 
 export function createRequestLogger(request: NextRequest): StructuredLogger {
   const requestId = randomUUID().slice(0, 8);
+  const action = request.nextUrl.searchParams.get("action");
   
   return new StructuredLogger({
     requestId,
-    path: request.nextUrl.pathname,
+    path: action ? `${request.nextUrl.pathname}?action=${action}` : request.nextUrl.pathname,
     method: request.method,
   });
 }
@@ -187,12 +188,16 @@ export function logAPIResponse(params: {
   
   if (error) {
     logger.error("API request failed", error, {
+      path: logger.context.path,
+      method: logger.context.method,
       status,
       duration: `${duration}ms`,
       modelUsed,
     });
   } else {
     logger.info("API request completed", {
+      path: logger.context.path,
+      method: logger.context.method,
       status,
       duration: `${duration}ms`,
       modelUsed,

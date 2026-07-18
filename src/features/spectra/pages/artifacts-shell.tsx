@@ -1,24 +1,18 @@
 "use client";
 
 import {
-  BarChart3,
   BookOpen,
   CalendarCheck2,
   CheckCircle2,
   ChevronDown,
-  Atom,
-  Brain,
   Bot,
-  Calculator,
   CalendarDays,
   Code2,
   ExternalLink,
   FileText,
   Files,
-  FlaskConical,
   FolderInput,
   FolderPlus,
-  GraduationCap,
   Grid2X2,
   HelpCircle,
   LayoutGrid,
@@ -31,7 +25,6 @@ import {
   Search,
   Share2,
   Sparkles,
-  Sprout,
   Table2,
   Trash2,
   Presentation,
@@ -100,24 +93,6 @@ const filters: Array<{ key: "all" | SpectraBlueprintKey; label: string; icon: Lu
   { key: "whiteboard", label: "Whiteboards", icon: Workflow },
 ];
 
-function iconForWorkspace(workspace: SpectraWorkspace, index: number) {
-  if (workspace.icon === "Atom") return Atom;
-  if (workspace.icon === "Brain") return Brain;
-  if (workspace.icon === "Calculator") return Calculator;
-  if (workspace.icon === "FlaskConical") return FlaskConical;
-  if (workspace.icon === "GraduationCap") return GraduationCap;
-  if (workspace.icon === "Sprout") return Sprout;
-  if (workspace.icon === "BookOpen") return BookOpen;
-  if (workspace.icon === "BarChart3") return BarChart3;
-  if (workspace.icon === "Sparkles") return Sparkles;
-  const accent = workspaceAccent(workspace, index);
-  if (accent.icon === "leaf") return Sprout;
-  if (accent.icon === "bar") return BarChart3;
-  if (accent.icon === "book") return BookOpen;
-  if (accent.icon === "spark") return Sparkles;
-  return Plus;
-}
-
 function buttonClass(tone: "normal" | "dark" = "normal") {
   if (tone === "dark") return "inline-flex h-9 items-center gap-1.5 rounded-[8px] bg-[var(--text-primary)] px-3 text-[13px] font-medium text-[var(--bg-primary)] disabled:opacity-45";
   return "inline-flex h-8 items-center gap-1.5 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 text-[12px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-45";
@@ -138,59 +113,6 @@ function useOutsideClick<T extends HTMLElement>(open: boolean, onClose: () => vo
     return () => document.removeEventListener("pointerdown", onPointerDown);
   }, [onClose, open]);
   return ref;
-}
-
-function ArtifactsRail({
-  workspaces,
-  selectedWorkspaceId,
-  onSelect,
-}: {
-  workspaces: SpectraWorkspace[];
-  selectedWorkspaceId: string;
-  onSelect: (workspaceId: string) => void;
-}) {
-  const [mobileOpen, setMobileOpen] = useState(false);
-  return (
-    <>
-    <button type="button" onClick={() => setMobileOpen(true)} className="fixed left-2 top-2 z-[62] flex h-10 w-10 items-center justify-center rounded-[9px] border border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_94%,transparent)] text-[var(--text-secondary)] shadow-[0_6px_18px_rgba(27,20,12,0.1)] backdrop-blur sm:hidden" aria-label="Open artifact workspace filters" aria-expanded={mobileOpen} aria-controls="artifacts-mobile-rail"><LayoutGrid className="h-4 w-4" /></button>
-    {mobileOpen ? <button type="button" className="fixed inset-0 z-[63] bg-black/20 sm:hidden" onClick={() => setMobileOpen(false)} aria-label="Close artifact workspace filters" /> : null}
-    <aside id="artifacts-mobile-rail" className={`fixed inset-y-0 left-0 z-[64] flex w-[82px] shrink-0 flex-col items-center border-r border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-primary)_94%,var(--bg-elevated))] px-2.5 py-5 shadow-[12px_0_36px_rgba(27,20,12,0.12)] transition-transform duration-200 sm:relative sm:z-auto sm:w-[74px] sm:translate-x-0 sm:shadow-none ${mobileOpen ? "translate-x-0" : "-translate-x-full"}`}>
-      <button
-        type="button"
-        className={`flex h-14 w-14 flex-col items-center justify-center gap-1 rounded-[8px] text-[11px] font-medium transition ${
-          !selectedWorkspaceId ? "bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[0_2px_8px_rgba(27,20,12,0.04)]" : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-        }`}
-        onClick={() => { onSelect(""); setMobileOpen(false); }}
-      >
-        <LayoutGrid className="h-4 w-4" />
-        All
-      </button>
-      <div className="mt-4 flex min-h-0 flex-1 flex-col items-center gap-3 overflow-y-auto">
-        {workspaces.map((workspace, index) => {
-          const accent = workspaceAccent(workspace, index);
-          const Icon = iconForWorkspace(workspace, index);
-          const selected = workspace._id === selectedWorkspaceId;
-          return (
-            <button
-              key={workspace._id}
-              type="button"
-              className={`flex w-14 flex-col items-center gap-1 rounded-[8px] px-1.5 py-2 text-[11px] font-medium transition ${
-                selected ? "bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[0_2px_8px_rgba(27,20,12,0.04)]" : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-              }`}
-              onClick={() => { onSelect(workspace._id); setMobileOpen(false); }}
-              title={`Filter ${workspace.title}`}
-            >
-              <span className="flex h-9 w-9 items-center justify-center rounded-[8px] text-white" style={{ background: accent.color }}>
-                <Icon className="h-4 w-4" />
-              </span>
-              <span className="max-w-full truncate">{workspace.title}</span>
-            </button>
-          );
-        })}
-      </div>
-    </aside>
-    </>
-  );
 }
 
 export function ArtifactsShell() {
@@ -697,7 +619,6 @@ export function ArtifactsShell() {
 
   return (
     <div className="spectra-wave-y flex h-full min-h-0 bg-[radial-gradient(circle_at_32%_-12%,color-mix(in_oklab,var(--bg-elevated)_70%,transparent),transparent_34%),var(--bg-primary)]">
-      <ArtifactsRail workspaces={workspaces} selectedWorkspaceId={selectedWorkspaceId} onSelect={setSelectedWorkspaceId} />
       <div className="flex min-w-0 flex-1 flex-col">
         <StudioTabRail
           hubTabs={workSetIsolated && activeHubTabId ? hubTabs.map((tab) => tab.id === activeHubTabId ? { ...tab, label: `Work set · ${tiledArtifacts.length} objects` } : tab) : hubTabs}

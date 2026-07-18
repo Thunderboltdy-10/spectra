@@ -1,6 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
-import { BookOpen, Bot, CalendarCheck2, CalendarDays, Check, Code2, FileText, HelpCircle, MessageSquare, Presentation, Share2, Table2, Workflow } from "lucide-react";
+import { BookOpen, Bot, Building2, CalendarCheck2, CalendarDays, Check, Code2, FileText, HelpCircle, MessageSquare, Presentation, Share2, Table2, Workflow } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ArtifactTypeKey } from "../artifacts/types";
 import { CardTypeIcon, SpectraCard, type SpectraCardState } from "./card-system";
@@ -14,6 +14,7 @@ export type ArtifactCardView = {
   placement: "inbox" | "shared" | "workspace";
   shared?: boolean;
   accessLevel?: "read" | "modify";
+  accessExplanation?: string;
   updatedAt?: number;
   pinned?: boolean;
   variant?: string;
@@ -110,6 +111,7 @@ export function ArtifactCard({
           </div>
           {interactive ? <button type="button" onClick={(event) => { event.stopPropagation(); if (selectionMode && onToggleContext) onToggleContext(); else onSelect?.(); }} className={cn("mt-2 block max-w-full rounded-[4px] text-left text-[var(--text-primary)] outline-none hover:text-[var(--accent-cyan)] focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--accent-cyan)_35%,transparent)]", size === "large" ? "max-w-[14rem] text-[20px] font-semibold leading-[1.12] font-display" : "truncate text-[14px] font-semibold")}>{artifact.title}</button> : <h3 className={cn("mt-2 text-[var(--text-primary)]", size === "large" ? "max-w-[14rem] text-[20px] font-semibold leading-[1.12] font-display" : "truncate text-[14px] font-semibold")}>{artifact.title}</h3>}
           <p className={cn("mt-2 text-[12px] leading-5 text-[var(--text-secondary)]", size === "large" ? "line-clamp-3 max-w-[16rem]" : "line-clamp-2")}>{artifact.summary}</p>
+          {artifact.accessExplanation ? <div className="mt-2 flex min-w-0 items-center gap-1.5 text-[10px] text-[var(--text-tertiary)]"><Building2 className="h-3 w-3 shrink-0" /><span className="truncate">{artifact.accessExplanation}</span></div> : null}
           {artifact.aiState === "creating" && typeof artifact.aiProgress === "number" ? <div className="mt-3 h-1 overflow-hidden rounded-full bg-[color-mix(in_oklab,var(--accent-cyan)_10%,var(--bg-secondary))]" role="progressbar" aria-label={`Creating ${artifact.title}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(artifact.aiProgress * 100)}><span className="block h-full rounded-full bg-[var(--accent-cyan)] transition-[width] duration-300 motion-reduce:transition-none" style={{ width: `${Math.max(4, artifact.aiProgress * 100)}%` }} /></div> : null}
           {metrics.length > 0 ? (
             <div className="mt-5 grid grid-cols-3 gap-2">

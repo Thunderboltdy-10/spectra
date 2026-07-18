@@ -32,10 +32,13 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
   private listeners = new Set<() => void>();
   private state: CollaborationSyncState = "connecting";
   private level: "read" | "modify" | null = null;
+  private accountId?: string;
+  private displayName?: string;
   private unsynchronizedChanges = 0;
   private presence: CollaborationPresence[] = [];
   private error?: string;
   private destroyed = false;
+  private intentionallyDisconnected = false;
   private snapshot: CollaborationTransportSnapshot = {
     state: "connecting",
     level: null,
@@ -61,12 +64,16 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
   private update(next: Partial<CollaborationTransportSnapshot>) {
     if (next.state) this.state = next.state;
     if (next.level !== undefined) this.level = next.level;
+    if (next.accountId !== undefined) this.accountId = next.accountId;
+    if (next.displayName !== undefined) this.displayName = next.displayName;
     if (next.unsynchronizedChanges !== undefined) this.unsynchronizedChanges = next.unsynchronizedChanges;
     if (next.presence) this.presence = next.presence;
     if (next.error !== undefined) this.error = next.error;
     this.snapshot = {
       state: this.state,
       level: this.level,
+      ...(this.accountId ? { accountId: this.accountId } : {}),
+      ...(this.displayName ? { displayName: this.displayName } : {}),
       unsynchronizedChanges: this.unsynchronizedChanges,
       presence: this.presence,
       ...(this.error ? { error: this.error } : {}),
@@ -77,21 +84,31 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
   async connect() {
     if (this.destroyed || this.provider) return;
     this.update({ state: "connecting", error: undefined });
+    this.intentionallyDisconnected = false;
     try {
       const initial = await session(this.artifactId, this.partitionKey, this.clientId, this.schemaVersion);
-      this.update({ level: initial.level, state: "synchronizing" });
+      this.update({ level: initial.level, accountId: initial.accountId, displayName: initial.displayName, state: "synchronizing" });
       this.provider = new HocuspocusProvider({
       url: initial.url,
       name: initial.documentName,
       document: this.document,
       flushDelay: 180,
-      token: async () => (await session(this.artifactId, this.partitionKey, this.clientId, this.schemaVersion)).token,
+      token: async () => {
+        const refreshed = await session(this.artifactId, this.partitionKey, this.clientId, this.schemaVersion);
+        this.update({ level: refreshed.level, accountId: refreshed.accountId, displayName: refreshed.displayName, error: undefined });
+        return refreshed.token;
+      },
       onStatus: ({ status }) => {
         if (status === "connected") this.update({ state: this.provider?.synced ? "synchronized" : "synchronizing" });
-        else this.update({ state: this.state === "connecting" ? "connecting" : "reconnecting" });
+        else if (!this.intentionallyDisconnected && this.state !== "permission_lost" && this.state !== "closed") this.update({ state: this.state === "connecting" ? "connecting" : "reconnecting" });
       },
-      onSynced: ({ state }) => this.update({ state: state && this.unsynchronizedChanges === 0 ? "synchronized" : "synchronizing" }),
-      onUnsyncedChanges: ({ number }) => this.update({ unsynchronizedChanges: number, state: number > 0 ? "synchronizing" : this.provider?.synced ? "synchronized" : this.state }),
+      onSynced: ({ state }) => {
+        if (this.state !== "permission_lost" && this.state !== "closed") this.update({ state: state && this.unsynchronizedChanges === 0 ? "synchronized" : "synchronizing" });
+      },
+      onUnsyncedChanges: ({ number }) => {
+        const terminal = this.state === "permission_lost" || this.state === "closed";
+        this.update({ unsynchronizedChanges: number, ...(terminal ? {} : { state: number > 0 ? "synchronizing" : this.provider?.synced ? "synchronized" : this.state }) });
+      },
       onAwarenessChange: ({ states }) => this.update({ presence: states.map((entry) => {
         const user = entry.user && typeof entry.user === "object" ? entry.user as Record<string, unknown> : {};
         return {
@@ -121,17 +138,33 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
   }
 
   disconnect() {
+    this.intentionallyDisconnected = true;
     this.provider?.disconnect();
     this.update({ state: this.unsynchronizedChanges > 0 ? "unsynchronized" : "closed" });
   }
 
   destroy() {
     this.destroyed = true;
+    this.intentionallyDisconnected = true;
     this.provider?.destroy();
     this.provider = null;
     this.document.destroy();
     this.update({ state: "closed", presence: [] });
     this.listeners.clear();
+  }
+
+  async retry() {
+    if (this.destroyed) throw new Error("COLLABORATION_CLOSED");
+    if (this.state === "permission_lost") throw new Error("COLLABORATION_ACCESS_LOST");
+    if (!this.provider) {
+      await this.connect();
+      return;
+    }
+    this.intentionallyDisconnected = false;
+    this.update({ state: "reconnecting", error: undefined });
+    this.provider.connect();
+    this.provider.flushPendingUpdates();
+    await this.flush();
   }
 
   setPresence(fields: Omit<CollaborationPresence, "clientId">) {

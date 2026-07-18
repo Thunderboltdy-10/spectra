@@ -6,7 +6,7 @@ import { v } from "convex/values";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import type { Id } from "./_generated/dataModel";
 
-const operation = v.union(v.literal("authorize"), v.literal("load"), v.literal("append"), v.literal("snapshot"));
+const operation = v.union(v.literal("authorize"), v.literal("policy"), v.literal("load"), v.literal("append"), v.literal("snapshot"));
 
 function bridgeKey() {
   const value = process.env.SPECTRA_COLLAB_BRIDGE_KEY;
@@ -60,6 +60,10 @@ export const exchange = action({
         partitionKey,
         policyVersion: integer(payload.policyVersion, "policy_version"),
       });
+    }
+
+    if (args.operation === "policy") {
+      return ctx.runQuery(internal.collaborationGatewayStore.policy, { artifactId, partitionKey });
     }
 
     if (args.operation === "load") {

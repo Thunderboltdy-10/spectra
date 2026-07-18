@@ -12,6 +12,7 @@ export const ARTIFACT_YJS_META_MAP = "spectra:artifact-meta";
 export const ARTIFACT_YJS_REGION_MAP = "spectra:artifact-regions";
 export const ARTIFACT_YJS_DESCRIPTOR_MAP = "spectra:artifact-region-descriptors";
 const REGION_MARKER = "$spectraRegion";
+const CODE_LINES_MARKER = "$spectraCodeLines";
 const MODEL_VERSION = 1;
 
 export type ArtifactLiveValue = {
@@ -72,6 +73,10 @@ function marker(regionId: string) {
   return { [REGION_MARKER]: regionId };
 }
 
+function codeLinesMarker(regionIds: readonly string[]) {
+  return { [CODE_LINES_MARKER]: [...regionIds] };
+}
+
 function encodeRegionValue(value: unknown) {
   return JSON.stringify({ value });
 }
@@ -99,6 +104,21 @@ function isMarker(value: unknown): value is { [REGION_MARKER]: string } {
       !Array.isArray(value) &&
       Object.keys(value).length === 1 &&
       typeof (value as Record<string, unknown>)[REGION_MARKER] === "string",
+  );
+}
+
+function isCodeLinesMarker(
+  value: unknown,
+): value is { [CODE_LINES_MARKER]: string[] } {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      Object.keys(value).length === 1 &&
+      Array.isArray((value as Record<string, unknown>)[CODE_LINES_MARKER]) &&
+      ((value as Record<string, unknown>)[CODE_LINES_MARKER] as unknown[]).every(
+        (entry) => typeof entry === "string",
+      ),
   );
 }
 
@@ -134,6 +154,7 @@ function nearestAncestor(candidate: SemanticRegion, regions: readonly SemanticRe
 export function decomposeArtifactContent(typeKey: ArtifactTypeKey, content: unknown): DecomposedArtifact {
   const manifest = requireArtifactTypeManifest(typeKey);
   const parsed = manifest.schemas.content.parse(content);
+  if (typeKey === "code") return decomposeCodeContent(parsed);
   const regions = enumerateArtifactRegions(typeKey, parsed);
   const descriptors = new Map<string, StoredArtifactRegionDescriptor>();
   const regionValues = new Map<string, string>();
@@ -165,6 +186,69 @@ export function decomposeArtifactContent(typeKey: ArtifactTypeKey, content: unkn
   return { rootTemplate: JSON.stringify(root), descriptors, regionValues };
 }
 
+function decomposeCodeContent(content: unknown): DecomposedArtifact {
+  const parsed = clone(content) as { files?: Array<Record<string, unknown>> };
+  const semanticRegions = enumerateArtifactRegions("code", parsed);
+  const descriptors = new Map<string, StoredArtifactRegionDescriptor>();
+  const regionValues = new Map<string, string>();
+  const root = clone(parsed) as { files?: Array<Record<string, unknown>> };
+  const files = Array.isArray(parsed.files) ? parsed.files : [];
+
+  files.forEach((file, fileIndex) => {
+    const fileRegion = semanticRegions.find(
+      (candidate) =>
+        candidate.kind === "code_file" && candidate.path[1] === fileIndex,
+    );
+    if (!fileRegion) return;
+    const lineRegions = semanticRegions
+      .filter(
+        (candidate) =>
+          candidate.kind === "code_line" &&
+          candidate.parentRegionId === fileRegion.regionId,
+      )
+      .sort(
+        (left, right) =>
+          Number(left.path[left.path.length - 1]) -
+          Number(right.path[right.path.length - 1]),
+      );
+    const source = typeof file.source === "string" ? file.source : "";
+    const sourceLines = source.split("\n");
+    const fileTemplate = clone(file);
+    fileTemplate.lineIds = lineRegions.map((candidate) => candidate.regionId);
+    fileTemplate.source = codeLinesMarker(
+      lineRegions.map((candidate) => candidate.regionId),
+    );
+    descriptors.set(fileRegion.regionId, {
+      regionId: fileRegion.regionId,
+      kind: fileRegion.kind,
+      label: fileRegion.label,
+      path: [...fileRegion.path],
+      overlapDomain: fileRegion.overlapDomain,
+    });
+    regionValues.set(fileRegion.regionId, encodeRegionValue(fileTemplate));
+    lineRegions.forEach((candidate, lineIndex) => {
+      descriptors.set(candidate.regionId, {
+        regionId: candidate.regionId,
+        kind: candidate.kind,
+        label: candidate.label,
+        path: [...candidate.path],
+        overlapDomain: candidate.overlapDomain,
+        parentRegionId: fileRegion.regionId,
+      });
+      regionValues.set(
+        candidate.regionId,
+        encodeRegionValue(sourceLines[lineIndex] ?? ""),
+      );
+    });
+    if (root.files) root.files[fileIndex] = marker(fileRegion.regionId);
+  });
+  return {
+    rootTemplate: JSON.stringify(root),
+    descriptors,
+    regionValues,
+  };
+}
+
 function expandTemplate(value: unknown, regionValues: ReadonlyMap<string, string>, active = new Set<string>()): unknown {
   if (isMarker(value)) {
     const regionId = value[REGION_MARKER];
@@ -174,6 +258,25 @@ function expandTemplate(value: unknown, regionValues: ReadonlyMap<string, string
     const nextActive = new Set(active);
     nextActive.add(regionId);
     return expandTemplate(decodeRegionValue(encoded), regionValues, nextActive);
+  }
+  if (isCodeLinesMarker(value)) {
+    return value[CODE_LINES_MARKER]
+      .map((regionId) => {
+        if (active.has(regionId))
+          throw new Error(`ARTIFACT_REGION_CYCLE: ${regionId}`);
+        const encoded = regionValues.get(regionId);
+        if (encoded === undefined)
+          throw new Error(`ARTIFACT_REGION_MISSING: ${regionId}`);
+        const nextActive = new Set(active);
+        nextActive.add(regionId);
+        const line = expandTemplate(
+          decodeRegionValue(encoded),
+          regionValues,
+          nextActive,
+        );
+        return typeof line === "string" ? line : String(line ?? "");
+      })
+      .join("\n");
   }
   if (Array.isArray(value)) return value.map((entry) => expandTemplate(entry, regionValues, active));
   if (value && typeof value === "object") {

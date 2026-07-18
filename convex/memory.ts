@@ -1,0 +1,1644 @@
+import { internalMutation, mutation, query } from "./_generated/server";
+import { v } from "convex/values";
+import type { Doc, Id } from "./_generated/dataModel";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
+import { evaluateAccessForActor } from "./authorityShared";
+import { getActorForAccountId, getAuthenticatedActor } from "./identityShared";
+
+const DEFAULT_TARGET_TOKENS = 1_000;
+const MAX_TARGET_TOKENS = 4_000;
+const MAX_CLAIMS_PER_CONTEXT = 24;
+const MAX_LIST = 300;
+
+const vScope = v.union(
+  v.literal("private_global"),
+  v.literal("private_school"),
+  v.literal("workspace"),
+  v.literal("shared_artifact"),
+  v.literal("system"),
+);
+
+const vClaimType = v.union(
+  v.literal("declared_fact"),
+  v.literal("inferred_preference"),
+  v.literal("correction"),
+  v.literal("decision"),
+  v.literal("recurring_workflow"),
+  v.literal("commitment"),
+  v.literal("mistake_avoidance"),
+  v.literal("learning_signal"),
+  v.literal("relationship"),
+  v.literal("workspace_convention"),
+);
+
+const vCategoryControls = v.object({
+  declaredFacts: v.boolean(),
+  preferences: v.boolean(),
+  decisions: v.boolean(),
+  workflows: v.boolean(),
+  commitments: v.boolean(),
+  learningSignals: v.boolean(),
+  relationships: v.boolean(),
+  workspaceConventions: v.boolean(),
+});
+
+const DEFAULT_CATEGORIES = {
+  declaredFacts: true,
+  preferences: true,
+  decisions: true,
+  workflows: true,
+  commitments: true,
+  learningSignals: true,
+  relationships: true,
+  workspaceConventions: true,
+};
+
+type MemoryCtx = QueryCtx | MutationCtx;
+type Actor = NonNullable<Awaited<ReturnType<typeof getAuthenticatedActor>>>;
+type Scope = Doc<"memoryClaims">["scope"];
+type ClaimType = Doc<"memoryClaims">["claimType"];
+
+function hash(value: string) {
+  let first = 0x811c9dc5;
+  let second = 0x9e3779b9;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    first = Math.imul(first ^ code, 0x01000193);
+    second = Math.imul(second ^ (code + index), 0x85ebca6b);
+  }
+  const part = (number: number) => (number >>> 0).toString(16).padStart(8, "0");
+  return `${part(first)}${part(second)}${part(first ^ second)}${part(Math.imul(first, second))}`;
+}
+
+function compact(value: unknown, maximum = 1_500) {
+  return typeof value === "string"
+    ? value.replace(/\s+/g, " ").trim().slice(0, maximum)
+    : "";
+}
+
+function normalizeProposition(value: string) {
+  return value
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[“”‘’]/g, "'")
+    .replace(/[^\p{L}\p{N}\s'’-]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function tokenEstimate(value: string) {
+  return Math.max(1, Math.ceil(value.length / 4));
+}
+
+function terms(value: string) {
+  return new Set(
+    normalizeProposition(value)
+      .split(" ")
+      .filter((term) => term.length > 2)
+      .slice(0, 80),
+  );
+}
+
+function overlapScore(queryTerms: Set<string>, proposition: string) {
+  if (queryTerms.size === 0) return 0;
+  const propositionTerms = terms(proposition);
+  let matches = 0;
+  for (const term of queryTerms) if (propositionTerms.has(term)) matches += 1;
+  return (
+    matches / Math.sqrt(queryTerms.size * Math.max(1, propositionTerms.size))
+  );
+}
+
+const forbiddenCapturePatterns = [
+  /\b(?:password|passcode|pin)\s*(?:is|:|=)\s*\S+/i,
+  /\b(?:api[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|client[-_ ]?secret)\b/i,
+  /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/i,
+  /\b(?:aws_secret_access_key|authorization:\s*bearer)\b/i,
+  /\b(?:diagnos(?:is|ed)|mental illness|disciplinary record|protected characteristic)\b/i,
+  /\b(?:race|ethnicity|religion|sexual orientation|gender identity)\s*(?:is|:)/i,
+  /\b(?:self[- ]?harm|suicid(?:e|al))\b/i,
+];
+
+function captureRejectionReason(proposition: string) {
+  if (proposition.length < 12) return "too_short";
+  if (proposition.length > 1_500) return "too_long";
+  if (forbiddenCapturePatterns.some((pattern) => pattern.test(proposition)))
+    return "sensitive_or_secret";
+  if (
+    /\b(?:just for (?:today|this message)|right now only|temporary request)\b/i.test(
+      proposition,
+    )
+  )
+    return "transient";
+  return null;
+}
+
+function categoryForClaim(type: ClaimType): keyof typeof DEFAULT_CATEGORIES {
+  if (type === "declared_fact" || type === "correction") return "declaredFacts";
+  if (type === "inferred_preference") return "preferences";
+  if (type === "decision") return "decisions";
+  if (type === "recurring_workflow" || type === "mistake_avoidance")
+    return "workflows";
+  if (type === "commitment") return "commitments";
+  if (type === "learning_signal") return "learningSignals";
+  if (type === "relationship") return "relationships";
+  return "workspaceConventions";
+}
+
+function preferenceProjection(
+  row: Doc<"memoryPreferences"> | null,
+  actor: Actor,
+) {
+  return row
+    ? {
+        enabled: row.enabled,
+        capturePaused: row.capturePaused,
+        categoryControls: row.categoryControls,
+        capsuleTargetTokens: row.capsuleTargetTokens,
+        updatedAt: row.updatedAt,
+      }
+    : {
+        enabled: true,
+        capturePaused: false,
+        categoryControls: DEFAULT_CATEGORIES,
+        capsuleTargetTokens: DEFAULT_TARGET_TOKENS,
+        updatedAt: actor.createdAt,
+      };
+}
+
+async function requireActor(ctx: MemoryCtx) {
+  const actor = await getAuthenticatedActor(ctx);
+  if (!actor)
+    throw new Error("AUTH_NO_SCHOOL: An active school membership is required.");
+  return actor;
+}
+
+async function preferencesFor(
+  ctx: MemoryCtx,
+  actor: Actor,
+): Promise<Doc<"memoryPreferences"> | null> {
+  return ctx.db
+    .query("memoryPreferences")
+    .withIndex("by_account", (q) => q.eq("accountId", actor.accountId))
+    .unique();
+}
+
+async function ensurePreferences(ctx: MutationCtx, actor: Actor) {
+  const existing = await preferencesFor(ctx, actor);
+  if (existing) {
+    if (existing.schoolId !== actor.schoolId) {
+      await ctx.db.patch(existing._id, {
+        schoolId: actor.schoolId,
+        updatedAt: Date.now(),
+      });
+    }
+    return existing;
+  }
+  const now = Date.now();
+  const id = await ctx.db.insert("memoryPreferences", {
+    accountId: actor.accountId,
+    schoolId: actor.schoolId,
+    enabled: true,
+    capturePaused: false,
+    categoryControls: DEFAULT_CATEGORIES,
+    capsuleTargetTokens: DEFAULT_TARGET_TOKENS,
+    createdAt: now,
+    updatedAt: now,
+  });
+  return (await ctx.db.get(id))!;
+}
+
+async function canReadClaim(
+  ctx: MemoryCtx,
+  actor: Actor,
+  claim: Doc<"memoryClaims">,
+) {
+  if (
+    claim.scope === "private_global" ||
+    claim.scope === "private_school" ||
+    claim.scope === "system"
+  ) {
+    if (claim.accountId !== actor.accountId) return false;
+  }
+  if (claim.scope === "private_global" || claim.scope === "system") return true;
+  if (claim.scopeSchoolId && claim.scopeSchoolId !== actor.schoolId)
+    return false;
+  if (claim.scope === "private_school")
+    return claim.schoolId === actor.schoolId;
+  if (claim.scope === "workspace" && claim.workspaceId) {
+    const decision = await evaluateAccessForActor(
+      ctx,
+      actor,
+      "workspace",
+      claim.workspaceId,
+    );
+    return decision.allowed && decision.capabilities.includes("read");
+  }
+  if (claim.scope === "shared_artifact" && claim.artifactId) {
+    const artifact = await ctx.db.get(claim.artifactId);
+    const decision = await evaluateAccessForActor(
+      ctx,
+      actor,
+      artifact?.blueprintKey === "agent" ? "agent" : "artifact",
+      claim.artifactId,
+    );
+    return decision.allowed && decision.capabilities.includes("read");
+  }
+  return false;
+}
+
+async function canControlClaim(
+  ctx: MutationCtx,
+  actor: Actor,
+  claim: Doc<"memoryClaims">,
+) {
+  if (
+    claim.scope === "private_global" ||
+    claim.scope === "private_school" ||
+    claim.scope === "system"
+  )
+    return claim.accountId === actor.accountId;
+  if (claim.scope === "workspace" && claim.workspaceId) {
+    const decision = await evaluateAccessForActor(
+      ctx,
+      actor,
+      "workspace",
+      claim.workspaceId,
+    );
+    return decision.allowed && decision.capabilities.includes("modify");
+  }
+  if (claim.scope === "shared_artifact" && claim.artifactId) {
+    const artifact = await ctx.db.get(claim.artifactId);
+    const decision = await evaluateAccessForActor(
+      ctx,
+      actor,
+      artifact?.blueprintKey === "agent" ? "agent" : "artifact",
+      claim.artifactId,
+    );
+    return decision.allowed && decision.capabilities.includes("modify");
+  }
+  return false;
+}
+
+async function sharedScopedClaimsForActor(
+  ctx: MemoryCtx,
+  actor: Actor,
+  status: Doc<"memoryClaims">["status"],
+) {
+  const schoolRows = await ctx.db
+    .query("memoryClaims")
+    .withIndex("by_school_status", (q) =>
+      q.eq("schoolId", actor.schoolId).eq("status", status),
+    )
+    .order("desc")
+    .take(MAX_LIST);
+  return schoolRows.filter(
+    (claim) => claim.scope === "workspace" || claim.scope === "shared_artifact",
+  );
+}
+
+async function evidenceIsCurrentlyAvailable(
+  ctx: MemoryCtx,
+  actor: Actor,
+  evidence: Doc<"memoryEvidence">,
+) {
+  if (evidence.accessStatus !== "available") return false;
+  if (
+    evidence.sourceType === "user_statement" ||
+    evidence.sourceType === "product_event" ||
+    evidence.sourceType === "correction"
+  )
+    return true;
+  if (evidence.sourceType === "managebac")
+    return evidence.schoolId === actor.schoolId;
+  if (evidence.sourceType === "thread") {
+    const id = evidence.sourceId
+      ? ctx.db.normalizeId("spectraThreads", evidence.sourceId)
+      : null;
+    const thread = id ? await ctx.db.get(id) : null;
+    return (
+      Boolean(thread) &&
+      thread!.ownerAccountId === actor.accountId &&
+      thread!.schoolId === actor.schoolId &&
+      thread!.status !== "deleted"
+    );
+  }
+  if (evidence.sourceType === "workspace" && evidence.sourceId) {
+    const decision = await evaluateAccessForActor(
+      ctx,
+      actor,
+      "workspace",
+      evidence.sourceId,
+    );
+    return decision.allowed && decision.capabilities.includes("read");
+  }
+  if (evidence.sourceType === "artifact" && evidence.sourceId) {
+    const id = ctx.db.normalizeId("spectraArtifacts", evidence.sourceId);
+    const artifact = id ? await ctx.db.get(id) : null;
+    if (!artifact) return false;
+    const decision = await evaluateAccessForActor(
+      ctx,
+      actor,
+      artifact.blueprintKey === "agent" ? "agent" : "artifact",
+      evidence.sourceId,
+    );
+    return decision.allowed && decision.capabilities.includes("read");
+  }
+  return false;
+}
+
+async function claimHasCurrentEvidence(
+  ctx: MemoryCtx,
+  actor: Actor,
+  claimId: Id<"memoryClaims">,
+) {
+  const evidence = await evidenceForClaim(ctx, claimId);
+  if (evidence.length === 0) return false;
+  for (const item of evidence)
+    if (await evidenceIsCurrentlyAvailable(ctx, actor, item)) return true;
+  return false;
+}
+
+async function requireScopeWrite(
+  ctx: MutationCtx,
+  actor: Actor,
+  scope: Scope,
+  workspaceId?: Id<"spectraWorkspaces">,
+  artifactId?: Id<"spectraArtifacts">,
+) {
+  if (scope === "workspace") {
+    if (!workspaceId)
+      throw new Error("MEMORY_SCOPE_REQUIRED: Choose a workspace.");
+    const decision = await evaluateAccessForActor(
+      ctx,
+      actor,
+      "workspace",
+      workspaceId,
+    );
+    if (!decision.allowed || !decision.capabilities.includes("modify"))
+      throw new Error(
+        "MEMORY_SCOPE_FORBIDDEN: Workspace conventions require modify access.",
+      );
+  }
+  if (scope === "shared_artifact") {
+    if (!artifactId)
+      throw new Error("MEMORY_SCOPE_REQUIRED: Choose an artifact.");
+    const artifact = await ctx.db.get(artifactId);
+    const decision = await evaluateAccessForActor(
+      ctx,
+      actor,
+      artifact?.blueprintKey === "agent" ? "agent" : "artifact",
+      artifactId,
+    );
+    if (!decision.allowed || !decision.capabilities.includes("modify"))
+      throw new Error(
+        "MEMORY_SCOPE_FORBIDDEN: Artifact conventions require modify access.",
+      );
+  }
+}
+
+function claimProjection(
+  claim: Doc<"memoryClaims">,
+  evidence: Array<Doc<"memoryEvidence">>,
+) {
+  return {
+    _id: claim._id,
+    scope: claim.scope,
+    workspaceId: claim.workspaceId,
+    artifactId: claim.artifactId,
+    subjectKind: claim.subjectKind,
+    subjectId: claim.subjectId,
+    claimType: claim.claimType,
+    proposition: claim.proposition,
+    assertion: claim.assertion,
+    confidence: claim.confidence,
+    status: claim.status,
+    createdBy: claim.createdBy,
+    validFrom: claim.validFrom,
+    expiresAt: claim.expiresAt,
+    lastConfirmedAt: claim.lastConfirmedAt,
+    supersedesId: claim.supersedesId,
+    createdAt: claim.createdAt,
+    updatedAt: claim.updatedAt,
+    evidence: evidence.map((item) => ({
+      _id: item._id,
+      sourceType: item.sourceType,
+      sourceId: item.sourceId,
+      sourceVersionId: item.sourceVersionId,
+      sourceRegionId: item.sourceRegionId,
+      excerptPreview: item.excerptPreview,
+      captureReason: item.captureReason,
+      accessStatus: item.accessStatus,
+      observedAt: item.observedAt,
+    })),
+  };
+}
+
+async function evidenceForClaim(ctx: MemoryCtx, claimId: Id<"memoryClaims">) {
+  return ctx.db
+    .query("memoryEvidence")
+    .withIndex("by_claim_created", (q) => q.eq("claimId", claimId))
+    .order("desc")
+    .take(12);
+}
+
+async function invalidateCapsules(ctx: MutationCtx, accountId: Id<"accounts">) {
+  const capsules = await ctx.db
+    .query("memoryCapsules")
+    .withIndex("by_account_scope", (q) =>
+      q.eq("accountId", accountId).eq("scope", "private_global"),
+    )
+    .collect();
+  const schoolCapsules = await ctx.db
+    .query("memoryCapsules")
+    .withIndex("by_account_scope", (q) =>
+      q.eq("accountId", accountId).eq("scope", "private_school"),
+    )
+    .collect();
+  const workflowCapsules = await ctx.db
+    .query("memoryCapsules")
+    .withIndex("by_account_scope", (q) =>
+      q.eq("accountId", accountId).eq("scope", "workflow"),
+    )
+    .collect();
+  const now = Date.now();
+  for (const capsule of [...capsules, ...schoolCapsules, ...workflowCapsules])
+    await ctx.db.patch(capsule._id, { stale: true, updatedAt: now });
+}
+
+async function insertEvidence(
+  ctx: MutationCtx,
+  actor: Actor,
+  claimId: Id<"memoryClaims">,
+  input: {
+    sourceType: Doc<"memoryEvidence">["sourceType"];
+    sourceId?: string;
+    sourceVersionId?: string;
+    sourceRegionId?: string;
+    sourceEventId?: string;
+    excerpt?: string;
+    captureReason: string;
+  },
+) {
+  const excerpt = compact(input.excerpt, 240);
+  return ctx.db.insert("memoryEvidence", {
+    claimId,
+    accountId: actor.accountId,
+    schoolId: actor.schoolId,
+    sourceType: input.sourceType,
+    sourceId: compact(input.sourceId, 180) || undefined,
+    sourceVersionId: compact(input.sourceVersionId, 180) || undefined,
+    sourceRegionId: compact(input.sourceRegionId, 180) || undefined,
+    sourceEventId: compact(input.sourceEventId, 180) || undefined,
+    excerptHash: hash(excerpt || `${input.sourceType}:${input.sourceId ?? ""}`),
+    excerptPreview: excerpt || undefined,
+    captureReason: compact(input.captureReason, 240),
+    accessStatus: "available",
+    observedAt: Date.now(),
+    createdAt: Date.now(),
+  });
+}
+
+async function upsertClaim(
+  ctx: MutationCtx,
+  actor: Actor,
+  input: {
+    proposition: string;
+    scope: Scope;
+    claimType: ClaimType;
+    assertion: "asserted" | "inferred";
+    confidence: number;
+    createdBy: "user" | "policy" | "model";
+    status?: "proposed" | "active";
+    workspaceId?: Id<"spectraWorkspaces">;
+    artifactId?: Id<"spectraArtifacts">;
+    subjectKind?: Doc<"memoryClaims">["subjectKind"];
+    subjectId?: string;
+    evidence: {
+      sourceType: Doc<"memoryEvidence">["sourceType"];
+      sourceId?: string;
+      sourceVersionId?: string;
+      sourceRegionId?: string;
+      sourceEventId?: string;
+      excerpt?: string;
+      captureReason: string;
+    };
+  },
+) {
+  const proposition = compact(input.proposition);
+  const rejection = captureRejectionReason(proposition);
+  if (rejection)
+    throw new Error(
+      `MEMORY_CAPTURE_REJECTED: ${rejection.replaceAll("_", " ")}.`,
+    );
+  await requireScopeWrite(
+    ctx,
+    actor,
+    input.scope,
+    input.workspaceId,
+    input.artifactId,
+  );
+  const preferences = await ensurePreferences(ctx, actor);
+  if (!preferences.enabled)
+    throw new Error("MEMORY_DISABLED: Memory is disabled.");
+  if (!preferences.categoryControls[categoryForClaim(input.claimType)])
+    throw new Error(
+      "MEMORY_CATEGORY_DISABLED: This memory category is disabled.",
+    );
+
+  const normalized = normalizeProposition(proposition);
+  const propositionHash = hash(
+    `${input.scope}:${input.workspaceId ?? ""}:${input.artifactId ?? ""}:${normalized}`,
+  );
+  const existing = await ctx.db
+    .query("memoryClaims")
+    .withIndex("by_account_hash", (q) =>
+      q.eq("accountId", actor.accountId).eq("propositionHash", propositionHash),
+    )
+    .filter((q) =>
+      q.or(
+        q.eq(q.field("status"), "active"),
+        q.eq(q.field("status"), "proposed"),
+      ),
+    )
+    .first();
+  const now = Date.now();
+  if (existing) {
+    await ctx.db.patch(existing._id, {
+      confidence: Math.max(existing.confidence, input.confidence),
+      lastConfirmedAt:
+        input.assertion === "asserted" ? now : existing.lastConfirmedAt,
+      updatedAt: now,
+    });
+    await insertEvidence(ctx, actor, existing._id, input.evidence);
+    await invalidateCapsules(ctx, actor.accountId);
+    return { claimId: existing._id, merged: true };
+  }
+
+  const claimId = await ctx.db.insert("memoryClaims", {
+    accountId: actor.accountId,
+    schoolId: actor.schoolId,
+    scope: input.scope,
+    scopeSchoolId:
+      input.scope === "private_global" || input.scope === "system"
+        ? undefined
+        : actor.schoolId,
+    workspaceId: input.workspaceId,
+    artifactId: input.artifactId,
+    subjectKind:
+      input.subjectKind ??
+      (input.scope === "workspace"
+        ? "workspace"
+        : input.scope === "shared_artifact"
+          ? "artifact"
+          : "user"),
+    subjectId:
+      compact(input.subjectId, 180) ||
+      input.workspaceId ||
+      input.artifactId ||
+      actor.accountId,
+    claimType: input.claimType,
+    proposition,
+    normalizedProposition: normalized,
+    propositionHash,
+    assertion: input.assertion,
+    confidence: Math.max(0, Math.min(1, input.confidence)),
+    sensitivity: "standard",
+    status:
+      input.status ?? (input.assertion === "asserted" ? "active" : "proposed"),
+    createdBy: input.createdBy,
+    validFrom: now,
+    lastConfirmedAt: input.assertion === "asserted" ? now : undefined,
+    createdAt: now,
+    updatedAt: now,
+  });
+  await insertEvidence(ctx, actor, claimId, input.evidence);
+  await invalidateCapsules(ctx, actor.accountId);
+  return { claimId, merged: false };
+}
+
+export const preferences = query({
+  args: {},
+  handler: async (ctx) => {
+    const actor = await requireActor(ctx);
+    return preferenceProjection(await preferencesFor(ctx, actor), actor);
+  },
+});
+
+export const updatePreferences = mutation({
+  args: {
+    enabled: v.optional(v.boolean()),
+    capturePaused: v.optional(v.boolean()),
+    categoryControls: v.optional(vCategoryControls),
+    capsuleTargetTokens: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx);
+    const current = await ensurePreferences(ctx, actor);
+    const enabled = args.enabled ?? current.enabled;
+    const capturePaused = enabled
+      ? (args.capturePaused ?? current.capturePaused)
+      : true;
+    const now = Date.now();
+    await ctx.db.patch(current._id, {
+      enabled,
+      capturePaused,
+      categoryControls: args.categoryControls ?? current.categoryControls,
+      capsuleTargetTokens:
+        args.capsuleTargetTokens === undefined
+          ? current.capsuleTargetTokens
+          : Math.max(
+              350,
+              Math.min(MAX_TARGET_TOKENS, Math.round(args.capsuleTargetTokens)),
+            ),
+      schoolId: actor.schoolId,
+      updatedAt: now,
+    });
+    if (!enabled) await invalidateCapsules(ctx, actor.accountId);
+    return preferenceProjection((await ctx.db.get(current._id))!, actor);
+  },
+});
+
+export const listMine = query({
+  args: {
+    search: v.optional(v.string()),
+    status: v.optional(
+      v.union(
+        v.literal("proposed"),
+        v.literal("active"),
+        v.literal("disputed"),
+        v.literal("superseded"),
+        v.literal("expired"),
+      ),
+    ),
+    scope: v.optional(vScope),
+    claimType: v.optional(vClaimType),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx);
+    const preferences = preferenceProjection(
+      await preferencesFor(ctx, actor),
+      actor,
+    );
+    const wantedStatus = args.status;
+    const ownedCandidates = wantedStatus
+      ? await ctx.db
+          .query("memoryClaims")
+          .withIndex("by_account_status_updated", (q) =>
+            q.eq("accountId", actor.accountId).eq("status", wantedStatus),
+          )
+          .order("desc")
+          .take(MAX_LIST)
+      : (
+          await Promise.all(
+            (
+              [
+                "active",
+                "proposed",
+                "disputed",
+                "superseded",
+                "expired",
+              ] as const
+            ).map((status) =>
+              ctx.db
+                .query("memoryClaims")
+                .withIndex("by_account_status_updated", (q) =>
+                  q.eq("accountId", actor.accountId).eq("status", status),
+                )
+                .order("desc")
+                .take(MAX_LIST),
+            ),
+          )
+        ).flat();
+    const sharedCandidates = (
+      await Promise.all(
+        (wantedStatus
+          ? [wantedStatus]
+          : ([
+              "active",
+              "proposed",
+              "disputed",
+              "superseded",
+              "expired",
+            ] as const)
+        ).map((claimStatus) =>
+          sharedScopedClaimsForActor(ctx, actor, claimStatus),
+        ),
+      )
+    ).flat();
+    const candidates = [...ownedCandidates, ...sharedCandidates].filter(
+      (claim, index, all) =>
+        all.findIndex((candidate) => candidate._id === claim._id) === index,
+    );
+    const needle = normalizeProposition(args.search ?? "");
+    const visible: Array<Doc<"memoryClaims">> = [];
+    for (const claim of candidates) {
+      if (claim.status === "deleted") continue;
+      if (args.scope && claim.scope !== args.scope) continue;
+      if (args.claimType && claim.claimType !== args.claimType) continue;
+      if (needle && !claim.normalizedProposition.includes(needle)) continue;
+      if (!(await canReadClaim(ctx, actor, claim))) continue;
+      visible.push(claim);
+      if (visible.length >= Math.max(1, Math.min(args.limit ?? 100, 200)))
+        break;
+    }
+    return {
+      preferences,
+      claims: await Promise.all(
+        visible.map(async (claim) =>
+          claimProjection(claim, await evidenceForClaim(ctx, claim._id)),
+        ),
+      ),
+    };
+  },
+});
+
+export const remember = mutation({
+  args: {
+    proposition: v.string(),
+    scope: vScope,
+    claimType: vClaimType,
+    workspaceId: v.optional(v.id("spectraWorkspaces")),
+    artifactId: v.optional(v.id("spectraArtifacts")),
+    sourceType: v.optional(
+      v.union(
+        v.literal("user_statement"),
+        v.literal("thread"),
+        v.literal("artifact"),
+        v.literal("workspace"),
+        v.literal("product_event"),
+      ),
+    ),
+    sourceId: v.optional(v.string()),
+    sourceVersionId: v.optional(v.string()),
+    sourceRegionId: v.optional(v.string()),
+    captureReason: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx);
+    return upsertClaim(ctx, actor, {
+      proposition: args.proposition,
+      scope: args.scope,
+      claimType: args.claimType,
+      assertion: "asserted",
+      confidence: 1,
+      createdBy: "user",
+      workspaceId: args.workspaceId,
+      artifactId: args.artifactId,
+      evidence: {
+        sourceType: args.sourceType ?? "user_statement",
+        sourceId: args.sourceId,
+        sourceVersionId: args.sourceVersionId,
+        sourceRegionId: args.sourceRegionId,
+        excerpt: args.proposition,
+        captureReason:
+          args.captureReason ??
+          "You explicitly asked Spectra to remember this.",
+      },
+    });
+  },
+});
+
+export const correct = mutation({
+  args: {
+    claimId: v.id("memoryClaims"),
+    proposition: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx);
+    const original = await ctx.db.get(args.claimId);
+    if (!original || !(await canControlClaim(ctx, actor, original)))
+      throw new Error("MEMORY_NOT_FOUND: This memory is unavailable.");
+    if (!(await canReadClaim(ctx, actor, original)))
+      throw new Error(
+        "MEMORY_SCOPE_FORBIDDEN: This memory is no longer in scope.",
+      );
+    const result = await upsertClaim(ctx, actor, {
+      proposition: args.proposition,
+      scope: original.scope,
+      claimType: "correction",
+      assertion: "asserted",
+      confidence: 1,
+      createdBy: "user",
+      workspaceId: original.workspaceId,
+      artifactId: original.artifactId,
+      subjectKind: original.subjectKind,
+      subjectId: original.subjectId,
+      evidence: {
+        sourceType: "correction",
+        sourceId: original._id,
+        excerpt: args.proposition,
+        captureReason: "You corrected a previous memory.",
+      },
+    });
+    if (result.claimId !== original._id) {
+      const now = Date.now();
+      await ctx.db.patch(original._id, {
+        status: "superseded",
+        supersededById: result.claimId,
+        updatedAt: now,
+      });
+      await ctx.db.patch(result.claimId, {
+        supersedesId: original._id,
+        updatedAt: now,
+      });
+      await ctx.db.insert("memoryRelations", {
+        accountId: actor.accountId,
+        schoolId: actor.schoolId,
+        fromClaimId: result.claimId,
+        toClaimId: original._id,
+        fromSubject: `claim:${result.claimId}`,
+        toSubject: `claim:${original._id}`,
+        relationType: "corrected",
+        confidence: 1,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+    await invalidateCapsules(ctx, actor.accountId);
+    return result;
+  },
+});
+
+export const setDisputed = mutation({
+  args: { claimId: v.id("memoryClaims"), disputed: v.boolean() },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx);
+    const claim = await ctx.db.get(args.claimId);
+    if (!claim || !(await canControlClaim(ctx, actor, claim)))
+      throw new Error("MEMORY_NOT_FOUND: This memory is unavailable.");
+    const now = Date.now();
+    await ctx.db.patch(claim._id, {
+      status: args.disputed ? "disputed" : "active",
+      lastConfirmedAt: args.disputed ? claim.lastConfirmedAt : now,
+      updatedAt: now,
+    });
+    await invalidateCapsules(ctx, actor.accountId);
+    return {
+      claimId: claim._id,
+      status: args.disputed ? "disputed" : "active",
+    };
+  },
+});
+
+export const forget = mutation({
+  args: { claimId: v.id("memoryClaims") },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx);
+    const claim = await ctx.db.get(args.claimId);
+    if (!claim || !(await canControlClaim(ctx, actor, claim)))
+      throw new Error("MEMORY_NOT_FOUND: This memory is unavailable.");
+    const now = Date.now();
+    await ctx.db.patch(claim._id, {
+      status: "deleted",
+      deletionRequestedAt: now,
+      proposition: "[forgotten]",
+      normalizedProposition: "",
+      updatedAt: now,
+    });
+    for (const evidence of await evidenceForClaim(ctx, claim._id)) {
+      await ctx.db.patch(evidence._id, {
+        accessStatus: "deleted",
+        excerptPreview: undefined,
+      });
+    }
+    await invalidateCapsules(ctx, actor.accountId);
+    const idempotencyKey = `delete:${claim._id}`;
+    const existing = await ctx.db
+      .query("memoryJobs")
+      .withIndex("by_idempotency", (q) =>
+        q.eq("idempotencyKey", idempotencyKey),
+      )
+      .unique();
+    if (!existing)
+      await ctx.db.insert("memoryJobs", {
+        accountId: actor.accountId,
+        schoolId: actor.schoolId,
+        kind: "delete",
+        idempotencyKey,
+        payload: { claimId: claim._id },
+        status: "queued",
+        attemptCount: 0,
+        availableAt: now,
+        createdAt: now,
+        updatedAt: now,
+      });
+    return { forgotten: true };
+  },
+});
+
+export const clearAll = mutation({
+  args: { confirmation: v.string() },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx);
+    if (args.confirmation.trim().toUpperCase() !== "FORGET ALL")
+      throw new Error("MEMORY_CONFIRMATION_REQUIRED: Type FORGET ALL.");
+    const ownedClaims = await ctx.db
+      .query("memoryClaims")
+      .withIndex("by_account_status_updated", (q) =>
+        q.eq("accountId", actor.accountId).eq("status", "active"),
+      )
+      .collect();
+    const proposed = await ctx.db
+      .query("memoryClaims")
+      .withIndex("by_account_status_updated", (q) =>
+        q.eq("accountId", actor.accountId).eq("status", "proposed"),
+      )
+      .collect();
+    const disputed = await ctx.db
+      .query("memoryClaims")
+      .withIndex("by_account_status_updated", (q) =>
+        q.eq("accountId", actor.accountId).eq("status", "disputed"),
+      )
+      .collect();
+    const now = Date.now();
+    const privateClaims = [...ownedClaims, ...proposed, ...disputed].filter(
+      (claim) =>
+        claim.scope === "private_global" ||
+        claim.scope === "private_school" ||
+        claim.scope === "system",
+    );
+    for (const claim of privateClaims) {
+      await ctx.db.patch(claim._id, {
+        status: "deleted",
+        deletionRequestedAt: now,
+        proposition: "[forgotten]",
+        normalizedProposition: "",
+        updatedAt: now,
+      });
+      for (const evidence of await evidenceForClaim(ctx, claim._id))
+        await ctx.db.patch(evidence._id, {
+          accessStatus: "deleted",
+          excerptPreview: undefined,
+        });
+    }
+    const capsules = await ctx.db
+      .query("memoryCapsules")
+      .withIndex("by_school_updated", (q) => q.eq("schoolId", actor.schoolId))
+      .collect();
+    for (const capsule of capsules)
+      if (capsule.accountId === actor.accountId)
+        await ctx.db.delete(capsule._id);
+    return { forgottenCount: privateClaims.length };
+  },
+});
+
+export const exportMine = query({
+  args: {},
+  handler: async (ctx) => {
+    const actor = await requireActor(ctx);
+    const claims = (
+      await Promise.all(
+        (
+          ["active", "proposed", "disputed", "superseded", "expired"] as const
+        ).map((status) =>
+          ctx.db
+            .query("memoryClaims")
+            .withIndex("by_account_status_updated", (q) =>
+              q.eq("accountId", actor.accountId).eq("status", status),
+            )
+            .collect(),
+        ),
+      )
+    ).flat();
+    const visible = [];
+    for (const claim of claims)
+      if (await canReadClaim(ctx, actor, claim))
+        visible.push(
+          claimProjection(claim, await evidenceForClaim(ctx, claim._id)),
+        );
+    return {
+      format: "spectra-memory-export",
+      version: 1,
+      exportedAt: Date.now(),
+      account: { name: actor.name, email: actor.email },
+      preferences: preferenceProjection(
+        await preferencesFor(ctx, actor),
+        actor,
+      ),
+      claims: visible,
+    };
+  },
+});
+
+export const contextForRun = query({
+  args: {
+    queryText: v.string(),
+    workspaceId: v.optional(v.id("spectraWorkspaces")),
+    artifactId: v.optional(v.id("spectraArtifacts")),
+    targetTokens: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx);
+    const preferences = preferenceProjection(
+      await preferencesFor(ctx, actor),
+      actor,
+    );
+    if (!preferences.enabled)
+      return {
+        enabled: false,
+        text: "",
+        selectedClaimIds: [],
+        candidateClaimIds: [],
+        exclusions: {
+          scope: 0,
+          permission: 0,
+          stale: 0,
+          disputed: 0,
+          budget: 0,
+        },
+        estimatedTokens: 0,
+      };
+    const target = Math.max(
+      250,
+      Math.min(
+        MAX_TARGET_TOKENS,
+        Math.round(args.targetTokens ?? preferences.capsuleTargetTokens),
+      ),
+    );
+    const ownedClaims = await ctx.db
+      .query("memoryClaims")
+      .withIndex("by_account_status_updated", (q) =>
+        q.eq("accountId", actor.accountId).eq("status", "active"),
+      )
+      .order("desc")
+      .take(500);
+    const workspaceClaims = args.workspaceId
+      ? await ctx.db
+          .query("memoryClaims")
+          .withIndex("by_workspace_status", (q) =>
+            q.eq("workspaceId", args.workspaceId).eq("status", "active"),
+          )
+          .take(200)
+      : [];
+    const artifactClaims = args.artifactId
+      ? await ctx.db
+          .query("memoryClaims")
+          .withIndex("by_artifact_status", (q) =>
+            q.eq("artifactId", args.artifactId).eq("status", "active"),
+          )
+          .take(200)
+      : [];
+    const claims = [
+      ...ownedClaims,
+      ...workspaceClaims,
+      ...artifactClaims,
+    ].filter(
+      (claim, index, all) =>
+        all.findIndex((candidate) => candidate._id === claim._id) === index,
+    );
+    const queryTerms = terms(args.queryText);
+    const exclusions = {
+      scope: 0,
+      permission: 0,
+      stale: 0,
+      disputed: 0,
+      budget: 0,
+    };
+    const ranked: Array<{ claim: Doc<"memoryClaims">; score: number }> = [];
+    for (const claim of claims) {
+      if (!preferences.categoryControls[categoryForClaim(claim.claimType)]) {
+        exclusions.scope += 1;
+        continue;
+      }
+      if (claim.expiresAt && claim.expiresAt <= Date.now()) {
+        exclusions.stale += 1;
+        continue;
+      }
+      if (
+        claim.scope === "workspace" &&
+        (!args.workspaceId || claim.workspaceId !== args.workspaceId)
+      ) {
+        exclusions.scope += 1;
+        continue;
+      }
+      if (
+        claim.scope === "shared_artifact" &&
+        (!args.artifactId || claim.artifactId !== args.artifactId)
+      ) {
+        exclusions.scope += 1;
+        continue;
+      }
+      if (!(await canReadClaim(ctx, actor, claim))) {
+        exclusions.permission += 1;
+        continue;
+      }
+      if (!(await claimHasCurrentEvidence(ctx, actor, claim._id))) {
+        exclusions.permission += 1;
+        continue;
+      }
+      const lexical = overlapScore(queryTerms, claim.proposition);
+      const correctionBoost = claim.claimType === "correction" ? 0.3 : 0;
+      const assertedBoost = claim.assertion === "asserted" ? 0.18 : 0;
+      const recency = Math.max(
+        0,
+        1 - (Date.now() - claim.updatedAt) / 31_536_000_000,
+      );
+      ranked.push({
+        claim,
+        score:
+          lexical * 1.8 +
+          claim.confidence * 0.65 +
+          correctionBoost +
+          assertedBoost +
+          recency * 0.12,
+      });
+    }
+    ranked.sort(
+      (a, b) => b.score - a.score || b.claim.updatedAt - a.claim.updatedAt,
+    );
+    const selected: Array<Doc<"memoryClaims">> = [];
+    let used = 0;
+    for (const item of ranked) {
+      const cost = tokenEstimate(item.claim.proposition) + 12;
+      if (selected.length >= MAX_CLAIMS_PER_CONTEXT || used + cost > target) {
+        exclusions.budget += 1;
+        continue;
+      }
+      selected.push(item.claim);
+      used += cost;
+    }
+    const contextClaims = await Promise.all(
+      selected.map(async (claim, index) => {
+        const evidence = (await evidenceForClaim(ctx, claim._id)).filter(
+          (item) => item.accessStatus === "available",
+        );
+        return {
+          citation: `M${index + 1}`,
+          claimId: claim._id,
+          proposition: claim.proposition,
+          scope: claim.scope,
+          confidence: claim.confidence,
+          assertion: claim.assertion,
+          evidence: evidence.slice(0, 2).map((item) => ({
+            sourceType: item.sourceType,
+            sourceId: item.sourceId,
+            sourceVersionId: item.sourceVersionId,
+            sourceRegionId: item.sourceRegionId,
+            observedAt: item.observedAt,
+          })),
+        };
+      }),
+    );
+    const text = contextClaims
+      .map(
+        (claim) =>
+          `[${claim.citation}] ${claim.proposition} (${claim.scope.replaceAll("_", " ")}; ${claim.assertion}; confidence ${Math.round(claim.confidence * 100)}%)`,
+      )
+      .join("\n");
+    return {
+      enabled: true,
+      text,
+      claims: contextClaims,
+      selectedClaimIds: selected.map((claim) => claim._id),
+      candidateClaimIds: ranked.map((item) => item.claim._id).slice(0, 80),
+      exclusions,
+      estimatedTokens: tokenEstimate(text),
+      targetTokens: target,
+    };
+  },
+});
+
+export const recordRetrieval = mutation({
+  args: {
+    runId: v.optional(v.id("spectraAiRuns")),
+    purpose: v.string(),
+    queryHash: v.string(),
+    candidateClaimIds: v.array(v.id("memoryClaims")),
+    selectedClaimIds: v.array(v.id("memoryClaims")),
+    exclusionCounts: v.object({
+      scope: v.number(),
+      permission: v.number(),
+      stale: v.number(),
+      disputed: v.number(),
+      budget: v.number(),
+    }),
+    estimatedTokens: v.number(),
+    actualTokens: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx);
+    for (const claimId of args.selectedClaimIds) {
+      const claim = await ctx.db.get(claimId);
+      if (
+        !claim ||
+        !(await canReadClaim(ctx, actor, claim)) ||
+        !(await claimHasCurrentEvidence(ctx, actor, claim._id))
+      )
+        throw new Error(
+          "MEMORY_RETRIEVAL_STALE: A selected memory is no longer permitted.",
+        );
+    }
+    return ctx.db.insert("memoryRetrievalEvents", {
+      accountId: actor.accountId,
+      schoolId: actor.schoolId,
+      runId: args.runId,
+      purpose: compact(args.purpose, 180),
+      queryHash: compact(args.queryHash, 128),
+      candidateClaimIds: args.candidateClaimIds.slice(0, 100),
+      selectedClaimIds: args.selectedClaimIds.slice(0, 40),
+      exclusionCounts: args.exclusionCounts,
+      estimatedTokens: Math.max(0, args.estimatedTokens),
+      actualTokens: args.actualTokens,
+      createdAt: Date.now(),
+    });
+  },
+});
+
+function explicitCandidateFromText(text: string) {
+  const compacted = compact(text);
+  const remember = compacted.match(
+    /\b(?:please\s+)?remember(?:\s+that)?\s+(.+?)(?:[.!?]\s*$|$)/i,
+  );
+  if (remember?.[1])
+    return {
+      proposition: remember[1],
+      claimType: "declared_fact" as const,
+      reason: "You explicitly asked Spectra to remember this.",
+    };
+  const future = compacted.match(/\bfrom now on[,:\s]+(.+?)(?:[.!?]\s*$|$)/i);
+  if (future?.[1])
+    return {
+      proposition: future[1],
+      claimType: "recurring_workflow" as const,
+      reason: "You established a recurring way of working.",
+    };
+  const correction = compacted.match(
+    /^(?:actually|correction|to correct that)[,:\s]+(.+?)(?:[.!?]\s*$|$)/i,
+  );
+  if (correction?.[1])
+    return {
+      proposition: correction[1],
+      claimType: "correction" as const,
+      reason: "You directly corrected prior context.",
+    };
+  return null;
+}
+
+export const captureExplicitSignal = mutation({
+  args: {
+    text: v.string(),
+    sourceType: v.union(
+      v.literal("thread"),
+      v.literal("artifact"),
+      v.literal("workspace"),
+    ),
+    sourceId: v.string(),
+    sourceVersionId: v.optional(v.string()),
+    workspaceId: v.optional(v.id("spectraWorkspaces")),
+    artifactId: v.optional(v.id("spectraArtifacts")),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx);
+    const preferences = await ensurePreferences(ctx, actor);
+    if (!preferences.enabled || preferences.capturePaused)
+      return { queued: false, reason: "paused" };
+    const candidate = explicitCandidateFromText(args.text);
+    if (!candidate) return { queued: false, reason: "no_strong_signal" };
+    const rejection = captureRejectionReason(candidate.proposition);
+    if (rejection) return { queued: false, reason: rejection };
+    if (!preferences.categoryControls[categoryForClaim(candidate.claimType)])
+      return { queued: false, reason: "category_disabled" };
+    const scope: Scope = args.workspaceId ? "private_school" : "private_global";
+    const normalized = normalizeProposition(candidate.proposition);
+    const idempotencyKey = `capture:${actor.accountId}:${hash(`${scope}:${normalized}:${args.sourceType}:${args.sourceId}`).slice(0, 40)}`;
+    const existing = await ctx.db
+      .query("memoryJobs")
+      .withIndex("by_idempotency", (q) =>
+        q.eq("idempotencyKey", idempotencyKey),
+      )
+      .unique();
+    if (existing)
+      return { queued: existing.status !== "failed", duplicate: true };
+    const now = Date.now();
+    const jobId = await ctx.db.insert("memoryJobs", {
+      accountId: actor.accountId,
+      schoolId: actor.schoolId,
+      kind: "capture",
+      idempotencyKey,
+      payload: {
+        proposition: candidate.proposition,
+        claimType: candidate.claimType,
+        scope,
+        sourceType: args.sourceType,
+        sourceId: compact(args.sourceId, 180),
+        sourceVersionId: compact(args.sourceVersionId, 180) || undefined,
+        workspaceId: args.workspaceId,
+        artifactId: args.artifactId,
+        reason: candidate.reason,
+      },
+      status: "queued",
+      attemptCount: 0,
+      availableAt: now,
+      createdAt: now,
+      updatedAt: now,
+    });
+    return { queued: true, jobId };
+  },
+});
+
+async function rebuildCapsulesForAccount(
+  ctx: MutationCtx,
+  actor: Actor,
+  claims: Array<Doc<"memoryClaims">>,
+) {
+  const definitions: Array<{
+    scope: Doc<"memoryCapsules">["scope"];
+    workspaceId?: Id<"spectraWorkspaces">;
+    claims: Array<Doc<"memoryClaims">>;
+  }> = [
+    {
+      scope: "private_global",
+      claims: claims.filter(
+        (claim) => claim.scope === "private_global" || claim.scope === "system",
+      ),
+    },
+    {
+      scope: "private_school",
+      claims: claims.filter((claim) => claim.scope === "private_school"),
+    },
+    {
+      scope: "workflow",
+      claims: claims.filter((claim) =>
+        ["recurring_workflow", "mistake_avoidance", "correction"].includes(
+          claim.claimType,
+        ),
+      ),
+    },
+  ];
+  const workspaceIds = [
+    ...new Set(
+      claims.flatMap((claim) =>
+        claim.scope === "workspace" && claim.workspaceId
+          ? [claim.workspaceId]
+          : [],
+      ),
+    ),
+  ];
+  for (const workspaceId of workspaceIds)
+    definitions.push({
+      scope: "workspace",
+      workspaceId,
+      claims: claims.filter(
+        (claim) =>
+          claim.scope === "workspace" && claim.workspaceId === workspaceId,
+      ),
+    });
+
+  const now = Date.now();
+  for (const definition of definitions) {
+    const selected = definition.claims
+      .sort(
+        (a, b) =>
+          Number(b.assertion === "asserted") -
+            Number(a.assertion === "asserted") ||
+          b.confidence - a.confidence ||
+          b.updatedAt - a.updatedAt,
+      )
+      .slice(0, 32);
+    const text = selected.map((claim) => `- ${claim.proposition}`).join("\n");
+    const contentHash = hash(
+      selected.map((claim) => `${claim._id}:${claim.updatedAt}`).join("|"),
+    );
+    const existing = definition.workspaceId
+      ? await ctx.db
+          .query("memoryCapsules")
+          .withIndex("by_account_workspace", (q) =>
+            q
+              .eq("accountId", actor.accountId)
+              .eq("workspaceId", definition.workspaceId),
+          )
+          .unique()
+      : (
+          await ctx.db
+            .query("memoryCapsules")
+            .withIndex("by_account_scope", (q) =>
+              q.eq("accountId", actor.accountId).eq("scope", definition.scope),
+            )
+            .collect()
+        ).find((capsule) => !capsule.workspaceId);
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        text,
+        claimIds: selected.map((claim) => claim._id),
+        tokenCount: tokenEstimate(text),
+        generationVersion: existing.generationVersion + 1,
+        contentHash,
+        stale: false,
+        schoolId: actor.schoolId,
+        updatedAt: now,
+      });
+    } else if (text) {
+      await ctx.db.insert("memoryCapsules", {
+        accountId: actor.accountId,
+        schoolId: actor.schoolId,
+        scope: definition.scope,
+        workspaceId: definition.workspaceId,
+        text,
+        claimIds: selected.map((claim) => claim._id),
+        tokenCount: tokenEstimate(text),
+        generationVersion: 1,
+        contentHash,
+        stale: false,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+  }
+}
+
+export const maintain = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const now = Date.now();
+    const queued = await ctx.db
+      .query("memoryJobs")
+      .withIndex("by_status_available", (q) =>
+        q.eq("status", "queued").lte("availableAt", now),
+      )
+      .take(20);
+    const staleLeases = await ctx.db
+      .query("memoryJobs")
+      .withIndex("by_status_available", (q) =>
+        q.eq("status", "leased").lte("availableAt", now),
+      )
+      .take(20);
+    const jobs = [
+      ...queued,
+      ...staleLeases.filter((job) => (job.leaseExpiresAt ?? 0) <= now),
+    ];
+    const touchedAccounts = new Map<string, Actor>();
+    for (const job of jobs) {
+      const leaseOwner = `memory-maintainer:${now}:${job._id}`;
+      await ctx.db.patch(job._id, {
+        status: "leased",
+        leaseOwner,
+        leaseExpiresAt: now + 45_000,
+        attemptCount: job.attemptCount + 1,
+        updatedAt: now,
+      });
+      try {
+        const actor = await getActorForAccountId(ctx, job.accountId);
+        if (!actor || actor.schoolId !== job.schoolId)
+          throw new Error(
+            "School membership changed; scoped memory was invalidated.",
+          );
+        if (job.kind === "capture") {
+          const payload =
+            job.payload && typeof job.payload === "object"
+              ? (job.payload as Record<string, unknown>)
+              : {};
+          const proposition = compact(payload.proposition);
+          const claimType = compact(payload.claimType) as ClaimType;
+          if (
+            !["declared_fact", "correction", "recurring_workflow"].includes(
+              claimType,
+            )
+          )
+            throw new Error("Unsupported background memory candidate.");
+          await upsertClaim(ctx, actor, {
+            proposition,
+            scope:
+              payload.scope === "private_school"
+                ? "private_school"
+                : "private_global",
+            claimType,
+            assertion: "asserted",
+            confidence: 1,
+            createdBy: "policy",
+            evidence: {
+              sourceType:
+                payload.sourceType === "artifact" ||
+                payload.sourceType === "workspace"
+                  ? payload.sourceType
+                  : "thread",
+              sourceId: compact(payload.sourceId, 180),
+              sourceVersionId:
+                compact(payload.sourceVersionId, 180) || undefined,
+              excerpt: proposition,
+              captureReason: compact(payload.reason, 240),
+            },
+          });
+        }
+        if (job.kind === "delete") {
+          const payload =
+            job.payload && typeof job.payload === "object"
+              ? (job.payload as { claimId?: unknown })
+              : {};
+          const claimId =
+            typeof payload.claimId === "string"
+              ? ctx.db.normalizeId("memoryClaims", payload.claimId)
+              : null;
+          if (claimId) {
+            const claim = await ctx.db.get(claimId);
+            if (claim?.accountId === actor.accountId) {
+              for (const evidence of await evidenceForClaim(ctx, claimId))
+                await ctx.db.delete(evidence._id);
+              for (const relation of await ctx.db
+                .query("memoryRelations")
+                .withIndex("by_from_claim", (q) => q.eq("fromClaimId", claimId))
+                .collect())
+                await ctx.db.delete(relation._id);
+              for (const relation of await ctx.db
+                .query("memoryRelations")
+                .withIndex("by_to_claim", (q) => q.eq("toClaimId", claimId))
+                .collect())
+                await ctx.db.delete(relation._id);
+            }
+          }
+        }
+        touchedAccounts.set(actor.accountId, actor);
+        await ctx.db.patch(job._id, {
+          status: "completed",
+          leaseOwner: undefined,
+          leaseExpiresAt: undefined,
+          error: undefined,
+          completedAt: Date.now(),
+          updatedAt: Date.now(),
+        });
+      } catch (error) {
+        const failed = job.attemptCount + 1 >= 5;
+        await ctx.db.patch(job._id, {
+          status: failed ? "failed" : "queued",
+          availableAt:
+            Date.now() + Math.min(3_600_000, 2 ** job.attemptCount * 30_000),
+          leaseOwner: undefined,
+          leaseExpiresAt: undefined,
+          error: compact(
+            error instanceof Error ? error.message : String(error),
+            500,
+          ),
+          updatedAt: Date.now(),
+        });
+      }
+    }
+    for (const actor of touchedAccounts.values()) {
+      const active = await ctx.db
+        .query("memoryClaims")
+        .withIndex("by_account_status_updated", (q) =>
+          q.eq("accountId", actor.accountId).eq("status", "active"),
+        )
+        .collect();
+      const permitted = [];
+      for (const claim of active)
+        if (await canReadClaim(ctx, actor, claim)) permitted.push(claim);
+      await rebuildCapsulesForAccount(ctx, actor, permitted);
+    }
+
+    const inferredCutoff = now - 180 * 86_400_000;
+    const proposedCutoff = now - 30 * 86_400_000;
+    const oldInferences = await ctx.db
+      .query("memoryClaims")
+      .withIndex("by_status_updated", (q) =>
+        q.eq("status", "active").lt("updatedAt", inferredCutoff),
+      )
+      .take(80);
+    const expiredAccountIds = new Set<Id<"accounts">>();
+    for (const claim of oldInferences) {
+      if (
+        claim.assertion !== "inferred" ||
+        (claim.lastConfirmedAt ?? 0) > inferredCutoff
+      )
+        continue;
+      await ctx.db.patch(claim._id, {
+        status: "expired",
+        expiresAt: now,
+        updatedAt: now,
+      });
+      expiredAccountIds.add(claim.accountId);
+    }
+    const rejectedCandidates = await ctx.db
+      .query("memoryClaims")
+      .withIndex("by_status_updated", (q) =>
+        q.eq("status", "proposed").lt("updatedAt", proposedCutoff),
+      )
+      .take(80);
+    for (const claim of rejectedCandidates) {
+      await ctx.db.patch(claim._id, {
+        status: "expired",
+        expiresAt: now,
+        updatedAt: now,
+      });
+      expiredAccountIds.add(claim.accountId);
+    }
+    for (const accountId of expiredAccountIds)
+      await invalidateCapsules(ctx, accountId);
+
+    const retrievalCutoff = now - 30 * 86_400_000;
+    const oldRetrievals = await ctx.db
+      .query("memoryRetrievalEvents")
+      .withIndex("by_created", (q) => q.lt("createdAt", retrievalCutoff))
+      .take(100);
+    for (const event of oldRetrievals) await ctx.db.delete(event._id);
+    const oldJobs = await ctx.db
+      .query("memoryJobs")
+      .withIndex("by_status_updated", (q) =>
+        q.eq("status", "completed").lt("updatedAt", retrievalCutoff),
+      )
+      .take(100);
+    for (const job of oldJobs) await ctx.db.delete(job._id);
+
+    return { processed: jobs.length, accounts: touchedAccounts.size };
+  },
+});

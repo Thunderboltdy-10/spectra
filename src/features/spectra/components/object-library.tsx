@@ -74,27 +74,22 @@ const threadMeta = { label: "Conversation", icon: MessageSquare, color: "#8b6ff0
 function objectId(entry: ObjectLibraryEntry) { return entry.artifact?._id ?? entry.thread?._id ?? entry.item?._id ?? "unknown"; }
 function objectTitle(entry: ObjectLibraryEntry) { return entry.artifact?.title ?? entry.thread?.title ?? "Untitled object"; }
 function objectSummary(entry: ObjectLibraryEntry) {
-  if (entry.artifact?.aiState === "creating") {
-    const progress = entry.artifact.aiProgress ?? 0;
-    if (progress < 0.12) return "Draft shell ready · reading the request…";
-    if (progress < 0.72) return "Writing the artifact’s first sections…";
-    if (progress < 0.96) return "Filling in the remaining details…";
-    return "Checking the completed artifact…";
-  }
-  if (entry.artifact?.aiState === "updating")
-    return "Applying the requested changes…";
+  const effectTitle = entry.artifact?.aiPreview?.effectTitle;
+  if (effectTitle) return effectTitle;
+  if (entry.artifact?.aiState === "creating") return `Building ${objectTitle(entry)}`;
+  if (entry.artifact?.aiState === "updating") return `Updating ${objectTitle(entry)}`;
   return entry.artifact?.summary ?? entry.thread?.summaryShort ?? "Continue this conversation.";
 }
 function objectUpdatedAt(entry: ObjectLibraryEntry) { return entry.artifact?.updatedAt ?? entry.thread?.lastMessageAt ?? entry.thread?.updatedAt ?? entry.item?.updatedAt ?? 0; }
 function objectCreatedAt(entry: ObjectLibraryEntry) { return entry.artifact?.createdAt ?? entry.thread?.createdAt ?? entry.item?.createdAt ?? 0; }
 function objectType(entry: ObjectLibraryEntry): ObjectType { return entry.thread ? "thread" : entry.artifact?.blueprintKey ?? "document"; }
 function objectMeta(entry: ObjectLibraryEntry) { return entry.thread ? threadMeta : blueprintMeta[entry.artifact?.blueprintKey ?? "document"]; }
-function objectAiState(entry: ObjectLibraryEntry) {
+function objectAiState(entry: ObjectLibraryEntry, now: number) {
   const state = entry.artifact?.aiState;
   if (
     state === "edited" &&
     entry.artifact?.aiStateExpiresAt &&
-    entry.artifact.aiStateExpiresAt <= Date.now()
+    entry.artifact.aiStateExpiresAt <= now
   )
     return "normal";
   return state === "creating" || state === "updating"
@@ -162,6 +157,7 @@ export function ObjectLibrary({
   selectedObjectKeys?: Set<string>;
   onToggleContext?: (entry: ObjectLibraryEntry) => void;
 }) {
+  const [aiClock, setAiClock] = useState(() => Date.now());
   const [internalMode, setInternalMode] = useState<LibraryMode>("list");
   const mode = controlledMode ?? internalMode;
   const setMode = (next: LibraryMode) => {
@@ -188,6 +184,22 @@ export function ObjectLibrary({
   const sortRef = useRef<HTMLDivElement | null>(null);
   const activateEntry = (entry: ObjectLibraryEntry) =>
     selectionMode && onToggleContext ? onToggleContext(entry) : onOpen(entry);
+
+  useEffect(() => {
+    const nextExpiry = entries.reduce<number | null>((nearest, entry) => {
+      const expiry = entry.artifact?.aiState === "edited"
+        ? entry.artifact.aiStateExpiresAt
+        : undefined;
+      if (!expiry || expiry <= aiClock) return nearest;
+      return nearest === null ? expiry : Math.min(nearest, expiry);
+    }, null);
+    if (nextExpiry === null) return;
+    const timer = window.setTimeout(
+      () => setAiClock(Date.now()),
+      Math.max(16, nextExpiry - aiClock + 24),
+    );
+    return () => window.clearTimeout(timer);
+  }, [aiClock, entries]);
 
   useEffect(() => {
     if (!sortOpen) return;
@@ -529,7 +541,7 @@ export function ObjectLibrary({
       <article
         key={id}
         data-spectra-card="inbox"
-        data-card-state={dropTargetKey === "inbox" ? "drop-target" : draggingArtifactId === entry.artifact?._id ? "drag-preview" : selected ? "multi-selected" : objectAiState(entry)}
+        data-card-state={dropTargetKey === "inbox" ? "drop-target" : draggingArtifactId === entry.artifact?._id ? "drag-preview" : selected ? "multi-selected" : objectAiState(entry, aiClock)}
         data-interactive="true"
         draggable={Boolean(entry.artifact) && canDragMove && !selectionMode}
         className="relative min-h-[118px] overflow-hidden p-3"
@@ -802,7 +814,7 @@ export function ObjectLibrary({
                         <div
                           key={`${group.key}:${entry.item?._id ?? id}`}
                           data-object-row="true"
-                          data-card-state={draggingArtifactId === entry.artifact?._id ? "drag-preview" : selectedArtifactId === id ? "focused" : contextSelected ? "multi-selected" : objectAiState(entry)}
+                          data-card-state={draggingArtifactId === entry.artifact?._id ? "drag-preview" : selectedArtifactId === id ? "focused" : contextSelected ? "multi-selected" : objectAiState(entry, aiClock)}
                           data-interactive="true"
                           draggable={Boolean(entry.artifact) && canDragMove && !selectionMode}
                           className="grid min-h-[58px] cursor-pointer grid-cols-[minmax(260px,1.2fr)_minmax(130px,0.6fr)_minmax(130px,0.5fr)_auto] items-center gap-4 border-b border-[var(--card-border-soft)] px-4 py-2.5 transition-colors last:border-b-0 hover:bg-[color-mix(in_oklab,var(--bg-hover)_58%,transparent)] data-[card-state=context]:bg-[color-mix(in_oklab,var(--card-focus)_5%,transparent)] data-[card-state=focused]:bg-[color-mix(in_oklab,var(--card-focus)_5%,transparent)]"
@@ -929,7 +941,7 @@ export function ObjectLibrary({
                             key={`${group.key}:${entry.item?._id ?? id}`}
                             type="button"
                             data-spectra-card="board"
-                            data-card-state={contextSelected ? "context" : selectedArtifactId === id ? "focused" : objectAiState(entry)}
+                            data-card-state={contextSelected ? "context" : selectedArtifactId === id ? "focused" : objectAiState(entry, aiClock)}
                             data-interactive="true"
                             className="flex min-h-[82px] w-full items-start gap-3 px-3 py-3 text-left"
                             style={{ "--card-accent": meta.color } as CSSProperties}

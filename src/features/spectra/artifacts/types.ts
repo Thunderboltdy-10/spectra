@@ -37,6 +37,11 @@ export type ArtifactSkill = {
   approvals: readonly string[];
   connections: readonly string[];
   workingEffects: readonly string[];
+  specialistGuides?: readonly {
+    id: string;
+    trigger: string;
+    instructions: readonly string[];
+  }[];
 };
 
 export type ArtifactTypeManifest<TSchema extends z.ZodType = z.ZodType> = {
@@ -99,4 +104,3 @@ export type ArtifactTypeManifest<TSchema extends z.ZodType = z.ZodType> = {
 export function defineArtifactSkill(skill: ArtifactSkill) {
   return Object.freeze(skill);
 }
-

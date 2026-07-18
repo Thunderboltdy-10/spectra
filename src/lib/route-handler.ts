@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { randomUUID } from "crypto";
-import { StructuredLogger, createRequestLogger, logAPIResponse } from "./logging";
+import {
+  StructuredLogger,
+  createRequestLogger,
+  logAPIResponse,
+} from "./logging";
 import type { NextRequest } from "next/server";
 
 function normalizeErrorStatus(message: string) {
@@ -15,8 +19,19 @@ function normalizeErrorStatus(message: string) {
   if (message.startsWith("INVITATION_EMAIL_FAILED")) return 502;
   if (lower.includes("unauthorized") || lower.includes("sign in")) return 401;
   if (lower.includes("super admin")) return 403;
-  if (lower.includes("only admin") || lower.includes("only teacher") || lower.includes("permission")) return 403;
+  if (
+    lower.includes("only admin") ||
+    lower.includes("only teacher") ||
+    lower.includes("permission")
+  )
+    return 403;
   if (lower.includes("not found")) return 404;
+  if (
+    lower.includes("source_changed") ||
+    lower.includes("version_stale") ||
+    lower.includes("conflict")
+  )
+    return 409;
   if (lower.includes("required") || lower.includes("invalid")) return 400;
   return 500;
 }
@@ -37,19 +52,21 @@ function parseCodeAndMessage(rawMessage: string) {
 
 export async function withRouteErrorHandling<T>(
   handler: (logger: StructuredLogger) => Promise<T>,
-  request?: NextRequest
+  request?: NextRequest,
 ) {
   const startTime = Date.now();
-  const logger = request ? createRequestLogger(request) : new StructuredLogger({ 
-    requestId: randomUUID().slice(0, 8),
-    path: "unknown",
-    method: "unknown"
-  });
+  const logger = request
+    ? createRequestLogger(request)
+    : new StructuredLogger({
+        requestId: randomUUID().slice(0, 8),
+        path: "unknown",
+        method: "unknown",
+      });
 
   try {
     const result = await handler(logger);
     const status = result instanceof Response ? result.status : 200;
-    
+
     // Log successful completion for API routes
     if (request) {
       logAPIResponse({
@@ -58,10 +75,11 @@ export async function withRouteErrorHandling<T>(
         duration: Date.now() - startTime,
       });
     }
-    
+
     return result;
   } catch (error) {
-    const rawMessage = error instanceof Error ? error.message : "Unexpected server error";
+    const rawMessage =
+      error instanceof Error ? error.message : "Unexpected server error";
     const status = normalizeErrorStatus(rawMessage);
     const { code, message } = parseCodeAndMessage(rawMessage);
     const safeMessage = status >= 500 ? "Unexpected server error" : message;

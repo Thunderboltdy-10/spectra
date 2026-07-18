@@ -48,6 +48,7 @@ export function ArtifactCommentsPanel({
   artifactId,
   artifactTitle,
   regions,
+  preferredRegionId,
   currentAccountId,
   onClose,
 }: {
@@ -55,6 +56,7 @@ export function ArtifactCommentsPanel({
   artifactId: string;
   artifactTitle: string;
   regions: readonly ArtifactCommentRegion[];
+  preferredRegionId?: string;
   currentAccountId?: string;
   onClose: () => void;
 }) {
@@ -96,12 +98,19 @@ export function ArtifactCommentsPanel({
     setReanchoringId(null);
     setMentions([]);
     setMentionSearch("");
-    setRegionId((current) => regions.some((region) => region.regionId === current) ? current : regions[0]?.regionId ?? "artifact:structure");
+    setRegionId((current) =>
+      preferredRegionId &&
+      regions.some((region) => region.regionId === preferredRegionId)
+        ? preferredRegionId
+        : regions.some((region) => region.regionId === current)
+          ? current
+          : (regions[0]?.regionId ?? "artifact:structure"),
+    );
     void Promise.all([
       refresh(),
       getSpectraArtifactCommentPreference(artifactId).then((result) => setNotificationMode(result.mode)),
     ]).catch(() => undefined);
-  }, [artifactId, open, refresh, regions]);
+  }, [artifactId, open, preferredRegionId, refresh, regions]);
 
   useEffect(() => {
     if (!open) return;
@@ -145,6 +154,11 @@ export function ArtifactCommentsPanel({
     return map;
   }, [comments]);
   const rootComments = comments.filter((comment) => !comment.parentCommentId);
+  const orderedRootComments = [...rootComments].sort((left, right) => {
+    const leftOrphaned = left.status === "orphaned" || !regions.some((region) => region.regionId === left.anchor.regionId);
+    const rightOrphaned = right.status === "orphaned" || !regions.some((region) => region.regionId === right.anchor.regionId);
+    return Number(rightOrphaned) - Number(leftOrphaned) || left.createdAt - right.createdAt;
+  });
 
   async function createComment() {
     const value = body.trim();
@@ -261,27 +275,32 @@ export function ArtifactCommentsPanel({
                 <span className="text-[9px] text-[var(--text-tertiary)]">{formatRelativeTime(comment.createdAt)}</span>
                 {comment.updatedAt > comment.createdAt + 1_000 ? <span className="text-[9px] text-[var(--text-tertiary)]">edited</span> : null}
               </div>
-              {editingId === comment._id ? (
+              {comment.status === "deleted" ? <p className="mt-1.5 text-[11px] italic text-[var(--text-tertiary)]">Comment removed</p> : editingId === comment._id ? (
                 <div className="mt-2">
                   <textarea autoFocus value={editingBody} onChange={(event) => setEditingBody(event.target.value)} className="min-h-20 w-full resize-y rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2 text-[12px] leading-5 text-[var(--text-primary)] outline-none focus:border-[var(--border-strong)]" />
                   <div className="mt-2 flex justify-end gap-2"><button type="button" onClick={() => setEditingId(null)} className="rounded-[6px] px-2 py-1 text-[10px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]">Cancel</button><button type="button" disabled={!editingBody.trim() || busy === `edit:${comment._id}`} onClick={() => void saveEdit(comment)} className="rounded-[6px] bg-[var(--text-primary)] px-2.5 py-1 text-[10px] font-semibold text-[var(--bg-primary)] disabled:opacity-45">Save</button></div>
                 </div>
               ) : <p className="mt-1.5 whitespace-pre-wrap text-[12px] leading-5 text-[var(--text-primary)]">{comment.body}</p>}
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                <button type="button" onClick={() => { setReplyTo(comment); setRegionId(comment.anchor.regionId); }} className="inline-flex h-6 items-center gap-1 rounded-[5px] px-1.5 text-[9px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"><Reply className="h-3 w-3" />Reply</button>
-                <button type="button" onClick={() => void setResolved(comment, comment.status !== "resolved")} className="inline-flex h-6 items-center gap-1 rounded-[5px] px-1.5 text-[9px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"><Check className="h-3 w-3" />{comment.status === "resolved" ? "Reopen" : "Resolve"}</button>
-                {own ? <button type="button" onClick={() => { setEditingId(comment._id); setEditingBody(comment.body); }} className="h-6 rounded-[5px] px-1.5 text-[9px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]">Edit</button> : null}
-                {own ? <button type="button" aria-label="Remove comment" onClick={() => void remove(comment)} className="flex h-6 w-6 items-center justify-center rounded-[5px] text-[var(--text-tertiary)] hover:bg-[color-mix(in_oklab,var(--danger)_8%,var(--bg-primary))] hover:text-[var(--danger)]"><Trash2 className="h-3 w-3" /></button> : null}
+                {comment.status !== "deleted" ? <button type="button" onClick={() => { setReplyTo(comment); setRegionId(comment.anchor.regionId); }} className="inline-flex h-6 items-center gap-1 rounded-[5px] px-1.5 text-[9px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"><Reply className="h-3 w-3" />Reply</button> : null}
+                {comment.status !== "deleted" ? <button type="button" onClick={() => void setResolved(comment, comment.status !== "resolved")} className="inline-flex h-6 items-center gap-1 rounded-[5px] px-1.5 text-[9px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"><Check className="h-3 w-3" />{comment.status === "resolved" ? "Reopen" : "Resolve"}</button> : null}
+                {own && comment.status !== "deleted" ? <button type="button" onClick={() => { setEditingId(comment._id); setEditingBody(comment.body); }} className="h-6 rounded-[5px] px-1.5 text-[9px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]">Edit</button> : null}
+                {own && comment.status !== "deleted" ? <button type="button" aria-label="Remove comment" onClick={() => void remove(comment)} className="flex h-6 w-6 items-center justify-center rounded-[5px] text-[var(--text-tertiary)] hover:bg-[color-mix(in_oklab,var(--danger)_8%,var(--bg-primary))] hover:text-[var(--danger)]"><Trash2 className="h-3 w-3" /></button> : null}
               </div>
             </div>
           </div>
-          <div className={`mt-3 rounded-[7px] border px-2.5 py-2 ${orphaned ? "border-[color-mix(in_oklab,#d88922_35%,var(--border-default))] bg-[color-mix(in_oklab,#d88922_6%,var(--bg-elevated))]" : "border-[var(--border-subtle)] bg-[var(--bg-elevated)]"}`}>
+          {comment.status !== "deleted" ? <div className={`mt-3 rounded-[7px] border px-2.5 py-2 ${orphaned ? "border-[color-mix(in_oklab,#d88922_35%,var(--border-default))] bg-[color-mix(in_oklab,#d88922_6%,var(--bg-elevated))]" : "border-[var(--border-subtle)] bg-[var(--bg-elevated)]"}`}>
             <div className="flex items-center gap-1.5 text-[9px] text-[var(--text-secondary)]"><MapPin className="h-3 w-3" /><span className="min-w-0 flex-1 truncate">{orphaned ? "Original region changed or was removed" : regionLabel(regions, comment.anchor.regionId)}</span>{orphaned ? <button type="button" onClick={() => { setReanchoringId(comment._id); setReanchorRegionId(regions[0]?.regionId ?? ""); }} className="font-semibold text-[var(--text-primary)]">Reattach</button> : null}</div>
             {reanchoringId === comment._id ? <div className="mt-2 flex gap-1.5"><select value={reanchorRegionId} onChange={(event) => setReanchorRegionId(event.target.value)} className="h-8 min-w-0 flex-1 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-[10px] text-[var(--text-primary)]">{regions.map((region) => <option key={region.regionId} value={region.regionId}>{region.label}</option>)}</select><button type="button" disabled={!reanchorRegionId || busy === `anchor:${comment._id}`} onClick={() => void reanchor(comment)} className="rounded-[6px] bg-[var(--text-primary)] px-2.5 text-[10px] font-semibold text-[var(--bg-primary)] disabled:opacity-45">Attach</button></div> : null}
-          </div>
+          </div> : null}
         </div>
       </article>
     );
+  }
+
+  function renderThread(comment: SpectraArtifactComment, depth = 0): React.ReactNode {
+    const replies = repliesByParent.get(comment._id) ?? [];
+    return <div key={comment._id} className="space-y-2">{renderComment(comment, depth > 0)}{replies.map((reply) => renderThread(reply, depth + 1))}</div>;
   }
 
   if (!open) return null;
@@ -296,7 +315,7 @@ export function ArtifactCommentsPanel({
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="flex shrink-0 items-center justify-between border-b border-[var(--border-subtle)] px-4 py-2"><span className="text-[10px] text-[var(--text-tertiary)]">{comments.filter((comment) => comment.status !== "resolved").length} open</span><label className="flex cursor-pointer items-center gap-2 text-[10px] text-[var(--text-secondary)]"><input type="checkbox" checked={includeResolved} onChange={(event) => setIncludeResolved(event.target.checked)} className="h-3.5 w-3.5 accent-[var(--accent-cyan)]" />Show resolved</label></div>
           <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-            {loading ? <div className="flex h-32 items-center justify-center"><Loader2 className="h-4 w-4 animate-spin text-[var(--text-tertiary)]" /></div> : rootComments.length === 0 ? <div className="mx-auto flex max-w-[260px] flex-col items-center py-14 text-center"><span className="flex h-11 w-11 items-center justify-center rounded-full border border-dashed border-[var(--border-strong)] text-[var(--text-tertiary)]"><MessageSquare className="h-4 w-4" /></span><h3 className="mt-3 text-[12px] font-semibold text-[var(--text-primary)]">No comments here yet</h3><p className="mt-1 text-[10px] leading-5 text-[var(--text-secondary)]">Anchor a thought to a block, field, card, cell, object, or other semantic region.</p></div> : <div className="space-y-3">{rootComments.map((comment) => <div key={comment._id} className="space-y-2">{renderComment(comment)}{(repliesByParent.get(comment._id) ?? []).map((reply) => renderComment(reply, true))}</div>)}</div>}
+            {loading ? <div className="flex h-32 items-center justify-center"><Loader2 className="h-4 w-4 animate-spin text-[var(--text-tertiary)]" /></div> : orderedRootComments.length === 0 ? <div className="mx-auto flex max-w-[260px] flex-col items-center py-14 text-center"><span className="flex h-11 w-11 items-center justify-center rounded-full border border-dashed border-[var(--border-strong)] text-[var(--text-tertiary)]"><MessageSquare className="h-4 w-4" /></span><h3 className="mt-3 text-[12px] font-semibold text-[var(--text-primary)]">No comments here yet</h3><p className="mt-1 text-[10px] leading-5 text-[var(--text-secondary)]">Anchor a thought to a block, field, card, cell, object, or other semantic region.</p></div> : <div className="space-y-3">{orderedRootComments.map((comment) => renderThread(comment))}</div>}
           </div>
 
           <div className="shrink-0 border-t border-[var(--border-default)] bg-[var(--bg-primary)] p-3">

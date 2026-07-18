@@ -63,19 +63,21 @@ function mergeCards(current: ResultCardStreamView[], incoming: ResultCardStreamV
   return unchanged ? current : merged;
 }
 
-function statusTitle(message: string) {
+function authoredStepTitle(message: string) {
   const authoredTitle = message.split(" · ")[0]?.trim();
   if (message.includes(" · ") && authoredTitle) return authoredTitle;
-  if (/review|reading|context/i.test(message)) return "Reading context";
-  if (/validating|analys|resolving|loading|sending/i.test(message)) return "Resolving the request";
-  if (/saving|creating|updating|adding|removing/i.test(message)) return "Updating workspace";
-  return "Preparing the result";
+  return message.trim().slice(0, 88);
+}
+
+function operationPreviewMessage(preview: { action: "create" | "update" | "archive" | "link" | "place" | "remove" | "workspace"; title: string }) {
+  const verb = preview.action === "create" ? "Creating" : preview.action === "update" ? "Updating" : preview.action === "archive" ? "Archiving" : preview.action === "remove" ? "Removing" : preview.action === "workspace" ? "Organizing" : preview.action === "place" ? "Placing" : "Connecting";
+  return new RegExp(`^${verb}\\b`, "i").test(preview.title) ? preview.title : `${verb} ${preview.title}`;
 }
 
 function appendStep(exchange: SpectraLiveExchange, message: string): SpectraLiveExchange {
   const last = exchange.steps.at(-1);
   if (last?.summary === message && last.status === "running") return exchange;
-  const title = statusTitle(message);
+  const title = authoredStepTitle(message);
   const summary = message.includes(" · ") ? message.slice(message.indexOf(" · ") + 3).trim() : message;
   const existingIndex = exchange.steps.findIndex((step) => step.title === title);
   if (existingIndex >= 0) {
@@ -216,7 +218,7 @@ export function useSpectraRun({
             let event: ReturnType<typeof parseSpectraStreamEvent>;
             try { event = parseSpectraStreamEvent(row.payload); } catch { continue; }
             if (event.type === "run_created" || event.type === "result_card" || event.type === "confirmation_required" || event.type === "final") upsert(event.card);
-            if (event.type === "text_delta" || event.type === "text_replace" || event.type === "status" || event.type === "progress" || event.type === "agent_routed" || event.type === "operation_preview" || event.type === "operation_result") {
+            if (event.type === "text_delta" || event.type === "text_replace" || event.type === "progress" || event.type === "operation_preview") {
               setLiveExchange((current) => {
                 const base = current?.runId === tab.runId ? current : {
                   id: `durable:${tab.runId}`,
@@ -229,10 +231,8 @@ export function useSpectraRun({
                 };
                 if (event.type === "text_delta") return { ...base, content: base.content + event.content, status: "streaming" };
                 if (event.type === "text_replace") return { ...base, content: event.content, status: "streaming" };
-                if (event.type === "status") return appendStep(base, event.message);
                 if (event.type === "progress") return appendStep(base, event.detail ? `${event.title} · ${event.detail}` : event.title);
-                if (event.type === "agent_routed") return appendStep(base, `Using ${event.title}: ${event.reason}`);
-                if (event.type === "operation_preview" && event.preview) return appendStep(base, event.preview.title);
+                if (event.type === "operation_preview" && event.preview) return appendStep(base, operationPreviewMessage(event.preview));
                 return base;
               });
             }
@@ -316,26 +316,16 @@ export function useSpectraRun({
           setLiveExchange((current) => current && (!liveExchangeId || current.id === liveExchangeId) ? { ...current, status: "failed" } : current);
         }
         if (event.type === "stopped" || event.type === "interrupted") changed = true;
-        if (event.type === "status") {
-          setLiveExchange((current) => current && (!liveExchangeId || current.id === liveExchangeId) ? appendStep({ ...current, runId: event.runId, status: "streaming" }, event.message) : current);
-          setCards((current) => current.map((card) => card.runId === event.runId ? {
-            ...card,
-            status: "running",
-            title: event.message.startsWith("Saving") ? "Saving changes" : event.message.startsWith("Validating") ? "Validating changes" : statusTitle(event.message),
-            summary: event.message,
-            updatedAt: Date.now(),
-          } : card));
-        }
         if (event.type === "operation_preview" && event.preview) {
-          setCards((current) => current.map((card) => card.runId === event.runId ? { ...card, title: event.preview!.action === "create" ? "Creating" : event.preview!.action === "update" ? "Updating" : "Working", summary: event.preview!.title, updatedAt: Date.now() } : card));
+          const operationTitle = operationPreviewMessage(event.preview);
+          setCards((current) => current.map((card) => card.runId === event.runId ? { ...card, title: operationTitle, summary: event.preview!.title, updatedAt: Date.now() } : card));
           if (event.preview.pendingArtifactId) { changed = true; void onDataChanged?.(); }
         }
         if (event.type === "operation_result") { changed = true; void onDataChanged?.(); }
         if (event.type === "artifact_patch") { changed = true; dispatchArtifactPatch(event.artifactId, event.patch); }
         if (event.type === "operation_preview" && event.preview) {
-          const action = event.preview.action === "create" ? "Creating" : event.preview.action === "update" ? "Updating" : event.preview.action === "archive" ? "Preparing archive" : event.preview.action === "workspace" ? "Organizing" : "Connecting";
-          const title = /^(creating|updating|organizing|connecting|preparing)\b/i.test(event.preview.title) ? event.preview.title.replace(/^Preparing\b/i, action) : `${action} ${event.preview.title}`;
-          setLiveExchange((current) => current && (!liveExchangeId || current.id === liveExchangeId) ? appendStep({ ...current, runId: event.runId, status: "streaming" }, `${title} · Applying the validated change to the visible workspace`) : current);
+          const title = operationPreviewMessage(event.preview);
+          setLiveExchange((current) => current && (!liveExchangeId || current.id === liveExchangeId) ? appendStep({ ...current, runId: event.runId, status: "streaming" }, title) : current);
         }
         if (event.type === "progress") {
           const message = event.detail ? `${event.title} · ${event.detail}` : event.title;
@@ -349,9 +339,6 @@ export function useSpectraRun({
           } : card));
         }
         if (event.type === "agent_routed") {
-          setLiveExchange((current) => current && (!liveExchangeId || current.id === liveExchangeId)
-            ? appendStep({ ...current, runId: event.runId, status: "streaming" }, `Using ${event.title}: ${event.reason}`)
-            : current);
           setCards((current) => current.map((card) => card.runId === event.runId ? {
             ...card,
             provenance: {

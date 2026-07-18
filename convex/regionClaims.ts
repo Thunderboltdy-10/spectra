@@ -22,9 +22,25 @@ async function queuedClaims(ctx: QueryCtx | MutationCtx, artifactId: Id<"spectra
   return ctx.db.query("regionClaims").withIndex("by_artifact_status", (q) => q.eq("artifactId", artifactId).eq("status", "queued")).collect();
 }
 
+async function expireStaleClaims(ctx: MutationCtx, artifactId: Id<"spectraArtifacts">, now: number) {
+  const pending = (await Promise.all((['active', 'queued', 'paused'] as const).map((status) =>
+    ctx.db.query("regionClaims").withIndex("by_artifact_status", (q) => q.eq("artifactId", artifactId).eq("status", status)).collect(),
+  ))).flat();
+  const expired = pending.filter((claim) => claim.leaseExpiresAt <= now);
+  await Promise.all(expired.map((claim) => ctx.db.patch(claim._id, {
+    status: "released",
+    resolution: "expired",
+    queuePosition: undefined,
+    releasedAt: now,
+    updatedAt: now,
+  })));
+  return expired;
+}
+
 async function promoteQueues(ctx: MutationCtx, artifactId: Id<"spectraArtifacts">, now: number) {
+  await expireStaleClaims(ctx, artifactId, now);
   const active = await activeClaims(ctx, artifactId, now);
-  const queued = (await queuedClaims(ctx, artifactId)).filter((claim) => claim.leaseExpiresAt > now).sort((a, b) => (a.queuePosition ?? 0) - (b.queuePosition ?? 0) || a.createdAt - b.createdAt);
+  const queued = (await queuedClaims(ctx, artifactId)).sort((a, b) => (a.queuePosition ?? 0) - (b.queuePosition ?? 0) || a.createdAt - b.createdAt);
   const promoted: Doc<"regionClaims">[] = [];
   const paused: Doc<"regionClaims">[] = [];
   for (const candidate of queued) {
@@ -84,9 +100,10 @@ export const acquire = mutation({
     } else if (args.runId || args.operationId) throw new Error("REGION_CLAIM_ACTOR_INVALID: Human claims cannot impersonate an AI operation.");
 
     const now = Date.now();
+    await expireStaleClaims(ctx, artifact._id, now);
     const room = await ctx.db.query("collaborationRooms").withIndex("by_artifact_partition", (q) => q.eq("artifactId", artifact._id).eq("partitionKey", args.partitionKey?.trim() || "root")).unique();
     const sameClient = (await ctx.db.query("regionClaims").withIndex("by_client_status", (q) => q.eq("clientId", clientId).eq("status", "active")).collect())
-      .find((claim) => claim.artifactId === artifact._id && claim.actorAccountId === actor.accountId && claim.regionId === regionId && claim.leaseExpiresAt > now);
+      .find((claim) => claim.artifactId === artifact._id && claim.actorAccountId === actor.accountId && claim.actorKind === args.actorKind && claim.runId === args.runId && claim.operationId === args.operationId && claim.regionId === regionId && claim.leaseExpiresAt > now);
     const leaseExpiresAt = now + (args.actorKind === "ai" ? AI_LEASE_MS : HUMAN_LEASE_MS);
     if (sameClient) {
       await ctx.db.patch(sameClient._id, { overlapDomains, baseStateVectorHash: args.baseStateVectorHash, proposedStateRef: args.proposedStateRef, leaseExpiresAt, updatedAt: now });
@@ -94,17 +111,18 @@ export const acquire = mutation({
     }
 
     const pendingForClient = (await Promise.all((["queued", "paused"] as const).map((status) => ctx.db.query("regionClaims").withIndex("by_client_status", (q) => q.eq("clientId", clientId).eq("status", status)).collect()))).flat();
-    const samePending = pendingForClient.find((claim) => claim.artifactId === artifact._id && claim.actorAccountId === actor.accountId && claim.regionId === regionId && claim.leaseExpiresAt > now);
+    const samePending = pendingForClient.find((claim) => claim.artifactId === artifact._id && claim.actorAccountId === actor.accountId && claim.actorKind === args.actorKind && claim.runId === args.runId && claim.operationId === args.operationId && claim.regionId === regionId && claim.leaseExpiresAt > now);
     if (samePending) {
       const blocking = (await activeClaims(ctx, artifact._id, now)).find((claim) => regionDomainsIntersect(claim.overlapDomains, overlapDomains));
-      await ctx.db.patch(samePending._id, { status: blocking ? samePending.status : "active", queuePosition: blocking ? samePending.queuePosition : undefined, overlapDomains, baseStateVectorHash: args.baseStateVectorHash, proposedStateRef: args.proposedStateRef, leaseExpiresAt, updatedAt: now });
-      if (!blocking) return { claimId: samePending._id, status: "active" as const, leaseExpiresAt, conflict: null };
+      const remainsPaused = samePending.status === "paused" && samePending.actorKind === "ai";
+      await ctx.db.patch(samePending._id, { status: blocking || remainsPaused ? samePending.status : "active", queuePosition: blocking ? samePending.queuePosition : undefined, overlapDomains, baseStateVectorHash: args.baseStateVectorHash, proposedStateRef: args.proposedStateRef, leaseExpiresAt, updatedAt: now });
+      if (!blocking && !remainsPaused) return { claimId: samePending._id, status: "active" as const, leaseExpiresAt, conflict: null };
       return { claimId: samePending._id, status: "queued" as const, leaseExpiresAt, conflict: blocking ? { claimId: blocking._id, actorKind: blocking.actorKind, regionId: blocking.regionId, leaseExpiresAt: blocking.leaseExpiresAt, queuePosition: samePending.queuePosition ?? 1 } : null };
     }
 
     const active = await activeClaims(ctx, artifact._id, now);
     const conflict = active.find((claim) => claim.actorAccountId !== actor.accountId || claim.clientId !== clientId ? regionDomainsIntersect(claim.overlapDomains, overlapDomains) : false);
-    const queued = await queuedClaims(ctx, artifact._id);
+    const queued = (await queuedClaims(ctx, artifact._id)).filter((claim) => claim.leaseExpiresAt > now);
     const status = conflict ? "queued" as const : "active" as const;
     const claimId = await ctx.db.insert("regionClaims", {
       artifactId: artifact._id, roomId: room?._id, schoolId: artifact.schoolId,
@@ -127,6 +145,11 @@ export const renew = mutation({
     const { actor } = await requireArtifactCapability(ctx, claim.artifactId, "modify");
     if (claim.actorAccountId !== actor.accountId || claim.clientId !== args.clientId) throw new Error("REGION_CLAIM_FORBIDDEN: This claim belongs to another collaborator.");
     const now = Date.now();
+    if (claim.leaseExpiresAt <= now) {
+      await ctx.db.patch(claim._id, { status: "released", resolution: "expired", queuePosition: undefined, releasedAt: now, updatedAt: now });
+      await promoteQueues(ctx, claim.artifactId, now);
+      throw new Error("REGION_CLAIM_EXPIRED: Reacquire the region before editing.");
+    }
     const leaseExpiresAt = now + (claim.actorKind === "ai" ? AI_LEASE_MS : HUMAN_LEASE_MS);
     await ctx.db.patch(claim._id, { baseStateVectorHash: args.baseStateVectorHash ?? claim.baseStateVectorHash, leaseExpiresAt, updatedAt: now });
     return { claimId: claim._id, status: claim.status, leaseExpiresAt };
@@ -155,6 +178,11 @@ export const resolveConflict = mutation({
     const { actor } = await requireArtifactCapability(ctx, claim.artifactId, "modify");
     if (claim.actorAccountId !== actor.accountId || claim.clientId !== args.clientId) throw new Error("REGION_CLAIM_FORBIDDEN: This conflict belongs to another collaborator.");
     const now = Date.now();
+    if (claim.leaseExpiresAt <= now) {
+      await ctx.db.patch(claim._id, { status: "released", resolution: "expired", queuePosition: undefined, releasedAt: now, updatedAt: now });
+      await promoteQueues(ctx, claim.artifactId, now);
+      throw new Error("REGION_CLAIM_EXPIRED: Reacquire the region before resolving it.");
+    }
     if (args.resolution === "cancel" || args.resolution === "keep_current") {
       await ctx.db.patch(claim._id, { status: "rejected", resolution: args.resolution, releasedAt: now, updatedAt: now });
       return { status: "rejected" as const };
@@ -174,7 +202,10 @@ export const listForArtifact = query({
     const now = Date.now();
     const statuses = args.includeResolved ? ["active", "queued", "paused", "released", "rejected"] as const : ["active", "queued", "paused"] as const;
     const groups = await Promise.all(statuses.map((status) => ctx.db.query("regionClaims").withIndex("by_artifact_status", (q) => q.eq("artifactId", args.artifactId).eq("status", status)).collect()));
-    return groups.flat().filter((claim) => args.includeResolved || claim.leaseExpiresAt > now).map((claim) => ({ claimId: claim._id, actorKind: claim.actorKind, actorAccountId: claim.actorAccountId, runId: claim.runId, regionId: claim.regionId, overlapDomains: claim.overlapDomains, status: claim.status, queuePosition: claim.queuePosition, leaseExpiresAt: claim.leaseExpiresAt, resolution: claim.resolution, createdAt: claim.createdAt }));
+    return groups.flat().filter((claim) => args.includeResolved || claim.leaseExpiresAt > now).map((claim) => {
+      const expired = claim.leaseExpiresAt <= now && (claim.status === "active" || claim.status === "queued" || claim.status === "paused");
+      return { claimId: claim._id, actorKind: claim.actorKind, actorAccountId: claim.actorAccountId, runId: claim.runId, regionId: claim.regionId, overlapDomains: claim.overlapDomains, status: expired ? "released" as const : claim.status, queuePosition: expired ? undefined : claim.queuePosition, leaseExpiresAt: claim.leaseExpiresAt, resolution: expired ? "expired" as const : claim.resolution, createdAt: claim.createdAt };
+    });
   },
 });
 
@@ -185,12 +216,13 @@ export const getOwned = query({
     if (!claim) return null;
     const { actor } = await requireArtifactCapability(ctx, claim.artifactId, "read");
     if (claim.actorAccountId !== actor.accountId || claim.clientId !== args.clientId) throw new Error("REGION_CLAIM_FORBIDDEN: This claim belongs to another collaborator.");
+    const expired = claim.leaseExpiresAt <= Date.now() && (claim.status === "active" || claim.status === "queued" || claim.status === "paused");
     return {
       claimId: claim._id,
-      status: claim.status,
-      queuePosition: claim.queuePosition,
+      status: expired ? "released" as const : claim.status,
+      queuePosition: expired ? undefined : claim.queuePosition,
       leaseExpiresAt: claim.leaseExpiresAt,
-      resolution: claim.resolution,
+      resolution: expired ? "expired" as const : claim.resolution,
       conflictRegionId: claim.regionId,
     };
   },

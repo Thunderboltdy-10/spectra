@@ -1,6 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import {
@@ -8,6 +14,8 @@ import {
   BarChart3,
   BookOpen,
   Brain,
+  Bot,
+  Building2,
   Calculator,
   FlaskConical,
   Folders,
@@ -17,6 +25,7 @@ import {
   MessageSquareText,
   Plus,
   Settings2,
+  ShieldCheck,
   Sparkles,
   Sprout,
   UsersRound,
@@ -29,6 +38,10 @@ import {
   getSpectraWorkspaces,
   type SpectraWorkspace,
 } from "@/features/spectra/data/api";
+import {
+  getAdministration,
+  type AdministrationIdentity,
+} from "@/features/spectra/administration/api";
 
 type AppShellProps = {
   children: ReactNode;
@@ -37,10 +50,11 @@ type AppShellProps = {
   contentClassName?: string;
 };
 
-const coreDestinations = [
-  { href: "/chat", label: "Spectra", icon: MessageSquareText },
+const ordinaryDestinations = [
+  { href: "/chat", label: "Chat", icon: MessageSquareText },
   { href: "/workspace", label: "Home", icon: LayoutGrid },
   { href: "/artifacts", label: "Artifacts", icon: LibraryBig },
+  { href: "/agents", label: "Agents", icon: Bot },
 ] as const;
 
 const workspaceIconMap: Record<string, LucideIcon> = {
@@ -55,14 +69,24 @@ const workspaceIconMap: Record<string, LucideIcon> = {
   Sprout,
 };
 
-const workspacePalette = ["#2397c9", "#5c7bd9", "#9a70c7", "#d17858", "#58a17a", "#c18a35"];
+const workspacePalette = [
+  "#2397c9",
+  "#5c7bd9",
+  "#9a70c7",
+  "#d17858",
+  "#58a17a",
+  "#c18a35",
+];
 
 function workspaceIcon(workspace: SpectraWorkspace) {
   return workspaceIconMap[workspace.icon ?? ""] ?? Sparkles;
 }
 
 function workspaceColor(workspace: SpectraWorkspace, index: number) {
-  return workspace.color?.trim() || workspacePalette[index % workspacePalette.length]!;
+  return (
+    workspace.color?.trim() ||
+    workspacePalette[index % workspacePalette.length]!
+  );
 }
 
 function workspaceHref(workspaceId: string) {
@@ -101,6 +125,39 @@ function ShellNavigation() {
   const [workspacesLoading, setWorkspacesLoading] = useState(true);
   const [workspacesUnavailable, setWorkspacesUnavailable] = useState(false);
   const [mobileWorkspaceOpen, setMobileWorkspaceOpen] = useState(false);
+  const [administrationIdentity, setAdministrationIdentity] =
+    useState<AdministrationIdentity | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void getAdministration<AdministrationIdentity>("identity")
+      .then((identity) => {
+        if (active) setAdministrationIdentity(identity);
+      })
+      .catch(() => {
+        if (active) setAdministrationIdentity(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const coreDestinations = useMemo(() => {
+    const destinations: Array<{
+      href: string;
+      label: string;
+      icon: LucideIcon;
+    }> = [...ordinaryDestinations];
+    if (administrationIdentity?.membership.role === "school_admin")
+      destinations.push({ href: "/admin", label: "Admin", icon: Building2 });
+    if (administrationIdentity?.account.platformOperator)
+      destinations.push({
+        href: "/superadmin",
+        label: "Superadmin",
+        icon: ShieldCheck,
+      });
+    return destinations;
+  }, [administrationIdentity]);
 
   const refreshWorkspaces = useCallback(async (force = false) => {
     try {
@@ -127,11 +184,15 @@ function ShellNavigation() {
 
   useEffect(() => {
     setMobileWorkspaceOpen(false);
-  }, [pathname, selectedWorkspaceId]);
+  }, [coreDestinations, pathname, selectedWorkspaceId]);
 
   const activeCoreHref = useMemo(() => {
     if (pathname === "/workspace" && selectedWorkspaceId) return null;
-    return coreDestinations.find(({ href }) => pathname === href || pathname.startsWith(`${href}/`))?.href ?? null;
+    return (
+      coreDestinations.find(
+        ({ href }) => pathname === href || pathname.startsWith(`${href}/`),
+      )?.href ?? null
+    );
   }, [pathname, selectedWorkspaceId]);
 
   return (
@@ -153,7 +214,10 @@ function ShellNavigation() {
           <SpectraLogo size={34} />
         </Link>
 
-        <nav aria-label="Main destinations" className="mt-6 flex shrink-0 flex-col items-center gap-1.5 px-2">
+        <nav
+          aria-label="Main destinations"
+          className="spectra-thin-scrollbar mt-5 flex max-h-[43dvh] shrink-0 flex-col items-center gap-1.5 overflow-y-auto overflow-x-visible px-2"
+        >
           {coreDestinations.map(({ href, label, icon: Icon }) => {
             const active = activeCoreHref === href;
             return (
@@ -163,29 +227,40 @@ function ShellNavigation() {
                 aria-label={label}
                 aria-current={active ? "page" : undefined}
                 className={cn(
-                  "group relative grid size-12 shrink-0 place-items-center rounded-[15px] outline-none transition-[background,color,transform] duration-200",
+                  "group relative flex h-14 w-14 shrink-0 flex-col items-center justify-center gap-1 rounded-[8px] text-[10px] font-medium outline-none transition-[background,color,transform,box-shadow] duration-200",
                   active
-                    ? "text-[var(--brand-primary)]"
-                    : "text-[var(--text-tertiary)] hover:-translate-y-px hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]",
+                    ? "bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[0_2px_8px_rgba(27,20,12,.055)]"
+                    : "text-[var(--text-secondary)] hover:-translate-y-px hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
                 )}
-                style={active ? { background: "color-mix(in oklab, var(--brand-primary) 11%, var(--bg-elevated))" } : undefined}
               >
                 {active ? <ActiveRailMarker /> : null}
-                <Icon size={20} strokeWidth={active ? 2 : 1.7} />
+                <Icon size={16} strokeWidth={active ? 2 : 1.7} />
+                <span className="max-w-[52px] truncate leading-none">
+                  {label}
+                </span>
                 <RailTooltip>{label}</RailTooltip>
               </Link>
             );
           })}
         </nav>
 
-        <div aria-hidden="true" className="mx-auto my-3 h-px w-8 shrink-0 bg-[var(--border-subtle)]" />
+        <div
+          aria-hidden="true"
+          className="mx-auto my-3 h-px w-8 shrink-0 bg-[var(--border-subtle)]"
+        />
 
-        <nav aria-label="Workspaces" className="flex min-h-0 flex-1 flex-col items-center px-2">
+        <nav
+          aria-label="Workspaces"
+          className="flex min-h-0 flex-1 flex-col items-center px-2"
+        >
           <div className="spectra-thin-scrollbar flex w-full min-h-0 flex-1 flex-col items-center gap-2 overflow-x-visible overflow-y-auto py-0.5">
             {workspaces.map((workspace, index) => {
               const Icon = workspaceIcon(workspace);
-              const active = pathname === "/workspace" && selectedWorkspaceId === workspace._id;
-              const shared = workspace.isShared || workspace.ownership === "shared";
+              const active =
+                pathname === "/workspace" &&
+                selectedWorkspaceId === workspace._id;
+              const shared =
+                workspace.isShared || workspace.ownership === "shared";
               return (
                 <Link
                   key={workspace._id}
@@ -193,8 +268,10 @@ function ShellNavigation() {
                   aria-label={workspace.title}
                   aria-current={active ? "page" : undefined}
                   className={cn(
-                    "group relative grid size-12 shrink-0 place-items-center rounded-[15px] outline-none transition-[background,transform] duration-200",
-                    active ? "bg-[var(--bg-elevated)] shadow-[0_2px_10px_rgba(27,20,12,.07)]" : "hover:-translate-y-px hover:bg-[var(--bg-secondary)]",
+                    "group relative flex w-14 shrink-0 flex-col items-center gap-1 rounded-[8px] px-1 py-2 text-[10px] font-medium outline-none transition-[background,transform,box-shadow] duration-200",
+                    active
+                      ? "bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[0_2px_8px_rgba(27,20,12,.055)]"
+                      : "text-[var(--text-secondary)] hover:-translate-y-px hover:bg-[var(--bg-hover)]",
                   )}
                 >
                   {active ? <ActiveRailMarker /> : null}
@@ -209,14 +286,21 @@ function ShellNavigation() {
                       </span>
                     ) : null}
                   </span>
+                  <span className="max-w-[52px] truncate leading-none">
+                    {workspace.title}
+                  </span>
                   <RailTooltip>
-                    {workspace.title}{shared ? " · Shared" : ""}
+                    {workspace.title}
+                    {shared ? " · Shared" : ""}
                   </RailTooltip>
                 </Link>
               );
             })}
             {workspacesLoading ? (
-              <span className="size-8 shrink-0 animate-pulse rounded-[9px] bg-[var(--bg-secondary)]" aria-label="Loading workspaces" />
+              <span
+                className="size-8 shrink-0 animate-pulse rounded-[9px] bg-[var(--bg-secondary)]"
+                aria-label="Loading workspaces"
+              />
             ) : null}
             {workspacesUnavailable ? (
               <button
@@ -243,7 +327,9 @@ function ShellNavigation() {
         <button
           type="button"
           aria-label="Settings"
-          onClick={() => window.dispatchEvent(new Event("ai-school:toggle-settings"))}
+          onClick={() =>
+            window.dispatchEvent(new Event("ai-school:toggle-settings"))
+          }
           className="group relative mx-auto mb-3.5 grid size-11 shrink-0 place-items-center rounded-[14px] text-[var(--text-tertiary)] outline-none transition-colors hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)] focus-visible:ring-2 focus-visible:ring-[var(--brand-primary)]"
         >
           <Settings2 size={19} strokeWidth={1.7} />
@@ -266,10 +352,19 @@ function ShellNavigation() {
           >
             <header className="flex items-center justify-between border-b border-[var(--border-subtle)] px-4 py-3">
               <div>
-                <h2 className="text-[14px] font-semibold text-[var(--text-primary)]">Workspaces</h2>
-                <p className="mt-0.5 text-[11px] text-[var(--text-tertiary)]">Open any shared or personal workspace</p>
+                <h2 className="text-[14px] font-semibold text-[var(--text-primary)]">
+                  Workspaces
+                </h2>
+                <p className="mt-0.5 text-[11px] text-[var(--text-tertiary)]">
+                  Open any shared or personal workspace
+                </p>
               </div>
-              <button type="button" onClick={() => setMobileWorkspaceOpen(false)} className="grid size-9 place-items-center rounded-[10px] text-[var(--text-tertiary)] hover:bg-[var(--bg-secondary)]" aria-label="Close">
+              <button
+                type="button"
+                onClick={() => setMobileWorkspaceOpen(false)}
+                className="grid size-9 place-items-center rounded-[10px] text-[var(--text-tertiary)] hover:bg-[var(--bg-secondary)]"
+                aria-label="Close"
+              >
                 <X size={17} />
               </button>
             </header>
@@ -277,14 +372,38 @@ function ShellNavigation() {
               {workspaces.map((workspace, index) => {
                 const Icon = workspaceIcon(workspace);
                 return (
-                  <Link key={workspace._id} href={workspaceHref(workspace._id)} className="flex min-h-12 items-center gap-3 rounded-[12px] px-3 py-2 text-[13px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-secondary)]">
-                    <span className="grid size-8 shrink-0 place-items-center rounded-[9px] text-white" style={{ background: workspaceColor(workspace, index) }}><Icon size={15} /></span>
-                    <span className="min-w-0 flex-1 truncate">{workspace.title}</span>
-                    {workspace.isShared || workspace.ownership === "shared" ? <UsersRound size={14} className="text-[var(--text-tertiary)]" /> : null}
+                  <Link
+                    key={workspace._id}
+                    href={workspaceHref(workspace._id)}
+                    className="flex min-h-12 items-center gap-3 rounded-[12px] px-3 py-2 text-[13px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-secondary)]"
+                  >
+                    <span
+                      className="grid size-8 shrink-0 place-items-center rounded-[9px] text-white"
+                      style={{ background: workspaceColor(workspace, index) }}
+                    >
+                      <Icon size={15} />
+                    </span>
+                    <span className="min-w-0 flex-1 truncate">
+                      {workspace.title}
+                    </span>
+                    {workspace.isShared || workspace.ownership === "shared" ? (
+                      <UsersRound
+                        size={14}
+                        className="text-[var(--text-tertiary)]"
+                      />
+                    ) : null}
                   </Link>
                 );
               })}
-              <Link href="/workspace?create=1" className="mt-1 flex min-h-12 items-center gap-3 rounded-[12px] px-3 py-2 text-[13px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]"><span className="grid size-8 place-items-center rounded-[9px] border border-dashed border-[var(--border-default)]"><Plus size={15} /></span>Create workspace</Link>
+              <Link
+                href="/workspace?create=1"
+                className="mt-1 flex min-h-12 items-center gap-3 rounded-[12px] px-3 py-2 text-[13px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]"
+              >
+                <span className="grid size-8 place-items-center rounded-[9px] border border-dashed border-[var(--border-default)]">
+                  <Plus size={15} />
+                </span>
+                Create workspace
+              </Link>
             </div>
           </section>
         </>
@@ -292,19 +411,43 @@ function ShellNavigation() {
 
       <nav
         aria-label="Spectra navigation"
-        className="fixed inset-x-3 bottom-3 z-[52] flex h-16 items-center justify-around rounded-[22px] border px-1 shadow-[0_18px_60px_-22px_rgba(11,18,36,.55)] backdrop-blur-xl md:hidden"
-        style={{ borderColor: "var(--border-default)", background: "color-mix(in oklab, var(--bg-elevated) 88%, transparent)" }}
+        className="spectra-thin-scrollbar fixed inset-x-3 bottom-3 z-[52] flex h-16 items-center gap-1 overflow-x-auto rounded-[22px] border px-2 shadow-[0_18px_60px_-22px_rgba(11,18,36,.55)] backdrop-blur-xl md:hidden"
+        style={{
+          borderColor: "var(--border-default)",
+          background:
+            "color-mix(in oklab, var(--bg-elevated) 88%, transparent)",
+        }}
       >
         {coreDestinations.map(({ href, label, icon: Icon }) => {
           const active = activeCoreHref === href;
           return (
-            <Link key={href} href={href} aria-current={active ? "page" : undefined} className={cn("flex min-w-[62px] flex-col items-center gap-1 rounded-xl px-2 py-2 text-[10px] font-semibold", active ? "text-[var(--brand-primary)]" : "text-[var(--text-tertiary)]")}>
+            <Link
+              key={href}
+              href={href}
+              aria-current={active ? "page" : undefined}
+              className={cn(
+                "flex min-w-[62px] flex-col items-center gap-1 rounded-xl px-2 py-2 text-[10px] font-semibold",
+                active
+                  ? "text-[var(--brand-primary)]"
+                  : "text-[var(--text-tertiary)]",
+              )}
+            >
               <Icon size={19} strokeWidth={active ? 2.1 : 1.7} />
               {label}
             </Link>
           );
         })}
-        <button type="button" onClick={() => setMobileWorkspaceOpen((open) => !open)} aria-expanded={mobileWorkspaceOpen} className={cn("flex min-w-[62px] flex-col items-center gap-1 rounded-xl px-2 py-2 text-[10px] font-semibold", selectedWorkspaceId || mobileWorkspaceOpen ? "text-[var(--brand-primary)]" : "text-[var(--text-tertiary)]")}>
+        <button
+          type="button"
+          onClick={() => setMobileWorkspaceOpen((open) => !open)}
+          aria-expanded={mobileWorkspaceOpen}
+          className={cn(
+            "flex min-w-[62px] flex-col items-center gap-1 rounded-xl px-2 py-2 text-[10px] font-semibold",
+            selectedWorkspaceId || mobileWorkspaceOpen
+              ? "text-[var(--brand-primary)]"
+              : "text-[var(--text-tertiary)]",
+          )}
+        >
           <Folders size={19} strokeWidth={selectedWorkspaceId ? 2.1 : 1.7} />
           Workspaces
         </button>
@@ -313,7 +456,12 @@ function ShellNavigation() {
   );
 }
 
-export function AppShell({ children, fullBleed = false, noScroll = false, contentClassName }: AppShellProps) {
+export function AppShell({
+  children,
+  fullBleed = false,
+  noScroll = false,
+  contentClassName,
+}: AppShellProps) {
   return (
     <div className="min-h-dvh bg-[var(--bg-primary)] text-[var(--text-primary)] md:pl-[76px]">
       <ShellNavigation />
@@ -321,7 +469,8 @@ export function AppShell({ children, fullBleed = false, noScroll = false, conten
         className={cn(
           "relative min-h-dvh pb-24 md:pb-0",
           noScroll && "h-dvh min-h-0 overflow-hidden",
-          !fullBleed && "mx-auto w-full max-w-[1540px] px-5 py-6 sm:px-8 lg:px-10",
+          !fullBleed &&
+            "mx-auto w-full max-w-[1540px] px-5 py-6 sm:px-8 lg:px-10",
           contentClassName,
         )}
       >

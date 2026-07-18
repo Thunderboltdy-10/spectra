@@ -20,6 +20,8 @@ export type CollaborationPresence = {
 export type CollaborationTransportSnapshot = {
   state: CollaborationSyncState;
   level: "read" | "modify" | null;
+  accountId?: string;
+  displayName?: string;
   unsynchronizedChanges: number;
   presence: CollaborationPresence[];
   error?: string;
@@ -31,6 +33,7 @@ export type ArtifactCollaborationTransport = {
   getSnapshot(): CollaborationTransportSnapshot;
   subscribe(listener: () => void): () => void;
   connect(): Promise<void>;
+  retry(): Promise<void>;
   disconnect(): void;
   destroy(): void;
   setPresence(fields: Omit<CollaborationPresence, "clientId">): void;

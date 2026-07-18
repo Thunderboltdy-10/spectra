@@ -26,13 +26,25 @@ type IdentityContext = {
   membershipId: string;
 };
 
+export type AccountIdentity = {
+  accountId: string;
+  email: string;
+  emailVerified: boolean;
+  name: string;
+  avatarUrl?: string;
+  status: "active" | "deactivated";
+  platformOperator: boolean;
+};
+
 function operatorEmails() {
   const values = (process.env.SUPER_ADMIN_EMAILS ?? "")
     .split(",")
     .map((value) => value.trim().toLowerCase())
     .filter(Boolean);
   if (process.env.NODE_ENV === "production" && values.length === 0) {
-    throw new Error("AUTH_OPERATOR_CONFIG_MISSING: SUPER_ADMIN_EMAILS must contain at least one verified operator email in production.");
+    throw new Error(
+      "AUTH_OPERATOR_CONFIG_MISSING: SUPER_ADMIN_EMAILS must contain at least one verified operator email in production.",
+    );
   }
   return new Set(values);
 }
@@ -42,25 +54,65 @@ export function isPlatformOperatorEmail(email: string) {
 }
 
 async function readIdentity() {
-  return convexQuery<Record<string, never>, IdentityContext | null>("identity:me", {});
+  return convexQuery<Record<string, never>, IdentityContext | null>(
+    "identity:me",
+    {},
+  );
 }
 
 async function ensureVerifiedClerkAccount() {
   const profile = await currentUser();
-  if (!profile) throw new Error("AUTH_PROFILE_UNAVAILABLE: The signed-in identity profile could not be loaded.");
-  const primary = profile.emailAddresses.find((entry) => entry.id === profile.primaryEmailAddressId);
+  if (!profile)
+    throw new Error(
+      "AUTH_PROFILE_UNAVAILABLE: The signed-in identity profile could not be loaded.",
+    );
+  const primary = profile.emailAddresses.find(
+    (entry) => entry.id === profile.primaryEmailAddressId,
+  );
   const verified = [primary, ...profile.emailAddresses]
     .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
-    .find((entry) => entry.verification?.status === "verified" && Boolean(entry.emailAddress));
-  if (!verified) throw new Error("AUTH_EMAIL_UNVERIFIED: Verify your school email before using Spectra.");
+    .find(
+      (entry) =>
+        entry.verification?.status === "verified" &&
+        Boolean(entry.emailAddress),
+    );
+  if (!verified)
+    throw new Error(
+      "AUTH_EMAIL_UNVERIFIED: Verify your school email before using Spectra.",
+    );
   await convexMutation("identity:registerSelf", {
     name: profile.fullName ?? profile.firstName ?? "Spectra user",
     avatarUrl: profile.imageUrl || undefined,
   });
 }
 
+export async function requireAccount(): Promise<AccountIdentity> {
+  if (!hasClerkServerConfig())
+    throw new Error("AUTH_MISCONFIGURED: Clerk authentication is required.");
+  const authState = await auth();
+  if (!authState.userId)
+    throw new Error("AUTH_NOT_SIGNED_IN: Sign in to continue.");
+  let account = await convexQuery<
+    Record<string, never>,
+    AccountIdentity | null
+  >("identity:account", {});
+  if (!account) {
+    await ensureVerifiedClerkAccount();
+    account = await convexQuery<Record<string, never>, AccountIdentity | null>(
+      "identity:account",
+      {},
+    );
+  }
+  if (!account || account.status !== "active")
+    throw new Error(
+      "AUTH_ACCOUNT_REQUIRED: An active verified account is required.",
+    );
+  return account;
+}
+
 export async function requireActor(): Promise<SessionActor> {
-  if (!hasClerkServerConfig()) throw new Error("AUTH_MISCONFIGURED: Clerk authentication is required.");
+  if (!hasClerkServerConfig())
+    throw new Error("AUTH_MISCONFIGURED: Clerk authentication is required.");
 
   let clerkId: string | null = null;
   try {
@@ -77,9 +129,14 @@ export async function requireActor(): Promise<SessionActor> {
     identity = await readIdentity();
   }
   if (!identity) {
-    throw new Error("AUTH_NO_SCHOOL: This account does not have an active school membership.");
+    throw new Error(
+      "AUTH_NO_SCHOOL: This account does not have an active school membership.",
+    );
   }
-  if (!identity.emailVerified) throw new Error("AUTH_EMAIL_UNVERIFIED: Verify your school email before using Spectra.");
+  if (!identity.emailVerified)
+    throw new Error(
+      "AUTH_EMAIL_UNVERIFIED: Verify your school email before using Spectra.",
+    );
   return {
     clerkId,
     accountId: identity.accountId,
@@ -93,6 +150,9 @@ export async function requireActor(): Promise<SessionActor> {
 
 export async function requirePlatformOperator() {
   const actor = await requireActor();
-  if (!isPlatformOperatorEmail(actor.email)) throw new Error("AUTH_OPERATOR_REQUIRED: Platform operator access is required.");
+  if (!isPlatformOperatorEmail(actor.email))
+    throw new Error(
+      "AUTH_OPERATOR_REQUIRED: Platform operator access is required.",
+    );
   return actor;
 }

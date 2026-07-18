@@ -5,6 +5,7 @@ import type { MutationCtx } from "./_generated/server";
 import {
   buildArtifactTextIndex,
   defaultArtifactContent,
+  defaultArtifactSchemaVersion,
   fallbackArtifactSummary,
   normalizeArtifactId,
   requireArtifactCapability,
@@ -15,14 +16,53 @@ import {
   vCreatedFromSource,
   type BlueprintKey,
 } from "./spectraShared";
-import { evaluateAccess, listDirectlyGrantedResourceIds } from "./authorityShared";
-import { hydrateVersion, releaseSnapshotObject, retainSnapshotObject, type SnapshotStrategy } from "./artifactSnapshots";
+import {
+  bumpPolicyVersion,
+  evaluateAccess,
+  listDirectlyGrantedResourceIds,
+} from "./authorityShared";
+import {
+  hydrateVersionSafely,
+  loadVersionAfter,
+  releaseSnapshotObject,
+  retainSnapshotObject,
+  type SnapshotStrategy,
+} from "./artifactSnapshots";
+import { recordMeterEvent } from "./metering";
+import { writeAuditEvent } from "./auditShared";
+import { incrementOperationalCounter } from "./operationalCounters";
+import { agentDraftHash } from "./agents";
+import {
+  projectArtifactForAccess,
+  projectTimetableSharedContent,
+  projectTimetableSnapshot,
+} from "./quizPrivacy";
 
-function versionSnapshotStrategy(typeKey: string): SnapshotStrategy {
-  return ["presentation", "sheets", "code", "whiteboard"].includes(typeKey) ? "content_addressed" : "normalized";
+function contentForArtifactStorage(typeKey: string, content: unknown) {
+  return typeKey === "timetable"
+    ? projectTimetableSharedContent(content)
+    : content;
 }
 
-async function versionSnapshotFields(ctx: MutationCtx, schoolId: Id<"schools"> | undefined, typeKey: string, before: unknown, after: unknown) {
+function currentAiEffects(artifact: Doc<"spectraArtifacts">, now = Date.now()) {
+  return (artifact.aiEffects ?? []).filter(
+    (effect) => !effect.expiresAt || effect.expiresAt > now,
+  );
+}
+
+function versionSnapshotStrategy(typeKey: string): SnapshotStrategy {
+  return ["presentation", "sheets", "code", "whiteboard"].includes(typeKey)
+    ? "content_addressed"
+    : "normalized";
+}
+
+async function versionSnapshotFields(
+  ctx: MutationCtx,
+  schoolId: Id<"schools"> | undefined,
+  typeKey: string,
+  before: unknown,
+  after: unknown,
+) {
   const snapshotStrategy = versionSnapshotStrategy(typeKey);
   const [beforeObject, afterObject] = await Promise.all([
     retainSnapshotObject(ctx, schoolId, before, snapshotStrategy),
@@ -39,10 +79,15 @@ async function versionSnapshotFields(ctx: MutationCtx, schoolId: Id<"schools"> |
   };
 }
 
-async function listPlacementsForArtifact(ctx: Parameters<typeof requireSpectraActor>[0], artifactId: Id<"spectraArtifacts">) {
+async function listPlacementsForArtifact(
+  ctx: Parameters<typeof requireSpectraActor>[0],
+  artifactId: Id<"spectraArtifacts">,
+) {
   const items = await ctx.db
     .query("spectraWorkspaceItems")
-    .withIndex("by_source", (q) => q.eq("sourceType", "artifact").eq("sourceId", artifactId))
+    .withIndex("by_source", (q) =>
+      q.eq("sourceType", "artifact").eq("sourceId", artifactId),
+    )
     .collect();
 
   const visibleItems = items.filter((item) => item.viewData.hidden !== true);
@@ -59,14 +104,24 @@ async function listPlacementsForArtifact(ctx: Parameters<typeof requireSpectraAc
       };
     }),
   );
-  return placements.filter((placement): placement is NonNullable<typeof placement> => Boolean(placement));
+  return placements.filter(
+    (placement): placement is NonNullable<typeof placement> =>
+      Boolean(placement),
+  );
 }
 
 export const list = query({
   args: {
     status: v.optional(vArtifactStatus),
     blueprintKey: v.optional(vBlueprintKey),
-    placement: v.optional(v.union(v.literal("all"), v.literal("inbox"), v.literal("shared"), v.literal("workspace"))),
+    placement: v.optional(
+      v.union(
+        v.literal("all"),
+        v.literal("inbox"),
+        v.literal("shared"),
+        v.literal("workspace"),
+      ),
+    ),
     search: v.optional(v.string()),
     limit: v.optional(v.number()),
   },
@@ -77,85 +132,217 @@ export const list = query({
     const blueprintKey = args.blueprintKey;
     const owned = blueprintKey
       ? await ctx.db
-        .query("spectraArtifacts")
-        .withIndex("by_account_blueprint", (q) => q.eq("ownerAccountId", actor._id).eq("blueprintKey", blueprintKey))
-        .order("desc")
-        .take(limit * 3)
+          .query("spectraArtifacts")
+          .withIndex("by_account_blueprint", (q) =>
+            q.eq("ownerAccountId", actor._id).eq("blueprintKey", blueprintKey),
+          )
+          .order("desc")
+          .take(limit * 3)
       : await ctx.db
-        .query("spectraArtifacts")
-        .withIndex("by_account_status_updated", (q) => q.eq("ownerAccountId", actor._id).eq("status", baseStatus))
-        .order("desc")
-        .take(limit * 3);
+          .query("spectraArtifacts")
+          .withIndex("by_account_status_updated", (q) =>
+            q.eq("ownerAccountId", actor._id).eq("status", baseStatus),
+          )
+          .order("desc")
+          .take(limit * 3);
 
     const [artifactGrantIds, agentGrantIds] = await Promise.all([
       listDirectlyGrantedResourceIds(ctx, actor, "artifact"),
       listDirectlyGrantedResourceIds(ctx, actor, "agent"),
     ]);
-    const granted = (await Promise.all([...new Set([...artifactGrantIds, ...agentGrantIds])].map(async (resourceId) => {
-      const id = ctx.db.normalizeId("spectraArtifacts", resourceId);
-      if (!id) return null;
-      const candidate = await ctx.db.get(id);
-      if (!candidate) return null;
-      const resourceType = candidate.blueprintKey === "agent" ? "agent" : "artifact";
-      const decision = await evaluateAccess(ctx, resourceType, id);
-      return decision.allowed ? decision.loaded.resource as Doc<"spectraArtifacts"> : null;
-    }))).filter((artifact): artifact is Doc<"spectraArtifacts"> => Boolean(artifact));
-    const rows = [...new Map([...owned, ...granted].map((artifact) => [artifact._id, artifact])).values()];
+    const granted = (
+      await Promise.all(
+        [...new Set([...artifactGrantIds, ...agentGrantIds])].map(
+          async (resourceId) => {
+            const id = ctx.db.normalizeId("spectraArtifacts", resourceId);
+            if (!id) return null;
+            const candidate = await ctx.db.get(id);
+            if (!candidate) return null;
+            const resourceType =
+              candidate.blueprintKey === "agent" ? "agent" : "artifact";
+            const decision = await evaluateAccess(ctx, resourceType, id);
+            return decision.allowed
+              ? (decision.loaded.resource as Doc<"spectraArtifacts">)
+              : null;
+          },
+        ),
+      )
+    ).filter((artifact): artifact is Doc<"spectraArtifacts"> =>
+      Boolean(artifact),
+    );
+    const rows = [
+      ...new Map(
+        [...owned, ...granted].map((artifact) => [artifact._id, artifact]),
+      ).values(),
+    ];
 
     const needle = args.search?.trim().toLowerCase();
     const ownedWorkspaces = await ctx.db
       .query("spectraWorkspaces")
-      .withIndex("by_account_status", (q) => q.eq("ownerAccountId", actor._id).eq("status", "active"))
+      .withIndex("by_account_status", (q) =>
+        q.eq("ownerAccountId", actor._id).eq("status", "active"),
+      )
       .collect();
-    const workspaceGrantIds = await listDirectlyGrantedResourceIds(ctx, actor, "workspace");
-    const grantedWorkspaces = (await Promise.all(workspaceGrantIds.map(async (resourceId) => {
-      const id = ctx.db.normalizeId("spectraWorkspaces", resourceId);
-      if (!id) return null;
-      const decision = await evaluateAccess(ctx, "workspace", id);
-      const workspace = decision.allowed ? decision.loaded.resource as Doc<"spectraWorkspaces"> : null;
-      return workspace?.status === "active" ? workspace : null;
-    }))).filter((workspace): workspace is Doc<"spectraWorkspaces"> => Boolean(workspace));
-    const activeWorkspaces = [...new Map([...ownedWorkspaces, ...grantedWorkspaces].map((workspace) => [workspace._id, workspace])).values()];
-    const placementRows = (await Promise.all(activeWorkspaces
-      .filter((workspace) => workspace.schoolId === actor.schoolId)
-      .map(async (workspace) => ({
-        workspace,
-        items: await ctx.db.query("spectraWorkspaceItems").withIndex("by_workspace", (q) => q.eq("workspaceId", workspace._id)).collect(),
-      })))).flatMap(({ workspace, items }) => items
-        .filter((item) => item.sourceType === "artifact" && item.viewData.hidden !== true)
-        .map((item) => ({ sourceId: item.sourceId, workspaceId: workspace._id, workspaceTitle: workspace.title, workspaceItemId: item._id, pinned: item.viewData.pinned === true })));
+    const workspaceGrantIds = await listDirectlyGrantedResourceIds(
+      ctx,
+      actor,
+      "workspace",
+    );
+    const grantedWorkspaces = (
+      await Promise.all(
+        workspaceGrantIds.map(async (resourceId) => {
+          const id = ctx.db.normalizeId("spectraWorkspaces", resourceId);
+          if (!id) return null;
+          const decision = await evaluateAccess(ctx, "workspace", id);
+          const workspace = decision.allowed
+            ? (decision.loaded.resource as Doc<"spectraWorkspaces">)
+            : null;
+          return workspace?.status === "active" ? workspace : null;
+        }),
+      )
+    ).filter((workspace): workspace is Doc<"spectraWorkspaces"> =>
+      Boolean(workspace),
+    );
+    const activeWorkspaces = [
+      ...new Map(
+        [...ownedWorkspaces, ...grantedWorkspaces].map((workspace) => [
+          workspace._id,
+          workspace,
+        ]),
+      ).values(),
+    ];
+    const placementRows = (
+      await Promise.all(
+        activeWorkspaces
+          .filter((workspace) => workspace.schoolId === actor.schoolId)
+          .map(async (workspace) => ({
+            workspace,
+            items: await ctx.db
+              .query("spectraWorkspaceItems")
+              .withIndex("by_workspace", (q) =>
+                q.eq("workspaceId", workspace._id),
+              )
+              .collect(),
+          })),
+      )
+    ).flatMap(({ workspace, items }) =>
+      items
+        .filter(
+          (item) =>
+            item.sourceType === "artifact" && item.viewData.hidden !== true,
+        )
+        .map((item) => ({
+          sourceId: item.sourceId,
+          workspaceId: workspace._id,
+          workspaceTitle: workspace.title,
+          workspaceItemId: item._id,
+          pinned: item.viewData.pinned === true,
+        })),
+    );
     const placementsByArtifact = new Map<string, typeof placementRows>();
-    for (const placement of placementRows) placementsByArtifact.set(placement.sourceId, [...(placementsByArtifact.get(placement.sourceId) ?? []), placement]);
+    for (const placement of placementRows)
+      placementsByArtifact.set(placement.sourceId, [
+        ...(placementsByArtifact.get(placement.sourceId) ?? []),
+        placement,
+      ]);
 
     const candidateArtifacts = rows
-        .filter((artifact) => artifact.schoolId === actor.schoolId)
-        .filter((artifact) => artifact.blueprintKey !== "thread_reference")
-        .filter((artifact) => artifact.status === baseStatus)
-        .filter((artifact) => !needle || `${artifact.title}\n${artifact.summary ?? ""}\n${artifact.blueprintKey}\n${artifact.textIndex ?? ""}\n${(placementsByArtifact.get(artifact._id) ?? []).map((placement) => placement.workspaceTitle).join("\n")}`.toLowerCase().includes(needle));
+      .filter((artifact) => artifact.schoolId === actor.schoolId)
+      .filter((artifact) => artifact.blueprintKey !== "thread_reference")
+      .filter((artifact) => artifact.status === baseStatus)
+      .filter(
+        (artifact) =>
+          !needle ||
+          `${artifact.title}\n${artifact.summary ?? ""}\n${artifact.blueprintKey}\n${
+            (artifact.blueprintKey === "quiz" &&
+              artifact.ownerAccountId !== actor.accountId) ||
+            artifact.blueprintKey === "timetable"
+              ? ""
+              : (artifact.textIndex ?? "")
+          }\n${(placementsByArtifact.get(artifact._id) ?? []).map((placement) => placement.workspaceTitle).join("\n")}`
+            .toLowerCase()
+            .includes(needle),
+      );
 
-    const artifacts = await Promise.all(candidateArtifacts.map(async (artifact) => {
-      const placements = placementsByArtifact.get(artifact._id) ?? [];
-      const ownership = artifact.ownerAccountId === actor.accountId ? "owned" as const : "shared" as const;
-      const resourceType = artifact.blueprintKey === "agent" ? "agent" as const : "artifact" as const;
-      const [decision, invitations] = await Promise.all([
-        evaluateAccess(ctx, resourceType, artifact._id),
-        ctx.db.query("shareInvitations").withIndex("by_resource", (q) => q.eq("resourceType", resourceType).eq("resourceId", artifact._id)).collect(),
-      ]);
-      const activeInvitations = invitations.filter((invitation) => (invitation.status === "pending" || invitation.status === "accepted") && (!invitation.expiresAt || invitation.expiresAt > Date.now()));
-      return {
-        ...artifact,
-        placements,
-        ownership,
-        accessLevel: decision.allowed ? decision.level : null,
-        accessReason: decision.reason,
-        isShared: ownership === "shared" || activeInvitations.length > 0,
-        sharedWithCount: ownership === "owned" ? new Set(activeInvitations.map((invitation) => invitation.inviteeAccountId)).size : undefined,
-        // Shared is the recipient's accepted-but-not-yet-organized landing
-        // state. Once placed, it behaves like any normal workspace artifact,
-        // while `ownership` keeps it discoverable in the Shared collection.
-        placementStatus: placements.length > 0 ? "workspace" as const : ownership === "shared" ? "shared" as const : "inbox" as const,
-      };
-    }));
+    const artifacts = await Promise.all(
+      candidateArtifacts.map(async (artifact) => {
+        const placements = placementsByArtifact.get(artifact._id) ?? [];
+        const ownership =
+          artifact.ownerAccountId === actor.accountId
+            ? ("owned" as const)
+            : ("shared" as const);
+        const resourceType =
+          artifact.blueprintKey === "agent"
+            ? ("agent" as const)
+            : ("artifact" as const);
+        const [decision, invitations] = await Promise.all([
+          evaluateAccess(ctx, resourceType, artifact._id),
+          ctx.db
+            .query("shareInvitations")
+            .withIndex("by_resource", (q) =>
+              q.eq("resourceType", resourceType).eq("resourceId", artifact._id),
+            )
+            .collect(),
+        ]);
+        const activeInvitations = invitations.filter(
+          (invitation) =>
+            (invitation.status === "pending" ||
+              invitation.status === "accepted") &&
+            (!invitation.expiresAt || invitation.expiresAt > Date.now()),
+        );
+        const agentRelease =
+          artifact.blueprintKey === "agent"
+            ? await latestPublishedAgentRelease(ctx, artifact._id)
+            : undefined;
+        const owner =
+          artifact.blueprintKey === "agent"
+            ? await ctx.db.get(artifact.ownerAccountId)
+            : null;
+        const projected = projectArtifactForAccess(
+          artifact,
+          decision.allowed && decision.level ? decision.level : "read",
+        );
+        return {
+          ...projected,
+          placements,
+          ownership,
+          accessLevel: decision.allowed ? decision.level : null,
+          accessReason: decision.reason,
+          isShared: ownership === "shared" || activeInvitations.length > 0,
+          sharedWithCount:
+            ownership === "owned"
+              ? new Set(
+                  activeInvitations.map(
+                    (invitation) => invitation.inviteeAccountId,
+                  ),
+                ).size
+              : undefined,
+          ...(artifact.blueprintKey === "agent"
+            ? {
+                owner: owner
+                  ? { name: owner.name, avatarUrl: owner.avatarUrl }
+                  : undefined,
+                agentRelease: agentRelease
+                  ? {
+                      versionId: agentRelease.versionId,
+                      releaseNumber: agentRelease.releaseNumber,
+                      publishedAt: agentRelease.publishedAt,
+                    }
+                  : null,
+              }
+            : {}),
+          // Shared is the recipient's accepted-but-not-yet-organized landing
+          // state. Once placed, it behaves like any normal workspace artifact,
+          // while `ownership` keeps it discoverable in the Shared collection.
+          placementStatus:
+            placements.length > 0
+              ? ("workspace" as const)
+              : ownership === "shared"
+                ? ("shared" as const)
+                : ("inbox" as const),
+        };
+      }),
+    );
 
     return artifacts
       .filter((artifact) => {
@@ -173,23 +360,693 @@ export const get = query({
     artifactId: v.id("spectraArtifacts"),
   },
   handler: async (ctx, args) => {
-    const { actor, artifact, decision } = await requireArtifactCapability(ctx, args.artifactId);
-    if (artifact.schoolId !== actor.schoolId || artifact.blueprintKey === "thread_reference") throw new Error("Artifact not found");
+    const { actor, artifact, decision } = await requireArtifactCapability(
+      ctx,
+      args.artifactId,
+    );
+    if (
+      artifact.schoolId !== actor.schoolId ||
+      artifact.blueprintKey === "thread_reference"
+    )
+      throw new Error("Artifact not found");
     const placements = await listPlacementsForArtifact(ctx, args.artifactId);
-    const resourceType = artifact.blueprintKey === "agent" ? "agent" as const : "artifact" as const;
-    const invitations = await ctx.db.query("shareInvitations").withIndex("by_resource", (q) => q.eq("resourceType", resourceType).eq("resourceId", artifact._id)).collect();
-    const ownership = artifact.ownerAccountId === actor.accountId ? "owned" as const : "shared" as const;
-    const activeInvitations = invitations.filter((invitation) => (invitation.status === "pending" || invitation.status === "accepted") && (!invitation.expiresAt || invitation.expiresAt > Date.now()));
+    const resourceType =
+      artifact.blueprintKey === "agent"
+        ? ("agent" as const)
+        : ("artifact" as const);
+    const invitations = await ctx.db
+      .query("shareInvitations")
+      .withIndex("by_resource", (q) =>
+        q.eq("resourceType", resourceType).eq("resourceId", artifact._id),
+      )
+      .collect();
+    const ownership =
+      artifact.ownerAccountId === actor.accountId
+        ? ("owned" as const)
+        : ("shared" as const);
+    const activeInvitations = invitations.filter(
+      (invitation) =>
+        (invitation.status === "pending" || invitation.status === "accepted") &&
+        (!invitation.expiresAt || invitation.expiresAt > Date.now()),
+    );
     return {
-      ...artifact,
+      ...projectArtifactForAccess(artifact, decision.level),
       placements,
       ownership,
       accessLevel: decision.level,
       accessReason: decision.reason,
       isShared: ownership === "shared" || activeInvitations.length > 0,
-      sharedWithCount: ownership === "owned" ? new Set(activeInvitations.map((invitation) => invitation.inviteeAccountId)).size : undefined,
-      placementStatus: placements.length > 0 ? "workspace" : ownership === "shared" ? "shared" : "inbox",
+      sharedWithCount:
+        ownership === "owned"
+          ? new Set(
+              activeInvitations.map(
+                (invitation) => invitation.inviteeAccountId,
+              ),
+            ).size
+          : undefined,
+      placementStatus:
+        placements.length > 0
+          ? "workspace"
+          : ownership === "shared"
+            ? "shared"
+            : "inbox",
     };
+  },
+});
+
+const allowedAgentToolKeys = new Set([
+  "artifact_search",
+  "artifact_read",
+  "artifact_create",
+  "artifact_edit",
+  "memory_retrieve",
+  "school_data",
+  "web_search",
+  "code_execute",
+  "image_generate",
+]);
+
+async function latestPublishedAgentRelease(
+  ctx: Parameters<typeof requireSpectraActor>[0],
+  agentId: Id<"spectraArtifacts">,
+) {
+  const releases = await ctx.db
+    .query("agentReleases")
+    .withIndex("by_agent_status", (q) =>
+      q.eq("agentId", agentId).eq("status", "published"),
+    )
+    .collect();
+  return releases
+    .filter(
+      (release) => !release.rollout || release.rollout === "published",
+    )
+    .sort((left, right) => right.releaseNumber - left.releaseNumber)[0];
+}
+
+function publicAgentProjection(
+  snapshot: unknown,
+  fallback: Doc<"spectraArtifacts">,
+) {
+  const state =
+    snapshot && typeof snapshot === "object" && !Array.isArray(snapshot)
+      ? (snapshot as Record<string, unknown>)
+      : {};
+  const content =
+    state.content &&
+    typeof state.content === "object" &&
+    !Array.isArray(state.content)
+      ? (state.content as Record<string, unknown>)
+      : {};
+  const profile =
+    content.profile &&
+    typeof content.profile === "object" &&
+    !Array.isArray(content.profile)
+      ? (content.profile as Record<string, unknown>)
+      : {};
+  const routing =
+    content.routing &&
+    typeof content.routing === "object" &&
+    !Array.isArray(content.routing)
+      ? (content.routing as Record<string, unknown>)
+      : {};
+  const skills = Array.isArray(content.skills)
+    ? content.skills.flatMap((candidate) => {
+        if (
+          !candidate ||
+          typeof candidate !== "object" ||
+          Array.isArray(candidate)
+        )
+          return [];
+        const skill = candidate as Record<string, unknown>;
+        return skill.enabled !== false && typeof skill.name === "string"
+          ? [skill.name.trim().slice(0, 100)]
+          : [];
+      })
+    : [];
+  return {
+    title:
+      typeof state.title === "string"
+        ? state.title.slice(0, 200)
+        : fallback.title,
+    summary:
+      typeof state.summary === "string"
+        ? state.summary.slice(0, 1_000)
+        : fallback.summary,
+    tags: Array.isArray(state.tags)
+      ? state.tags
+          .filter((tag): tag is string => typeof tag === "string")
+          .map((tag) => tag.slice(0, 80))
+          .slice(0, 12)
+      : fallback.tags.slice(0, 12),
+    purpose:
+      typeof profile.purpose === "string"
+        ? profile.purpose.slice(0, 1_000)
+        : "",
+    audienceIntent:
+      typeof profile.audienceIntent === "string"
+        ? profile.audienceIntent.slice(0, 500)
+        : "",
+    routingDescription:
+      typeof routing.description === "string"
+        ? routing.description.slice(0, 1_000)
+        : "",
+    skills: skills.slice(0, 12),
+  };
+}
+
+export const listPublicAgents = query({
+  args: { search: v.optional(v.string()), limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const actor = await requireSpectraActor(ctx);
+    const limit = Math.max(1, Math.min(args.limit ?? 40, 100));
+    const policies = await ctx.db
+      .query("resourcePolicies")
+      .withIndex("by_school", (q) => q.eq("schoolId", actor.schoolId))
+      .order("desc")
+      .take(400);
+    const needle = args.search?.trim().toLowerCase();
+    const now = Date.now();
+    const viewerDomain = actor.email.split("@").at(-1)?.toLowerCase() ?? "";
+    const rows = [];
+    for (const policy of policies) {
+      if (
+        policy.resourceType !== "agent" ||
+        !policy.publicEnabled ||
+        rows.length >= limit
+      )
+        continue;
+      const agentId = ctx.db.normalizeId("spectraArtifacts", policy.resourceId);
+      const artifact = agentId ? await ctx.db.get(agentId) : null;
+      if (
+        !artifact ||
+        artifact.schoolId !== actor.schoolId ||
+        artifact.blueprintKey !== "agent" ||
+        artifact.status !== "active"
+      )
+        continue;
+      const publicLinks = await ctx.db
+        .query("publicLinks")
+        .withIndex("by_resource", (q) =>
+          q.eq("resourceType", "agent").eq("resourceId", artifact._id),
+        )
+        .collect();
+      const discoverable = publicLinks.some(
+        (link) =>
+          !link.revokedAt &&
+          (!link.expiresAt || link.expiresAt > now) &&
+          (!link.domainRestriction || link.domainRestriction === viewerDomain),
+      );
+      if (!discoverable) continue;
+      const release = await latestPublishedAgentRelease(ctx, artifact._id);
+      const version = release ? await ctx.db.get(release.versionId) : null;
+      if (!release || !version) continue;
+      const projection = publicAgentProjection(
+        await loadVersionAfter(ctx, version),
+        artifact,
+      );
+      if (
+        needle &&
+        !`${projection.title}\n${projection.summary ?? ""}\n${projection.tags.join(" ")}\n${projection.skills.join(" ")}\n${projection.routingDescription}`
+          .toLowerCase()
+          .includes(needle)
+      )
+        continue;
+      const owner = await ctx.db.get(artifact.ownerAccountId);
+      rows.push({
+        agentId: artifact._id,
+        ...projection,
+        owner: owner
+          ? { name: owner.name, avatarUrl: owner.avatarUrl }
+          : { name: "Spectra creator" },
+        releaseNumber: release.releaseNumber,
+        publishedAt: release.publishedAt,
+      });
+    }
+    return rows.sort((left, right) => right.publishedAt - left.publishedAt);
+  },
+});
+
+export const addPublicAgent = mutation({
+  args: { agentId: v.id("spectraArtifacts") },
+  handler: async (ctx, args) => {
+    const actor = await requireSpectraActor(ctx);
+    const artifact = await ctx.db.get(args.agentId);
+    if (
+      !artifact ||
+      artifact.schoolId !== actor.schoolId ||
+      artifact.blueprintKey !== "agent" ||
+      artifact.status !== "active"
+    )
+      throw new Error("AGENT_PUBLIC_UNAVAILABLE");
+    const policy = await ctx.db
+      .query("resourcePolicies")
+      .withIndex("by_resource", (q) =>
+        q.eq("resourceType", "agent").eq("resourceId", artifact._id),
+      )
+      .unique();
+    if (!policy?.publicEnabled) throw new Error("AGENT_PUBLIC_UNAVAILABLE");
+    const now = Date.now();
+    const viewerDomain = actor.email.split("@").at(-1)?.toLowerCase() ?? "";
+    const links = await ctx.db
+      .query("publicLinks")
+      .withIndex("by_resource", (q) =>
+        q.eq("resourceType", "agent").eq("resourceId", artifact._id),
+      )
+      .collect();
+    if (
+      !links.some(
+        (link) =>
+          !link.revokedAt &&
+          (!link.expiresAt || link.expiresAt > now) &&
+          (!link.domainRestriction || link.domainRestriction === viewerDomain),
+      )
+    )
+      throw new Error("AGENT_PUBLIC_UNAVAILABLE");
+    if (!(await latestPublishedAgentRelease(ctx, artifact._id)))
+      throw new Error("AGENT_RELEASE_REQUIRED");
+    const existing = await ctx.db
+      .query("accessGrants")
+      .withIndex("by_resource", (q) =>
+        q.eq("resourceType", "agent").eq("resourceId", artifact._id),
+      )
+      .collect();
+    const current = existing.find(
+      (grant) =>
+        grant.principalType === "account" &&
+        grant.principalId === actor.accountId &&
+        grant.source === "direct" &&
+        !grant.revokedAt &&
+        (!grant.expiresAt || grant.expiresAt > now),
+    );
+    if (current) return { grantId: current._id, added: false };
+    const grantId = await ctx.db.insert("accessGrants", {
+      schoolId: actor.schoolId,
+      resourceType: "agent",
+      resourceId: artifact._id,
+      principalType: "account",
+      principalId: actor.accountId,
+      level: "read",
+      capabilities: ["read", "use", "comment"],
+      source: "direct",
+      createdByAccountId: actor.accountId,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const policyVersion = await bumpPolicyVersion(
+      ctx,
+      "agent",
+      artifact._id,
+      artifact.schoolId,
+      actor.accountId,
+    );
+    await writeAuditEvent(ctx, {
+      actorAccountId: actor.accountId,
+      schoolId: actor.schoolId,
+      action: "agent.public_added",
+      targetType: "agent",
+      targetId: artifact._id,
+      metadata: { grantId, policyVersion },
+      retentionClass: "operational",
+    });
+    return { grantId, added: true };
+  },
+});
+
+export const publishAgent = mutation({
+  args: {
+    agentId: v.id("spectraArtifacts"),
+    releaseNotes: v.optional(v.string()),
+    rollout: v.optional(
+      v.union(
+        v.literal("internal_test"),
+        v.literal("limited"),
+        v.literal("published"),
+      ),
+    ),
+  },
+  handler: async (ctx, args) => {
+    const { actor, artifact } = await requireArtifactCapability(
+      ctx,
+      args.agentId,
+      "publish",
+    );
+    if (
+      artifact.blueprintKey !== "agent" ||
+      artifact.status !== "active" ||
+      !artifact.schoolId
+    )
+      throw new Error("AGENT_PUBLISH_INVALID");
+    const content =
+      artifact.content &&
+      typeof artifact.content === "object" &&
+      !Array.isArray(artifact.content)
+        ? (artifact.content as Record<string, unknown>)
+        : {};
+    const instructions =
+      content.instructions &&
+      typeof content.instructions === "object" &&
+      !Array.isArray(content.instructions)
+        ? (content.instructions as Record<string, unknown>)
+        : {};
+    const routing =
+      content.routing &&
+      typeof content.routing === "object" &&
+      !Array.isArray(content.routing)
+        ? (content.routing as Record<string, unknown>)
+        : {};
+    if (
+      typeof instructions.text !== "string" ||
+      instructions.text.trim().length < 40
+    )
+      throw new Error("AGENT_INSTRUCTIONS_INCOMPLETE");
+    if (
+      routing.enabled === true &&
+      (typeof routing.description !== "string" ||
+        routing.description.trim().length < 30)
+    )
+      throw new Error("AGENT_ROUTING_DESCRIPTION_INCOMPLETE");
+    const tools = Array.isArray(content.tools) ? content.tools : [];
+    for (const candidate of tools) {
+      const tool =
+        candidate && typeof candidate === "object" && !Array.isArray(candidate)
+          ? (candidate as Record<string, unknown>)
+          : {};
+      if (
+        tool.enabled === true &&
+        (typeof tool.key !== "string" || !allowedAgentToolKeys.has(tool.key))
+      )
+        throw new Error("AGENT_TOOL_UNSUPPORTED");
+    }
+    const resources = Array.isArray(content.resources) ? content.resources : [];
+    for (const candidate of resources) {
+      const resource =
+        candidate && typeof candidate === "object" && !Array.isArray(candidate)
+          ? (candidate as Record<string, unknown>)
+          : {};
+      if (typeof resource.artifactId !== "string")
+        throw new Error("AGENT_RESOURCE_INVALID");
+      const resourceId = ctx.db.normalizeId(
+        "spectraArtifacts",
+        resource.artifactId,
+      );
+      if (!resourceId) throw new Error("AGENT_RESOURCE_INVALID");
+      await requireArtifactCapability(ctx, resourceId, "read");
+      if (typeof resource.pinnedVersionId === "string") {
+        const pinnedId = ctx.db.normalizeId(
+          "spectraArtifactVersions",
+          resource.pinnedVersionId,
+        );
+        const pinned = pinnedId ? await ctx.db.get(pinnedId) : null;
+        if (!pinned || pinned.artifactId !== resourceId)
+          throw new Error("AGENT_RESOURCE_VERSION_INVALID");
+      }
+    }
+    const rollout = args.rollout ?? "published";
+    const contentHash = await agentDraftHash(artifact);
+    const passingEval =
+      rollout === "internal_test"
+        ? null
+        : await ctx.db
+            .query("agentEvalRuns")
+            .withIndex("by_agent_hash_status", (q) =>
+              q
+                .eq("agentId", artifact._id)
+                .eq("contentHash", contentHash)
+                .eq("status", "passed"),
+            )
+            .order("desc")
+            .first();
+    if (rollout !== "internal_test" && !passingEval)
+      throw new Error(
+        "AGENT_EVAL_GATE_REQUIRED: Run and pass the current draft evaluation suite before release.",
+      );
+    const previous = artifact.currentVersionId
+      ? await ctx.db.get(artifact.currentVersionId)
+      : null;
+    const before = previous
+      ? await loadVersionAfter(ctx, previous)
+      : {
+          title: artifact.title,
+          summary: artifact.summary,
+          content: null,
+          tags: artifact.tags,
+        };
+    const after = {
+      title: artifact.title,
+      summary: artifact.summary,
+      content: artifact.content,
+      tags: artifact.tags,
+    };
+    const snapshots = await versionSnapshotFields(
+      ctx,
+      artifact.schoolId,
+      "agent",
+      before,
+      after,
+    );
+    const existing = await ctx.db
+      .query("agentReleases")
+      .withIndex("by_agent_number", (q) => q.eq("agentId", artifact._id))
+      .collect();
+    const releaseNumber =
+      existing.reduce(
+        (maximum, release) => Math.max(maximum, release.releaseNumber),
+        0,
+      ) + 1;
+    const now = Date.now();
+    const versionId = await ctx.db.insert("spectraArtifactVersions", {
+      artifactId: artifact._id,
+      ownerAccountId: artifact.ownerAccountId,
+      schoolId: artifact.schoolId,
+      parentVersionId: artifact.currentVersionId,
+      source: "checkpoint",
+      creatorAccountIds: [actor.accountId],
+      schemaVersion: artifact.schemaVersion ?? 1,
+      ...snapshots,
+      summary: `Published agent release ${releaseNumber}`,
+      name: `Release ${releaseNumber}`,
+      provenance: {
+        source: "human",
+        kind: "agent_release",
+        releaseNumber,
+      },
+      createdAt: now,
+    });
+    const releaseId = await ctx.db.insert("agentReleases", {
+      agentId: artifact._id,
+      schoolId: artifact.schoolId,
+      versionId,
+      releaseNumber,
+      status: "published",
+      rollout,
+      evalRunId: passingEval?._id,
+      contentHash,
+      releaseNotes: args.releaseNotes?.trim().slice(0, 4_000),
+      publishedByAccountId: actor.accountId,
+      publishedAt: now,
+    });
+    await ctx.db.patch(artifact._id, {
+      currentVersionId: versionId,
+      updatedAt: now,
+    });
+    return {
+      releaseId,
+      versionId,
+      releaseNumber,
+      rollout,
+      evalRunId: passingEval?._id,
+      publishedAt: now,
+    };
+  },
+});
+
+export const listAgentReleases = query({
+  args: { agentId: v.id("spectraArtifacts") },
+  handler: async (ctx, args) => {
+    await requireArtifactCapability(ctx, args.agentId, "read");
+    const releases = await ctx.db
+      .query("agentReleases")
+      .withIndex("by_agent_number", (q) => q.eq("agentId", args.agentId))
+      .collect();
+    return releases
+      .sort((left, right) => right.releaseNumber - left.releaseNumber)
+      .map((release) => ({
+        releaseId: release._id,
+        versionId: release.versionId,
+        releaseNumber: release.releaseNumber,
+        status: release.status,
+        rollout: release.rollout,
+        evalRunId: release.evalRunId,
+        releaseNotes: release.releaseNotes,
+        publishedAt: release.publishedAt,
+      }));
+  },
+});
+
+export const manageAgentRelease = mutation({
+  args: {
+    releaseId: v.id("agentReleases"),
+    action: v.union(
+      v.literal("promote"),
+      v.literal("rollback"),
+      v.literal("suspend"),
+      v.literal("deprecate"),
+    ),
+  },
+  handler: async (ctx, args) => {
+    const release = await ctx.db.get(args.releaseId);
+    if (!release) throw new Error("AGENT_RELEASE_NOT_FOUND");
+    const { actor, artifact } = await requireArtifactCapability(
+      ctx,
+      release.agentId,
+      "modify",
+    );
+    if (artifact.blueprintKey !== "agent" || !artifact.schoolId)
+      throw new Error("AGENT_RELEASE_INVALID");
+    const now = Date.now();
+    if (args.action === "promote") {
+      if (release.status !== "published")
+        throw new Error("Only an active staged release can be promoted.");
+      if (!release.evalRunId)
+        throw new Error("A passing evaluation is required before promotion.");
+      const evaluation = await ctx.db.get(release.evalRunId);
+      if (
+        !evaluation ||
+        evaluation.status !== "passed" ||
+        evaluation.contentHash !== release.contentHash
+      )
+        throw new Error(
+          "The release evaluation is unavailable or no longer matches.",
+        );
+      await ctx.db.patch(release._id, { rollout: "published" });
+    } else if (args.action === "rollback") {
+      if (release.status === "deprecated")
+        throw new Error("A deprecated release cannot be restored.");
+      const releases = await ctx.db
+        .query("agentReleases")
+        .withIndex("by_agent_number", (q) =>
+          q.eq("agentId", release.agentId),
+        )
+        .collect();
+      await Promise.all(
+        releases.map((candidate) =>
+          candidate._id === release._id
+            ? ctx.db.patch(candidate._id, {
+                status: "published",
+                rollout: "published",
+              })
+            : candidate.releaseNumber > release.releaseNumber &&
+                candidate.status === "published" &&
+                (!candidate.rollout || candidate.rollout === "published")
+              ? ctx.db.patch(candidate._id, { status: "suspended" })
+              : Promise.resolve(),
+        ),
+      );
+    } else {
+      await ctx.db.patch(release._id, {
+        status: args.action === "suspend" ? "suspended" : "deprecated",
+      });
+    }
+    await writeAuditEvent(ctx, {
+      actorAccountId: actor.accountId,
+      schoolId: artifact.schoolId,
+      action: `agent.release.${args.action}`,
+      targetType: "agent",
+      targetId: artifact._id,
+      metadata: {
+        releaseId: release._id,
+        releaseNumber: release.releaseNumber,
+      },
+      retentionClass: "operational",
+    });
+    return {
+      releaseId: release._id,
+      action: args.action,
+      updatedAt: now,
+    };
+  },
+});
+
+export const agentResourceHealth = query({
+  args: { agentId: v.id("spectraArtifacts") },
+  handler: async (ctx, args) => {
+    const { artifact } = await requireArtifactCapability(
+      ctx,
+      args.agentId,
+      "modify",
+    );
+    if (artifact.blueprintKey !== "agent")
+      throw new Error("AGENT_RESOURCE_HEALTH_INVALID");
+    const content =
+      artifact.content &&
+      typeof artifact.content === "object" &&
+      !Array.isArray(artifact.content)
+        ? (artifact.content as Record<string, unknown>)
+        : {};
+    const bindings = Array.isArray(content.resources)
+      ? content.resources
+          .filter(
+            (value): value is Record<string, unknown> =>
+              Boolean(
+                value && typeof value === "object" && !Array.isArray(value),
+              ),
+          )
+          .slice(0, 100)
+      : [];
+    return Promise.all(
+      bindings.map(async (binding) => {
+        const rawArtifactId =
+          typeof binding.artifactId === "string" ? binding.artifactId : "";
+        const resourceId = ctx.db.normalizeId(
+          "spectraArtifacts",
+          rawArtifactId,
+        );
+        if (!resourceId)
+          return {
+            id: binding.id,
+            artifactId: rawArtifactId,
+            health: "missing" as const,
+          };
+        try {
+          const { artifact: resource } = await requireArtifactCapability(
+            ctx,
+            resourceId,
+            "read",
+          );
+          const pinnedId =
+            typeof binding.pinnedVersionId === "string"
+              ? ctx.db.normalizeId(
+                  "spectraArtifactVersions",
+                  binding.pinnedVersionId,
+                )
+              : null;
+          const pinned = pinnedId ? await ctx.db.get(pinnedId) : null;
+          if (
+            binding.versionPolicy === "reviewed" &&
+            (!pinned || pinned.artifactId !== resource._id)
+          )
+            return {
+              id: binding.id,
+              artifactId: resource._id,
+              health: "version_unavailable" as const,
+            };
+          return {
+            id: binding.id,
+            artifactId: resource._id,
+            health: "available" as const,
+            versionId: pinned?._id ?? resource.currentVersionId,
+            title: resource.title,
+            blueprintKey: resource.blueprintKey,
+          };
+        } catch {
+          return {
+            id: binding.id,
+            artifactId: rawArtifactId,
+            health: "permission_revoked" as const,
+          };
+        }
+      }),
+    );
   },
 });
 
@@ -197,53 +1054,298 @@ export const listAgentRoutingDescriptors = query({
   args: {},
   handler: async (ctx) => {
     const actor = await requireSpectraActor(ctx);
-    const owned = await ctx.db.query("spectraArtifacts").withIndex("by_account_blueprint", (q) => q.eq("ownerAccountId", actor._id).eq("blueprintKey", "agent")).collect();
-    const grantedIds = await listDirectlyGrantedResourceIds(ctx, actor, "agent");
-    const granted = (await Promise.all(grantedIds.map(async (resourceId) => {
-      const id = ctx.db.normalizeId("spectraArtifacts", resourceId);
-      return id ? ctx.db.get(id) : null;
-    }))).filter((artifact): artifact is Doc<"spectraArtifacts"> => Boolean(artifact));
-    const candidates = [...new Map([...owned, ...granted].map((artifact) => [artifact._id, artifact])).values()];
+    const owned = await ctx.db
+      .query("spectraArtifacts")
+      .withIndex("by_account_blueprint", (q) =>
+        q.eq("ownerAccountId", actor._id).eq("blueprintKey", "agent"),
+      )
+      .collect();
+    const grantedIds = await listDirectlyGrantedResourceIds(
+      ctx,
+      actor,
+      "agent",
+    );
+    const granted = (
+      await Promise.all(
+        grantedIds.map(async (resourceId) => {
+          const id = ctx.db.normalizeId("spectraArtifacts", resourceId);
+          return id ? ctx.db.get(id) : null;
+        }),
+      )
+    ).filter((artifact): artifact is Doc<"spectraArtifacts"> =>
+      Boolean(artifact),
+    );
+    const candidates = [
+      ...new Map(
+        [...owned, ...granted].map((artifact) => [artifact._id, artifact]),
+      ).values(),
+    ];
     const descriptors = [];
     for (const artifact of candidates) {
-      if (artifact.schoolId !== actor.schoolId || artifact.status !== "active" || artifact.blueprintKey !== "agent") continue;
+      if (
+        artifact.schoolId !== actor.schoolId ||
+        artifact.status !== "active" ||
+        artifact.blueprintKey !== "agent"
+      )
+        continue;
       const decision = await evaluateAccess(ctx, "agent", artifact._id);
       if (!decision.allowed || !decision.capabilities.includes("use")) continue;
-      const content = artifact.content && typeof artifact.content === "object" && !Array.isArray(artifact.content) ? artifact.content as Record<string, unknown> : {};
-      const routing = content.routing && typeof content.routing === "object" && !Array.isArray(content.routing) ? content.routing as Record<string, unknown> : {};
+      const release = await latestPublishedAgentRelease(ctx, artifact._id);
+      if (!release) continue;
+      const version = await ctx.db.get(release.versionId);
+      if (!version) continue;
+      const snapshot = await loadVersionAfter(ctx, version);
+      const releaseState =
+        snapshot && typeof snapshot === "object" && !Array.isArray(snapshot)
+          ? (snapshot as Record<string, unknown>)
+          : {};
+      const content =
+        releaseState.content &&
+        typeof releaseState.content === "object" &&
+        !Array.isArray(releaseState.content)
+          ? (releaseState.content as Record<string, unknown>)
+          : {};
+      const routing =
+        content.routing &&
+        typeof content.routing === "object" &&
+        !Array.isArray(content.routing)
+          ? (content.routing as Record<string, unknown>)
+          : {};
       if (routing.enabled !== true) continue;
       descriptors.push({
         agentId: artifact._id,
-        versionId: artifact.currentVersionId,
-        title: artifact.title,
-        summary: artifact.summary,
-        description: typeof routing.description === "string" ? routing.description.slice(0, 2_000) : "",
-        examples: Array.isArray(routing.examples) ? routing.examples.filter((value): value is string => typeof value === "string").slice(0, 30) : [],
-        updatedAt: artifact.updatedAt,
+        versionId: release.versionId,
+        title:
+          typeof releaseState.title === "string"
+            ? releaseState.title
+            : artifact.title,
+        summary:
+          typeof releaseState.summary === "string"
+            ? releaseState.summary
+            : artifact.summary,
+        description:
+          typeof routing.description === "string"
+            ? routing.description.slice(0, 2_000)
+            : "",
+        examples: Array.isArray(routing.examples)
+          ? routing.examples
+              .filter((value): value is string => typeof value === "string")
+              .slice(0, 30)
+          : [],
+        updatedAt: release.publishedAt,
       });
     }
-    return descriptors.sort((left, right) => right.updatedAt - left.updatedAt).slice(0, 100);
+    return descriptors
+      .sort((left, right) => right.updatedAt - left.updatedAt)
+      .slice(0, 100);
   },
 });
 
 export const getAgentRuntime = query({
   args: { agentId: v.id("spectraArtifacts") },
   handler: async (ctx, args) => {
-    const { artifact } = await requireArtifactCapability(ctx, args.agentId, "use");
-    if (artifact.blueprintKey !== "agent" || artifact.status !== "active") throw new Error("Agent not found");
-    const content = artifact.content && typeof artifact.content === "object" && !Array.isArray(artifact.content) ? artifact.content as Record<string, unknown> : {};
-    const instructions = content.instructions && typeof content.instructions === "object" && !Array.isArray(content.instructions) ? content.instructions as Record<string, unknown> : {};
-    const routing = content.routing && typeof content.routing === "object" && !Array.isArray(content.routing) ? content.routing as Record<string, unknown> : {};
+    const { artifact } = await requireArtifactCapability(
+      ctx,
+      args.agentId,
+      "use",
+    );
+    if (artifact.blueprintKey !== "agent" || artifact.status !== "active")
+      throw new Error("Agent not found");
+    const release = await latestPublishedAgentRelease(ctx, artifact._id);
+    if (!release) throw new Error("Agent has no published release");
+    const version = await ctx.db.get(release.versionId);
+    if (!version) throw new Error("Published agent release is unavailable");
+    const snapshot = await loadVersionAfter(ctx, version);
+    const releaseState =
+      snapshot && typeof snapshot === "object" && !Array.isArray(snapshot)
+        ? (snapshot as Record<string, unknown>)
+        : {};
+    const content =
+      releaseState.content &&
+      typeof releaseState.content === "object" &&
+      !Array.isArray(releaseState.content)
+        ? (releaseState.content as Record<string, unknown>)
+        : {};
+    const instructions =
+      content.instructions &&
+      typeof content.instructions === "object" &&
+      !Array.isArray(content.instructions)
+        ? (content.instructions as Record<string, unknown>)
+        : {};
+    const routing =
+      content.routing &&
+      typeof content.routing === "object" &&
+      !Array.isArray(content.routing)
+        ? (content.routing as Record<string, unknown>)
+        : {};
+    const resourceBindings = Array.isArray(content.resources)
+      ? content.resources
+          .filter(
+            (value): value is Record<string, unknown> =>
+              Boolean(
+                value && typeof value === "object" && !Array.isArray(value),
+              ),
+          )
+          .slice(0, 60)
+      : [];
+    const resolvedResources = await Promise.all(
+      resourceBindings.map(async (binding) => {
+        const rawArtifactId =
+          typeof binding.artifactId === "string" ? binding.artifactId : "";
+        const resourceId = ctx.db.normalizeId(
+          "spectraArtifacts",
+          rawArtifactId,
+        );
+        if (!resourceId)
+          return {
+            id: binding.id,
+            artifactId: rawArtifactId,
+            label: binding.label,
+            mode: binding.mode,
+            health: "missing",
+          };
+        try {
+          const { artifact: resource } = await requireArtifactCapability(
+            ctx,
+            resourceId,
+            "read",
+          );
+          const pinnedId =
+            typeof binding.pinnedVersionId === "string"
+              ? ctx.db.normalizeId(
+                  "spectraArtifactVersions",
+                  binding.pinnedVersionId,
+                )
+              : null;
+          const pinned = pinnedId ? await ctx.db.get(pinnedId) : null;
+          if (
+            binding.versionPolicy === "reviewed" &&
+            (!pinned || pinned.artifactId !== resource._id)
+          )
+            return {
+              id: binding.id,
+              artifactId: resource._id,
+              label: binding.label,
+              mode: binding.mode,
+              versionPolicy: binding.versionPolicy,
+              health: "version_unavailable",
+            };
+          const state = pinned
+            ? await loadVersionAfter(ctx, pinned)
+            : {
+                title: resource.title,
+                summary: resource.summary,
+                content: resource.content,
+                tags: resource.tags,
+              };
+          return {
+            id: binding.id,
+            artifactId: resource._id,
+            label: binding.label,
+            mode: binding.mode,
+            versionPolicy: binding.versionPolicy,
+            versionId: pinned?._id ?? resource.currentVersionId,
+            health: "available",
+            snapshot: {
+              id: resource._id,
+              title:
+                state &&
+                typeof state === "object" &&
+                !Array.isArray(state) &&
+                typeof (state as Record<string, unknown>).title === "string"
+                  ? (state as Record<string, unknown>).title
+                  : resource.title,
+              summary:
+                state &&
+                typeof state === "object" &&
+                !Array.isArray(state) &&
+                typeof (state as Record<string, unknown>).summary === "string"
+                  ? (state as Record<string, unknown>).summary
+                  : resource.summary,
+              blueprintKey: resource.blueprintKey,
+              content:
+                state && typeof state === "object" && !Array.isArray(state)
+                  ? (state as Record<string, unknown>).content
+                  : resource.content,
+              tags:
+                state &&
+                typeof state === "object" &&
+                !Array.isArray(state) &&
+                Array.isArray((state as Record<string, unknown>).tags)
+                  ? (state as Record<string, unknown>).tags
+                  : resource.tags,
+            },
+          };
+        } catch {
+          return {
+            id: binding.id,
+            artifactId: rawArtifactId,
+            label: binding.label,
+            mode: binding.mode,
+            versionPolicy: binding.versionPolicy,
+            health: "permission_revoked",
+          };
+        }
+      }),
+    );
     return {
       agentId: artifact._id,
-      versionId: artifact.currentVersionId,
-      title: artifact.title,
-      summary: artifact.summary,
-      instructions: typeof instructions.text === "string" ? instructions.text.slice(0, 24_000) : "",
-      skills: Array.isArray(content.skills) ? content.skills.flatMap((value) => value && typeof value === "object" && !Array.isArray(value) && (value as Record<string, unknown>).enabled === true ? [{ id: (value as Record<string, unknown>).id, name: (value as Record<string, unknown>).name, instructions: (value as Record<string, unknown>).instructions }] : []).slice(0, 40) : [],
-      tools: Array.isArray(content.tools) ? content.tools.flatMap((value) => value && typeof value === "object" && !Array.isArray(value) && (value as Record<string, unknown>).enabled === true ? [{ id: (value as Record<string, unknown>).id, key: (value as Record<string, unknown>).key, approval: (value as Record<string, unknown>).approval }] : []).slice(0, 60) : [],
-      resources: Array.isArray(content.resources) ? content.resources.flatMap((value) => value && typeof value === "object" && !Array.isArray(value) ? [{ id: (value as Record<string, unknown>).id, artifactId: (value as Record<string, unknown>).artifactId, mode: (value as Record<string, unknown>).mode, label: (value as Record<string, unknown>).label }] : []).slice(0, 60) : [],
-      routing: { description: typeof routing.description === "string" ? routing.description : "", examples: Array.isArray(routing.examples) ? routing.examples : [] },
+      versionId: release.versionId,
+      title:
+        typeof releaseState.title === "string"
+          ? releaseState.title
+          : artifact.title,
+      summary:
+        typeof releaseState.summary === "string"
+          ? releaseState.summary
+          : artifact.summary,
+      instructions:
+        typeof instructions.text === "string"
+          ? instructions.text.slice(0, 24_000)
+          : "",
+      skills: Array.isArray(content.skills)
+        ? content.skills
+            .flatMap((value) =>
+              value &&
+              typeof value === "object" &&
+              !Array.isArray(value) &&
+              (value as Record<string, unknown>).enabled === true
+                ? [
+                    {
+                      id: (value as Record<string, unknown>).id,
+                      name: (value as Record<string, unknown>).name,
+                      instructions: (value as Record<string, unknown>)
+                        .instructions,
+                    },
+                  ]
+                : [],
+            )
+            .slice(0, 40)
+        : [],
+      tools: Array.isArray(content.tools)
+        ? content.tools
+            .flatMap((value) =>
+              value &&
+              typeof value === "object" &&
+              !Array.isArray(value) &&
+              (value as Record<string, unknown>).enabled === true
+                ? [
+                    {
+                      id: (value as Record<string, unknown>).id,
+                      key: (value as Record<string, unknown>).key,
+                      approval: (value as Record<string, unknown>).approval,
+                    },
+                  ]
+                : [],
+            )
+            .slice(0, 60)
+        : [],
+      resources: resolvedResources,
+      routing: {
+        description:
+          typeof routing.description === "string" ? routing.description : "",
+        examples: Array.isArray(routing.examples) ? routing.examples : [],
+      },
     };
   },
 });
@@ -269,23 +1371,46 @@ export const create = mutation({
     const actor = await requireSpectraActor(ctx);
     if (args.runId) {
       const run = await ctx.db.get(args.runId);
-      if (!run || run.ownerAccountId !== actor._id || run.schoolId !== actor.schoolId || run.status !== "running" || !args.executionId || run.executionId !== args.executionId) throw new Error("This run is no longer allowed to create artifacts.");
+      if (
+        !run ||
+        run.ownerAccountId !== actor._id ||
+        run.schoolId !== actor.schoolId ||
+        run.status !== "running" ||
+        !args.executionId ||
+        run.executionId !== args.executionId
+      )
+        throw new Error("This run is no longer allowed to create artifacts.");
     }
     if (args.workspaceId) {
       await requireWorkspaceCapability(ctx, args.workspaceId, "modify");
     }
-    for (const sourceArtifactId of args.sourceArtifactIds ?? []) await requireArtifactCapability(ctx, sourceArtifactId);
+    for (const sourceArtifactId of args.sourceArtifactIds ?? [])
+      await requireArtifactCapability(ctx, sourceArtifactId);
     const now = Date.now();
     const title = args.title.trim() || "Untitled artifact";
-    const summary = args.summary?.trim() || fallbackArtifactSummary(args.blueprintKey as BlueprintKey);
+    const summary =
+      args.summary?.trim() ||
+      fallbackArtifactSummary(args.blueprintKey as BlueprintKey);
+    const content = contentForArtifactStorage(
+      args.blueprintKey,
+      args.content ?? defaultArtifactContent(args.blueprintKey as BlueprintKey),
+    );
     const artifactId = await ctx.db.insert("spectraArtifacts", {
       ownerAccountId: actor._id,
       schoolId: actor.schoolId,
       blueprintKey: args.blueprintKey,
+      schemaVersion: defaultArtifactSchemaVersion(
+        args.blueprintKey as BlueprintKey,
+      ),
       title,
       summary,
-      content: args.content ?? defaultArtifactContent(args.blueprintKey as BlueprintKey),
-      textIndex: buildArtifactTextIndex({ title, summary, content: args.content, tags: args.tags }),
+      content,
+      textIndex: buildArtifactTextIndex({
+        title,
+        summary,
+        content,
+        tags: args.tags,
+      }),
       tags: args.tags ?? [],
       status: "active",
       createdFrom: {
@@ -295,7 +1420,9 @@ export const create = mutation({
         threadId: args.threadId,
         sourceArtifactIds: args.sourceArtifactIds?.slice(0, 12),
         sourceThreadIds: args.sourceThreadIds?.slice(0, 4),
-        sourceAttachmentNames: args.sourceAttachmentNames?.map((name) => name.slice(0, 180)).slice(0, 8),
+        sourceAttachmentNames: args.sourceAttachmentNames
+          ?.map((name) => name.slice(0, 180))
+          .slice(0, 8),
         contextSummary: args.contextSummary?.slice(0, 400),
       },
       createdAt: now,
@@ -329,11 +1456,22 @@ export const create = mutation({
     const created = {
       title,
       summary,
-      content: args.content ?? defaultArtifactContent(args.blueprintKey as BlueprintKey),
+      content,
       tags: args.tags ?? [],
     };
-    const initial = { title: "Untitled artifact", summary: undefined, content: null, tags: [] as string[] };
-    const snapshots = await versionSnapshotFields(ctx, actor.schoolId, args.blueprintKey, initial, created);
+    const initial = {
+      title: "Untitled artifact",
+      summary: undefined,
+      content: null,
+      tags: [] as string[],
+    };
+    const snapshots = await versionSnapshotFields(
+      ctx,
+      actor.schoolId,
+      args.blueprintKey,
+      initial,
+      created,
+    );
     const versionId = await ctx.db.insert("spectraArtifactVersions", {
       artifactId,
       ownerAccountId: actor._id,
@@ -341,71 +1479,198 @@ export const create = mutation({
       source: args.source === "ai" ? "ai" : "manual",
       runId: args.runId,
       ...snapshots,
-      summary: args.source === "ai" ? "Created with Spectra" : "Artifact created",
+      summary:
+        args.source === "ai" ? "Created with Spectra" : "Artifact created",
       createdAt: now,
     });
     await ctx.db.patch(artifactId, { currentVersionId: versionId });
+    await incrementOperationalCounter(ctx, {
+      schoolId: actor.schoolId,
+      category: "artifact_created",
+      dimension: args.blueprintKey,
+      occurredAt: now,
+    });
 
     return { artifactId, workspaceItemId };
   },
 });
 
 export const createPending = mutation({
-  args: { blueprintKey: vBlueprintKey, title: v.string(), workspaceId: v.optional(v.id("spectraWorkspaces")), runId: v.id("spectraAiRuns"), executionId: v.string(), threadId: v.optional(v.id("spectraThreads")) },
+  args: {
+    blueprintKey: vBlueprintKey,
+    title: v.string(),
+    workspaceId: v.optional(v.id("spectraWorkspaces")),
+    runId: v.id("spectraAiRuns"),
+    executionId: v.string(),
+    threadId: v.optional(v.id("spectraThreads")),
+  },
   handler: async (ctx, args) => {
     const actor = await requireSpectraActor(ctx);
     const run = await ctx.db.get(args.runId);
-    if (!run || run.ownerAccountId !== actor._id || run.schoolId !== actor.schoolId || run.status !== "running" || run.executionId !== args.executionId) throw new Error("AI run not found");
-    if (args.workspaceId) await requireWorkspaceCapability(ctx, args.workspaceId, "modify");
+    if (
+      !run ||
+      run.ownerAccountId !== actor._id ||
+      run.schoolId !== actor.schoolId ||
+      run.status !== "running" ||
+      run.executionId !== args.executionId
+    )
+      throw new Error("AI run not found");
+    if (args.workspaceId)
+      await requireWorkspaceCapability(ctx, args.workspaceId, "modify");
     const now = Date.now();
     const title = args.title.trim() || "Creating artifact";
-    const summary = "Spectra is building this artifact now.";
+    const summary = `Spectra is building ${title}.`;
     const artifactId = await ctx.db.insert("spectraArtifacts", {
-      ownerAccountId: actor._id, schoolId: actor.schoolId, blueprintKey: args.blueprintKey,
-      title, summary, content: defaultArtifactContent(args.blueprintKey as BlueprintKey),
-      textIndex: `${title} ${summary}`, tags: [], status: "active", aiState: "creating", aiRunId: args.runId, aiExecutionId: args.executionId, aiProgress: 0.05,
-      createdFrom: { source: "ai", workspaceId: args.workspaceId, runId: args.runId, threadId: args.threadId },
-      createdAt: now, updatedAt: now,
+      ownerAccountId: actor._id,
+      schoolId: actor.schoolId,
+      blueprintKey: args.blueprintKey,
+      schemaVersion: defaultArtifactSchemaVersion(
+        args.blueprintKey as BlueprintKey,
+      ),
+      title,
+      summary,
+      content: defaultArtifactContent(args.blueprintKey as BlueprintKey),
+      textIndex: `${title} ${summary}`,
+      tags: [],
+      status: "active",
+      aiState: "creating",
+      aiRunId: args.runId,
+      aiExecutionId: args.executionId,
+      aiProgress: 0.05,
+      createdFrom: {
+        source: "ai",
+        workspaceId: args.workspaceId,
+        runId: args.runId,
+        threadId: args.threadId,
+      },
+      createdAt: now,
+      updatedAt: now,
     });
     let workspaceItemId: Id<"spectraWorkspaceItems"> | undefined;
     if (args.workspaceId) {
-      workspaceItemId = await ctx.db.insert("spectraWorkspaceItems", { workspaceId: args.workspaceId, sourceType: "artifact", sourceId: artifactId, placedByAccountId: actor.accountId, accessProjection: true, viewData: { compactSummary: summary, hidden: false }, layout: { view: "cards" }, createdAt: now, updatedAt: now });
-      await ctx.db.patch(args.workspaceId, { updatedAt: now, lastActivityAt: now });
+      workspaceItemId = await ctx.db.insert("spectraWorkspaceItems", {
+        workspaceId: args.workspaceId,
+        sourceType: "artifact",
+        sourceId: artifactId,
+        placedByAccountId: actor.accountId,
+        accessProjection: true,
+        viewData: { compactSummary: summary, hidden: false },
+        layout: { view: "cards" },
+        createdAt: now,
+        updatedAt: now,
+      });
+      await ctx.db.patch(args.workspaceId, {
+        updatedAt: now,
+        lastActivityAt: now,
+      });
     }
+    await incrementOperationalCounter(ctx, {
+      schoolId: actor.schoolId,
+      category: "artifact_created",
+      dimension: args.blueprintKey,
+      occurredAt: now,
+    });
     return { artifactId, workspaceItemId };
   },
 });
 
 export const finalizePendingLive = mutation({
-  args: { artifactId: v.id("spectraArtifacts"), runId: v.id("spectraAiRuns"), executionId: v.string() },
+  args: {
+    artifactId: v.id("spectraArtifacts"),
+    runId: v.id("spectraAiRuns"),
+    executionId: v.string(),
+  },
   handler: async (ctx, args) => {
-    const { actor, artifact } = await requireArtifactCapability(ctx, args.artifactId, "modify");
+    const { actor, artifact } = await requireArtifactCapability(
+      ctx,
+      args.artifactId,
+      "modify",
+    );
     const run = await ctx.db.get(args.runId);
-    if (!run || run.ownerAccountId !== actor.accountId || run.status !== "running" || run.executionId !== args.executionId || artifact.aiRunId !== args.runId || artifact.aiExecutionId !== args.executionId || (artifact.aiState !== "creating" && artifact.aiState !== undefined)) throw new Error("This pending artifact is no longer editable by that run.");
-    if (!artifact.currentVersionId || !artifact.liveStateVectorHash) throw new Error("The live artifact has not finished synchronizing.");
+    if (
+      !run ||
+      run.ownerAccountId !== actor.accountId ||
+      run.status !== "running" ||
+      run.executionId !== args.executionId ||
+      artifact.aiRunId !== args.runId ||
+      artifact.aiExecutionId !== args.executionId ||
+      (artifact.aiState !== "creating" && artifact.aiState !== undefined)
+    )
+      throw new Error(
+        "This pending artifact is no longer editable by that run.",
+      );
+    if (!artifact.currentVersionId || !artifact.liveStateVectorHash)
+      throw new Error("The live artifact has not finished synchronizing.");
     const version = await ctx.db.get(artifact.currentVersionId);
-    if (!version || version.artifactId !== artifact._id || version.source !== "ai" || version.runId !== args.runId) throw new Error("The synchronized AI version is unavailable.");
+    if (
+      !version ||
+      version.artifactId !== artifact._id ||
+      version.source !== "ai" ||
+      version.runId !== args.runId
+    )
+      throw new Error("The synchronized AI version is unavailable.");
     const now = Date.now();
     await ctx.db.patch(version._id, { summary: "Created with Spectra" });
-    await ctx.db.patch(args.artifactId, { aiState: "edited", aiExecutionId: undefined, aiStateExpiresAt: now + 8_000, aiProgress: undefined, aiPreview: undefined, updatedAt: now });
-    const placements = await ctx.db.query("spectraWorkspaceItems").withIndex("by_source", (q) => q.eq("sourceType", "artifact").eq("sourceId", args.artifactId)).collect();
-    await Promise.all(placements.map((placement) => ctx.db.patch(placement._id, { viewData: { ...placement.viewData, compactSummary: artifact.summary }, updatedAt: now })));
+    await ctx.db.patch(args.artifactId, {
+      aiState: undefined,
+      aiRunId: undefined,
+      aiExecutionId: undefined,
+      aiStateExpiresAt: undefined,
+      aiProgress: undefined,
+      aiPreview: undefined,
+      aiEffects: undefined,
+      updatedAt: now,
+    });
+    const placements = await ctx.db
+      .query("spectraWorkspaceItems")
+      .withIndex("by_source", (q) =>
+        q.eq("sourceType", "artifact").eq("sourceId", args.artifactId),
+      )
+      .collect();
+    await Promise.all(
+      placements.map((placement) =>
+        ctx.db.patch(placement._id, {
+          viewData: { ...placement.viewData, compactSummary: artifact.summary },
+          updatedAt: now,
+        }),
+      ),
+    );
     return { artifactId: args.artifactId, workspaceItemId: placements[0]?._id };
   },
 });
 
 export const pausePendingForConflict = mutation({
-  args: { artifactId: v.id("spectraArtifacts"), runId: v.id("spectraAiRuns"), executionId: v.string() },
+  args: {
+    artifactId: v.id("spectraArtifacts"),
+    runId: v.id("spectraAiRuns"),
+    executionId: v.string(),
+  },
   handler: async (ctx, args) => {
-    const { actor, artifact } = await requireArtifactCapability(ctx, args.artifactId, "modify");
+    const { actor, artifact } = await requireArtifactCapability(
+      ctx,
+      args.artifactId,
+      "modify",
+    );
     const run = await ctx.db.get(args.runId);
-    if (!run || run.ownerAccountId !== actor.accountId || run.executionId !== args.executionId || artifact.aiRunId !== args.runId || artifact.aiExecutionId !== args.executionId) throw new Error("This pending artifact does not belong to the paused run.");
+    if (
+      !run ||
+      run.ownerAccountId !== actor.accountId ||
+      run.executionId !== args.executionId ||
+      artifact.aiRunId !== args.runId ||
+      artifact.aiExecutionId !== args.executionId
+    )
+      throw new Error(
+        "This pending artifact does not belong to the paused run.",
+      );
     if (artifact.aiState !== "creating") return { paused: false };
     await ctx.db.patch(artifact._id, {
       aiState: undefined,
       aiProgress: undefined,
       aiPreview: undefined,
-      summary: artifact.summary === "Spectra is building this artifact now." ? "Draft paused while an overlapping edit is resolved." : artifact.summary,
+      aiEffects: undefined,
+      summary: artifact.summary?.startsWith("Spectra is building ")
+        ? "Draft paused while an overlapping edit is resolved."
+        : artifact.summary,
       updatedAt: Date.now(),
     });
     return { paused: true };
@@ -413,13 +1678,40 @@ export const pausePendingForConflict = mutation({
 });
 
 export const patchPendingContent = mutation({
-  args: { artifactId: v.id("spectraArtifacts"), runId: v.id("spectraAiRuns"), executionId: v.string(), content: v.any(), progress: v.number(), title: v.optional(v.string()), summary: v.optional(v.string()) },
+  args: {
+    artifactId: v.id("spectraArtifacts"),
+    runId: v.id("spectraAiRuns"),
+    executionId: v.string(),
+    content: v.any(),
+    progress: v.number(),
+    title: v.optional(v.string()),
+    summary: v.optional(v.string()),
+  },
   handler: async (ctx, args) => {
-    const { actor, artifact } = await requireArtifactCapability(ctx, args.artifactId, "modify");
+    const { actor, artifact } = await requireArtifactCapability(
+      ctx,
+      args.artifactId,
+      "modify",
+    );
     const run = await ctx.db.get(args.runId);
-    if (!run || run.ownerAccountId !== actor.accountId || run.status !== "running" || run.executionId !== args.executionId || artifact.aiRunId !== args.runId || artifact.aiExecutionId !== args.executionId || artifact.aiState !== "creating") throw new Error("This pending artifact is no longer editable by that run.");
+    if (
+      !run ||
+      run.ownerAccountId !== actor.accountId ||
+      run.status !== "running" ||
+      run.executionId !== args.executionId ||
+      artifact.aiRunId !== args.runId ||
+      artifact.aiExecutionId !== args.executionId ||
+      artifact.aiState !== "creating"
+    )
+      throw new Error(
+        "This pending artifact is no longer editable by that run.",
+      );
     const progress = Math.max(0, Math.min(0.98, args.progress));
     const title = args.title?.trim() || artifact.title;
+    const content = contentForArtifactStorage(
+      artifact.blueprintKey,
+      args.content,
+    );
     await ctx.db.patch(args.artifactId, {
       title,
       summary: args.summary ?? artifact.summary,
@@ -429,7 +1721,7 @@ export const patchPendingContent = mutation({
         ...(artifact.aiPreview ?? {}),
         title,
         summary: args.summary ?? artifact.summary,
-        content: args.content,
+        content,
         changedPaths: ["/"],
         startedAt: artifact.aiPreview?.startedAt ?? Date.now(),
       },
@@ -439,13 +1731,183 @@ export const patchPendingContent = mutation({
   },
 });
 
-export const stageAiPatch = mutation({
-  args: { artifactId: v.id("spectraArtifacts"), runId: v.id("spectraAiRuns"), executionId: v.string(), title: v.optional(v.string()), summary: v.optional(v.string()), content: v.optional(v.any()), tags: v.optional(v.array(v.string())), changedPaths: v.optional(v.array(v.string())) },
+export const updateAiEffect = mutation({
+  args: {
+    artifactId: v.id("spectraArtifacts"),
+    runId: v.id("spectraAiRuns"),
+    executionId: v.string(),
+    title: v.string(),
+    detail: v.optional(v.string()),
+    activity: v.union(
+      v.literal("create"),
+      v.literal("edit"),
+      v.literal("verify"),
+      v.literal("other"),
+    ),
+    regionHint: v.optional(v.string()),
+    operationIndex: v.optional(v.number()),
+    regionIds: v.optional(v.array(v.string())),
+    changedPaths: v.optional(v.array(v.string())),
+  },
   handler: async (ctx, args) => {
-    const { actor, artifact } = await requireArtifactCapability(ctx, args.artifactId, "modify");
+    const { actor, artifact } = await requireArtifactCapability(
+      ctx,
+      args.artifactId,
+      "modify",
+    );
     const run = await ctx.db.get(args.runId);
-    if (!run || run.ownerAccountId !== actor.accountId || run.status !== "running" || run.executionId !== args.executionId) throw new Error("This run is no longer allowed to preview changes.");
-    await ctx.db.patch(args.artifactId, { aiState: "updating", aiRunId: args.runId, aiExecutionId: args.executionId, aiPreview: { title: args.title, summary: args.summary, content: args.content, tags: args.tags, changedPaths: args.changedPaths, startedAt: Date.now() }, updatedAt: Date.now() });
+    if (
+      !run ||
+      run.ownerAccountId !== actor.accountId ||
+      run.schoolId !== actor.schoolId ||
+      run.status !== "running" ||
+      run.executionId !== args.executionId
+    )
+      throw new Error(
+        "This run is no longer allowed to show an artifact effect.",
+      );
+    const now = Date.now();
+    const effectTitle = args.title.replace(/\s+/g, " ").trim().slice(0, 88);
+    if (effectTitle.length < 4)
+      throw new Error("The artifact effect title is too vague.");
+    const effectDetail = args.detail?.replace(/\s+/g, " ").trim().slice(0, 240);
+    const effectRegionHint = args.regionHint
+      ?.replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 160);
+    const effectId =
+      args.operationIndex !== undefined
+        ? `${args.runId}:${args.operationIndex}`
+        : `${args.runId}:focused:${effectRegionHint ?? args.activity}`;
+    const existingEffects = currentAiEffects(artifact, now).filter(
+      (effect) =>
+        effect.runId !== args.runId || effect.executionId === args.executionId,
+    );
+    const previous = existingEffects.find(
+      (effect) => effect.effectId === effectId,
+    );
+    const nextEffect = {
+      effectId,
+      runId: args.runId,
+      executionId: args.executionId,
+      ...(args.operationIndex !== undefined
+        ? { operationIndex: Math.max(0, Math.floor(args.operationIndex)) }
+        : {}),
+      title: effectTitle,
+      ...(effectDetail ? { detail: effectDetail } : {}),
+      activity: args.activity,
+      ...(effectRegionHint ? { regionHint: effectRegionHint } : {}),
+      regionIds: [
+        ...new Set(
+          (args.regionIds ?? previous?.regionIds ?? [])
+            .map((regionId) => regionId.trim().slice(0, 240))
+            .filter(Boolean),
+        ),
+      ].slice(0, 128),
+      changedPaths: [
+        ...new Set(
+          (
+            args.changedPaths ??
+            previous?.changedPaths ??
+            artifact.aiPreview?.changedPaths ??
+            []
+          )
+            .map((path) => path.trim().slice(0, 500))
+            .filter(Boolean),
+        ),
+      ].slice(0, 256),
+      state: "active" as const,
+      startedAt: previous?.startedAt ?? now,
+      updatedAt: now,
+    };
+    await ctx.db.patch(args.artifactId, {
+      aiState:
+        artifact.aiState === "creating" ||
+        (artifact.createdFrom?.runId === args.runId &&
+          !artifact.currentVersionId)
+          ? "creating"
+          : "updating",
+      aiRunId: args.runId,
+      aiExecutionId: args.executionId,
+      aiEffects: [
+        ...existingEffects.filter((effect) => effect.effectId !== effectId),
+        nextEffect,
+      ].slice(-24),
+      aiPreview: {
+        ...(artifact.aiPreview ?? { startedAt: now }),
+        effectTitle,
+        ...(effectDetail ? { effectDetail } : {}),
+        effectActivity: args.activity,
+        ...(effectRegionHint ? { effectRegionHint } : {}),
+        ...(args.operationIndex !== undefined
+          ? { effectOperationIndex: args.operationIndex }
+          : {}),
+      },
+      updatedAt: now,
+    });
+    return { artifactId: args.artifactId };
+  },
+});
+
+export const stageAiPatch = mutation({
+  args: {
+    artifactId: v.id("spectraArtifacts"),
+    runId: v.id("spectraAiRuns"),
+    executionId: v.string(),
+    title: v.optional(v.string()),
+    summary: v.optional(v.string()),
+    content: v.optional(v.any()),
+    tags: v.optional(v.array(v.string())),
+    changedPaths: v.optional(v.array(v.string())),
+    operationIndex: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const { actor, artifact } = await requireArtifactCapability(
+      ctx,
+      args.artifactId,
+      "modify",
+    );
+    const run = await ctx.db.get(args.runId);
+    if (
+      !run ||
+      run.ownerAccountId !== actor.accountId ||
+      run.status !== "running" ||
+      run.executionId !== args.executionId
+    )
+      throw new Error("This run is no longer allowed to preview changes.");
+    const now = Date.now();
+    const content =
+      args.content === undefined
+        ? undefined
+        : contentForArtifactStorage(artifact.blueprintKey, args.content);
+    const changedPaths = (args.changedPaths ?? [])
+      .map((path) => path.trim().slice(0, 500))
+      .filter(Boolean)
+      .slice(0, 256);
+    const effects = currentAiEffects(artifact, now).map((effect) =>
+      effect.runId === args.runId &&
+      effect.executionId === args.executionId &&
+      (args.operationIndex === undefined ||
+        effect.operationIndex === args.operationIndex)
+        ? { ...effect, changedPaths, updatedAt: now }
+        : effect,
+    );
+    await ctx.db.patch(args.artifactId, {
+      aiState: "updating",
+      aiRunId: args.runId,
+      aiExecutionId: args.executionId,
+      aiPreview: {
+        ...(artifact.aiPreview ?? {}),
+        title: args.title,
+        summary: args.summary,
+        content,
+        tags: args.tags,
+        changedPaths,
+        startedAt: artifact.aiPreview?.startedAt ?? now,
+      },
+      aiEffects: effects,
+      updatedAt: now,
+    });
     return { artifactId: args.artifactId };
   },
 });
@@ -455,15 +1917,85 @@ export const discardPendingForRun = mutation({
   handler: async (ctx, args) => {
     const actor = await requireSpectraActor(ctx);
     const run = await ctx.db.get(args.runId);
-    if (!run || run.ownerAccountId !== actor._id || run.schoolId !== actor.schoolId || run.executionId !== args.executionId) throw new Error("This run attempt is no longer active.");
-    const artifacts = await ctx.db.query("spectraArtifacts").withIndex("by_account_status", (q) => q.eq("ownerAccountId", actor._id).eq("status", "active")).collect();
-    const pending = artifacts.filter((artifact) => artifact.schoolId === actor.schoolId && artifact.aiRunId === args.runId && artifact.aiExecutionId === args.executionId && (artifact.aiState === "creating" || (artifact.aiState === "failed" && artifact.createdFrom?.runId === args.runId)));
+    if (
+      !run ||
+      run.ownerAccountId !== actor._id ||
+      run.schoolId !== actor.schoolId ||
+      run.executionId !== args.executionId
+    )
+      throw new Error("This run attempt is no longer active.");
+    const artifacts = await ctx.db
+      .query("spectraArtifacts")
+      .withIndex("by_account_status", (q) =>
+        q.eq("ownerAccountId", actor._id).eq("status", "active"),
+      )
+      .collect();
+    const pending = artifacts.filter(
+      (artifact) =>
+        artifact.schoolId === actor.schoolId &&
+        artifact.aiRunId === args.runId &&
+        artifact.aiExecutionId === args.executionId &&
+        (artifact.aiState === "creating" ||
+          (artifact.createdFrom?.runId === args.runId &&
+            !artifact.currentVersionId)),
+    );
     for (const artifact of pending) {
-      const placements = await ctx.db.query("spectraWorkspaceItems").withIndex("by_source", (q) => q.eq("sourceType", "artifact").eq("sourceId", artifact._id)).collect();
-      await Promise.all(placements.map((placement) => ctx.db.delete(placement._id)));
+      const placements = await ctx.db
+        .query("spectraWorkspaceItems")
+        .withIndex("by_source", (q) =>
+          q.eq("sourceType", "artifact").eq("sourceId", artifact._id),
+        )
+        .collect();
+      await Promise.all(
+        placements.map((placement) => ctx.db.delete(placement._id)),
+      );
       await ctx.db.delete(artifact._id);
     }
     return { discarded: pending.length };
+  },
+});
+
+export const pausePendingForApproval = mutation({
+  args: { runId: v.id("spectraAiRuns"), executionId: v.string() },
+  handler: async (ctx, args) => {
+    const actor = await requireSpectraActor(ctx);
+    const run = await ctx.db.get(args.runId);
+    if (
+      !run ||
+      run.ownerAccountId !== actor._id ||
+      run.schoolId !== actor.schoolId ||
+      run.status !== "awaiting_confirmation" ||
+      run.executionId !== args.executionId
+    )
+      throw new Error("This run is not waiting for approval.");
+    const artifacts = await ctx.db
+      .query("spectraArtifacts")
+      .withIndex("by_account_status", (q) =>
+        q.eq("ownerAccountId", actor._id).eq("status", "active"),
+      )
+      .collect();
+    const pending = artifacts.filter(
+      (artifact) =>
+        artifact.schoolId === actor.schoolId &&
+        artifact.aiRunId === args.runId &&
+        artifact.aiExecutionId === args.executionId &&
+        artifact.createdFrom?.runId === args.runId &&
+        !artifact.currentVersionId,
+    );
+    const now = Date.now();
+    await Promise.all(
+      pending.map((artifact) =>
+        ctx.db.patch(artifact._id, {
+          aiState: undefined,
+          aiProgress: undefined,
+          aiPreview: undefined,
+          aiEffects: undefined,
+          summary: "Proposed artifact awaiting your approval.",
+          updatedAt: now,
+        }),
+      ),
+    );
+    return { paused: pending.length };
   },
 });
 
@@ -472,72 +2004,181 @@ export const failPendingForRun = mutation({
   handler: async (ctx, args) => {
     const actor = await requireSpectraActor(ctx);
     const run = await ctx.db.get(args.runId);
-    if (!run || run.ownerAccountId !== actor._id || run.schoolId !== actor.schoolId || run.executionId !== args.executionId) throw new Error("This run attempt is no longer active.");
-    const artifacts = await ctx.db.query("spectraArtifacts").withIndex("by_account_status", (q) => q.eq("ownerAccountId", actor._id).eq("status", "active")).collect();
-    const pending = artifacts.filter((artifact) => artifact.schoolId === actor.schoolId && artifact.aiRunId === args.runId && artifact.aiExecutionId === args.executionId && artifact.aiState === "creating");
+    if (
+      !run ||
+      run.ownerAccountId !== actor._id ||
+      run.schoolId !== actor.schoolId ||
+      run.executionId !== args.executionId
+    )
+      throw new Error("This run attempt is no longer active.");
+    const artifacts = await ctx.db
+      .query("spectraArtifacts")
+      .withIndex("by_account_status", (q) =>
+        q.eq("ownerAccountId", actor._id).eq("status", "active"),
+      )
+      .collect();
+    const pending = artifacts.filter(
+      (artifact) =>
+        artifact.schoolId === actor.schoolId &&
+        artifact.aiRunId === args.runId &&
+        artifact.aiExecutionId === args.executionId &&
+        artifact.aiState === "creating",
+    );
     let removed = 0;
-    await Promise.all(pending.map(async (artifact) => {
-      // A provisional shell with no generated content is not useful work. Do
-      // not leave an empty red artifact behind after an internal format error.
-      if ((artifact.aiProgress ?? 0) <= 0.05) {
-        const placements = await ctx.db.query("spectraWorkspaceItems").withIndex("by_source", (q) => q.eq("sourceType", "artifact").eq("sourceId", artifact._id)).collect();
-        await Promise.all(placements.map((placement) => ctx.db.delete(placement._id)));
-        await ctx.db.delete(artifact._id);
-        removed += 1;
-        return;
-      }
-      await ctx.db.patch(artifact._id, {
-        aiState: undefined,
-        aiRunId: undefined,
-        aiExecutionId: undefined,
-        aiStateExpiresAt: undefined,
-        aiProgress: undefined,
-        aiPreview: undefined,
-        summary: "Incomplete draft preserved from an interrupted Spectra run.",
-        updatedAt: Date.now(),
-      });
-    }));
+    await Promise.all(
+      pending.map(async (artifact) => {
+        // A provisional shell with no generated content is not useful work. Do
+        // not leave an empty red artifact behind after an internal format error.
+        if ((artifact.aiProgress ?? 0) <= 0.05) {
+          const placements = await ctx.db
+            .query("spectraWorkspaceItems")
+            .withIndex("by_source", (q) =>
+              q.eq("sourceType", "artifact").eq("sourceId", artifact._id),
+            )
+            .collect();
+          await Promise.all(
+            placements.map((placement) => ctx.db.delete(placement._id)),
+          );
+          await ctx.db.delete(artifact._id);
+          removed += 1;
+          return;
+        }
+        await ctx.db.patch(artifact._id, {
+          aiState: undefined,
+          aiRunId: undefined,
+          aiExecutionId: undefined,
+          aiStateExpiresAt: undefined,
+          aiProgress: undefined,
+          aiPreview: undefined,
+          aiEffects: undefined,
+          summary:
+            "Incomplete draft preserved from an interrupted Spectra run.",
+          updatedAt: Date.now(),
+        });
+      }),
+    );
     return { failed: pending.length - removed, removed };
   },
 });
 
 export const settleStagedForRun = mutation({
-  args: { runId: v.id("spectraAiRuns"), executionId: v.string(), outcome: v.union(v.literal("clear"), v.literal("failed")) },
+  args: {
+    runId: v.id("spectraAiRuns"),
+    executionId: v.string(),
+    outcome: v.union(v.literal("clear"), v.literal("failed")),
+  },
   handler: async (ctx, args) => {
     const actor = await requireSpectraActor(ctx);
     const run = await ctx.db.get(args.runId);
-    if (!run || run.ownerAccountId !== actor._id || run.schoolId !== actor.schoolId || run.executionId !== args.executionId) throw new Error("This run attempt is no longer active.");
-    const artifacts = await ctx.db.query("spectraArtifacts").withIndex("by_account_status", (q) => q.eq("ownerAccountId", actor._id).eq("status", "active")).collect();
-    const staged = artifacts.filter((artifact) =>
-      artifact.schoolId === actor.schoolId &&
-      artifact.aiRunId === args.runId &&
-      (artifact.aiExecutionId === args.executionId || (artifact.aiExecutionId === undefined && artifact.aiState === "edited")) &&
-      (artifact.aiState === "updating" || artifact.aiState === "edited"),
+    if (
+      !run ||
+      run.ownerAccountId !== actor._id ||
+      run.schoolId !== actor.schoolId ||
+      run.executionId !== args.executionId
+    )
+      throw new Error("This run attempt is no longer active.");
+    const artifacts = await ctx.db
+      .query("spectraArtifacts")
+      .withIndex("by_account_status", (q) =>
+        q.eq("ownerAccountId", actor._id).eq("status", "active"),
+      )
+      .collect();
+    const staged = artifacts.filter(
+      (artifact) =>
+        artifact.schoolId === actor.schoolId &&
+        (artifact.aiRunId === args.runId ||
+          (artifact.aiEffects ?? []).some(
+            (effect) =>
+              effect.runId === args.runId &&
+              effect.executionId === args.executionId,
+          )),
     );
     const now = Date.now();
-    await Promise.all(staged.map((artifact) => ctx.db.patch(artifact._id, {
-      aiState: undefined,
-      aiRunId: undefined,
-      aiExecutionId: undefined,
-      aiStateExpiresAt: undefined,
-      aiProgress: undefined,
-      aiPreview: undefined,
-      updatedAt: now,
-    })));
+    await Promise.all(
+      staged.map((artifact) => {
+        const remainingEffects = currentAiEffects(artifact, now).filter(
+          (effect) =>
+            effect.runId !== args.runId ||
+            effect.executionId !== args.executionId,
+        );
+        const keepCurrentPreview =
+          artifact.aiRunId !== args.runId ||
+          artifact.aiExecutionId !== args.executionId;
+        const latest = remainingEffects.at(-1);
+        return ctx.db.patch(artifact._id, {
+          aiState: remainingEffects.length ? "updating" : undefined,
+          aiRunId: latest?.runId,
+          aiExecutionId: latest?.executionId,
+          aiStateExpiresAt: undefined,
+          aiProgress: remainingEffects.length ? artifact.aiProgress : undefined,
+          aiPreview: keepCurrentPreview ? artifact.aiPreview : undefined,
+          aiEffects: remainingEffects.length ? remainingEffects : undefined,
+          updatedAt: now,
+        });
+      }),
+    );
     return { settled: staged.length };
   },
 });
 
 export const markAiState = mutation({
-  args: { artifactId: v.id("spectraArtifacts"), runId: v.id("spectraAiRuns"), executionId: v.string(), state: v.union(v.literal("updating"), v.literal("edited"), v.literal("failed")) },
+  args: {
+    artifactId: v.id("spectraArtifacts"),
+    runId: v.id("spectraAiRuns"),
+    executionId: v.string(),
+    state: v.union(
+      v.literal("updating"),
+      v.literal("edited"),
+      v.literal("failed"),
+    ),
+  },
   handler: async (ctx, args) => {
-    const { actor, artifact } = await requireArtifactCapability(ctx, args.artifactId, "modify");
+    const { actor, artifact } = await requireArtifactCapability(
+      ctx,
+      args.artifactId,
+      "modify",
+    );
     const run = await ctx.db.get(args.runId);
-    if (!run || run.ownerAccountId !== actor.accountId || run.executionId !== args.executionId || artifact.aiRunId !== args.runId || artifact.aiExecutionId !== args.executionId) throw new Error("This artifact belongs to a different run attempt.");
+    if (
+      !run ||
+      run.ownerAccountId !== actor.accountId ||
+      run.executionId !== args.executionId ||
+      ((artifact.aiRunId !== args.runId ||
+        artifact.aiExecutionId !== args.executionId) &&
+        !(artifact.aiEffects ?? []).some(
+          (effect) =>
+            effect.runId === args.runId &&
+            effect.executionId === args.executionId,
+        ))
+    )
+      throw new Error("This artifact belongs to a different run attempt.");
     const now = Date.now();
-    await ctx.db.patch(args.artifactId, args.state === "failed"
-      ? { aiState: undefined, aiRunId: undefined, aiExecutionId: undefined, aiStateExpiresAt: undefined, aiProgress: undefined, aiPreview: undefined, updatedAt: now }
-      : { aiState: args.state, aiRunId: args.runId, aiExecutionId: args.state === "edited" ? undefined : args.executionId, aiStateExpiresAt: args.state === "edited" ? now + 8_000 : undefined, aiPreview: args.state === "edited" ? undefined : artifact.aiPreview, updatedAt: now });
+    if (args.state === "updating") {
+      await ctx.db.patch(args.artifactId, {
+        aiState: "updating",
+        aiRunId: args.runId,
+        aiExecutionId: args.executionId,
+        updatedAt: now,
+      });
+    } else {
+      const remainingEffects = currentAiEffects(artifact, now).filter(
+        (effect) =>
+          effect.runId !== args.runId ||
+          effect.executionId !== args.executionId,
+      );
+      const latest = remainingEffects.at(-1);
+      await ctx.db.patch(args.artifactId, {
+        aiState: remainingEffects.length ? "updating" : undefined,
+        aiRunId: latest?.runId,
+        aiExecutionId: latest?.executionId,
+        aiStateExpiresAt: undefined,
+        aiProgress: remainingEffects.length ? artifact.aiProgress : undefined,
+        aiPreview:
+          artifact.aiRunId === args.runId ? undefined : artifact.aiPreview,
+        aiEffects: remainingEffects.length ? remainingEffects : undefined,
+        updatedAt: now,
+      });
+    }
     return { artifactId: args.artifactId };
   },
 });
@@ -545,12 +2186,65 @@ export const markAiState = mutation({
 export const listVersions = query({
   args: { artifactId: v.id("spectraArtifacts"), limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
-    await requireArtifactCapability(ctx, args.artifactId);
-    const versions = await ctx.db.query("spectraArtifactVersions")
-      .withIndex("by_artifact_created", (q) => q.eq("artifactId", args.artifactId))
-      .order("desc")
-      .take(Math.max(1, Math.min(args.limit ?? 30, 100)));
-    return Promise.all(versions.map((version) => hydrateVersion(ctx, version)));
+    const { artifact, decision } = await requireArtifactCapability(
+      ctx,
+      args.artifactId,
+    );
+    if (artifact.blueprintKey === "quiz" && decision.level === "read")
+      return [];
+    const allVersions = await ctx.db
+      .query("spectraArtifactVersions")
+      .withIndex("by_artifact_created", (q) =>
+        q.eq("artifactId", args.artifactId),
+      )
+      .order("asc")
+      .collect();
+    const limit = Math.max(1, Math.min(args.limit ?? 30, 100));
+    const selected = allVersions.slice(-limit).reverse();
+    return Promise.all(
+      selected.map(async (version) => {
+        const [hydrated, creators, run] = await Promise.all([
+          hydrateVersionSafely(ctx, version),
+          Promise.all(
+            (version.creatorAccountIds ?? []).map((accountId) =>
+              ctx.db.get(accountId),
+            ),
+          ),
+          version.runId ? ctx.db.get(version.runId) : null,
+        ]);
+        const projectedHydrated =
+          artifact.blueprintKey === "timetable"
+            ? {
+                ...hydrated,
+                ...("before" in hydrated && hydrated.before !== undefined
+                  ? { before: projectTimetableSnapshot(hydrated.before) }
+                  : {}),
+                ...("after" in hydrated && hydrated.after !== undefined
+                  ? { after: projectTimetableSnapshot(hydrated.after) }
+                  : {}),
+              }
+            : hydrated;
+        return {
+          ...projectedHydrated,
+          versionNumber:
+            allVersions.findIndex(
+              (candidate) => candidate._id === version._id,
+            ) + 1,
+          creators: creators
+            .filter((creator): creator is NonNullable<typeof creator> =>
+              Boolean(creator),
+            )
+            .map((creator) => ({
+              accountId: creator._id,
+              name: creator.name,
+              avatarUrl: creator.avatarUrl,
+            })),
+          run: run
+            ? { runId: run._id, finalSummary: run.finalSummary }
+            : undefined,
+        };
+      }),
+    );
   },
 });
 
@@ -559,11 +2253,22 @@ export const archive = mutation({
     artifactId: v.id("spectraArtifacts"),
   },
   handler: async (ctx, args) => {
-    await requireArtifactCapability(ctx, args.artifactId, "delete");
+    const { actor, artifact } = await requireArtifactCapability(
+      ctx,
+      args.artifactId,
+      "delete",
+    );
     await ctx.db.patch(args.artifactId, {
       status: "archived",
       updatedAt: Date.now(),
     });
+    await bumpPolicyVersion(
+      ctx,
+      artifact.blueprintKey === "agent" ? "agent" : "artifact",
+      artifact._id,
+      artifact.schoolId,
+      actor.accountId,
+    );
     return { artifactId: args.artifactId };
   },
 });
@@ -573,23 +2278,149 @@ export const permanentlyDelete = mutation({
     artifactId: v.id("spectraArtifacts"),
   },
   handler: async (ctx, args) => {
-    await requireArtifactCapability(ctx, args.artifactId, "delete");
+    const { actor, artifact } = await requireArtifactCapability(
+      ctx,
+      args.artifactId,
+      "delete",
+    );
+    await bumpPolicyVersion(
+      ctx,
+      artifact.blueprintKey === "agent" ? "agent" : "artifact",
+      artifact._id,
+      artifact.schoolId,
+      actor.accountId,
+    );
 
     const placements = await ctx.db
       .query("spectraWorkspaceItems")
-      .withIndex("by_source", (q) => q.eq("sourceType", "artifact").eq("sourceId", args.artifactId))
+      .withIndex("by_source", (q) =>
+        q.eq("sourceType", "artifact").eq("sourceId", args.artifactId),
+      )
       .collect();
-    await Promise.all(placements.map((placement) => ctx.db.delete(placement._id)));
+    await Promise.all(
+      placements.map((placement) => ctx.db.delete(placement._id)),
+    );
+    const userStates = await ctx.db
+      .query("artifactUserStates")
+      .withIndex("by_artifact_updated", (q) =>
+        q.eq("artifactId", args.artifactId),
+      )
+      .collect();
+    await Promise.all(userStates.map((state) => ctx.db.delete(state._id)));
 
-    const versions = await ctx.db.query("spectraArtifactVersions").withIndex("by_artifact_created", (q) => q.eq("artifactId", args.artifactId)).collect();
+    const versions = await ctx.db
+      .query("spectraArtifactVersions")
+      .withIndex("by_artifact_created", (q) =>
+        q.eq("artifactId", args.artifactId),
+      )
+      .collect();
+    const runtimeBuilds = await ctx.db
+      .query("spectraRuntimeBuilds")
+      .withIndex("by_artifact_status", (q) =>
+        q.eq("artifactId", args.artifactId),
+      )
+      .collect();
+    const importJobs = await ctx.db
+      .query("artifactImportJobs")
+      .withIndex("by_artifact", (q) => q.eq("artifactId", args.artifactId))
+      .collect();
+    const artifactAssets = await ctx.db
+      .query("artifactAssets")
+      .withIndex("by_artifact_path", (q) => q.eq("artifactId", args.artifactId))
+      .collect();
     const [outgoingLinks, incomingLinks] = await Promise.all([
-      ctx.db.query("spectraArtifactLinks").withIndex("by_source", (q) => q.eq("sourceArtifactId", args.artifactId)).collect(),
-      ctx.db.query("spectraArtifactLinks").withIndex("by_target", (q) => q.eq("targetArtifactId", args.artifactId)).collect(),
+      ctx.db
+        .query("spectraArtifactLinks")
+        .withIndex("by_source", (q) =>
+          q.eq("sourceArtifactId", args.artifactId),
+        )
+        .collect(),
+      ctx.db
+        .query("spectraArtifactLinks")
+        .withIndex("by_target", (q) =>
+          q.eq("targetArtifactId", args.artifactId),
+        )
+        .collect(),
     ]);
-    const linkRows = [...new Map([...outgoingLinks, ...incomingLinks].map((link) => [link._id, link])).values()];
+    const linkRows = [
+      ...new Map(
+        [...outgoingLinks, ...incomingLinks].map((link) => [link._id, link]),
+      ).values(),
+    ];
+    for (const build of runtimeBuilds) {
+      if (build.storageId) {
+        await ctx.storage.delete(build.storageId);
+        if (build.payloadBytes)
+          await recordMeterEvent(ctx, {
+            schoolId: build.schoolId,
+            accountId: build.createdByAccountId,
+            category: "storage_bytes",
+            quantity: -build.payloadBytes,
+            sourceType: "runtime_build",
+            sourceId: String(build._id),
+            idempotencyKey: `runtime-build:${build._id}:storage:deleted`,
+            dimensions: { runtime: build.runtime, state: "deleted" },
+            occurredAt: Date.now(),
+          });
+      }
+      await ctx.db.delete(build._id);
+    }
+    for (const job of importJobs) {
+      if (job.originalStorageId) {
+        const metadata = await ctx.db.system.get(
+          "_storage",
+          job.originalStorageId,
+        );
+        if (metadata) {
+          await ctx.storage.delete(job.originalStorageId);
+          await recordMeterEvent(ctx, {
+            schoolId: job.schoolId,
+            accountId: job.ownerAccountId,
+            category: "storage_bytes",
+            quantity: -metadata.size,
+            sourceType: "artifact_import_original",
+            sourceId: String(job._id),
+            idempotencyKey: `artifact-import:${job._id}:storage:deleted`,
+            dimensions: {
+              typeKey: job.typeKey,
+              format: job.format,
+              state: "deleted",
+            },
+            occurredAt: Date.now(),
+          });
+        }
+      }
+      await ctx.db.delete(job._id);
+    }
+    for (const asset of artifactAssets) {
+      if (asset.storageId) {
+        const metadata = await ctx.db.system.get("_storage", asset.storageId);
+        if (metadata) {
+          await ctx.storage.delete(asset.storageId);
+          await recordMeterEvent(ctx, {
+            schoolId: asset.schoolId,
+            accountId: asset.uploadedByAccountId,
+            category: "storage_bytes",
+            quantity: -metadata.size,
+            sourceType: "artifact_asset",
+            sourceId: String(asset._id),
+            idempotencyKey: `artifact-asset:${asset._id}:storage:deleted`,
+            dimensions: { mediaType: asset.mediaType, state: "deleted" },
+            occurredAt: Date.now(),
+          });
+        }
+      }
+      await ctx.db.delete(asset._id);
+    }
     for (const version of versions) {
-      if (version.snapshotRef) await releaseSnapshotObject(ctx, version.schoolId, version.snapshotRef);
-      if (version.beforeSnapshotRef) await releaseSnapshotObject(ctx, version.schoolId, version.beforeSnapshotRef);
+      if (version.snapshotRef)
+        await releaseSnapshotObject(ctx, version.schoolId, version.snapshotRef);
+      if (version.beforeSnapshotRef)
+        await releaseSnapshotObject(
+          ctx,
+          version.schoolId,
+          version.beforeSnapshotRef,
+        );
       await ctx.db.delete(version._id);
     }
     await Promise.all(linkRows.map((link) => ctx.db.delete(link._id)));
@@ -600,15 +2431,79 @@ export const permanentlyDelete = mutation({
       .collect();
     for (const run of runs) {
       const [operations, cards] = await Promise.all([
-        ctx.db.query("spectraOperations").withIndex("by_run", (q) => q.eq("runId", run._id)).collect(),
-        ctx.db.query("spectraResultCards").withIndex("by_run", (q) => q.eq("runId", run._id)).collect(),
+        ctx.db
+          .query("spectraOperations")
+          .withIndex("by_run", (q) => q.eq("runId", run._id))
+          .collect(),
+        ctx.db
+          .query("spectraResultCards")
+          .withIndex("by_run", (q) => q.eq("runId", run._id))
+          .collect(),
       ]);
-      await Promise.all([...operations.map((operation) => ctx.db.delete(operation._id)), ...cards.map((card) => ctx.db.delete(card._id))]);
+      await Promise.all([
+        ...operations.map((operation) => ctx.db.delete(operation._id)),
+        ...cards.map((card) => ctx.db.delete(card._id)),
+      ]);
       await ctx.db.delete(run._id);
     }
 
+    const [memoryEvidence, scopedMemory] = await Promise.all([
+      ctx.db
+        .query("memoryEvidence")
+        .withIndex("by_source", (q) =>
+          q.eq("sourceType", "artifact").eq("sourceId", args.artifactId),
+        )
+        .collect(),
+      ctx.db
+        .query("memoryClaims")
+        .withIndex("by_artifact_status", (q) =>
+          q.eq("artifactId", args.artifactId).eq("status", "active"),
+        )
+        .collect(),
+    ]);
+    const memoryAccountIds = new Set<Id<"accounts">>();
+    const memoryChangedAt = Date.now();
+    for (const evidence of memoryEvidence) {
+      memoryAccountIds.add(evidence.accountId);
+      await ctx.db.patch(evidence._id, {
+        accessStatus: "deleted",
+        excerptPreview: undefined,
+      });
+    }
+    for (const claim of scopedMemory) {
+      memoryAccountIds.add(claim.accountId);
+      await ctx.db.patch(claim._id, {
+        status: "expired",
+        expiresAt: memoryChangedAt,
+        updatedAt: memoryChangedAt,
+      });
+    }
+    for (const accountId of memoryAccountIds) {
+      const capsules = await ctx.db
+        .query("memoryCapsules")
+        .withIndex("by_account_scope", (q) =>
+          q.eq("accountId", accountId).eq("scope", "private_global"),
+        )
+        .collect();
+      const schoolCapsules = await ctx.db
+        .query("memoryCapsules")
+        .withIndex("by_account_scope", (q) =>
+          q.eq("accountId", accountId).eq("scope", "private_school"),
+        )
+        .collect();
+      for (const capsule of [...capsules, ...schoolCapsules])
+        await ctx.db.patch(capsule._id, {
+          stale: true,
+          updatedAt: memoryChangedAt,
+        });
+    }
+
     await ctx.db.delete(args.artifactId);
-    return { artifactId: args.artifactId, placementCount: placements.length, runCount: runs.length };
+    return {
+      artifactId: args.artifactId,
+      placementCount: placements.length,
+      runCount: runs.length,
+    };
   },
 });
 

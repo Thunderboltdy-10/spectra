@@ -102,11 +102,16 @@ export function artifactToCard(artifact: SpectraArtifact, placement?: "inbox" | 
     id: artifact._id,
     title: artifact.title,
     blueprintKey: artifact.blueprintKey,
-    summary: artifact.summary ?? "No summary yet.",
+    summary: artifact.aiPreview?.effectTitle ?? artifact.summary ?? "No summary yet.",
     meta: placements.length > 0 ? placements.map((item) => item.workspaceTitle).join(", ") : "Created recently",
     placement: placement ?? artifactPlacementStatus(artifact),
     shared: artifact.isShared,
     accessLevel: artifact.accessLevel ?? undefined,
+    accessExplanation: artifact.ownership === "shared"
+      ? artifact.accessReason === "workspace_inheritance"
+        ? `Access through ${placements.map((item) => item.workspaceTitle).join(", ") || "a workspace"}`
+        : "Shared directly with you"
+      : undefined,
     updatedAt: artifact.updatedAt,
     metrics: meta.metrics,
     aiState: artifact.aiState === "edited" && artifact.aiStateExpiresAt && artifact.aiStateExpiresAt <= Date.now() ? undefined : artifact.aiState,
@@ -121,11 +126,16 @@ export function workspaceItemToCard(item: SpectraWorkspaceItem): ArtifactCardVie
     id: item.artifact._id,
     title: item.viewData.titleOverride ?? item.artifact.title,
     blueprintKey: item.artifact.blueprintKey,
-    summary: item.viewData.compactSummary ?? item.artifact.summary ?? "No summary yet.",
+    summary: item.artifact.aiPreview?.effectTitle ?? item.viewData.compactSummary ?? item.artifact.summary ?? "No summary yet.",
     meta: item.viewData.pinned ? "Pinned" : formatRelativeTime(item.updatedAt),
     placement: "workspace",
     shared: item.artifact.isShared,
     accessLevel: item.artifact.accessLevel ?? undefined,
+    accessExplanation: item.artifact.ownership === "shared"
+      ? item.artifact.accessReason === "workspace_inheritance"
+        ? "Access through this workspace"
+        : "Shared directly with you"
+      : undefined,
     updatedAt: item.updatedAt,
     pinned: item.viewData.pinned,
     variant: item.viewData.cardVariant,

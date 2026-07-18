@@ -1,0 +1,1497 @@
+export type SheetScalar = string | number | boolean | null;
+
+export type SheetValidation =
+  | {
+      kind: "list";
+      options: string[];
+      rejectInvalid: boolean;
+    }
+  | {
+      kind: "number";
+      minimum?: number;
+      maximum?: number;
+      rejectInvalid: boolean;
+    }
+  | {
+      kind: "checkbox";
+      rejectInvalid: boolean;
+    };
+
+export type SheetCell = {
+  value?: SheetScalar;
+  formula?: string;
+  format?: {
+    bold?: boolean;
+    italic?: boolean;
+    underline?: boolean;
+    align?: "left" | "center" | "right";
+    numberFormat?: "general" | "number" | "currency" | "percent" | "date";
+    decimals?: number;
+    fontFamily?: "sans" | "serif" | "mono";
+    fontSize?: number;
+    textColor?: string;
+    fillColor?: string;
+  };
+  validation?: SheetValidation;
+  note?: string;
+  provenance?: { source?: string; importedAt?: number };
+};
+
+export type SheetChart = {
+  id: string;
+  type:
+    | "column"
+    | "bar"
+    | "line"
+    | "area"
+    | "pie"
+    | "scatter"
+    | "combo"
+    | "histogram";
+  sourceRange: string;
+  title: string;
+  position: { x: number; y: number; width: number; height: number };
+};
+
+export type SheetTable = {
+  id: string;
+  name: string;
+  range: string;
+  filters?: Array<{
+    column: number;
+    allowedValues: SheetScalar[];
+  }>;
+  sort?: {
+    column: number;
+    direction: "asc" | "desc";
+  };
+};
+
+export type SheetConditionalFormat =
+  | {
+      id: string;
+      range: string;
+      kind: "color_scale";
+      minimumColor: string;
+      maximumColor: string;
+    }
+  | {
+      id: string;
+      range: string;
+      kind: "cell_is";
+      operator: "greater_than" | "less_than" | "equal_to";
+      value: number;
+      fillColor: string;
+      textColor?: string;
+    };
+
+export type WorkbookSheet = {
+  id: string;
+  name: string;
+  cells: Record<string, SheetCell>;
+  tables: SheetTable[];
+  charts: SheetChart[];
+  rowCount?: number;
+  columnCount?: number;
+  frozenRows?: number;
+  frozenColumns?: number;
+  hiddenRows?: number[];
+  hiddenColumns?: number[];
+  columnWidths?: Record<string, number>;
+  rowHeights?: Record<string, number>;
+  mergedRanges?: string[];
+  conditionalFormats?: SheetConditionalFormat[];
+  rowIdentities?: Record<string, string>;
+  columnIdentities?: Record<string, string>;
+};
+
+export type SheetsContent = {
+  workbook: {
+    calculationMode: "automatic" | "manual";
+    locale: string;
+    timezone?: string;
+    namedRanges?: Record<string, string>;
+    calculationVersion?: number;
+  };
+  sheets: WorkbookSheet[];
+  activeSheetId: string;
+};
+
+export type CellCoordinate = { row: number; column: number };
+export type CellRange = { start: CellCoordinate; end: CellCoordinate };
+export type CalculatedCell = { value: SheetScalar; error?: string };
+
+const addressPattern = /^([A-Z]+)([1-9][0-9]*)$/;
+
+export function columnName(index: number) {
+  let value = index + 1;
+  let result = "";
+  while (value > 0) {
+    const remainder = (value - 1) % 26;
+    result = String.fromCharCode(65 + remainder) + result;
+    value = Math.floor((value - 1) / 26);
+  }
+  return result;
+}
+
+export function columnIndex(name: string) {
+  let result = 0;
+  for (const character of name.toUpperCase()) {
+    if (character < "A" || character > "Z") return -1;
+    result = result * 26 + character.charCodeAt(0) - 64;
+  }
+  return result - 1;
+}
+
+export function coordinateToAddress(coordinate: CellCoordinate) {
+  return `${columnName(coordinate.column)}${coordinate.row + 1}`;
+}
+
+export function parseAddress(address: string): CellCoordinate | null {
+  const match = address.trim().toUpperCase().match(addressPattern);
+  if (!match) return null;
+  const column = columnIndex(match[1]!);
+  const row = Number(match[2]) - 1;
+  return column >= 0 && row >= 0 ? { row, column } : null;
+}
+
+export function normalizeRange(range: CellRange): CellRange {
+  return {
+    start: {
+      row: Math.min(range.start.row, range.end.row),
+      column: Math.min(range.start.column, range.end.column),
+    },
+    end: {
+      row: Math.max(range.start.row, range.end.row),
+      column: Math.max(range.start.column, range.end.column),
+    },
+  };
+}
+
+export function parseRange(value: string): CellRange | null {
+  const [startText, endText = startText] = value
+    .trim()
+    .toUpperCase()
+    .split(":", 2);
+  const start = parseAddress(startText ?? "");
+  const end = parseAddress(endText ?? "");
+  return start && end ? normalizeRange({ start, end }) : null;
+}
+
+export function rangeLabel(range: CellRange) {
+  const normalized = normalizeRange(range);
+  const start = coordinateToAddress(normalized.start);
+  const end = coordinateToAddress(normalized.end);
+  return start === end ? start : `${start}:${end}`;
+}
+
+export function rangeAddresses(range: CellRange, limit = 10_000) {
+  const normalized = normalizeRange(range);
+  const result: string[] = [];
+  for (let row = normalized.start.row; row <= normalized.end.row; row += 1) {
+    for (
+      let column = normalized.start.column;
+      column <= normalized.end.column;
+      column += 1
+    ) {
+      if (result.length >= limit) return result;
+      result.push(coordinateToAddress({ row, column }));
+    }
+  }
+  return result;
+}
+
+function record(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+export function normalizeSheetsContent(value: unknown): SheetsContent {
+  const source = record(value);
+  const workbookSource = record(source.workbook);
+  const rawSheets = Array.isArray(source.sheets) ? source.sheets : [];
+  const sheets = rawSheets.map((raw, index): WorkbookSheet => {
+    const sheet = record(raw);
+    const rawCells = record(sheet.cells);
+    const cells = Object.fromEntries(
+      Object.entries(rawCells).flatMap(([address, rawCell]) => {
+        if (!addressPattern.test(address.toUpperCase())) return [];
+        const cell = record(rawCell);
+        const value = cell.value;
+        const scalar =
+          typeof value === "string" ||
+          typeof value === "number" ||
+          typeof value === "boolean" ||
+          value === null
+            ? value
+            : undefined;
+        return [
+          [
+            address.toUpperCase(),
+            {
+              ...(scalar !== undefined ? { value: scalar } : {}),
+              ...(typeof cell.formula === "string"
+                ? { formula: cell.formula }
+                : {}),
+              ...(cell.format && typeof cell.format === "object"
+                ? { format: cell.format as SheetCell["format"] }
+                : {}),
+              ...(cell.validation && typeof cell.validation === "object"
+                ? {
+                    validation: cell.validation as SheetValidation,
+                  }
+                : {}),
+              ...(typeof cell.note === "string" ? { note: cell.note } : {}),
+            } satisfies SheetCell,
+          ],
+        ];
+      }),
+    );
+    return {
+      id:
+        typeof sheet.id === "string" && sheet.id
+          ? sheet.id
+          : `sheet-${index + 1}`,
+      name:
+        typeof sheet.name === "string" && sheet.name
+          ? sheet.name
+          : `Sheet ${index + 1}`,
+      cells,
+      tables: Array.isArray(sheet.tables)
+        ? sheet.tables.flatMap((candidate, tableIndex): SheetTable[] => {
+            const table = record(candidate);
+            if (typeof table.range !== "string" || !parseRange(table.range))
+              return [];
+            return [
+              {
+                id:
+                  typeof table.id === "string" && table.id
+                    ? table.id
+                    : `table-${index + 1}-${tableIndex + 1}`,
+                name:
+                  typeof table.name === "string" && table.name
+                    ? table.name.slice(0, 100)
+                    : `Table ${tableIndex + 1}`,
+                range: table.range.toUpperCase(),
+                filters: Array.isArray(table.filters)
+                  ? table.filters.flatMap((candidateFilter) => {
+                      const filter = record(candidateFilter);
+                      if (
+                        typeof filter.column !== "number" ||
+                        !Array.isArray(filter.allowedValues)
+                      )
+                        return [];
+                      return [
+                        {
+                          column: Math.max(
+                            0,
+                            Math.min(16_383, Math.round(filter.column)),
+                          ),
+                          allowedValues: filter.allowedValues
+                            .filter(
+                              (value): value is SheetScalar =>
+                                typeof value === "string" ||
+                                typeof value === "number" ||
+                                typeof value === "boolean" ||
+                                value === null,
+                            )
+                            .slice(0, 10_000),
+                        },
+                      ];
+                    })
+                  : [],
+                ...(record(table.sort).direction === "asc" ||
+                record(table.sort).direction === "desc"
+                  ? {
+                      sort: {
+                        column: Math.max(
+                          0,
+                          Math.min(
+                            16_383,
+                            Math.round(Number(record(table.sort).column) || 0),
+                          ),
+                        ),
+                        direction: record(table.sort).direction as
+                          "asc" | "desc",
+                      },
+                    }
+                  : {}),
+              },
+            ];
+          })
+        : [],
+      charts: Array.isArray(sheet.charts)
+        ? sheet.charts.flatMap((candidate, chartIndex): SheetChart[] => {
+            const chart = record(candidate);
+            const position = record(chart.position);
+            if (
+              typeof chart.sourceRange !== "string" ||
+              !parseRange(chart.sourceRange.split("!").at(-1) ?? "")
+            )
+              return [];
+            const type = [
+              "column",
+              "bar",
+              "line",
+              "area",
+              "pie",
+              "scatter",
+              "combo",
+              "histogram",
+            ].includes(String(chart.type))
+              ? (chart.type as SheetChart["type"])
+              : "line";
+            return [
+              {
+                id:
+                  typeof chart.id === "string" && chart.id
+                    ? chart.id
+                    : `chart-${index + 1}-${chartIndex + 1}`,
+                type,
+                sourceRange: chart.sourceRange,
+                title:
+                  typeof chart.title === "string"
+                    ? chart.title.slice(0, 300)
+                    : `Chart ${chartIndex + 1}`,
+                position: {
+                  x: Number(position.x) || 0,
+                  y: Number(position.y) || 0,
+                  width: Math.max(240, Number(position.width) || 760),
+                  height: Math.max(180, Number(position.height) || 320),
+                },
+              },
+            ];
+          })
+        : [],
+      rowCount: typeof sheet.rowCount === "number" ? sheet.rowCount : 100,
+      columnCount:
+        typeof sheet.columnCount === "number" ? sheet.columnCount : 26,
+      frozenRows: typeof sheet.frozenRows === "number" ? sheet.frozenRows : 0,
+      frozenColumns:
+        typeof sheet.frozenColumns === "number" ? sheet.frozenColumns : 0,
+      hiddenRows: Array.isArray(sheet.hiddenRows)
+        ? sheet.hiddenRows.filter(
+            (item): item is number => typeof item === "number",
+          )
+        : [],
+      hiddenColumns: Array.isArray(sheet.hiddenColumns)
+        ? sheet.hiddenColumns.filter(
+            (item): item is number => typeof item === "number",
+          )
+        : [],
+      columnWidths: record(sheet.columnWidths) as Record<string, number>,
+      rowHeights: record(sheet.rowHeights) as Record<string, number>,
+      mergedRanges: Array.isArray(sheet.mergedRanges)
+        ? sheet.mergedRanges
+            .filter(
+              (item): item is string =>
+                typeof item === "string" && Boolean(parseRange(item)),
+            )
+            .map((item) => rangeLabel(parseRange(item)!))
+            .slice(0, 10_000)
+        : [],
+      conditionalFormats: Array.isArray(sheet.conditionalFormats)
+        ? sheet.conditionalFormats.flatMap(
+            (candidate, ruleIndex): SheetConditionalFormat[] => {
+              const rule = record(candidate);
+              if (typeof rule.range !== "string" || !parseRange(rule.range))
+                return [];
+              const id =
+                typeof rule.id === "string" && rule.id
+                  ? rule.id
+                  : `conditional-${index + 1}-${ruleIndex + 1}`;
+              if (rule.kind === "color_scale")
+                return [
+                  {
+                    id,
+                    range: rangeLabel(parseRange(rule.range)!),
+                    kind: "color_scale",
+                    minimumColor:
+                      typeof rule.minimumColor === "string"
+                        ? rule.minimumColor
+                        : "#f1f8f4",
+                    maximumColor:
+                      typeof rule.maximumColor === "string"
+                        ? rule.maximumColor
+                        : "#78d2ad",
+                  },
+                ];
+              if (
+                rule.kind === "cell_is" &&
+                ["greater_than", "less_than", "equal_to"].includes(
+                  String(rule.operator),
+                ) &&
+                typeof rule.value === "number" &&
+                Number.isFinite(rule.value)
+              )
+                return [
+                  {
+                    id,
+                    range: rangeLabel(parseRange(rule.range)!),
+                    kind: "cell_is",
+                    operator: rule.operator as
+                      "greater_than" | "less_than" | "equal_to",
+                    value: rule.value,
+                    fillColor:
+                      typeof rule.fillColor === "string"
+                        ? rule.fillColor
+                        : "#d9f4e8",
+                    textColor:
+                      typeof rule.textColor === "string"
+                        ? rule.textColor
+                        : undefined,
+                  },
+                ];
+              return [];
+            },
+          )
+        : [],
+      rowIdentities: record(sheet.rowIdentities) as Record<string, string>,
+      columnIdentities: record(sheet.columnIdentities) as Record<
+        string,
+        string
+      >,
+    };
+  });
+  if (sheets.length === 0)
+    sheets.push({
+      id: "sheet-1",
+      name: "Sheet 1",
+      cells: {},
+      tables: [],
+      charts: [],
+      rowCount: 100,
+      columnCount: 26,
+      hiddenRows: [],
+      hiddenColumns: [],
+      columnWidths: {},
+      rowHeights: {},
+      mergedRanges: [],
+      conditionalFormats: [],
+      rowIdentities: {},
+      columnIdentities: {},
+    });
+  const activeSheetId =
+    typeof source.activeSheetId === "string" &&
+    sheets.some((sheet) => sheet.id === source.activeSheetId)
+      ? source.activeSheetId
+      : sheets[0]!.id;
+  return {
+    workbook: {
+      calculationMode:
+        workbookSource.calculationMode === "manual" ? "manual" : "automatic",
+      locale:
+        typeof workbookSource.locale === "string"
+          ? workbookSource.locale
+          : "en-US",
+      timezone:
+        typeof workbookSource.timezone === "string"
+          ? workbookSource.timezone
+          : undefined,
+      namedRanges: record(workbookSource.namedRanges) as Record<string, string>,
+      calculationVersion:
+        typeof workbookSource.calculationVersion === "number"
+          ? workbookSource.calculationVersion
+          : 1,
+    },
+    sheets,
+    activeSheetId,
+  };
+}
+
+type Token = {
+  type:
+    | "number"
+    | "string"
+    | "identifier"
+    | "operator"
+    | "paren"
+    | "comma"
+    | "colon";
+  value: string;
+};
+
+function tokenize(expression: string): Token[] {
+  const tokens: Token[] = [];
+  let index = 0;
+  while (index < expression.length) {
+    const remaining = expression.slice(index);
+    const whitespace = remaining.match(/^\s+/);
+    if (whitespace) {
+      index += whitespace[0].length;
+      continue;
+    }
+    const number = remaining.match(/^(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?/i);
+    if (number) {
+      tokens.push({ type: "number", value: number[0] });
+      index += number[0].length;
+      continue;
+    }
+    if (remaining[0] === '"') {
+      let result = "";
+      index += 1;
+      while (index < expression.length) {
+        if (expression[index] === '"' && expression[index + 1] === '"') {
+          result += '"';
+          index += 2;
+          continue;
+        }
+        if (expression[index] === '"') {
+          index += 1;
+          break;
+        }
+        result += expression[index];
+        index += 1;
+      }
+      tokens.push({ type: "string", value: result });
+      continue;
+    }
+    const cellReference = remaining.match(
+      /^(?:(?:'(?:[^']|'')+'|[A-Za-z_][A-Za-z0-9_.]*)!)?\$?[A-Za-z]+\$?[1-9][0-9]*/,
+    );
+    if (cellReference) {
+      tokens.push({
+        type: "identifier",
+        value: cellReference[0].replaceAll("$", ""),
+      });
+      index += cellReference[0].length;
+      continue;
+    }
+    const identifier = remaining.match(/^[A-Za-z_][A-Za-z0-9_.]*/);
+    if (identifier) {
+      tokens.push({ type: "identifier", value: identifier[0] });
+      index += identifier[0].length;
+      continue;
+    }
+    const twoCharacter = remaining.slice(0, 2);
+    if (["<=", ">=", "<>", "=="].includes(twoCharacter)) {
+      tokens.push({ type: "operator", value: twoCharacter });
+      index += 2;
+      continue;
+    }
+    const character = remaining[0]!;
+    if ("+-*/^&=<>%".includes(character))
+      tokens.push({ type: "operator", value: character });
+    else if (character === "(" || character === ")")
+      tokens.push({ type: "paren", value: character });
+    else if (character === "," || character === ";")
+      tokens.push({ type: "comma", value: character });
+    else if (character === ":")
+      tokens.push({ type: "colon", value: character });
+    else throw new Error("#VALUE!");
+    index += 1;
+  }
+  return tokens;
+}
+
+type FormulaValue = SheetScalar | FormulaValue[];
+
+function scalar(value: FormulaValue): SheetScalar {
+  return Array.isArray(value) ? scalar(value[0] ?? null) : value;
+}
+
+function numeric(value: FormulaValue) {
+  const item = scalar(value);
+  if (typeof item === "number") return item;
+  if (typeof item === "boolean") return item ? 1 : 0;
+  if (item === null || item === "") return 0;
+  const parsed = Number(item);
+  if (!Number.isFinite(parsed)) throw new Error("#VALUE!");
+  return parsed;
+}
+
+function flattened(values: FormulaValue[]) {
+  return values.flatMap((value): SheetScalar[] =>
+    Array.isArray(value) ? flattened(value) : [value],
+  );
+}
+
+function formulaCriteriaMatches(value: SheetScalar, criterion: SheetScalar) {
+  if (typeof criterion !== "string") return value === criterion;
+  const match = /^(<=|>=|<>|=|<|>)([\s\S]*)$/.exec(criterion);
+  const operator = match?.[1] ?? "=";
+  const rawExpected = match?.[2] ?? criterion;
+  const numericExpected = Number(rawExpected);
+  const bothNumeric =
+    typeof value === "number" &&
+    rawExpected.trim() !== "" &&
+    Number.isFinite(numericExpected);
+  const left = bothNumeric ? value : String(value ?? "");
+  const right = bothNumeric ? numericExpected : rawExpected;
+  const comparison =
+    typeof left === "number" && typeof right === "number"
+      ? left - right
+      : String(left).localeCompare(String(right), undefined, {
+          sensitivity: "base",
+        });
+  if (operator === "<>") return comparison !== 0;
+  if (operator === "<") return comparison < 0;
+  if (operator === ">") return comparison > 0;
+  if (operator === "<=") return comparison <= 0;
+  if (operator === ">=") return comparison >= 0;
+  if (rawExpected.includes("*") || rawExpected.includes("?")) {
+    const expression = rawExpected
+      .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+      .replaceAll("*", ".*")
+      .replaceAll("?", ".");
+    return new RegExp(`^${expression}$`, "i").test(String(value ?? ""));
+  }
+  return comparison === 0;
+}
+
+class FormulaParser {
+  private index = 0;
+  constructor(
+    private readonly tokens: Token[],
+    private readonly resolveCell: (reference: string) => SheetScalar,
+    private readonly resolveRange: (reference: string) => SheetScalar[],
+    private readonly resolveName: (name: string) => FormulaValue,
+  ) {}
+
+  parse() {
+    const value = this.comparison();
+    if (this.index < this.tokens.length) throw new Error("#VALUE!");
+    return scalar(value);
+  }
+
+  private current() {
+    return this.tokens[this.index];
+  }
+  private consume() {
+    return this.tokens[this.index++];
+  }
+  private comparison(): FormulaValue {
+    let left = this.concatenate();
+    while (
+      this.current()?.type === "operator" &&
+      ["=", "==", "<>", "<", ">", "<=", ">="].includes(this.current()!.value)
+    ) {
+      const operator = this.consume()!.value;
+      const right = this.concatenate();
+      const a = scalar(left);
+      const b = scalar(right);
+      const compare =
+        typeof a === "number" && typeof b === "number"
+          ? a - b
+          : String(a ?? "").localeCompare(String(b ?? ""));
+      left =
+        operator === "=" || operator === "=="
+          ? a === b
+          : operator === "<>"
+            ? a !== b
+            : operator === "<"
+              ? compare < 0
+              : operator === ">"
+                ? compare > 0
+                : operator === "<="
+                  ? compare <= 0
+                  : compare >= 0;
+    }
+    return left;
+  }
+  private concatenate(): FormulaValue {
+    let left = this.additive();
+    while (this.current()?.value === "&") {
+      this.consume();
+      left = `${scalar(left) ?? ""}${scalar(this.additive()) ?? ""}`;
+    }
+    return left;
+  }
+  private additive(): FormulaValue {
+    let left = this.multiplicative();
+    while (this.current()?.value === "+" || this.current()?.value === "-") {
+      const operator = this.consume()!.value;
+      const right = this.multiplicative();
+      left =
+        operator === "+"
+          ? numeric(left) + numeric(right)
+          : numeric(left) - numeric(right);
+    }
+    return left;
+  }
+  private multiplicative(): FormulaValue {
+    let left = this.power();
+    while (this.current()?.value === "*" || this.current()?.value === "/") {
+      const operator = this.consume()!.value;
+      const right = numeric(this.power());
+      if (operator === "/" && right === 0) throw new Error("#DIV/0!");
+      left = operator === "*" ? numeric(left) * right : numeric(left) / right;
+    }
+    return left;
+  }
+  private power(): FormulaValue {
+    let left = this.unary();
+    if (this.current()?.value === "^") {
+      this.consume();
+      left = Math.pow(numeric(left), numeric(this.power()));
+    }
+    return left;
+  }
+  private unary(): FormulaValue {
+    if (this.current()?.value === "+") {
+      this.consume();
+      return numeric(this.unary());
+    }
+    if (this.current()?.value === "-") {
+      this.consume();
+      return -numeric(this.unary());
+    }
+    let value = this.primary();
+    while (this.current()?.value === "%") {
+      this.consume();
+      value = numeric(value) / 100;
+    }
+    return value;
+  }
+  private primary(): FormulaValue {
+    const token = this.consume();
+    if (!token) throw new Error("#VALUE!");
+    if (token.type === "number") return Number(token.value);
+    if (token.type === "string") return token.value;
+    if (token.type === "paren" && token.value === "(") {
+      const value = this.comparison();
+      if (this.consume()?.value !== ")") throw new Error("#VALUE!");
+      return value;
+    }
+    if (token.type !== "identifier") throw new Error("#VALUE!");
+    const upper = token.value.toUpperCase();
+    if (upper === "TRUE") return true;
+    if (upper === "FALSE") return false;
+    if (upper === "NULL") return null;
+    if (this.current()?.value === "(") {
+      this.consume();
+      const args: FormulaValue[] = [];
+      while (this.current() && this.current()!.value !== ")") {
+        args.push(this.comparison());
+        if (this.current()?.type === "comma") this.consume();
+        else break;
+      }
+      if (this.consume()?.value !== ")") throw new Error("#VALUE!");
+      return this.call(upper, args);
+    }
+    if (!addressPattern.test(upper.split("!").at(-1) ?? ""))
+      return this.resolveName(upper);
+    if (this.current()?.type === "colon") {
+      this.consume();
+      const end = this.consume();
+      if (!end || end.type !== "identifier") throw new Error("#REF!");
+      return this.resolveRange(`${upper}:${end.value.toUpperCase()}`);
+    }
+    return this.resolveCell(upper);
+  }
+  private call(name: string, args: FormulaValue[]): FormulaValue {
+    const values = flattened(args);
+    const numbers = values.filter(
+      (value): value is number =>
+        typeof value === "number" && Number.isFinite(value),
+    );
+    if (name === "SUM")
+      return numbers.reduce((total, value) => total + value, 0);
+    if (name === "AVERAGE" || name === "AVG")
+      return numbers.length
+        ? numbers.reduce((total, value) => total + value, 0) / numbers.length
+        : 0;
+    if (name === "MIN") return numbers.length ? Math.min(...numbers) : 0;
+    if (name === "MAX") return numbers.length ? Math.max(...numbers) : 0;
+    if (name === "COUNT") return numbers.length;
+    if (name === "COUNTA")
+      return values.filter((value) => value !== null && value !== "").length;
+    if (name === "COUNTIF") {
+      const source = Array.isArray(args[0])
+        ? flattened([args[0]])
+        : [scalar(args[0] ?? null)];
+      const criterion = scalar(args[1] ?? null);
+      return source.filter((value) => formulaCriteriaMatches(value, criterion))
+        .length;
+    }
+    if (name === "SUMIF" || name === "AVERAGEIF") {
+      const criteriaRange = Array.isArray(args[0])
+        ? flattened([args[0]])
+        : [scalar(args[0] ?? null)];
+      const criterion = scalar(args[1] ?? null);
+      const sumRange = Array.isArray(args[2])
+        ? flattened([args[2]])
+        : args[2] === undefined
+          ? criteriaRange
+          : [scalar(args[2])];
+      const matchingNumbers = criteriaRange.flatMap((value, index) => {
+        if (!formulaCriteriaMatches(value, criterion)) return [];
+        const candidate = sumRange[index] ?? null;
+        return typeof candidate === "number" && Number.isFinite(candidate)
+          ? [candidate]
+          : [];
+      });
+      if (name === "AVERAGEIF")
+        return matchingNumbers.length
+          ? matchingNumbers.reduce((sum, value) => sum + value, 0) /
+              matchingNumbers.length
+          : 0;
+      return matchingNumbers.reduce((sum, value) => sum + value, 0);
+    }
+    if (name === "COUNTIFS" || name === "SUMIFS") {
+      const sumRange =
+        name === "SUMIFS"
+          ? Array.isArray(args[0])
+            ? flattened([args[0]])
+            : [scalar(args[0] ?? null)]
+          : null;
+      const offset = name === "SUMIFS" ? 1 : 0;
+      const pairs: Array<{ range: SheetScalar[]; criterion: SheetScalar }> = [];
+      for (let index = offset; index + 1 < args.length; index += 2)
+        pairs.push({
+          range: Array.isArray(args[index])
+            ? flattened([args[index]!])
+            : [scalar(args[index] ?? null)],
+          criterion: scalar(args[index + 1] ?? null),
+        });
+      if (!pairs.length) throw new Error("#VALUE!");
+      const length = Math.max(...pairs.map((pair) => pair.range.length));
+      const matched = Array.from({ length }, (_, index) =>
+        pairs.every((pair) =>
+          formulaCriteriaMatches(pair.range[index] ?? null, pair.criterion),
+        ),
+      );
+      if (name === "COUNTIFS") return matched.filter(Boolean).length;
+      return matched.reduce(
+        (sum, matches, index) =>
+          sum +
+          (matches && typeof sumRange?.[index] === "number"
+            ? (sumRange[index] as number)
+            : 0),
+        0,
+      );
+    }
+    if (name === "IF")
+      return Boolean(scalar(args[0] ?? false))
+        ? (args[1] ?? null)
+        : (args[2] ?? null);
+    if (name === "AND") return values.every(Boolean);
+    if (name === "OR") return values.some(Boolean);
+    if (name === "NOT") return !Boolean(scalar(args[0] ?? false));
+    if (name === "ROUND")
+      return Number(
+        numeric(args[0] ?? 0).toFixed(
+          Math.max(0, Math.min(12, numeric(args[1] ?? 0))),
+        ),
+      );
+    if (name === "ROUNDUP" || name === "ROUNDDOWN") {
+      const digits = Math.max(-12, Math.min(12, numeric(args[1] ?? 0)));
+      const factor = Math.pow(10, digits);
+      const value = numeric(args[0] ?? 0) * factor;
+      return (
+        (name === "ROUNDUP"
+          ? value < 0
+            ? Math.floor(value)
+            : Math.ceil(value)
+          : value < 0
+            ? Math.ceil(value)
+            : Math.floor(value)) / factor
+      );
+    }
+    if (name === "ABS") return Math.abs(numeric(args[0] ?? 0));
+    if (name === "SQRT") {
+      const value = numeric(args[0] ?? 0);
+      if (value < 0) throw new Error("#NUM!");
+      return Math.sqrt(value);
+    }
+    if (name === "POWER" || name === "POW")
+      return Math.pow(numeric(args[0] ?? 0), numeric(args[1] ?? 0));
+    if (name === "LEN") return String(scalar(args[0] ?? "") ?? "").length;
+    if (name === "LOWER")
+      return String(scalar(args[0] ?? "") ?? "").toLowerCase();
+    if (name === "UPPER")
+      return String(scalar(args[0] ?? "") ?? "").toUpperCase();
+    if (name === "TRIM")
+      return String(scalar(args[0] ?? "") ?? "")
+        .trim()
+        .replace(/\s+/g, " ");
+    if (name === "LEFT" || name === "RIGHT") {
+      const text = String(scalar(args[0] ?? "") ?? "");
+      const count = Math.max(0, Math.round(numeric(args[1] ?? 1)));
+      return name === "LEFT" ? text.slice(0, count) : text.slice(-count);
+    }
+    if (name === "MID") {
+      const text = String(scalar(args[0] ?? "") ?? "");
+      const start = Math.max(0, Math.round(numeric(args[1] ?? 1)) - 1);
+      const count = Math.max(0, Math.round(numeric(args[2] ?? 0)));
+      return text.slice(start, start + count);
+    }
+    if (name === "SUBSTITUTE") {
+      const text = String(scalar(args[0] ?? "") ?? "");
+      const before = String(scalar(args[1] ?? "") ?? "");
+      const after = String(scalar(args[2] ?? "") ?? "");
+      if (!before) return text;
+      const occurrence = Math.round(numeric(args[3] ?? 0));
+      if (occurrence <= 0) return text.split(before).join(after);
+      let seen = 0;
+      return text.replaceAll(before, (match) => {
+        seen += 1;
+        return seen === occurrence ? after : match;
+      });
+    }
+    if (name === "FIND" || name === "SEARCH") {
+      const needle = String(scalar(args[0] ?? "") ?? "");
+      const haystack = String(scalar(args[1] ?? "") ?? "");
+      const start = Math.max(0, Math.round(numeric(args[2] ?? 1)) - 1);
+      const index =
+        name === "SEARCH"
+          ? haystack.toLowerCase().indexOf(needle.toLowerCase(), start)
+          : haystack.indexOf(needle, start);
+      if (index < 0) throw new Error("#VALUE!");
+      return index + 1;
+    }
+    if (name === "CONCAT" || name === "CONCATENATE")
+      return values.map((value) => value ?? "").join("");
+    if (name === "TEXTJOIN") {
+      const delimiter = String(scalar(args[0] ?? "") ?? "");
+      const ignoreEmpty = Boolean(scalar(args[1] ?? false));
+      return flattened(args.slice(2))
+        .filter((value) => !ignoreEmpty || (value !== null && value !== ""))
+        .map((value) => value ?? "")
+        .join(delimiter);
+    }
+    if (name === "PRODUCT")
+      return numbers.reduce((product, value) => product * value, 1);
+    if (name === "MEDIAN") {
+      if (!numbers.length) return 0;
+      const sorted = [...numbers].sort((left, right) => left - right);
+      const middle = Math.floor(sorted.length / 2);
+      return sorted.length % 2
+        ? sorted[middle]!
+        : (sorted[middle - 1]! + sorted[middle]!) / 2;
+    }
+    if (
+      ["STDEV", "STDEV.S", "STDEV.P", "VAR", "VAR.S", "VAR.P"].includes(name)
+    ) {
+      const population = name.endsWith(".P");
+      const varianceName = name.startsWith("VAR");
+      if (!numbers.length || (!population && numbers.length < 2))
+        throw new Error("#DIV/0!");
+      const mean =
+        numbers.reduce((sum, value) => sum + value, 0) / numbers.length;
+      const denominator = population ? numbers.length : numbers.length - 1;
+      const variance =
+        numbers.reduce((sum, value) => sum + Math.pow(value - mean, 2), 0) /
+        denominator;
+      return varianceName ? variance : Math.sqrt(variance);
+    }
+    if (name === "MOD") {
+      const divisor = numeric(args[1] ?? 0);
+      if (divisor === 0) throw new Error("#DIV/0!");
+      return ((numeric(args[0] ?? 0) % divisor) + divisor) % divisor;
+    }
+    if (name === "CEILING" || name === "FLOOR") {
+      const value = numeric(args[0] ?? 0);
+      const significance = Math.abs(numeric(args[1] ?? 1));
+      if (!significance) throw new Error("#DIV/0!");
+      return (
+        (name === "CEILING" ? Math.ceil : Math.floor)(value / significance) *
+        significance
+      );
+    }
+    if (name === "EXP") return Math.exp(numeric(args[0] ?? 0));
+    if (name === "LN") {
+      const value = numeric(args[0] ?? 0);
+      if (value <= 0) throw new Error("#NUM!");
+      return Math.log(value);
+    }
+    if (name === "LOG") {
+      const value = numeric(args[0] ?? 0);
+      const base = numeric(args[1] ?? 10);
+      if (value <= 0 || base <= 0 || base === 1) throw new Error("#NUM!");
+      return Math.log(value) / Math.log(base);
+    }
+    if (name === "SIN") return Math.sin(numeric(args[0] ?? 0));
+    if (name === "COS") return Math.cos(numeric(args[0] ?? 0));
+    if (name === "TAN") return Math.tan(numeric(args[0] ?? 0));
+    if (name === "PI") return Math.PI;
+    if (name === "DATE") {
+      const date = new Date(
+        Date.UTC(
+          Math.round(numeric(args[0] ?? 1900)),
+          Math.round(numeric(args[1] ?? 1)) - 1,
+          Math.round(numeric(args[2] ?? 1)),
+        ),
+      );
+      return date.getTime();
+    }
+    if (name === "YEAR" || name === "MONTH" || name === "DAY") {
+      const date = new Date(numeric(args[0] ?? 0));
+      if (Number.isNaN(date.getTime())) throw new Error("#VALUE!");
+      if (name === "YEAR") return date.getUTCFullYear();
+      if (name === "MONTH") return date.getUTCMonth() + 1;
+      return date.getUTCDate();
+    }
+    if (name === "INDEX") {
+      const source = Array.isArray(args[0])
+        ? flattened([args[0]])
+        : [scalar(args[0] ?? null)];
+      const position = Math.round(numeric(args[1] ?? 1));
+      if (position < 1 || position > source.length) throw new Error("#REF!");
+      return source[position - 1] ?? null;
+    }
+    if (name === "MATCH") {
+      const needle = scalar(args[0] ?? null);
+      const source = Array.isArray(args[1])
+        ? flattened([args[1]])
+        : [scalar(args[1] ?? null)];
+      const position = source.findIndex((value) => value === needle);
+      if (position < 0) throw new Error("#N/A");
+      return position + 1;
+    }
+    if (name === "XLOOKUP") {
+      const needle = scalar(args[0] ?? null);
+      const lookup = Array.isArray(args[1])
+        ? flattened([args[1]])
+        : [scalar(args[1] ?? null)];
+      const returned = Array.isArray(args[2])
+        ? flattened([args[2]])
+        : [scalar(args[2] ?? null)];
+      const position = lookup.findIndex((value) => value === needle);
+      if (position < 0) {
+        if (args[3] !== undefined) return scalar(args[3]);
+        throw new Error("#N/A");
+      }
+      return returned[position] ?? null;
+    }
+    throw new Error("#NAME?");
+  }
+}
+
+function referenceParts(
+  reference: string,
+  fallbackSheet: WorkbookSheet,
+  sheets: WorkbookSheet[],
+) {
+  const separator = reference.lastIndexOf("!");
+  if (separator < 0) return { sheet: fallbackSheet, address: reference };
+  const name = reference
+    .slice(0, separator)
+    .replace(/^'|'$/g, "")
+    .replaceAll("''", "'");
+  const sheet = sheets.find(
+    (candidate) => candidate.name.toUpperCase() === name.toUpperCase(),
+  );
+  return { sheet, address: reference.slice(separator + 1) };
+}
+
+export function calculateWorkbook(content: SheetsContent) {
+  const result = new Map<string, CalculatedCell>();
+  const resolving = new Set<string>();
+  const calculate = (sheet: WorkbookSheet, address: string): CalculatedCell => {
+    const key = `${sheet.id}:${address.toUpperCase()}`;
+    const cached = result.get(key);
+    if (cached) return cached;
+    if (resolving.has(key)) return { value: null, error: "#CYCLE!" };
+    resolving.add(key);
+    const cell = sheet.cells[address.toUpperCase()];
+    if (!cell?.formula) {
+      const plain = { value: cell?.value ?? null };
+      result.set(key, plain);
+      resolving.delete(key);
+      return plain;
+    }
+    try {
+      if (cell.formula.includes("#REF!")) throw new Error("#REF!");
+      const parser = new FormulaParser(
+        tokenize(cell.formula.replace(/^=/, "")),
+        (reference) => {
+          const parts = referenceParts(reference, sheet, content.sheets);
+          if (!parts.sheet || !parseAddress(parts.address))
+            throw new Error("#REF!");
+          const calculated = calculate(parts.sheet, parts.address);
+          if (calculated.error) throw new Error(calculated.error);
+          return calculated.value;
+        },
+        (reference) => {
+          const [startRef, endRef] = reference.split(":", 2);
+          const startParts = referenceParts(
+            startRef ?? "",
+            sheet,
+            content.sheets,
+          );
+          const endParts = referenceParts(
+            endRef ?? "",
+            startParts.sheet ?? sheet,
+            content.sheets,
+          );
+          if (
+            !startParts.sheet ||
+            !endParts.sheet ||
+            startParts.sheet.id !== endParts.sheet.id
+          )
+            throw new Error("#REF!");
+          const range = parseRange(`${startParts.address}:${endParts.address}`);
+          if (!range) throw new Error("#REF!");
+          return rangeAddresses(range).map((item) => {
+            const calculated = calculate(startParts.sheet!, item);
+            if (calculated.error) throw new Error(calculated.error);
+            return calculated.value;
+          });
+        },
+        (name) => {
+          const named = Object.entries(content.workbook.namedRanges ?? {}).find(
+            ([candidate]) => candidate.toUpperCase() === name.toUpperCase(),
+          )?.[1];
+          if (!named) throw new Error("#NAME?");
+          const separator = named.lastIndexOf("!");
+          const sheetName =
+            separator >= 0
+              ? named
+                  .slice(0, separator)
+                  .replace(/^'|'$/g, "")
+                  .replaceAll("''", "'")
+              : sheet.name;
+          const targetSheet = content.sheets.find(
+            (candidate) =>
+              candidate.name.toUpperCase() === sheetName.toUpperCase(),
+          );
+          const targetRange = parseRange(
+            separator >= 0 ? named.slice(separator + 1) : named,
+          );
+          if (!targetSheet || !targetRange) throw new Error("#REF!");
+          const values = rangeAddresses(targetRange).map((address) => {
+            const target = calculate(targetSheet, address);
+            if (target.error) throw new Error(target.error);
+            return target.value;
+          });
+          return values.length === 1 ? values[0]! : values;
+        },
+      );
+      const calculated = { value: parser.parse() };
+      result.set(key, calculated);
+      resolving.delete(key);
+      return calculated;
+    } catch (error) {
+      const message =
+        error instanceof Error && /^#[A-Z0-9/?!]+$/.test(error.message)
+          ? error.message
+          : "#VALUE!";
+      const calculated = { value: null, error: message };
+      result.set(key, calculated);
+      resolving.delete(key);
+      return calculated;
+    }
+  };
+  for (const sheet of content.sheets)
+    for (const address of Object.keys(sheet.cells)) calculate(sheet, address);
+  return result;
+}
+
+export function formatCalculatedCell(
+  cell: SheetCell | undefined,
+  calculated: CalculatedCell | undefined,
+  locale: string,
+) {
+  if (calculated?.error) return calculated.error;
+  const value = calculated?.value ?? cell?.value ?? null;
+  if (value === null) return "";
+  if (typeof value !== "number") return String(value);
+  const format = cell?.format;
+  const decimals = Math.max(
+    0,
+    Math.min(12, format?.decimals ?? (Number.isInteger(value) ? 0 : 2)),
+  );
+  try {
+    if (format?.numberFormat === "currency")
+      return new Intl.NumberFormat(locale, {
+        style: "currency",
+        currency: "USD",
+        minimumFractionDigits: decimals,
+        maximumFractionDigits: decimals,
+      }).format(value);
+    if (format?.numberFormat === "percent")
+      return new Intl.NumberFormat(locale, {
+        style: "percent",
+        minimumFractionDigits: decimals,
+        maximumFractionDigits: decimals,
+      }).format(value);
+    if (format?.numberFormat === "date")
+      return new Intl.DateTimeFormat(locale).format(new Date(value));
+    return new Intl.NumberFormat(locale, {
+      maximumFractionDigits: decimals,
+    }).format(value);
+  } catch {
+    return String(value);
+  }
+}
+
+export function parseDelimited(
+  text: string,
+  delimiter = text.includes("\t") ? "\t" : ",",
+) {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = "";
+  let quoted = false;
+  for (let index = 0; index <= text.length; index += 1) {
+    const character = text[index] ?? "\n";
+    if (character === '"') {
+      if (quoted && text[index + 1] === '"') {
+        cell += '"';
+        index += 1;
+      } else quoted = !quoted;
+    } else if (!quoted && character === delimiter) {
+      row.push(cell);
+      cell = "";
+    } else if (!quoted && (character === "\n" || character === "\r")) {
+      if (character === "\r" && text[index + 1] === "\n") index += 1;
+      row.push(cell);
+      cell = "";
+      if (row.some((value) => value.length > 0)) rows.push(row);
+      row = [];
+    } else cell += character;
+  }
+  return rows;
+}
+
+export function delimitedValue(value: string) {
+  if (!/[",\n\r]/.test(value)) return value;
+  return `"${value.replaceAll('"', '""')}"`;
+}
+
+function rewriteStructuralReferences(
+  value: string,
+  axis: "row" | "column",
+  at: number,
+  delta: 1 | -1,
+) {
+  return value.replace(
+    /(\$?)([A-Z]+)(\$?)([1-9][0-9]*)/g,
+    (
+      token,
+      columnAbsolute: string,
+      columnText: string,
+      rowAbsolute: string,
+      rowText: string,
+    ) => {
+      const coordinate = {
+        row: Number(rowText) - 1,
+        column: columnIndex(columnText),
+      };
+      const current = axis === "row" ? coordinate.row : coordinate.column;
+      if (delta === -1 && current === at) return "#REF!";
+      if (current < at) return token;
+      if (axis === "row") coordinate.row += delta;
+      else coordinate.column += delta;
+      if (coordinate.row < 0 || coordinate.column < 0) return "#REF!";
+      return `${columnAbsolute}${columnName(coordinate.column)}${rowAbsolute}${coordinate.row + 1}`;
+    },
+  );
+}
+
+function shiftIdentityMap(
+  source: Record<string, string> | undefined,
+  at: number,
+  delta: 1 | -1,
+  newId: string,
+  materializedCount = 0,
+  identityPrefix = "region",
+) {
+  const result: Record<string, string> = {};
+  const materialized = {
+    ...Object.fromEntries(
+      Array.from({ length: materializedCount }, (_, index) => [
+        String(index),
+        `${identityPrefix}-${index + 1}`,
+      ]),
+    ),
+    ...(source ?? {}),
+  };
+  for (const [rawIndex, id] of Object.entries(materialized)) {
+    const index = Number(rawIndex);
+    if (!Number.isInteger(index)) continue;
+    if (delta === -1 && index === at) continue;
+    result[String(index >= at ? index + delta : index)] = id;
+  }
+  if (delta === 1) result[String(at)] = newId;
+  return result;
+}
+
+function shiftIndexList(
+  source: number[] | undefined,
+  at: number,
+  delta: 1 | -1,
+) {
+  return (source ?? []).flatMap((index) => {
+    if (delta === -1 && index === at) return [];
+    return [index >= at ? index + delta : index];
+  });
+}
+
+function shiftNumericKeyMap(
+  source: Record<string, number> | undefined,
+  at: number,
+  delta: 1 | -1,
+) {
+  return Object.fromEntries(
+    Object.entries(source ?? {}).flatMap(([rawIndex, value]) => {
+      const index = Number(rawIndex);
+      if (!Number.isInteger(index) || (delta === -1 && index === at)) return [];
+      return [[String(index >= at ? index + delta : index), value]];
+    }),
+  );
+}
+
+function shiftStructuralRange(
+  value: string,
+  axis: "row" | "column",
+  at: number,
+  delta: 1 | -1,
+) {
+  const separator = value.lastIndexOf("!");
+  const prefix = separator >= 0 ? value.slice(0, separator + 1) : "";
+  const parsed = parseRange(
+    separator >= 0 ? value.slice(separator + 1) : value,
+  );
+  if (!parsed) return null;
+  const range = normalizeRange(parsed);
+  const start = axis === "row" ? range.start.row : range.start.column;
+  const end = axis === "row" ? range.end.row : range.end.column;
+  if (delta === 1) {
+    if (at <= start) {
+      if (axis === "row") {
+        range.start.row += 1;
+        range.end.row += 1;
+      } else {
+        range.start.column += 1;
+        range.end.column += 1;
+      }
+    } else if (at <= end) {
+      if (axis === "row") range.end.row += 1;
+      else range.end.column += 1;
+    }
+  } else if (at < start) {
+    if (axis === "row") {
+      range.start.row -= 1;
+      range.end.row -= 1;
+    } else {
+      range.start.column -= 1;
+      range.end.column -= 1;
+    }
+  } else if (at <= end) {
+    if (start === end) return null;
+    if (axis === "row") range.end.row -= 1;
+    else range.end.column -= 1;
+  }
+  return `${prefix}${rangeLabel(range)}`;
+}
+
+export function mutateSheetAxis(
+  sheet: WorkbookSheet,
+  axis: "row" | "column",
+  at: number,
+  delta: 1 | -1,
+) {
+  const cells: Record<string, SheetCell> = {};
+  for (const [address, cell] of Object.entries(sheet.cells)) {
+    const coordinate = parseAddress(address);
+    if (!coordinate) continue;
+    const current = axis === "row" ? coordinate.row : coordinate.column;
+    if (delta === -1 && current === at) continue;
+    if (current >= at) {
+      if (axis === "row") coordinate.row += delta;
+      else coordinate.column += delta;
+    }
+    if (coordinate.row < 0 || coordinate.column < 0) continue;
+    cells[coordinateToAddress(coordinate)] = {
+      ...cell,
+      ...(cell.formula
+        ? {
+            formula: rewriteStructuralReferences(cell.formula, axis, at, delta),
+          }
+        : {}),
+    };
+  }
+  const rewriteRange = (range: string) =>
+    shiftStructuralRange(range, axis, at, delta);
+  const shiftColumnIndex = (column: number) => {
+    if (axis !== "column") return column;
+    if (delta === -1 && column === at) return null;
+    return column >= at ? column + delta : column;
+  };
+  return {
+    ...sheet,
+    cells,
+    tables: sheet.tables.flatMap((table) => {
+      const range = rewriteRange(table.range);
+      if (!range) return [];
+      const filters = table.filters?.flatMap((filter) => {
+        const column = shiftColumnIndex(filter.column);
+        return column === null ? [] : [{ ...filter, column }];
+      });
+      const sortColumn = table.sort
+        ? shiftColumnIndex(table.sort.column)
+        : undefined;
+      return [
+        {
+          ...table,
+          range,
+          filters,
+          ...(table.sort && sortColumn !== null && sortColumn !== undefined
+            ? { sort: { ...table.sort, column: sortColumn } }
+            : { sort: undefined }),
+        },
+      ];
+    }),
+    charts: sheet.charts.flatMap((chart) => {
+      const sourceRange = rewriteRange(chart.sourceRange);
+      return sourceRange ? [{ ...chart, sourceRange }] : [];
+    }),
+    mergedRanges: (sheet.mergedRanges ?? []).flatMap((range) => {
+      const shifted = rewriteRange(range);
+      return shifted ? [shifted] : [];
+    }),
+    conditionalFormats: (sheet.conditionalFormats ?? []).flatMap((rule) => {
+      const range = rewriteRange(rule.range);
+      return range ? [{ ...rule, range }] : [];
+    }),
+    rowCount:
+      axis === "row"
+        ? Math.max(1, (sheet.rowCount ?? 100) + delta)
+        : sheet.rowCount,
+    columnCount:
+      axis === "column"
+        ? Math.max(1, (sheet.columnCount ?? 26) + delta)
+        : sheet.columnCount,
+    hiddenRows:
+      axis === "row"
+        ? shiftIndexList(sheet.hiddenRows, at, delta)
+        : sheet.hiddenRows,
+    hiddenColumns:
+      axis === "column"
+        ? shiftIndexList(sheet.hiddenColumns, at, delta)
+        : sheet.hiddenColumns,
+    rowHeights:
+      axis === "row"
+        ? shiftNumericKeyMap(sheet.rowHeights, at, delta)
+        : sheet.rowHeights,
+    columnWidths:
+      axis === "column"
+        ? shiftNumericKeyMap(sheet.columnWidths, at, delta)
+        : sheet.columnWidths,
+    rowIdentities:
+      axis === "row"
+        ? shiftIdentityMap(
+            sheet.rowIdentities,
+            at,
+            delta,
+            `row-${crypto.randomUUID()}`,
+            sheet.rowCount ?? 100,
+            `${sheet.id}:row`,
+          )
+        : sheet.rowIdentities,
+    columnIdentities:
+      axis === "column"
+        ? shiftIdentityMap(
+            sheet.columnIdentities,
+            at,
+            delta,
+            `column-${crypto.randomUUID()}`,
+            sheet.columnCount ?? 26,
+            `${sheet.id}:column`,
+          )
+        : sheet.columnIdentities,
+  };
+}

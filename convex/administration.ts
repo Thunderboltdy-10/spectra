@@ -56,6 +56,126 @@ async function platformOperator(ctx: Ctx) {
   return actor;
 }
 
+export const agentGovernance = query({
+  args: { operatorSessionId: v.optional(v.id("operatorSchoolSessions")) },
+  handler: async (ctx, args) => {
+    const { school } = await schoolScope(ctx, args.operatorSessionId);
+    const [agents, schoolGrants, usage, feedback, evaluations, releases] =
+      await Promise.all([
+        ctx.db
+          .query("spectraArtifacts")
+          .withIndex("by_school_status", (q) =>
+            q.eq("schoolId", school._id).eq("status", "active"),
+          )
+          .collect(),
+        ctx.db
+          .query("accessGrants")
+          .withIndex("by_school", (q) =>
+            q.eq("schoolId", school._id).eq("resourceType", "agent"),
+          )
+          .collect(),
+        ctx.db
+          .query("agentUsageAggregates")
+          .withIndex("by_school_day", (q) => q.eq("schoolId", school._id))
+          .collect(),
+        ctx.db
+          .query("agentFeedback")
+          .withIndex("by_school_created", (q) => q.eq("schoolId", school._id))
+          .collect(),
+        ctx.db
+          .query("agentEvalRuns")
+          .withIndex("by_school_created", (q) => q.eq("schoolId", school._id))
+          .collect(),
+        ctx.db
+          .query("agentReleases")
+          .withIndex("by_school_published", (q) => q.eq("schoolId", school._id))
+          .collect(),
+      ]);
+    const now = Date.now();
+    const visibleAgentIds = new Set(
+      schoolGrants
+        .filter(
+          (grant) =>
+            !grant.revokedAt &&
+            (!grant.expiresAt || grant.expiresAt > now) &&
+            (grant.principalType === "school" ||
+              grant.principalType === "public"),
+        )
+        .map((grant) => grant.resourceId),
+    );
+    const visible = agents.filter(
+      (artifact) =>
+        artifact.blueprintKey === "agent" && visibleAgentIds.has(artifact._id),
+    );
+    const summaries = visible.map((artifact) => {
+      const agentUsage = usage.filter((row) => row.agentId === artifact._id);
+      const agentFeedback = feedback.filter(
+        (row) => row.agentId === artifact._id,
+      );
+      const agentEvals = evaluations.filter(
+        (row) => row.agentId === artifact._id,
+      );
+      const agentReleases = releases.filter(
+        (row) => row.agentId === artifact._id,
+      );
+      const invocations = agentUsage.reduce(
+        (sum, row) => sum + row.invocations,
+        0,
+      );
+      const completed = agentUsage.reduce((sum, row) => sum + row.completed, 0);
+      return {
+        agentId: artifact._id,
+        title: artifact.title,
+        invocations,
+        completionRate: invocations ? completed / invocations : null,
+        averageRating: agentFeedback.length
+          ? agentFeedback.reduce((sum, row) => sum + row.rating, 0) /
+            agentFeedback.length
+          : null,
+        evaluationPassRate: agentEvals.length
+          ? agentEvals.filter((row) => row.status === "passed").length /
+            agentEvals.length
+          : null,
+        publishedReleases: agentReleases.filter(
+          (row) =>
+            row.status === "published" &&
+            (!row.rollout || row.rollout === "published"),
+        ).length,
+        suspendedReleases: agentReleases.filter(
+          (row) => row.status === "suspended",
+        ).length,
+        updatedAt: artifact.updatedAt,
+      };
+    });
+    const invocations = summaries.reduce(
+      (sum, row) => sum + row.invocations,
+      0,
+    );
+    return {
+      totals: {
+        sharedAgents: summaries.length,
+        invocations,
+        feedback: summaries.reduce(
+          (sum, row) =>
+            sum +
+            feedback.filter((item) => item.agentId === row.agentId).length,
+          0,
+        ),
+        passedEvaluations: evaluations.filter(
+          (row) => visibleAgentIds.has(row.agentId) && row.status === "passed",
+        ).length,
+      },
+      agents: summaries.sort(
+        (left, right) =>
+          right.invocations - left.invocations ||
+          right.updatedAt - left.updatedAt,
+      ),
+      privacy:
+        "Only school/public agent metadata and aggregate usage, evaluation, and consented rating counts are included. Prompts, threads, memory, artifacts, resource content, and feedback comments are excluded.",
+    };
+  },
+});
+
 async function schoolMemberRows(ctx: Ctx, schoolId: Id<"schools">) {
   const memberships = await ctx.db
     .query("schoolMemberships")
@@ -429,195 +549,6 @@ export const updateSchoolProfile = mutation({
       policyVersion: school.policyVersion + 1,
       updatedAt: now,
     };
-  },
-});
-
-export const governancePolicy = query({
-  args: { operatorSessionId: v.optional(v.id("operatorSchoolSessions")) },
-  handler: async (ctx, args) => {
-    const { school } = await schoolScope(ctx, args.operatorSessionId);
-    const [specific, fallback] = await Promise.all([
-      ctx.db
-        .query("governancePolicies")
-        .withIndex("by_scope_school", (q) =>
-          q.eq("scope", "school").eq("schoolId", school._id),
-        )
-        .unique(),
-      ctx.db
-        .query("governancePolicies")
-        .withIndex("by_scope_school", (q) =>
-          q.eq("scope", "platform_default").eq("schoolId", undefined),
-        )
-        .unique(),
-    ]);
-    const policy = specific ?? fallback;
-    return policy
-      ? {
-          policyId: policy._id,
-          source: specific
-            ? ("school" as const)
-            : ("platform_default" as const),
-          publicSharing: policy.publicSharing,
-          defaultWorkspaceAccess: policy.defaultWorkspaceAccess,
-          retentionDays: policy.retentionDays,
-          allowedModels: policy.allowedModels,
-          allowedCodeRuntimes: policy.allowedCodeRuntimes,
-          codeNetworkAccess: policy.codeNetworkAccess,
-          exportEnabled: policy.exportEnabled,
-          updatedAt: policy.updatedAt,
-        }
-      : {
-          policyId: null,
-          source: "built_in" as const,
-          publicSharing: "approval_required" as const,
-          defaultWorkspaceAccess: "private" as const,
-          retentionDays: undefined,
-          allowedModels: [],
-          allowedCodeRuntimes: [
-            "javascript",
-            "typescript",
-            "react",
-            "python",
-          ] as const,
-          codeNetworkAccess: false,
-          exportEnabled: true,
-          updatedAt: null,
-        };
-  },
-});
-
-export const platformGovernancePolicy = query({
-  args: {},
-  handler: async (ctx) => {
-    await platformOperator(ctx);
-    const policy = await ctx.db
-      .query("governancePolicies")
-      .withIndex("by_scope_school", (q) =>
-        q.eq("scope", "platform_default").eq("schoolId", undefined),
-      )
-      .unique();
-    return policy
-      ? {
-          policyId: policy._id,
-          source: "platform_default" as const,
-          publicSharing: policy.publicSharing,
-          defaultWorkspaceAccess: policy.defaultWorkspaceAccess,
-          retentionDays: policy.retentionDays,
-          allowedModels: policy.allowedModels,
-          allowedCodeRuntimes: policy.allowedCodeRuntimes,
-          codeNetworkAccess: policy.codeNetworkAccess,
-          exportEnabled: policy.exportEnabled,
-          updatedAt: policy.updatedAt,
-        }
-      : {
-          policyId: null,
-          source: "built_in" as const,
-          publicSharing: "approval_required" as const,
-          defaultWorkspaceAccess: "private" as const,
-          retentionDays: undefined,
-          allowedModels: [],
-          allowedCodeRuntimes: [
-            "javascript",
-            "typescript",
-            "react",
-            "python",
-          ] as const,
-          codeNetworkAccess: false,
-          exportEnabled: true,
-          updatedAt: null,
-        };
-  },
-});
-
-export const setGovernancePolicy = mutation({
-  args: {
-    operatorSessionId: v.optional(v.id("operatorSchoolSessions")),
-    scope: v.union(v.literal("school"), v.literal("platform_default")),
-    publicSharing: v.union(
-      v.literal("disabled"),
-      v.literal("approval_required"),
-      v.literal("allowed"),
-    ),
-    defaultWorkspaceAccess: v.union(v.literal("private"), v.literal("school")),
-    retentionDays: v.optional(v.number()),
-    allowedModels: v.array(v.string()),
-    allowedCodeRuntimes: v.array(
-      v.union(
-        v.literal("javascript"),
-        v.literal("typescript"),
-        v.literal("react"),
-        v.literal("python"),
-      ),
-    ),
-    codeNetworkAccess: v.boolean(),
-    exportEnabled: v.boolean(),
-    requestId: v.optional(v.string()),
-  },
-  handler: async (ctx, args) => {
-    const scoped =
-      args.scope === "school"
-        ? await schoolScope(ctx, args.operatorSessionId, true)
-        : null;
-    const actor = scoped?.actor ?? (await platformOperator(ctx));
-    const school = scoped?.school;
-    if (
-      args.retentionDays !== undefined &&
-      (!Number.isInteger(args.retentionDays) ||
-        args.retentionDays < 30 ||
-        args.retentionDays > 3_650)
-    )
-      throw new Error(
-        "GOVERNANCE_RETENTION_INVALID: Retention must be between 30 and 3,650 days.",
-      );
-    const allowedModels = [
-      ...new Set(
-        args.allowedModels.map((item) => clean(item, 160)).filter(Boolean),
-      ),
-    ].slice(0, 100);
-    const scope = args.scope;
-    const existing = await ctx.db
-      .query("governancePolicies")
-      .withIndex("by_scope_school", (q) =>
-        q.eq("scope", scope).eq("schoolId", school?._id),
-      )
-      .unique();
-    const now = Date.now();
-    const value = {
-      schoolId: school?._id,
-      scope,
-      publicSharing: args.publicSharing,
-      defaultWorkspaceAccess: args.defaultWorkspaceAccess,
-      retentionDays: args.retentionDays,
-      allowedModels,
-      allowedCodeRuntimes: [...new Set(args.allowedCodeRuntimes)],
-      codeNetworkAccess: args.codeNetworkAccess,
-      exportEnabled: args.exportEnabled,
-      updatedByAccountId: actor.accountId,
-      updatedAt: now,
-    };
-    const policyId = existing
-      ? (await ctx.db.patch(existing._id, value), existing._id)
-      : await ctx.db.insert("governancePolicies", {
-          ...value,
-          createdAt: now,
-        });
-    await writeAuditEvent(ctx, {
-      actorAccountId: actor.accountId,
-      schoolId: school?._id,
-      operatorSessionId: scoped?.operatorSessionId,
-      action: "governance.policy.changed",
-      targetType: "governance_policy",
-      targetId: policyId,
-      metadata: {
-        scope,
-        publicSharing: args.publicSharing,
-        codeNetworkAccess: args.codeNetworkAccess,
-        allowedModelCount: allowedModels.length,
-      },
-      requestId: args.requestId,
-      retentionClass: "security",
-    });
-    return { policyId, scope, updatedAt: now };
   },
 });
 
@@ -2498,7 +2429,6 @@ export const buildLifecycleExport = internalQuery({
       deliveries,
       feedback,
       requests,
-      governance,
       limits,
       workspacesActive,
       workspacesArchived,
@@ -2552,12 +2482,6 @@ export const buildLifecycleExport = internalQuery({
       ctx.db
         .query("schoolRequests")
         .filter((q) => q.eq(q.field("schoolId"), school._id))
-        .collect(),
-      ctx.db
-        .query("governancePolicies")
-        .withIndex("by_scope_school", (q) =>
-          q.eq("scope", "school").eq("schoolId", school._id),
-        )
         .collect(),
       ctx.db
         .query("limitPolicies")
@@ -2714,7 +2638,6 @@ export const buildLifecycleExport = internalQuery({
         deliveries,
         feedback,
         requests,
-        governance,
         limits,
         auditEvents,
       },
@@ -3101,7 +3024,6 @@ const PURGE_DEPENDENT_TABLES = [
 const PURGE_SCHOOL_TABLES = [
   "membershipInvitations",
   "schoolGroups",
-  "governancePolicies",
   "schoolGroupMembers",
   "schoolAnnouncements",
   "schoolAnnouncementDeliveries",
@@ -3133,6 +3055,7 @@ const PURGE_SCHOOL_TABLES = [
   "memoryCapsules",
   "memoryRetrievalEvents",
   "memoryJobs",
+  "memoryEvaluationRuns",
   "memoryClaims",
   "flashcardStudyStates",
   "flashcardStudyReviews",
@@ -3151,6 +3074,7 @@ const PURGE_SCHOOL_TABLES = [
   "regionClaims",
   "artifactComments",
   "plannerReminderDeliveries",
+  "timetableReminderDeliveries",
   "changeGroups",
   "artifactEmbeds",
   "artifactAccessRequests",
@@ -3161,6 +3085,7 @@ const PURGE_SCHOOL_TABLES = [
   "spectraAiRuns",
   "spectraThreads",
   "spectraWorkspaceItems",
+  "workspaceImportJobs",
   "spectraArtifacts",
   "spectraWorkspaces",
 ] as const;

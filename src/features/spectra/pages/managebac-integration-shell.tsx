@@ -343,8 +343,6 @@ export function ManageBacIntegrationShell() {
     authScheme: "bearer" as "raw" | "bearer",
     token: "",
     frequencyMinutes: 60,
-    autoCreateClasses: true,
-    autoImportTasks: true,
     autoApplySafeUpdates: true,
     conflictMode: "review" as "review" | "ask_me",
   });
@@ -363,8 +361,6 @@ export function ManageBacIntegrationShell() {
           authHeaderName: integration.authHeaderName,
           authScheme: integration.authScheme,
           frequencyMinutes: integration.syncPolicy.frequencyMinutes,
-          autoCreateClasses: integration.syncPolicy.autoCreateClasses,
-          autoImportTasks: integration.syncPolicy.autoImportTasks,
           autoApplySafeUpdates: integration.syncPolicy.autoApplySafeUpdates,
           conflictMode: integration.syncPolicy.conflictMode,
         }));
@@ -1072,14 +1068,14 @@ export function ManageBacIntegrationShell() {
               <DetailRow
                 icon={School}
                 label="Auto-import new classes"
-                value={integration?.syncPolicy.autoCreateClasses ? "On" : "Off"}
-                good={integration?.syncPolicy.autoCreateClasses}
+                value="Automatic"
+                good
               />
               <DetailRow
                 icon={ListChecks}
                 label="Auto-import tasks"
-                value={integration?.syncPolicy.autoImportTasks ? "On" : "Off"}
-                good={integration?.syncPolicy.autoImportTasks}
+                value="Automatic"
+                good
               />
               <DetailRow
                 icon={AlertCircle}
@@ -1732,8 +1728,6 @@ function SettingsDialog({
     authScheme: "raw" | "bearer";
     token: string;
     frequencyMinutes: number;
-    autoCreateClasses: boolean;
-    autoImportTasks: boolean;
     autoApplySafeUpdates: boolean;
     conflictMode: "review" | "ask_me";
   };
@@ -1895,26 +1889,13 @@ function SettingsDialog({
                 <option value={1440}>Daily</option>
               </select>
             </label>
+            <div className="mt-3 rounded-[8px] border border-[#cfe5da] bg-[#f3f9f6] p-3 text-[10px] leading-4 text-[#426b5c]">
+              Current classes and source-linked tasks are always imported for
+              the verified user. This is an ordinary Spectra capability, not an
+              administrator feature switch. Imported workspaces begin private,
+              and later sync preserves personal customization.
+            </div>
             <div className="mt-2 divide-y divide-[var(--border-subtle)]">
-              <Toggle
-                checked={config.autoCreateClasses}
-                onChange={(autoCreateClasses) =>
-                  setConfig((current) => ({
-                    ...current,
-                    autoCreateClasses,
-                  }))
-                }
-                label="Create class workspaces"
-                detail="Exactly one private workspace per verified current class and academic period."
-              />
-              <Toggle
-                checked={config.autoImportTasks}
-                onChange={(autoImportTasks) =>
-                  setConfig((current) => ({ ...current, autoImportTasks }))
-                }
-                label="Create source-linked tasks"
-                detail="Assignments and deadlines become planner artifacts with separate personal overlays."
-              />
               <Toggle
                 checked={config.autoApplySafeUpdates}
                 onChange={(autoApplySafeUpdates) =>

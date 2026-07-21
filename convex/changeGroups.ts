@@ -265,7 +265,7 @@ export async function commitChangeGroup(
   return { status: "committed" as const, versionId };
 }
 
-async function commitHumanCheckpoint(
+export async function commitHumanCheckpoint(
   ctx: MutationCtx,
   artifactId: Id<"spectraArtifacts">,
   summary: string,
@@ -348,6 +348,64 @@ async function commitHumanCheckpoint(
   );
   await ctx.db.patch(artifact._id, { currentVersionId: versionId });
   return [{ status: "committed" as const, versionId }];
+}
+
+export async function commitDirectHumanChange(
+  ctx: MutationCtx,
+  input: {
+    artifactId: Id<"spectraArtifacts">;
+    actorAccountId: Id<"accounts">;
+    before: {
+      title: string;
+      summary?: string;
+      content: unknown;
+      tags: string[];
+    };
+    regionIds: string[];
+    summary: string;
+  },
+) {
+  const artifact = await ctx.db.get(input.artifactId);
+  if (!artifact) throw new Error("ARTIFACT_NOT_FOUND");
+  const after = {
+    title: artifact.title,
+    summary: artifact.summary,
+    content: artifact.content,
+    tags: artifact.tags,
+  };
+  if (JSON.stringify(input.before) === JSON.stringify(after))
+    return { status: "unchanged" as const };
+  const now = Date.now();
+  const stateHash =
+    artifact.contentHash ??
+    artifact.liveStateVectorHash ??
+    `direct:${artifact._id}:${now}`;
+  const changeGroupId = await ctx.db.insert("changeGroups", {
+    artifactId: artifact._id,
+    schoolId: artifact.schoolId,
+    source: "human",
+    actorAccountId: input.actorAccountId,
+    operationIds: [],
+    regionIds: [...new Set(input.regionIds)].slice(0, 200),
+    baseStateVectorHash:
+      artifact.liveStateVectorHash ??
+      (artifact.currentVersionId
+        ? `version:${artifact.currentVersionId}`
+        : `initial:${artifact._id}`),
+    baseVersionId: artifact.currentVersionId,
+    baseSnapshot: input.before,
+    finalStateVectorHash: stateHash,
+    finalSnapshot: after,
+    finalIntegrityHash: artifact.contentHash,
+    summary: input.summary.trim().slice(0, 500),
+    status: "open",
+    openedAt: now,
+    lastActivityAt: now,
+  });
+  return commitChangeGroup(ctx, changeGroupId, {
+    source: "manual",
+    summary: input.summary,
+  });
 }
 
 export const commitIdle = internalMutation({
@@ -534,9 +592,15 @@ export const reconcileImports = mutation({
       .slice(0, 20);
     const versionIds: Id<"spectraArtifactVersions">[] = [];
     for (const job of pending) {
-      const result = await commitImportJob(ctx, artifact, job, actor.accountId, {
-        preserveLiveCurrent: false,
-      });
+      const result = await commitImportJob(
+        ctx,
+        artifact,
+        job,
+        actor.accountId,
+        {
+          preserveLiveCurrent: false,
+        },
+      );
       versionIds.push(result.versionId);
     }
     const recoveryVersionId = versionIds.length

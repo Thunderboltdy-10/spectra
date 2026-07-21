@@ -63,11 +63,10 @@ function callFingerprint(call: OpenRouterAgentToolCall) {
 }
 
 /**
- * Runs the model/tool/result loop without an arbitrary turn, time, or token
- * limit. It stops only when the model finishes, invokes a terminal tool, the
- * caller aborts, or the exact same ineffective tool call proves a no-progress
- * cycle. The latter is feedback first, failure only after the model ignores the
- * same structured feedback and repeats the identical call again.
+ * Runs the model/tool/result loop under explicit reliability guardrails. These
+ * are not commercial quotas: they prevent a malformed agent from consuming
+ * resources forever while leaving enough headroom for genuinely complex work.
+ * Repeated no-progress calls remain a separate, earlier circuit breaker.
  */
 export async function runSpectraAgentLoop(input: {
   messages: SpectraAgentMessage[];
@@ -83,6 +82,12 @@ export async function runSpectraAgentLoop(input: {
   ) => boolean;
   signal?: AbortSignal;
   onTurn?: (turn: OpenRouterAgentTurn, index: number) => void;
+  budget?: {
+    maxTurns?: number;
+    maxToolCalls?: number;
+    maxElapsedMs?: number;
+    maxTotalTokens?: number;
+  };
 }) {
   const messages = [...input.messages];
   const repeatedCalls = new Map<string, number>();
@@ -90,13 +95,40 @@ export async function runSpectraAgentLoop(input: {
   let model: string | undefined;
   let provider: string | undefined;
   let turns = 0;
+  let toolCalls = 0;
+  const startedAt = Date.now();
+  const maxTurns = Math.max(4, Math.min(40, input.budget?.maxTurns ?? 24));
+  const maxToolCalls = Math.max(
+    4,
+    Math.min(100, input.budget?.maxToolCalls ?? 60),
+  );
+  const maxElapsedMs = Math.max(
+    30_000,
+    Math.min(10 * 60_000, input.budget?.maxElapsedMs ?? 4 * 60_000),
+  );
+  const maxTotalTokens = Math.max(
+    20_000,
+    Math.min(500_000, input.budget?.maxTotalTokens ?? 250_000),
+  );
 
   while (true) {
     if (input.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    if (turns >= maxTurns)
+      throw new Error(
+        `Spectra stopped this agent after ${maxTurns} model turns without a completed result. Continue in the thread to resume with the preserved context.`,
+      );
+    if (Date.now() - startedAt >= maxElapsedMs)
+      throw new Error(
+        "Spectra paused this agent after its reliability time budget. Continue in the thread to resume safely.",
+      );
     turns += 1;
     const turn = await input.requestTurn(messages, turns);
     input.onTurn?.(turn, turns);
     usage = mergeUsage(usage, turn.usage);
+    if ((usage?.totalTokens ?? 0) > maxTotalTokens)
+      throw new Error(
+        "Spectra paused this agent after its reliability context budget. Continue in the thread to resume with a narrower context.",
+      );
     model = turn.model ?? model;
     provider = turn.provider ?? provider;
 
@@ -131,6 +163,11 @@ export async function runSpectraAgentLoop(input: {
     });
 
     for (const call of turn.toolCalls) {
+      toolCalls += 1;
+      if (toolCalls > maxToolCalls)
+        throw new Error(
+          `Spectra stopped this agent after ${maxToolCalls} tool calls without a completed result. Continue in the thread to resume safely.`,
+        );
       const fingerprint = callFingerprint(call);
       const repetition = (repeatedCalls.get(fingerprint) ?? 0) + 1;
       repeatedCalls.set(fingerprint, repetition);

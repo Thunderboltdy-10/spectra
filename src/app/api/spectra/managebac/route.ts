@@ -1104,14 +1104,6 @@ export async function POST(request: NextRequest) {
           typeof body.frequencyMinutes === "number"
             ? body.frequencyMinutes
             : undefined,
-        autoCreateClasses:
-          typeof body.autoCreateClasses === "boolean"
-            ? body.autoCreateClasses
-            : undefined,
-        autoImportTasks:
-          typeof body.autoImportTasks === "boolean"
-            ? body.autoImportTasks
-            : undefined,
         autoApplySafeUpdates:
           typeof body.autoApplySafeUpdates === "boolean"
             ? body.autoApplySafeUpdates

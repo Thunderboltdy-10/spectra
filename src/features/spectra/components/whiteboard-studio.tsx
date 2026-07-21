@@ -291,6 +291,7 @@ export function WhiteboardStudio({
   const [uploadingImage, setUploadingImage] = useState(false);
   const [ioNotice, setIoNotice] = useState<string>();
   const [ioBusy, setIoBusy] = useState<string>();
+  const [canvasSize, setCanvasSize] = useState({ width: 1280, height: 800 });
   const dragRef = useRef<Drag | undefined>(undefined);
   const canvasRef = useRef<HTMLDivElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -308,6 +309,49 @@ export function WhiteboardStudio({
   );
   const edges = board.edges.filter(
     (edge) => edge.pageId === page.id && visibleLayerIds.has(edge.layerId),
+  );
+  const renderedNodes = useMemo(() => {
+    const margin = 520 / Math.max(board.viewport.zoom, 0.05);
+    const left = board.viewport.x - margin;
+    const top = board.viewport.y - margin;
+    const right =
+      board.viewport.x + canvasSize.width / board.viewport.zoom + margin;
+    const bottom =
+      board.viewport.y + canvasSize.height / board.viewport.zoom + margin;
+    return nodes.filter(
+      (node) =>
+        node.x + node.width >= left &&
+        node.y + node.height >= top &&
+        node.x <= right &&
+        node.y <= bottom,
+    );
+  }, [
+    board.viewport.x,
+    board.viewport.y,
+    board.viewport.zoom,
+    canvasSize.height,
+    canvasSize.width,
+    nodes,
+  ]);
+  const renderedNodeIds = useMemo(
+    () => new Set(renderedNodes.map((node) => node.id)),
+    [renderedNodes],
+  );
+  const renderedEdges = useMemo(
+    () =>
+      edges.filter(
+        (edge) =>
+          renderedNodeIds.has(edge.from) || renderedNodeIds.has(edge.to),
+      ),
+    [edges, renderedNodeIds],
+  );
+  const nodeIndexById = useMemo(
+    () => new Map(board.nodes.map((node, index) => [node.id, index])),
+    [board.nodes],
+  );
+  const edgeIndexById = useMemo(
+    () => new Map(board.edges.map((edge, index) => [edge.id, index])),
+    [board.edges],
   );
   const selectedNode = board.nodes.find((node) => node.id === selectedNodeId);
   const selectedNodes = board.nodes.filter((node) =>
@@ -336,6 +380,20 @@ export function WhiteboardStudio({
       active = false;
     };
   }, [artifactId]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const update = () =>
+      setCanvasSize({
+        width: Math.max(1, canvas.clientWidth),
+        height: Math.max(1, canvas.clientHeight),
+      });
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(canvas);
+    return () => observer.disconnect();
+  }, []);
 
   const emit = useCallback(
     (next: WhiteboardContent, record = true) => {
@@ -781,6 +839,12 @@ export function WhiteboardStudio({
     if (readOnly) return;
     if (!file.type.startsWith("image/")) {
       setAssetError("Choose an image file.");
+      return;
+    }
+    if (file.type === "image/svg+xml" || /\.svgz?$/i.test(file.name)) {
+      setAssetError(
+        "Use Import board for SVG files so active content and external resources can be quarantined before conversion.",
+      );
       return;
     }
     if (file.size > 100 * 1024 * 1024) {
@@ -1358,10 +1422,11 @@ export function WhiteboardStudio({
           }}
         >
           <svg className="whiteboard-edges" aria-label="Connectors">
-            {edges.map((edge, index) => {
+            {renderedEdges.map((edge) => {
               const from = nodes.find((node) => node.id === edge.from);
               const to = nodes.find((node) => node.id === edge.to);
               if (!from || !to) return null;
+              const index = edgeIndexById.get(edge.id) ?? -1;
               const changed = aiChangedPaths.some((path) =>
                 path.includes(`/edges/${index}`),
               );
@@ -1387,9 +1452,10 @@ export function WhiteboardStudio({
               );
             })}
           </svg>
-          {[...nodes]
+          {[...renderedNodes]
             .sort((a, b) => a.zIndex - b.zIndex)
-            .map((node, index) => {
+            .map((node) => {
+              const index = nodeIndexById.get(node.id) ?? -1;
               const source =
                 node.content &&
                 typeof node.content === "object" &&
@@ -1454,17 +1520,23 @@ export function WhiteboardStudio({
         </div>
         {!compact ? (
           <div className="whiteboard-minimap" aria-label="Board minimap">
-            {nodes.slice(0, 500).map((node) => (
-              <i
-                key={node.id}
-                style={{
-                  left: `${50 + node.x / 100}%`,
-                  top: `${50 + node.y / 100}%`,
-                  width: Math.max(2, node.width / 120),
-                  height: Math.max(2, node.height / 120),
-                }}
-              />
-            ))}
+            {nodes
+              .filter(
+                (_node, index) =>
+                  nodes.length <= 500 ||
+                  index % Math.ceil(nodes.length / 500) === 0,
+              )
+              .map((node) => (
+                <i
+                  key={node.id}
+                  style={{
+                    left: `${50 + node.x / 100}%`,
+                    top: `${50 + node.y / 100}%`,
+                    width: Math.max(2, node.width / 120),
+                    height: Math.max(2, node.height / 120),
+                  }}
+                />
+              ))}
             <span />
           </div>
         ) : null}
@@ -1477,7 +1549,7 @@ export function WhiteboardStudio({
       <input
         ref={imageInputRef}
         type="file"
-        accept="image/*"
+        accept="image/png,image/jpeg,image/webp,image/gif,image/avif"
         hidden
         onChange={(event) => {
           const file = event.target.files?.[0];
@@ -1588,6 +1660,7 @@ export function WhiteboardStudio({
           <button
             type="button"
             title="Templates"
+            disabled={readOnly}
             data-active={panel === "templates" || undefined}
             onClick={() =>
               setPanel(panel === "templates" ? "none" : "templates")
@@ -1621,10 +1694,18 @@ export function WhiteboardStudio({
         </div>
         <span />
         <div>
-          <button type="button" onClick={undoAction} disabled={!undo.length}>
+          <button
+            type="button"
+            onClick={undoAction}
+            disabled={readOnly || !undo.length}
+          >
             <Undo2 className="h-4 w-4" />
           </button>
-          <button type="button" onClick={redoAction} disabled={!redo.length}>
+          <button
+            type="button"
+            onClick={redoAction}
+            disabled={readOnly || !redo.length}
+          >
             <Redo2 className="h-4 w-4" />
           </button>
           <button
@@ -1799,6 +1880,7 @@ export function WhiteboardStudio({
                 <button
                   type="button"
                   className="whiteboard-panel-add"
+                  disabled={readOnly}
                   onClick={addPage}
                 >
                   <Plus className="h-3.5 w-3.5" /> Add page
@@ -1813,6 +1895,7 @@ export function WhiteboardStudio({
                       <button
                         type="button"
                         title={layer.visible ? "Hide layer" : "Show layer"}
+                        disabled={readOnly}
                         onClick={() =>
                           mutate((draft) => {
                             const found = draft.layers.find(
@@ -1831,6 +1914,7 @@ export function WhiteboardStudio({
                       <button
                         type="button"
                         title={layer.locked ? "Unlock layer" : "Lock layer"}
+                        disabled={readOnly}
                         onClick={() =>
                           mutate((draft) => {
                             const found = draft.layers.find(
@@ -1852,6 +1936,7 @@ export function WhiteboardStudio({
                 <button
                   type="button"
                   className="whiteboard-panel-add"
+                  disabled={readOnly}
                   onClick={addLayer}
                 >
                   <Plus className="h-3.5 w-3.5" /> Add layer
@@ -1859,21 +1944,33 @@ export function WhiteboardStudio({
               </>
             ) : panel === "templates" ? (
               <div className="whiteboard-template-list">
-                <button type="button" onClick={() => applyTemplate("concept")}>
+                <button
+                  type="button"
+                  disabled={readOnly}
+                  onClick={() => applyTemplate("concept")}
+                >
                   <i data-template="concept" />
                   <span>
                     <strong>Concept map</strong>
                     <small>Central idea with connected evidence</small>
                   </span>
                 </button>
-                <button type="button" onClick={() => applyTemplate("study")}>
+                <button
+                  type="button"
+                  disabled={readOnly}
+                  onClick={() => applyTemplate("study")}
+                >
                   <i data-template="study" />
                   <span>
                     <strong>Study map</strong>
                     <small>Knowledge, review, and open questions</small>
                   </span>
                 </button>
-                <button type="button" onClick={() => applyTemplate("retro")}>
+                <button
+                  type="button"
+                  disabled={readOnly}
+                  onClick={() => applyTemplate("retro")}
+                >
                   <i data-template="retro" />
                   <span>
                     <strong>Reflection</strong>

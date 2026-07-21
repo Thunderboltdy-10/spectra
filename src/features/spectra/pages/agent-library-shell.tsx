@@ -65,6 +65,8 @@ type LibraryCard = {
   owner: { name: string; avatarUrl?: string };
   updatedAt: number;
   releaseNumber?: number;
+  rating?: number | null;
+  ratingCount?: number;
   artifact?: SpectraArtifact;
   publicAgent?: SpectraPublicAgent;
 };
@@ -139,6 +141,8 @@ function publicCard(agent: SpectraPublicAgent): LibraryCard {
     owner: agent.owner,
     updatedAt: agent.publishedAt,
     releaseNumber: agent.releaseNumber,
+    rating: agent.rating,
+    ratingCount: agent.ratingCount,
     publicAgent: agent,
   };
 }
@@ -245,6 +249,11 @@ function AgentCard({
                 : "Published"}{" "}
             {formatRelativeTime(card.updatedAt)}
           </span>
+          {card.section === "public" && typeof card.rating === "number" ? (
+            <span className="ml-auto shrink-0 font-semibold text-[#b87618]">
+              ★ {card.rating.toFixed(1)} ({card.ratingCount})
+            </span>
+          ) : null}
         </span>
         <span className="mt-3 flex min-h-[22px] flex-wrap gap-1.5 overflow-hidden">
           {(card.capabilities.length ? card.capabilities : ["Specialist"])

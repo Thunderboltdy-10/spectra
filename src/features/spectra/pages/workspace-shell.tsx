@@ -9,6 +9,7 @@ import {
   Atom,
   Brain,
   Calculator,
+  Download,
   ExternalLink,
   FileText,
   Files,
@@ -30,6 +31,7 @@ import {
   Sparkles,
   Sprout,
   Trash2,
+  Upload,
   X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -86,6 +88,7 @@ import {
 } from "../components/spectra-view-model";
 import {
   getSpectraArtifact,
+  exportSpectraWorkspaceManifest,
   getSpectraOverview,
   getSpectraRunDetail,
   getSpectraThread,
@@ -254,6 +257,7 @@ function WorkspaceHome({
   onToggleContext,
   onToggleSelection,
   searchControl,
+  onImportWorkspace,
 }: {
   overview: SpectraOverview | null;
   onSelect: (workspaceId: string) => void;
@@ -278,6 +282,7 @@ function WorkspaceHome({
   onToggleContext: (artifact: SpectraArtifact) => void;
   onToggleSelection: () => void;
   searchControl: ReactNode;
+  onImportWorkspace: () => void;
 }) {
   const selectedObjects = useSpectraContextStore(
     (state) => state.selectionDraft,
@@ -369,6 +374,14 @@ function WorkspaceHome({
               <span>{unplacedCount} unplaced</span>
             </div>
             {searchControl}
+            <button
+              type="button"
+              onClick={onImportWorkspace}
+              className="flex h-9 items-center gap-2 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+            >
+              <Upload className="h-4 w-4" />
+              Import workspace
+            </button>
             <button
               type="button"
               onClick={onToggleSelection}
@@ -673,6 +686,7 @@ function WorkspaceHeader({
   onCreateArtifact,
   onEditWorkspace,
   onShareWorkspace,
+  onExportWorkspace,
   onArchiveWorkspace,
 }: {
   workspace: SpectraWorkspace | null;
@@ -684,6 +698,7 @@ function WorkspaceHeader({
   onCreateArtifact: (type: ArtifactTypeKey) => void;
   onEditWorkspace: () => void;
   onShareWorkspace: () => void;
+  onExportWorkspace: () => void;
   onArchiveWorkspace: () => void;
 }) {
   const [createOpen, setCreateOpen] = useState(false);
@@ -743,6 +758,15 @@ function WorkspaceHeader({
                 <Share2 className="h-4 w-4" />
               </button>
             ) : null}
+            <button
+              type="button"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[7px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+              onClick={onExportWorkspace}
+              aria-label="Export portable workspace manifest"
+              title="Export workspace"
+            >
+              <Download className="h-4 w-4" />
+            </button>
             {workspace?.ownership !== "shared" ? (
               <button
                 type="button"
@@ -2373,6 +2397,7 @@ export function WorkspaceShell() {
   const workspaceRequestSequence = useRef(0);
   const overviewRequestSequence = useRef(0);
   const restoredViewWorkspaceId = useRef<string | null>(null);
+  const workspaceImportInputRef = useRef<HTMLInputElement | null>(null);
   const openObjects = useSpectraContextStore((state) => state.openObjects);
   const tileArtifactIds = useSpectraContextStore(
     (state) => state.tileArtifactIds,
@@ -3703,6 +3728,105 @@ export function WorkspaceShell() {
     }
   }
 
+  async function importWorkspaceManifest(file: File) {
+    if (file.size > 750_000) {
+      toast.error("Workspace manifests must be 750 KB or smaller.");
+      return;
+    }
+    setBusyKey("workspace:import");
+    try {
+      const bytes = await file.arrayBuffer();
+      const manifest = JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+      const digest = await crypto.subtle.digest("SHA-256", bytes);
+      const sha256 = Array.from(new Uint8Array(digest), (byte) =>
+        byte.toString(16).padStart(2, "0"),
+      ).join("");
+      const result = await postSpectra<
+        | { status: "quarantined"; reason: string }
+        | {
+            status: "imported";
+            workspaceId: string;
+            report: {
+              placed: number;
+              skipped: number;
+              unsupported: string[];
+              warnings: string[];
+            };
+          }
+      >({
+        action: "importWorkspaceManifest",
+        fileName: file.name,
+        sha256,
+        manifest,
+      });
+      if (result.status === "quarantined") {
+        toast.error(`Import quarantined: ${result.reason}`);
+        return;
+      }
+      const detail = result.report.skipped
+        ? `${result.report.placed} placed; ${result.report.skipped} unavailable reference${result.report.skipped === 1 ? "" : "s"} skipped.`
+        : `${result.report.placed} artifact reference${result.report.placed === 1 ? "" : "s"} placed.`;
+      toast.success(`Workspace imported. ${detail}`);
+      setSelection(null);
+      setViewMode("list");
+      const refreshed = await loadOverview(result.workspaceId, true);
+      const imported = refreshed?.workspaces.find(
+        (item) => item._id === result.workspaceId,
+      );
+      setActiveHubDestination(
+        imported?.title ?? "Imported workspace",
+        result.workspaceId,
+      );
+    } catch (error) {
+      toast.error(
+        error instanceof SyntaxError
+          ? "This file is not valid JSON and has been left unchanged."
+          : error instanceof Error
+            ? error.message
+            : "Could not import this workspace.",
+      );
+    } finally {
+      setBusyKey(null);
+      if (workspaceImportInputRef.current)
+        workspaceImportInputRef.current.value = "";
+    }
+  }
+
+  async function exportWorkspaceManifest() {
+    if (!workspaceHeader) return;
+    setBusyKey(`workspace:export:${workspaceHeader._id}`);
+    try {
+      const result = await exportSpectraWorkspaceManifest(workspaceHeader._id);
+      const blob = new Blob([JSON.stringify(result.manifest, null, 2)], {
+        type: "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `${
+        workspaceHeader.title
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-|-$/g, "") || "workspace"
+      }.spectra-workspace.json`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      const warningCount =
+        result.report.warnings.length + result.report.unsupported.length;
+      toast.success(
+        warningCount
+          ? `Workspace exported with ${warningCount} fidelity note${warningCount === 1 ? "" : "s"}.`
+          : "Portable workspace manifest exported.",
+      );
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Could not export workspace.",
+      );
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
   function openWorkspaceEdit() {
     if (!workspaceHeader) return;
     setWorkspaceEditTitle(workspaceHeader.title);
@@ -3762,6 +3886,17 @@ export function WorkspaceShell() {
 
   return (
     <div className="spectra-wave-y relative flex h-full min-h-0 bg-[var(--bg-primary)]">
+      <input
+        ref={workspaceImportInputRef}
+        type="file"
+        accept=".spectra-workspace.json,.json,application/json"
+        className="sr-only"
+        aria-label="Import a Spectra workspace manifest"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (file) void importWorkspaceManifest(file);
+        }}
+      />
       <div className="flex min-w-0 flex-1 flex-col">
         <StudioTabRail
           hubTabs={
@@ -4212,6 +4347,9 @@ export function WorkspaceShell() {
                   });
                   if (selectionCount) setFocusModeOverride("selection");
                 }}
+                onImportWorkspace={() =>
+                  workspaceImportInputRef.current?.click()
+                }
                 searchControl={
                   <GlobalSearch
                     onOpenArtifact={openArtifactPanel}
@@ -4297,6 +4435,7 @@ export function WorkspaceShell() {
                     onCreateArtifact={openCreateArtifact}
                     onEditWorkspace={openWorkspaceEdit}
                     onShareWorkspace={() => setWorkspaceShareOpen(true)}
+                    onExportWorkspace={() => void exportWorkspaceManifest()}
                     onArchiveWorkspace={() => {
                       setWorkspaceDeleteConfirmation("");
                       setWorkspaceDeleteOpen(true);

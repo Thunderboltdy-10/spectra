@@ -180,19 +180,6 @@ type AuditEvent = {
   createdAt: number;
 };
 
-type GovernancePolicy = {
-  policyId: string | null;
-  source: "school" | "platform_default" | "built_in";
-  publicSharing: "disabled" | "approval_required" | "allowed";
-  defaultWorkspaceAccess: "private" | "school";
-  retentionDays?: number;
-  allowedModels: string[];
-  allowedCodeRuntimes: Array<"javascript" | "typescript" | "react" | "python">;
-  codeNetworkAccess: boolean;
-  exportEnabled: boolean;
-  updatedAt: number | null;
-};
-
 function actionLabel(value: string) {
   return value
     .replaceAll(".", " · ")
@@ -888,17 +875,16 @@ function SchoolAdminTab({
       />
     );
   if (tab === "usage") return <UsageSurface overview={overview} />;
-  if (tab === "agents") return <AgentsResourcesSurface />;
-  if (tab === "integrations")
-    return <IntegrationsSurface overview={overview} />;
-  if (tab === "governance")
+  if (tab === "agents")
     return (
-      <GovernanceSurface
+      <AgentsResourcesSurface
         operatorSessionId={operatorSessionId}
-        busy={busy}
-        mutate={mutate}
+        refreshKey={refreshKey}
       />
     );
+  if (tab === "integrations")
+    return <IntegrationsSurface overview={overview} />;
+  if (tab === "governance") return <GovernanceSurface />;
   if (tab === "feedback")
     return (
       <FeedbackSurface
@@ -1863,20 +1849,106 @@ function UsageSurface({
   );
 }
 
-function AgentsResourcesSurface() {
+type AgentGovernance = {
+  totals: {
+    sharedAgents: number;
+    invocations: number;
+    feedback: number;
+    passedEvaluations: number;
+  };
+  agents: Array<{
+    agentId: string;
+    title: string;
+    invocations: number;
+    completionRate: number | null;
+    averageRating: number | null;
+    evaluationPassRate: number | null;
+    publishedReleases: number;
+    suspendedReleases: number;
+    updatedAt: number;
+  }>;
+  privacy: string;
+};
+
+function AgentsResourcesSurface({
+  operatorSessionId,
+  refreshKey,
+}: {
+  operatorSessionId?: string;
+  refreshKey: number;
+}) {
+  const [data, setData] = useState<AgentGovernance | null>(null);
+  const [error, setError] = useState("");
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  useEffect(() => {
+    let active = true;
+    setError("");
+    void getAdministration<AgentGovernance>("agentGovernance", {
+      operatorSessionId,
+    })
+      .then((result) => {
+        if (active) setData(result);
+      })
+      .catch((failure) => {
+        if (active)
+          setError(
+            failure instanceof Error
+              ? failure.message
+              : "Agent governance could not be loaded.",
+          );
+      });
+    return () => {
+      active = false;
+    };
+  }, [loadAttempt, operatorSessionId, refreshKey]);
   return (
-    <div className="grid gap-3 lg:grid-cols-2">
+    <div className="grid gap-3">
       <AdminCard>
         <AdminSectionHeader
           title="School agents"
           detail="Review agents that were explicitly shared or published to the school. Private agents remain private."
         />
         <div className="p-4 pt-1">
+          {error ? (
+            <ErrorPanel
+              message={error}
+              retry={() => setLoadAttempt((value) => value + 1)}
+            />
+          ) : null}
           <PrivacyNotice>
-            Agent analytics use aggregate invocation and evaluation metadata;
-            private prompts, sessions, memory, and unrelated artifacts are not
-            available here.
+            {data?.privacy ??
+              "Agent analytics use aggregate invocation and evaluation metadata; private prompts, sessions, memory, and unrelated artifacts are not available here."}
           </PrivacyNotice>
+          {data ? (
+            <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+              <MetricCard
+                icon={Bot}
+                label="School-shared agents"
+                value={formatCompact(data.totals.sharedAgents)}
+                detail="Private drafts excluded"
+              />
+              <MetricCard
+                icon={Activity}
+                label="Invocations"
+                value={formatCompact(data.totals.invocations)}
+                detail="Aggregate only"
+              />
+              <MetricCard
+                icon={MessageCircle}
+                label="Feedback signals"
+                value={formatCompact(data.totals.feedback)}
+                detail="No private comments"
+              />
+              <MetricCard
+                icon={ShieldCheck}
+                label="Passing evaluations"
+                value={formatCompact(data.totals.passedEvaluations)}
+                detail="Synthetic suites"
+              />
+            </div>
+          ) : !error ? (
+            <LoadingPanel label="Loading privacy-safe agent governance…" />
+          ) : null}
           <div className="mt-4 flex gap-2">
             <Link href="/agents">
               <AdminButton tone="primary">
@@ -1890,6 +1962,64 @@ function AgentsResourcesSurface() {
           </div>
         </div>
       </AdminCard>
+      {data?.agents.length ? (
+        <AdminCard>
+          <AdminSectionHeader
+            title="Published and school-shared agents"
+            detail="Operational quality only; private invocations and resource contents never appear."
+          />
+          <div className="overflow-x-auto px-4 pb-4">
+            <table className="w-full min-w-[760px] text-left text-[10px]">
+              <thead className="text-[var(--text-tertiary)]">
+                <tr>
+                  <th className="py-2">Agent</th>
+                  <th>Invocations</th>
+                  <th>Completion</th>
+                  <th>Rating</th>
+                  <th>Eval pass</th>
+                  <th>Releases</th>
+                  <th>Updated</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.agents.map((agent) => (
+                  <tr
+                    key={agent.agentId}
+                    className="border-t border-[var(--border-subtle)]"
+                  >
+                    <td className="py-3 font-semibold text-[var(--text-primary)]">
+                      {agent.title}
+                    </td>
+                    <td>{formatCompact(agent.invocations)}</td>
+                    <td>
+                      {agent.completionRate === null
+                        ? "—"
+                        : `${Math.round(agent.completionRate * 100)}%`}
+                    </td>
+                    <td>
+                      {agent.averageRating === null
+                        ? "—"
+                        : agent.averageRating.toFixed(1)}
+                    </td>
+                    <td>
+                      {agent.evaluationPassRate === null
+                        ? "—"
+                        : `${Math.round(agent.evaluationPassRate * 100)}%`}
+                    </td>
+                    <td>
+                      {agent.publishedReleases} live
+                      {agent.suspendedReleases
+                        ? ` · ${agent.suspendedReleases} suspended`
+                        : ""}
+                    </td>
+                    <td>{formatRelative(agent.updatedAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </AdminCard>
+      ) : null}
       <AdminCard>
         <AdminSectionHeader
           title="Resource governance"
@@ -1991,183 +2121,88 @@ function IntegrationsSurface({
   );
 }
 
-function GovernanceSurface({
-  operatorSessionId,
-  busy,
-  mutate,
-}: Pick<SchoolAdminTabProps, "operatorSessionId" | "busy" | "mutate">) {
-  const [policy, setPolicy] = useState<GovernancePolicy | null>(null);
-  const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    setLoading(true);
-    void getAdministration<GovernancePolicy>("governance", {
-      operatorSessionId,
-    })
-      .then(setPolicy)
-      .catch((error) =>
-        toast.error(error instanceof Error ? error.message : "Policy failed."),
-      )
-      .finally(() => setLoading(false));
-  }, [operatorSessionId]);
-  if (loading || !policy) return <LoadingPanel label="Loading governance" />;
+function GovernanceSurface() {
+  const freedoms = [
+    {
+      icon: Sparkles,
+      title: "Full AI access",
+      detail:
+        "Models and adaptive AI operations are available to every ordinary user.",
+    },
+    {
+      icon: FileClock,
+      title: "Personal memory",
+      detail:
+        "Memory is on by default and controlled only by the person it belongs to.",
+    },
+    {
+      icon: Bot,
+      title: "Agents for everyone",
+      detail:
+        "Any student, teacher, or administrator can create, use, and share agents.",
+    },
+    {
+      icon: BookOpen,
+      title: "Every artifact",
+      detail:
+        "Creation, editing, collaboration, imports, and exports are ordinary capabilities.",
+    },
+    {
+      icon: Network,
+      title: "Capable runtimes",
+      detail:
+        "Code and visualisation tools are secured by isolation, not school allowlists.",
+    },
+    {
+      icon: LockKeyhole,
+      title: "Private by default",
+      detail:
+        "People decide who can read or modify their work; public access is always explicit.",
+    },
+  ] as const;
   return (
     <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_340px]">
       <AdminCard>
         <AdminSectionHeader
-          title="School governance policy"
-          detail={`Currently using ${policy.source.replaceAll("_", " ")} policy`}
-          action={
-            <AdminButton
-              tone="primary"
-              disabled={busy === "governance"}
-              onClick={() =>
-                void mutate(
-                  "governance",
-                  "setGovernance",
-                  {
-                    publicSharing: policy.publicSharing,
-                    defaultWorkspaceAccess: policy.defaultWorkspaceAccess,
-                    retentionDays: policy.retentionDays,
-                    allowedModels: policy.allowedModels,
-                    allowedCodeRuntimes: policy.allowedCodeRuntimes,
-                    codeNetworkAccess: policy.codeNetworkAccess,
-                    exportEnabled: policy.exportEnabled,
-                  },
-                  "Governance policy saved.",
-                )
-              }
-            >
-              <Save size={12} />
-              Save policy
-            </AdminButton>
-          }
+          title="Freedom and privacy charter"
+          detail="School administration adds operational tools. It never removes ordinary Spectra capabilities."
         />
-        <div className="grid gap-4 p-4 pt-1 sm:grid-cols-2">
-          <SelectField
-            label="Public sharing"
-            value={policy.publicSharing}
-            onChange={(value) =>
-              setPolicy({
-                ...policy,
-                publicSharing: value as GovernancePolicy["publicSharing"],
-              })
-            }
-            options={[
-              { value: "disabled", label: "Disabled" },
-              { value: "approval_required", label: "Approval required" },
-              { value: "allowed", label: "Explicitly allowed" },
-            ]}
-          />
-          <SelectField
-            label="Default workspace access"
-            value={policy.defaultWorkspaceAccess}
-            onChange={(value) =>
-              setPolicy({
-                ...policy,
-                defaultWorkspaceAccess:
-                  value as GovernancePolicy["defaultWorkspaceAccess"],
-              })
-            }
-            options={[
-              { value: "private", label: "Private" },
-              { value: "school", label: "School-accessible" },
-            ]}
-          />
-          <TextField
-            label="Retention days (blank for policy default)"
-            value={policy.retentionDays ? String(policy.retentionDays) : ""}
-            onChange={(value) =>
-              setPolicy({
-                ...policy,
-                retentionDays: value ? Number(value) : undefined,
-              })
-            }
-            type="number"
-          />
-          <TextField
-            label="Allowed models (comma separated; blank uses platform)"
-            value={policy.allowedModels.join(", ")}
-            onChange={(value) =>
-              setPolicy({
-                ...policy,
-                allowedModels: value
-                  .split(",")
-                  .map((item) => item.trim())
-                  .filter(Boolean),
-              })
-            }
-          />
-          <label className="flex min-h-12 items-center gap-3 rounded-[7px] border border-[var(--border-default)] p-3 text-[10px]">
-            <input
-              type="checkbox"
-              checked={policy.codeNetworkAccess}
-              onChange={(event) =>
-                setPolicy({
-                  ...policy,
-                  codeNetworkAccess: event.target.checked,
-                })
-              }
-            />
-            <span>
-              <strong className="block">Code network access</strong>
-              <span className="text-[9px] text-[var(--text-tertiary)]">
-                Off by default for browser and Python execution
-              </span>
-            </span>
-          </label>
-          <label className="flex min-h-12 items-center gap-3 rounded-[7px] border border-[var(--border-default)] p-3 text-[10px]">
-            <input
-              type="checkbox"
-              checked={policy.exportEnabled}
-              onChange={(event) =>
-                setPolicy({ ...policy, exportEnabled: event.target.checked })
-              }
-            />
-            <span>
-              <strong className="block">User export enabled</strong>
-              <span className="text-[9px] text-[var(--text-tertiary)]">
-                Destructive school export remains a separate audited job
-              </span>
-            </span>
-          </label>
+        <div className="grid gap-2 p-4 pt-1 sm:grid-cols-2">
+          {freedoms.map(({ icon: Icon, title, detail }) => (
+            <div
+              key={title}
+              className="rounded-[9px] border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-3.5"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <span className="grid size-8 shrink-0 place-items-center rounded-[8px] bg-[#eef8f4] text-[#16805f]">
+                  <Icon size={15} />
+                </span>
+                <StatusBadge tone="good">Always available</StatusBadge>
+              </div>
+              <strong className="mt-3 block text-[11px]">{title}</strong>
+              <p className="mt-1 text-[9px] leading-4 text-[var(--text-tertiary)]">
+                {detail}
+              </p>
+            </div>
+          ))}
         </div>
       </AdminCard>
       <div className="space-y-3">
         <AdminCard className="p-4">
           <h2 className="font-[var(--font-serif)] text-[15px] font-medium">
-            Runtime allowlist
+            What administration can do
           </h2>
-          <div className="mt-3 space-y-2">
-            {(["javascript", "typescript", "react", "python"] as const).map(
-              (runtime) => (
-                <label
-                  key={runtime}
-                  className="flex items-center justify-between rounded-[6px] px-1 py-1.5 text-[10px]"
-                >
-                  <span className="capitalize">{runtime}</span>
-                  <input
-                    type="checkbox"
-                    checked={policy.allowedCodeRuntimes.includes(runtime)}
-                    onChange={(event) =>
-                      setPolicy({
-                        ...policy,
-                        allowedCodeRuntimes: event.target.checked
-                          ? [...policy.allowedCodeRuntimes, runtime]
-                          : policy.allowedCodeRuntimes.filter(
-                              (item) => item !== runtime,
-                            ),
-                      })
-                    }
-                  />
-                </label>
-              ),
-            )}
-          </div>
+          <p className="mt-2 text-[10px] leading-5 text-[var(--text-secondary)]">
+            Manage people, verified integrations, school profile, operational
+            communications, privacy-safe usage, audit, legal lifecycle, and
+            future commercial limits. Security isolation and permissions remain
+            enforced without turning them into educational restrictions.
+          </p>
         </AdminCard>
         <PrivacyNotice>
-          Public access is always explicit. Workspace access may flow to
-          artifacts, with per-artifact exceptions and future extensible
-          capabilities.
+          Private prompts, threads, memory, and unrelated artifacts never appear
+          here. Public access is explicit and user-directed; workspace and
+          artifact permissions remain fully enforced.
         </PrivacyNotice>
       </div>
     </div>

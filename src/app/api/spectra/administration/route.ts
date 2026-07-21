@@ -70,7 +70,6 @@ const PLATFORM_READS = new Set([
   "schoolDirectory",
   "onboardingSagas",
   "platformRequests",
-  "platformGovernance",
   "lifecycleJobs",
   "lifecycleExport",
 ]);
@@ -87,7 +86,6 @@ const PLATFORM_WRITES = new Set([
   "simulateLimits",
   "setLimitPolicy",
   "cancelOnboarding",
-  "setPlatformGovernance",
 ]);
 
 export async function GET(request: NextRequest) {
@@ -116,6 +114,12 @@ export async function GET(request: NextRequest) {
           operatorSessionId,
           ...range,
           requestId: optionalText(params.get("requestId"), 120),
+        }),
+      );
+    if (action === "agentGovernance")
+      return ok(
+        await convexQuery("administration:agentGovernance", {
+          operatorSessionId,
         }),
       );
     if (action === "people")
@@ -175,16 +179,6 @@ export async function GET(request: NextRequest) {
           requestId: optionalText(params.get("requestId"), 120),
         }),
       });
-    if (action === "governance")
-      return ok(
-        await convexQuery("administration:governancePolicy", {
-          operatorSessionId,
-        }),
-      );
-    if (action === "platformGovernance")
-      return ok(
-        await convexQuery("administration:platformGovernancePolicy", {}),
-      );
     if (action === "audit")
       return ok({
         events: await convexMutation("administration:auditLog", {
@@ -453,22 +447,6 @@ export async function POST(request: NextRequest) {
                     bodyObject(body.accessibilityDefaults).largerText,
                   ),
                 },
-          requestId,
-        }),
-      );
-    if (action === "setGovernance" || action === "setPlatformGovernance")
-      return ok(
-        await convexMutation("administration:setGovernancePolicy", {
-          operatorSessionId,
-          scope:
-            action === "setPlatformGovernance" ? "platform_default" : "school",
-          publicSharing: text(body.publicSharing, 40),
-          defaultWorkspaceAccess: text(body.defaultWorkspaceAccess, 40),
-          retentionDays: number(body.retentionDays),
-          allowedModels: strings(body.allowedModels),
-          allowedCodeRuntimes: strings(body.allowedCodeRuntimes),
-          codeNetworkAccess: boolean(body.codeNetworkAccess),
-          exportEnabled: boolean(body.exportEnabled),
           requestId,
         }),
       );

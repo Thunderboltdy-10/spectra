@@ -278,9 +278,48 @@ export type SpectraWorkspace = {
   lastActivityAt: number;
   ownership?: "owned" | "shared";
   accessLevel?: "read" | "modify" | null;
+  capabilities?: Array<
+    | "read"
+    | "modify"
+    | "share"
+    | "delete"
+    | "restore"
+    | "use"
+    | "comment"
+    | "publish"
+  >;
   accessReason?: string;
   isShared?: boolean;
   sharedWithCount?: number;
+};
+
+export type SpectraWorkspacePortableManifest = {
+  format: "spectra-workspace";
+  version: 1;
+  exportedAt: number;
+  workspace: {
+    title: string;
+    description?: string;
+    icon?: string;
+    color?: string;
+    defaultView: "cards" | "canvas" | "timeline" | "library";
+  };
+  placements: Array<{
+    artifactId: string;
+    title: string;
+    blueprintKey: SpectraBlueprintKey;
+    viewData: Record<string, unknown>;
+    layout: Record<string, unknown>;
+  }>;
+};
+
+export type SpectraWorkspaceManifestReport = {
+  exported?: number;
+  omitted?: number;
+  placed?: number;
+  skipped?: number;
+  unsupported: string[];
+  warnings: string[];
 };
 
 export type SpectraArtifact = {
@@ -321,6 +360,16 @@ export type SpectraArtifact = {
   placementStatus?: "inbox" | "shared" | "workspace";
   ownership?: "owned" | "shared";
   accessLevel?: "read" | "modify" | null;
+  capabilities?: Array<
+    | "read"
+    | "modify"
+    | "share"
+    | "delete"
+    | "restore"
+    | "use"
+    | "comment"
+    | "publish"
+  >;
   accessReason?: string;
   isShared?: boolean;
   sharedWithCount?: number;
@@ -478,6 +527,8 @@ export type SpectraRun = {
   };
   attemptCount?: number;
   traceDegraded?: boolean;
+  selectedAgentId?: string;
+  selectedAgentVersionId?: string;
   createdAt: number;
   updatedAt: number;
 };
@@ -666,6 +717,21 @@ export type SpectraPlannerReminderNotification = {
   attempts: number;
   createdAt: number;
   deliveredAt?: number;
+  readAt?: number;
+};
+
+export type SpectraTimetableReminderNotification = {
+  _id: string;
+  artifactId: string;
+  recipientAccountId: string;
+  eventId: string;
+  reminderKey: string;
+  eventTitle: string;
+  artifactTitle: string;
+  occurrenceStart: number;
+  scheduledFor: number;
+  createdAt: number;
+  deliveredAt: number;
   readAt?: number;
 };
 
@@ -911,6 +977,17 @@ export async function getSpectraWorkspaces(force = false) {
   return value.workspaces;
 }
 
+export async function exportSpectraWorkspaceManifest(workspaceId: string) {
+  const qs = new URLSearchParams({
+    action: "exportWorkspaceManifest",
+    workspaceId,
+  });
+  return readJson<{
+    manifest: SpectraWorkspacePortableManifest;
+    report: SpectraWorkspaceManifestReport;
+  }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+}
+
 export async function getSpectraArtifacts(params?: {
   placement?: "all" | "inbox" | "shared" | "workspace";
   blueprintKey?: SpectraBlueprintKey | "all";
@@ -1073,8 +1150,6 @@ export async function configureSpectraManageBac(input: {
   authScheme: "raw" | "bearer";
   token: string;
   frequencyMinutes: number;
-  autoCreateClasses: boolean;
-  autoImportTasks: boolean;
   autoApplySafeUpdates: boolean;
   conflictMode: "review" | "ask_me";
 }) {
@@ -1535,7 +1610,20 @@ export type SpectraAgentAnalytics = {
     }>;
   };
   evals: SpectraAgentEvalRun[];
-  proposals: Array<Record<string, unknown>>;
+  proposals: Array<{
+    _id: string;
+    evidence: string;
+    expectedImpact: string;
+    proposedPatch: {
+      instructionsText?: string;
+      routingDescription?: string;
+      routingExamples?: string[];
+      boundaries?: string[];
+    };
+    evalRunId?: string;
+    status: "proposed" | "accepted" | "rejected";
+    createdAt: number;
+  }>;
   privacy: string;
 };
 
@@ -1543,10 +1631,7 @@ export type SpectraAgentResourceHealth = {
   id?: string;
   artifactId: string;
   health:
-    | "available"
-    | "missing"
-    | "version_unavailable"
-    | "permission_revoked";
+    "available" | "missing" | "version_unavailable" | "permission_revoked";
   versionId?: string;
   title?: string;
   blueprintKey?: string;
@@ -1582,9 +1667,7 @@ export async function getSpectraAgentEvalRuns(agentId: string) {
   return readJson<{
     currentContentHash: string;
     runs: SpectraAgentEvalRun[];
-  }>(
-    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
-  );
+  }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
 }
 
 export async function getSpectraAgentResourceHealth(agentId: string) {
@@ -1594,10 +1677,7 @@ export async function getSpectraAgentResourceHealth(agentId: string) {
   );
 }
 
-export async function evaluateSpectraAgent(
-  agentId: string,
-  threshold = 0.8,
-) {
+export async function evaluateSpectraAgent(agentId: string, threshold = 0.8) {
   return readJson<{
     evalRunId: string;
     status: "passed" | "failed";
@@ -1611,6 +1691,24 @@ export async function evaluateSpectraAgent(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ agentId, threshold }),
+    }),
+  );
+}
+
+export async function generateSpectraAgentEvalSuite(agentId: string) {
+  return readJson<{
+    cases: Array<{
+      id: string;
+      prompt: string;
+      expected: string;
+      category: string;
+      required: boolean;
+    }>;
+  }>(
+    await fetch("/api/spectra/agents/evaluate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "generate", agentId }),
     }),
   );
 }
@@ -1633,6 +1731,58 @@ export async function manageSpectraAgentRelease(
   });
 }
 
+export async function submitSpectraAgentFeedback(input: {
+  agentId: string;
+  agentVersionId: string;
+  runId?: string;
+  rating: number;
+  category:
+    | "helpful"
+    | "accuracy"
+    | "clarity"
+    | "safety"
+    | "resource_quality"
+    | "other";
+  comment?: string;
+  consentToShareComment: boolean;
+}) {
+  return postSpectra<{ feedbackId: string }>({
+    action: "submitAgentFeedback",
+    ...input,
+  });
+}
+
+export async function proposeSpectraAgentImprovement(input: {
+  agentId: string;
+  evidence: string;
+  proposedPatch: {
+    instructionsText?: string;
+    routingDescription?: string;
+    routingExamples?: string[];
+    boundaries?: string[];
+  };
+  expectedImpact: string;
+  evalRunId?: string;
+}) {
+  return postSpectra<{ proposalId: string }>({
+    action: "proposeAgentImprovement",
+    ...input,
+  });
+}
+
+export async function decideSpectraAgentImprovement(
+  proposalId: string,
+  decision: "accepted" | "rejected",
+  note?: string,
+) {
+  return postSpectra<{ proposalId: string; status: string }>({
+    action: "decideAgentImprovement",
+    proposalId,
+    decision,
+    note,
+  });
+}
+
 export type SpectraPublicAgent = {
   agentId: string;
   title: string;
@@ -1645,6 +1795,8 @@ export type SpectraPublicAgent = {
   owner: { name: string; avatarUrl?: string };
   releaseNumber: number;
   publishedAt: number;
+  rating: number | null;
+  ratingCount: number;
 };
 
 export async function getSpectraPublicAgents(params?: {
@@ -1746,6 +1898,15 @@ export async function getSpectraArtifactCommentNotifications(
   );
 }
 
+export async function markSpectraArtifactCommentNotificationsRead(
+  notificationIds: string[],
+) {
+  return postSpectra<{ updated: number }>({
+    action: "markArtifactCommentNotificationsRead",
+    notificationIds,
+  });
+}
+
 export async function getSpectraPlannerReminderNotifications(
   unreadOnly = false,
   limit = 50,
@@ -1765,6 +1926,29 @@ export async function markSpectraPlannerReminderNotificationsRead(
 ) {
   return postSpectra<{ updated: number }>({
     action: "markPlannerReminderNotificationsRead",
+    deliveryIds,
+  });
+}
+
+export async function getSpectraTimetableReminderNotifications(
+  unreadOnly = false,
+  limit = 50,
+) {
+  const qs = new URLSearchParams({
+    action: "timetableReminderNotifications",
+    unreadOnly: String(unreadOnly),
+    limit: String(limit),
+  });
+  return readJson<{ notifications: SpectraTimetableReminderNotification[] }>(
+    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+  );
+}
+
+export async function markSpectraTimetableReminderNotificationsRead(
+  deliveryIds: string[],
+) {
+  return postSpectra<{ updated: number }>({
+    action: "markTimetableReminderNotificationsRead",
     deliveryIds,
   });
 }
@@ -1846,9 +2030,12 @@ export async function postSpectra<T>(body: JsonRecord) {
   if (
     typeof window !== "undefined" &&
     typeof body.action === "string" &&
-    ["createWorkspace", "updateWorkspace", "deleteWorkspace"].includes(
-      body.action,
-    )
+    [
+      "createWorkspace",
+      "importWorkspaceManifest",
+      "updateWorkspace",
+      "deleteWorkspace",
+    ].includes(body.action)
   ) {
     window.dispatchEvent(new Event("spectra:workspaces-changed"));
   }

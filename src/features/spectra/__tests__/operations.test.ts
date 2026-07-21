@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  executeOperationStub,
   operationRequiresConfirmation,
   parseOperationInput,
 } from "@/features/spectra/operations";
@@ -16,10 +15,6 @@ describe("Spectra operation policy", () => {
     });
 
     expect(operationRequiresConfirmation(operation)).toBe(false);
-    expect(executeOperationStub(operation)).toMatchObject({
-      status: "executed",
-      requiresConfirmation: false,
-    });
   });
 
   it("requires confirmation for workspace creation", () => {

@@ -307,6 +307,7 @@ export const list = query({
           placements,
           ownership,
           accessLevel: decision.allowed ? decision.level : null,
+          capabilities: decision.allowed ? decision.capabilities : [],
           accessReason: decision.reason,
           isShared: ownership === "shared" || activeInvitations.length > 0,
           sharedWithCount:
@@ -394,6 +395,7 @@ export const get = query({
       placements,
       ownership,
       accessLevel: decision.level,
+      capabilities: decision.capabilities,
       accessReason: decision.reason,
       isShared: ownership === "shared" || activeInvitations.length > 0,
       sharedWithCount:
@@ -422,13 +424,14 @@ const allowedAgentToolKeys = new Set([
   "memory_retrieve",
   "school_data",
   "web_search",
-  "code_execute",
-  "image_generate",
 ]);
 
 async function latestPublishedAgentRelease(
   ctx: Parameters<typeof requireSpectraActor>[0],
   agentId: Id<"spectraArtifacts">,
+  allowedRollouts: Array<"internal_test" | "limited" | "published"> = [
+    "published",
+  ],
 ) {
   const releases = await ctx.db
     .query("agentReleases")
@@ -437,8 +440,8 @@ async function latestPublishedAgentRelease(
     )
     .collect();
   return releases
-    .filter(
-      (release) => !release.rollout || release.rollout === "published",
+    .filter((release) =>
+      allowedRollouts.includes(release.rollout ?? "published"),
     )
     .sort((left, right) => right.releaseNumber - left.releaseNumber)[0];
 }
@@ -572,6 +575,10 @@ export const listPublicAgents = query({
       )
         continue;
       const owner = await ctx.db.get(artifact.ownerAccountId);
+      const feedback = await ctx.db
+        .query("agentFeedback")
+        .withIndex("by_agent_created", (q) => q.eq("agentId", artifact._id))
+        .collect();
       rows.push({
         agentId: artifact._id,
         ...projection,
@@ -580,6 +587,11 @@ export const listPublicAgents = query({
           : { name: "Spectra creator" },
         releaseNumber: release.releaseNumber,
         publishedAt: release.publishedAt,
+        rating: feedback.length
+          ? feedback.reduce((sum, item) => sum + item.rating, 0) /
+            feedback.length
+          : null,
+        ratingCount: feedback.length,
       });
     }
     return rows.sort((left, right) => right.publishedAt - left.publishedAt);
@@ -638,7 +650,29 @@ export const addPublicAgent = mutation({
         !grant.revokedAt &&
         (!grant.expiresAt || grant.expiresAt > now),
     );
-    if (current) return { grantId: current._id, added: false };
+    const existingFollow = await ctx.db
+      .query("agentFollows")
+      .withIndex("by_agent_account", (q) =>
+        q.eq("agentId", artifact._id).eq("accountId", actor.accountId),
+      )
+      .unique();
+    if (current) {
+      if (existingFollow)
+        await ctx.db.patch(existingFollow._id, {
+          status: "following",
+          updatedAt: now,
+        });
+      else
+        await ctx.db.insert("agentFollows", {
+          agentId: artifact._id,
+          schoolId: artifact.schoolId,
+          accountId: actor.accountId,
+          status: "following",
+          createdAt: now,
+          updatedAt: now,
+        });
+      return { grantId: current._id, added: false };
+    }
     const grantId = await ctx.db.insert("accessGrants", {
       schoolId: actor.schoolId,
       resourceType: "agent",
@@ -659,6 +693,21 @@ export const addPublicAgent = mutation({
       artifact.schoolId,
       actor.accountId,
     );
+    if (existingFollow)
+      await ctx.db.patch(existingFollow._id, {
+        status: "following",
+        pinnedReleaseId: undefined,
+        updatedAt: now,
+      });
+    else
+      await ctx.db.insert("agentFollows", {
+        agentId: artifact._id,
+        schoolId: artifact.schoolId,
+        accountId: actor.accountId,
+        status: "following",
+        createdAt: now,
+        updatedAt: now,
+      });
     await writeAuditEvent(ctx, {
       actorAccountId: actor.accountId,
       schoolId: actor.schoolId,
@@ -899,7 +948,7 @@ export const manageAgentRelease = mutation({
     const { actor, artifact } = await requireArtifactCapability(
       ctx,
       release.agentId,
-      "modify",
+      "publish",
     );
     if (artifact.blueprintKey !== "agent" || !artifact.schoolId)
       throw new Error("AGENT_RELEASE_INVALID");
@@ -922,11 +971,22 @@ export const manageAgentRelease = mutation({
     } else if (args.action === "rollback") {
       if (release.status === "deprecated")
         throw new Error("A deprecated release cannot be restored.");
+      if (!release.evalRunId)
+        throw new Error(
+          "A passing evaluation is required before this release can receive new invocations.",
+        );
+      const evaluation = await ctx.db.get(release.evalRunId);
+      if (
+        !evaluation ||
+        evaluation.status !== "passed" ||
+        evaluation.contentHash !== release.contentHash
+      )
+        throw new Error(
+          "This release no longer has matching passing evaluation evidence.",
+        );
       const releases = await ctx.db
         .query("agentReleases")
-        .withIndex("by_agent_number", (q) =>
-          q.eq("agentId", release.agentId),
-        )
+        .withIndex("by_agent_number", (q) => q.eq("agentId", release.agentId))
         .collect();
       await Promise.all(
         releases.map((candidate) =>
@@ -970,7 +1030,7 @@ export const manageAgentRelease = mutation({
 export const agentResourceHealth = query({
   args: { agentId: v.id("spectraArtifacts") },
   handler: async (ctx, args) => {
-    const { artifact } = await requireArtifactCapability(
+    const { actor, artifact } = await requireArtifactCapability(
       ctx,
       args.agentId,
       "modify",
@@ -985,11 +1045,10 @@ export const agentResourceHealth = query({
         : {};
     const bindings = Array.isArray(content.resources)
       ? content.resources
-          .filter(
-            (value): value is Record<string, unknown> =>
-              Boolean(
-                value && typeof value === "object" && !Array.isArray(value),
-              ),
+          .filter((value): value is Record<string, unknown> =>
+            Boolean(
+              value && typeof value === "object" && !Array.isArray(value),
+            ),
           )
           .slice(0, 100)
       : [];
@@ -1090,7 +1149,13 @@ export const listAgentRoutingDescriptors = query({
         continue;
       const decision = await evaluateAccess(ctx, "agent", artifact._id);
       if (!decision.allowed || !decision.capabilities.includes("use")) continue;
-      const release = await latestPublishedAgentRelease(ctx, artifact._id);
+      const release = await latestPublishedAgentRelease(
+        ctx,
+        artifact._id,
+        artifact.ownerAccountId === actor.accountId
+          ? ["internal_test", "limited", "published"]
+          : ["limited", "published"],
+      );
       if (!release) continue;
       const version = await ctx.db.get(release.versionId);
       if (!version) continue;
@@ -1132,6 +1197,11 @@ export const listAgentRoutingDescriptors = query({
               .filter((value): value is string => typeof value === "string")
               .slice(0, 30)
           : [],
+        negativeExamples: Array.isArray(routing.negativeExamples)
+          ? routing.negativeExamples
+              .filter((value): value is string => typeof value === "string")
+              .slice(0, 30)
+          : [],
         updatedAt: release.publishedAt,
       });
     }
@@ -1144,14 +1214,20 @@ export const listAgentRoutingDescriptors = query({
 export const getAgentRuntime = query({
   args: { agentId: v.id("spectraArtifacts") },
   handler: async (ctx, args) => {
-    const { artifact } = await requireArtifactCapability(
+    const { actor, artifact } = await requireArtifactCapability(
       ctx,
       args.agentId,
       "use",
     );
     if (artifact.blueprintKey !== "agent" || artifact.status !== "active")
       throw new Error("Agent not found");
-    const release = await latestPublishedAgentRelease(ctx, artifact._id);
+    const release = await latestPublishedAgentRelease(
+      ctx,
+      artifact._id,
+      artifact.ownerAccountId === actor.accountId
+        ? ["internal_test", "limited", "published"]
+        : ["limited", "published"],
+    );
     if (!release) throw new Error("Agent has no published release");
     const version = await ctx.db.get(release.versionId);
     if (!version) throw new Error("Published agent release is unavailable");
@@ -1180,11 +1256,10 @@ export const getAgentRuntime = query({
         : {};
     const resourceBindings = Array.isArray(content.resources)
       ? content.resources
-          .filter(
-            (value): value is Record<string, unknown> =>
-              Boolean(
-                value && typeof value === "object" && !Array.isArray(value),
-              ),
+          .filter((value): value is Record<string, unknown> =>
+            Boolean(
+              value && typeof value === "object" && !Array.isArray(value),
+            ),
           )
           .slice(0, 60)
       : [];
@@ -1341,10 +1416,19 @@ export const getAgentRuntime = query({
             .slice(0, 60)
         : [],
       resources: resolvedResources,
+      runtimeBudget:
+        content.runtimeBudget &&
+        typeof content.runtimeBudget === "object" &&
+        !Array.isArray(content.runtimeBudget)
+          ? content.runtimeBudget
+          : undefined,
       routing: {
         description:
           typeof routing.description === "string" ? routing.description : "",
         examples: Array.isArray(routing.examples) ? routing.examples : [],
+        negativeExamples: Array.isArray(routing.negativeExamples)
+          ? routing.negativeExamples
+          : [],
       },
     };
   },

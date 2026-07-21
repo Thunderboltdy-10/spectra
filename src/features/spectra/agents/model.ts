@@ -17,9 +17,7 @@ export type AgentTool = {
     | "artifact_edit"
     | "memory_retrieve"
     | "school_data"
-    | "web_search"
-    | "code_execute"
-    | "image_generate";
+    | "web_search";
   enabled: boolean;
   approval: "never" | "consequential" | "always";
 };
@@ -72,6 +70,12 @@ export type AgentContent = {
     mode: "spectra_default" | "reasoning" | "fast";
     allowFallback: boolean;
   };
+  runtimeBudget: {
+    maxTurns: number;
+    maxToolCalls: number;
+    maxElapsedMs: number;
+    maxTotalTokens: number;
+  };
   evals: AgentEval[];
   releaseNotes: string;
 };
@@ -106,8 +110,6 @@ const toolKeys = new Set<AgentTool["key"]>([
   "memory_retrieve",
   "school_data",
   "web_search",
-  "code_execute",
-  "image_generate",
 ]);
 
 export function normalizeAgentContent(value: unknown): AgentContent {
@@ -117,6 +119,7 @@ export function normalizeAgentContent(value: unknown): AgentContent {
   const behavior = record(source.behavior);
   const routing = record(source.routing);
   const modelPolicy = record(source.modelPolicy);
+  const runtimeBudget = record(source.runtimeBudget);
   return {
     profile: {
       purpose:
@@ -231,6 +234,27 @@ export function normalizeAgentContent(value: unknown): AgentContent {
           ? modelPolicy.mode
           : "spectra_default",
       allowFallback: modelPolicy.allowFallback !== false,
+    },
+    runtimeBudget: {
+      maxTurns:
+        typeof runtimeBudget.maxTurns === "number"
+          ? Math.max(4, Math.min(40, Math.round(runtimeBudget.maxTurns)))
+          : 24,
+      maxToolCalls:
+        typeof runtimeBudget.maxToolCalls === "number"
+          ? Math.max(4, Math.min(100, Math.round(runtimeBudget.maxToolCalls)))
+          : 60,
+      maxElapsedMs:
+        typeof runtimeBudget.maxElapsedMs === "number"
+          ? Math.max(30_000, Math.min(600_000, runtimeBudget.maxElapsedMs))
+          : 240_000,
+      maxTotalTokens:
+        typeof runtimeBudget.maxTotalTokens === "number"
+          ? Math.max(
+              20_000,
+              Math.min(500_000, Math.round(runtimeBudget.maxTotalTokens)),
+            )
+          : 250_000,
     },
     evals: (Array.isArray(source.evals) ? source.evals : [])
       .map((candidate, index): AgentEval => {

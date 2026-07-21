@@ -21,24 +21,24 @@ The frontend-design skill governs every implementation surface. The supplied ima
 
 ## Document map
 
-| Plan | Contract |
-|---|---|
-| 01_NEXT_GENERATION_PRODUCT_ARCHITECTURE.md | Topology, single-school identity, authority, data flow, metering, operational guarantees |
-| 02_ARTIFACT_TYPE_STANDARD.md | Mandatory artifact, AI-skill, live-save, import, effects, and conformance protocol |
-| 03_MEMORY_AND_CONNECTED_INTELLIGENCE.md | Default-on scoped background memory and controls |
-| 04_MANAGEBAC_AND_SCHOOL_DATA.md | Verified read-only capabilities, first/later sync, identity, provenance, overlays |
-| 05_ADMIN_AND_SUPERADMIN.md | Complete school/platform operations without ordinary-content exposure |
-| 06_AGENT_ARTIFACT_SYSTEM.md | Universal agent creation/use, automatic routing, privacy, evaluation, versions |
-| 07_REALTIME_COLLABORATION_AND_PERMISSIONS.md | Private-default sharing, self-hosted Yjs, region control, reconnect |
-| 08_EMBEDDED_ARTIFACTS_AND_VERSION_HISTORY.md | Live/pinned embeds, human/AI history, checkpoint and restore |
-| 09_PRODUCT_DECISIONS.md | Resolved product decisions and consequences |
-| 10_DELETION_AND_MIGRATION_MAP.md | Exact obsolete-system deletion and failure-ledger contract |
-| 11_AI_RUNTIME_AND_OPERATIONS.md | Durable adaptive runs, native progress protocol, artifact skills, real effects |
-| 12_UI_REFERENCE_REVIEW.md | Exact 21-image implementation and verification matrix |
-| 13_RESEARCH_AND_ALTERNATIVES.md | Primary-source evidence and selected alternatives |
-| 14_WORKSPACES_AND_MISSION_CONTROL.md | Home, workspace views, access projection, class generation, and cross-product composition |
+| Plan                                         | Contract                                                                                            |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| 01_NEXT_GENERATION_PRODUCT_ARCHITECTURE.md   | Topology, single-school identity, authority, data flow, metering, operational guarantees            |
+| 02_ARTIFACT_TYPE_STANDARD.md                 | Mandatory artifact, AI-skill, live-save, import, effects, and conformance protocol                  |
+| 03_MEMORY_AND_CONNECTED_INTELLIGENCE.md      | Default-on scoped background memory and controls                                                    |
+| 04_MANAGEBAC_AND_SCHOOL_DATA.md              | Verified read-only capabilities, first/later sync, identity, provenance, overlays                   |
+| 05_ADMIN_AND_SUPERADMIN.md                   | Complete school/platform operations without ordinary-content exposure                               |
+| 06_AGENT_ARTIFACT_SYSTEM.md                  | Universal agent creation/use, automatic routing, privacy, evaluation, versions                      |
+| 07_REALTIME_COLLABORATION_AND_PERMISSIONS.md | Private-default sharing, self-hosted Yjs, region control, reconnect                                 |
+| 08_EMBEDDED_ARTIFACTS_AND_VERSION_HISTORY.md | Live/pinned embeds, human/AI history, checkpoint and restore                                        |
+| 09_PRODUCT_DECISIONS.md                      | Resolved product decisions and consequences                                                         |
+| 10_DELETION_AND_MIGRATION_MAP.md             | Exact obsolete-system deletion and failure-ledger contract                                          |
+| 11_AI_RUNTIME_AND_OPERATIONS.md              | Durable adaptive runs, native progress protocol, artifact skills, real effects                      |
+| 12_UI_REFERENCE_REVIEW.md                    | Exact 21-image implementation and verification matrix                                               |
+| 13_RESEARCH_AND_ALTERNATIVES.md              | Primary-source evidence and selected alternatives                                                   |
+| 14_WORKSPACES_AND_MISSION_CONTROL.md         | Home, workspace views, access projection, class generation, and cross-product composition           |
 | 15_IMPLEMENTATION_AND_VERIFICATION_LEDGER.md | Active phase, evidence, failures/defects, migrations, and one-reference-at-a-time visual acceptance |
-| artifacts/*.md | Complete type-specific products inheriting the standard |
+| artifacts/*.md                               | Complete type-specific products inheriting the standard                                             |
 
 First-class artifact types are Document, Flashcard Deck, Quiz, Planner Task, Agent, Timetable/Calendar, Presentation, Sheets, Code/Interactive Visualisation, and Collaborative Whiteboard. CAS and structured data flow into these general-purpose types and Workspaces rather than a dedicated artifact.
 
@@ -46,6 +46,7 @@ First-class artifact types are Document, Flashcard Deck, Quiz, Planner Task, Age
 
 - A normal user has at most one active school membership. Superadmin school access is an operational session, never another membership.
 - Students, teachers, school admins, and superadmins have identical ordinary Spectra creation/use/sharing capability. Admin roles only add management pages. Everyone can create, use, and share agents.
+- Ordinary Spectra capability is a user right, not a school-admin setting. School or platform operators cannot enable, disable, or narrow legitimate AI, memory, agent, artifact, creation, import/export, or execution capabilities for ordinary users. Educational context shapes workflows, agents, and ManageBac integration rather than imposing classroom-style AI guardrails. Permission boundaries, privacy, secret isolation, runtime sandboxing, abuse/security response, legal retention, metering, and future commercial limits remain operational controls; they must not become disguised feature gates.
 - Artifacts are private by default. Direct sharing presents read-only or modify. Workspace access normally flows to its artifacts, with per-artifact access removal. Public access is explicit and never default. The backend retains extensible capabilities without exposing needless complexity.
 - No commercial storage/model/usage limits are enforced now. Meter everything efficiently and let superadmin define, adjust, simulate, and later enable per-school limits without redesign.
 - Collaboration uses self-hosted Yjs behind a transport abstraction. Spectra is online-first and does not support offline editing or offline mutation queues. Network loss produces honest reconnect/unsynchronized/recovery states.
@@ -64,19 +65,19 @@ First-class artifact types are Document, Flashcard Deck, Quiz, Planner Task, Age
 
 ## Dependency graph
 
-| Foundation | Unblocks | Hard prerequisite |
-|---|---|---|
-| Deletion/failure ledger | every replacement | exports and active dependency baseline |
-| Single-school identity, operator sessions, capability core | permissions, school data, admin, agents | deletion complete |
-| Metering, audit, pragmatic secrets | admin, ManageBac, later limits | identity/tenant scope |
-| Artifact registry, type skills, regions, imports | every artifact, AI, history, embeds | authority |
-| Reactive metadata and self-hosted Yjs transport | live save, presence, comments, editors | grants and region policy |
-| Region ownership/conflict service | safe human/AI collaboration | stable type regions |
-| Change groups/version service | AI edits, restore, publishing, imports | live persistence |
-| Durable run/operation/progress/effects platform | cross-artifact AI | registry, regions, history |
-| External records and sync policy | ManageBac-created structures | identity, secrets, audit |
-| Default-on memory | personalization/router | authority, retrieval, deletion controls |
-| Complete UI shell/design system | every reference surface | frontend-design and reference tokens |
+| Foundation                                                 | Unblocks                                | Hard prerequisite                       |
+| ---------------------------------------------------------- | --------------------------------------- | --------------------------------------- |
+| Deletion/failure ledger                                    | every replacement                       | exports and active dependency baseline  |
+| Single-school identity, operator sessions, capability core | permissions, school data, admin, agents | deletion complete                       |
+| Metering, audit, pragmatic secrets                         | admin, ManageBac, later limits          | identity/tenant scope                   |
+| Artifact registry, type skills, regions, imports           | every artifact, AI, history, embeds     | authority                               |
+| Reactive metadata and self-hosted Yjs transport            | live save, presence, comments, editors  | grants and region policy                |
+| Region ownership/conflict service                          | safe human/AI collaboration             | stable type regions                     |
+| Change groups/version service                              | AI edits, restore, publishing, imports  | live persistence                        |
+| Durable run/operation/progress/effects platform            | cross-artifact AI                       | registry, regions, history              |
+| External records and sync policy                           | ManageBac-created structures            | identity, secrets, audit                |
+| Default-on memory                                          | personalization/router                  | authority, retrieval, deletion controls |
+| Complete UI shell/design system                            | every reference surface                 | frontend-design and reference tokens    |
 
 ## Implementation sequence
 
@@ -106,7 +107,7 @@ Execute 14_WORKSPACES_AND_MISSION_CONTROL.md and bring Home, workspace List/Boar
 
 ### Phase 6 — school data and operational products
 
-Implement new school-admin and superadmin products, metering/limit controls, feedback, governance, storage, and integrations. Build the verified read-only ManageBac capability manifest from the tenant API Manager/reference. Resolve identity strictly by verified school email. First successful sync automatically and idempotently creates class workspaces, timetable layers, source-linked assignments/tasks, deadlines/assessments where readable, permitted resources, provenance, and links with progress/summary. Later syncs preserve customization/overlays, apply safe non-conflicting source changes, tombstone removals, avoid duplicates, and review consequential ambiguity.
+Implement new school-admin and superadmin products, metering/future-limit controls, feedback, rights-preserving governance, storage, and integrations. Administration observes and operates the service but never becomes a feature-control panel for AI, memory, agents, artifacts, creation, import/export, or execution. Build the verified read-only ManageBac capability manifest from the tenant API Manager/reference. Resolve identity strictly by verified school email. First successful sync automatically and idempotently creates class workspaces, timetable layers, source-linked assignments/tasks, deadlines/assessments where readable, permitted resources, provenance, and links with progress/summary. Later syncs preserve customization/overlays, apply safe non-conflicting source changes, tombstone removals, avoid duplicates, and review consequential ambiguity.
 
 ### Phase 7 — universal agent product and memory
 

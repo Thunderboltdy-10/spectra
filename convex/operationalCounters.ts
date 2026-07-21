@@ -9,6 +9,7 @@ export type OperationalCounterCategory =
   | "ai_run_started"
   | "ai_run_failed"
   | "workspace_created"
+  | "workspace_imported"
   | "agent_invocation";
 
 function utcDay(timestamp: number) {

@@ -146,6 +146,16 @@ export async function GET(request: NextRequest) {
       return ok({ workspaces });
     }
 
+    if (action === "exportWorkspaceManifest") {
+      const result = await spectraQuery(
+        "spectraWorkspaces:exportPortableManifest",
+        {
+          workspaceId: requireString(params.get("workspaceId"), "workspaceId"),
+        },
+      );
+      return ok(result);
+    }
+
     if (action === "artifacts") {
       const artifacts = await spectraQuery("spectraArtifacts:list", {
         status: params.get("status") ?? undefined,
@@ -275,6 +285,14 @@ export async function GET(request: NextRequest) {
 
     if (action === "plannerReminderNotifications") {
       const notifications = await spectraQuery("plannerReminders:listMine", {
+        unreadOnly: params.get("unreadOnly") === "true",
+        limit: params.has("limit") ? Number(params.get("limit")) : undefined,
+      });
+      return ok({ notifications });
+    }
+
+    if (action === "timetableReminderNotifications") {
+      const notifications = await spectraQuery("timetableReminders:listMine", {
         unreadOnly: params.get("unreadOnly") === "true",
         limit: params.has("limit") ? Number(params.get("limit")) : undefined,
       });
@@ -728,6 +746,18 @@ export async function POST(request: NextRequest) {
       return ok({ workspaceId });
     }
 
+    if (action === "importWorkspaceManifest") {
+      const result = await spectraMutation(
+        "spectraWorkspaces:importPortableManifest",
+        {
+          fileName: requireString(body.fileName, "fileName"),
+          sha256: requireString(body.sha256, "sha256"),
+          manifest: body.manifest,
+        },
+      );
+      return ok(result);
+    }
+
     if (action === "inviteShare") {
       const result = await spectraMutation("authority:invite", {
         resourceType: requireResourceType(body.resourceType),
@@ -940,6 +970,19 @@ export async function POST(request: NextRequest) {
           )
         : [];
       const result = await spectraMutation("plannerReminders:markRead", {
+        deliveryIds,
+      });
+      return ok(result);
+    }
+
+    if (action === "markTimetableReminderNotificationsRead") {
+      const deliveryIds = Array.isArray(body.deliveryIds)
+        ? body.deliveryIds.filter(
+            (value): value is string =>
+              typeof value === "string" && value.trim().length > 0,
+          )
+        : [];
+      const result = await spectraMutation("timetableReminders:markRead", {
         deliveryIds,
       });
       return ok(result);
@@ -1286,15 +1329,37 @@ export async function POST(request: NextRequest) {
       if (!category) throw new Error("feedback category is invalid");
       const result = await spectraMutation("agents:submitFeedback", {
         agentId: requireString(body.agentId, "agentId"),
-        agentVersionId: requireString(
-          body.agentVersionId,
-          "agentVersionId",
-        ),
+        agentVersionId: requireString(body.agentVersionId, "agentVersionId"),
         runId: optionalString(body.runId),
         rating: Number(body.rating),
         category,
         comment: optionalString(body.comment),
         consentToShareComment: body.consentToShareComment === true,
+      });
+      return ok(result);
+    }
+
+    if (action === "proposeAgentImprovement") {
+      const result = await spectraMutation("agents:proposeImprovement", {
+        agentId: requireString(body.agentId, "agentId"),
+        evidence: requireString(body.evidence, "evidence"),
+        proposedPatch: body.proposedPatch,
+        expectedImpact: requireString(body.expectedImpact, "expectedImpact"),
+        evalRunId: optionalString(body.evalRunId),
+      });
+      return ok(result);
+    }
+
+    if (action === "decideAgentImprovement") {
+      const decision =
+        body.decision === "accepted" || body.decision === "rejected"
+          ? body.decision
+          : null;
+      if (!decision) throw new Error("improvement decision is invalid");
+      const result = await spectraMutation("agents:decideImprovement", {
+        proposalId: requireString(body.proposalId, "proposalId"),
+        decision,
+        note: optionalString(body.note),
       });
       return ok(result);
     }

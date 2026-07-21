@@ -15,6 +15,12 @@ crons.interval(
   internal.plannerReminders.dispatchDue,
   {},
 );
+crons.interval(
+  "deliver-timetable-reminders",
+  { minutes: 1 },
+  internal.timetableReminders.dispatchDue,
+  {},
+);
 crons.daily(
   "maintain-artifact-snapshots",
   { hourUTC: 2, minuteUTC: 20 },
@@ -25,6 +31,12 @@ crons.interval(
   "maintain-private-memory",
   { minutes: 1 },
   internal.memory.maintain,
+  {},
+);
+crons.daily(
+  "evaluate-private-memory-safety",
+  { hourUTC: 3, minuteUTC: 10 },
+  internal.memory.evaluateSafety,
   {},
 );
 crons.interval(

@@ -79,6 +79,12 @@ function workerSource(assetBase: string) {
         try { self.WebSocket = class { constructor() { throw new Error('Network access is disabled in the Spectra Python runtime.'); } }; } catch {}
         try { self.EventSource = class { constructor() { throw new Error('Network access is disabled in the Spectra Python runtime.'); } }; } catch {}
         try { self.importScripts = () => { throw new Error('Loading external scripts is disabled in the Spectra Python runtime.'); }; } catch {}
+        try { self.Worker = class { constructor() { throw new Error('Nested workers are disabled in the Spectra Python runtime.'); } }; } catch {}
+        try { self.SharedWorker = class { constructor() { throw new Error('Shared workers are disabled in the Spectra Python runtime.'); } }; } catch {}
+        try { self.BroadcastChannel = class { constructor() { throw new Error('Cross-context channels are disabled in the Spectra Python runtime.'); } }; } catch {}
+        try { self.RTCPeerConnection = class { constructor() { throw new Error('Peer connections are disabled in the Spectra Python runtime.'); } }; } catch {}
+        try { Object.defineProperty(self, 'indexedDB', { value: undefined, configurable: false }); } catch {}
+        try { Object.defineProperty(self, 'caches', { value: undefined, configurable: false }); } catch {}
         pyodide.FS.mkdirTree('/home/pyodide/project');
         const assetPaths = {};
         for (const asset of event.data.assets || []) {

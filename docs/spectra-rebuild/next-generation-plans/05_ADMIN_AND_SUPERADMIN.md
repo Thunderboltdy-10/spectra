@@ -4,11 +4,11 @@
 
 This system is a clean replacement. Current /admin, /super-admin, /api/admin, /api/school-admin, /api/super-admin, convex/admin.ts, convex/schoolAdmin.ts, convex/superAdmin.ts, and hard-coded email logic are removed in Phase 1. The new implementation uses the same identity, grants, audit, secrets, usage, and design system as the product.
 
-School administration and platform operations are additional authority scopes, not alternate ordinary products. Students, teachers, school admins, and superadmins retain identical ordinary Spectra artifact/agent creation, use, and sharing capabilities. Admin navigation only adds dedicated management pages. Neither authority implies routine access to private prompts, threads, memory, or artifacts; analytics, moderation, adoption, and support cannot become content back doors.
+School administration and platform operations are additional authority scopes, not alternate ordinary products. Students, teachers, school admins, and superadmins retain identical ordinary Spectra AI, memory, artifact, agent, creation, import/export, and execution capabilities. Admin navigation only adds dedicated management pages. Admins do not enable, disable, allowlist, or narrow ordinary product capabilities. Neither authority implies routine access to private prompts, threads, memory, or artifacts; analytics, moderation, adoption, and support cannot become content back doors.
 
 ## Role and capability model
 
-Recommended management-role additions are school owner, administrator, IT/integration manager, and support/safeguarding officer. Teacher and student are school-profile labels with no reduced ordinary capability. Capabilities are authoritative for additional management only. Sensitive separation includes membership management, role/grant management, integration secret management, content governance, announcement sending, agent governance, audit viewing, data export/deletion, and any separately approved safeguarding workflow.
+Recommended management-role additions are school owner, administrator, IT/integration manager, and support/safeguarding officer. Teacher and student are school-profile labels with no reduced ordinary capability. Capabilities are authoritative for additional management operations only. Sensitive separation includes membership management, role/grant management, integration secret management, announcement sending, privacy-safe operational analytics, audit viewing, institutional export/deletion, and any separately approved safeguarding workflow. Governance protects rights, data, tenancy, and service integrity; it is never a capability switchboard for users' AI, memory, agents, artifacts, imports, exports, or code execution.
 
 Platform-operator eligibility comes from normalized SUPER_ADMIN_EMAILS and optional step-up authentication. A platform operator creates a time-boxed operatorSession when entering a school: reason/ticket, target school, read-only default, requested capabilities, expiry, banner, and audit. Writes require an explicit elevation and may require a second operator for destructive actions. Recommend no impersonation of an individual student; operate as a labeled platform operator.
 
@@ -20,7 +20,7 @@ Platform-operator eligibility comes from normalized SUPER_ADMIN_EMAILS and optio
 - Usage & adoption: active users, workspace/artifact/agent adoption, retention trends, storage/compute/model usage and configured-but-disabled limits; no prompt or private-content inspection.
 - Agents & resources: school/class agents, publishing policy, resource bindings, version/eval health, reports.
 - Integrations: ManageBac and future connectors, secret rotation, capabilities, mappings, sync runs, quarantine.
-- Governance: sharing defaults, public-link policy, retention, AI/model policy, allowed code runtimes/network, exports/deletion, audit.
+- Governance: fixed ordinary-capability charter, explicit-private sharing model, legal retention/deletion obligations, data processing, security, and audit. No AI/model, memory-category, artifact, export, or runtime allowlists.
 - Feedback & support: user feedback triage, status/replies, aggregate themes, escalation to Spectra.
 - School profile: branding, domains, locale/timezone, academic calendar, accessibility defaults.
 
@@ -33,10 +33,12 @@ Messaging needs consent/role policy, rate limits, group resolution snapshot, sch
 - Operations: incidents, queues, model/provider health, failed jobs, connector errors, migrations, feature rollout.
 - Usage & finance: model/storage/egress cost allocation, budgets, anomalies, forecasts; never shown to school admins unless a future product decision changes it.
 - Requests & support: school requests, feedback, tickets, seat changes, integration requests, response SLA.
-- Governance: platform policies, data processing regions, retention defaults, public sharing, model allowlists.
+- Governance: platform rights charter, data processing regions, legal retention defaults, explicit-private sharing guarantees, security posture, and audit. Provider selection is an internal reliability/cost concern, never a user-capability allowlist.
 - Audit & security: operator sessions, privileged actions, credential events, suspicious access, export/delete jobs.
 
 ## Data and services
+
+The ordinary-capability charter is an invariant in code rather than a mutable school policy record. Operational policy data may cover legal retention, data processing, tenancy security, audit, and disabled-by-default future commercial limits, but it cannot contain feature allowlists or user-capability switches.
 
 Use memberships/invitations/groups from tenancy; policy bundles/resource grants from authority; usageEvents and dailyAggregates for storage, model, messages, artifact operations, collaboration bandwidth, imports, and execution; limitPolicies with enforcementEnabled=false by default; auditEvents; feedback; announcements/deliveries; incidents; schoolRequests; integration/secret metadata. Aggregation workers tolerate delayed usage and expose “last complete through” timestamps. Limits can be simulated and adjusted per school without commercial enforcement or product redesign.
 
@@ -126,6 +128,11 @@ The frontend-design skill is required during later implementation, as requested.
 - [ ] Verified
 
 ### ADM-13 Meter storage, model, collaboration, execution, import, and activity usage; expose school/platform views and per-school limit configuration/simulation with enforcement disabled by default
+
+- [ ] Implemented
+- [ ] Verified
+
+### ADM-14 Remove admin-facing AI, memory, agent, artifact, import/export, model, runtime, and network capability gates; present the fixed freedom/privacy charter and retain only genuine operational controls
 
 - [ ] Implemented
 - [ ] Verified

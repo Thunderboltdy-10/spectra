@@ -15,10 +15,7 @@ import {
 } from "./spectraRunLifecycle";
 import { releaseClaimsForRun } from "./regionClaims";
 import { incrementOperationalCounter } from "./operationalCounters";
-import {
-  recordAgentInvocation,
-  settleAgentInvocation,
-} from "./agents";
+import { recordAgentInvocation, settleAgentInvocation } from "./agents";
 
 const vSurface = v.union(
   v.literal("chat"),
@@ -1881,7 +1878,7 @@ export const setAgentRouting = mutation({
       run.executionId !== args.executionId
     )
       throw new Error("This routing decision belongs to an older run attempt.");
-    const { artifact } = await requireArtifactCapability(
+    const { actor, artifact } = await requireArtifactCapability(
       ctx,
       args.agentId,
       "use",
@@ -1896,10 +1893,14 @@ export const setAgentRouting = mutation({
         )
         .collect()
     )
-      .filter(
-        (candidate) =>
-          !candidate.rollout || candidate.rollout === "published",
-      )
+      .filter((candidate) => {
+        const rollout = candidate.rollout ?? "published";
+        return artifact.ownerAccountId === actor.accountId
+          ? rollout === "internal_test" ||
+              rollout === "limited" ||
+              rollout === "published"
+          : rollout === "limited" || rollout === "published";
+      })
       .sort((left, right) => right.releaseNumber - left.releaseNumber)[0];
     if (!release)
       throw new Error("This agent has no active published release.");

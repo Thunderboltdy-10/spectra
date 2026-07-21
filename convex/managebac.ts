@@ -373,7 +373,11 @@ function safeIntegration(integration: Doc<"schoolIntegrations">) {
     providerVersion: integration.providerVersion,
     manifestVersion: integration.manifestVersion,
     capabilityCoverage: integration.capabilityCoverage,
-    syncPolicy: integration.syncPolicy,
+    syncPolicy: {
+      ...integration.syncPolicy,
+      autoCreateClasses: true,
+      autoImportTasks: true,
+    },
     freshnessSlaMinutes: integration.freshnessSlaMinutes,
     requestBudgetPerMinute: integration.requestBudgetPerMinute,
     bootstrapVersion: integration.bootstrapVersion,
@@ -395,8 +399,6 @@ export const configure = mutation({
     authScheme: v.union(v.literal("raw"), v.literal("bearer")),
     credentialFingerprint: v.optional(v.string()),
     frequencyMinutes: v.optional(v.number()),
-    autoCreateClasses: v.optional(v.boolean()),
-    autoImportTasks: v.optional(v.boolean()),
     autoApplySafeUpdates: v.optional(v.boolean()),
     conflictMode: v.optional(v.union(v.literal("review"), v.literal("ask_me"))),
     rotationDueAt: v.optional(v.number()),
@@ -451,10 +453,8 @@ export const configure = mutation({
           ),
         ),
       ),
-      autoCreateClasses:
-        args.autoCreateClasses ?? current?.syncPolicy.autoCreateClasses ?? true,
-      autoImportTasks:
-        args.autoImportTasks ?? current?.syncPolicy.autoImportTasks ?? true,
+      autoCreateClasses: true,
+      autoImportTasks: true,
       autoApplySafeUpdates:
         args.autoApplySafeUpdates ??
         current?.syncPolicy.autoApplySafeUpdates ??
@@ -2045,10 +2045,7 @@ async function projectRecord(
   source: Doc<"externalRecords">,
 ) {
   if (!syncRun.accountId) return { projected: false, created: false };
-  if (
-    source.recordType === "class" &&
-    integration.syncPolicy.autoCreateClasses
-  ) {
+  if (source.recordType === "class") {
     const result = await ensureClassWorkspace(
       ctx,
       integration,
@@ -2057,10 +2054,7 @@ async function projectRecord(
     );
     return { projected: true, created: result.created };
   }
-  if (
-    ["assignment", "deadline", "assessment"].includes(source.recordType) &&
-    integration.syncPolicy.autoImportTasks
-  ) {
+  if (["assignment", "deadline", "assessment"].includes(source.recordType)) {
     const result = await ensurePlannerProjection(
       ctx,
       integration,

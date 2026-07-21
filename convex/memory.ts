@@ -1,9 +1,17 @@
-import { internalMutation, mutation, query } from "./_generated/server";
+import {
+  action,
+  internalMutation,
+  internalQuery,
+  mutation,
+  query,
+} from "./_generated/server";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { evaluateAccessForActor } from "./authorityShared";
 import { getActorForAccountId, getAuthenticatedActor } from "./identityShared";
+import { memoryEmbedding } from "./memoryEmbedding";
 
 const DEFAULT_TARGET_TOKENS = 1_000;
 const MAX_TARGET_TOKENS = 4_000;
@@ -107,6 +115,15 @@ function overlapScore(queryTerms: Set<string>, proposition: string) {
   return (
     matches / Math.sqrt(queryTerms.size * Math.max(1, propositionTerms.size))
   );
+}
+
+function propositionSimilarity(left: string, right: string) {
+  const leftTerms = terms(left);
+  const rightTerms = terms(right);
+  if (leftTerms.size === 0 || rightTerms.size === 0) return 0;
+  let intersection = 0;
+  for (const term of leftTerms) if (rightTerms.has(term)) intersection += 1;
+  return intersection / (leftTerms.size + rightTerms.size - intersection);
 }
 
 const forbiddenCapturePatterns = [
@@ -466,6 +483,31 @@ async function invalidateCapsules(ctx: MutationCtx, accountId: Id<"accounts">) {
     await ctx.db.patch(capsule._id, { stale: true, updatedAt: now });
 }
 
+async function enqueueClaimDeletion(
+  ctx: MutationCtx,
+  claim: Doc<"memoryClaims">,
+  now = Date.now(),
+) {
+  const idempotencyKey = `delete:${claim._id}`;
+  const existing = await ctx.db
+    .query("memoryJobs")
+    .withIndex("by_idempotency", (q) => q.eq("idempotencyKey", idempotencyKey))
+    .unique();
+  if (existing) return existing._id;
+  return ctx.db.insert("memoryJobs", {
+    accountId: claim.accountId,
+    schoolId: claim.schoolId,
+    kind: "delete",
+    idempotencyKey,
+    payload: { claimId: claim._id },
+    status: "queued",
+    attemptCount: 0,
+    availableAt: now,
+    createdAt: now,
+    updatedAt: now,
+  });
+}
+
 async function insertEvidence(
   ctx: MutationCtx,
   actor: Actor,
@@ -562,17 +604,37 @@ async function upsertClaim(
       ),
     )
     .first();
+  const nearDuplicate = existing
+    ? null
+    : (
+        await ctx.db
+          .query("memoryClaims")
+          .withIndex("by_account_status_updated", (q) =>
+            q.eq("accountId", actor.accountId).eq("status", "active"),
+          )
+          .order("desc")
+          .take(120)
+      ).find(
+        (claim) =>
+          claim.scope === input.scope &&
+          claim.workspaceId === input.workspaceId &&
+          claim.artifactId === input.artifactId &&
+          claim.claimType === input.claimType &&
+          propositionSimilarity(claim.proposition, proposition) >= 0.88,
+      );
   const now = Date.now();
-  if (existing) {
-    await ctx.db.patch(existing._id, {
-      confidence: Math.max(existing.confidence, input.confidence),
+  const duplicate = existing ?? nearDuplicate;
+  if (duplicate) {
+    await ctx.db.patch(duplicate._id, {
+      confidence: Math.max(duplicate.confidence, input.confidence),
+      embedding: duplicate.embedding ?? memoryEmbedding(proposition),
       lastConfirmedAt:
-        input.assertion === "asserted" ? now : existing.lastConfirmedAt,
+        input.assertion === "asserted" ? now : duplicate.lastConfirmedAt,
       updatedAt: now,
     });
-    await insertEvidence(ctx, actor, existing._id, input.evidence);
+    await insertEvidence(ctx, actor, duplicate._id, input.evidence);
     await invalidateCapsules(ctx, actor.accountId);
-    return { claimId: existing._id, merged: true };
+    return { claimId: duplicate._id, merged: true };
   }
 
   const claimId = await ctx.db.insert("memoryClaims", {
@@ -601,6 +663,7 @@ async function upsertClaim(
     proposition,
     normalizedProposition: normalized,
     propositionHash,
+    embedding: memoryEmbedding(proposition),
     assertion: input.assertion,
     confidence: Math.max(0, Math.min(1, input.confidence)),
     sensitivity: "standard",
@@ -613,6 +676,49 @@ async function upsertClaim(
     updatedAt: now,
   });
   await insertEvidence(ctx, actor, claimId, input.evidence);
+  const relatedCandidates = await ctx.db
+    .query("memoryClaims")
+    .withIndex("by_account_status_updated", (q) =>
+      q.eq("accountId", actor.accountId).eq("status", "active"),
+    )
+    .order("desc")
+    .take(100);
+  const related = relatedCandidates
+    .filter(
+      (claim) =>
+        claim._id !== claimId &&
+        claim.scope === input.scope &&
+        claim.workspaceId === input.workspaceId &&
+        claim.artifactId === input.artifactId,
+    )
+    .map((claim) => ({
+      claim,
+      similarity: propositionSimilarity(claim.proposition, proposition),
+    }))
+    .filter((candidate) => candidate.similarity >= 0.32)
+    .sort((left, right) => right.similarity - left.similarity)
+    .slice(0, 4);
+  const relationType =
+    input.claimType === "inferred_preference"
+      ? ("prefers" as const)
+      : input.claimType === "recurring_workflow"
+        ? ("follows_workflow" as const)
+        : input.claimType === "decision" || input.claimType === "commitment"
+          ? ("depends_on" as const)
+          : ("related_to" as const);
+  for (const candidate of related)
+    await ctx.db.insert("memoryRelations", {
+      accountId: actor.accountId,
+      schoolId: actor.schoolId,
+      fromClaimId: claimId,
+      toClaimId: candidate.claim._id,
+      fromSubject: `claim:${claimId}`,
+      toSubject: `claim:${candidate.claim._id}`,
+      relationType,
+      confidence: Math.min(0.95, candidate.similarity + 0.2),
+      createdAt: now,
+      updatedAt: now,
+    });
   await invalidateCapsules(ctx, actor.accountId);
   return { claimId, merged: false };
 }
@@ -904,26 +1010,7 @@ export const forget = mutation({
       });
     }
     await invalidateCapsules(ctx, actor.accountId);
-    const idempotencyKey = `delete:${claim._id}`;
-    const existing = await ctx.db
-      .query("memoryJobs")
-      .withIndex("by_idempotency", (q) =>
-        q.eq("idempotencyKey", idempotencyKey),
-      )
-      .unique();
-    if (!existing)
-      await ctx.db.insert("memoryJobs", {
-        accountId: actor.accountId,
-        schoolId: actor.schoolId,
-        kind: "delete",
-        idempotencyKey,
-        payload: { claimId: claim._id },
-        status: "queued",
-        attemptCount: 0,
-        availableAt: now,
-        createdAt: now,
-        updatedAt: now,
-      });
+    await enqueueClaimDeletion(ctx, claim, now);
     return { forgotten: true };
   },
 });
@@ -972,6 +1059,7 @@ export const clearAll = mutation({
           accessStatus: "deleted",
           excerptPreview: undefined,
         });
+      await enqueueClaimDeletion(ctx, claim, now);
     }
     const capsules = await ctx.db
       .query("memoryCapsules")
@@ -1022,12 +1110,28 @@ export const exportMine = query({
   },
 });
 
-export const contextForRun = query({
+export const retrievalIdentity = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    const actor = await requireActor(ctx);
+    return { accountId: actor.accountId, schoolId: actor.schoolId };
+  },
+});
+
+export const contextForRunBase = internalQuery({
   args: {
     queryText: v.string(),
     workspaceId: v.optional(v.id("spectraWorkspaces")),
     artifactId: v.optional(v.id("spectraArtifacts")),
     targetTokens: v.optional(v.number()),
+    semanticMatches: v.optional(
+      v.array(
+        v.object({
+          claimId: v.id("memoryClaims"),
+          score: v.number(),
+        }),
+      ),
+    ),
   },
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx);
@@ -1080,15 +1184,29 @@ export const contextForRun = query({
           )
           .take(200)
       : [];
+    const semanticClaims = (
+      await Promise.all(
+        (args.semanticMatches ?? [])
+          .slice(0, 80)
+          .map((match) => ctx.db.get(match.claimId)),
+      )
+    ).filter((claim): claim is Doc<"memoryClaims"> => Boolean(claim));
     const claims = [
       ...ownedClaims,
       ...workspaceClaims,
       ...artifactClaims,
+      ...semanticClaims,
     ].filter(
       (claim, index, all) =>
         all.findIndex((candidate) => candidate._id === claim._id) === index,
     );
     const queryTerms = terms(args.queryText);
+    const semanticScores = new Map(
+      (args.semanticMatches ?? []).map((match) => [
+        String(match.claimId),
+        Math.max(0, Math.min(1, match.score)),
+      ]),
+    );
     const exclusions = {
       scope: 0,
       permission: 0,
@@ -1096,8 +1214,17 @@ export const contextForRun = query({
       disputed: 0,
       budget: 0,
     };
-    const ranked: Array<{ claim: Doc<"memoryClaims">; score: number }> = [];
+    const ranked: Array<{
+      claim: Doc<"memoryClaims">;
+      score: number;
+      retrievalSignal: number;
+    }> = [];
     for (const claim of claims) {
+      if (claim.status !== "active") {
+        if (claim.status === "disputed") exclusions.disputed += 1;
+        else exclusions.stale += 1;
+        continue;
+      }
       if (!preferences.categoryControls[categoryForClaim(claim.claimType)]) {
         exclusions.scope += 1;
         continue;
@@ -1129,6 +1256,7 @@ export const contextForRun = query({
         continue;
       }
       const lexical = overlapScore(queryTerms, claim.proposition);
+      const semantic = semanticScores.get(String(claim._id)) ?? 0;
       const correctionBoost = claim.claimType === "correction" ? 0.3 : 0;
       const assertedBoost = claim.assertion === "asserted" ? 0.18 : 0;
       const recency = Math.max(
@@ -1137,13 +1265,61 @@ export const contextForRun = query({
       );
       ranked.push({
         claim,
+        retrievalSignal: lexical + semantic,
         score:
           lexical * 1.8 +
+          semantic * 1.35 +
           claim.confidence * 0.65 +
           correctionBoost +
           assertedBoost +
           recency * 0.12,
       });
+    }
+    const rankedById = new Map(
+      ranked.map((item) => [String(item.claim._id), item]),
+    );
+    let frontier = ranked
+      .filter((item) => item.retrievalSignal >= 0.12)
+      .sort((left, right) => right.score - left.score)
+      .slice(0, 12)
+      .map((item) => item.claim._id);
+    const traversed = new Set(frontier.map(String));
+    for (let depth = 0; depth < 2 && frontier.length; depth += 1) {
+      const relationSets = await Promise.all(
+        frontier.map(async (claimId) => ({
+          claimId,
+          relations: [
+            ...(await ctx.db
+              .query("memoryRelations")
+              .withIndex("by_from_claim", (q) => q.eq("fromClaimId", claimId))
+              .collect()),
+            ...(await ctx.db
+              .query("memoryRelations")
+              .withIndex("by_to_claim", (q) => q.eq("toClaimId", claimId))
+              .collect()),
+          ],
+        })),
+      );
+      const next: Id<"memoryClaims">[] = [];
+      for (const { claimId, relations } of relationSets)
+        for (const relation of relations) {
+          if (relation.accountId !== actor.accountId) continue;
+          const neighborId =
+            relation.fromClaimId === claimId
+              ? relation.toClaimId
+              : relation.fromClaimId;
+          if (!neighborId) continue;
+          const item = rankedById.get(String(neighborId));
+          if (item)
+            item.score +=
+              Math.max(0, Math.min(1, relation.confidence)) *
+              (depth === 0 ? 0.22 : 0.1);
+          if (!traversed.has(String(neighborId))) {
+            traversed.add(String(neighborId));
+            next.push(neighborId);
+          }
+        }
+      frontier = next.slice(0, 24);
     }
     ranked.sort(
       (a, b) => b.score - a.score || b.claim.updatedAt - a.claim.updatedAt,
@@ -1161,9 +1337,10 @@ export const contextForRun = query({
     }
     const contextClaims = await Promise.all(
       selected.map(async (claim, index) => {
-        const evidence = (await evidenceForClaim(ctx, claim._id)).filter(
-          (item) => item.accessStatus === "available",
-        );
+        const evidence = [];
+        for (const item of await evidenceForClaim(ctx, claim._id))
+          if (await evidenceIsCurrentlyAvailable(ctx, actor, item))
+            evidence.push(item);
         return {
           citation: `M${index + 1}`,
           claimId: claim._id,
@@ -1197,6 +1374,34 @@ export const contextForRun = query({
       estimatedTokens: tokenEstimate(text),
       targetTokens: target,
     };
+  },
+});
+
+export const contextForRun = action({
+  args: {
+    queryText: v.string(),
+    workspaceId: v.optional(v.id("spectraWorkspaces")),
+    artifactId: v.optional(v.id("spectraArtifacts")),
+    targetTokens: v.optional(v.number()),
+  },
+  handler: async (ctx, args): Promise<unknown> => {
+    const identity = await ctx.runQuery(internal.memory.retrievalIdentity, {});
+    const queryText = compact(args.queryText, 4_000);
+    const semanticMatches = queryText
+      ? await ctx.vectorSearch("memoryClaims", "by_embedding", {
+          vector: memoryEmbedding(queryText),
+          limit: 80,
+          filter: (q) => q.eq("accountId", identity.accountId),
+        })
+      : [];
+    return ctx.runQuery(internal.memory.contextForRunBase, {
+      ...args,
+      queryText,
+      semanticMatches: semanticMatches.map((match) => ({
+        claimId: match._id,
+        score: match._score,
+      })),
+    });
   },
 });
 
@@ -1273,6 +1478,24 @@ function explicitCandidateFromText(text: string) {
       claimType: "correction" as const,
       reason: "You directly corrected prior context.",
     };
+  const preference = compacted.match(
+    /^(?:i\s+(?:strongly\s+)?prefer|my\s+preference\s+is)\s+(.+?)(?:[.!?]\s*$|$)/i,
+  );
+  if (preference?.[1])
+    return {
+      proposition: `I prefer ${preference[1]}`,
+      claimType: "inferred_preference" as const,
+      reason: "You directly stated a durable preference.",
+    };
+  const decision = compacted.match(
+    /^(?:i(?:'ve| have)\s+decided(?:\s+that)?|my\s+decision\s+is)\s+(.+?)(?:[.!?]\s*$|$)/i,
+  );
+  if (decision?.[1])
+    return {
+      proposition: decision[1],
+      claimType: "decision" as const,
+      reason: "You explicitly recorded a durable decision.",
+    };
   return null;
 }
 
@@ -1343,6 +1566,10 @@ async function rebuildCapsulesForAccount(
   actor: Actor,
   claims: Array<Doc<"memoryClaims">>,
 ) {
+  const preferences = preferenceProjection(
+    await preferencesFor(ctx, actor),
+    actor,
+  );
   const definitions: Array<{
     scope: Doc<"memoryCapsules">["scope"];
     workspaceId?: Id<"spectraWorkspaces">;
@@ -1388,15 +1615,33 @@ async function rebuildCapsulesForAccount(
 
   const now = Date.now();
   for (const definition of definitions) {
-    const selected = definition.claims
-      .sort(
-        (a, b) =>
-          Number(b.assertion === "asserted") -
-            Number(a.assertion === "asserted") ||
-          b.confidence - a.confidence ||
-          b.updatedAt - a.updatedAt,
+    const ranked = definition.claims.sort(
+      (a, b) =>
+        Number(b.assertion === "asserted") -
+          Number(a.assertion === "asserted") ||
+        b.confidence - a.confidence ||
+        b.updatedAt - a.updatedAt,
+    );
+    const selected: Array<Doc<"memoryClaims">> = [];
+    let tokens = 0;
+    const scopeTarget =
+      definition.scope === "private_global"
+        ? Math.round(preferences.capsuleTargetTokens * 0.3)
+        : definition.scope === "private_school"
+          ? Math.round(preferences.capsuleTargetTokens * 0.18)
+          : definition.scope === "workflow"
+            ? Math.round(preferences.capsuleTargetTokens * 0.22)
+            : Math.round(preferences.capsuleTargetTokens * 0.38);
+    for (const claim of ranked) {
+      const cost = tokenEstimate(claim.proposition) + 2;
+      if (
+        selected.length >= 32 ||
+        (selected.length > 0 && tokens + cost > scopeTarget)
       )
-      .slice(0, 32);
+        continue;
+      selected.push(claim);
+      tokens += cost;
+    }
     const text = selected.map((claim) => `- ${claim.proposition}`).join("\n");
     const contentHash = hash(
       selected.map((claim) => `${claim._id}:${claim.updatedAt}`).join("|"),
@@ -1452,6 +1697,19 @@ export const maintain = internalMutation({
   args: {},
   handler: async (ctx) => {
     const now = Date.now();
+    const unembedded = await ctx.db
+      .query("memoryClaims")
+      .withIndex("by_status_updated", (q) => q.eq("status", "active"))
+      .filter((q) => q.eq(q.field("embedding"), undefined))
+      .take(80);
+    await Promise.all(
+      unembedded.map((claim) =>
+        ctx.db.patch(claim._id, {
+          embedding: memoryEmbedding(claim.proposition),
+          updatedAt: claim.updatedAt,
+        }),
+      ),
+    );
     const queued = await ctx.db
       .query("memoryJobs")
       .withIndex("by_status_available", (q) =>
@@ -1492,9 +1750,13 @@ export const maintain = internalMutation({
           const proposition = compact(payload.proposition);
           const claimType = compact(payload.claimType) as ClaimType;
           if (
-            !["declared_fact", "correction", "recurring_workflow"].includes(
-              claimType,
-            )
+            ![
+              "declared_fact",
+              "correction",
+              "recurring_workflow",
+              "inferred_preference",
+              "decision",
+            ].includes(claimType)
           )
             throw new Error("Unsupported background memory candidate.");
           await upsertClaim(ctx, actor, {
@@ -1582,7 +1844,11 @@ export const maintain = internalMutation({
         .collect();
       const permitted = [];
       for (const claim of active)
-        if (await canReadClaim(ctx, actor, claim)) permitted.push(claim);
+        if (
+          (await canReadClaim(ctx, actor, claim)) &&
+          (await claimHasCurrentEvidence(ctx, actor, claim._id))
+        )
+          permitted.push(claim);
       await rebuildCapsulesForAccount(ctx, actor, permitted);
     }
 
@@ -1640,5 +1906,144 @@ export const maintain = internalMutation({
     for (const job of oldJobs) await ctx.db.delete(job._id);
 
     return { processed: jobs.length, accounts: touchedAccounts.size };
+  },
+});
+
+/**
+ * Privacy-safe invariant evaluation. It stores counts and rates only: never
+ * propositions, evidence previews, source identifiers, or account IDs.
+ */
+export const evaluateSafety = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const startedAt = Date.now();
+    const claims = await ctx.db.query("memoryClaims").order("desc").take(160);
+    const capsules = await ctx.db
+      .query("memoryCapsules")
+      .order("desc")
+      .take(100);
+    const active = claims.filter((claim) => claim.status === "active");
+    const deleted = claims.filter((claim) => claim.status === "deleted");
+    const corrections = active.filter(
+      (claim) => claim.claimType === "correction" && claim.supersedesId,
+    );
+
+    let evidenceBacked = 0;
+    let correctionFailures = 0;
+    let deletionFailures = 0;
+    let contaminationFailures = 0;
+    let scopeFailures = 0;
+    const duplicateKeys = new Set<string>();
+    const actorCache = new Map<string, Actor | null>();
+    let duplicates = 0;
+
+    for (const claim of active) {
+      const duplicateKey = `${claim.accountId}:${claim.propositionHash}`;
+      if (duplicateKeys.has(duplicateKey)) duplicates += 1;
+      else duplicateKeys.add(duplicateKey);
+
+      if (captureRejectionReason(claim.proposition)) contaminationFailures += 1;
+      if (
+        ((claim.scope === "private_school" ||
+          claim.scope === "workspace" ||
+          claim.scope === "shared_artifact") &&
+          claim.scopeSchoolId !== claim.schoolId) ||
+        (claim.scope === "workspace" && !claim.workspaceId) ||
+        (claim.scope === "shared_artifact" && !claim.artifactId)
+      )
+        scopeFailures += 1;
+
+      const actorKey = String(claim.accountId);
+      let actor = actorCache.get(actorKey);
+      if (actor === undefined) {
+        actor = await getActorForAccountId(ctx, claim.accountId);
+        actorCache.set(actorKey, actor);
+      }
+      if (
+        actor &&
+        (await canReadClaim(ctx, actor, claim)) &&
+        (await claimHasCurrentEvidence(ctx, actor, claim._id))
+      )
+        evidenceBacked += 1;
+    }
+
+    for (const correction of corrections) {
+      const prior = correction.supersedesId
+        ? await ctx.db.get(correction.supersedesId)
+        : null;
+      if (
+        !prior ||
+        prior.status !== "superseded" ||
+        prior.supersededById !== correction._id
+      )
+        correctionFailures += 1;
+    }
+
+    for (const claim of deleted) {
+      const evidence = await evidenceForClaim(ctx, claim._id);
+      if (
+        evidence.some(
+          (item) =>
+            item.accessStatus === "available" || Boolean(item.excerptPreview),
+        )
+      )
+        deletionFailures += 1;
+    }
+
+    let capsuleBudgetFailures = 0;
+    const preferenceCache = new Map<string, Doc<"memoryPreferences"> | null>();
+    for (const capsule of capsules) {
+      const accountKey = String(capsule.accountId);
+      let preference = preferenceCache.get(accountKey);
+      if (preference === undefined) {
+        preference = await ctx.db
+          .query("memoryPreferences")
+          .withIndex("by_account", (q) => q.eq("accountId", capsule.accountId))
+          .unique();
+        preferenceCache.set(accountKey, preference);
+      }
+      const target = preference?.capsuleTargetTokens ?? DEFAULT_TARGET_TOKENS;
+      if (capsule.tokenCount > target || capsule.stale)
+        capsuleBudgetFailures += 1;
+    }
+
+    const rate = (failures: number, total: number) =>
+      total > 0 ? failures / total : 0;
+    const metrics = {
+      evidenceBackedRate: active.length ? evidenceBacked / active.length : 1,
+      duplicateRate: rate(duplicates, active.length),
+      correctionFailureRate: rate(correctionFailures, corrections.length),
+      deletionFailureRate: rate(deletionFailures, deleted.length),
+      contaminationFailureRate: rate(contaminationFailures, active.length),
+      scopeFailureRate: rate(scopeFailures, active.length),
+      capsuleBudgetFailureRate: rate(capsuleBudgetFailures, capsules.length),
+    };
+    const passed =
+      metrics.evidenceBackedRate >= 0.98 &&
+      metrics.duplicateRate <= 0.01 &&
+      metrics.correctionFailureRate === 0 &&
+      metrics.deletionFailureRate === 0 &&
+      metrics.contaminationFailureRate === 0 &&
+      metrics.scopeFailureRate === 0 &&
+      metrics.capsuleBudgetFailureRate <= 0.02;
+    const evaluationId = await ctx.db.insert("memoryEvaluationRuns", {
+      scope: "platform",
+      sampledClaims: claims.length,
+      sampledCapsules: capsules.length,
+      metrics,
+      passed,
+      durationMs: Date.now() - startedAt,
+      createdAt: Date.now(),
+    });
+
+    const cutoff = Date.now() - 90 * 86_400_000;
+    const oldRuns = await ctx.db
+      .query("memoryEvaluationRuns")
+      .withIndex("by_scope_created", (q) =>
+        q.eq("scope", "platform").lt("createdAt", cutoff),
+      )
+      .take(50);
+    for (const run of oldRuns) await ctx.db.delete(run._id);
+    return { evaluationId, passed, metrics };
   },
 });

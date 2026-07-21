@@ -33,13 +33,16 @@ import {
   abortArtifactImportUpload,
   beginArtifactImportOriginal,
   completeArtifactImport,
+  decideSpectraAgentImprovement,
   evaluateSpectraAgent,
+  generateSpectraAgentEvalSuite,
   getSpectraAgentAnalytics,
   getSpectraAgentEvalRuns,
   getSpectraAgentResourceHealth,
   getSpectraAgentReleases,
   manageSpectraAgentRelease,
   publishSpectraAgent,
+  proposeSpectraAgentImprovement,
   signSpectraAgentManifest,
   uploadArtifactImportOriginal,
   verifySpectraAgentManifest,
@@ -118,16 +121,6 @@ const TOOL_CATALOG: Array<{
     key: "web_search",
     label: "Web research",
     detail: "Retrieve current public sources",
-  },
-  {
-    key: "code_execute",
-    label: "Run code",
-    detail: "Use Spectra's isolated runtimes",
-  },
-  {
-    key: "image_generate",
-    label: "Generate images",
-    detail: "Create visual assets when requested",
   },
 ];
 
@@ -217,6 +210,7 @@ export function AgentStudio({
   onChange,
   aiChangedPaths = [],
   readOnly = false,
+  canPublish = false,
   onActiveRegionChange,
 }: {
   artifactId: string;
@@ -226,6 +220,7 @@ export function AgentStudio({
   onChange: (content: unknown) => void;
   aiChangedPaths?: string[];
   readOnly?: boolean;
+  canPublish?: boolean;
   onActiveRegionChange?: (regionId: string) => void;
 }) {
   const normalized = useMemo(() => normalizeAgentContent(content), [content]);
@@ -234,6 +229,7 @@ export function AgentStudio({
   const [preview, setPreview] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [evaluating, setEvaluating] = useState(false);
+  const [generatingSuite, setGeneratingSuite] = useState(false);
   const [releaseMessage, setReleaseMessage] = useState<string>();
   const [releases, setReleases] = useState<SpectraAgentRelease[]>([]);
   const [evalRuns, setEvalRuns] = useState<SpectraAgentEvalRun[]>([]);
@@ -246,6 +242,11 @@ export function AgentStudio({
     "internal_test" | "limited" | "published"
   >("published");
   const [releaseBusy, setReleaseBusy] = useState<string>();
+  const [proposalBusy, setProposalBusy] = useState(false);
+  const [proposalOpen, setProposalOpen] = useState(false);
+  const [proposalEvidence, setProposalEvidence] = useState("");
+  const [proposalImpact, setProposalImpact] = useState("");
+  const [proposalInstructions, setProposalInstructions] = useState("");
   const [skillDraft, setSkillDraft] = useState("");
   const [importMessage, setImportMessage] = useState<string>();
   const [manifestBusy, setManifestBusy] = useState<"export" | "import" | null>(
@@ -268,32 +269,29 @@ export function AgentStudio({
   }, [onActiveRegionChange, step]);
   useEffect(() => {
     let active = true;
-    void Promise.all([
-      getSpectraAgentReleases(artifactId),
-      getSpectraAgentEvalRuns(artifactId),
-      getSpectraAgentAnalytics(artifactId),
-      getSpectraAgentResourceHealth(artifactId),
-    ])
-      .then(
-        ([
-          releaseResponse,
-          evaluationResponse,
-          analyticsResponse,
-          resourceResponse,
-        ]) => {
-        if (!active) return;
-        setReleases(releaseResponse.releases);
-        setEvalRuns(evaluationResponse.runs);
-        setCurrentContentHash(evaluationResponse.currentContentHash);
-        setAnalytics(analyticsResponse.analytics);
-          setResourceHealth(resourceResponse.resources);
-        },
-      )
+    void getSpectraAgentReleases(artifactId)
+      .then((response) => {
+        if (active) setReleases(response.releases);
+      })
       .catch(() => undefined);
+    if (!readOnly)
+      void Promise.all([
+        getSpectraAgentEvalRuns(artifactId),
+        getSpectraAgentAnalytics(artifactId),
+        getSpectraAgentResourceHealth(artifactId),
+      ])
+        .then(([evaluationResponse, analyticsResponse, resourceResponse]) => {
+          if (!active) return;
+          setEvalRuns(evaluationResponse.runs);
+          setCurrentContentHash(evaluationResponse.currentContentHash);
+          setAnalytics(analyticsResponse.analytics);
+          setResourceHealth(resourceResponse.resources);
+        })
+        .catch(() => undefined);
     return () => {
       active = false;
     };
-  }, [artifactId]);
+  }, [artifactId, readOnly]);
 
   const issues = agentConfigurationIssues(agent);
   const linkedResources = agent.resources.map((resource) => ({
@@ -352,7 +350,10 @@ export function AgentStudio({
               id: identifier("tool"),
               key,
               enabled: true,
-              approval: "consequential",
+              approval:
+                key === "artifact_create" || key === "artifact_edit"
+                  ? "consequential"
+                  : "never",
             },
           ],
     });
@@ -360,6 +361,7 @@ export function AgentStudio({
 
   async function publish() {
     if (
+      !canPublish ||
       issues.length ||
       publishing ||
       (publishNeedsEval && !hasPassingCurrentEval)
@@ -416,11 +418,32 @@ export function AgentStudio({
     }
   }
 
+  async function generateEvaluationSuite() {
+    if (evaluating || generatingSuite || readOnly || issues.length) return;
+    setGeneratingSuite(true);
+    setReleaseMessage(undefined);
+    try {
+      const response = await generateSpectraAgentEvalSuite(artifactId);
+      commit({ ...agent, evals: response.cases });
+      setReleaseMessage(
+        "Generated eight synthetic quality, boundary, privacy, injection, and source-truthfulness cases. Review their observable criteria before running them.",
+      );
+    } catch (error) {
+      setReleaseMessage(
+        error instanceof Error
+          ? error.message
+          : "The synthetic suite could not be generated.",
+      );
+    } finally {
+      setGeneratingSuite(false);
+    }
+  }
+
   async function manageRelease(
     release: SpectraAgentRelease,
     action: "promote" | "rollback" | "suspend" | "deprecate",
   ) {
-    if (readOnly || releaseBusy) return;
+    if (!canPublish || releaseBusy) return;
     setReleaseBusy(release.releaseId);
     setReleaseMessage(undefined);
     try {
@@ -440,6 +463,77 @@ export function AgentStudio({
       );
     } finally {
       setReleaseBusy(undefined);
+    }
+  }
+
+  async function createImprovementProposal() {
+    if (
+      proposalBusy ||
+      readOnly ||
+      proposalEvidence.trim().length < 10 ||
+      proposalImpact.trim().length < 10 ||
+      proposalInstructions.trim().length < 40
+    )
+      return;
+    setProposalBusy(true);
+    try {
+      await proposeSpectraAgentImprovement({
+        agentId: artifactId,
+        evidence: proposalEvidence,
+        expectedImpact: proposalImpact,
+        proposedPatch: { instructionsText: proposalInstructions },
+        evalRunId: evalRuns.find((run) => run.status === "passed")?._id,
+      });
+      const response = await getSpectraAgentAnalytics(artifactId);
+      setAnalytics(response.analytics);
+      setProposalOpen(false);
+      setProposalEvidence("");
+      setProposalImpact("");
+      setProposalInstructions("");
+      setReleaseMessage(
+        "Improvement proposed. Accepting it updates only the draft; a fresh passing suite is still required before rollout.",
+      );
+    } catch (error) {
+      setReleaseMessage(
+        error instanceof Error
+          ? error.message
+          : "The improvement proposal could not be saved.",
+      );
+    } finally {
+      setProposalBusy(false);
+    }
+  }
+
+  async function decideImprovement(
+    proposalId: string,
+    decision: "accepted" | "rejected",
+  ) {
+    if (proposalBusy || readOnly) return;
+    setProposalBusy(true);
+    try {
+      await decideSpectraAgentImprovement(proposalId, decision);
+      const [analyticsResponse, evalResponse] = await Promise.all([
+        getSpectraAgentAnalytics(artifactId),
+        getSpectraAgentEvalRuns(artifactId),
+      ]);
+      setAnalytics(analyticsResponse.analytics);
+      setEvalRuns(evalResponse.runs);
+      setCurrentContentHash(evalResponse.currentContentHash);
+      if (decision === "accepted")
+        window.dispatchEvent(new Event("spectra:artifacts-changed"));
+      setReleaseMessage(
+        decision === "accepted"
+          ? "The proposal is now in the live draft. Review it here and run the complete suite before publishing."
+          : "The proposal was rejected without changing the draft.",
+      );
+    } catch (error) {
+      setReleaseMessage(
+        error instanceof Error
+          ? error.message
+          : "The proposal decision could not be saved.",
+      );
+    } finally {
+      setProposalBusy(false);
     }
   }
 
@@ -810,7 +904,7 @@ export function AgentStudio({
                   <input
                     type="checkbox"
                     checked={agent.routing.enabled}
-                    disabled={readOnly}
+                    disabled={readOnly || !canPublish}
                     onChange={(event) =>
                       commit({
                         ...agent,
@@ -1122,7 +1216,9 @@ export function AgentStudio({
                             <small>{catalog.detail}</small>
                           </div>
                         </button>
-                        {tool?.enabled ? (
+                        {tool?.enabled &&
+                        (tool.key === "artifact_create" ||
+                          tool.key === "artifact_edit") ? (
                           <select
                             value={tool.approval}
                             disabled={readOnly}
@@ -1147,11 +1243,121 @@ export function AgentStudio({
                             </option>
                             <option value="always">Always approve</option>
                           </select>
+                        ) : tool?.enabled ? (
+                          <small className="agent-tool-runtime-note">
+                            Permission checked for every invocation
+                          </small>
                         ) : null}
                       </article>
                     );
                   })}
                 </div>
+                <details className="agent-runtime-budget">
+                  <summary>Reliability guardrails</summary>
+                  <p>
+                    Safety ceilings prevent a malformed agent from running
+                    indefinitely. They are not commercial usage limits.
+                  </p>
+                  <div>
+                    <label>
+                      <span>Model turns</span>
+                      <input
+                        type="number"
+                        min={4}
+                        max={40}
+                        value={agent.runtimeBudget.maxTurns}
+                        disabled={readOnly}
+                        onChange={(event) =>
+                          commit({
+                            ...agent,
+                            runtimeBudget: {
+                              ...agent.runtimeBudget,
+                              maxTurns: Math.max(
+                                4,
+                                Math.min(40, Number(event.target.value) || 4),
+                              ),
+                            },
+                          })
+                        }
+                      />
+                    </label>
+                    <label>
+                      <span>Tool calls</span>
+                      <input
+                        type="number"
+                        min={4}
+                        max={100}
+                        value={agent.runtimeBudget.maxToolCalls}
+                        disabled={readOnly}
+                        onChange={(event) =>
+                          commit({
+                            ...agent,
+                            runtimeBudget: {
+                              ...agent.runtimeBudget,
+                              maxToolCalls: Math.max(
+                                4,
+                                Math.min(100, Number(event.target.value) || 4),
+                              ),
+                            },
+                          })
+                        }
+                      />
+                    </label>
+                    <label>
+                      <span>Minutes</span>
+                      <input
+                        type="number"
+                        min={0.5}
+                        max={10}
+                        step={0.5}
+                        value={agent.runtimeBudget.maxElapsedMs / 60_000}
+                        disabled={readOnly}
+                        onChange={(event) =>
+                          commit({
+                            ...agent,
+                            runtimeBudget: {
+                              ...agent.runtimeBudget,
+                              maxElapsedMs:
+                                Math.max(
+                                  0.5,
+                                  Math.min(
+                                    10,
+                                    Number(event.target.value) || 0.5,
+                                  ),
+                                ) * 60_000,
+                            },
+                          })
+                        }
+                      />
+                    </label>
+                    <label>
+                      <span>Total tokens</span>
+                      <input
+                        type="number"
+                        min={20_000}
+                        max={500_000}
+                        step={10_000}
+                        value={agent.runtimeBudget.maxTotalTokens}
+                        disabled={readOnly}
+                        onChange={(event) =>
+                          commit({
+                            ...agent,
+                            runtimeBudget: {
+                              ...agent.runtimeBudget,
+                              maxTotalTokens: Math.max(
+                                20_000,
+                                Math.min(
+                                  500_000,
+                                  Number(event.target.value) || 20_000,
+                                ),
+                              ),
+                            },
+                          })
+                        }
+                      />
+                    </label>
+                  </div>
+                </details>
               </section>
             </div>
           ) : null}
@@ -1331,9 +1537,29 @@ export function AgentStudio({
                   <div className="agent-eval-actions">
                     <button
                       type="button"
+                      disabled={
+                        generatingSuite ||
+                        evaluating ||
+                        readOnly ||
+                        Boolean(issues.length)
+                      }
+                      onClick={() => void generateEvaluationSuite()}
+                    >
+                      {generatingSuite ? (
+                        <Loader2 className="animate-spin" />
+                      ) : (
+                        <Sparkles />
+                      )}
+                      {agent.evals.length
+                        ? "Regenerate suite"
+                        : "Generate suite"}
+                    </button>
+                    <button
+                      type="button"
                       className="agent-run-evals"
                       disabled={
                         evaluating ||
+                        generatingSuite ||
                         readOnly ||
                         Boolean(issues.length) ||
                         !agent.evals.length
@@ -1500,9 +1726,7 @@ export function AgentStudio({
                     onChange={(event) =>
                       setRollout(
                         event.target.value as
-                          | "internal_test"
-                          | "limited"
-                          | "published",
+                          "internal_test" | "limited" | "published",
                       )
                     }
                   >
@@ -1517,11 +1741,13 @@ export function AgentStudio({
                     </option>
                   </select>
                   <small>
-                    {publishNeedsEval
-                      ? hasPassingCurrentEval
-                        ? "The passing suite matches this exact saved draft."
-                        : "Run and pass the suite for this exact draft before rollout."
-                      : "Internal test releases cannot be routed automatically."}
+                    {!canPublish
+                      ? "Your access can edit this draft but does not include release management."
+                      : publishNeedsEval
+                        ? hasPassingCurrentEval
+                          ? "The passing suite matches this exact saved draft."
+                          : "Run and pass the suite for this exact draft before rollout."
+                        : "Internal test releases cannot be routed automatically."}
                   </small>
                 </label>
                 <label className="agent-field">
@@ -1541,7 +1767,7 @@ export function AgentStudio({
                   disabled={
                     Boolean(issues.length) ||
                     publishing ||
-                    readOnly ||
+                    !canPublish ||
                     (publishNeedsEval && !hasPassingCurrentEval)
                   }
                   onClick={() => void publish()}
@@ -1586,7 +1812,7 @@ export function AgentStudio({
                           release.status === "published" ? (
                             <button
                               type="button"
-                              disabled={Boolean(releaseBusy) || readOnly}
+                              disabled={Boolean(releaseBusy) || !canPublish}
                               onClick={() =>
                                 void manageRelease(release, "promote")
                               }
@@ -1597,7 +1823,7 @@ export function AgentStudio({
                           {release.status === "published" ? (
                             <button
                               type="button"
-                              disabled={Boolean(releaseBusy) || readOnly}
+                              disabled={Boolean(releaseBusy) || !canPublish}
                               onClick={() =>
                                 void manageRelease(release, "rollback")
                               }
@@ -1608,7 +1834,7 @@ export function AgentStudio({
                           {release.status === "published" ? (
                             <button
                               type="button"
-                              disabled={Boolean(releaseBusy) || readOnly}
+                              disabled={Boolean(releaseBusy) || !canPublish}
                               onClick={() =>
                                 void manageRelease(release, "suspend")
                               }
@@ -1619,7 +1845,7 @@ export function AgentStudio({
                           {release.status !== "deprecated" ? (
                             <button
                               type="button"
-                              disabled={Boolean(releaseBusy) || readOnly}
+                              disabled={Boolean(releaseBusy) || !canPublish}
                               onClick={() =>
                                 void manageRelease(release, "deprecate")
                               }
@@ -1669,6 +1895,99 @@ export function AgentStudio({
                         </div>
                       </dl>
                       <p>{analytics.privacy}</p>
+                      <div className="agent-improvements">
+                        <header>
+                          <div>
+                            <strong>Improvement proposals</strong>
+                            <small>
+                              Evidence-backed draft changes; never silent
+                              learning
+                            </small>
+                          </div>
+                          <button
+                            type="button"
+                            disabled={readOnly}
+                            onClick={() => setProposalOpen((value) => !value)}
+                          >
+                            <Plus /> Propose
+                          </button>
+                        </header>
+                        {proposalOpen ? (
+                          <div className="agent-improvement-form">
+                            <textarea
+                              value={proposalEvidence}
+                              onChange={(event) =>
+                                setProposalEvidence(event.target.value)
+                              }
+                              placeholder="Aggregate evidence or a consented feedback pattern — never paste a private prompt"
+                            />
+                            <textarea
+                              value={proposalImpact}
+                              onChange={(event) =>
+                                setProposalImpact(event.target.value)
+                              }
+                              placeholder="Expected measurable improvement"
+                            />
+                            <textarea
+                              value={proposalInstructions}
+                              onChange={(event) =>
+                                setProposalInstructions(event.target.value)
+                              }
+                              placeholder="Complete replacement agent instructions to test in the draft"
+                            />
+                            <button
+                              type="button"
+                              disabled={proposalBusy}
+                              onClick={() => void createImprovementProposal()}
+                            >
+                              {proposalBusy ? (
+                                <Loader2 className="animate-spin" />
+                              ) : (
+                                <TestTube2 />
+                              )}
+                              Save proposal
+                            </button>
+                          </div>
+                        ) : null}
+                        {analytics.proposals.map((proposal) => (
+                          <article key={proposal._id}>
+                            <div>
+                              <strong>{proposal.expectedImpact}</strong>
+                              <p>{proposal.evidence}</p>
+                              <small>
+                                Accepting changes the draft only and invalidates
+                                prior release evidence.
+                              </small>
+                            </div>
+                            <div>
+                              <button
+                                type="button"
+                                disabled={proposalBusy || readOnly}
+                                onClick={() =>
+                                  void decideImprovement(
+                                    proposal._id,
+                                    "rejected",
+                                  )
+                                }
+                              >
+                                Reject
+                              </button>
+                              <button
+                                type="button"
+                                disabled={proposalBusy || readOnly}
+                                onClick={() =>
+                                  void decideImprovement(
+                                    proposal._id,
+                                    "accepted",
+                                  )
+                                }
+                              >
+                                Try in draft
+                              </button>
+                            </div>
+                          </article>
+                        ))}
+                      </div>
                     </div>
                   </details>
                 ) : null}

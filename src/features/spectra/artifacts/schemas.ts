@@ -71,6 +71,14 @@ export const agentContentSchema = z
       mode: z.enum(["spectra_default", "reasoning", "fast"]),
       allowFallback: z.boolean(),
     }),
+    runtimeBudget: z
+      .object({
+        maxTurns: z.number().int().min(4).max(40),
+        maxToolCalls: z.number().int().min(4).max(100),
+        maxElapsedMs: z.number().int().min(30_000).max(600_000),
+        maxTotalTokens: z.number().int().min(20_000).max(500_000),
+      })
+      .optional(),
     evals: z
       .array(
         z.object({

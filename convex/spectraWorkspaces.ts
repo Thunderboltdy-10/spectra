@@ -19,6 +19,68 @@ const vDefaultView = v.union(
   v.literal("library"),
 );
 
+const WORKSPACE_MANIFEST_FORMAT = "spectra-workspace";
+const WORKSPACE_MANIFEST_VERSION = 1;
+const MAX_WORKSPACE_MANIFEST_BYTES = 750_000;
+const MAX_WORKSPACE_MANIFEST_PLACEMENTS = 1_000;
+
+function recordValue(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function boundedText(value: unknown, max: number) {
+  return typeof value === "string" && value.trim()
+    ? value.trim().slice(0, max)
+    : undefined;
+}
+
+function finiteNumber(value: unknown, min: number, max: number) {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.min(max, Math.max(min, value))
+    : undefined;
+}
+
+function sanitizeViewData(value: unknown) {
+  const data = recordValue(value);
+  return {
+    titleOverride: boundedText(data?.titleOverride, 160),
+    compactSummary: boundedText(data?.compactSummary, 500),
+    cardVariant: boundedText(data?.cardVariant, 48),
+    pinned: typeof data?.pinned === "boolean" ? data.pinned : undefined,
+    hidden: typeof data?.hidden === "boolean" ? data.hidden : undefined,
+  };
+}
+
+function sanitizeLayout(value: unknown): {
+  view: "cards" | "canvas" | "timeline";
+  position?: { x: number; y: number };
+  size?: { w: number; h: number };
+  zIndex?: number;
+  collapsed?: boolean;
+} {
+  const layout = recordValue(value);
+  const position = recordValue(layout?.position);
+  const size = recordValue(layout?.size);
+  const view =
+    layout?.view === "canvas" || layout?.view === "timeline"
+      ? layout.view
+      : "cards";
+  const x = finiteNumber(position?.x, -1_000_000, 1_000_000);
+  const y = finiteNumber(position?.y, -1_000_000, 1_000_000);
+  const w = finiteNumber(size?.w, 80, 10_000);
+  const h = finiteNumber(size?.h, 60, 10_000);
+  return {
+    view,
+    position: x !== undefined && y !== undefined ? { x, y } : undefined,
+    size: w !== undefined && h !== undefined ? { w, h } : undefined,
+    zIndex: finiteNumber(layout?.zIndex, -100_000, 100_000),
+    collapsed:
+      typeof layout?.collapsed === "boolean" ? layout.collapsed : undefined,
+  };
+}
+
 function liveWorkspace<
   T extends {
     title: string;
@@ -545,7 +607,7 @@ export const permanentlyDelete = mutation({
     );
     const expected = `Remove ${workspace.title} permanently`;
     if (args.confirmation !== expected)
-      throw new Error(`Type â€œ${expected}â€ to confirm`);
+      throw new Error(`Type “${expected}” to confirm`);
 
     await bumpPolicyVersion(
       ctx,
@@ -648,6 +710,261 @@ export const permanentlyDelete = mutation({
       detachedArtifactCount: artifactIds.length,
       detachedThreadCount: threads.length,
       preservedRunCount: runs.length,
+    };
+  },
+});
+
+export const exportPortableManifest = query({
+  args: { workspaceId: v.id("spectraWorkspaces") },
+  handler: async (ctx, args) => {
+    const { workspace } = await requireWorkspaceCapability(
+      ctx,
+      args.workspaceId,
+      "read",
+    );
+    const items = await ctx.db
+      .query("spectraWorkspaceItems")
+      .withIndex("by_workspace", (q) => q.eq("workspaceId", workspace._id))
+      .collect();
+    const placements: Array<Record<string, unknown>> = [];
+    const unsupported = new Set<string>();
+    let inaccessible = 0;
+
+    for (const item of items.slice(0, MAX_WORKSPACE_MANIFEST_PLACEMENTS)) {
+      if (item.sourceType !== "artifact") {
+        unsupported.add(item.sourceType);
+        continue;
+      }
+      const artifactId = ctx.db.normalizeId("spectraArtifacts", item.sourceId);
+      if (!artifactId) {
+        inaccessible += 1;
+        continue;
+      }
+      const access = await evaluateAccess(ctx, "artifact", artifactId);
+      if (!access.allowed || !access.capabilities.includes("read")) {
+        inaccessible += 1;
+        continue;
+      }
+      const artifact = access.loaded.resource as Doc<"spectraArtifacts">;
+      placements.push({
+        artifactId: String(artifact._id),
+        title: artifact.title,
+        blueprintKey: artifact.blueprintKey,
+        viewData: sanitizeViewData(item.viewData),
+        layout: sanitizeLayout(item.layout),
+      });
+    }
+
+    const warnings = [
+      ...(items.length > MAX_WORKSPACE_MANIFEST_PLACEMENTS
+        ? [
+            `Only the first ${MAX_WORKSPACE_MANIFEST_PLACEMENTS} placements were exported.`,
+          ]
+        : []),
+      ...(inaccessible
+        ? [
+            `${inaccessible} inaccessible or stale artifact reference${inaccessible === 1 ? " was" : "s were"} omitted.`,
+          ]
+        : []),
+    ];
+    return {
+      manifest: {
+        format: WORKSPACE_MANIFEST_FORMAT,
+        version: WORKSPACE_MANIFEST_VERSION,
+        exportedAt: Date.now(),
+        workspace: {
+          title: workspace.title,
+          description: workspace.description,
+          icon: workspace.icon,
+          color: workspace.color,
+          defaultView: workspace.defaultView,
+        },
+        placements,
+      },
+      report: {
+        exported: placements.length,
+        omitted: inaccessible,
+        unsupported: Array.from(unsupported),
+        warnings,
+      },
+    };
+  },
+});
+
+export const importPortableManifest = mutation({
+  args: {
+    fileName: v.string(),
+    sha256: v.string(),
+    manifest: v.any(),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireSpectraActor(ctx);
+    const now = Date.now();
+    const fileName = args.fileName.trim().slice(0, 220) || "workspace.json";
+    const sha256 = args.sha256.toLowerCase();
+    const root = recordValue(args.manifest);
+    const workspaceValue = recordValue(root?.workspace);
+    const placementsValue = Array.isArray(root?.placements)
+      ? root.placements
+      : null;
+    let byteLength = MAX_WORKSPACE_MANIFEST_BYTES + 1;
+    try {
+      byteLength = new TextEncoder().encode(
+        JSON.stringify(args.manifest),
+      ).length;
+    } catch {
+      // The quarantine record below deliberately keeps only a compact reason.
+    }
+    const quarantineReason = !/^[a-f0-9]{64}$/.test(sha256)
+      ? "The file fingerprint is invalid."
+      : byteLength > MAX_WORKSPACE_MANIFEST_BYTES
+        ? "The workspace manifest is larger than 750 KB."
+        : root?.format !== WORKSPACE_MANIFEST_FORMAT
+          ? "This is not a Spectra workspace manifest."
+          : root?.version !== WORKSPACE_MANIFEST_VERSION
+            ? "This workspace manifest version is not supported."
+            : !workspaceValue || !placementsValue
+              ? "The workspace manifest is incomplete."
+              : placementsValue.length > MAX_WORKSPACE_MANIFEST_PLACEMENTS
+                ? `A workspace manifest may contain at most ${MAX_WORKSPACE_MANIFEST_PLACEMENTS} placements.`
+                : undefined;
+
+    if (quarantineReason) {
+      const jobId = await ctx.db.insert("workspaceImportJobs", {
+        schoolId: actor.schoolId,
+        accountId: actor._id,
+        fileName,
+        sha256,
+        status: "quarantined",
+        formatVersion:
+          typeof root?.version === "number" ? root.version : undefined,
+        originalManifest:
+          byteLength <= MAX_WORKSPACE_MANIFEST_BYTES
+            ? args.manifest
+            : undefined,
+        report: {
+          placed: 0,
+          skipped: placementsValue?.length ?? 0,
+          unsupported: [],
+          warnings: [quarantineReason],
+        },
+        createdAt: now,
+        completedAt: now,
+      });
+      return {
+        status: "quarantined" as const,
+        jobId,
+        reason: quarantineReason,
+      };
+    }
+
+    // Every null shape returns through quarantine above. These aliases make
+    // that validation boundary explicit to TypeScript and future readers.
+    const safeWorkspace = workspaceValue as Record<string, unknown>;
+    const safePlacements = placementsValue as unknown[];
+
+    const title = boundedText(safeWorkspace.title, 160) ?? "Imported workspace";
+    const defaultView =
+      safeWorkspace.defaultView === "cards" ||
+      safeWorkspace.defaultView === "canvas" ||
+      safeWorkspace.defaultView === "timeline"
+        ? safeWorkspace.defaultView
+        : "library";
+    const workspaceId = await ctx.db.insert("spectraWorkspaces", {
+      ownerAccountId: actor._id,
+      schoolId: actor.schoolId,
+      title,
+      description: boundedText(safeWorkspace.description, 2_000),
+      icon: boundedText(safeWorkspace.icon, 48) ?? "Sparkles",
+      color: boundedText(safeWorkspace.color, 48) ?? "cyan",
+      status: "active",
+      defaultView,
+      createdAt: now,
+      updatedAt: now,
+      lastActivityAt: now,
+    });
+
+    let placed = 0;
+    let skipped = 0;
+    const unsupported = new Set<string>();
+    const warnings: string[] = [];
+    const seen = new Set<string>();
+    for (const rawPlacement of safePlacements) {
+      const placement = recordValue(rawPlacement);
+      const artifactIdText = boundedText(placement?.artifactId, 100);
+      if (!artifactIdText || seen.has(artifactIdText)) {
+        skipped += 1;
+        continue;
+      }
+      seen.add(artifactIdText);
+      const artifactId = ctx.db.normalizeId("spectraArtifacts", artifactIdText);
+      if (!artifactId) {
+        skipped += 1;
+        continue;
+      }
+      const access = await evaluateAccess(ctx, "artifact", artifactId);
+      if (!access.allowed || !access.capabilities.includes("read")) {
+        skipped += 1;
+        continue;
+      }
+      const artifact = access.loaded.resource as Doc<"spectraArtifacts">;
+      if (artifact.schoolId !== actor.schoolId) {
+        skipped += 1;
+        continue;
+      }
+      const sourceType = boundedText(placement?.sourceType, 32);
+      if (sourceType && sourceType !== "artifact") unsupported.add(sourceType);
+      await ctx.db.insert("spectraWorkspaceItems", {
+        workspaceId,
+        sourceType: "artifact",
+        sourceId: String(artifact._id),
+        placedByAccountId: actor._id,
+        accessProjection: false,
+        viewData: sanitizeViewData(placement?.viewData),
+        layout: sanitizeLayout(placement?.layout),
+        createdAt: now,
+        updatedAt: now,
+      });
+      placed += 1;
+    }
+    if (skipped)
+      warnings.push(
+        `${skipped} inaccessible, stale, duplicate, or malformed artifact reference${skipped === 1 ? " was" : "s were"} skipped.`,
+      );
+    const jobId = await ctx.db.insert("workspaceImportJobs", {
+      schoolId: actor.schoolId,
+      accountId: actor._id,
+      fileName,
+      sha256,
+      status: "imported",
+      formatVersion: WORKSPACE_MANIFEST_VERSION,
+      originalManifest: args.manifest,
+      workspaceId,
+      report: {
+        placed,
+        skipped,
+        unsupported: Array.from(unsupported),
+        warnings,
+      },
+      createdAt: now,
+      completedAt: Date.now(),
+    });
+    await incrementOperationalCounter(ctx, {
+      schoolId: actor.schoolId,
+      category: "workspace_imported",
+      dimension: skipped ? "partial" : "complete",
+      occurredAt: now,
+    });
+    return {
+      status: "imported" as const,
+      jobId,
+      workspaceId,
+      report: {
+        placed,
+        skipped,
+        unsupported: Array.from(unsupported),
+        warnings,
+      },
     };
   },
 });

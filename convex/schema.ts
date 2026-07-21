@@ -117,32 +117,6 @@ export default defineSchema({
     .index("by_school_status", ["schoolId", "status"])
     .index("by_school_source", ["schoolId", "source", "sourceKey"]),
 
-  governancePolicies: defineTable({
-    schoolId: v.optional(v.id("schools")),
-    scope: v.union(v.literal("platform_default"), v.literal("school")),
-    publicSharing: v.union(
-      v.literal("disabled"),
-      v.literal("approval_required"),
-      v.literal("allowed"),
-    ),
-    defaultWorkspaceAccess: v.union(v.literal("private"), v.literal("school")),
-    retentionDays: v.optional(v.number()),
-    allowedModels: v.array(v.string()),
-    allowedCodeRuntimes: v.array(
-      v.union(
-        v.literal("javascript"),
-        v.literal("typescript"),
-        v.literal("react"),
-        v.literal("python"),
-      ),
-    ),
-    codeNetworkAccess: v.boolean(),
-    exportEnabled: v.boolean(),
-    updatedByAccountId: v.id("accounts"),
-    createdAt: v.number(),
-    updatedAt: v.number(),
-  }).index("by_scope_school", ["scope", "schoolId"]),
-
   schoolGroupMembers: defineTable({
     schoolId: v.id("schools"),
     groupId: v.id("schoolGroups"),
@@ -380,7 +354,7 @@ export default defineSchema({
     completedSteps: v.array(
       v.union(
         v.literal("identity_reserved"),
-        v.literal("policy_created"),
+        v.literal("capability_charter_applied"),
         v.literal("limits_created"),
         v.literal("admin_invited"),
       ),
@@ -623,6 +597,7 @@ export default defineSchema({
       v.literal("ai_run_started"),
       v.literal("ai_run_failed"),
       v.literal("workspace_created"),
+      v.literal("workspace_imported"),
       v.literal("agent_invocation"),
     ),
     dimension: v.string(),
@@ -1344,7 +1319,8 @@ export default defineSchema({
   })
     .index("by_artifact_account_kind", ["artifactId", "accountId", "kind"])
     .index("by_account_updated", ["accountId", "updatedAt"])
-    .index("by_artifact_updated", ["artifactId", "updatedAt"]),
+    .index("by_artifact_updated", ["artifactId", "updatedAt"])
+    .index("by_kind_updated", ["kind", "updatedAt"]),
 
   memoryPreferences: defineTable({
     accountId: v.id("accounts"),
@@ -1405,6 +1381,7 @@ export default defineSchema({
     proposition: v.string(),
     normalizedProposition: v.string(),
     propositionHash: v.string(),
+    embedding: v.optional(v.array(v.float64())),
     assertion: v.union(v.literal("asserted"), v.literal("inferred")),
     confidence: v.number(),
     sensitivity: v.union(v.literal("standard"), v.literal("restricted")),
@@ -1436,7 +1413,12 @@ export default defineSchema({
     .index("by_status_updated", ["status", "updatedAt"])
     .index("by_workspace_status", ["workspaceId", "status"])
     .index("by_artifact_status", ["artifactId", "status"])
-    .index("by_school_status", ["schoolId", "status"]),
+    .index("by_school_status", ["schoolId", "status"])
+    .vectorIndex("by_embedding", {
+      vectorField: "embedding",
+      dimensions: 256,
+      filterFields: ["accountId", "schoolId", "status"],
+    }),
 
   memoryEvidence: defineTable({
     claimId: v.id("memoryClaims"),
@@ -1573,6 +1555,27 @@ export default defineSchema({
     .index("by_status_updated", ["status", "updatedAt"])
     .index("by_account_created", ["accountId", "createdAt"])
     .index("by_idempotency", ["idempotencyKey"]),
+
+  memoryEvaluationRuns: defineTable({
+    schoolId: v.optional(v.id("schools")),
+    scope: v.union(v.literal("platform"), v.literal("school")),
+    sampledClaims: v.number(),
+    sampledCapsules: v.number(),
+    metrics: v.object({
+      evidenceBackedRate: v.number(),
+      duplicateRate: v.number(),
+      correctionFailureRate: v.number(),
+      deletionFailureRate: v.number(),
+      contaminationFailureRate: v.number(),
+      scopeFailureRate: v.number(),
+      capsuleBudgetFailureRate: v.number(),
+    }),
+    passed: v.boolean(),
+    durationMs: v.number(),
+    createdAt: v.number(),
+  })
+    .index("by_scope_created", ["scope", "createdAt"])
+    .index("by_school_created", ["schoolId", "createdAt"]),
 
   flashcardStudyStates: defineTable({
     accountId: v.id("accounts"),
@@ -2076,6 +2079,24 @@ export default defineSchema({
     .index("by_status_retry", ["status", "nextAttemptAt"])
     .index("by_artifact_scheduled", ["artifactId", "scheduledFor"]),
 
+  timetableReminderDeliveries: defineTable({
+    artifactId: v.id("spectraArtifacts"),
+    schoolId: v.id("schools"),
+    recipientAccountId: v.id("accounts"),
+    eventId: v.string(),
+    reminderKey: v.string(),
+    eventTitle: v.string(),
+    occurrenceStart: v.number(),
+    scheduledFor: v.number(),
+    idempotencyKey: v.string(),
+    createdAt: v.number(),
+    deliveredAt: v.number(),
+    readAt: v.optional(v.number()),
+  })
+    .index("by_idempotency", ["idempotencyKey"])
+    .index("by_recipient_created", ["recipientAccountId", "createdAt"])
+    .index("by_artifact_scheduled", ["artifactId", "scheduledFor"]),
+
   changeGroups: defineTable({
     artifactId: v.id("spectraArtifacts"),
     schoolId: v.optional(v.id("schools")),
@@ -2319,6 +2340,27 @@ export default defineSchema({
     .index("by_workspace_updated", ["workspaceId", "updatedAt"])
     .index("by_workspace_source", ["workspaceId", "sourceType", "sourceId"])
     .index("by_source", ["sourceType", "sourceId"]),
+
+  workspaceImportJobs: defineTable({
+    schoolId: v.optional(v.id("schools")),
+    accountId: v.id("accounts"),
+    fileName: v.string(),
+    sha256: v.string(),
+    status: v.union(v.literal("imported"), v.literal("quarantined")),
+    formatVersion: v.optional(v.number()),
+    originalManifest: v.optional(v.any()),
+    workspaceId: v.optional(v.id("spectraWorkspaces")),
+    report: v.object({
+      placed: v.number(),
+      skipped: v.number(),
+      unsupported: v.array(v.string()),
+      warnings: v.array(v.string()),
+    }),
+    createdAt: v.number(),
+    completedAt: v.number(),
+  })
+    .index("by_account_created", ["accountId", "createdAt"])
+    .index("by_workspace", ["workspaceId"]),
 
   spectraThreads: defineTable({
     ownerAccountId: v.id("accounts"),

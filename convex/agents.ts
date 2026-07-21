@@ -6,6 +6,7 @@ import {
   requireSpectraActor,
 } from "./spectraShared";
 import { writeAuditEvent } from "./auditShared";
+import { commitDirectHumanChange, commitHumanCheckpoint } from "./changeGroups";
 
 const vEvalResult = v.object({
   caseId: v.string(),
@@ -159,6 +160,22 @@ export const beginEvalRun = mutation({
         "AGENT_EVAL_CASE_REQUIRED: Add at least one synthetic evaluation case.",
       );
     const now = Date.now();
+    const staleRuns = await ctx.db
+      .query("agentEvalRuns")
+      .withIndex("by_agent_created", (q) => q.eq("agentId", artifact._id))
+      .filter((q) => q.eq(q.field("status"), "running"))
+      .collect();
+    await Promise.all(
+      staleRuns
+        .filter((run) => run.startedAt < now - 10 * 60_000)
+        .map((run) =>
+          ctx.db.patch(run._id, {
+            status: "failed",
+            completedAt: now,
+            updatedAt: now,
+          }),
+        ),
+    );
     const contentHash = await agentDraftHash(artifact);
     const evalRunId = await ctx.db.insert("agentEvalRuns", {
       agentId: artifact._id,
@@ -190,6 +207,25 @@ export const beginEvalRun = mutation({
   },
 });
 
+export const draftForEvaluation = query({
+  args: { agentId: v.id("spectraArtifacts") },
+  handler: async (ctx, args) => {
+    const { artifact } = await requireArtifactCapability(
+      ctx,
+      args.agentId,
+      "modify",
+    );
+    if (artifact.blueprintKey !== "agent")
+      throw new Error("AGENT_EVAL_INVALID");
+    return {
+      title: artifact.title,
+      summary: artifact.summary,
+      blueprintKey: artifact.blueprintKey,
+      content: artifact.content,
+    };
+  },
+});
+
 export const settleEvalRun = mutation({
   args: {
     evalRunId: v.id("agentEvalRuns"),
@@ -213,7 +249,9 @@ export const settleEvalRun = mutation({
       );
     const expectedDigest = await digest({ results: args.results });
     if (expectedDigest !== args.payloadDigest)
-      throw new Error("AGENT_EVAL_PAYLOAD_INVALID: Results changed in transit.");
+      throw new Error(
+        "AGENT_EVAL_PAYLOAD_INVALID: Results changed in transit.",
+      );
     await verifyEvalBridge(ctx, actor, args);
     if (args.results.length !== run.caseCount)
       throw new Error(
@@ -470,11 +508,129 @@ export const decideImprovement = mutation({
       proposal.agentId,
       "modify",
     );
+    if (args.decision === "accepted") {
+      await commitHumanCheckpoint(
+        ctx,
+        proposal.agentId,
+        "Saved agent draft before applying an improvement",
+      );
+      const artifact = await ctx.db.get(proposal.agentId);
+      if (!artifact || artifact.blueprintKey !== "agent")
+        throw new Error("AGENT_IMPROVEMENT_ARTIFACT_UNAVAILABLE");
+      const patch =
+        proposal.proposedPatch &&
+        typeof proposal.proposedPatch === "object" &&
+        !Array.isArray(proposal.proposedPatch)
+          ? (proposal.proposedPatch as Record<string, unknown>)
+          : {};
+      const allowedKeys = new Set([
+        "instructionsText",
+        "routingDescription",
+        "routingExamples",
+        "boundaries",
+      ]);
+      if (
+        Object.keys(patch).length === 0 ||
+        Object.keys(patch).some((key) => !allowedKeys.has(key))
+      )
+        throw new Error(
+          "AGENT_IMPROVEMENT_PATCH_INVALID: The proposal contains unsupported changes.",
+        );
+      const content =
+        artifact.content &&
+        typeof artifact.content === "object" &&
+        !Array.isArray(artifact.content)
+          ? ({ ...artifact.content } as Record<string, unknown>)
+          : {};
+      const instructions =
+        content.instructions &&
+        typeof content.instructions === "object" &&
+        !Array.isArray(content.instructions)
+          ? ({ ...content.instructions } as Record<string, unknown>)
+          : {};
+      const routing =
+        content.routing &&
+        typeof content.routing === "object" &&
+        !Array.isArray(content.routing)
+          ? ({ ...content.routing } as Record<string, unknown>)
+          : {};
+      const behavior =
+        content.behavior &&
+        typeof content.behavior === "object" &&
+        !Array.isArray(content.behavior)
+          ? ({ ...content.behavior } as Record<string, unknown>)
+          : {};
+      if (typeof patch.instructionsText === "string")
+        instructions.text = patch.instructionsText.slice(0, 250_000);
+      if (typeof patch.routingDescription === "string")
+        routing.description = patch.routingDescription.slice(0, 4_000);
+      if (Array.isArray(patch.routingExamples))
+        routing.examples = patch.routingExamples
+          .filter((value): value is string => typeof value === "string")
+          .map((value) => value.trim().slice(0, 500))
+          .filter(Boolean)
+          .slice(0, 50);
+      if (Array.isArray(patch.boundaries))
+        behavior.boundaries = patch.boundaries
+          .filter((value): value is string => typeof value === "string")
+          .map((value) => value.trim().slice(0, 500))
+          .filter(Boolean)
+          .slice(0, 100);
+      const before = {
+        title: artifact.title,
+        summary: artifact.summary,
+        content: artifact.content,
+        tags: artifact.tags,
+      };
+      const nextContent = { ...content, instructions, routing, behavior };
+      const now = Date.now();
+      await ctx.db.patch(artifact._id, {
+        content: nextContent,
+        contentHash: await digest({
+          title: artifact.title,
+          summary: artifact.summary,
+          tags: artifact.tags,
+          content: nextContent,
+          schemaVersion: artifact.schemaVersion,
+        }),
+        textIndex: `${artifact.title}\n${artifact.summary ?? ""}\n${artifact.tags.join(" ")}\n${JSON.stringify(nextContent).slice(0, 80_000)}`,
+        validity: "valid",
+        validityIssues: [],
+        syncState: "synchronized",
+        lastSynchronizedAt: now,
+        updatedAt: now,
+      });
+      await commitDirectHumanChange(ctx, {
+        artifactId: artifact._id,
+        actorAccountId: actor.accountId,
+        before,
+        regionIds: [
+          ...(typeof patch.instructionsText === "string"
+            ? ["agent:instructions"]
+            : []),
+          ...(typeof patch.routingDescription === "string" ||
+          Array.isArray(patch.routingExamples)
+            ? ["agent:routing"]
+            : []),
+          ...(Array.isArray(patch.boundaries) ? ["agent:behavior"] : []),
+        ],
+        summary: "Applied an agent improvement proposal",
+      });
+    }
     await ctx.db.patch(proposal._id, {
       status: args.decision,
       decidedByAccountId: actor.accountId,
       decisionNote: args.note?.trim().slice(0, 2_000),
       updatedAt: Date.now(),
+    });
+    await writeAuditEvent(ctx, {
+      actorAccountId: actor.accountId,
+      schoolId: actor.schoolId,
+      action: `agent.improvement.${args.decision}`,
+      targetType: "agent",
+      targetId: proposal.agentId,
+      metadata: { proposalId: proposal._id },
+      retentionClass: "operational",
     });
     return { proposalId: proposal._id, status: args.decision };
   },
@@ -494,6 +650,18 @@ export const follow = mutation({
     );
     if (artifact.blueprintKey !== "agent" || !artifact.schoolId)
       throw new Error("AGENT_FOLLOW_INVALID");
+    if (args.pinnedReleaseId) {
+      const release = await ctx.db.get(args.pinnedReleaseId);
+      if (
+        !release ||
+        release.agentId !== artifact._id ||
+        release.status !== "published" ||
+        !["limited", "published"].includes(release.rollout ?? "published")
+      )
+        throw new Error(
+          "AGENT_FOLLOW_RELEASE_INVALID: Choose an available release of this agent.",
+        );
+    }
     const existing = await ctx.db
       .query("agentFollows")
       .withIndex("by_agent_account", (q) =>

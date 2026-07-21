@@ -78,6 +78,7 @@ import {
   type SheetsContent,
   type WorkbookSheet,
 } from "../sheets/model";
+import { exportOds, importOds } from "../sheets/ods";
 import {
   abortArtifactImportUpload,
   beginArtifactImportOriginal,
@@ -692,6 +693,15 @@ export function SheetsStudio({
   useEffect(() => {
     rangeRef.current = range;
   }, [range]);
+
+  useEffect(() => {
+    if (!readOnly) return;
+    setNamedRangeOpen(false);
+    setValidationOpen(false);
+    setConditionalOpen(false);
+    setFilterEditor(null);
+    setEditingAddress(null);
+  }, [readOnly]);
 
   useEffect(() => {
     const incomingKey = JSON.stringify(incoming);
@@ -1689,7 +1699,9 @@ export function SheetsStudio({
             ? "text/csv"
             : extension === "tsv"
               ? "text/tab-separated-values"
-              : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+              : extension === "ods"
+                ? "application/vnd.oasis.opendocument.spreadsheet"
+                : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
         bytes: file.size,
         sha256: await sheetsBlobSha256(file),
       });
@@ -1698,9 +1710,28 @@ export function SheetsStudio({
       const result =
         extension === "xlsx"
           ? await importExcel(file)
-          : extension === "csv" || extension === "tsv"
-            ? await importDelimited(file)
-            : await importExcel(file);
+          : extension === "ods"
+            ? await (async () => {
+                if (readOnly) throw new Error("This workbook is read-only.");
+                const imported = importOds(await file.arrayBuffer(), workbook);
+                commit(imported.next);
+                setRange({
+                  start: { row: 0, column: 0 },
+                  end: { row: 0, column: 0 },
+                });
+                const notice = `Imported ${imported.next.sheets.length} worksheet${imported.next.sheets.length === 1 ? "" : "s"} from ${file.name}.`;
+                setImportNotice(
+                  `${notice} Fidelity report: ${imported.unsupported.join("; ")}.`,
+                );
+                return {
+                  next: imported.next,
+                  notice,
+                  unsupported: imported.unsupported,
+                };
+              })()
+            : extension === "csv" || extension === "tsv"
+              ? await importDelimited(file)
+              : await importExcel(file);
       if (!result) throw new Error("The importer produced no workbook state.");
       await completeArtifactImport({
         jobId,
@@ -1871,6 +1902,23 @@ export function SheetsStudio({
     );
   }
 
+  function exportOpenDocument() {
+    const bytes = exportOds(workbook);
+    const url = URL.createObjectURL(
+      new Blob([bytes], {
+        type: "application/vnd.oasis.opendocument.spreadsheet",
+      }),
+    );
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "Spectra-workbook.ods";
+    anchor.click();
+    URL.revokeObjectURL(url);
+    setImportNotice(
+      "Exported cell values and formulas as OpenDocument. Spectra-native charts, validations, conditional formats, comments, links, permissions, and advanced styling remain in Spectra and are reported as non-round-trippable.",
+    );
+  }
+
   const scrollingRows = visibleRowIndices
     .slice(viewport.rowStart, viewport.rowEnd + 1)
     .map((row, index) => ({ row, position: viewport.rowStart + index }));
@@ -1961,6 +2009,7 @@ export function SheetsStudio({
                     <>
                       <button
                         type="button"
+                        disabled={readOnly}
                         onClick={() => importRef.current?.click()}
                       >
                         <Upload />
@@ -1973,6 +2022,10 @@ export function SheetsStudio({
                       <button type="button" onClick={() => void exportExcel()}>
                         <Download />
                         Export workbook as Excel
+                      </button>
+                      <button type="button" onClick={exportOpenDocument}>
+                        <Download />
+                        Export workbook as OpenDocument
                       </button>
                     </>
                   ) : null}
@@ -2149,6 +2202,7 @@ export function SheetsStudio({
                     <>
                       <button
                         type="button"
+                        disabled={readOnly}
                         onClick={() =>
                           formatSelection({ numberFormat: "currency" })
                         }
@@ -2157,6 +2211,7 @@ export function SheetsStudio({
                       </button>
                       <button
                         type="button"
+                        disabled={readOnly}
                         onClick={() =>
                           formatSelection({ numberFormat: "percent" })
                         }
@@ -2165,6 +2220,7 @@ export function SheetsStudio({
                       </button>
                       <button
                         type="button"
+                        disabled={readOnly}
                         onClick={() =>
                           formatSelection({ numberFormat: "date" })
                         }
@@ -2191,6 +2247,7 @@ export function SheetsStudio({
                     <>
                       <button
                         type="button"
+                        disabled={readOnly}
                         onClick={() => sortSelection("asc")}
                       >
                         <SortAsc />
@@ -2198,17 +2255,23 @@ export function SheetsStudio({
                       </button>
                       <button
                         type="button"
+                        disabled={readOnly}
                         onClick={() => sortSelection("desc")}
                       >
                         <SortDesc />
                         Sort descending
                       </button>
-                      <button type="button" onClick={toggleTable}>
+                      <button
+                        type="button"
+                        disabled={readOnly}
+                        onClick={toggleTable}
+                      >
                         <Filter />
                         Toggle filterable table
                       </button>
                       <button
                         type="button"
+                        disabled={readOnly}
                         onClick={() => {
                           setNamedRangeOpen(true);
                           setNamedRangeDraft("");
@@ -2220,6 +2283,7 @@ export function SheetsStudio({
                       </button>
                       <button
                         type="button"
+                        disabled={readOnly}
                         onClick={() => {
                           const existing = activeCell?.validation;
                           setValidationKind(existing?.kind ?? "list");
@@ -2265,7 +2329,7 @@ export function SheetsStudio({
       <input
         ref={importRef}
         type="file"
-        accept=".csv,.tsv,.xlsx,.xls,.xlsm,.xlsb,text/csv,text/tab-separated-values,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        accept=".csv,.tsv,.xlsx,.xls,.xlsm,.xlsb,.ods,text/csv,text/tab-separated-values,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.oasis.opendocument.spreadsheet"
         hidden
         onChange={(event) => {
           const file = event.currentTarget.files?.[0];
@@ -2277,14 +2341,14 @@ export function SheetsStudio({
         <ToolbarButton
           label="Undo"
           onClick={undo}
-          disabled={!undoRef.current.length}
+          disabled={readOnly || !undoRef.current.length}
         >
           <Undo2 />
         </ToolbarButton>
         <ToolbarButton
           label="Redo"
           onClick={redo}
-          disabled={!redoRef.current.length}
+          disabled={readOnly || !redoRef.current.length}
         >
           <Redo2 />
         </ToolbarButton>
@@ -2308,6 +2372,7 @@ export function SheetsStudio({
           label="Currency"
           active={activeCell?.format?.numberFormat === "currency"}
           onClick={() => formatSelection({ numberFormat: "currency" })}
+          disabled={readOnly}
         >
           $
         </ToolbarButton>
@@ -2315,6 +2380,7 @@ export function SheetsStudio({
           label="Percent"
           active={activeCell?.format?.numberFormat === "percent"}
           onClick={() => formatSelection({ numberFormat: "percent" })}
+          disabled={readOnly}
         >
           %
         </ToolbarButton>
@@ -2325,6 +2391,7 @@ export function SheetsStudio({
               decimals: Math.max(0, (activeCell?.format?.decimals ?? 2) - 1),
             })
           }
+          disabled={readOnly}
         >
           .0←
         </ToolbarButton>
@@ -2335,6 +2402,7 @@ export function SheetsStudio({
               decimals: Math.min(12, (activeCell?.format?.decimals ?? 2) + 1),
             })
           }
+          disabled={readOnly}
         >
           .0→
         </ToolbarButton>
@@ -2349,6 +2417,7 @@ export function SheetsStudio({
             })
           }
           className="sheets-toolbar-select"
+          disabled={readOnly}
         >
           <option value="general">123</option>
           <option value="number">Number</option>
@@ -2368,6 +2437,7 @@ export function SheetsStudio({
             })
           }
           className="sheets-toolbar-select"
+          disabled={readOnly}
         >
           <option value="sans">Spectra Sans</option>
           <option value="serif">Spectra Serif</option>
@@ -2380,6 +2450,7 @@ export function SheetsStudio({
             formatSelection({ fontSize: Number(event.target.value) })
           }
           className="sheets-toolbar-select sheets-toolbar-size"
+          disabled={readOnly}
         >
           <option>9</option>
           <option>10</option>
@@ -2392,6 +2463,7 @@ export function SheetsStudio({
           label="Bold"
           active={activeCell?.format?.bold}
           onClick={() => formatSelection({ bold: !activeCell?.format?.bold })}
+          disabled={readOnly}
         >
           <Bold />
         </ToolbarButton>
@@ -2401,6 +2473,7 @@ export function SheetsStudio({
           onClick={() =>
             formatSelection({ italic: !activeCell?.format?.italic })
           }
+          disabled={readOnly}
         >
           <Italic />
         </ToolbarButton>
@@ -2410,6 +2483,7 @@ export function SheetsStudio({
           onClick={() =>
             formatSelection({ underline: !activeCell?.format?.underline })
           }
+          disabled={readOnly}
         >
           <Underline />
         </ToolbarButton>
@@ -2442,6 +2516,7 @@ export function SheetsStudio({
           label="Align left"
           active={activeCell?.format?.align === "left"}
           onClick={() => formatSelection({ align: "left" })}
+          disabled={readOnly}
         >
           <AlignLeft />
         </ToolbarButton>
@@ -2449,6 +2524,7 @@ export function SheetsStudio({
           label="Align center"
           active={activeCell?.format?.align === "center"}
           onClick={() => formatSelection({ align: "center" })}
+          disabled={readOnly}
         >
           <AlignCenter />
         </ToolbarButton>
@@ -2456,6 +2532,7 @@ export function SheetsStudio({
           label="Align right"
           active={activeCell?.format?.align === "right"}
           onClick={() => formatSelection({ align: "right" })}
+          disabled={readOnly}
         >
           <AlignRight />
         </ToolbarButton>
@@ -2465,6 +2542,7 @@ export function SheetsStudio({
             setEditingAddress(activeAddress);
             setEditingValue("=SUM(");
           }}
+          disabled={readOnly}
         >
           <Sigma />
         </ToolbarButton>
@@ -2474,6 +2552,7 @@ export function SheetsStudio({
             (table) => table.range === selectionLabel,
           )}
           onClick={toggleTable}
+          disabled={readOnly}
         >
           <Filter />
         </ToolbarButton>
@@ -3107,6 +3186,7 @@ export function SheetsStudio({
                       <button
                         type="button"
                         className="sheets-table-filter"
+                        disabled={readOnly}
                         aria-label={`Filter ${formatCalculatedCell(cell, calculatedCell, workbook.workbook.locale) || columnName(column)}`}
                         aria-pressed={Boolean(tableFilter)}
                         onPointerDown={(event) => event.stopPropagation()}
@@ -3299,6 +3379,7 @@ export function SheetsStudio({
           <button
             type="button"
             onClick={createChart}
+            disabled={readOnly}
             className="sheets-secondary-button"
           >
             <BarChart3 />
@@ -3449,6 +3530,7 @@ export function SheetsStudio({
         <button
           type="button"
           onClick={addSheet}
+          disabled={readOnly}
           className="sheets-add-tab"
           aria-label="Add sheet"
         >
@@ -3462,6 +3544,7 @@ export function SheetsStudio({
             <button
               type="button"
               onDoubleClick={() => {
+                if (readOnly) return;
                 setRenamingSheetId(sheet.id);
                 setRenameDraft(sheet.name);
               }}

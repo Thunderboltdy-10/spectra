@@ -178,7 +178,18 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
     const questions = records(content.questions);
     const question =
       questions[Math.min(activeIndex, Math.max(0, questions.length - 1))];
-    const options = records(question?.options);
+    const optionIds = Array.isArray(question?.optionIds)
+      ? question.optionIds
+      : [];
+    const options = Array.isArray(question?.options)
+      ? question.options.map((option, index) => ({
+          id:
+            typeof optionIds[index] === "string"
+              ? optionIds[index]
+              : `${String(question?.id ?? activeIndex)}:option:${index + 1}`,
+          text: textFrom(option),
+        }))
+      : [];
     if (embed.mode === "compact" && !canInteract)
       return (
         <div className="flex items-center justify-between gap-3">
@@ -203,7 +214,7 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
         </p>
         <div className="mt-3 space-y-1.5">
           {options.map((option, index) => {
-            const id = String(option.id ?? index);
+            const id = option.id;
             return (
               <button
                 type="button"
@@ -215,7 +226,7 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
                 <span className="flex h-5 w-5 items-center justify-center rounded-full border border-current text-[8px]">
                   {String.fromCharCode(65 + index)}
                 </span>
-                {textFrom(option.text ?? option.label)}
+                {option.text}
               </button>
             );
           })}

@@ -200,19 +200,6 @@ type PlatformSecurityLog = {
   }>;
 };
 
-type GovernancePolicy = {
-  policyId: string | null;
-  source: string;
-  publicSharing: "disabled" | "approval_required" | "allowed";
-  defaultWorkspaceAccess: "private" | "school";
-  retentionDays?: number;
-  allowedModels: string[];
-  allowedCodeRuntimes: Array<"javascript" | "typescript" | "react" | "python">;
-  codeNetworkAccess: boolean;
-  exportEnabled: boolean;
-  updatedAt: number | null;
-};
-
 function dateRange() {
   return {
     fromDay: new Date(Date.now() - 29 * 24 * 60 * 60_000)
@@ -2094,165 +2081,75 @@ function RequestsSurface({
 }
 
 function PlatformGovernanceSurface() {
-  const [policy, setPolicy] = useState<GovernancePolicy | null>(null);
-  const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    void getAdministration<GovernancePolicy>("platformGovernance")
-      .then(setPolicy)
-      .catch((error) =>
-        toast.error(error instanceof Error ? error.message : "Policy failed."),
-      );
-  }, []);
-  if (!policy) return <LoadingPanel label="Loading platform governance" />;
+  const guarantees = [
+    {
+      icon: Sparkles,
+      title: "AI without role gates",
+      detail:
+        "Provider operations optimize quality, reliability, caching, and cost without narrowing user capability.",
+    },
+    {
+      icon: FileClock,
+      title: "User-owned memory",
+      detail:
+        "Memory is default-on, permission-bound, and controlled by its user rather than an institution.",
+    },
+    {
+      icon: Workflow,
+      title: "Universal creation",
+      detail:
+        "Artifacts, agents, imports, exports, and advanced workflows remain available to every ordinary role.",
+    },
+    {
+      icon: CloudCog,
+      title: "Secure execution",
+      detail:
+        "Runtimes use isolation, scoped credentials, approvals, and audit instead of school allowlists.",
+    },
+  ] as const;
   return (
     <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_340px]">
       <AdminCard>
         <AdminSectionHeader
-          title="Platform governance defaults"
-          detail="School-specific policies may override these defaults through an audited operator session."
-          action={
-            <AdminButton
-              tone="primary"
-              disabled={busy}
-              onClick={() => {
-                setBusy(true);
-                void mutateAdministration("setPlatformGovernance", {
-                  publicSharing: policy.publicSharing,
-                  defaultWorkspaceAccess: policy.defaultWorkspaceAccess,
-                  retentionDays: policy.retentionDays,
-                  allowedModels: policy.allowedModels,
-                  allowedCodeRuntimes: policy.allowedCodeRuntimes,
-                  codeNetworkAccess: policy.codeNetworkAccess,
-                  exportEnabled: policy.exportEnabled,
-                })
-                  .then(() => toast.success("Platform defaults saved."))
-                  .catch((error) =>
-                    toast.error(
-                      error instanceof Error ? error.message : "Save failed.",
-                    ),
-                  )
-                  .finally(() => setBusy(false));
-              }}
-            >
-              Save defaults
-            </AdminButton>
-          }
+          title="Platform capability charter"
+          detail="Operations protect the service and its users. They do not decide which legitimate Spectra capabilities people may use."
         />
-        <div className="grid gap-4 p-4 pt-1 sm:grid-cols-2">
-          <SelectField
-            label="Public sharing"
-            value={policy.publicSharing}
-            onChange={(value) =>
-              setPolicy({
-                ...policy,
-                publicSharing: value as GovernancePolicy["publicSharing"],
-              })
-            }
-            options={[
-              { value: "disabled", label: "Disabled" },
-              { value: "approval_required", label: "Approval required" },
-              { value: "allowed", label: "Explicitly allowed" },
-            ]}
-          />
-          <SelectField
-            label="Default workspace access"
-            value={policy.defaultWorkspaceAccess}
-            onChange={(value) =>
-              setPolicy({
-                ...policy,
-                defaultWorkspaceAccess:
-                  value as GovernancePolicy["defaultWorkspaceAccess"],
-              })
-            }
-            options={[
-              { value: "private", label: "Private" },
-              { value: "school", label: "School-accessible" },
-            ]}
-          />
-          <TextField
-            label="Default retention days"
-            value={policy.retentionDays ? String(policy.retentionDays) : ""}
-            onChange={(value) =>
-              setPolicy({
-                ...policy,
-                retentionDays: value ? Number(value) : undefined,
-              })
-            }
-            type="number"
-          />
-          <TextField
-            label="Allowed model identifiers"
-            value={policy.allowedModels.join(", ")}
-            onChange={(value) =>
-              setPolicy({
-                ...policy,
-                allowedModels: value
-                  .split(",")
-                  .map((item) => item.trim())
-                  .filter(Boolean),
-              })
-            }
-          />
-          <label className="flex min-h-12 items-center gap-3 rounded-[7px] border border-[var(--border-default)] p-3 text-[10px]">
-            <input
-              type="checkbox"
-              checked={policy.codeNetworkAccess}
-              onChange={(event) =>
-                setPolicy({
-                  ...policy,
-                  codeNetworkAccess: event.target.checked,
-                })
-              }
-            />
-            Code runtime network access
-          </label>
-          <label className="flex min-h-12 items-center gap-3 rounded-[7px] border border-[var(--border-default)] p-3 text-[10px]">
-            <input
-              type="checkbox"
-              checked={policy.exportEnabled}
-              onChange={(event) =>
-                setPolicy({ ...policy, exportEnabled: event.target.checked })
-              }
-            />
-            User export enabled
-          </label>
+        <div className="grid gap-2 p-4 pt-1 sm:grid-cols-2">
+          {guarantees.map(({ icon: Icon, title, detail }) => (
+            <div
+              key={title}
+              className="rounded-[9px] border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-3.5"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <span className="grid size-8 shrink-0 place-items-center rounded-[8px] bg-[#eef8f4] text-[#16805f]">
+                  <Icon size={15} />
+                </span>
+                <StatusBadge tone="good">Platform guarantee</StatusBadge>
+              </div>
+              <strong className="mt-3 block text-[11px]">{title}</strong>
+              <p className="mt-1 text-[9px] leading-4 text-[var(--text-tertiary)]">
+                {detail}
+              </p>
+            </div>
+          ))}
         </div>
       </AdminCard>
       <div className="space-y-3">
         <AdminCard className="p-4">
           <h2 className="font-[var(--font-serif)] text-[15px] font-medium">
-            Runtime defaults
+            Operational boundaries
           </h2>
-          <div className="mt-3 space-y-2">
-            {(["javascript", "typescript", "react", "python"] as const).map(
-              (runtime) => (
-                <label
-                  key={runtime}
-                  className="flex items-center justify-between text-[10px]"
-                >
-                  <span className="capitalize">{runtime}</span>
-                  <input
-                    type="checkbox"
-                    checked={policy.allowedCodeRuntimes.includes(runtime)}
-                    onChange={(event) =>
-                      setPolicy({
-                        ...policy,
-                        allowedCodeRuntimes: event.target.checked
-                          ? [...policy.allowedCodeRuntimes, runtime]
-                          : policy.allowedCodeRuntimes.filter(
-                              (item) => item !== runtime,
-                            ),
-                      })
-                    }
-                  />
-                </label>
-              ),
-            )}
-          </div>
+          <p className="mt-2 text-[10px] leading-5 text-[var(--text-secondary)]">
+            Platform operators manage availability, incidents, tenancy,
+            credentials, legal lifecycle, metering, provider health, and future
+            commercial limits. Permissions, privacy, and sandboxing remain hard
+            security boundaries; none becomes an educational feature switch.
+          </p>
         </AdminCard>
         <PrivacyNotice>
-          These controls govern explicit capabilities; they never grant platform
-          access to private school content.
+          Operators cannot inspect private prompts, threads, memory, or
+          unrelated artifacts through this surface. School admins inherit this
+          same capability charter.
         </PrivacyNotice>
       </div>
     </div>

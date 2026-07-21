@@ -59,16 +59,16 @@ export function buildWhiteboardSvg(
       pageNodeIds.has(edge.from) &&
       pageNodeIds.has(edge.to),
   );
-  const minimumX = Math.min(0, ...pageNodes.map((node) => node.x - 40));
-  const minimumY = Math.min(0, ...pageNodes.map((node) => node.y - 40));
-  const maximumX = Math.max(
-    1200,
-    ...pageNodes.map((node) => node.x + node.width + 40),
+  const bounds = pageNodes.reduce(
+    (current, node) => ({
+      minimumX: Math.min(current.minimumX, node.x - 40),
+      minimumY: Math.min(current.minimumY, node.y - 40),
+      maximumX: Math.max(current.maximumX, node.x + node.width + 40),
+      maximumY: Math.max(current.maximumY, node.y + node.height + 40),
+    }),
+    { minimumX: 0, minimumY: 0, maximumX: 1200, maximumY: 800 },
   );
-  const maximumY = Math.max(
-    800,
-    ...pageNodes.map((node) => node.y + node.height + 40),
-  );
+  const { minimumX, minimumY, maximumX, maximumY } = bounds;
   const byId = new Map(pageNodes.map((node) => [node.id, node]));
   const lines = pageEdges.flatMap((edge) => {
     const from = byId.get(edge.from);

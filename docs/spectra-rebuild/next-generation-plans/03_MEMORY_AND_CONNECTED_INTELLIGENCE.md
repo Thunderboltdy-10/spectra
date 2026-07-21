@@ -35,13 +35,13 @@ Candidates merge with semantically equivalent claims, supersede contradictions, 
 
 Memory is separate from continued thread and focused artifact content.
 
-| Layer                        | Target | Typical upper range | Entry rule                                           |
-| ---------------------------- | -----: | ------------------: | ---------------------------------------------------- |
-| user capsule                 | 250 tokens | 350 | stable active claims useful across work              |
-| active workspace capsule     | 320 tokens | 450 | conventions, objectives, active decisions            |
-| current workflow/corrections | 150 tokens | 250 | directly relevant recent pattern or mistake          |
-| relationship hints           | 80 tokens  | 150 | only actors/resources already in permitted context   |
-| school-safe profile          | 80 tokens  | 150 | role/course/timezone facts allowed in this school    |
+| Layer                        |                   Target | Typical upper range | Entry rule                                           |
+| ---------------------------- | -----------------------: | ------------------: | ---------------------------------------------------- |
+| user capsule                 |               250 tokens |                 350 | stable active claims useful across work              |
+| active workspace capsule     |               320 tokens |                 450 | conventions, objectives, active decisions            |
+| current workflow/corrections |               150 tokens |                 250 | directly relevant recent pattern or mistake          |
+| relationship hints           |                80 tokens |                 150 | only actors/resources already in permitted context   |
+| school-safe profile          |                80 tokens |                 150 | role/course/timezone facts allowed in this school    |
 | total initial memory         | approximately 880 tokens | approximately 1,350 | relevance and accuracy outrank an arbitrary hard cap |
 
 Approximately 1,000 initial tokens is a design target, not a strict ceiling. Testing may increase or reduce a layer when usefulness, accuracy, latency, or model behavior justifies it. First-pass deeper retrieval targets 1,500 tokens and eight claims/evidence snippets; a tool may request a second pass around 4,000 tokens when the task needs old context. Very large retrieval requires a logged reason and evaluation, but no fixed ceiling should damage a legitimate task. The context manifest records estimates and actual tokens. Artifact-level capsules are not injected globally; a focused artifact uses its type serializer/on-demand skill.
@@ -56,7 +56,7 @@ Memory can propose related artifacts, threads, and next steps in right-side inte
 
 Users get a private Memory & personalization surface with search, filters, why remembered, evidence, scope, confidence label, edit/correct, dispute, forget, export, pause capture, and clear-all. “Forget” immediately excludes claims/capsules/retrieval, invalidates derived embeddings, and schedules evidence deletion where the user owns it; it does not falsify immutable audit or delete independently owned source artifacts. Correction creates a superseding claim and tests that the old claim cannot be retrieved.
 
-Workspace owners/managers may manage workspace conventions, not members’ private user memory. School admins can set retention and disabled categories but cannot inspect individual memory. Platform operators see service health and aggregate counts only.
+Workspace owners/managers may manage shared workspace conventions, not members’ private user memory. Each user alone controls their private memory categories, pause state, correction, deletion, and export. School admins and platform operators cannot disable memory, narrow its categories, or inspect individual memory; they see only privacy-safe service health and aggregate counts. Legal retention/offboarding may remove inaccessible school-scoped evidence, but cannot become a feature switch.
 
 ## School and privacy boundaries
 

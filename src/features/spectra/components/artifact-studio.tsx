@@ -2085,7 +2085,7 @@ function documentJsonFromContent(content: unknown, title: string): JSONContent {
             const items = text
               .split(/\r?\n/)
               .map((line) =>
-                line.replace(/^\s*(?:[-*â€¢]|\d+[.)])\s+/, "").trim(),
+                line.replace(/^\s*(?:[-*•]|\d+[.)])\s+/, "").trim(),
               )
               .filter(Boolean);
             return {
@@ -4452,6 +4452,10 @@ function ArtifactStudioEditor({
                 onChange={editorChange}
                 aiChangedPaths={aiChangedPaths}
                 readOnly={readOnly}
+                canPublish={
+                  artifact.capabilities?.includes("publish") ??
+                  artifact.ownership === "owned"
+                }
                 onActiveRegionChange={handleActiveRegionChange}
               />
             ) : null}
@@ -10464,7 +10468,7 @@ function QuizStudio({
                               .map(
                                 (pair) => `${pair.left} → ${pair.right ?? ""}`,
                               )
-                              .join(" Â· ")
+                              .join(" · ")
                           : question.type === "long_response"
                             ? "Advisory review — no single auto-scored answer"
                             : question.type === "select_all" ||
@@ -11146,7 +11150,7 @@ function QuizStudio({
                 <ul>
                   {question.options.map((option, index) => (
                     <li key={`${question.id}-print-${index}`}>
-                      {String.fromCharCode(65 + index)}. {option || "â€”"}
+                      {String.fromCharCode(65 + index)}. {option || "—"}
                     </li>
                   ))}
                 </ul>
@@ -11158,12 +11162,12 @@ function QuizStudio({
                   <strong>Answer / review guidance:</strong>{" "}
                   {question.type === "matching"
                     ? (question.matchingPairs ?? [])
-                        .map((pair) => `${pair.left} â†’ ${pair.right ?? ""}`)
-                        .join(" Â· ")
+                        .map((pair) => `${pair.left} → ${pair.right ?? ""}`)
+                        .join(" · ")
                     : question.type === "select_all" ||
                         question.type === "ordering"
                       ? (question.correctAnswers ?? question.options).join(
-                          " Â· ",
+                          " · ",
                         )
                       : question.type === "long_response"
                         ? question.rubric || "Advisory review"

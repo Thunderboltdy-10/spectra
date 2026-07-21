@@ -40,6 +40,7 @@ import {
   getSpectraWorkspaces,
   postSpectra,
   resolveSpectraOperationConflict,
+  submitSpectraAgentFeedback,
   type SpectraArtifact,
   type SpectraOperation,
   type SpectraThreadDetail,
@@ -928,6 +929,15 @@ function PersistedProgressTrace({ trace }: { trace: SpectraThreadTrace }) {
 function AgentRoutingControl({ trace }: { trace: SpectraThreadTrace }) {
   const [busy, setBusy] = useState(false);
   const [ordinaryNext, setOrdinaryNext] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [feedbackBusy, setFeedbackBusy] = useState(false);
+  const [feedbackSent, setFeedbackSent] = useState(false);
+  const [feedbackRating, setFeedbackRating] = useState(5);
+  const [feedbackCategory, setFeedbackCategory] = useState<
+    "helpful" | "accuracy" | "clarity" | "safety" | "resource_quality" | "other"
+  >("helpful");
+  const [feedbackComment, setFeedbackComment] = useState("");
+  const [shareComment, setShareComment] = useState(false);
   const event = [...(trace.events ?? [])]
     .reverse()
     .find((candidate) => candidate.type === "agent_routed");
@@ -946,6 +956,14 @@ function AgentRoutingControl({ trace }: { trace: SpectraThreadTrace }) {
       ? event.payload.source
       : trace.cards.find((card) => card.provenance?.agentRoutingSource)
           ?.provenance?.agentRoutingSource;
+  const agentId =
+    event && typeof event.payload.agentId === "string"
+      ? event.payload.agentId
+      : trace.run.selectedAgentId;
+  const agentVersionId =
+    event && typeof event.payload.agentVersionId === "string"
+      ? event.payload.agentVersionId
+      : trace.run.selectedAgentVersionId;
   if (!title) return null;
 
   async function clearAgent() {
@@ -967,21 +985,65 @@ function AgentRoutingControl({ trace }: { trace: SpectraThreadTrace }) {
     }
   }
 
+  async function submitFeedback() {
+    if (
+      feedbackBusy ||
+      feedbackSent ||
+      !agentId ||
+      !agentVersionId ||
+      trace.run.status !== "completed"
+    )
+      return;
+    setFeedbackBusy(true);
+    try {
+      await submitSpectraAgentFeedback({
+        agentId,
+        agentVersionId,
+        runId: trace.run._id,
+        rating: feedbackRating,
+        category: feedbackCategory,
+        comment: shareComment ? feedbackComment.trim() || undefined : undefined,
+        consentToShareComment: shareComment,
+      });
+      setFeedbackSent(true);
+      setFeedbackOpen(false);
+      toast.success("Feedback shared without your prompt or thread content.");
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Could not share feedback.",
+      );
+    } finally {
+      setFeedbackBusy(false);
+    }
+  }
+
   return (
-    <div
-      className="mt-2 inline-flex max-w-full items-center gap-1.5 rounded-[7px] border border-[color-mix(in_oklab,var(--accent-cyan)_14%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--accent-cyan)_5%,var(--bg-elevated))] px-2 py-1 text-[10px] text-[var(--text-secondary)]"
-      title={reason}
-    >
-      <Bot className="h-3 w-3 shrink-0 text-[var(--accent-cyan)]" />
-      <span className="truncate font-semibold">{title}</span>
-      <span className="shrink-0 text-[9px] text-[var(--text-tertiary)]">
+    <div className="mt-2 max-w-[560px]">
+      <div
+        className="inline-flex max-w-full items-center gap-1.5 rounded-[7px] border border-[color-mix(in_oklab,var(--accent-cyan)_14%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--accent-cyan)_5%,var(--bg-elevated))] px-2 py-1 text-[10px] text-[var(--text-secondary)]"
+        title={reason}
+      >
+        <Bot className="h-3 w-3 shrink-0 text-[var(--accent-cyan)]" />
+        <span className="truncate font-semibold">{title}</span>
+        <span className="shrink-0 text-[9px] text-[var(--text-tertiary)]">
         {source === "continued"
           ? "retained"
           : source === "explicit"
             ? "selected"
             : "auto-routed"}
-      </span>
-      <button
+        </span>
+        {trace.run.status === "completed" && agentId && agentVersionId ? (
+          <button
+            type="button"
+            disabled={feedbackSent}
+            onClick={() => setFeedbackOpen((value) => !value)}
+            className="ml-1 inline-flex shrink-0 items-center gap-1 rounded-[5px] px-1.5 py-0.5 font-semibold hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)] disabled:opacity-65"
+          >
+            {feedbackSent ? <Check className="h-2.5 w-2.5" /> : <MessageSquare className="h-2.5 w-2.5" />}
+            {feedbackSent ? "Feedback sent" : "Rate"}
+          </button>
+        ) : null}
+        <button
         type="button"
         disabled={busy || ordinaryNext}
         onClick={() => void clearAgent()}
@@ -995,7 +1057,35 @@ function AgentRoutingControl({ trace }: { trace: SpectraThreadTrace }) {
           <Undo2 className="h-2.5 w-2.5" />
         )}
         {ordinaryNext ? "Ordinary next" : "Use ordinary Spectra"}
-      </button>
+        </button>
+      </div>
+      {feedbackOpen ? (
+        <div className="mt-1.5 grid gap-2 rounded-[8px] border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-2.5 text-[10px] shadow-[var(--shadow-sm)]">
+          <div className="grid grid-cols-[auto_1fr] gap-2">
+            <label className="grid gap-1">
+              <span className="font-semibold text-[var(--text-secondary)]">Rating</span>
+              <select value={feedbackRating} onChange={(event) => setFeedbackRating(Number(event.target.value))} className="h-8 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2">
+                {[5, 4, 3, 2, 1].map((rating) => <option key={rating} value={rating}>{rating} / 5</option>)}
+              </select>
+            </label>
+            <label className="grid gap-1">
+              <span className="font-semibold text-[var(--text-secondary)]">Category</span>
+              <select value={feedbackCategory} onChange={(event) => setFeedbackCategory(event.target.value as typeof feedbackCategory)} className="h-8 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2">
+                <option value="helpful">Helpfulness</option><option value="accuracy">Accuracy</option><option value="clarity">Clarity</option><option value="safety">Safety</option><option value="resource_quality">Source quality</option><option value="other">Other</option>
+              </select>
+            </label>
+          </div>
+          <textarea value={feedbackComment} onChange={(event) => setFeedbackComment(event.target.value)} placeholder="Optional detail — never include private information" className="min-h-16 resize-y rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-2 outline-none" />
+          <label className="flex items-start gap-2 text-[9px] text-[var(--text-tertiary)]">
+            <input type="checkbox" checked={shareComment} onChange={(event) => setShareComment(event.target.checked)} />
+            Share this comment with the agent creator. The rating and category are aggregated; your prompt, thread, memory, and artifacts are never shared.
+          </label>
+          <div className="flex justify-end gap-1.5">
+            <button type="button" onClick={() => setFeedbackOpen(false)} className="h-8 rounded-[6px] px-2.5 text-[var(--text-secondary)]">Cancel</button>
+            <button type="button" disabled={feedbackBusy} onClick={() => void submitFeedback()} className="inline-flex h-8 items-center gap-1 rounded-[6px] bg-[var(--accent-cyan)] px-2.5 font-semibold text-white disabled:opacity-60">{feedbackBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : null} Share feedback</button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

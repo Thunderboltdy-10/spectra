@@ -120,19 +120,6 @@ export const create = mutation({
       createdAt: now,
       updatedAt: now,
     });
-    const governancePolicyId = await ctx.db.insert("governancePolicies", {
-      schoolId,
-      scope: "school",
-      publicSharing: "approval_required",
-      defaultWorkspaceAccess: "private",
-      allowedModels: [],
-      allowedCodeRuntimes: ["javascript", "typescript", "react", "python"],
-      codeNetworkAccess: false,
-      exportEnabled: true,
-      updatedByAccountId: actor.accountId,
-      createdAt: now,
-      updatedAt: now,
-    });
     const limitPolicyId = await ctx.db.insert("limitPolicies", {
       schoolId,
       scope: "school",
@@ -160,7 +147,7 @@ export const create = mutation({
       status: "invited",
       completedSteps: [
         "identity_reserved",
-        "policy_created",
+        "capability_charter_applied",
         "limits_created",
         "admin_invited",
       ],
@@ -179,7 +166,6 @@ export const create = mutation({
         name,
         slug,
         timezone: args.timezone,
-        governancePolicyId,
         limitPolicyId,
         invitationId,
       },

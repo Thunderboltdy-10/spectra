@@ -155,11 +155,21 @@ export type PlatformAdministrationOverview = {
 
 async function responseJson<T>(response: Response): Promise<T> {
   const data = (await response.json().catch(() => null)) as
-    (T & { error?: string; message?: string }) | null;
-  if (!response.ok)
+    | (T & {
+        error?: string | { code?: string; message?: string; requestId?: string };
+        message?: string;
+      })
+    | null;
+  if (!response.ok) {
+    const structuredError =
+      data?.error && typeof data.error === "object" ? data.error : null;
     throw new Error(
-      data?.message ?? data?.error ?? "The administration request failed.",
+      data?.message ??
+        structuredError?.message ??
+        (typeof data?.error === "string" ? data.error : undefined) ??
+        "The administration request failed.",
     );
+  }
   return data as T;
 }
 

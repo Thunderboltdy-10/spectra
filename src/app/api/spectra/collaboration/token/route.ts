@@ -35,6 +35,6 @@ export async function POST(request: NextRequest) {
       policyVersion: room.policyVersion,
       schemaVersion: room.schemaVersion ?? schemaVersion,
     });
-    return ok({ token, documentName, provider: "self_hosted_yjs", url: process.env.NEXT_PUBLIC_SPECTRA_COLLAB_URL ?? "ws://localhost:1234", expiresInMs: 90_000, level: access.level, accountId: actor.accountId, displayName: actor.name });
+    return ok({ token, documentName, provider: "self_hosted_yjs", url: process.env.NEXT_PUBLIC_SPECTRA_COLLAB_URL ?? "ws://localhost:1234", expiresInMs: 600_000, level: access.level, accountId: actor.accountId, displayName: actor.name });
   }, request);
 }

@@ -386,6 +386,7 @@ export function ArtifactsShell() {
 	    const tile = () => openSelectedArtifactsInTiles();
 	    const focusSet = () => { openSelectedArtifactsInTiles(); setWorkSetIsolated(true); };
 	    const clear = () => clearSelection();
+	    const returnToSection = () => returnToAllHub();
 	    const refresh = () => { void load(true); };
 	    window.addEventListener("spectra:open-artifact", onOpenArtifact);
 	    window.addEventListener("spectra:open-workspace", onOpenWorkspace);
@@ -393,6 +394,7 @@ export function ArtifactsShell() {
 	    window.addEventListener("spectra:tile-selected", tile);
 	    window.addEventListener("spectra:focus-set", focusSet);
 	    window.addEventListener("spectra:clear-selection", clear);
+	    window.addEventListener("spectra:return-to-section", returnToSection);
 	    window.addEventListener("spectra:refresh", refresh);
 	    return () => {
 	      window.removeEventListener("spectra:open-artifact", onOpenArtifact);
@@ -401,6 +403,7 @@ export function ArtifactsShell() {
 	      window.removeEventListener("spectra:tile-selected", tile);
 	      window.removeEventListener("spectra:focus-set", focusSet);
 	      window.removeEventListener("spectra:clear-selection", clear);
+	      window.removeEventListener("spectra:return-to-section", returnToSection);
 	      window.removeEventListener("spectra:refresh", refresh);
 	    };
 	  });
@@ -620,7 +623,7 @@ export function ArtifactsShell() {
   return (
     <div className="spectra-wave-y flex h-full min-h-0 bg-[radial-gradient(circle_at_32%_-12%,color-mix(in_oklab,var(--bg-elevated)_70%,transparent),transparent_34%),var(--bg-primary)]">
       <div className="flex min-w-0 flex-1 flex-col">
-        <StudioTabRail
+        {studio.mode !== "tab" ? <StudioTabRail
           hubTabs={workSetIsolated && activeHubTabId ? hubTabs.map((tab) => tab.id === activeHubTabId ? { ...tab, label: `Work set · ${tiledArtifacts.length} objects` } : tab) : hubTabs}
           activeHubTabId={studio.mode === "tab" ? null : activeHubTabId}
           artifacts={allArtifacts}
@@ -632,7 +635,7 @@ export function ArtifactsShell() {
           onAddHub={addAllHubTab}
           onActivateTab={studio.activateTab}
           onCloseTab={closeArtifactTab}
-        />
+        /> : null}
         <div className="relative flex min-h-0 flex-1">
       {pendingCreateType ? <div className="absolute inset-0 z-[90] flex items-center justify-center bg-[color-mix(in_oklab,var(--bg-primary)_72%,transparent)] backdrop-blur-[2px]" onPointerDown={() => setPendingCreateType(null)}><div className="w-[390px] rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 shadow-[0_24px_70px_rgba(27,20,12,0.2)]" onPointerDown={(event) => event.stopPropagation()}><h2 className="font-display text-[19px] font-semibold text-[var(--text-primary)]">Choose a destination</h2><p className="mt-1 text-[12px] text-[var(--text-secondary)]">Create this {blueprintMeta[pendingCreateType].label.toLowerCase()} in a workspace or keep it unplaced.</p><div className="mt-4 max-h-[300px] space-y-1 overflow-y-auto"><button type="button" className={menuItemClass()} onClick={() => { const type = pendingCreateType; setPendingCreateType(null); void createArtifact(createDefaultArtifactPayload(type)); }}><LayoutGrid className="h-4 w-4" />Unplaced / inbox</button>{workspaces.map((target) => <button key={target._id} type="button" className={menuItemClass()} onClick={() => { const type = pendingCreateType; setPendingCreateType(null); void createArtifact(createDefaultArtifactPayload(type), target._id); }}>{target.title}</button>)}</div></div></div> : null}
       {artifactDeletePending ? <div className="absolute inset-0 z-[96] flex items-center justify-center bg-[color-mix(in_oklab,var(--bg-primary)_76%,transparent)] p-5 backdrop-blur-[2px]" onPointerDown={() => setArtifactDeletePending(null)}><div className="w-full max-w-[440px] rounded-[12px] border border-[color-mix(in_oklab,var(--danger)_24%,var(--border-default))] bg-[var(--bg-elevated)] p-5 shadow-[0_24px_70px_rgba(27,20,12,0.2)]" onPointerDown={(event) => event.stopPropagation()}><h2 className="font-display text-[21px] font-semibold text-[var(--text-primary)]">Delete {artifactDeletePending.title}?</h2><p className="mt-2 text-[13px] leading-5 text-[var(--text-secondary)]">The artifact, placements, version history, and linked run history will be permanently removed.</p><div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setArtifactDeletePending(null)} className="h-9 px-3 text-[12px] text-[var(--text-secondary)]">Cancel</button><button type="button" disabled={busyKey === `delete:${artifactDeletePending._id}`} onClick={() => void permanentlyDeleteArtifact(artifactDeletePending, true)} className="flex h-9 items-center gap-2 rounded-[8px] bg-[var(--danger)] px-3 text-[12px] font-medium text-white disabled:opacity-45">{busyKey === `delete:${artifactDeletePending._id}` ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}Delete permanently</button></div></div></div> : null}
@@ -830,7 +833,7 @@ export function ArtifactsShell() {
 	      ) : null}
 	      </>
 	      )}
-	        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 bg-transparent px-2 pb-3 pt-2 sm:px-5 sm:pb-5 lg:px-8" style={activeRunPanelId ? { right: "var(--spectra-run-panel-width, 680px)" } : undefined}>
+	        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 bg-transparent px-2 pb-0 pt-2 sm:px-5 sm:pb-0 lg:px-8" style={activeRunPanelId ? { right: "var(--spectra-run-panel-width, 680px)" } : undefined}>
           <div className="pointer-events-auto mx-auto max-w-[880px]">
 	            <DurableRunTabs workspaceId={selectedWorkspaceId || undefined} onOpen={(_runId, threadId, title) => { setActiveRunPanelId(null); setLiveThread({ id: threadId, title }); }} onStop={(runId) => runEngine.stop(runId)} onRetry={(runId) => void runEngine.retry(runId)} />
 	            {multiSelectMode ? <SelectionActionBar count={selectedContextIds.size} onClear={clearSelection} onExit={() => { clearSelection(); setMultiSelectMode(false); }} onAddToContext={() => { const count = selectedContextIds.size; commitSelection(); setFocusModeOverride("selection"); setMultiSelectMode(false); toast.success(`${count} object${count === 1 ? "" : "s"} added to context.`); }} onTile={openSelectedArtifactsInTiles} /> : null}

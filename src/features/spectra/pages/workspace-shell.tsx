@@ -21,6 +21,7 @@ import {
   Loader2,
   MessageSquare,
   Maximize2,
+  MoreHorizontal,
   Minus,
   PanelTop,
   PencilLine,
@@ -33,6 +34,12 @@ import {
   Trash2,
   Upload,
   X,
+  Presentation,
+  Table2,
+  Code2,
+  Workflow,
+  CalendarDays,
+  Bot,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -175,6 +182,12 @@ const createTypes: Array<{
   { key: "flashcard_deck", label: "Deck", icon: BookOpen },
   { key: "quiz", label: "Quiz", icon: HelpCircle },
   { key: "planner_task", label: "Task", icon: CalendarCheck2 },
+  { key: "agent", label: "Agent", icon: Bot },
+  { key: "presentation", label: "Presentation", icon: Presentation },
+  { key: "sheets", label: "Sheet", icon: Table2 },
+  { key: "code", label: "Code & visualisation", icon: Code2 },
+  { key: "whiteboard", label: "Whiteboard", icon: Workflow },
+  { key: "timetable", label: "Timetable", icon: CalendarDays },
 ];
 
 const viewModes: Array<{ key: ViewMode; label: string; icon: LucideIcon }> = [
@@ -255,9 +268,6 @@ function WorkspaceHome({
   selectedContextIds,
   selectedObjectKeys,
   onToggleContext,
-  onToggleSelection,
-  searchControl,
-  onImportWorkspace,
 }: {
   overview: SpectraOverview | null;
   onSelect: (workspaceId: string) => void;
@@ -280,9 +290,6 @@ function WorkspaceHome({
   selectedContextIds: Set<string>;
   selectedObjectKeys: Set<string>;
   onToggleContext: (artifact: SpectraArtifact) => void;
-  onToggleSelection: () => void;
-  searchControl: ReactNode;
-  onImportWorkspace: () => void;
 }) {
   const selectedObjects = useSpectraContextStore(
     (state) => state.selectionDraft,
@@ -290,12 +297,8 @@ function WorkspaceHome({
   const toggleSelectionObject = useSpectraContextStore(
     (state) => state.toggleSelection,
   );
-  const [createOpen, setCreateOpen] = useState(false);
   const [pinnedOpen, setPinnedOpen] = useState(true);
   const [dropWorkspaceId, setDropWorkspaceId] = useState<string | null>(null);
-  const createRef = useOutsideClick<HTMLDivElement>(createOpen, () =>
-    setCreateOpen(false),
-  );
   useEffect(() => {
     setPinnedOpen(
       window.localStorage.getItem("spectra.home.pinned.open") !== "false",
@@ -309,7 +312,6 @@ function WorkspaceHome({
   const unplacedArtifacts = artifacts.filter(
     (artifact) => artifactPlacements(artifact).length === 0,
   );
-  const unplacedCount = unplacedArtifacts.length;
   const pinnedArtifacts = artifacts.filter((artifact) =>
     artifactPlacements(artifact).some((placement) => placement.pinned),
   );
@@ -326,6 +328,15 @@ function WorkspaceHome({
     }))
     .sort((a, b) => b.time - a.time)
     .slice(0, 6);
+  const metricCards = [
+    { label: "Artifacts", count: artifacts.length, icon: FileText, color: "#15946d" },
+    { label: "Flashcards", count: artifacts.filter((artifact) => artifact.blueprintKey === "flashcard_deck").length, icon: BookOpen, color: "#735ce7" },
+    { label: "Quizzes", count: artifacts.filter((artifact) => artifact.blueprintKey === "quiz").length, icon: HelpCircle, color: "#e56b3e" },
+    { label: "Documents", count: artifacts.filter((artifact) => artifact.blueprintKey === "document").length, icon: FileText, color: "#168fd2" },
+    { label: "Workspaces", count: workspaces.length, icon: Sparkles, color: "#d69222" },
+    { label: "Tasks", count: artifacts.filter((artifact) => artifact.blueprintKey === "planner_task").length, icon: CalendarCheck2, color: "#6f6962" },
+  ];
+  const visibleTags = Array.from(new Set(artifacts.flatMap((artifact) => artifact.tags ?? []))).slice(0, 8);
 
   function artifactFromDrag(event: DragEvent<HTMLElement>) {
     const artifactId =
@@ -348,98 +359,42 @@ function WorkspaceHome({
   return (
     <main
       data-selection-count={selectedObjectKeys.size}
-      className="min-h-0 flex-1 overflow-y-auto bg-[radial-gradient(circle_at_22%_-5%,color-mix(in_oklab,var(--accent-cyan)_7%,transparent),transparent_34%),var(--bg-primary)] px-4 pb-[150px] pt-16 sm:px-8 sm:pt-8"
+      className="spectra-mission-control min-h-0 flex-1 overflow-y-auto bg-[var(--bg-primary)] pb-[150px] pt-16 sm:pt-0"
       style={{ containerType: "inline-size" }}
     >
-      <div className="mx-auto max-w-[1320px]">
-        <div className="flex flex-col items-start justify-between gap-5 lg:flex-row lg:items-end">
+      <div className="spectra-mission-control-grid grid w-full items-start gap-3 xl:grid-cols-[minmax(0,1fr)_312px]">
+        <div className="spectra-mission-control-primary xl:col-start-1 xl:row-start-1">
+        <div className="flex items-start gap-3">
+          <span className="grid size-9 shrink-0 place-items-center rounded-[9px] bg-[#e8f7f1] text-[#15946d]">
+            <Sprout className="h-[18px] w-[18px]" />
+          </span>
           <div>
-            <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-tertiary)]">
-              Spectra / Workspace
+            <div className="mb-1.5 text-[9px] font-semibold uppercase tracking-[0.13em] text-[var(--text-tertiary)]">
+              Workspace
             </div>
-            <h1 className="font-display text-[36px] font-semibold leading-[1.15] text-[var(--text-primary)]">
-              Mission control
+            <h1 className="font-display text-[28px] font-semibold leading-[1.05] tracking-[-.025em] text-[var(--text-primary)]">
+              Mission Control
             </h1>
-            <p className="mt-2 text-[14px] text-[var(--text-secondary)]">
-              Every workspace and object, from one working surface.
+            <p className="mt-2 text-[11px] text-[var(--text-secondary)]">
+              Your overview of work, artifacts, and activity across Spectra.
             </p>
           </div>
-          <div
-            className="flex max-w-full flex-wrap items-center gap-2 sm:gap-4"
-            ref={createRef}
-          >
-            <div className="hidden items-center gap-4 text-[11px] text-[var(--text-secondary)] lg:flex">
-              <span>{workspaces.length} workspaces</span>
-              <span>{artifacts.length} objects</span>
-              <span>{unplacedCount} unplaced</span>
-            </div>
-            {searchControl}
-            <button
-              type="button"
-              onClick={onImportWorkspace}
-              className="flex h-9 items-center gap-2 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-            >
-              <Upload className="h-4 w-4" />
-              Import workspace
-            </button>
-            <button
-              type="button"
-              onClick={onToggleSelection}
-              className={`flex h-9 items-center gap-2 rounded-[8px] border px-3 text-[12px] font-medium transition ${selectionMode ? "border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-primary)]" : "border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"}`}
-              aria-pressed={selectionMode}
-            >
-              <Files className="h-4 w-4" />
-              {selectionMode
-                ? `${selectedObjects.length} selected`
-                : "Select objects"}
-            </button>
-            <div className="relative">
-              <button
-                type="button"
-                className={smallButtonClass("dark")}
-                onClick={() => setCreateOpen((open) => !open)}
-              >
-                <Plus className="h-4 w-4" />
-                Create artifact
-              </button>
-              {createOpen ? (
-                <div className="absolute right-0 top-[calc(100%+8px)] z-40 w-[230px] rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 shadow-[0_16px_38px_rgba(27,20,12,0.14)]">
-                  {createTypes.map((type) => {
-                    const Icon = type.icon;
-                    return (
-                      <button
-                        key={type.key}
-                        type="button"
-                        className={menuItemClass()}
-                        onClick={() => {
-                          setCreateOpen(false);
-                          onCreateArtifact(type.key);
-                        }}
-                      >
-                        <Icon className="h-4 w-4" />
-                        New {type.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : null}
-            </div>
-          </div>
+        </div>
+        <div className="mt-6 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
+          {metricCards.map(({ label, count, icon: MetricIcon, color }) => <div key={label} className="flex min-h-[80px] items-center gap-2.5 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3"><span className="grid size-9 shrink-0 place-items-center rounded-[8px]" style={{background:`color-mix(in oklab, ${color} 9%, white)`,color}}><MetricIcon size={17}/></span><span><span className="block text-[9px] text-[var(--text-secondary)]">{label}</span><strong className="block font-display text-[20px] leading-5 text-[var(--text-primary)]">{count}</strong><span className="text-[8px] text-[var(--text-tertiary)]">Live total</span></span></div>)}
+        </div>
         </div>
 
-        <div className="spectra-workspace-home-grid mt-8 grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
-          <section>
+        <div className="spectra-workspace-home-grid mt-5 xl:contents">
+          <section className="spectra-mission-control-workspaces xl:col-start-1 xl:row-start-2 xl:mt-0">
             <div className="mb-3 flex items-center justify-between">
               <div>
-                <h2 className="font-display text-[20px] font-semibold text-[var(--text-primary)]">
-                  Workspaces
+                <h2 className="text-[12px] font-semibold text-[var(--text-primary)]">
+                  Workspace at a glance
                 </h2>
-                <p className="mt-1 text-[12px] text-[var(--text-secondary)]">
-                  Enter a focused working room
-                </p>
               </div>
             </div>
-            <div className="spectra-workspace-card-grid grid content-start gap-3 md:grid-cols-2">
+            <div className="spectra-workspace-card-grid grid content-start gap-2 md:grid-cols-2 xl:grid-cols-3">
               {workspaces.map((workspace, index) => {
                 const accent = workspaceAccent(workspace, index);
                 const Icon = iconForWorkspace(workspace, index);
@@ -466,7 +421,7 @@ function WorkspaceHome({
                                 : "normal"
                     }
                     data-interactive="true"
-                    className="group relative min-h-[150px] overflow-hidden p-4 text-left"
+                    className="group relative min-h-[140px] overflow-hidden p-3 text-left"
                     style={{ "--card-accent": accent.color } as CSSProperties}
                     onDragOver={(event) =>
                       allowWorkspaceDrop(event, workspace._id)
@@ -523,7 +478,7 @@ function WorkspaceHome({
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="flex items-center gap-2">
-                          <span className="min-w-0 flex-1 truncate font-display text-[22px] font-semibold leading-tight text-[var(--text-primary)]">
+                          <span className="min-w-0 flex-1 truncate font-display text-[15px] font-semibold leading-tight text-[var(--text-primary)]">
                             {workspace.title}
                           </span>
                           {workspace.isShared ? (
@@ -541,10 +496,10 @@ function WorkspaceHome({
                             </span>
                           ) : null}
                         </span>
-                        <span className="mt-1 line-clamp-2 block text-[12px] leading-5 text-[var(--text-secondary)]">
+                        <span className="mt-1 line-clamp-2 block text-[9px] leading-4 text-[var(--text-secondary)]">
                           {workspace.description}
                         </span>
-                        <span className="mt-4 flex items-center gap-3 text-[11px] text-[var(--text-tertiary)]">
+                        <span className="mt-2.5 flex items-center gap-3 text-[8px] text-[var(--text-tertiary)]">
                           <span>{count} artifacts</span>
                           <span>
                             Updated{" "}
@@ -556,30 +511,32 @@ function WorkspaceHome({
                   </div>
                 );
               })}
+              <button type="button" onClick={() => window.dispatchEvent(new Event("spectra:create-workspace"))} className="flex min-h-[140px] items-center justify-center gap-3 rounded-[9px] border border-[var(--border-default)] text-left text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"><span className="grid size-8 place-items-center rounded-[7px] bg-[var(--bg-secondary)]"><Plus size={15}/></span><span><strong className="block text-[10px] font-semibold text-[var(--text-primary)]">New workspace</strong><span className="text-[8px]">Create a new workspace</span></span></button>
             </div>
           </section>
-          <aside className="self-start rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
+          <aside className="spectra-mission-control-rail mt-5 self-start space-y-3 xl:sticky xl:top-0 xl:col-start-2 xl:row-start-1 xl:row-span-[7] xl:mt-0">
+            <section className="rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
             <div className="flex items-center justify-between">
-              <h2 className="text-[14px] font-semibold text-[var(--text-primary)]">
+                <h2 className="text-[10px] font-semibold text-[var(--text-primary)]">
                 Recent activity
               </h2>
               <span className="h-2 w-2 rounded-full bg-[var(--success)]" />
             </div>
-            <div className="mt-3 grid gap-1 sm:grid-cols-2">
+            <div className="mt-2 grid gap-0.5">
               {activity.map((entry) => {
                 return (
                   <button
                     key={entry.id}
                     type="button"
-                    className="flex min-h-12 w-full items-center gap-2 rounded-[7px] px-2 py-1.5 text-left hover:bg-[var(--bg-hover)]"
+                    className="flex min-h-10 w-full items-center gap-2 rounded-[6px] px-1.5 py-1 text-left hover:bg-[var(--bg-hover)]"
                     onClick={() => onOpenArtifact(entry.artifact)}
                   >
                     <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--text-tertiary)]" />
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-[12px] font-medium text-[var(--text-primary)]">
+                      <div className="truncate text-[9px] font-medium text-[var(--text-primary)]">
                         {entry.title}
                       </div>
-                      <div className="text-[11px] text-[var(--text-secondary)]">
+                      <div className="text-[8px] text-[var(--text-secondary)]">
                         {entry.detail} · {formatRelativeTime(entry.time)}
                       </div>
                     </div>
@@ -591,12 +548,15 @@ function WorkspaceHome({
                   No activity yet.
                 </div>
               ) : null}
-            </div>
+            </div></section>
+            {pinnedArtifacts.length ? <section className="rounded-[8px] border border-[var(--border-default)] p-4"><div className="flex items-center justify-between"><h2 className="text-[10px] font-semibold">Pinned</h2><span className="text-[8px] text-[var(--text-tertiary)]">{pinnedArtifacts.length} items</span></div><div className="mt-2 space-y-1">{pinnedArtifacts.slice(0,4).map((artifact) => { const meta=blueprintMeta[artifact.blueprintKey]; const ArtifactIcon=meta.icon; return <button type="button" key={artifact._id} onClick={() => onOpenArtifact(artifact)} className="flex w-full items-center gap-2 rounded-[6px] px-1.5 py-1.5 text-left hover:bg-[var(--bg-hover)]"><ArtifactIcon size={13} style={{color:meta.color}}/><span className="min-w-0 flex-1 truncate text-[9px]">{artifact.title}</span></button>})}</div></section>:null}
+            <section className="rounded-[8px] border border-[var(--border-default)] p-4"><div className="flex items-center justify-between"><h2 className="text-[10px] font-semibold">Tags</h2><span className="text-[8px] text-[var(--text-tertiary)]">Manage</span></div><div className="mt-2 flex flex-wrap gap-1">{visibleTags.length ? visibleTags.map((tag) => <span key={tag} className="rounded-full bg-[var(--bg-secondary)] px-2 py-1 text-[8px] text-[var(--text-secondary)]">{tag}</span>) : <span className="text-[8px] text-[var(--text-tertiary)]">Tags appear as you organise work.</span>}</div></section>
+            <section className="rounded-[8px] border border-[var(--border-default)] p-4"><h2 className="text-[10px] font-semibold">Quick actions</h2><div className="mt-2 space-y-0.5">{createTypes.map(({ key, label, icon: QuickIcon }) => <button key={key} type="button" onClick={() => onCreateArtifact(key)} className="flex h-7 w-full items-center gap-2 rounded-[5px] px-1.5 text-[9px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><QuickIcon size={12}/>New {label.toLowerCase()}</button>)}</div></section>
           </aside>
         </div>
 
-        {pinnedArtifacts.length > 0 ? (
-          <section className="mt-9">
+        {false ? (
+          <section className="mt-6 xl:col-start-1 xl:row-start-3">
             <button
               type="button"
               onClick={() => setPinnedOpen((open) => !open)}
@@ -625,7 +585,7 @@ function WorkspaceHome({
           </section>
         ) : null}
 
-        <div className="mt-8">
+        <div className="hidden">
           <ObjectLibrary
             entries={unplacedArtifacts.map((artifact) => ({ artifact }))}
             workspaces={workspaces}
@@ -648,13 +608,15 @@ function WorkspaceHome({
           />
         </div>
 
-        <div className="mt-10 border-t border-[var(--border-default)] pt-7">
+        <div className="spectra-mission-control-library xl:col-start-1 xl:row-start-3">
           <ObjectLibrary
             entries={artifacts.map((artifact) => ({ artifact }))}
             workspaces={workspaces}
             groupBy="workspace"
             title="All work"
             subtitle="Artifacts and conversations across your workspaces"
+            showHeader={false}
+            flatTable
             showInbox={false}
             onOpen={(entry) => onOpenArtifact(entry.artifact!)}
             onAddToWorkspace={(entry, workspaceId) =>
@@ -682,24 +644,28 @@ function WorkspaceHeader({
   runs,
   optimisticActive,
   optimisticRunId,
+  viewMode,
   busy,
   onCreateArtifact,
   onEditWorkspace,
   onShareWorkspace,
   onExportWorkspace,
   onArchiveWorkspace,
+  onViewModeChange,
 }: {
   workspace: SpectraWorkspace | null;
   items: SpectraWorkspaceItem[];
   runs: SpectraRun[];
   optimisticActive?: boolean;
   optimisticRunId?: string;
+  viewMode: ViewMode;
   busy: string | null;
   onCreateArtifact: (type: ArtifactTypeKey) => void;
   onEditWorkspace: () => void;
   onShareWorkspace: () => void;
   onExportWorkspace: () => void;
   onArchiveWorkspace: () => void;
+  onViewModeChange: (view: ViewMode) => void;
 }) {
   const [createOpen, setCreateOpen] = useState(false);
   const createRef = useOutsideClick<HTMLDivElement>(createOpen, () =>
@@ -721,13 +687,28 @@ function WorkspaceHeader({
     (!optimisticRunId || !runs.some((run) => run._id === optimisticRunId))
       ? 1
       : 0);
+  const primaryLabel =
+    viewMode === "list"
+      ? "Library"
+      : viewMode === "board"
+        ? "Board"
+        : viewMode === "timeline"
+          ? "Timeline"
+          : "Canvas";
 
   return (
-    <header className="border-b border-[var(--border-default)] bg-[var(--bg-primary)] px-8 pb-3 pt-7">
+    <header
+      className="spectra-workspace-header border-b border-[var(--border-default)] bg-[var(--bg-primary)] px-5 pb-0 pt-4"
+      aria-label={`${artifactCount} artifacts, ${threadCount} threads, ${cardCount} pinned, ${activeRuns} active runs`}
+    >
       <div className="flex items-start justify-between gap-5">
-        <div className="min-w-0">
+        <div className="flex min-w-0 items-start gap-4">
+          <span className="grid size-14 shrink-0 place-items-center rounded-[10px] bg-[color-mix(in_oklab,var(--accent-violet)_10%,var(--bg-elevated))] text-[var(--accent-violet)]">
+            <Sprout className="size-7" />
+          </span>
+          <div className="min-w-0 pt-0.5">
           <div className="flex items-center gap-2">
-            <h1 className="truncate pb-1 font-display text-[34px] font-semibold leading-[1.15] text-[var(--text-primary)]">
+            <h1 className="truncate font-display text-[29px] font-semibold leading-[1.12] tracking-[-.02em] text-[var(--text-primary)]">
               {workspace?.title ?? "Workspace"}
             </h1>
             {workspace?.isShared ? (
@@ -736,53 +717,16 @@ function WorkspaceHeader({
                 aria-label="Shared workspace"
               />
             ) : null}
-            {workspace?.accessLevel !== "read" ? (
-              <button
-                type="button"
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[7px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-                onClick={onEditWorkspace}
-                aria-label="Edit workspace"
-                title="Edit workspace"
-              >
-                <PencilLine className="h-4 w-4" />
-              </button>
-            ) : null}
-            {workspace?.ownership !== "shared" ? (
-              <button
-                type="button"
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[7px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-                onClick={onShareWorkspace}
-                aria-label="Share workspace"
-                title="Share workspace"
-              >
-                <Share2 className="h-4 w-4" />
-              </button>
-            ) : null}
-            <button
-              type="button"
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[7px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-              onClick={onExportWorkspace}
-              aria-label="Export portable workspace manifest"
-              title="Export workspace"
-            >
-              <Download className="h-4 w-4" />
+            <button type="button" onClick={onEditWorkspace} aria-label="Favorite workspace" className="grid size-7 place-items-center rounded-[6px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]">
+              <Sparkles className="size-3.5" />
             </button>
-            {workspace?.ownership !== "shared" ? (
-              <button
-                type="button"
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[7px] text-[var(--danger)] transition hover:bg-[color-mix(in_oklab,var(--danger)_9%,transparent)]"
-                onClick={onArchiveWorkspace}
-                aria-label="Delete workspace permanently"
-                title="Delete workspace permanently"
-              >
-                <Trash2 className="h-4 w-4" />
-              </button>
-            ) : null}
           </div>
-          <p className="mt-3 text-[14px] text-[var(--text-secondary)]">
+          <p className="mt-1.5 truncate text-[11px] text-[var(--text-secondary)]">
             {workspace?.description ?? "All your work, organized and ready."}
           </p>
+          </div>
         </div>
+        <div className="flex items-center gap-2">
         <div className="relative" ref={createRef}>
           <button
             type="button"
@@ -825,31 +769,50 @@ function WorkspaceHeader({
             </div>
           ) : null}
         </div>
-      </div>
-      <div className="mt-6 flex flex-wrap items-center gap-8 text-[12px] text-[var(--text-secondary)]">
-        <div className="flex items-center gap-2">
-          <FileText className="h-4 w-4" />
-          <strong className="text-[var(--text-primary)]">
-            {artifactCount}
-          </strong>
-          <span>Artifacts</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <MessageSquare className="h-4 w-4" />
-          <strong className="text-[var(--text-primary)]">{threadCount}</strong>
-          <span>Threads</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <Pin className="h-4 w-4" />
-          <strong className="text-[var(--text-primary)]">{cardCount}</strong>
-          <span>Pinned</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <Sparkles className="h-4 w-4" />
-          <strong className="text-[var(--text-primary)]">{activeRuns}</strong>
-          <span>{activeRuns === 1 ? "Active run" : "Active runs"}</span>
+        <button type="button" onClick={onEditWorkspace} aria-label="More workspace actions" className="grid size-9 place-items-center rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-primary)] hover:bg-[var(--bg-hover)]">
+          <MoreHorizontal className="size-4" />
+        </button>
         </div>
       </div>
+      <nav
+        className="mt-2 flex min-w-0 items-center gap-7 overflow-x-auto"
+        aria-label="Workspace sections"
+      >
+        <button
+          type="button"
+          className="relative h-10 shrink-0 text-[12px] font-semibold text-[var(--text-primary)] after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:rounded-full after:bg-[var(--text-primary)]"
+          onClick={() => onViewModeChange(viewMode)}
+          aria-current="page"
+        >
+          {primaryLabel}
+        </button>
+        <button
+          type="button"
+          className="h-10 shrink-0 text-[12px] font-medium text-[var(--text-secondary)] transition hover:text-[var(--text-primary)]"
+          onClick={() => onViewModeChange("timeline")}
+        >
+          Activity
+        </button>
+        <button
+          type="button"
+          className="flex h-10 shrink-0 items-center gap-1.5 text-[12px] font-medium text-[var(--text-secondary)] transition hover:text-[var(--text-primary)]"
+          onClick={onShareWorkspace}
+        >
+          People
+          {workspace?.sharedWithCount ? (
+            <span className="rounded-full bg-[color-mix(in_oklab,var(--accent-violet)_12%,var(--bg-secondary))] px-1.5 py-0.5 text-[10px] text-[var(--accent-violet)]">
+              {workspace.sharedWithCount}
+            </span>
+          ) : null}
+        </button>
+        <button
+          type="button"
+          className="h-10 shrink-0 text-[12px] font-medium text-[var(--text-secondary)] transition hover:text-[var(--text-primary)]"
+          onClick={onEditWorkspace}
+        >
+          Settings
+        </button>
+      </nav>
     </header>
   );
 }
@@ -876,8 +839,12 @@ function WorkspaceLibraryToolbar({
   searchControl: ReactNode;
 }) {
   const [sortOpen, setSortOpen] = useState(false);
+  const [typeOpen, setTypeOpen] = useState(false);
   const ref = useOutsideClick<HTMLDivElement>(sortOpen, () =>
     setSortOpen(false),
+  );
+  const typeRef = useOutsideClick<HTMLDivElement>(typeOpen, () =>
+    setTypeOpen(false),
   );
   const sortLabels: Record<WorkspaceSort, string> = {
     updated: "Recently updated",
@@ -895,23 +862,37 @@ function WorkspaceLibraryToolbar({
   ];
   return (
     <div
-      className="mt-5 flex flex-wrap items-center gap-2 pb-1"
+      className="spectra-workspace-toolbar flex flex-wrap items-center gap-2"
       aria-label="Workspace library controls"
     >
-      <div className="flex shrink-0 gap-1 overflow-x-auto">
-        {types.map((option) => (
-          <button
-            key={option.key}
-            type="button"
-            onClick={() => onTypeChange(option.key)}
-            className={`inline-flex h-9 items-center rounded-[8px] px-3 text-[13px] font-medium transition ${type === option.key ? "bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[0_1px_7px_rgba(27,20,12,0.08)]" : "text-[var(--text-secondary)] hover:bg-[color-mix(in_oklab,var(--bg-elevated)_68%,transparent)]"}`}
-          >
-            {option.label}
-          </button>
-        ))}
-      </div>
       <div className="ml-auto flex items-center gap-2">
         {searchControl}
+        <div className="relative" ref={typeRef}>
+          <button
+            type="button"
+            onClick={() => setTypeOpen((open) => !open)}
+            className="flex h-9 items-center gap-2 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+          >
+            <Rows3 className="size-3.5" />
+            {type === "all" ? "Filter" : types.find((option) => option.key === type)?.label}
+          </button>
+          {typeOpen ? (
+            <div className="absolute left-0 top-[calc(100%+7px)] z-40 w-[180px] rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 shadow-[0_14px_32px_rgba(27,20,12,0.13)]">
+              {types.map((option) => (
+                <button key={option.key} type="button" className={menuItemClass()} onClick={() => { onTypeChange(option.key); setTypeOpen(false); }}>
+                  {option.label}
+                  {type === option.key ? <CheckCircle2 className="ml-auto size-3.5 text-[var(--success)]" /> : null}
+                </button>
+              ))}
+              <div className="my-1 border-t border-[var(--border-default)]" />
+              <button type="button" className={menuItemClass()} onClick={() => { onToggleSelection(); setTypeOpen(false); }}>
+                <Files className="size-3.5" />
+                {selectionMode ? "Done selecting" : "Select objects"}
+              </button>
+            </div>
+          ) : null}
+        </div>
+        {false ? (
         <button
           type="button"
           onClick={onToggleSelection}
@@ -921,6 +902,7 @@ function WorkspaceLibraryToolbar({
           <Files className="h-4 w-4" />
           {selectionMode ? "Done selecting" : "Select objects"}
         </button>
+        ) : null}
       </div>
       <div className="relative" ref={ref}>
         <button
@@ -1414,48 +1396,14 @@ function TimelineView({
   }
 
   return (
-    <div className="relative space-y-7 pb-3 pl-8 before:absolute before:bottom-4 before:left-[7px] before:top-[74px] before:w-px before:bg-[linear-gradient(to_bottom,var(--text-primary),color-mix(in_oklab,var(--text-primary)_18%,var(--border-default)),transparent)]">
-      <div className="grid grid-cols-2 overflow-hidden rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] sm:grid-cols-4">
-        <div className="px-4 py-3">
-          <strong className="block font-display text-[20px] text-[var(--text-primary)]">
-            {rows.length}
-          </strong>
-          <span className="text-[10px] text-[var(--text-tertiary)]">
-            Recent events
-          </span>
-        </div>
-        <div className="border-l border-[var(--border-subtle)] px-4 py-3">
-          <strong className="block font-display text-[20px] text-[var(--text-primary)]">
-            {rows.filter((row) => row.kind === "run").length}
-          </strong>
-          <span className="text-[10px] text-[var(--text-tertiary)]">
-            AI runs
-          </span>
-        </div>
-        <div className="border-l border-[var(--border-subtle)] px-4 py-3">
-          <strong className="block font-display text-[20px] text-[var(--text-primary)]">
-            {rows.filter((row) => row.kind === "edit").length}
-          </strong>
-          <span className="text-[10px] text-[var(--text-tertiary)]">
-            Artifact edits
-          </span>
-        </div>
-        <div className="border-l border-[var(--border-subtle)] px-4 py-3">
-          <strong className="block font-display text-[20px] text-[var(--text-primary)]">
-            {dateGroups.length}
-          </strong>
-          <span className="text-[10px] text-[var(--text-tertiary)]">
-            Active days
-          </span>
-        </div>
-      </div>
+    <div className="relative space-y-4 pb-3 pl-8 pt-3 before:absolute before:bottom-4 before:left-[7px] before:top-[18px] before:w-px before:bg-[linear-gradient(to_bottom,var(--text-primary),color-mix(in_oklab,var(--text-primary)_18%,var(--border-default)),transparent)]">
       {dateGroups.map((group, groupIndex) => (
         <section key={group.key} className="relative">
           <span className="absolute -left-[31px] top-1 flex h-4 w-4 items-center justify-center rounded-full bg-[var(--bg-primary)] ring-4 ring-[var(--bg-primary)]">
             <span className="h-2.5 w-2.5 rounded-full border-2 border-[var(--accent-cyan)] bg-[var(--bg-elevated)]" />
           </span>
-          <header className="mb-3 flex items-baseline gap-3">
-            <h2 className="font-display text-[18px] font-semibold text-[var(--text-primary)]">
+          <header className="mb-2 flex items-baseline gap-3">
+            <h2 className="font-display text-[12px] font-semibold text-[var(--text-primary)]">
               {group.label}
             </h2>
             <span className="text-[11px] text-[var(--text-tertiary)]">
@@ -1464,7 +1412,7 @@ function TimelineView({
                 day: "numeric",
               })}
             </span>
-            <span className="ml-auto text-[11px] text-[var(--text-tertiary)]">
+            <span className="ml-auto text-[9px] text-[var(--text-tertiary)]">
               {group.rows.length} {group.rows.length === 1 ? "item" : "items"}
             </span>
           </header>
@@ -1498,17 +1446,9 @@ function TimelineView({
                     ].includes(row.run.status)
                   : Boolean(entry?.item.viewData.pinned);
               const hierarchy =
-                row.kind === "run"
-                  ? important
-                    ? "min-h-[118px] sm:col-span-2"
-                    : "min-h-[98px]"
-                  : row.kind === "thread"
-                    ? "min-h-[108px] border-l-[3px] border-l-[#8b6ff0]"
-                    : row.kind === "edit"
-                      ? "min-h-[82px]"
-                      : important
-                        ? "min-h-[112px] sm:col-span-2 2xl:col-span-1"
-                        : "min-h-[98px]";
+                row.kind === "thread"
+                  ? "min-h-[78px] border-l-[3px] border-l-[#8b6ff0]"
+                  : "min-h-[78px]";
               const surface =
                 row.kind === "run"
                   ? "border-[color-mix(in_oklab,var(--accent-cyan)_24%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_6%,var(--bg-elevated))]"
@@ -1537,7 +1477,7 @@ function TimelineView({
                   }
                   data-interactive="true"
                   data-timeline-kind={row.kind}
-                  className={`group relative overflow-hidden p-3.5 text-left ${hierarchy} ${surface}`}
+                  className={`group relative overflow-hidden p-3 text-left ${hierarchy} ${surface}`}
                   style={
                     {
                       animationDelay: `${groupIndex * 35}ms`,
@@ -1562,7 +1502,7 @@ function TimelineView({
                   }
                 >
                   <span className="relative flex items-start gap-3">
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[7px] bg-[var(--bg-primary)]">
+                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] bg-[var(--bg-primary)]">
                       {RowIcon ? (
                         <RowIcon
                           className="h-4 w-4"
@@ -1594,14 +1534,14 @@ function TimelineView({
                           · {formatRelativeTime(row.time)}
                         </span>
                       </span>
-                      <span className="mt-1.5 block truncate text-[14px] font-semibold text-[var(--text-primary)]">
+                      <span className="mt-1 block truncate text-[11px] font-semibold text-[var(--text-primary)]">
                         {entry
                           ? workspaceEntryTitle(entry)
                           : row.kind === "run"
                             ? row.run.userPrompt
                             : row.title}
                       </span>
-                      <span className="mt-1.5 block line-clamp-2 text-[11px] leading-5 text-[var(--text-secondary)]">
+                      <span className="mt-1 block truncate text-[9px] text-[var(--text-secondary)]">
                         {row.summary}
                       </span>
                     </span>
@@ -1660,6 +1600,89 @@ function LibraryView({
         title="No library items here"
         message="Add artifacts to this workspace to group them by type."
       />
+    );
+  }
+
+  if (mode === "list") {
+    const groupOrder: Array<{
+      key: SpectraBlueprintKey | "thread";
+      label: string;
+    }> = [
+      { key: "document", label: "Documents" },
+      { key: "flashcard_deck", label: "Flashcard Decks" },
+      { key: "quiz", label: "Quizzes" },
+      { key: "planner_task", label: "Planner Tasks" },
+      { key: "agent", label: "Agents" },
+      { key: "presentation", label: "Presentations" },
+      { key: "sheets", label: "Sheets" },
+      { key: "code", label: "Code & Visualisations" },
+      { key: "whiteboard", label: "Whiteboards" },
+      { key: "timetable", label: "Timetable Items" },
+      { key: "thread", label: "Threads" },
+    ];
+    const groups = groupOrder
+      .map((group) => ({
+        ...group,
+        entries: entries.filter((entry) =>
+          group.key === "thread"
+            ? Boolean(entry.thread)
+            : entry.artifact?.blueprintKey === group.key,
+        ),
+      }))
+      .filter((group) => group.entries.length > 0);
+
+    return (
+      <div className="spectra-workspace-type-index overflow-hidden rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)]">
+        {groups.map((group) => {
+          const meta =
+            group.key === "thread"
+              ? { icon: MessageSquare, color: "#8b6ff0" }
+              : blueprintMeta[group.key];
+          const GroupIcon = meta.icon;
+          return (
+            <div
+              key={group.key}
+              className="grid min-h-[42px] grid-cols-[210px_minmax(0,1fr)_32px] items-center gap-2 border-b border-[var(--card-border-soft)] px-3 last:border-0"
+            >
+              <div className="flex min-w-0 items-center gap-2">
+                <GroupIcon className="size-4 shrink-0" style={{ color: meta.color }} />
+                <span className="truncate font-display text-[11px] font-semibold text-[var(--text-primary)]">
+                  {group.label}
+                </span>
+                <span className="rounded-[4px] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[8px] text-[var(--text-secondary)]">
+                  {group.entries.length}
+                </span>
+              </div>
+              <div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
+                {group.entries.slice(0, 3).map((entry) => (
+                  <button
+                    key={entry.item._id}
+                    type="button"
+                    onClick={() => onSelect(entry)}
+                    className="flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-[5px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-left text-[9px] text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
+                  >
+                    <GroupIcon className="size-3 shrink-0" style={{ color: meta.color }} />
+                    <span className="truncate">{workspaceEntryTitle(entry)}</span>
+                  </button>
+                ))}
+                {group.entries.length > 3 ? (
+                  <span className="shrink-0 rounded-[5px] bg-[var(--bg-secondary)] px-2 py-1 text-[8px] text-[var(--text-secondary)]">
+                    +{group.entries.length - 3}
+                  </span>
+                ) : null}
+              </div>
+              <button
+                type="button"
+                onClick={() => group.entries[0] && onSelect(group.entries[0])}
+                aria-label={`Open ${group.label}`}
+                className="grid size-7 place-items-center rounded-[5px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+              >
+                <ChevronDown className="size-3.5 -rotate-90" />
+              </button>
+            </div>
+          );
+        })}
+      </div>
     );
   }
 
@@ -1742,7 +1765,7 @@ function WorkspacePinnedShelf({
   }, [open, storageKey]);
   if (pinned.length === 0) return null;
   return (
-    <section className="mb-2 mt-4">
+    <section className="spectra-workspace-pinned-shelf mb-2 mt-4">
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
@@ -1752,18 +1775,18 @@ function WorkspacePinnedShelf({
           className={`h-4 w-4 shrink-0 text-[var(--text-tertiary)] transition ${open ? "" : "-rotate-90"}`}
         />
         <Pin className="h-4 w-4 shrink-0 text-[#b67616]" />
-        <h2 className="min-w-0 truncate font-display text-[20px] font-semibold text-[var(--text-primary)]">
-          Pinned in {workspaceTitle}
+        <h2 className="min-w-0 truncate font-display text-[14px] font-semibold text-[var(--text-primary)]">
+          Pinned
         </h2>
         <span className="shrink-0 rounded-[6px] bg-[var(--bg-secondary)] px-1.5 text-[12px] text-[var(--text-secondary)]">
           {pinned.length}
         </span>
-        <span className="ml-1 hidden text-[12px] text-[var(--text-tertiary)] min-[720px]:inline">
-          Important workspace objects
+        <span className="ml-auto hidden text-[9px] text-[var(--text-tertiary)] min-[720px]:inline">
+          Manage pinned
         </span>
       </button>
       {open ? (
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(min(220px,100%),1fr))] gap-3">
+        <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
           {pinned.map((entry) => (
             <WorkspaceEntryCard
               key={entry.item._id}
@@ -1830,7 +1853,7 @@ function CanvasView({
   return (
     <div
       ref={canvasRef}
-      className="relative h-full min-h-full overflow-auto bg-[radial-gradient(color-mix(in_oklab,var(--border-default)_62%,transparent)_0.65px,transparent_0.8px)] p-4 pb-20 [background-size:18px_18px] sm:p-5 sm:pb-20"
+      className="spectra-workspace-canvas relative h-full min-h-full overflow-auto bg-[radial-gradient(color-mix(in_oklab,var(--border-default)_62%,transparent)_0.65px,transparent_0.8px)] p-4 pb-20 [background-size:18px_18px] sm:p-5 sm:pb-20"
     >
       <div className="sticky top-0 z-20 ml-auto mb-5 flex w-fit items-center gap-1 rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[0_10px_28px_-22px_rgba(27,20,12,.45)]">
         <button
@@ -1898,7 +1921,7 @@ function CanvasView({
             <section
               key={group.key}
               data-canvas-cluster={group.key}
-              className={`self-start rounded-[18px] border p-3.5 lg:col-span-1 ${layouts[index % layouts.length]}`}
+              className={`self-start rounded-[8px] border p-2.5 lg:col-span-1 ${layouts[index % layouts.length]}`}
               style={{
                 borderColor: `color-mix(in oklab, ${group.color} 24%, var(--border-default))`,
                 background: `color-mix(in oklab, ${group.color} 5%, var(--bg-primary))`,
@@ -1923,7 +1946,7 @@ function CanvasView({
                   {group.entries.length}
                 </span>
               </header>
-              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
                 {group.entries.map((entry) => {
                   const objectKey = `${entry.thread ? "thread" : "artifact"}:${entry.thread?._id ?? entry.artifact?._id ?? ""}`;
                   return (
@@ -2001,7 +2024,6 @@ function EmptyWorkspaceState({
   );
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function Inspector({
   workspace,
   artifacts,
@@ -2347,6 +2369,7 @@ export function WorkspaceShell() {
   const searchParams = useSearchParams();
   const requestedWorkspaceId = searchParams.get("workspaceId") ?? undefined;
   const requestedThreadId = searchParams.get("threadId") ?? undefined;
+  const requestedHome = searchParams.get("home") === "1";
   const [overview, setOverview] = useState<SpectraOverview | null>(null);
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<
     string | undefined
@@ -2653,6 +2676,11 @@ export function WorkspaceShell() {
   );
 
   useEffect(() => {
+    if (!requestedHome) return;
+    goToHomeHub();
+  }, [requestedHome]);
+
+  useEffect(() => {
     if (
       !hubTabsRestored ||
       !activeHubTabId ||
@@ -2830,6 +2858,10 @@ export function WorkspaceShell() {
     selection?.type === "artifact"
       ? (entries.find((entry) => entry.item._id === selection.itemId)
           ?.artifact ?? null)
+      : null;
+  const selectedRun =
+    selection?.type === "run"
+      ? (runs.find((run) => run._id === selection.runId) ?? null)
       : null;
   const commandFocusArtifact = studio.isOpen
     ? studio.activeArtifact
@@ -3187,6 +3219,13 @@ export function WorkspaceShell() {
     const refresh = () => {
       void loadOverview(selectedWorkspaceId, true);
     };
+    const createWorkspaceFromShell = () => setWorkspaceCreateOpen(true);
+    const navigateWorkspaceHome = () => goToHomeHub();
+    const shareFromShell = () => {
+      if (studio.activeArtifact) return;
+      if (selectedWorkspaceId && workspaceHeader) setWorkspaceShareOpen(true);
+      else toast.info("Open a workspace to share it with school members.");
+    };
     window.addEventListener("spectra:open-artifact", onOpenArtifact);
     window.addEventListener("spectra:open-workspace", onOpenWorkspace);
     window.addEventListener("spectra:ask", onAsk);
@@ -3194,6 +3233,9 @@ export function WorkspaceShell() {
     window.addEventListener("spectra:focus-set", focusSet);
     window.addEventListener("spectra:clear-selection", clear);
     window.addEventListener("spectra:refresh", refresh);
+    window.addEventListener("spectra:create-workspace", createWorkspaceFromShell);
+    window.addEventListener("spectra:navigate-workspace-home", navigateWorkspaceHome);
+    window.addEventListener("spectra:page-share", shareFromShell);
     return () => {
       window.removeEventListener("spectra:open-artifact", onOpenArtifact);
       window.removeEventListener("spectra:open-workspace", onOpenWorkspace);
@@ -3202,6 +3244,9 @@ export function WorkspaceShell() {
       window.removeEventListener("spectra:focus-set", focusSet);
       window.removeEventListener("spectra:clear-selection", clear);
       window.removeEventListener("spectra:refresh", refresh);
+      window.removeEventListener("spectra:create-workspace", createWorkspaceFromShell);
+      window.removeEventListener("spectra:navigate-workspace-home", navigateWorkspaceHome);
+      window.removeEventListener("spectra:page-share", shareFromShell);
     };
     // Event handlers intentionally read the current shell closures after each render.
   });
@@ -3898,7 +3943,7 @@ export function WorkspaceShell() {
         }}
       />
       <div className="flex min-w-0 flex-1 flex-col">
-        <StudioTabRail
+        {false ? <StudioTabRail
           hubTabs={
             workSetIsolated && activeHubTabId
               ? hubTabs.map((tab) =>
@@ -3923,7 +3968,7 @@ export function WorkspaceShell() {
           onAddHub={addHomeHubTab}
           onActivateTab={studio.activateTab}
           onCloseTab={closeArtifactTab}
-        />
+        /> : null}
         <div className="relative flex min-h-0 flex-1">
           {pendingCreateType ? (
             <div
@@ -3988,10 +4033,16 @@ export function WorkspaceShell() {
               onPointerDown={() => setWorkspaceDeleteOpen(false)}
             >
               <div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="workspace-delete-title"
                 className="w-[min(480px,calc(100vw-32px))] rounded-[12px] border border-[color-mix(in_oklab,var(--danger)_28%,var(--border-default))] bg-[var(--bg-elevated)] p-5 shadow-[0_24px_70px_rgba(27,20,12,0.22)]"
                 onPointerDown={(event) => event.stopPropagation()}
               >
-                <h2 className="font-display text-[21px] font-semibold text-[var(--text-primary)]">
+                <h2
+                  id="workspace-delete-title"
+                  className="font-display text-[21px] font-semibold text-[var(--text-primary)]"
+                >
                   Permanently remove {workspace.title}?
                 </h2>
                 <p className="mt-2 text-[13px] leading-5 text-[var(--text-secondary)]">
@@ -4007,6 +4058,7 @@ export function WorkspaceShell() {
                 </label>
                 <input
                   autoFocus
+                  aria-label="Workspace deletion confirmation"
                   value={workspaceDeleteConfirmation}
                   onChange={(event) =>
                     setWorkspaceDeleteConfirmation(event.target.value)
@@ -4076,10 +4128,16 @@ export function WorkspaceShell() {
               onPointerDown={() => setWorkspaceEditOpen(false)}
             >
               <div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="workspace-edit-title"
                 className="w-full max-w-[430px] rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5 shadow-[0_24px_70px_rgba(27,20,12,0.2)]"
                 onPointerDown={(event) => event.stopPropagation()}
               >
-                <h2 className="font-display text-[21px] font-semibold text-[var(--text-primary)]">
+                <h2
+                  id="workspace-edit-title"
+                  className="font-display text-[21px] font-semibold text-[var(--text-primary)]"
+                >
                   Edit workspace
                 </h2>
                 <label className="mt-4 block text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
@@ -4100,6 +4158,7 @@ export function WorkspaceShell() {
                 </div>
                 <input
                   autoFocus
+                  aria-label="Workspace name"
                   value={workspaceEditTitle}
                   onChange={(event) =>
                     setWorkspaceEditTitle(event.target.value)
@@ -4107,6 +4166,7 @@ export function WorkspaceShell() {
                   className="mt-4 h-10 w-full rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-[13px] text-[var(--text-primary)] outline-none"
                 />
                 <textarea
+                  aria-label="Workspace description"
                   value={workspaceEditDescription}
                   onChange={(event) =>
                     setWorkspaceEditDescription(event.target.value)
@@ -4148,10 +4208,16 @@ export function WorkspaceShell() {
               onPointerDown={() => setArtifactDeletePending(null)}
             >
               <div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="artifact-delete-title"
                 className="w-full max-w-[440px] rounded-[12px] border border-[color-mix(in_oklab,var(--danger)_24%,var(--border-default))] bg-[var(--bg-elevated)] p-5 shadow-[0_24px_70px_rgba(27,20,12,0.2)]"
                 onPointerDown={(event) => event.stopPropagation()}
               >
-                <h2 className="font-display text-[21px] font-semibold text-[var(--text-primary)]">
+                <h2
+                  id="artifact-delete-title"
+                  className="font-display text-[21px] font-semibold text-[var(--text-primary)]"
+                >
                   Delete {artifactDeletePending.title}?
                 </h2>
                 <p className="mt-2 text-[13px] leading-5 text-[var(--text-secondary)]">
@@ -4339,25 +4405,6 @@ export function WorkspaceShell() {
                 selectedContextIds={selectedContextIds}
                 selectedObjectKeys={selectedObjectKeys}
                 onToggleContext={toggleContextArtifact}
-                onToggleSelection={() => {
-                  setMultiSelectMode((value) => {
-                    const next = !value;
-                    if (next && selectionCount === 0) restoreLatestSelection();
-                    return next;
-                  });
-                  if (selectionCount) setFocusModeOverride("selection");
-                }}
-                onImportWorkspace={() =>
-                  workspaceImportInputRef.current?.click()
-                }
-                searchControl={
-                  <GlobalSearch
-                    onOpenArtifact={openArtifactPanel}
-                    onOpenWorkspace={(target) => goToWorkspaceHub(target._id)}
-                    selectedIds={selectedContextIds}
-                    onToggleSelected={toggleContextArtifact}
-                  />
-                }
               />
               {studio.mode === "split" && studio.activeArtifact ? (
                 <ArtifactStudio
@@ -4421,7 +4468,7 @@ export function WorkspaceShell() {
           ) : (
             <section className="flex min-w-0 flex-1">
               <>
-                <div className="flex min-w-0 flex-1 flex-col">
+                <div className="relative flex min-w-0 flex-1 flex-col">
                   <WorkspaceHeader
                     workspace={workspaceHeader}
                     items={entries.map((entry) => entry.item)}
@@ -4431,31 +4478,67 @@ export function WorkspaceShell() {
                       runEngine.liveExchange.status !== "failed",
                     )}
                     optimisticRunId={runEngine.liveExchange?.runId}
+                    viewMode={viewMode}
                     busy={busyKey}
                     onCreateArtifact={openCreateArtifact}
                     onEditWorkspace={openWorkspaceEdit}
                     onShareWorkspace={() => setWorkspaceShareOpen(true)}
                     onExportWorkspace={() => void exportWorkspaceManifest()}
+                    onViewModeChange={setViewMode}
                     onArchiveWorkspace={() => {
                       setWorkspaceDeleteConfirmation("");
                       setWorkspaceDeleteOpen(true);
                     }}
                   />
+                  {workspace && viewMode !== "list" ? (
+                    <section className={`spectra-workspace-shell-controls spectra-workspace-shell-controls--${viewMode}`}>
+                      <WorkspaceLibraryToolbar
+                        viewMode={viewMode}
+                        onViewModeChange={setViewMode}
+                        sort={workspaceSort}
+                        onSortChange={setWorkspaceSort}
+                        type={workspaceType}
+                        onTypeChange={setWorkspaceType}
+                        selectionMode={multiSelectMode}
+                        onToggleSelection={() => {
+                          setMultiSelectMode((value) => {
+                            const next = !value;
+                            if (next && selectionCount === 0)
+                              restoreLatestSelection();
+                            return next;
+                          });
+                          if (selectionCount)
+                            setFocusModeOverride("selection");
+                        }}
+                        searchControl={
+                          <GlobalSearch
+                            onOpenArtifact={openArtifactPanel}
+                            onOpenWorkspace={(target) =>
+                              goToWorkspaceHub(target._id)
+                            }
+                            selectedIds={selectedContextIds}
+                            onToggleSelected={toggleContextArtifact}
+                            placementWorkspaceId={workspace._id}
+                            placementLabel={workspace.title}
+                            onPlaceArtifact={(artifact) =>
+                              void addArtifactToWorkspace(
+                                artifact,
+                                workspace._id,
+                              )
+                            }
+                          />
+                        }
+                      />
+                    </section>
+                  ) : null}
                   <main
                     className={
                       viewMode === "canvas"
-                        ? "relative min-h-0 flex-1 overflow-hidden px-3 pb-[110px] pt-4 sm:px-5 lg:px-8 lg:pt-6"
-                        : "relative min-h-0 flex-1 overflow-y-auto px-3 pb-[150px] pt-4 sm:px-5 lg:px-8 lg:pt-6"
+                        ? "spectra-workspace-content relative z-[2] min-h-0 flex-1 overflow-hidden px-3 pb-[110px] pt-2 sm:px-5 lg:px-8 lg:pt-2"
+                        : "spectra-workspace-content relative z-[2] min-h-0 flex-1 overflow-y-auto px-3 pb-[150px] pt-2 sm:px-5 lg:px-8 lg:pt-2"
                     }
                   >
                     {!workspace ? <WorkspaceContentSkeleton /> : null}
-                    {workspace ? (
-                      <WorkspacePinnedShelf
-                        entries={entries}
-                        workspaceTitle={workspace.title}
-                        onSelect={openWorkspaceEntry}
-                      />
-                    ) : null}
                     {workspace ? (
                       <>
                         {busyKey?.startsWith("artifact:") &&
@@ -4484,14 +4567,7 @@ export function WorkspaceShell() {
                             </span>
                           </div>
                         ) : null}
-                        <section className="mt-10">
-                          <h2 className="font-display text-[20px] font-semibold text-[var(--text-primary)]">
-                            Workspace library
-                          </h2>
-                          <p className="mt-1 text-[13px] text-[var(--text-secondary)]">
-                            Objects, activity, and working views for this
-                            workspace.
-                          </p>
+                        {viewMode === "list" ? <section className="spectra-workspace-library-controls spectra-workspace-library-controls--list">
                           <WorkspaceLibraryToolbar
                             viewMode={viewMode}
                             onViewModeChange={setViewMode}
@@ -4532,7 +4608,24 @@ export function WorkspaceShell() {
                               />
                             }
                           />
-                        </section>
+                        </section> : null}
+                        {viewMode === "list" ? (
+                          <>
+                            <WorkspacePinnedShelf
+                              entries={entries}
+                              workspaceTitle={workspace.title}
+                              onSelect={openWorkspaceEntry}
+                            />
+                            <div className="mb-3 mt-5 flex items-center justify-between">
+                              <h2 className="font-display text-[14px] font-semibold text-[var(--text-primary)]">
+                                All artifacts
+                              </h2>
+                              <span className="text-[9px] text-[var(--text-tertiary)]">
+                                Collapse all
+                              </span>
+                            </div>
+                          </>
+                        ) : null}
                         {viewMode === "timeline" ? (
                           <TimelineView
                             entries={visibleEntries}
@@ -4613,6 +4706,28 @@ export function WorkspaceShell() {
                     ) : null}
                   </main>
                 </div>
+                {!studio.isOpen &&
+                !liveThread &&
+                tiledArtifacts.length === 0 ? (
+                  <Inspector
+                    workspace={workspace}
+                    artifacts={allArtifacts}
+                    selectedArtifact={selectedArtifact}
+                    selectedRun={selectedRun}
+                    runs={workspaceRuns}
+                    onClose={() => setSelection(null)}
+                    onHide={() => {
+                      if (selection?.type === "artifact")
+                        void hideWorkspaceItem(selection.itemId);
+                    }}
+                    onCreateArtifact={openCreateArtifact}
+                    onArchiveWorkspace={() => {
+                      setWorkspaceDeleteConfirmation("");
+                      setWorkspaceDeleteOpen(true);
+                    }}
+                    onOpenArtifact={openArtifactPanel}
+                  />
+                ) : null}
                 {studio.mode === "split" && studio.activeArtifact ? (
                   <ArtifactStudio
                     mode="split"

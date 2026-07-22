@@ -27,6 +27,9 @@ import {
   CalendarClock,
   CheckCheck,
   MessageSquareText,
+  Search,
+  HelpCircle,
+  Moon,
   Plus,
   Settings2,
   ShieldCheck,
@@ -34,6 +37,13 @@ import {
   Sprout,
   UsersRound,
   X,
+  Share2,
+  Star,
+  MoreHorizontal,
+  ChevronRight,
+  CircleCheck,
+  PanelLeftClose,
+  PanelLeftOpen,
   type LucideIcon,
 } from "lucide-react";
 import { SpectraLogo } from "@/components/spectra-logo";
@@ -43,6 +53,7 @@ import {
   getSpectraPlannerReminderNotifications,
   getSpectraTimetableReminderNotifications,
   getSpectraWorkspaces,
+  getSpectraThreads,
   markSpectraArtifactCommentNotificationsRead,
   markSpectraPlannerReminderNotificationsRead,
   markSpectraTimetableReminderNotificationsRead,
@@ -50,6 +61,7 @@ import {
   type SpectraPlannerReminderNotification,
   type SpectraTimetableReminderNotification,
   type SpectraWorkspace,
+  type SpectraThread,
 } from "@/features/spectra/data/api";
 import {
   getAdministration,
@@ -68,6 +80,8 @@ const ordinaryDestinations = [
   { href: "/workspace", label: "Home", icon: LayoutGrid },
   { href: "/artifacts", label: "Artifacts", icon: LibraryBig },
   { href: "/agents", label: "Agents", icon: Bot },
+  { href: "/models", label: "Models", icon: Brain },
+  { href: "/analytics", label: "Analytics", icon: BarChart3 },
 ] as const;
 
 const workspaceIconMap: Record<string, LucideIcon> = {
@@ -137,6 +151,9 @@ function ShellNavigation() {
   const [workspaces, setWorkspaces] = useState<SpectraWorkspace[]>([]);
   const [workspacesLoading, setWorkspacesLoading] = useState(true);
   const [workspacesUnavailable, setWorkspacesUnavailable] = useState(false);
+  const [threads, setThreads] = useState<SpectraThread[]>([]);
+  const [sidebarSearch, setSidebarSearch] = useState("");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileWorkspaceOpen, setMobileWorkspaceOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notificationsLoading, setNotificationsLoading] = useState(false);
@@ -166,6 +183,20 @@ function ShellNavigation() {
     };
   }, []);
 
+  useEffect(() => {
+    const stored = window.localStorage.getItem("spectra:sidebar-collapsed");
+    if (stored === "true") setSidebarCollapsed(true);
+  }, []);
+
+  const toggleSidebar = useCallback(() => {
+    setSidebarCollapsed((collapsed) => {
+      const next = !collapsed;
+      window.localStorage.setItem("spectra:sidebar-collapsed", String(next));
+      window.dispatchEvent(new CustomEvent("spectra:sidebar-layout", { detail: { collapsed: next } }));
+      return next;
+    });
+  }, []);
+
   const coreDestinations = useMemo(() => {
     const destinations: Array<{
       href: string;
@@ -177,8 +208,14 @@ function ShellNavigation() {
     if (administrationIdentity?.account.platformOperator)
       destinations.push({
         href: "/superadmin",
-        label: "Superadmin",
+        label: "Super Admin",
         icon: ShieldCheck,
+      });
+    if (administrationIdentity?.membership.role === "school_admin")
+      destinations.push({
+        href: "/admin?tab=feedback",
+        label: "Feedback",
+        icon: MessageSquareText,
       });
     return destinations;
   }, [administrationIdentity]);
@@ -205,6 +242,23 @@ function ShellNavigation() {
       window.removeEventListener("focus", refresh);
     };
   }, [refreshWorkspaces]);
+
+  useEffect(() => {
+    let active = true;
+    const refresh = () => {
+      void getSpectraThreads({ limit: 40 })
+        .then(({ threads: rows }) => {
+          if (active) setThreads(rows.filter((thread) => thread.status === "active"));
+        })
+        .catch(() => undefined);
+    };
+    refresh();
+    window.addEventListener("spectra:threads-changed", refresh);
+    return () => {
+      active = false;
+      window.removeEventListener("spectra:threads-changed", refresh);
+    };
+  }, []);
 
   const refreshNotifications = useCallback(async () => {
     setNotificationsLoading(true);
@@ -320,17 +374,62 @@ function ShellNavigation() {
   const activeCoreHref = useMemo(() => {
     if (pathname === "/workspace" && selectedWorkspaceId) return null;
     return (
-      coreDestinations.find(
-        ({ href }) => pathname === href || pathname.startsWith(`${href}/`),
-      )?.href ?? null
+      coreDestinations.find(({ href }) => {
+        const baseHref = href.split("?", 1)[0]!;
+        return pathname === baseHref || pathname.startsWith(`${baseHref}/`);
+      })?.href ?? null
     );
   }, [pathname, selectedWorkspaceId]);
 
   return (
     <>
+      <aside aria-label="Spectra navigation" className={cn("spectra-shell-sidebar fixed inset-y-0 left-0 z-40 w-[240px] flex-col border-r border-[var(--border-default)] bg-[var(--bg-sidebar)]", sidebarCollapsed ? "hidden" : "hidden md:flex")}>
+        <button type="button" onClick={toggleSidebar} aria-label="Collapse sidebar" title="Collapse sidebar" className="absolute right-3 top-4 z-10 grid size-8 place-items-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><PanelLeftClose size={14}/></button>
+        <Link href="/workspace?home=1" className="mx-4 mt-4 flex h-9 items-center gap-2 rounded-[7px] px-1 outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-primary)]" aria-label="Spectra home">
+          <SpectraLogo size={22} />
+          <span className="font-[family-name:var(--font-display)] text-[19px] font-semibold tracking-[-.025em] text-[#171513]">spectra</span>
+        </Link>
+        <label className="relative mx-3 mt-3 block">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-[var(--text-tertiary)]" />
+          <input value={sidebarSearch} onChange={(event) => setSidebarSearch(event.target.value)} placeholder="Search" className="h-8 w-full rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-elevated)] pl-8 pr-10 text-[11px] outline-none placeholder:text-[var(--text-placeholder)] focus:border-[var(--border-strong)]" />
+          <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 rounded-[4px] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[9px] text-[var(--text-tertiary)]">⌘ K</span>
+        </label>
+        <nav aria-label="Main destinations" className="mt-3 flex flex-col gap-0.5 px-3">
+          {coreDestinations.map(({ href, label, icon: Icon }) => {
+            const active = activeCoreHref === href;
+            return <Link key={href} href={href === "/workspace" ? "/workspace?home=1" : href} onClick={() => { if (href === "/workspace") window.dispatchEvent(new Event("spectra:navigate-workspace-home")); }} aria-current={active ? "page" : undefined} className={cn("flex h-8 items-center gap-2.5 rounded-[6px] px-2 text-[11px] font-medium transition-colors", active ? "bg-[#eeece9] text-[#171513]" : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]")}><Icon size={14} strokeWidth={active ? 2.05 : 1.65} /><span>{label === "Home" ? "Workspace" : label}</span></Link>;
+          })}
+        </nav>
+        <Link href="/chat" className="mx-3 mt-3 flex h-8 items-center justify-center gap-2 rounded-[6px] bg-[#7659ef] text-[11px] font-semibold text-white shadow-[0_1px_2px_rgba(83,61,180,.22)] transition hover:bg-[#684ce3]"><Plus size={14} /> New chat</Link>
+        <div className="relative mx-3 mt-2">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-[var(--text-tertiary)]" />
+          <input value={sidebarSearch} onChange={(event) => setSidebarSearch(event.target.value)} placeholder="Search chats" className="h-8 w-full rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-elevated)] pl-8 pr-2 text-[10px] outline-none placeholder:text-[var(--text-placeholder)]" />
+        </div>
+        <div className="spectra-thin-scrollbar min-h-0 flex-1 overflow-y-auto px-3 pb-3">
+          {([true, false] as const).map((pinned) => {
+            const term = sidebarSearch.trim().toLowerCase();
+            const rows = threads.filter((thread) => Boolean(thread.pinned) === pinned && (!term || thread.title.toLowerCase().includes(term))).slice(0, pinned ? 5 : 10);
+            if (!rows.length) return null;
+            return <section key={String(pinned)} className="mt-3"><h2 className="px-1 text-[8px] font-semibold uppercase tracking-[.09em] text-[var(--text-tertiary)]">{pinned ? "Pinned" : "Recents"}</h2><div className="mt-1 space-y-0.5">{rows.map((thread, index) => <Link key={thread._id} href={`/chat?threadId=${encodeURIComponent(thread._id)}`} className="flex h-7 items-center gap-2 rounded-[5px] px-1.5 text-[9.5px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><i className="size-1.5 shrink-0 rounded-full" style={{background:index % 4 === 3 ? "#8371ee" : "#1aa47b"}}/><span className="min-w-0 flex-1 truncate">{thread.title}</span></Link>)}</div></section>;
+          })}
+          {workspaces.length ? <section className="mt-4 border-t border-[var(--border-subtle)] pt-3"><div className="flex items-center justify-between px-1"><h2 className="text-[8px] font-semibold uppercase tracking-[.09em] text-[var(--text-tertiary)]">Workspaces</h2><Link href="/workspace?create=1" aria-label="Create workspace" className="grid size-5 place-items-center rounded-[4px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]"><Plus size={12}/></Link></div><div className="mt-1 space-y-0.5">{workspaces.filter((workspace) => !sidebarSearch.trim() || workspace.title.toLowerCase().includes(sidebarSearch.trim().toLowerCase())).slice(0,8).map((workspace,index) => { const Icon=workspaceIcon(workspace); const active=pathname==="/workspace"&&selectedWorkspaceId===workspace._id; return <Link key={workspace._id} href={workspaceHref(workspace._id)} className={cn("flex h-8 items-center gap-2 rounded-[6px] px-1.5 text-[10px]",active?"bg-[var(--bg-hover)] font-semibold text-[var(--text-primary)]":"text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]")}><span className="grid size-5 place-items-center rounded-[5px] text-white" style={{background:workspaceColor(workspace,index)}}><Icon size={11}/></span><span className="min-w-0 flex-1 truncate">{workspace.title}</span>{workspace.isShared||workspace.ownership==="shared"?<UsersRound size={11}/>:null}</Link>})}</div></section> : null}
+          {workspacesLoading ? <div className="mt-4 h-16 animate-pulse rounded-[7px] bg-[var(--bg-secondary)]"/> : null}
+          {workspacesUnavailable ? <button type="button" onClick={() => void refreshWorkspaces(true)} className="mt-3 w-full rounded-[6px] px-2 py-2 text-left text-[10px] text-[var(--danger)] hover:bg-[var(--bg-hover)]">Workspaces unavailable · Retry</button> : null}
+        </div>
+        <div className="relative shrink-0 border-t border-[var(--border-subtle)] px-3 py-2">
+          <div className="flex items-center justify-between">
+            <button type="button" aria-label={`Notifications${unreadCount ? `, ${unreadCount} unread` : ""}`} onClick={() => { setNotificationsOpen((open) => !open); void refreshNotifications(); }} className="relative grid size-8 place-items-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"><Bell size={15}/>{unreadCount?<span className="absolute right-0 top-0 grid min-w-3.5 place-items-center rounded-full bg-[var(--danger)] px-0.5 text-[7px] leading-3.5 text-white">{unreadCount}</span>:null}</button>
+            <button type="button" aria-label="Help" className="grid size-8 place-items-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-secondary)]"><HelpCircle size={15}/></button>
+            <button type="button" aria-label="Toggle theme" onClick={() => window.dispatchEvent(new Event("ai-school:toggle-theme"))} className="grid size-8 place-items-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-secondary)]"><Moon size={15}/></button>
+            <button type="button" aria-label="Settings" onClick={() => window.dispatchEvent(new Event("ai-school:toggle-settings"))} className="grid size-8 place-items-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-secondary)]"><Settings2 size={15}/></button>
+          </div>
+          {administrationIdentity ? <div className="mt-2 flex items-center gap-2 rounded-[7px] px-1 py-1"><span className="grid size-8 shrink-0 place-items-center overflow-hidden rounded-[7px] bg-[#d8d0fa] text-[10px] font-semibold text-[#3e327f]">{administrationIdentity.account.avatarUrl ? <img src={administrationIdentity.account.avatarUrl} alt="" className="size-full object-cover"/> : administrationIdentity.account.name.split(/\s+/).map((part) => part[0]).join("").slice(0,2).toUpperCase()}</span><span className="min-w-0 flex-1"><strong className="block truncate text-[10px] font-semibold text-[var(--text-primary)]">{administrationIdentity.account.name}</strong><span className="block truncate text-[8.5px] capitalize text-[var(--text-tertiary)]">{administrationIdentity.membership.role.replace("_"," ")}</span></span></div> : null}
+          {notificationsOpen ? <section className="absolute bottom-2 left-[228px] z-[80] w-[340px] overflow-hidden rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[0_22px_70px_rgba(27,20,12,.18)]"><header className="flex items-center justify-between border-b border-[var(--border-subtle)] px-4 py-3"><div><strong className="text-[12px]">Notifications</strong><p className="text-[9px] text-[var(--text-tertiary)]">Comments, tasks, and calendar reminders</p></div><button type="button" disabled={!unreadCount} onClick={() => void markAllNotificationsRead()} className="flex h-7 items-center gap-1 rounded-[6px] px-2 text-[9px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-35"><CheckCheck size={12}/>Mark read</button></header><div className="spectra-thin-scrollbar max-h-[420px] overflow-y-auto p-1.5">{notifications.slice(0,30).map((item) => <Link key={`wide:${item.kind}:${item.id}`} href={`/artifacts?artifactId=${encodeURIComponent(item.artifactId)}`} onClick={() => { setNotificationsOpen(false); void markNotificationRead(item); }} className="flex gap-2.5 rounded-[7px] px-2.5 py-2 hover:bg-[var(--bg-hover)]"><span className="min-w-0 flex-1"><strong className="block truncate text-[10px] font-semibold">{item.title}</strong><span className="mt-0.5 block line-clamp-2 text-[9px] leading-3.5 text-[var(--text-secondary)]">{item.detail}</span></span>{!item.readAt?<i className="mt-1 size-1.5 shrink-0 rounded-full bg-[var(--brand-primary)]"/>:null}</Link>)}{!notifications.length&&!notificationsLoading?<p className="px-4 py-8 text-center text-[10px] text-[var(--text-tertiary)]">You are all caught up.</p>:null}</div></section> : null}
+        </div>
+      </aside>
       <aside
         aria-label="Spectra navigation"
-        className="fixed inset-y-0 left-0 z-40 hidden w-[76px] flex-col border-r md:flex"
+        className={cn("fixed inset-y-0 left-0 z-40 w-[76px] flex-col border-r", sidebarCollapsed ? "hidden md:flex" : "hidden")}
         style={{
           borderColor: "var(--border-default)",
           background:
@@ -344,6 +443,7 @@ function ShellNavigation() {
         >
           <SpectraLogo size={34} />
         </Link>
+        <button type="button" onClick={toggleSidebar} aria-label="Expand sidebar" title="Expand sidebar" className="absolute right-1 top-1 grid size-7 place-items-center rounded-[7px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><PanelLeftOpen size={13}/></button>
 
         <nav
           aria-label="Main destinations"
@@ -354,7 +454,13 @@ function ShellNavigation() {
             return (
               <Link
                 key={href}
-                href={href}
+                href={href === "/workspace" ? "/workspace?home=1" : href}
+                onClick={() => {
+                  if (href === "/workspace")
+                    window.dispatchEvent(
+                      new Event("spectra:navigate-workspace-home"),
+                    );
+                }}
                 aria-label={label}
                 aria-current={active ? "page" : undefined}
                 className={cn(
@@ -786,19 +892,93 @@ export function AppShell({
   noScroll = false,
   contentClassName,
 }: AppShellProps) {
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const [shellSidebarCollapsed, setShellSidebarCollapsed] = useState(false);
+  const [pageContext, setPageContext] = useState<{
+    source?: string;
+    kind?: string;
+    title?: string;
+  } | null>(null);
+  const workspaceId = searchParams.get("workspaceId");
+  const sectionLabel = pathname.startsWith("/workspace")
+    ? "Workspaces"
+    : pathname.startsWith("/artifacts")
+      ? "Artifacts"
+      : pathname.startsWith("/agents")
+        ? "Agents"
+        : pathname.startsWith("/chat")
+          ? "Chat"
+          : pathname.startsWith("/superadmin")
+            ? "Super Admin"
+            : pathname.startsWith("/admin")
+              ? "Admin"
+              : pathname.startsWith("/managebac")
+                ? "ManageBac"
+                : "Spectra";
+
+  const requestPageAction = (action: "share" | "favorite" | "more") => {
+    window.dispatchEvent(new CustomEvent(`spectra:page-${action}`));
+  };
+
+  useEffect(() => {
+    setShellSidebarCollapsed(
+      window.localStorage.getItem("spectra:sidebar-collapsed") === "true",
+    );
+    const update = (event: Event) => {
+      const detail = (event as CustomEvent<{ collapsed?: boolean }>).detail;
+      setShellSidebarCollapsed(Boolean(detail?.collapsed));
+    };
+    window.addEventListener("spectra:sidebar-layout", update);
+    return () => window.removeEventListener("spectra:sidebar-layout", update);
+  }, []);
+
+  useEffect(() => {
+    const update = (event: Event) => {
+      setPageContext(
+        (event as CustomEvent<{ source?: string; kind?: string; title?: string }>).detail ?? null,
+      );
+    };
+    const clear = () => setPageContext(null);
+    window.addEventListener("spectra:page-context", update);
+    window.addEventListener("spectra:clear-page-context", clear);
+    return () => {
+      window.removeEventListener("spectra:page-context", update);
+      window.removeEventListener("spectra:clear-page-context", clear);
+    };
+  }, []);
+
   return (
-    <div className="min-h-dvh bg-[var(--bg-primary)] text-[var(--text-primary)] md:pl-[76px]">
+    <div className={cn("min-h-dvh bg-[#fbfaf8] text-[var(--text-primary)] transition-[padding] duration-200", shellSidebarCollapsed ? "md:pl-[76px]" : "md:pl-[240px]")}>
       <ShellNavigation />
       <main
         className={cn(
-          "relative min-h-dvh pb-24 md:pb-0",
+          "relative min-h-dvh pb-24 md:flex md:h-dvh md:min-h-0 md:flex-col md:gap-1 md:px-[17px] md:pb-3 md:pt-5",
           noScroll && "h-dvh min-h-0 overflow-hidden",
           !fullBleed &&
             "mx-auto w-full max-w-[1540px] px-5 py-6 sm:px-8 lg:px-10",
-          contentClassName,
         )}
       >
-        {children}
+        <header className="spectra-global-commandbar hidden h-10 shrink-0 items-center justify-between rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-5 md:flex">
+          <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-2 text-[10.5px] text-[var(--text-secondary)]">
+            <button
+              type="button"
+              className="inline-flex items-center gap-2 rounded-[5px] font-medium hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]"
+              onClick={() => window.dispatchEvent(new CustomEvent("spectra:return-to-section"))}
+            >
+              <LayoutGrid size={13} strokeWidth={1.7}/>{pageContext?.source ?? sectionLabel}
+            </button>
+            {pageContext?.kind ? <><ChevronRight size={12} className="text-[var(--text-tertiary)]"/><span>{pageContext.kind}</span></> : null}
+            {pageContext?.title ? <><ChevronRight size={12} className="text-[var(--text-tertiary)]"/><span className="truncate font-semibold text-[var(--text-primary)]">{pageContext.title}</span></> : workspaceId ? <><ChevronRight size={12} className="text-[var(--text-tertiary)]"/><span className="truncate font-semibold text-[var(--text-primary)]">Current workspace</span></> : null}
+          </nav>
+          <div className="flex items-center gap-2">
+            <span className="mr-2 inline-flex items-center gap-1.5 text-[9.5px] text-[var(--text-tertiary)]"><CircleCheck size={13} className="text-[var(--success)]"/>Saved just now</span>
+            <button type="button" onClick={() => requestPageAction("share")} className="inline-flex h-8 items-center gap-1.5 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[10px] font-semibold text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"><Share2 size={13}/>Share</button>
+            <button type="button" onClick={() => requestPageAction("favorite")} aria-label="Favorite" className="grid size-8 place-items-center rounded-[6px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"><Star size={14}/></button>
+            <button type="button" onClick={() => requestPageAction("more")} aria-label="More page actions" className="grid size-8 place-items-center rounded-[6px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"><MoreHorizontal size={15}/></button>
+          </div>
+        </header>
+        <div className={cn("spectra-global-stage min-h-0 flex-1 md:overflow-hidden md:rounded-[8px] md:border md:border-[var(--border-default)] md:bg-[var(--bg-elevated)]", noScroll && "overflow-hidden", contentClassName)}>{children}</div>
       </main>
     </div>
   );

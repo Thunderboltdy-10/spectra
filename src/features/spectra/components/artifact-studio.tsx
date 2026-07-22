@@ -37,12 +37,14 @@ import {
   MoreHorizontal,
   Minus,
   PanelLeft,
+  PanelRight,
   Plus,
   Radio,
   Play,
   RotateCcw,
   Save,
   Search,
+  Shuffle,
   SlidersHorizontal,
   Share2,
   Sigma,
@@ -3326,6 +3328,12 @@ function ArtifactStudioEditor({
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [activeCommentRegionId, setActiveCommentRegionId] = useState<string>();
   const [embedsOpen, setEmbedsOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(
+    () =>
+      artifact.blueprintKey !== "document" &&
+      artifact.blueprintKey !== "planner_task" &&
+      artifact.blueprintKey !== "thread_reference",
+  );
   const [versions, setVersions] = useState<SpectraArtifactVersion[]>([]);
   const [historyBusy, setHistoryBusy] = useState<string | null>(null);
   const [previewVersion, setPreviewVersion] =
@@ -3356,6 +3364,38 @@ function ArtifactStudioEditor({
   // explicitly so a freshly opened or AI-updated artifact never advertises
   // unsaved work that the student did not create.
   const userHasEditedRef = useRef(false);
+
+  useEffect(() => {
+    if (mode !== "tab") return;
+    window.dispatchEvent(
+      new CustomEvent("spectra:page-context", {
+        detail: {
+          source: sourceLabel,
+          kind: meta.label,
+          title: artifact.title,
+        },
+      }),
+    );
+    const shareFromShell = () => onShare?.();
+    const moreFromShell = () => {
+      setHistoryOpen(true);
+      void getSpectraArtifactVersions(artifact._id, 100).then((result) => {
+        setVersions(result.versions);
+        setPreviewVersion(
+          result.versions.find((version) => version.after) ??
+            result.versions[0] ??
+            null,
+        );
+      });
+    };
+    window.addEventListener("spectra:page-share", shareFromShell);
+    window.addEventListener("spectra:page-more", moreFromShell);
+    return () => {
+      window.removeEventListener("spectra:page-share", shareFromShell);
+      window.removeEventListener("spectra:page-more", moreFromShell);
+      window.dispatchEvent(new Event("spectra:clear-page-context"));
+    };
+  }, [artifact._id, artifact.title, meta.label, mode, onShare, sourceLabel]);
   // Updating the four editor fields and their baseline is intentionally a
   // single logical reconciliation, but React commits those state updates
   // independently. Without this guard the intermediate render (new baseline,
@@ -3989,17 +4029,17 @@ function ArtifactStudioEditor({
   // shown in their source-of-truth layout. Nesting the generic artifact
   // details rail beside it creates an unusable three-column editor.
   const showDetails =
-    mode === "tab" && !compact && artifact.blueprintKey !== "planner_task";
+    detailsOpen && mode === "tab" && !compact && artifact.blueprintKey !== "planner_task";
   const contentMode = compact ? ("split" as const) : mode;
   const editorLayoutClass = showDetails
     ? mode === "tab"
-      ? "mx-auto grid w-full max-w-[1680px] gap-4 xl:grid-cols-[minmax(0,1fr)_320px]"
-      : "grid gap-5 2xl:grid-cols-[minmax(0,1fr)_280px]"
+      ? "mx-auto grid w-[calc(100%+10px)] max-w-[1690px] gap-3 xl:grid-cols-[minmax(0,1fr)_302px]"
+      : "grid gap-5 2xl:grid-cols-[minmax(0,1fr)_302px]"
     : "block";
   const mainClass =
     artifact.blueprintKey === "document"
       ? "min-h-0 flex-1 overflow-y-auto pb-5"
-      : "min-h-0 flex-1 overflow-y-auto px-5 pb-5 pt-5";
+      : "min-h-0 flex-1 overflow-y-auto pb-5 pl-[15px] pr-0 pt-5";
   const collaboratorCount = live.presence.filter(
     (person) => person.clientId !== live.transport?.clientId,
   ).length;
@@ -4045,9 +4085,33 @@ function ArtifactStudioEditor({
               : live.modelSnapshot.validity === "invalid"
                 ? "Needs attention"
                 : "Synchronized";
+  const quizHeaderQuestions =
+    artifact.blueprintKey === "quiz" ? quizQuestions(editorContent) : [];
+  const quizHeaderMinutes = Math.max(
+    1,
+    Math.ceil(
+      quizHeaderQuestions.reduce(
+        (total, question) => total + (question.timeLimitSeconds ?? 90),
+        0,
+      ) / 60,
+    ),
+  );
+  const quizHeaderDifficulty = quizHeaderQuestions.some(
+    (question) => question.difficulty === "hard",
+  )
+    ? "Hard"
+    : quizHeaderQuestions.length > 0 &&
+        quizHeaderQuestions.every((question) => question.difficulty === "easy")
+      ? "Easy"
+      : "Medium";
+  const visibleIdentityTags = tagDraft
+    .split(",")
+    .map((tag) => tag.trim())
+    .filter(Boolean)
+    .slice(0, 3);
   const identityBlock = (
     <div
-      className={`mx-auto flex w-full max-w-[1120px] items-start ${compact ? "gap-3 px-5 pb-5 pt-5" : "gap-4 px-7 pb-7 pt-8 sm:px-10"}`}
+      className={`spectra-artifact-identity flex w-full items-start ${compact ? "gap-3 px-5 pb-5 pt-5" : artifact.blueprintKey === "document" ? "gap-4 px-6 pb-2 pt-6" : artifact.blueprintKey === "quiz" ? "gap-[10px] px-2 pb-0 pt-1" : "gap-4 px-1 pb-2 pt-1"}`}
     >
       <span
         className="mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-[9px] border border-[color-mix(in_oklab,currentColor_24%,transparent)] bg-[color-mix(in_oklab,currentColor_9%,var(--bg-elevated))]"
@@ -4056,6 +4120,9 @@ function ArtifactStudioEditor({
         <Icon className="h-5 w-5" />
       </span>
       <div className="min-w-0 flex-1">
+        <div className="mb-1 text-[9px] font-semibold uppercase tracking-[.13em] text-[var(--text-tertiary)]">
+          {meta.label}
+        </div>
         <div
           className="rounded-[7px]"
           data-ai-region={
@@ -4072,12 +4139,12 @@ function ArtifactStudioEditor({
               setActiveCommentRegionId("metadata:title");
               live.transport?.setPresence({ activeRegionId: "metadata:title" });
             }}
-            className={`min-h-10 w-full resize-none overflow-hidden bg-transparent font-display font-semibold leading-tight text-[var(--text-primary)] outline-none [field-sizing:content] ${compact ? "text-[26px]" : "text-[clamp(24px,2vw,34px)]"}`}
+            className={`min-h-8 w-full resize-none overflow-hidden bg-transparent font-display font-semibold leading-tight text-[var(--text-primary)] outline-none [field-sizing:content] ${compact ? "text-[26px]" : "text-[28px]"}`}
             placeholder="Untitled artifact"
           />
         </div>
         <div
-          className="mt-1.5 rounded-[7px]"
+          className="mt-0.5 rounded-[7px]"
           data-ai-region={
             (aiPreviewActive && artifact.aiPreview?.summary !== undefined) ||
             undefined
@@ -4093,11 +4160,58 @@ function ArtifactStudioEditor({
               });
             }}
             onChange={(event) => changeBase({ summary: event.target.value })}
-            className="w-full bg-transparent text-[13px] leading-6 text-[var(--text-secondary)] outline-none placeholder:text-[var(--text-tertiary)]"
+            className="w-full bg-transparent text-[12px] leading-5 text-[var(--text-secondary)] outline-none placeholder:text-[var(--text-tertiary)]"
             placeholder="Short useful summary"
           />
         </div>
+        {artifact.blueprintKey === "quiz" && visibleIdentityTags.length ? (
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            {visibleIdentityTags.map((tag) => (
+              <span
+                key={tag}
+                className="rounded-[6px] bg-[#eaf8f2] px-2 py-1 text-[10px] font-medium text-[#27836a]"
+              >
+                {tag}
+              </span>
+            ))}
+            <button
+              type="button"
+              aria-label="Add quiz tag"
+              className="grid size-6 place-items-center rounded-[6px] border border-[var(--border-default)] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]"
+              onClick={() => setDetailsOpen(true)}
+            >
+              <Plus className="h-3 w-3" />
+            </button>
+          </div>
+        ) : null}
       </div>
+      {artifact.blueprintKey === "quiz" && !compact ? (
+        <div className="mr-3.5 hidden w-[292px] shrink-0 flex-col items-stretch gap-2 lg:flex">
+          <div className="grid h-16 grid-cols-3 overflow-hidden rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-primary)]">
+            {[
+              [String(quizHeaderQuestions.length), "Questions"],
+              [`${quizHeaderMinutes} min`, "Est. time"],
+              [quizHeaderDifficulty, "Difficulty"],
+            ].map(([value, label], index) => (
+              <span
+                key={label}
+                className={`grid place-items-center content-center gap-1 ${index ? "border-l border-[var(--border-subtle)]" : ""}`}
+              >
+                <strong className="font-display text-[16px] text-[var(--text-primary)]">
+                  {value}
+                </strong>
+                <small className="text-[9px] text-[var(--text-tertiary)]">
+                  {label}
+                </small>
+              </span>
+            ))}
+          </div>
+          <span className="inline-flex items-center justify-start gap-1.5 text-[10px] text-[var(--text-secondary)]">
+            <CheckCircle2 className="h-3.5 w-3.5 text-[var(--success)]" />
+            {syncLabel === "Synchronized" ? "Auto-saved" : syncLabel}
+          </span>
+        </div>
+      ) : (
       <div className="hidden shrink-0 items-center gap-2 sm:flex">
         <span className="inline-flex items-center gap-1.5 text-[11px] text-[var(--text-secondary)]">
           {syncLabel === "Synchronized" ? (
@@ -4135,6 +4249,7 @@ function ArtifactStudioEditor({
                 : "Synced"}
         </button>
       </div>
+      )}
     </div>
   );
 
@@ -4152,7 +4267,7 @@ function ArtifactStudioEditor({
           ))}
         </div>
       ) : null}
-      <header className="spectra-artifact-header flex h-12 shrink-0 items-center justify-between gap-4 bg-transparent px-5">
+      <header className={`${mode === "tab" ? "hidden" : "flex"} spectra-artifact-header h-12 shrink-0 items-center justify-between gap-4 bg-transparent px-5`}>
         <div
           className={`${compact ? "hidden" : "flex"} min-w-0 items-center gap-2 text-[11px] text-[var(--text-secondary)]`}
         >
@@ -4190,6 +4305,13 @@ function ArtifactStudioEditor({
             onClick={() => setEmbedsOpen(true)}
             icon={Link2}
           />
+          {mode === "tab" && artifact.blueprintKey !== "planner_task" ? (
+            <IconButton
+              label={detailsOpen ? "Close details" : "Open details"}
+              onClick={() => setDetailsOpen((open) => !open)}
+              icon={PanelRight}
+            />
+          ) : null}
           {mode === "split" ? (
             <IconButton
               label="Open as tab"
@@ -4469,6 +4591,8 @@ function ArtifactStudioEditor({
               artifacts={artifacts}
               tagDraft={tagDraft}
               onTagDraftChange={(value) => changeBase({ tagDraft: value })}
+              onArchive={onArchive}
+              onOpenArtifact={onOpenArtifact}
             />
           ) : null}
         </div>
@@ -4890,7 +5014,7 @@ function DocumentStudio({
   const [replaceDraft, setReplaceDraft] = useState("");
   const [findCursor, setFindCursor] = useState(0);
   const [focusMode, setFocusMode] = useState(false);
-  const [pageLayout, setPageLayout] = useState<"page" | "continuous">("page");
+  const [pageLayout, setPageLayout] = useState<"page" | "continuous">("continuous");
   const [importReport, setImportReport] = useState<string>();
   const [importError, setImportError] = useState<string>();
   const importRef = useRef<HTMLInputElement>(null);
@@ -6120,6 +6244,7 @@ function FlashcardStudio({
   const [renamingSection, setRenamingSection] = useState<string>();
   const [sectionNameDraft, setSectionNameDraft] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [deckTagDraft, setDeckTagDraft] = useState("");
   const [studyOpen, setStudyOpen] = useState(false);
   const [studyRevealed, setStudyRevealed] = useState(false);
   const [studyIndex, setStudyIndex] = useState(0);
@@ -6298,6 +6423,15 @@ function FlashcardStudio({
   }, [artifactId]);
 
   useEffect(() => {
+    function beginFromInspector(event: Event) {
+      const requestedId = (event as CustomEvent<{ artifactId?: string }>).detail?.artifactId;
+      if (requestedId === artifactId) beginStudySession();
+    }
+    window.addEventListener("spectra:study-deck", beginFromInspector);
+    return () => window.removeEventListener("spectra:study-deck", beginFromInspector);
+  }, [artifactId, cards, studyStates]);
+
+  useEffect(() => {
     let active = true;
     void getArtifactAssets(artifactId)
       .then((result) => {
@@ -6351,6 +6485,16 @@ function FlashcardStudio({
     commit(
       cards.map((card) => (card.id === cardId ? { ...card, ...patch } : card)),
     );
+  }
+
+  function addActiveCardTag() {
+    if (!activeCard) return;
+    const tag = deckTagDraft.trim();
+    if (!tag) return;
+    updateCard(activeCard.id, {
+      tags: [...new Set([...(activeCard.tags ?? []), tag])].slice(0, 8),
+    });
+    setDeckTagDraft("");
   }
 
   function deckMediaUrl(card: DeckCard) {
@@ -7561,7 +7705,7 @@ function FlashcardStudio({
 
   return (
     <div
-      className={`spectra-flashcard-studio grid min-h-[720px] min-w-0 gap-4 ${mode === "tab" ? "lg:grid-cols-[300px_minmax(0,1fr)]" : "grid-cols-1"}`}
+      className={`spectra-flashcard-studio ml-2.5 grid min-h-[720px] min-w-0 gap-3 ${mode === "tab" ? "lg:grid-cols-[330px_minmax(0,1fr)]" : "grid-cols-1"}`}
     >
       <input
         ref={deckMediaInputRef}
@@ -7574,41 +7718,49 @@ function FlashcardStudio({
         }}
       />
       <div
-        className={`grid min-w-0 grid-cols-2 overflow-hidden rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] ${mode === "tab" ? "sm:grid-cols-4 lg:col-span-2" : ""}`}
+        className={`grid w-[580px] max-w-full min-w-0 grid-cols-2 overflow-hidden rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] ${mode === "tab" ? "ml-11 sm:grid-cols-5 lg:col-span-2" : ""}`}
       >
-        <div className="px-4 py-3">
-          <strong className="block font-display text-[18px] text-[var(--text-primary)]">
+        <div className="px-3 py-2">
+          <strong className="block font-display text-[16px] leading-5 text-[var(--text-primary)]">
             {cards.length}
           </strong>
           <span className="text-[10px] text-[var(--text-tertiary)]">Cards</span>
         </div>
-        <div className="border-l border-[var(--border-subtle)] px-4 py-3">
-          <strong className="block font-display text-[18px] text-[var(--text-primary)]">
+        <div className="border-l border-[var(--border-subtle)] px-3 py-2">
+          <strong className="block font-display text-[16px] leading-5 text-[var(--text-primary)]">
             {sections.length}
           </strong>
           <span className="text-[10px] text-[var(--text-tertiary)]">
             Sections
           </span>
         </div>
-        <div className="border-l border-[var(--border-subtle)] px-4 py-3">
-          <strong className="block font-display text-[18px] text-[var(--text-primary)]">
+        <div className="border-l border-[var(--border-subtle)] px-3 py-2">
+          <strong className="block font-display text-[16px] leading-5 text-[var(--text-primary)]">
             {studyStateLoading ? "—" : `${personalMastery}%`}
           </strong>
           <span className="text-[10px] text-[var(--text-tertiary)]">
             Personal mastery
           </span>
         </div>
-        <div className="border-l border-[var(--border-subtle)] px-4 py-3">
-          <strong className="block font-display text-[18px] text-[var(--text-primary)]">
+        <div className="border-l border-[var(--border-subtle)] px-3 py-2">
+          <strong className="block font-display text-[16px] leading-5 text-[var(--text-primary)]">
             {studyStateLoading ? "—" : dueStudyCount}
           </strong>
           <span className="text-[10px] text-[var(--text-tertiary)]">
             Due now
           </span>
         </div>
+        <div className="border-l border-[var(--border-subtle)] px-3 py-2">
+          <strong className="block rounded-[5px] bg-[color-mix(in_oklab,var(--success)_10%,var(--bg-primary))] px-2 py-1 text-center text-[10px] font-semibold text-[var(--success)]">
+            Active
+          </strong>
+          <span className="mt-0.5 block text-center text-[9px] text-[var(--text-tertiary)]">
+            Ready
+          </span>
+        </div>
       </div>
       <div
-        className={`flex min-w-0 flex-wrap items-center gap-2 ${mode === "tab" ? "lg:col-span-2" : ""}`}
+        className={`spectra-deck-toolbar flex min-w-0 flex-wrap items-center gap-2 ${mode === "tab" ? "lg:col-span-2" : ""}`}
       >
         <button
           type="button"
@@ -7654,7 +7806,7 @@ function FlashcardStudio({
             beginStudySession();
           }}
           disabled={!studyCards.length}
-          className="inline-flex h-9 items-center gap-2 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-primary)] disabled:opacity-40"
+          className="spectra-deck-study-trigger inline-flex h-9 items-center gap-2 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-primary)] disabled:opacity-40"
         >
           <BookOpen className="h-4 w-4" />
           Study
@@ -7670,7 +7822,7 @@ function FlashcardStudio({
           <MoreHorizontal className="h-4 w-4" />
         </button>
         <div
-          className={`${mode === "split" ? "w-full justify-between border-t border-[var(--border-subtle)] pt-2" : "ml-auto"} flex min-w-0 items-center gap-1 text-[11px] text-[var(--text-secondary)]`}
+          className={`spectra-deck-pagination ${mode === "split" ? "w-full justify-between border-t border-[var(--border-subtle)] pt-2" : "ml-auto"} flex min-w-0 items-center gap-1 text-[11px] text-[var(--text-secondary)]`}
         >
           <button
             type="button"
@@ -7715,6 +7867,24 @@ function FlashcardStudio({
             className={iconButtonClass()}
           >
             <ChevronDown className="h-4 w-4 -rotate-90" />
+          </button>
+        </div>
+        <div className="spectra-deck-view-switch flex items-center rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-0.5">
+          <button
+            type="button"
+            data-active={railView === "list" || undefined}
+            onClick={() => setRailView("list")}
+            aria-label="List view"
+          >
+            <List className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            data-active={railView === "grid" || undefined}
+            onClick={() => setRailView("grid")}
+            aria-label="Grid view"
+          >
+            <Grid3X3 className="h-3.5 w-3.5" />
           </button>
         </div>
       </div>
@@ -7865,22 +8035,6 @@ function FlashcardStudio({
               <option value="hard">Hard</option>
             </select>
           </label>
-          <button
-            type="button"
-            data-active={railView === "list" || undefined}
-            onClick={() => setRailView("list")}
-            aria-label="List view"
-          >
-            <List className="h-3.5 w-3.5" />
-          </button>
-          <button
-            type="button"
-            data-active={railView === "grid" || undefined}
-            onClick={() => setRailView("grid")}
-            aria-label="Grid view"
-          >
-            <Grid3X3 className="h-3.5 w-3.5" />
-          </button>
           <button
             type="button"
             onClick={() =>
@@ -8160,11 +8314,11 @@ function FlashcardStudio({
               ) || undefined
             : undefined
         }
-        className="min-w-0 overflow-hidden rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4"
+        className="spectra-deck-card-editor min-w-0 overflow-hidden rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4"
       >
         {activeCard ? (
           <div>
-            <div className="mb-4 flex items-center justify-between">
+            <div className="spectra-deck-card-heading mb-4 flex items-center justify-between">
               <div className="text-[12px] text-[var(--text-secondary)]">
                 Card {cards.findIndex((card) => card.id === activeCard.id) + 1}{" "}
                 of {cards.length}
@@ -8469,6 +8623,10 @@ function FlashcardStudio({
               value={activeCard.back}
               placeholder="Answer"
               onChange={(value) => updateCard(activeCard.id, { back: value })}
+              noteValue={activeCard.hint ?? ""}
+              onNoteChange={(value) =>
+                updateCard(activeCard.id, { hint: value })
+              }
             />
             {activeCard.variant !== "image_occlusion" &&
             activeCard.media?.placement === "back" &&
@@ -8482,68 +8640,43 @@ function FlashcardStudio({
                 />
               </div>
             ) : null}
-            <div
-              className={`mt-4 grid gap-3 ${mode === "tab" ? "md:grid-cols-[1fr_180px]" : "grid-cols-1"}`}
-            >
-              <Field label="Note or hint">
+            <div className="spectra-deck-tag-field mt-3">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">Tags</span>
+              <div className="mt-2 flex min-h-9 flex-wrap items-center gap-1.5">
+                {(activeCard.tags ?? []).map((tag) => (
+                  <span key={tag} className="inline-flex h-7 items-center gap-1 rounded-[6px] border border-[color-mix(in_oklab,#8b6ff0_20%,var(--border-default))] bg-[color-mix(in_oklab,#8b6ff0_6%,var(--bg-elevated))] px-2 text-[10px] text-[var(--text-secondary)]">
+                    {tag}
+                    <button
+                      type="button"
+                      className="grid size-4 place-items-center rounded text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--danger)]"
+                      onClick={() =>
+                        updateCard(activeCard.id, {
+                          tags: (activeCard.tags ?? []).filter((candidate) => candidate !== tag),
+                        })
+                      }
+                      aria-label={`Remove ${tag}`}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                ))}
                 <input
-                  value={activeCard.hint ?? ""}
-                  onChange={(event) =>
-                    updateCard(activeCard.id, { hint: event.target.value })
-                  }
-                  className={inputClass()}
-                  placeholder="Optional hint"
+                  value={deckTagDraft}
+                  onChange={(event) => setDeckTagDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      addActiveCardTag();
+                    }
+                  }}
+                  className="h-7 min-w-24 flex-1 bg-transparent px-1 text-[10px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
+                  placeholder="Add tag"
+                  aria-label="Add card tag"
                 />
-              </Field>
-              <Field label="Confidence">
-                <select
-                  value={activeCard.confidence ?? "unknown"}
-                  onChange={(event) =>
-                    updateCard(activeCard.id, {
-                      confidence: event.target.value as DeckCard["confidence"],
-                    })
-                  }
-                  className={inputClass()}
-                >
-                  <option value="unknown">Unknown</option>
-                  <option value="weak">Weak</option>
-                  <option value="medium">Medium</option>
-                  <option value="strong">Strong</option>
-                </select>
-              </Field>
-            </div>
-            <div className="mt-3 grid gap-3 md:grid-cols-[1fr_220px]">
-              <Field label="Tags">
-                <input
-                  value={(activeCard.tags ?? []).join(", ")}
-                  onChange={(event) =>
-                    updateCard(activeCard.id, {
-                      tags: event.target.value
-                        .split(",")
-                        .map((tag) => tag.trim())
-                        .filter(Boolean)
-                        .slice(0, 8),
-                    })
-                  }
-                  className={inputClass()}
-                  placeholder="biology, basics, respiration"
-                />
-              </Field>
-              <Field label="Section">
-                <select
-                  value={activeCard.section ?? "Section 1"}
-                  onChange={(event) =>
-                    updateCard(activeCard.id, { section: event.target.value })
-                  }
-                  className={inputClass()}
-                >
-                  {sections.map((section) => (
-                    <option key={section} value={section}>
-                      {section}
-                    </option>
-                  ))}
-                </select>
-              </Field>
+                <button type="button" className="inline-flex h-7 items-center gap-1 rounded-[6px] px-2 text-[10px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" onClick={addActiveCardTag}>
+                  <Plus className="h-3 w-3" /> Add tag
+                </button>
+              </div>
             </div>
             <button
               type="button"
@@ -8594,6 +8727,37 @@ function FlashcardStudio({
                       <option value="easy">Easy</option>
                       <option value="medium">Medium</option>
                       <option value="hard">Hard</option>
+                    </select>
+                  </Field>
+                  <Field label="Confidence">
+                    <select
+                      value={activeCard.confidence ?? "unknown"}
+                      onChange={(event) =>
+                        updateCard(activeCard.id, {
+                          confidence: event.target.value as DeckCard["confidence"],
+                        })
+                      }
+                      className={inputClass()}
+                    >
+                      <option value="unknown">Unknown</option>
+                      <option value="weak">Weak</option>
+                      <option value="medium">Medium</option>
+                      <option value="strong">Strong</option>
+                    </select>
+                  </Field>
+                  <Field label="Section">
+                    <select
+                      value={activeCard.section ?? "Section 1"}
+                      onChange={(event) =>
+                        updateCard(activeCard.id, { section: event.target.value })
+                      }
+                      className={inputClass()}
+                    >
+                      {sections.map((section) => (
+                        <option key={section} value={section}>
+                          {section}
+                        </option>
+                      ))}
                     </select>
                   </Field>
                   <Field label="Language">
@@ -9200,6 +9364,7 @@ function QuizStudio({
   const [quizImportReport, setQuizImportReport] = useState<string>();
   const [quizImportError, setQuizImportError] = useState<string>();
   const quizImportRef = useRef<HTMLInputElement>(null);
+  const quizWasReadOnly = useRef(readOnly);
   const [practiceClockNow, setPracticeClockNow] = useState(0);
   const activeQuestion =
     questions.find((question) => question.id === activeQuestionId) ??
@@ -9220,7 +9385,19 @@ function QuizStudio({
   useEffect(() => {
     if (readOnly && (view === "builder" || view === "settings"))
       setView("preview");
-  }, [readOnly, view]);
+    if (quizWasReadOnly.current && !readOnly && !practiceAttempt)
+      setView("builder");
+    quizWasReadOnly.current = readOnly;
+  }, [practiceAttempt, readOnly, view]);
+
+  useEffect(() => {
+    const openPreview = (event: Event) => {
+      const detail = (event as CustomEvent<{ artifactId?: string }>).detail;
+      if (!detail?.artifactId || detail.artifactId === artifactId) setView("preview");
+    };
+    window.addEventListener("spectra:preview-quiz", openPreview);
+    return () => window.removeEventListener("spectra:preview-quiz", openPreview);
+  }, [artifactId]);
 
   useEffect(() => {
     let active = true;
@@ -9902,8 +10079,8 @@ function QuizStudio({
   }
 
   return (
-    <div className="spectra-quiz-studio rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)]">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border-default)] px-4 py-3">
+    <div className="spectra-quiz-studio bg-[var(--bg-elevated)]">
+      <div className="flex min-h-11 flex-wrap items-center justify-between gap-3 border-b border-[var(--border-default)] py-1 pl-1 pr-4">
         <div className="flex items-center gap-3">
           {!readOnly ? (
             <>
@@ -9939,6 +10116,18 @@ function QuizStudio({
           </button>
         </div>
         <div className="flex items-center gap-2">
+          <span className="hidden items-center gap-1.5 text-[10px] text-[var(--text-secondary)] xl:inline-flex">
+            <CheckCircle2 className="h-3.5 w-3.5 text-[var(--success)]" />
+            Auto-saved
+          </span>
+          <button
+            type="button"
+            className={smallActionClass()}
+            onClick={() => setView("preview")}
+          >
+            <Eye className="h-3.5 w-3.5" />
+            Preview
+          </button>
           {!readOnly ? (
             <>
               <input
@@ -9953,7 +10142,7 @@ function QuizStudio({
               />
               <button
                 type="button"
-                className={smallActionClass()}
+                className="sr-only"
                 disabled={quizImporting}
                 onClick={() => quizImportRef.current?.click()}
               >
@@ -9966,7 +10155,7 @@ function QuizStudio({
               </button>
             </>
           ) : null}
-          <details className="spectra-quiz-export-menu relative">
+          <details className="spectra-quiz-export-menu relative sr-only">
             <summary className={smallActionClass()}>
               <FileDown className="h-3.5 w-3.5" />
               <span className="hidden xl:inline">Export</span>
@@ -9997,7 +10186,7 @@ function QuizStudio({
               </button>
             </div>
           </details>
-          <span className="hidden items-center gap-5 rounded-[8px] border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-1.5 text-[10px] text-[var(--text-tertiary)] md:flex">
+          <span className="hidden items-center gap-5 rounded-[8px] border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-1.5 text-[10px] text-[var(--text-tertiary)]">
             <strong className="font-display text-[16px] text-[var(--text-primary)]">
               {questions.length}
             </strong>{" "}
@@ -10038,13 +10227,6 @@ function QuizStudio({
                 ? "Draft changes"
                 : "Private draft"}
           </span>
-          <button
-            type="button"
-            className={smallActionClass()}
-            onClick={() => setView("preview")}
-          >
-            Preview
-          </button>
           {!readOnly ? (
             <>
               <button
@@ -10064,14 +10246,6 @@ function QuizStudio({
                   : published
                     ? "Practice live"
                     : "Publish practice"}
-              </button>
-              <button
-                type="button"
-                className={smallActionClass()}
-                onClick={addQuestion}
-              >
-                <Plus className="h-3.5 w-3.5" />
-                Add question
               </button>
             </>
           ) : published ? (
@@ -10840,20 +11014,28 @@ function QuizStudio({
         </div>
       ) : (
         <div
-          className={`grid min-h-[680px] ${mode === "tab" ? "lg:grid-cols-[310px_minmax(0,1fr)_220px]" : "grid-cols-1"}`}
+          className={`grid min-h-[680px] ${mode === "tab" ? "pr-[10px] lg:grid-cols-[334px_minmax(0,1fr)_202px]" : "grid-cols-1"}`}
         >
           <aside
+            data-quiz-panel="questions"
             className={`${mode === "tab" ? "border-r" : "border-b"} border-[var(--border-default)] p-3`}
           >
-            <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
-              Questions ({questions.length})
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
+                Questions ({questions.length})
+              </span>
+              {!readOnly ? (
+                <button type="button" className={smallActionClass()} onClick={addQuestion}>
+                  <Plus className="h-3.5 w-3.5" /> Add question
+                </button>
+              ) : null}
             </div>
-            <div className="space-y-2">
+            <div className="-mt-1.5 space-y-1.5">
               {questions.map((question, index) => (
                 <button
                   key={question.id}
                   type="button"
-                  className={`grid w-full grid-cols-[28px_minmax(0,1fr)_auto] items-center gap-2 rounded-[8px] border px-2 py-2 text-left ${
+                  className={`grid min-h-11 w-full grid-cols-[28px_auto_minmax(0,1fr)_16px] items-center gap-2 rounded-[8px] border px-2 py-1.5 text-left ${
                     activeQuestion?.id === question.id
                       ? "border-[#8b6ff0] bg-[color-mix(in_oklab,#8b6ff0_6%,var(--bg-primary))]"
                       : "border-[var(--border-default)] bg-[var(--bg-primary)] hover:bg-[var(--bg-hover)]"
@@ -10867,11 +11049,7 @@ function QuizStudio({
                   <span className="rounded-[6px] border border-[var(--border-default)] py-1 text-center text-[12px] text-[var(--text-secondary)]">
                     {index + 1}
                   </span>
-                  <span className="min-w-0">
-                    <span className="block truncate text-[12px] font-medium text-[var(--text-primary)]">
-                      {question.prompt || "Untitled question"}
-                    </span>
-                    <span className="text-[10px] text-[var(--text-tertiary)]">
+                  <span className="rounded-[5px] bg-[color-mix(in_oklab,#8b6ff0_8%,var(--bg-primary))] px-1.5 py-1 text-[9px] font-medium text-[#7560e8]">
                       {
                         {
                           multiple_choice: "MCQ",
@@ -10885,14 +11063,24 @@ function QuizStudio({
                           matching: "Matching",
                         }[question.type]
                       }
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block truncate text-[10px] font-medium text-[var(--text-primary)]">
+                      {question.prompt || "Untitled question"}
                     </span>
                   </span>
                   <GripVertical className="h-3.5 w-3.5 text-[var(--text-tertiary)]" />
                 </button>
               ))}
             </div>
+            {!readOnly ? (
+              <button type="button" className={`${smallActionClass()} mt-2`} onClick={addQuestion}>
+                <Plus className="h-3.5 w-3.5" /> Add question
+              </button>
+            ) : null}
           </aside>
           <section
+            data-quiz-panel="editor"
             data-ai-region={
               activeQuestion
                 ? pathTouches(
@@ -10911,14 +11099,27 @@ function QuizStudio({
                     (question) => question.id === activeQuestion.id,
                   ) + 1
                 }
+                questionCount={questions.length}
                 onChange={(patch) => updateQuestion(activeQuestion.id, patch)}
                 onRemove={() => void removeQuestion(activeQuestion.id)}
+                onDuplicate={() => {
+                  const questionId = id("question");
+                  const duplicate: QuizQuestion = {
+                    ...structuredClone(activeQuestion),
+                    id: questionId,
+                    optionIds: activeQuestion.options.map((_, optionIndex) =>
+                      `${questionId}:option:${optionIndex + 1}`,
+                    ),
+                  };
+                  commit([...questions, duplicate]);
+                  setActiveQuestionId(questionId);
+                }}
               />
             ) : null}
           </section>
-          <aside className="p-4">
+          <aside data-quiz-panel="settings" className="p-3">
             {activeQuestion ? (
-              <div className="space-y-4">
+              <div className="grid gap-3">
                 <Field label="Difficulty">
                   <select
                     value={activeQuestion.difficulty ?? "medium"}
@@ -10980,6 +11181,42 @@ function QuizStudio({
                     <option value="evaluate">Evaluate</option>
                     <option value="create">Create</option>
                   </select>
+                </Field>
+                <Field label="Standards (optional)">
+                  <div className="spectra-quiz-standard-editor">
+                    {(activeQuestion.standards ?? []).map((standard) => (
+                      <span key={standard}>
+                        {standard}
+                        <button
+                          type="button"
+                          aria-label={`Remove ${standard}`}
+                          onClick={() =>
+                            updateQuestion(activeQuestion.id, {
+                              standards: (activeQuestion.standards ?? []).filter(
+                                (item) => item !== standard,
+                              ),
+                            })
+                          }
+                        >
+                          <X className="h-2.5 w-2.5" />
+                        </button>
+                      </span>
+                    ))}
+                    <input
+                      aria-label="Add standard"
+                      placeholder="+ Add standard"
+                      onKeyDown={(event) => {
+                        if (event.key !== "Enter" && event.key !== ",") return;
+                        event.preventDefault();
+                        const value = event.currentTarget.value.trim().replace(/,$/, "");
+                        if (!value) return;
+                        updateQuestion(activeQuestion.id, {
+                          standards: Array.from(new Set([...(activeQuestion.standards ?? []), value])),
+                        });
+                        event.currentTarget.value = "";
+                      }}
+                    />
+                  </div>
                 </Field>
                 <details className="spectra-quiz-advanced">
                   <summary>
@@ -11083,11 +11320,19 @@ function QuizStudio({
                       </button>
                     </>
                   ) : (
-                    <label>
-                      <ImageIcon className="mx-auto mb-2 h-4 w-4" />
-                      {uploadingQuizMedia
-                        ? "Uploading image…"
-                        : "Add question image"}
+                    <label
+                      onDragOver={(event) => event.preventDefault()}
+                      onDrop={(event) => {
+                        event.preventDefault();
+                        const file = event.dataTransfer.files?.[0];
+                        if (file?.type.startsWith("image/")) void uploadQuestionMedia(file);
+                      }}
+                    >
+                      {uploadingQuizMedia ? (
+                        <><Loader2 className="mx-auto mb-2 h-4 w-4 animate-spin" />Uploading image…</>
+                      ) : (
+                        <><span>Drag and drop image</span><span>or</span><strong>Browse</strong></>
+                      )}
                       <input
                         type="file"
                         accept="image/*"
@@ -11411,6 +11656,7 @@ function PlannerStudio({
   const [newPlannerTag, setNewPlannerTag] = useState("");
   const [newSourceRef, setNewSourceRef] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
   const [importingTask, setImportingTask] = useState(false);
   const [taskToolReport, setTaskToolReport] = useState<string>();
 
@@ -11816,7 +12062,7 @@ function PlannerStudio({
 
   return (
     <div
-      className={`spectra-planner-studio grid gap-5 ${mode === "tab" ? "lg:grid-cols-[minmax(0,1fr)_280px]" : "grid-cols-1"}`}
+      className={`spectra-planner-studio grid gap-2 ${mode === "tab" ? "lg:grid-cols-[minmax(0,1fr)_392px]" : "grid-cols-1"}`}
     >
       <fieldset className="contents" disabled={readOnly}>
         <section className="rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
@@ -12008,7 +12254,7 @@ function PlannerStudio({
               ) : null}
             </div>
           ) : null}
-          <div className="mt-4 rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-primary)]">
+          <div className="spectra-planner-advanced mt-4 rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-primary)]">
             <button
               type="button"
               className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left text-[12px] font-semibold text-[var(--text-secondary)]"
@@ -12299,7 +12545,7 @@ function PlannerStudio({
         <aside className="space-y-4">
           <SideCard title="Task blueprint">
             <div className="flex items-center gap-3">
-              <span className="flex h-9 w-9 items-center justify-center rounded-[9px] bg-[color-mix(in_oklab,#d88922_10%,var(--bg-primary))] text-[#d88922]">
+              <span className="flex h-8 w-8 items-center justify-center rounded-[8px] bg-[color-mix(in_oklab,#d88922_10%,var(--bg-primary))] text-[#d88922]">
                 <CalendarCheck2 className="h-4 w-4" />
               </span>
               <div>
@@ -12314,9 +12560,21 @@ function PlannerStudio({
                 Active
               </span>
             </div>
+            <div className="-mt-1 grid grid-cols-2 gap-2">
+              <div className="rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2">
+                <strong className="block text-[12px] font-semibold text-[var(--text-primary)]">{task.status === "done" ? "Completed" : task.status === "doing" ? "In progress" : "Active"}</strong>
+                <span className="text-[10px] text-[var(--text-tertiary)]">State</span>
+              </div>
+              <div className="rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2">
+                <strong className="block text-[12px] font-semibold text-[var(--text-primary)]">Task</strong>
+                <span className="text-[10px] text-[var(--text-tertiary)]">Type</span>
+              </div>
+            </div>
           </SideCard>
           <fieldset className="contents" disabled={readOnly}>
             <SideCard title="Schedule">
+              {scheduleOpen ? (
+                <div className="spectra-planner-schedule-editor">
               <Field
                 label="Starts"
                 aiActive={pathTouches(aiChangedPaths, "/startAt")}
@@ -12371,6 +12629,19 @@ function PlannerStudio({
                   </div>
                 </Field>
               </div>
+                </div>
+              ) : (
+                <div className="spectra-planner-schedule-summary">
+                  <button type="button" onClick={() => setScheduleOpen(true)}>
+                    <span>Starts</span>
+                    <strong>{formatScheduleDateTime(task.startAt)}</strong>
+                  </button>
+                  <button type="button" onClick={() => setScheduleOpen(true)}>
+                    <span>Ends</span>
+                    <strong>{formatScheduleDateTime(task.endAt)}</strong>
+                  </button>
+                </div>
+              )}
               <button
                 type="button"
                 className="mt-3 flex h-9 w-full items-center justify-between rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-[11px] text-[var(--text-secondary)]"
@@ -12386,6 +12657,9 @@ function PlannerStudio({
                   />
                 </span>
               </button>
+              {scheduleOpen ? (
+                <button type="button" className="mt-2 w-full text-center text-[10px] text-[var(--text-tertiary)] hover:text-[var(--text-primary)]" onClick={() => setScheduleOpen(false)}>Done editing schedule</button>
+              ) : null}
             </SideCard>
           </fieldset>
           <div className="contents">
@@ -12595,14 +12869,29 @@ function ThreadReferenceStudio({ content }: { content: unknown }) {
 function QuestionEditor({
   question,
   questionNumber,
+  questionCount,
   onChange,
   onRemove,
+  onDuplicate,
 }: {
   question: QuizQuestion;
   questionNumber: number;
+  questionCount: number;
   onChange: (patch: Partial<QuizQuestion>) => void;
   onRemove: () => void;
+  onDuplicate: () => void;
 }) {
+  const [tagDraft, setTagDraft] = useState("");
+
+  function addTag() {
+    const tag = tagDraft.trim().replace(/^#+/, "");
+    if (!tag) return;
+    if (!(question.tags ?? []).some((candidate) => candidate.toLowerCase() === tag.toLowerCase())) {
+      onChange({ tags: [...(question.tags ?? []), tag] });
+    }
+    setTagDraft("");
+  }
+
   function updateOption(index: number, value: string) {
     const options = [...question.options];
     const previous = options[index] ?? "";
@@ -12617,21 +12906,32 @@ function QuestionEditor({
     });
   }
   return (
-    <div>
+    <div className="spectra-quiz-question-editor">
       <div className="mb-4 flex items-center justify-between">
         <div className="text-[13px] font-semibold text-[var(--text-primary)]">
-          Question {questionNumber}
+          Question {questionNumber} of {questionCount}
         </div>
-        <button
-          type="button"
-          className={iconButtonClass()}
-          onClick={onRemove}
-          aria-label="Remove question"
-        >
-          <Trash2 className="h-4 w-4" />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            className={iconButtonClass()}
+            onClick={onDuplicate}
+            aria-label="Duplicate question"
+          >
+            <Copy className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            className={iconButtonClass()}
+            onClick={onRemove}
+            aria-label="Remove question"
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+        </div>
       </div>
-      <Field label="Type">
+      <div className="spectra-quiz-type-row">
+        <span>Type</span>
         <select
           value={question.type}
           onChange={(event) => {
@@ -12681,15 +12981,24 @@ function QuestionEditor({
           <option value="long_response">Long response</option>
           <option value="matching">Matching</option>
         </select>
-      </Field>
-      <div className="mt-4">
+      </div>
+      <div className="mt-2">
         <Field label="Question">
-          <textarea
-            value={question.prompt}
-            onChange={(event) => onChange({ prompt: event.target.value })}
-            className={textareaClass("min-h-[110px]")}
-            placeholder="Write a clear question"
-          />
+          <div className="spectra-quiz-prompt-editor">
+            <div role="toolbar" aria-label="Question formatting">
+              <strong>B</strong><em>I</em><u>U</u>
+              <Link2 className="h-3.5 w-3.5" />
+              <List className="h-3.5 w-3.5" />
+              <ListOrdered className="h-3.5 w-3.5" />
+              <Code2 className="h-3.5 w-3.5" />
+            </div>
+            <textarea
+              value={question.prompt}
+              onChange={(event) => onChange({ prompt: event.target.value })}
+              className="min-h-[58px] w-full resize-none bg-transparent px-3 py-2 text-[12px] leading-5 text-[var(--text-primary)] outline-none"
+              placeholder="Write a clear question"
+            />
+          </div>
         </Field>
       </div>
       {["multiple_choice", "true_false", "select_all", "ordering"].includes(
@@ -12700,25 +13009,12 @@ function QuestionEditor({
             <h4 className="text-[12px] font-semibold text-[var(--text-secondary)]">
               Answer options
             </h4>
-            <button
-              type="button"
-              className={smallActionClass()}
-              onClick={() =>
-                onChange({
-                  options: [...question.options, ""],
-                  optionIds: [...question.optionIds, id("option")],
-                })
-              }
-            >
-              <Plus className="h-3.5 w-3.5" />
-              Add option
-            </button>
           </div>
-          <div className="space-y-2">
+          <div className="grid gap-1">
             {question.options.map((option, index) => (
               <div
                 key={question.optionIds[index] ?? index}
-                className="grid grid-cols-[28px_minmax(0,1fr)_auto] items-center gap-2"
+                className="grid grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-2"
               >
                 {question.type === "ordering" ? (
                   <span className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--border-default)] text-[11px] font-semibold text-[var(--text-secondary)]">
@@ -12727,7 +13023,7 @@ function QuestionEditor({
                 ) : (
                   <button
                     type="button"
-                    className={`flex h-8 w-8 items-center justify-center rounded-full border ${
+                    className={`flex h-4 w-4 items-center justify-center rounded-full border ${
                       question.type === "select_all"
                         ? (question.correctAnswers ?? []).includes(option) &&
                           option
@@ -12758,9 +13054,9 @@ function QuestionEditor({
                     {(question.type === "select_all"
                       ? (question.correctAnswers ?? []).includes(option)
                       : question.correctAnswer === option) && option ? (
-                      <Check className="h-4 w-4" />
+                      <Check className="h-2.5 w-2.5" />
                     ) : (
-                      <Circle className="h-4 w-4" />
+                      <Circle className="h-2.5 w-2.5" />
                     )}
                   </button>
                 )}
@@ -12855,6 +13151,42 @@ function QuestionEditor({
                 </div>
               </div>
             ))}
+          </div>
+          <div className="mt-2 flex items-center gap-2">
+            <button
+              type="button"
+              className={smallActionClass()}
+              onClick={() =>
+                onChange({
+                  options: [...question.options, ""],
+                  optionIds: [...question.optionIds, id("option")],
+                })
+              }
+            >
+              <Plus className="h-3.5 w-3.5" /> Add option
+            </button>
+            {question.type !== "ordering" ? (
+              <button
+                type="button"
+                className={smallActionClass()}
+                onClick={() => {
+                  const paired = question.options.map((option, index) => ({
+                    option,
+                    optionId: question.optionIds[index] ?? id("option"),
+                  }));
+                  for (let index = paired.length - 1; index > 0; index -= 1) {
+                    const target = Math.floor(Math.random() * (index + 1));
+                    [paired[index], paired[target]] = [paired[target]!, paired[index]!];
+                  }
+                  onChange({
+                    options: paired.map(({ option }) => option),
+                    optionIds: paired.map(({ optionId }) => optionId),
+                  });
+                }}
+              >
+                <Shuffle className="h-3.5 w-3.5" /> Shuffle options
+              </button>
+            ) : null}
           </div>
           <p className="mt-2 text-[9px] text-[var(--text-tertiary)]">
             {question.type === "ordering"
@@ -13048,64 +13380,64 @@ function QuestionEditor({
         </Field>
       </div>
       <div className="mt-4">
-        <Field label="Formative feedback / next step">
-          <textarea
-            value={question.feedback ?? ""}
-            onChange={(event) => onChange({ feedback: event.target.value })}
-            className={textareaClass("min-h-[88px]")}
-            placeholder="Offer a useful next step without turning practice into a grade."
-          />
-        </Field>
-      </div>
-      <div className="mt-4">
-        <Field label="Sources / provenance">
-          <input
-            value={(question.sourceRefs ?? []).join(", ")}
-            onChange={(event) =>
-              onChange({
-                sourceRefs: event.target.value
-                  .split(",")
-                  .map((item) => item.trim())
-                  .filter(Boolean),
-              })
-            }
-            className={inputClass()}
-            placeholder="Textbook p. 42, class notes"
-          />
-        </Field>
-      </div>
-      <div className="mt-4 grid gap-3 md:grid-cols-2">
         <Field label="Tags / topics">
-          <input
-            value={(question.tags ?? []).join(", ")}
-            onChange={(event) =>
-              onChange({
-                tags: event.target.value
-                  .split(",")
-                  .map((item) => item.trim())
-                  .filter(Boolean),
-              })
-            }
-            className={inputClass()}
-            placeholder="glycolysis, basics"
-          />
-        </Field>
-        <Field label="Standards">
-          <input
-            value={(question.standards ?? []).join(", ")}
-            onChange={(event) =>
-              onChange({
-                standards: event.target.value
-                  .split(",")
-                  .map((item) => item.trim())
-                  .filter(Boolean),
-              })
-            }
-            className={inputClass()}
-            placeholder="IB Biology C1.2"
-          />
+          <div className="spectra-quiz-tag-editor">
+            {(question.tags ?? []).map((tag) => (
+              <span key={tag}>
+                {tag}
+                <button
+                  type="button"
+                  aria-label={`Remove ${tag} tag`}
+                  onClick={() => onChange({ tags: (question.tags ?? []).filter((item) => item !== tag) })}
+                >
+                  <X className="h-2.5 w-2.5" />
+                </button>
+              </span>
+            ))}
+            <input
+              value={tagDraft}
+              onChange={(event) => setTagDraft(event.target.value)}
+              onBlur={addTag}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === ",") {
+                  event.preventDefault();
+                  addTag();
+                }
+              }}
+              placeholder="+ Add tag"
+            />
+          </div>
         </Field>
       </div>
+      <details className="spectra-quiz-content-advanced mt-4">
+        <summary>
+          <SlidersHorizontal className="h-3.5 w-3.5" />
+          Feedback and source details
+          <ChevronDown className="ml-auto h-3.5 w-3.5" />
+        </summary>
+        <div className="grid gap-4 pt-3">
+          <Field label="Formative feedback / next step">
+            <textarea
+              value={question.feedback ?? ""}
+              onChange={(event) => onChange({ feedback: event.target.value })}
+              className={textareaClass("min-h-[76px]")}
+              placeholder="Offer a useful next step without turning practice into a grade."
+            />
+          </Field>
+          <Field label="Sources / provenance">
+            <input
+              value={(question.sourceRefs ?? []).join(", ")}
+              onChange={(event) =>
+                onChange({
+                  sourceRefs: event.target.value.split(",").map((item) => item.trim()).filter(Boolean),
+                })
+              }
+              className={inputClass()}
+              placeholder="Textbook p. 42, class notes"
+            />
+          </Field>
+        </div>
+      </details>
     </div>
   );
 }
@@ -13723,11 +14055,15 @@ function StudioDetails({
   artifacts,
   tagDraft,
   onTagDraftChange,
+  onArchive,
+  onOpenArtifact,
 }: {
   artifact: SpectraArtifact;
   artifacts: SpectraArtifact[];
   tagDraft: string;
   onTagDraftChange: (value: string) => void;
+  onArchive?: () => Promise<void> | void;
+  onOpenArtifact: (artifactId: string) => void;
 }) {
   const meta = blueprintMeta[artifact.blueprintKey];
   const Icon = meta.icon;
@@ -13735,7 +14071,10 @@ function StudioDetails({
   const links = linkedArtifacts(artifact, artifacts);
   const [durableLinks, setDurableLinks] = useState<SpectraArtifactLink[]>([]);
   const [linkingId, setLinkingId] = useState<string | null>(null);
+  const [linkPickerOpen, setLinkPickerOpen] = useState(false);
   const [newTag, setNewTag] = useState("");
+  const [tagEditorOpen, setTagEditorOpen] = useState(false);
+  const [duplicating, setDuplicating] = useState(false);
   const [detailsTab, setDetailsTab] = useState<"details" | "history">(
     "details",
   );
@@ -13743,6 +14082,8 @@ function StudioDetails({
     SpectraArtifactVersion[]
   >([]);
   const visibleTags = tagsFromDraft(tagDraft);
+  const detailDeckCards = artifact.blueprintKey === "flashcard_deck" ? deckCards(artifact.content) : [];
+  const detailDeckSections = new Set(detailDeckCards.map((card) => card.section ?? "Section 1")).size;
   useEffect(() => {
     void getSpectraArtifactLinks(artifact._id)
       .then((result) => setDurableLinks(result.links))
@@ -13820,6 +14161,24 @@ function StudioDetails({
     const result = await getSpectraArtifactLinks(artifact._id);
     setDurableLinks(result.links);
   }
+  async function duplicateCurrentArtifact() {
+    setDuplicating(true);
+    try {
+      const result = await postSpectra<{ artifactId: string }>({
+        action: "createArtifact",
+        blueprintKey: artifact.blueprintKey,
+        title: `${artifact.title} copy`,
+        summary: artifact.summary,
+        content: artifact.content,
+        tags: artifact.tags,
+        workspaceId: placements[0]?.workspaceId,
+      });
+      window.dispatchEvent(new Event("spectra:refresh"));
+      onOpenArtifact(result.artifactId);
+    } finally {
+      setDuplicating(false);
+    }
+  }
   return (
     <aside className="spectra-studio-details overflow-hidden rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-primary)]">
       <div className="grid grid-cols-2 border-b border-[var(--border-default)] bg-[var(--bg-elevated)] px-4 pt-1">
@@ -13835,13 +14194,13 @@ function StudioDetails({
           onClick={() => setDetailsTab("history")}
           className={`h-11 border-b-2 text-[12px] font-semibold ${detailsTab === "history" ? "border-[var(--text-primary)] text-[var(--text-primary)]" : "border-transparent text-[var(--text-secondary)]"}`}
         >
-          History
+          Activity
         </button>
       </div>
       {detailsTab === "details" ? (
         <div className="space-y-3 p-3">
-          <SideCard title="Details">
-            <div className="flex items-center gap-2 text-[13px] font-semibold text-[var(--text-primary)]">
+          <SideCard title="Blueprint">
+            <div className="flex items-center gap-2 text-[12px] font-semibold text-[var(--text-primary)]">
               <Icon className="h-4 w-4" style={{ color: meta.color }} />
               {meta.label}
               <span className="ml-auto rounded-[6px] bg-[color-mix(in_oklab,var(--success)_11%,var(--bg-primary))] px-2 py-1 text-[11px] text-[var(--success)]">
@@ -13855,7 +14214,7 @@ function StudioDetails({
                 placements.map((placement) => (
                   <div
                     key={placement.workspaceItemId}
-                    className="rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-[13px] font-medium text-[var(--text-primary)]"
+                    className="rounded-[7px] px-1 py-1 text-[12px] font-medium text-[var(--text-primary)]"
                   >
                     {placement.workspaceTitle}
                     <div className="text-[11px] font-normal text-[var(--text-secondary)]">
@@ -13870,13 +14229,22 @@ function StudioDetails({
               )}
             </div>
           </SideCard>
+          {artifact.blueprintKey === "flashcard_deck" ? (
+            <SideCard title="Deck metrics">
+              <div className="grid grid-cols-3 divide-x divide-[var(--border-subtle)] text-center">
+                <div><strong className="block font-display text-[14px] text-[var(--text-primary)]">{detailDeckCards.length}</strong><span className="text-[9px] text-[var(--text-tertiary)]">Cards</span></div>
+                <div><strong className="block font-display text-[14px] text-[var(--text-primary)]">{detailDeckSections}</strong><span className="text-[9px] text-[var(--text-tertiary)]">Sections</span></div>
+                <div><strong className="block font-display text-[14px] text-[var(--text-primary)]">~{Math.max(1, Math.round(detailDeckCards.length * 0.75))} min</strong><span className="text-[9px] text-[var(--text-tertiary)]">Study time</span></div>
+              </div>
+            </SideCard>
+          ) : null}
           <SideCard title="Linked artifacts">
             <div className="space-y-2">
               {durableLinks.slice(0, 8).map((link) =>
                 link.artifact ? (
                   <div
                     key={link._id}
-                    className="group rounded-[7px] bg-[var(--bg-primary)] px-2 py-1.5 text-[11px] text-[var(--text-primary)]"
+                    className="group rounded-[7px] px-1 py-1.5 text-[11px] text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
                     data-link-direction={link.direction}
                   >
                     <div className="flex items-center gap-2">
@@ -13897,11 +14265,6 @@ function StudioDetails({
                         <X className="h-3 w-3" />
                       </button>
                     </div>
-                    {link.explanation ? (
-                      <div className="mt-1 line-clamp-2 pl-3.5 text-[9px] leading-4 text-[var(--text-tertiary)]">
-                        {link.explanation}
-                      </div>
-                    ) : null}
                   </div>
                 ) : null,
               )}
@@ -13928,10 +14291,29 @@ function StudioDetails({
                   No confirmed links yet.
                 </div>
               ) : null}
+              <button
+                type="button"
+                className="inline-flex h-7 items-center gap-1.5 rounded-[6px] px-1.5 text-[10px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                onClick={() => setLinkPickerOpen((open) => !open)}
+                aria-expanded={linkPickerOpen}
+              >
+                <Plus className="h-3 w-3" /> Link artifact
+              </button>
+              {linkPickerOpen ? (
+                <div className="space-y-1 border-t border-[var(--border-subtle)] pt-2">
+                  {suggestions.map(({ candidate }) => (
+                    <div key={candidate._id} className="flex items-center gap-2 rounded-[5px] px-1 py-1 text-[10px]">
+                      <span className="min-w-0 flex-1 truncate text-[var(--text-secondary)]">{candidate.title}</span>
+                      <button type="button" disabled={linkingId === candidate._id} className="text-[var(--accent-cyan)]" onClick={() => void confirmLink(candidate)}>{linkingId === candidate._id ? "Linking…" : "Add"}</button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
             </div>
           </SideCard>
           {suggestions.length > 0 ? (
-            <SideCard title="Related suggestions">
+            <details open className="spectra-related-artifacts rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
+              <summary className="text-[10px] font-semibold uppercase tracking-[.08em] text-[var(--text-tertiary)]">Related suggestions · {suggestions.length}</summary>
               <div className="space-y-1.5">
                 {suggestions.map(({ candidate }) => (
                   <div
@@ -13954,7 +14336,7 @@ function StudioDetails({
                   </div>
                 ))}
               </div>
-            </SideCard>
+            </details>
           ) : null}
           {artifact.createdFrom ? (
             <SideCard title="Provenance">
@@ -14009,8 +14391,17 @@ function StudioDetails({
                   </button>
                 </span>
               ))}
+              <button
+                type="button"
+                className="grid h-7 w-7 place-items-center rounded-[6px] border border-[var(--border-default)] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                onClick={() => setTagEditorOpen((open) => !open)}
+                aria-label="Add tag"
+                aria-expanded={tagEditorOpen}
+              >
+                <Plus className="h-3.5 w-3.5" />
+              </button>
             </div>
-            <div className="mt-2 flex gap-1.5">
+            {tagEditorOpen ? <div className="mt-2 flex gap-1.5">
               <input
                 value={newTag}
                 onChange={(event) => setNewTag(event.target.value)}
@@ -14044,8 +14435,28 @@ function StudioDetails({
               >
                 <Plus className="h-3.5 w-3.5" />
               </button>
+            </div> : null}
+          </SideCard>
+          <SideCard title={artifact.blueprintKey === "flashcard_deck" ? "Metadata" : "Activity"}>
+            <div className="space-y-2 text-[10px] text-[var(--text-secondary)]">
+              <div className="flex items-center justify-between"><span>Last edited</span><strong className="font-medium text-[var(--text-primary)]">{formatRelativeTime(artifact.updatedAt)}</strong></div>
+              <div className="flex items-center justify-between"><span>Created</span><strong className="font-medium text-[var(--text-primary)]">{formatShortDate(artifact.createdAt)}</strong></div>
             </div>
           </SideCard>
+          {artifact.blueprintKey === "flashcard_deck" || artifact.blueprintKey === "quiz" ? (
+            <SideCard title="Quick actions">
+              <div className="space-y-0.5">
+                {artifact.blueprintKey === "flashcard_deck" ? (
+                  <button type="button" className="spectra-inspector-action" onClick={() => window.dispatchEvent(new CustomEvent("spectra:study-deck", { detail: { artifactId: artifact._id } }))}><BookOpen className="h-3.5 w-3.5" />Study this deck</button>
+                ) : (
+                  <button type="button" className="spectra-inspector-action" onClick={() => window.dispatchEvent(new CustomEvent("spectra:preview-quiz", { detail: { artifactId: artifact._id } }))}><Eye className="h-3.5 w-3.5" />Preview quiz</button>
+                )}
+                <button type="button" className="spectra-inspector-action" disabled={duplicating} onClick={() => void duplicateCurrentArtifact()}><Copy className="h-3.5 w-3.5" />{duplicating ? "Duplicating…" : `Duplicate ${artifact.blueprintKey === "quiz" ? "quiz" : "deck"}`}</button>
+                <button type="button" className="spectra-inspector-action" onClick={() => window.print()}><FileDown className="h-3.5 w-3.5" />Export / print</button>
+                {onArchive ? <button type="button" className="spectra-inspector-action" onClick={() => void onArchive()}><Archive className="h-3.5 w-3.5" />Archive {artifact.blueprintKey === "quiz" ? "quiz" : "deck"}</button> : null}
+              </div>
+            </SideCard>
+          ) : null}
         </div>
       ) : (
         <div className="p-3">
@@ -14089,12 +14500,16 @@ function CardFace({
   placeholder,
   onChange,
   clozeMode = false,
+  noteValue,
+  onNoteChange,
 }: {
   label: string;
   value: string;
   placeholder: string;
   onChange: (value: string) => void;
   clozeMode?: boolean;
+  noteValue?: string;
+  onNoteChange?: (value: string) => void;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -14119,7 +14534,7 @@ function CardFace({
   }
 
   return (
-    <section>
+    <section data-card-face={label.toLowerCase()}>
       <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
         <span>{label}</span>
         {clozeMode ? (
@@ -14140,13 +14555,24 @@ function CardFace({
           </>
         ) : null}
       </div>
-      <textarea
-        ref={textareaRef}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="min-h-[180px] w-full resize-none rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-6 py-8 text-center font-serif text-[24px] leading-snug text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[color-mix(in_oklab,#8b6ff0_55%,var(--border-default))]"
-        placeholder={placeholder}
-      />
+      <div className={onNoteChange ? "spectra-card-face-shell" : undefined}>
+        <textarea
+          ref={textareaRef}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          className="min-h-[180px] w-full resize-none rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-6 py-8 text-center font-serif text-[24px] leading-snug text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[color-mix(in_oklab,#8b6ff0_55%,var(--border-default))]"
+          placeholder={placeholder}
+        />
+        {onNoteChange ? (
+          <input
+            value={noteValue ?? ""}
+            onChange={(event) => onNoteChange(event.target.value)}
+            className="spectra-card-face-note"
+            placeholder="Add a note (optional)"
+            aria-label="Note or hint"
+          />
+        ) : null}
+      </div>
       {clozeMode && clozeParts(value).length ? (
         <div className="mt-2 rounded-[7px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2">
           <span className="mb-1 block text-[9px] font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
@@ -14163,7 +14589,7 @@ function CardFace({
 
 function SideCard({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section data-spectra-card="side" className="p-4">
+    <section data-spectra-card="side" data-side-card-title={title.toLowerCase().replaceAll(" ", "-")} className="p-4">
       <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
         {title}
       </h3>

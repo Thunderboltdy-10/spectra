@@ -26,7 +26,7 @@ export type ArtifactCardView = {
 export const blueprintMeta: Record<ArtifactCardView["blueprintKey"], { label: string; icon: LucideIcon; color: string; soft: string }> = {
   document: { label: "Document", icon: FileText, color: "var(--mode-document)", soft: "color-mix(in oklab, var(--mode-document) 9%, var(--bg-elevated))" },
   thread_reference: { label: "Thread", icon: MessageSquare, color: "#8b6ff0", soft: "color-mix(in oklab, #8b6ff0 10%, var(--bg-elevated))" },
-  flashcard_deck: { label: "Deck", icon: BookOpen, color: "#8b6ff0", soft: "color-mix(in oklab, #8b6ff0 8%, var(--bg-elevated))" },
+  flashcard_deck: { label: "Deck", icon: BookOpen, color: "var(--mode-document)", soft: "color-mix(in oklab, var(--mode-document) 9%, var(--bg-elevated))" },
   quiz: { label: "Quiz", icon: HelpCircle, color: "var(--mode-quiz)", soft: "color-mix(in oklab, var(--mode-quiz) 9%, var(--bg-elevated))" },
   planner_task: { label: "Task", icon: CalendarCheck2, color: "#d47a16", soft: "color-mix(in oklab, #d47a16 10%, var(--bg-elevated))" },
   agent: { label: "Agent", icon: Bot, color: "#1785a5", soft: "color-mix(in oklab, #1785a5 9%, var(--bg-elevated))" },

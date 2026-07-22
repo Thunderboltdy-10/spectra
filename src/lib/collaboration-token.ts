@@ -30,6 +30,6 @@ export async function signCollaborationSession(claims: CollaborationSessionClaim
     .setSubject(claims.accountId)
     .setJti(crypto.randomUUID())
     .setIssuedAt()
-    .setExpirationTime("90s")
+    .setExpirationTime("10m")
     .sign(signingKey());
 }

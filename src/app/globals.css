@@ -186,6 +186,1014 @@
   }
 }
 
+/* Spectra reference system -------------------------------------------------
+   Shared visual contract for every next-generation product surface. The
+   supplied reference collection uses softly coloured paper, crisp ink,
+   quiet one-pixel framing, and saturated semantic accents; pure white panels
+   and undersized utility text make the same layouts look unfinished. */
+:root {
+  --brand-primary: #7458ef;
+  --brand-accent: #159b76;
+  --bg-primary: #f7f6f5;
+  --bg-secondary: #f1efed;
+  --bg-tertiary: #e9e6e3;
+  --bg-sidebar: #faf9f8;
+  --bg-elevated: #fbfaf9;
+  --bg-elevated-rgb: 251, 250, 249;
+  --bg-hover: #eeece9;
+  --text-primary: #1c1a18;
+  --text-secondary: #625d57;
+  --text-tertiary: #918a82;
+  --text-placeholder: #aaa39b;
+  --border-default: #dfdcd8;
+  --border-subtle: #ebe8e5;
+  --border-strong: #c9c4be;
+  --accent-cyan: #168fd2;
+  --accent-violet: #7659ef;
+  --accent-gold: #d89020;
+  --accent-orange: #e9783e;
+  --accent-coral: #ef684f;
+  --accent-mint: #159b76;
+  --mode-document: #159b76;
+  --mode-quiz: #7659ef;
+  --card-paper: #fcfbfa;
+  --card-paper-quiet: #f8f6f3;
+  --card-border: #dedad5;
+  --card-border-soft: #e8e4df;
+  --card-shadow: 0 1px 2px rgba(41, 34, 27, 0.025), 0 10px 28px -25px rgba(41, 34, 27, 0.24);
+  --card-shadow-hover: 0 2px 5px rgba(41, 34, 27, 0.045), 0 18px 38px -28px rgba(41, 34, 27, 0.32);
+  --shadow-sm: 0 1px 2px rgba(41, 34, 27, 0.045);
+  --shadow-card: 0 8px 24px -20px rgba(41, 34, 27, 0.2);
+  --shadow-soft: 0 18px 42px -30px rgba(41, 34, 27, 0.25);
+}
+
+body {
+  background:
+    radial-gradient(circle at 76% -10%, rgba(118, 89, 239, 0.025), transparent 28%),
+    radial-gradient(circle at 8% 108%, rgba(21, 155, 118, 0.022), transparent 32%),
+    var(--bg-primary);
+  letter-spacing: 0;
+}
+
+.spectra-shell-sidebar {
+  background:
+    radial-gradient(circle at 18% 4%, rgba(118, 89, 239, 0.025), transparent 23%),
+    linear-gradient(180deg, #fbfaf9 0%, #faf9f8 48%, #f8f7f5 100%);
+  box-shadow: inset -1px 0 rgba(255, 255, 255, 0.7);
+}
+
+.spectra-global-commandbar,
+.spectra-global-stage {
+  border-color: #dfdcd8 !important;
+  background:
+    radial-gradient(circle at 70% -25%, rgba(118, 89, 239, 0.018), transparent 34%),
+    linear-gradient(180deg, #fcfbfa 0%, #faf9f8 100%) !important;
+  box-shadow: 0 1px 2px rgba(42, 35, 28, 0.025);
+}
+
+.spectra-wave-y {
+  background:
+    radial-gradient(circle at 14% 0%, rgba(21, 155, 118, 0.025), transparent 24%),
+    radial-gradient(circle at 90% 8%, rgba(118, 89, 239, 0.018), transparent 28%),
+    #faf9f8 !important;
+}
+
+.spectra-wave-y :where(.font-display, h1, h2, h3) {
+  color: #1b1917;
+  text-rendering: geometricPrecision;
+}
+
+.spectra-wave-y .text-\[8px\] { font-size: 9px !important; }
+.spectra-wave-y .text-\[9px\] { font-size: 10px !important; }
+.spectra-wave-y .text-\[10px\] { font-size: 11px !important; }
+.spectra-wave-y .text-\[11px\] { font-size: 12px !important; }
+.spectra-wave-y .text-\[12px\] { font-size: 13px !important; }
+
+.spectra-card,
+[data-spectra-card] {
+  border-color: var(--card-border);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.56), rgba(255, 255, 255, 0.08) 52%),
+    var(--card-paper);
+}
+
+.spectra-wave-y :where(button, input, select, textarea) {
+  accent-color: var(--brand-primary);
+}
+
+.spectra-wave-y :where(input, select, textarea):not([class*="bg-transparent"]) {
+  background-color: #fbfaf9;
+}
+
+.spectra-artifact-header,
+.spectra-document-toolbar {
+  border-color: #dfdcd8 !important;
+}
+
+/* The reference editors use one quiet persistence indicator in the global
+   command bar. Keep the artifact identity focused on the object itself. */
+.spectra-artifact-identity > .hidden.shrink-0.items-center {
+  display: none !important;
+}
+
+.spectra-artifact-identity {
+  gap: 12px !important;
+  padding-left: 20px !important;
+  padding-right: 20px !important;
+}
+
+.spectra-artifact-identity > span:first-child {
+  width: 36px !important;
+  height: 36px !important;
+  margin-top: 2px !important;
+  border-radius: 8px !important;
+}
+
+.spectra-document-studio,
+.spectra-document-studio[data-layout="continuous"] .spectra-document-canvas-shell {
+  background:
+    radial-gradient(circle at 16% 2%, rgba(21, 155, 118, 0.02), transparent 24%),
+    #faf9f8 !important;
+}
+
+.spectra-document-studio[data-layout="continuous"] .ProseMirror {
+  color: #292622;
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
+.spectra-document-studio[data-layout="continuous"] .tiptap-root {
+  width: min(720px, calc(100% - 96px));
+  max-width: 720px !important;
+  margin-left: 54px !important;
+  margin-right: auto !important;
+}
+
+.spectra-document-studio > .spectra-document-toolbar {
+  width: min(1088px, calc(100% - 96px));
+  max-width: 1088px;
+  margin-left: 72px !important;
+  margin-right: auto !important;
+}
+
+.spectra-document-studio[data-layout="continuous"] .ProseMirror {
+  padding: 0 0 90px !important;
+}
+
+.spectra-document-studio[data-layout="continuous"] .ProseMirror > :first-child {
+  margin-top: 0 !important;
+}
+
+.spectra-document-studio .spectra-document-editor-hint {
+  display: none !important;
+}
+
+.spectra-document-studio .ProseMirror :is(h1, h2, h3) {
+  font-family: "Fraunces", "Fraunces Fallback", Georgia, serif;
+  font-weight: 600;
+  letter-spacing: -0.018em;
+}
+
+.spectra-document-studio .ProseMirror h2 {
+  font-size: 20px;
+  line-height: 1.28;
+}
+
+/* Mission Control reference geometry (05_home.png).
+   The post-sidebar stage is 1396px in the supplied desktop composition:
+   a 1072px primary paper, 12px gutter, and a 312px operational rail. */
+.spectra-mission-control {
+  --mission-paper: #fffefa;
+  --mission-canvas: #fbfaf7;
+  background: var(--mission-canvas) !important;
+}
+
+.spectra-mission-control-grid {
+  max-width: 1396px;
+  margin-inline: auto;
+  column-gap: 12px !important;
+  row-gap: 0 !important;
+}
+
+.spectra-mission-control-primary {
+  min-width: 0;
+  padding: 24px 24px 0;
+  border: 1px solid var(--border-default);
+  border-bottom: 0;
+  border-radius: 9px 9px 0 0;
+  background: var(--mission-paper);
+}
+
+.spectra-mission-control-workspaces {
+  min-width: 0;
+  padding: 16px 24px 22px;
+  border-inline: 1px solid var(--border-default);
+  background: var(--mission-paper);
+}
+
+.spectra-mission-control-workspaces .spectra-workspace-card-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+}
+
+.spectra-mission-control-workspaces [data-spectra-card="workspace"] {
+  border-color: var(--border-default);
+  background: #fffefa;
+  box-shadow: 0 8px 22px -22px rgba(53, 39, 24, 0.42);
+}
+
+.spectra-mission-control-workspaces [data-spectra-card="workspace"]::before,
+.spectra-mission-control-workspaces [data-spectra-card="workspace"]::after {
+  content: none;
+}
+
+.spectra-mission-control-library {
+  min-width: 0;
+  margin: 0 !important;
+  padding: 2px 24px 24px;
+  border: 1px solid var(--border-default);
+  border-top: 0;
+  border-radius: 0 0 9px 9px;
+  background: var(--mission-paper);
+}
+
+.spectra-mission-control-library > section > div:first-child {
+  margin-top: 0 !important;
+}
+
+.spectra-object-flat-toolbar {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 9px !important;
+  margin-top: 0 !important;
+}
+
+.spectra-object-flat-toolbar > div:first-child {
+  width: 100%;
+  gap: 2px;
+  border-bottom: 1px solid var(--border-default);
+}
+
+.spectra-object-flat-toolbar > div:first-child button {
+  height: 38px;
+  border-radius: 0;
+  padding-inline: 10px;
+  box-shadow: none !important;
+}
+
+.spectra-object-flat-toolbar > div:first-child button:first-child {
+  box-shadow: inset 0 -2px var(--text-primary) !important;
+}
+
+.spectra-object-flat-toolbar > div:last-child {
+  width: 100%;
+  margin-left: 0 !important;
+}
+
+.spectra-object-flat-toolbar > div:last-child > div:last-child {
+  margin-left: auto;
+}
+
+.spectra-object-flat-table {
+  margin-top: 10px !important;
+  border-radius: 0 !important;
+  border-inline: 0 !important;
+  border-bottom: 0 !important;
+}
+
+.spectra-mission-control-rail {
+  width: 312px;
+}
+
+.spectra-mission-control-rail > section {
+  border-color: var(--border-default) !important;
+  border-radius: 8px !important;
+  background: var(--mission-paper) !important;
+  box-shadow: 0 8px 24px -24px rgba(53, 39, 24, 0.34);
+}
+
+@container (max-width: 1180px) {
+  .spectra-mission-control-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+    padding-inline: 16px;
+    row-gap: 12px !important;
+  }
+
+  .spectra-mission-control-rail {
+    width: auto;
+  }
+
+  .spectra-mission-control-workspaces .spectra-workspace-card-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@container (max-width: 660px) {
+  .spectra-mission-control-primary,
+  .spectra-mission-control-workspaces,
+  .spectra-mission-control-library {
+    padding-inline: 16px;
+  }
+
+  .spectra-mission-control-workspaces .spectra-workspace-card-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+/* Shared workspace shell geometry from references 06–09. */
+.spectra-workspace-toolbar {
+  margin-top: 0 !important;
+  min-height: 40px;
+}
+
+.spectra-workspace-pinned-shelf {
+  margin-top: 10px !important;
+}
+
+.spectra-workspace-pinned-shelf [data-spectra-card="pinned"] {
+  height: 105px;
+  min-height: 105px;
+  overflow: hidden;
+  padding: 12px !important;
+}
+
+.spectra-workspace-pinned-shelf [data-spectra-card="pinned"] p {
+  display: none;
+}
+
+.spectra-workspace-pinned-shelf [data-spectra-card="pinned"] .mt-3 {
+  margin-top: 8px !important;
+}
+
+.spectra-workspace-type-index {
+  border-radius: 7px !important;
+}
+
+/* Reference 04 — planner task. Keep the high-frequency task path compact and
+   move configuration-heavy controls beneath the working content. */
+.spectra-artifact-studio[data-blueprint="planner_task"] .spectra-planner-studio {
+  margin-left: 13px !important;
+  margin-top: -7px !important;
+  gap: 8px !important;
+}
+
+.spectra-artifact-studio[data-blueprint="planner_task"] .spectra-planner-studio > fieldset > section {
+  display: flex;
+  flex-direction: column;
+  padding: 16px !important;
+  border-radius: 9px !important;
+}
+
+.spectra-artifact-studio[data-blueprint="planner_task"] .spectra-planner-description > div[role="toolbar"] {
+  min-height: 38px;
+  height: 38px;
+}
+
+.spectra-artifact-studio[data-blueprint="planner_task"] .spectra-planner-description .ProseMirror {
+  min-height: 82px !important;
+}
+
+.spectra-artifact-studio[data-blueprint="planner_task"] .spectra-planner-advanced {
+  order: 20;
+}
+
+.spectra-artifact-studio[data-blueprint="planner_task"] .spectra-planner-studio > aside {
+  display: grid !important;
+  align-content: start;
+  gap: 12px !important;
+  margin-top: -120px !important;
+}
+
+.spectra-artifact-studio[data-blueprint="planner_task"] .spectra-planner-studio > aside > * {
+  margin: 0 !important;
+}
+
+.spectra-artifact-studio[data-blueprint="planner_task"] [data-side-card-title="task-blueprint"] { order: 1; }
+.spectra-artifact-studio[data-blueprint="planner_task"] [data-side-card-title="schedule"] { order: 2; }
+.spectra-artifact-studio[data-blueprint="planner_task"] [data-side-card-title="linked-to"] { order: 3; }
+.spectra-artifact-studio[data-blueprint="planner_task"] [data-side-card-title="created"] { order: 4; }
+.spectra-artifact-studio[data-blueprint="planner_task"] .spectra-planner-studio > aside > button { order: 5; }
+.spectra-artifact-studio[data-blueprint="planner_task"] [data-side-card-title="reminders"] { order: 6; }
+.spectra-artifact-studio[data-blueprint="planner_task"] [data-side-card-title="import-&-export"] { order: 7; }
+
+.spectra-planner-schedule-summary {
+  display: grid;
+  gap: 12px;
+}
+
+.spectra-planner-schedule-summary > button {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  text-align: left;
+}
+
+.spectra-planner-schedule-summary > button > span {
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+.spectra-planner-schedule-summary > button > strong {
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* Quiz authoring follows the reference's fast primary path: question, options,
+   explanation and tags stay visible; review metadata remains one disclosure away. */
+.spectra-quiz-question-editor textarea[class*="min-h-[110px]"] {
+  min-height: 78px !important;
+}
+
+.spectra-quiz-tag-editor,
+.spectra-quiz-standard-editor {
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  border: 1px solid var(--border-default);
+  border-radius: 7px;
+  background: var(--bg-primary);
+  padding: 4px 6px;
+}
+
+.spectra-quiz-tag-editor > span,
+.spectra-quiz-standard-editor > span {
+  display: inline-flex;
+  height: 22px;
+  align-items: center;
+  gap: 4px;
+  border-radius: 5px;
+  background: color-mix(in oklab, #7560e8 8%, var(--bg-primary));
+  padding: 0 7px;
+  color: #6753cf;
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.spectra-quiz-tag-editor > span button,
+.spectra-quiz-standard-editor > span button {
+  display: grid;
+  place-items: center;
+  color: currentColor;
+  opacity: 0.65;
+}
+
+.spectra-quiz-tag-editor > input,
+.spectra-quiz-standard-editor > input {
+  min-width: 86px;
+  flex: 1 1 86px;
+  min-height: 22px !important;
+  height: 22px !important;
+  border: 0 !important;
+  background: transparent !important;
+  padding: 0 3px !important;
+  font-size: 10px;
+  outline: none;
+}
+
+.spectra-quiz-content-advanced {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 10px;
+}
+
+.spectra-quiz-content-advanced > summary {
+  display: flex;
+  height: 28px;
+  cursor: pointer;
+  list-style: none;
+  align-items: center;
+  gap: 7px;
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.spectra-quiz-content-advanced > summary::-webkit-details-marker {
+  display: none;
+}
+
+.spectra-quiz-content-advanced[open] > summary svg:last-child {
+  transform: rotate(180deg);
+}
+
+.spectra-artifact-studio[data-blueprint="quiz"] [data-quiz-panel="editor"] {
+  padding-left: 20px !important;
+  padding-right: 20px !important;
+}
+
+.spectra-quiz-question-editor section.mt-4 .space-y-2 > :not([hidden]) ~ :not([hidden]) {
+  margin-top: 5px !important;
+}
+
+.spectra-quiz-question-editor section.mt-4 .space-y-2 > :not(:last-child) {
+  margin-block-end: 5px !important;
+}
+
+.spectra-quiz-question-editor section.mt-4 .space-y-2 {
+  display: grid;
+  gap: 4px !important;
+}
+
+.spectra-quiz-question-editor section.mt-4 .space-y-2 > * {
+  margin: 0 !important;
+}
+
+.spectra-quiz-question-editor section.mt-4 > p.mt-2 {
+  margin-top: 4px !important;
+}
+
+.spectra-quiz-question-editor > .mt-4 {
+  margin-top: 11px !important;
+}
+
+.spectra-artifact-studio[data-blueprint="quiz"] [data-quiz-panel="settings"] {
+  padding-top: 32px !important;
+}
+
+.spectra-artifact-studio[data-blueprint="quiz"] [data-quiz-panel="settings"] :is(input, select) {
+  min-height: 32px !important;
+  height: 32px !important;
+}
+
+.spectra-artifact-studio[data-blueprint="quiz"] [data-quiz-panel="settings"] .spectra-quiz-media {
+  order: 6;
+  position: relative;
+  margin-top: 40px;
+}
+
+.spectra-artifact-studio[data-blueprint="quiz"] [data-quiz-panel="settings"] .spectra-quiz-media::before {
+  content: "Media (optional)";
+  position: absolute;
+  top: -25px;
+  left: 0;
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.spectra-quiz-media > label:only-child > span {
+  display: block;
+  line-height: 16px;
+}
+
+.spectra-quiz-media > label:only-child > strong {
+  margin-top: 2px;
+  color: var(--success);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.spectra-artifact-studio[data-blueprint="quiz"] [data-quiz-panel="settings"] .spectra-quiz-advanced {
+  order: 7;
+}
+
+/* Reference 04 uses a wide operational rail that begins beside the title,
+   while the editable task sheet retains a compact 30px inner gutter. */
+.spectra-artifact-studio[data-blueprint="planner_task"] .spectra-planner-studio {
+  margin-left: 13px;
+  margin-top: -2px;
+}
+
+.spectra-artifact-studio[data-blueprint="planner_task"] .spectra-planner-studio > aside {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  margin-top: -120px;
+}
+
+.spectra-artifact-studio[data-blueprint="planner_task"] .spectra-planner-studio > aside > * {
+  margin: 0 !important;
+}
+
+.spectra-artifact-studio[data-blueprint="planner_task"] [data-side-card-title="task-blueprint"] { order: 1; }
+.spectra-artifact-studio[data-blueprint="planner_task"] [data-side-card-title="schedule"] { order: 2; }
+.spectra-artifact-studio[data-blueprint="planner_task"] [data-side-card-title="linked-to"] { order: 3; }
+.spectra-artifact-studio[data-blueprint="planner_task"] [data-side-card-title="created"] { order: 4; }
+.spectra-artifact-studio[data-blueprint="planner_task"] .spectra-planner-studio > aside > button { order: 5; }
+.spectra-artifact-studio[data-blueprint="planner_task"] [data-side-card-title="reminders"] { order: 6; }
+.spectra-artifact-studio[data-blueprint="planner_task"] [data-side-card-title="import-&-export"] { order: 7; }
+
+.spectra-planner-schedule-summary {
+  display: grid;
+  gap: 12px;
+}
+
+.spectra-planner-schedule-summary > button {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  text-align: left;
+}
+
+.spectra-planner-schedule-summary > button > span {
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+.spectra-planner-schedule-summary > button > strong {
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.spectra-planner-schedule-summary > button:hover > strong {
+  color: var(--studio-accent);
+}
+
+/* Flashcard reference composition: compact identity, a quiet three-zone
+   toolbar, and a 330px rail separated from the card canvas by breathing room. */
+.spectra-artifact-studio[data-blueprint="flashcard_deck"] .spectra-artifact-identity {
+  padding-left: 8px !important;
+  padding-right: 8px !important;
+  padding-top: 6px !important;
+  padding-bottom: 10px !important;
+}
+
+.spectra-artifact-studio[data-blueprint="flashcard_deck"] .spectra-artifact-identity textarea {
+  display: block;
+  min-height: 30px !important;
+  font-size: 25px !important;
+  line-height: 1.25 !important;
+}
+
+.spectra-flashcard-studio > input + div > div {
+  padding-top: 4px !important;
+  padding-bottom: 4px !important;
+}
+
+.spectra-flashcard-studio {
+  position: relative;
+  column-gap: 46px !important;
+  row-gap: 12px !important;
+  padding-right: 18px;
+}
+
+.spectra-flashcard-studio > aside > div:first-child,
+.spectra-flashcard-studio .spectra-deck-searchbar {
+  display: none !important;
+}
+
+.spectra-deck-toolbar {
+  position: relative;
+  min-height: 36px;
+  padding-right: 0;
+}
+
+.spectra-deck-study-trigger {
+  display: none !important;
+}
+
+.spectra-deck-menu-trigger {
+  position: absolute !important;
+  top: -59px;
+  left: 588px;
+  z-index: 2;
+}
+
+.spectra-deck-pagination {
+  position: absolute;
+  left: calc(376px + (100% - 394px) / 2);
+  transform: translateX(-50%);
+}
+
+.spectra-deck-view-switch {
+  position: absolute;
+  right: 0;
+  top: 1px;
+}
+
+.spectra-deck-view-switch button {
+  display: grid;
+  width: 31px;
+  height: 30px;
+  place-items: center;
+  border-radius: 5px;
+  color: var(--text-secondary);
+}
+
+.spectra-deck-view-switch button[data-active="true"] {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.spectra-deck-card-editor {
+  border: 0 !important;
+  background: transparent !important;
+  padding: 5px 18px 24px !important;
+}
+
+.spectra-deck-card-heading {
+  display: none !important;
+}
+
+.spectra-deck-card-editor .spectra-deck-swap {
+  box-shadow: 0 3px 10px rgba(30, 26, 23, 0.08);
+}
+
+.spectra-deck-card-editor .my-3:has(> .spectra-deck-swap) {
+  margin-top: 0 !important;
+  margin-bottom: -13px !important;
+  transform: translateY(-5px);
+}
+
+.spectra-deck-card-editor [data-card-face="front"] textarea {
+  min-height: 168px !important;
+  height: 168px;
+  padding: 26px 28px !important;
+  font-size: 20px !important;
+  line-height: 1.35 !important;
+}
+
+.spectra-card-face-shell {
+  overflow: hidden;
+  border: 1px solid var(--border-default);
+  border-radius: 9px;
+  background: var(--bg-primary);
+  box-shadow: 0 18px 42px -34px rgba(57, 38, 97, 0.38);
+}
+
+.spectra-deck-card-editor [data-card-face="back"] textarea {
+  display: block;
+  min-height: 120px !important;
+  height: 120px;
+  border: 0 !important;
+  border-radius: 0 !important;
+  padding: 22px 28px !important;
+  font-size: 20px !important;
+  line-height: 1.35 !important;
+  box-shadow: none !important;
+}
+
+.spectra-card-face-note {
+  display: block;
+  width: 100%;
+  height: 56px;
+  border: 0;
+  border-top: 1px solid var(--border-default);
+  background: color-mix(in oklab, var(--bg-elevated) 84%, transparent) !important;
+  padding: 0 16px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  outline: none;
+}
+
+.spectra-card-face-note::placeholder {
+  color: var(--text-tertiary);
+}
+
+/* Final inspector and deck metadata overrides. */
+.spectra-deck-tag-field {
+  margin-top: 32px !important;
+}
+
+.spectra-studio-details {
+  height: calc(100dvh - 148px) !important;
+  margin-top: -20px !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain;
+  transform: translateY(-20px);
+}
+
+.spectra-artifact-studio[data-blueprint="flashcard_deck"] .spectra-studio-details > div:last-child {
+  max-height: none !important;
+  overflow: visible !important;
+}
+
+.spectra-artifact-studio[data-blueprint="flashcard_deck"] .spectra-related-artifacts,
+.spectra-artifact-studio[data-blueprint="flashcard_deck"] .spectra-studio-details > div > section:nth-of-type(5) {
+  display: none !important;
+}
+
+.spectra-inspector-action {
+  display: flex;
+  width: 100%;
+  height: 27px;
+  align-items: center;
+  gap: 8px;
+  border-radius: 6px;
+  padding: 0 3px;
+  font-size: 10px;
+  color: var(--text-secondary);
+  text-align: left;
+}
+
+.spectra-inspector-action:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.spectra-inspector-action:disabled {
+  opacity: 0.48;
+}
+
+.spectra-deck-tag-field {
+  margin-top: 32px !important;
+}
+
+.spectra-studio-details {
+  height: calc(100dvh - 148px);
+  margin-top: -20px;
+  overflow-y: auto !important;
+  overscroll-behavior: contain;
+}
+
+.spectra-artifact-studio[data-blueprint="flashcard_deck"] .spectra-related-artifacts,
+.spectra-artifact-studio[data-blueprint="flashcard_deck"] .spectra-studio-details > div > section:nth-of-type(5) {
+  display: none !important;
+}
+
+.spectra-inspector-action {
+  display: flex;
+  width: 100%;
+  height: 27px;
+  align-items: center;
+  gap: 8px;
+  border-radius: 6px;
+  padding: 0 3px;
+  font-size: 10px;
+  color: var(--text-secondary);
+  text-align: left;
+}
+
+.spectra-inspector-action:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.spectra-inspector-action:disabled {
+  opacity: 0.48;
+}
+
+/* Reference 03: compact, full-height formative quiz authoring surface. */
+.spectra-artifact-studio[data-blueprint="quiz"] .spectra-artifact-main {
+  padding-bottom: 0;
+}
+
+.spectra-artifact-studio[data-blueprint="quiz"] .spectra-artifact-identity textarea {
+  min-height: 27px;
+  line-height: 1;
+}
+
+.spectra-artifact-studio[data-blueprint="quiz"] .spectra-artifact-identity > div:nth-child(2) > div:nth-child(3) {
+  margin-top: -1px;
+}
+
+.spectra-artifact-studio[data-blueprint="quiz"] .spectra-artifact-identity > div:nth-child(2) > div:last-child {
+  margin-top: 5px;
+}
+
+.spectra-quiz-studio {
+  border-top: 1px solid var(--border-default);
+}
+
+.spectra-quiz-studio [data-quiz-panel="questions"] {
+  padding: 12px 10px;
+}
+
+.spectra-quiz-studio [data-quiz-panel="editor"] {
+  padding: 12px 20px;
+}
+
+.spectra-quiz-studio [data-quiz-panel="settings"] {
+  background: color-mix(in oklab, var(--bg-secondary) 24%, var(--bg-elevated));
+}
+
+.spectra-quiz-question-editor > .mb-4 {
+  margin-bottom: 10px;
+}
+
+.spectra-quiz-type-row {
+  display: grid;
+  grid-template-columns: 34px 190px;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.spectra-quiz-question-editor > label:first-of-type,
+.spectra-quiz-question-editor > div:first-of-type + label {
+  max-width: 190px;
+}
+
+.spectra-quiz-prompt-editor {
+  overflow: hidden;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  background: var(--bg-primary);
+}
+
+.spectra-quiz-prompt-editor textarea {
+  min-height: 40px !important;
+  height: 44px !important;
+}
+
+.spectra-quiz-prompt-editor > [role="toolbar"] {
+  display: flex;
+  height: 29px;
+  align-items: center;
+  gap: 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 0 11px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.spectra-quiz-question-editor input,
+.spectra-quiz-question-editor select,
+.spectra-quiz-studio [data-quiz-panel="settings"] input,
+.spectra-quiz-studio [data-quiz-panel="settings"] select {
+  min-height: 32px;
+}
+
+.spectra-quiz-question-editor section.mt-4 {
+  margin-top: 12px;
+}
+
+.spectra-quiz-question-editor section.mt-4 .space-y-2 {
+  gap: 5px;
+}
+
+.spectra-quiz-question-editor section.mt-4 input {
+  height: 30px;
+  min-height: 30px;
+}
+
+.spectra-quiz-studio [data-quiz-panel="settings"] > div {
+  gap: 12px;
+}
+
+.spectra-quiz-studio [data-quiz-panel="settings"] .spectra-quiz-media {
+  min-height: 104px;
+}
+
+.spectra-studio-details [data-spectra-card="side"] {
+  padding: 12px;
+}
+
+.spectra-studio-details [data-spectra-card="side"] > h3 {
+  margin-bottom: 8px;
+  font-size: 10px;
+  line-height: 12px;
+}
+
+.spectra-studio-details > div:last-child {
+  gap: 10px;
+}
+
+.spectra-artifact-studio[data-blueprint="quiz"]
+  .spectra-studio-details
+  .spectra-related-artifacts {
+  margin-top: -10px;
+  border-top: 0;
+  border-radius: 0 0 8px 8px;
+  padding: 4px 12px 10px;
+}
+
+.spectra-artifact-studio[data-blueprint="quiz"]
+  .spectra-studio-details
+  .spectra-related-artifacts
+  > summary {
+  display: none;
+}
+
+.spectra-artifact-studio[data-blueprint="quiz"]
+  .spectra-studio-details
+  > div
+  > section:nth-of-type(4) {
+  display: none;
+}
+
+.spectra-flashcard-studio textarea {
+  font-family: var(--font-fraunces), Georgia, serif;
+}
+
+.spectra-studio-details {
+  border-radius: 8px !important;
+  background: #faf9f8 !important;
+}
+
+.spectra-studio-details [data-spectra-card="side"] {
+  border-radius: 8px;
+  box-shadow: none;
+}
+
+.spectra-flashcard-studio textarea {
+  font-family: var(--font-fraunces), Georgia, serif;
+}
+
+.spectra-studio-details {
+  border-radius: 8px !important;
+  background: #faf9f8 !important;
+}
+
+.spectra-studio-details [data-spectra-card="side"] {
+  border-radius: 8px;
+  box-shadow: none;
+}
+
 /* Spectra whiteboard — a quiet spatial surface with deliberate, artifact-aware work. */
 .whiteboard-studio {
   position: relative;
@@ -12175,4 +13183,516 @@ button:not(:disabled),
   .spectra-run-tab-strip [data-run-status] {
     transition: none !important;
   }
+}
+
+/* Canonical reference palette (final cascade boundary). */
+.spectra-artifact-studio[data-blueprint="quiz"]
+  .spectra-quiz-studio
+  [data-quiz-panel="editor"] {
+  padding: 12px 20px;
+}
+
+.spectra-artifact-studio[data-blueprint="quiz"]
+  .spectra-studio-details
+  .spectra-related-artifacts {
+  margin-top: -10px;
+  border-top: 0;
+  border-radius: 0 0 8px 8px;
+  padding: 4px 12px 10px;
+}
+
+.spectra-artifact-studio[data-blueprint="quiz"]
+  .spectra-studio-details
+  .spectra-related-artifacts
+  > summary {
+  display: none;
+}
+
+.spectra-artifact-studio[data-blueprint="quiz"]
+  .spectra-studio-details
+  > div
+  > section:nth-of-type(4) {
+  display: none;
+}
+
+.spectra-artifact-studio[data-blueprint="quiz"] .spectra-artifact-main {
+  padding-bottom: 0;
+}
+
+.spectra-artifact-studio[data-blueprint="quiz"] .spectra-artifact-identity textarea {
+  min-height: 27px;
+  line-height: 1;
+}
+
+.spectra-quiz-studio {
+  border-top: 1px solid var(--border-default);
+}
+
+.spectra-quiz-studio > div:first-child {
+  min-height: 44px;
+}
+
+.spectra-artifact-studio[data-blueprint="quiz"]
+  .spectra-quiz-studio
+  > div:first-child {
+  min-height: 44px;
+  padding-left: 4px;
+  padding-right: 16px;
+}
+
+.spectra-quiz-studio [data-quiz-panel="questions"] {
+  padding: 12px 10px;
+}
+
+.spectra-quiz-studio [data-quiz-panel="editor"] {
+  padding: 12px;
+}
+
+.spectra-quiz-studio [data-quiz-panel="settings"] {
+  padding: 24px 12px 12px;
+  background: color-mix(in oklab, var(--bg-secondary) 24%, var(--bg-elevated));
+}
+
+.spectra-quiz-question-editor > .mb-4 {
+  margin-bottom: 10px;
+}
+
+.spectra-quiz-type-row {
+  display: grid;
+  grid-template-columns: 34px 190px;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.spectra-quiz-prompt-editor {
+  overflow: hidden;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  background: var(--bg-primary);
+}
+
+.spectra-quiz-prompt-editor > [role="toolbar"] {
+  display: flex;
+  height: 29px;
+  align-items: center;
+  gap: 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 0 11px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.spectra-quiz-prompt-editor textarea {
+  min-height: 35px !important;
+  height: 35px !important;
+}
+
+.spectra-quiz-type-row select {
+  min-height: 32px !important;
+  height: 32px !important;
+}
+
+.spectra-quiz-question-editor section.mt-4 {
+  margin-top: 12px;
+}
+
+.spectra-quiz-question-editor section.mt-4 .space-y-2 {
+  gap: 5px;
+}
+
+.spectra-quiz-question-editor section.mt-4 input {
+  min-height: 30px;
+  height: 30px;
+}
+
+.spectra-quiz-studio [data-quiz-panel="settings"] > div {
+  gap: 12px;
+}
+
+.spectra-quiz-studio [data-quiz-panel="settings"] .spectra-quiz-media {
+  min-height: 104px;
+}
+
+.spectra-studio-details [data-spectra-card="side"] {
+  padding: 12px;
+}
+
+.spectra-studio-details [data-spectra-card="side"] > h3 {
+  margin-bottom: 8px;
+  font-size: 10px;
+  line-height: 12px;
+}
+
+.spectra-studio-details > div:last-child {
+  gap: 10px;
+}
+
+.spectra-flashcard-studio textarea {
+  font-family: var(--font-fraunces), Georgia, serif;
+}
+
+.spectra-studio-details {
+  border-radius: 8px !important;
+  background: #faf9f8 !important;
+}
+
+.spectra-studio-details [data-spectra-card="side"] {
+  border-radius: 8px;
+  box-shadow: none;
+}
+
+:root {
+  --brand-primary: #7458ef;
+  --brand-accent: #159b76;
+  --bg-primary: #f7f6f5;
+  --bg-secondary: #f1efed;
+  --bg-tertiary: #e9e6e3;
+  --bg-sidebar: #faf9f8;
+  --bg-elevated: #fbfaf9;
+  --bg-elevated-rgb: 251, 250, 249;
+  --bg-hover: #eeece9;
+  --text-primary: #1c1a18;
+  --text-secondary: #625d57;
+  --text-tertiary: #918a82;
+  --text-placeholder: #aaa39b;
+  --border-default: #dfdcd8;
+  --border-subtle: #ebe8e5;
+  --border-strong: #c9c4be;
+  --accent-cyan: #168fd2;
+  --accent-violet: #7659ef;
+  --accent-gold: #d89020;
+  --accent-orange: #e9783e;
+  --accent-coral: #ef684f;
+  --accent-mint: #159b76;
+  --mode-document: #159b76;
+  --mode-quiz: #7659ef;
+  --card-paper: #fcfbfa;
+  --card-paper-quiet: #f8f6f3;
+  --card-border: #dedad5;
+  --card-border-soft: #e8e4df;
+  --card-shadow: 0 1px 2px rgba(41, 34, 27, 0.025), 0 10px 28px -25px rgba(41, 34, 27, 0.24);
+  --card-shadow-hover: 0 2px 5px rgba(41, 34, 27, 0.045), 0 18px 38px -28px rgba(41, 34, 27, 0.32);
+  --shadow-sm: 0 1px 2px rgba(41, 34, 27, 0.045);
+  --shadow-card: 0 8px 24px -20px rgba(41, 34, 27, 0.2);
+  --shadow-soft: 0 18px 42px -30px rgba(41, 34, 27, 0.25);
+}
+
+body {
+  background:
+    radial-gradient(circle at 76% -10%, rgba(118, 89, 239, 0.025), transparent 28%),
+    radial-gradient(circle at 8% 108%, rgba(21, 155, 118, 0.022), transparent 32%),
+    var(--bg-primary);
+  letter-spacing: 0;
+}
+
+.spectra-shell-sidebar {
+  background:
+    radial-gradient(circle at 18% 4%, rgba(118, 89, 239, 0.025), transparent 23%),
+    linear-gradient(180deg, #fbfaf9 0%, #faf9f8 48%, #f8f7f5 100%);
+  box-shadow: inset -1px 0 rgba(255, 255, 255, 0.7);
+}
+
+.spectra-global-commandbar,
+.spectra-global-stage {
+  border-color: #dfdcd8 !important;
+  background:
+    radial-gradient(circle at 70% -25%, rgba(118, 89, 239, 0.018), transparent 34%),
+    linear-gradient(180deg, #fcfbfa 0%, #faf9f8 100%) !important;
+  box-shadow: 0 1px 2px rgba(42, 35, 28, 0.025);
+}
+
+.spectra-wave-y {
+  background:
+    radial-gradient(circle at 14% 0%, rgba(21, 155, 118, 0.025), transparent 24%),
+    radial-gradient(circle at 90% 8%, rgba(118, 89, 239, 0.018), transparent 28%),
+    #faf9f8 !important;
+}
+
+.spectra-wave-y :where(.font-display, h1, h2, h3) {
+  color: #1b1917;
+  text-rendering: geometricPrecision;
+}
+
+.spectra-wave-y .text-\[8px\] { font-size: 9px !important; }
+.spectra-wave-y .text-\[9px\] { font-size: 10px !important; }
+.spectra-wave-y .text-\[10px\] { font-size: 11px !important; }
+.spectra-wave-y .text-\[11px\] { font-size: 12px !important; }
+.spectra-wave-y .text-\[12px\] { font-size: 13px !important; }
+
+.spectra-card,
+[data-spectra-card] {
+  border-color: var(--card-border);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.56), rgba(255, 255, 255, 0.08) 52%),
+    var(--card-paper);
+}
+
+.spectra-wave-y :where(button, input, select, textarea) {
+  accent-color: var(--brand-primary);
+}
+
+.spectra-wave-y :where(input, select, textarea):not([class*="bg-transparent"]) {
+  background-color: #fbfaf9;
+}
+
+.spectra-artifact-header,
+.spectra-document-toolbar {
+  border-color: #dfdcd8 !important;
+}
+
+.spectra-document-studio,
+.spectra-document-studio[data-layout="continuous"] .spectra-document-canvas-shell {
+  background:
+    radial-gradient(circle at 16% 2%, rgba(21, 155, 118, 0.02), transparent 24%),
+    #faf9f8 !important;
+}
+
+.spectra-document-studio[data-layout="continuous"] .ProseMirror {
+  color: #292622;
+  font-size: 15px;
+  line-height: 1.62;
+}
+
+.spectra-document-studio[data-layout="continuous"] .tiptap-root {
+  width: min(720px, calc(100% - 96px));
+  max-width: 720px !important;
+  margin-left: 54px !important;
+  margin-right: auto !important;
+}
+
+.spectra-document-studio > .spectra-document-toolbar {
+  width: min(1088px, calc(100% - 96px));
+  max-width: 1088px;
+  margin-left: 72px !important;
+  margin-right: auto !important;
+}
+
+.spectra-document-studio[data-layout="continuous"] .ProseMirror {
+  padding: 28px 0 90px !important;
+}
+
+.spectra-document-studio .spectra-document-editor-hint {
+  width: min(720px, calc(100% - 96px));
+  max-width: 720px;
+  margin-left: 54px;
+  margin-right: auto;
+}
+
+/* Reference-editor geometry and hierarchy. This block intentionally lives at
+   the final cascade boundary so every artifact shares the same identity frame. */
+.spectra-artifact-studio[data-blueprint="document"] .spectra-artifact-identity {
+  padding-bottom: 11px !important;
+  gap: 14px !important;
+  padding-left: 20px !important;
+  padding-right: 20px !important;
+}
+
+.spectra-artifact-studio[data-blueprint="document"] .spectra-artifact-identity textarea {
+  display: block;
+}
+
+.spectra-artifact-studio[data-blueprint="document"] .spectra-artifact-identity > div:nth-child(2) > div:has(> input) {
+  margin-top: 5px !important;
+}
+
+.spectra-document-toolbar {
+  min-height: 42px !important;
+  height: 42px;
+  padding-top: 4px !important;
+  padding-bottom: 4px !important;
+}
+
+.spectra-document-studio > .spectra-document-toolbar {
+  margin-left: 70px !important;
+}
+
+.spectra-document-studio[data-layout="continuous"] .tiptap-root,
+.spectra-document-studio .spectra-document-editor-hint {
+  margin-left: 52px !important;
+}
+
+.spectra-document-canvas-shell {
+  padding-top: 20px !important;
+}
+
+.spectra-artifact-studio[data-blueprint="flashcard_deck"] .spectra-studio-details [data-spectra-card="side"] {
+  padding: 10px !important;
+}
+
+.spectra-artifact-studio[data-blueprint="flashcard_deck"] .spectra-studio-details [data-spectra-card="side"] > h3 {
+  margin-bottom: 6px !important;
+}
+
+.spectra-artifact-studio[data-blueprint="flashcard_deck"] [data-side-card-title="tags"] > div:first-of-type {
+  flex-wrap: nowrap !important;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.spectra-artifact-studio[data-blueprint="flashcard_deck"] [data-side-card-title="tags"] > div:first-of-type::-webkit-scrollbar {
+  display: none;
+}
+
+.spectra-artifact-studio[data-blueprint="flashcard_deck"] .spectra-inspector-action {
+  height: 22px;
+}
+
+.spectra-studio-details {
+  transform: translateY(-20px);
+}
+
+.spectra-artifact-studio[data-blueprint="flashcard_deck"] .spectra-studio-details > div:last-child {
+  max-height: none !important;
+  overflow: visible !important;
+}
+
+.spectra-studio-details {
+  height: calc(100dvh - 148px) !important;
+  margin-top: -20px !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain;
+}
+
+.spectra-artifact-studio[data-blueprint="flashcard_deck"] .spectra-related-artifacts,
+.spectra-artifact-studio[data-blueprint="flashcard_deck"] .spectra-studio-details > div > section:nth-of-type(5) {
+  display: none !important;
+}
+
+.spectra-deck-tag-field {
+  margin-top: 32px !important;
+}
+
+.spectra-inspector-action {
+  display: flex;
+  width: 100%;
+  height: 27px;
+  align-items: center;
+  gap: 8px;
+  border-radius: 6px;
+  padding: 0 3px;
+  font-size: 10px;
+  color: var(--text-secondary);
+  text-align: left;
+}
+
+.spectra-inspector-action:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.spectra-inspector-action:disabled {
+  opacity: 0.48;
+}
+
+.spectra-document-studio .ProseMirror :is(h1, h2, h3) {
+  font-family: "Fraunces", "Fraunces Fallback", Georgia, serif !important;
+}
+
+.spectra-artifact-identity > .hidden.shrink-0.items-center {
+  display: none !important;
+}
+
+.spectra-artifact-identity {
+  gap: 12px !important;
+  padding-left: 8px !important;
+  padding-right: 8px !important;
+}
+
+.spectra-artifact-identity > span:first-child {
+  width: 36px !important;
+  height: 36px !important;
+  margin-top: 2px !important;
+  border-radius: 8px !important;
+}
+
+.spectra-document-studio[data-layout="continuous"] .ProseMirror {
+  padding: 0 0 90px !important;
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
+.spectra-document-studio[data-layout="continuous"] .ProseMirror > :first-child {
+  margin-top: 0 !important;
+}
+
+.spectra-document-studio .spectra-document-editor-hint {
+  display: none !important;
+}
+
+.spectra-document-studio .ProseMirror :is(h1, h2, h3) {
+  font-family: var(--font-display), Georgia, serif;
+  font-weight: 600;
+  letter-spacing: -0.018em;
+}
+
+.spectra-document-studio .ProseMirror h2 {
+  font-size: 20px;
+  line-height: 1.28;
+}
+
+/* Final workspace reference overrides. Keep these at the cascade boundary. */
+.spectra-workspace-pinned-shelf [data-spectra-card="pinned"] {
+  height: 105px !important;
+  min-height: 105px !important;
+  overflow: hidden !important;
+  padding: 12px !important;
+}
+
+.spectra-workspace-pinned-shelf [data-spectra-card="pinned"] p {
+  display: none !important;
+}
+
+.spectra-workspace-pinned-shelf [data-spectra-card="pinned"] .mt-3 {
+  margin-top: 7px !important;
+}
+
+.spectra-workspace-toolbar {
+  min-height: 36px !important;
+}
+
+.spectra-workspace-pinned-shelf {
+  margin-top: 0 !important;
+}
+
+.spectra-workspace-header nav[aria-label="Workspace sections"] {
+  width: max-content;
+}
+
+.spectra-workspace-shell-controls {
+  position: absolute !important;
+  z-index: 40 !important;
+  top: 84px !important;
+  right: 32px !important;
+  width: max-content !important;
+}
+
+.spectra-workspace-shell-controls--canvas .spectra-workspace-toolbar > :not(nav) {
+  display: none !important;
+}
+
+.spectra-workspace-canvas > .sticky:first-child {
+  position: absolute !important;
+  z-index: 45 !important;
+  top: -41px !important;
+  right: 392px !important;
+  margin: 0 !important;
+}
+
+.spectra-workspace-canvas > .sticky:first-child > button:first-child,
+.spectra-workspace-canvas > .sticky:first-child > span:last-child,
+.spectra-workspace-canvas > .sticky:first-child > span:nth-last-child(2) {
+  display: none !important;
+}
+
+.spectra-workspace-canvas [data-spectra-card] {
+  height: 102px !important;
+  min-height: 102px !important;
+  overflow: hidden !important;
+  padding: 10px !important;
+}
+
+.spectra-workspace-canvas [data-spectra-card] p {
+  display: none !important;
 }

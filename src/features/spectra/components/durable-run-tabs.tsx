@@ -108,7 +108,9 @@ export function DurableRunTabs({
     if (hydratedSelection.current || tabs.length === 0) return;
     hydratedSelection.current = true;
     if (continuation) return;
-    const selected = tabs.find((tab) => tab.selected && !tab.hiddenAt);
+    const selected = tabs.find(
+      (tab) => tab.selected && !tab.hiddenAt && activeStatuses.has(tab.run.status),
+    );
     if (selected)
       setContinuation({
         id: selected.threadId,
@@ -136,20 +138,14 @@ export function DurableRunTabs({
         !workspaceId || tab.workspaceId === workspaceId || !tab.workspaceId,
     );
     const live = scoped.filter((tab) => activeStatuses.has(tab.run.status));
-    const continued = continuation
-      ? scoped.filter((tab) => tab.threadId === continuation.id)
-      : [];
-    const recent = [...scoped]
-      .sort((a, b) => b.run.updatedAt - a.run.updatedAt)
-      .slice(0, 3);
-    return [...live, ...continued, ...recent]
+    return live
       .filter(
         (tab, index, all) =>
           all.findIndex((candidate) => candidate.threadId === tab.threadId) ===
           index,
       )
       .slice(0, 6);
-  }, [continuation, tabs, workspaceId]);
+  }, [tabs, workspaceId]);
   const hasActive = visible.some(
     (tab) =>
       activeStatuses.has(tab.run.status) &&

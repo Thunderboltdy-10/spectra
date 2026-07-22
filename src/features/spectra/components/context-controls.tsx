@@ -12,6 +12,7 @@ import {
   MessageSquare,
   Search,
   Sparkles,
+  Sprout,
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -29,11 +30,7 @@ import { useSpectraContextStore } from "@/stores/spectra-context-store";
 import { toast } from "sonner";
 
 export type ComposerFocusMode =
-  | "global"
-  | "workspace"
-  | "artifact"
-  | "selection"
-  | "thread";
+  "global" | "workspace" | "artifact" | "selection" | "thread";
 
 export function showContinuationConflict({
   currentTitle,
@@ -302,13 +299,30 @@ export function ContextFocusControl({
       ? `${threadTitle} + ${visibleFocus.length - 1} focus item${visibleFocus.length === 2 ? "" : "s"}`
       : detail;
   const contextCount = new Set(
-    [
-      ...explicit,
-      ...includedVisible,
-    ]
+    [...explicit, ...includedVisible]
       .filter((item) => !item.stale)
       .map((item) => `${item.type}:${item.id}`),
   ).size;
+  const triggerLabel =
+    mode === "thread" && threadTitle
+      ? threadTitle
+      : mode === "artifact" && artifact
+        ? artifact.title
+        : mode === "workspace" && workspace
+          ? workspace.title
+          : mode === "selection"
+            ? `${selectedCount ?? contextCount} selected`
+            : "All workspaces";
+  const TriggerIcon =
+    mode === "thread"
+      ? MessageSquare
+      : mode === "artifact"
+        ? FileText
+        : mode === "workspace"
+          ? Sprout
+          : mode === "selection"
+            ? Files
+            : Globe2;
   return (
     <div ref={ref} className="relative flex min-w-0 shrink-0 self-stretch">
       <button
@@ -329,18 +343,19 @@ export function ContextFocusControl({
           setOpen((value) => !value);
         }}
         data-focus-state={mode}
-        className="group flex h-full min-w-[78px] items-center justify-center gap-1 bg-[color-mix(in_oklab,var(--accent-cyan)_8%,var(--bg-primary))] px-2.5 text-[11px] text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
+        className="group flex h-full min-w-[78px] max-w-[190px] items-center justify-center gap-1.5 px-3 text-[11.5px] font-semibold text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
         aria-label="Choose AI context"
         aria-expanded={open}
         aria-controls="spectra-context-browser"
         title={focusSummary || "Choose what Spectra will use"}
       >
-        <span className="truncate font-medium">Context</span>
-        <span className="tabular-nums text-[var(--text-tertiary)]">
-          {contextCount || selectedCount || 0}
-        </span>
+        <TriggerIcon
+          className="h-3.5 w-3.5 shrink-0 text-[var(--brand-accent)]"
+          strokeWidth={2}
+        />
+        <span className="truncate">{triggerLabel}</span>
         <ChevronDown
-          className={`h-3 w-3 shrink-0 transition-transform duration-200 ${open ? "rotate-180" : ""}`}
+          className={`h-3 w-3 shrink-0 text-[var(--text-tertiary)] transition-transform duration-200 ${open ? "rotate-180" : ""}`}
         />
       </button>
       <>
@@ -382,9 +397,14 @@ export function ContextFocusControl({
                     </button>
                   </div>
                 ) : (
-                  <div className="mx-1 mb-2 flex min-h-11 items-center gap-2 rounded-[8px] border border-dashed border-[var(--border-default)] px-2.5 py-2 text-[12px] font-medium text-[var(--text-secondary)]"><MessageSquare className="h-4 w-4" />New chat<span className="sr-only">
-                    None selected — the next message starts a new thread.
-                  </span><Check className="ml-auto h-3.5 w-3.5 text-[var(--accent-cyan)]" /></div>
+                  <div className="mx-1 mb-2 flex min-h-11 items-center gap-2 rounded-[8px] border border-dashed border-[var(--border-default)] px-2.5 py-2 text-[12px] font-medium text-[var(--text-secondary)]">
+                    <MessageSquare className="h-4 w-4" />
+                    New chat
+                    <span className="sr-only">
+                      None selected — the next message starts a new thread.
+                    </span>
+                    <Check className="ml-auto h-3.5 w-3.5 text-[var(--accent-cyan)]" />
+                  </div>
                 )}
                 <div className="mx-1 mb-1 border-t border-[var(--border-subtle)] px-1 pb-1.5 pt-2 text-[11px] font-semibold text-[var(--text-secondary)]">
                   Also use
@@ -432,16 +452,18 @@ export function ContextFocusControl({
                             ),
                         )
                         .map((item) => (
-                            <span
-                              key={`visible:${item.type}:${item.id}`}
-                              className="inline-flex max-w-full items-center gap-1 rounded-[6px] bg-[color-mix(in_oklab,var(--accent-cyan)_9%,var(--bg-secondary))] px-1.5 py-1 text-[10px] font-medium text-[var(--text-secondary)]"
-                              title="Included because it is visible"
-                            >
-                              <span className="max-w-[240px] truncate">
-                                {item.label}
-                              </span>
-                              <span className="text-[var(--text-tertiary)]">visible</span>
+                          <span
+                            key={`visible:${item.type}:${item.id}`}
+                            className="inline-flex max-w-full items-center gap-1 rounded-[6px] bg-[color-mix(in_oklab,var(--accent-cyan)_9%,var(--bg-secondary))] px-1.5 py-1 text-[10px] font-medium text-[var(--text-secondary)]"
+                            title="Included because it is visible"
+                          >
+                            <span className="max-w-[240px] truncate">
+                              {item.label}
                             </span>
+                            <span className="text-[var(--text-tertiary)]">
+                              visible
+                            </span>
+                          </span>
                         ))}
                     </div>
                   </div>
@@ -483,7 +505,10 @@ export function ContextFocusControl({
                             label: item.title,
                             workspaceId: item.placements?.[0]?.workspaceId,
                             source: "explicit",
-                            capability: item.blueprintKey === "thread_reference" ? "context" : "tile",
+                            capability:
+                              item.blueprintKey === "thread_reference"
+                                ? "context"
+                                : "tile",
                           })
                         }
                         className="flex w-full items-center gap-2 rounded-[7px] px-2 py-2 text-left hover:bg-[var(--bg-hover)]"

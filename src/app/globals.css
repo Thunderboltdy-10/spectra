@@ -192,70 +192,61 @@
    quiet one-pixel framing, and saturated semantic accents; pure white panels
    and undersized utility text make the same layouts look unfinished. */
 :root {
-  --brand-primary: #7458ef;
+  --brand-primary: #7b5cf5;
   --brand-accent: #159b76;
-  --bg-primary: #f7f6f5;
-  --bg-secondary: #f1efed;
-  --bg-tertiary: #e9e6e3;
-  --bg-sidebar: #faf9f8;
-  --bg-elevated: #fbfaf9;
-  --bg-elevated-rgb: 251, 250, 249;
-  --bg-hover: #eeece9;
-  --text-primary: #1c1a18;
-  --text-secondary: #625d57;
-  --text-tertiary: #918a82;
-  --text-placeholder: #aaa39b;
-  --border-default: #dfdcd8;
-  --border-subtle: #ebe8e5;
-  --border-strong: #c9c4be;
-  --accent-cyan: #168fd2;
-  --accent-violet: #7659ef;
-  --accent-gold: #d89020;
-  --accent-orange: #e9783e;
+  --bg-primary: #f5f1ea;
+  --bg-secondary: #efebe4;
+  --bg-tertiary: #e8e3da;
+  --bg-sidebar: #faf8f2;
+  --bg-elevated: #fefdfb;
+  --bg-elevated-rgb: 254, 253, 251;
+  --bg-hover: #ede9e2;
+  --text-primary: #1c1917;
+  --text-secondary: #6e6860;
+  --text-tertiary: #9b948a;
+  --text-placeholder: #b0a89e;
+  --border-default: #e4dfd6;
+  --border-subtle: #ede9e1;
+  --border-strong: #d2cdc4;
+  --accent-cyan: #2e8fd4;
+  --accent-violet: #7b5cf5;
+  --accent-gold: #d89a28;
+  --accent-orange: #e8703c;
   --accent-coral: #ef684f;
   --accent-mint: #159b76;
   --mode-document: #159b76;
-  --mode-quiz: #7659ef;
-  --card-paper: #fcfbfa;
-  --card-paper-quiet: #f8f6f3;
-  --card-border: #dedad5;
-  --card-border-soft: #e8e4df;
-  --card-shadow: 0 1px 2px rgba(41, 34, 27, 0.025), 0 10px 28px -25px rgba(41, 34, 27, 0.24);
-  --card-shadow-hover: 0 2px 5px rgba(41, 34, 27, 0.045), 0 18px 38px -28px rgba(41, 34, 27, 0.32);
+  --mode-quiz: #7b5cf5;
+  --card-paper: #fefdfb;
+  --card-paper-quiet: #f8f5f1;
+  --card-border: #e5e1da;
+  --card-border-soft: #ede9e2;
+  --card-shadow:
+    0 1px 2px rgba(41, 34, 27, 0.025), 0 10px 28px -25px rgba(41, 34, 27, 0.24);
+  --card-shadow-hover:
+    0 2px 5px rgba(41, 34, 27, 0.045), 0 18px 38px -28px rgba(41, 34, 27, 0.32);
   --shadow-sm: 0 1px 2px rgba(41, 34, 27, 0.045);
   --shadow-card: 0 8px 24px -20px rgba(41, 34, 27, 0.2);
   --shadow-soft: 0 18px 42px -30px rgba(41, 34, 27, 0.25);
 }
 
 body {
-  background:
-    radial-gradient(circle at 76% -10%, rgba(118, 89, 239, 0.025), transparent 28%),
-    radial-gradient(circle at 8% 108%, rgba(21, 155, 118, 0.022), transparent 32%),
-    var(--bg-primary);
+  background: var(--bg-primary);
   letter-spacing: 0;
 }
 
 .spectra-shell-sidebar {
-  background:
-    radial-gradient(circle at 18% 4%, rgba(118, 89, 239, 0.025), transparent 23%),
-    linear-gradient(180deg, #fbfaf9 0%, #faf9f8 48%, #f8f7f5 100%);
-  box-shadow: inset -1px 0 rgba(255, 255, 255, 0.7);
+  background: var(--bg-sidebar);
 }
 
 .spectra-global-commandbar,
 .spectra-global-stage {
-  border-color: #dfdcd8 !important;
-  background:
-    radial-gradient(circle at 70% -25%, rgba(118, 89, 239, 0.018), transparent 34%),
-    linear-gradient(180deg, #fcfbfa 0%, #faf9f8 100%) !important;
+  border-color: var(--border-default) !important;
+  background: var(--bg-elevated) !important;
   box-shadow: 0 1px 2px rgba(42, 35, 28, 0.025);
 }
 
 .spectra-wave-y {
-  background:
-    radial-gradient(circle at 14% 0%, rgba(21, 155, 118, 0.025), transparent 24%),
-    radial-gradient(circle at 90% 8%, rgba(118, 89, 239, 0.018), transparent 28%),
-    #faf9f8 !important;
+  background: var(--bg-primary) !important;
 }
 
 .spectra-wave-y :where(.font-display, h1, h2, h3) {
@@ -263,17 +254,31 @@ body {
   text-rendering: geometricPrecision;
 }
 
-.spectra-wave-y .text-\[8px\] { font-size: 9px !important; }
-.spectra-wave-y .text-\[9px\] { font-size: 10px !important; }
-.spectra-wave-y .text-\[10px\] { font-size: 11px !important; }
-.spectra-wave-y .text-\[11px\] { font-size: 12px !important; }
-.spectra-wave-y .text-\[12px\] { font-size: 13px !important; }
+.spectra-wave-y .text-\[8px\] {
+  font-size: 9px !important;
+}
+.spectra-wave-y .text-\[9px\] {
+  font-size: 10px !important;
+}
+.spectra-wave-y .text-\[10px\] {
+  font-size: 11px !important;
+}
+.spectra-wave-y .text-\[11px\] {
+  font-size: 12px !important;
+}
+.spectra-wave-y .text-\[12px\] {
+  font-size: 13px !important;
+}
 
 .spectra-card,
 [data-spectra-card] {
   border-color: var(--card-border);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.56), rgba(255, 255, 255, 0.08) 52%),
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.56),
+      rgba(255, 255, 255, 0.08) 52%
+    ),
     var(--card-paper);
 }
 
@@ -310,9 +315,14 @@ body {
 }
 
 .spectra-document-studio,
-.spectra-document-studio[data-layout="continuous"] .spectra-document-canvas-shell {
+.spectra-document-studio[data-layout="continuous"]
+  .spectra-document-canvas-shell {
   background:
-    radial-gradient(circle at 16% 2%, rgba(21, 155, 118, 0.02), transparent 24%),
+    radial-gradient(
+      circle at 16% 2%,
+      rgba(21, 155, 118, 0.02),
+      transparent 24%
+    ),
     #faf9f8 !important;
 }
 
@@ -363,8 +373,8 @@ body {
    The post-sidebar stage is 1396px in the supplied desktop composition:
    a 1072px primary paper, 12px gutter, and a 312px operational rail. */
 .spectra-mission-control {
-  --mission-paper: #fffefa;
-  --mission-canvas: #fbfaf7;
+  --mission-paper: #ffffff;
+  --mission-canvas: var(--bg-primary);
   background: var(--mission-canvas) !important;
 }
 
@@ -465,10 +475,9 @@ body {
 }
 
 .spectra-mission-control-rail > section {
-  border-color: var(--border-default) !important;
-  border-radius: 8px !important;
-  background: var(--mission-paper) !important;
-  box-shadow: 0 8px 24px -24px rgba(53, 39, 24, 0.34);
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
 }
 
 @container (max-width: 1180px) {
@@ -530,50 +539,87 @@ body {
 
 /* Reference 04 — planner task. Keep the high-frequency task path compact and
    move configuration-heavy controls beneath the working content. */
-.spectra-artifact-studio[data-blueprint="planner_task"] .spectra-planner-studio {
+.spectra-artifact-studio[data-blueprint="planner_task"]
+  .spectra-planner-studio {
   margin-left: 13px !important;
   margin-top: -7px !important;
   gap: 8px !important;
 }
 
-.spectra-artifact-studio[data-blueprint="planner_task"] .spectra-planner-studio > fieldset > section {
+.spectra-artifact-studio[data-blueprint="planner_task"]
+  .spectra-planner-studio
+  > fieldset
+  > section {
   display: flex;
   flex-direction: column;
   padding: 16px !important;
   border-radius: 9px !important;
 }
 
-.spectra-artifact-studio[data-blueprint="planner_task"] .spectra-planner-description > div[role="toolbar"] {
+.spectra-artifact-studio[data-blueprint="planner_task"]
+  .spectra-planner-description
+  > div[role="toolbar"] {
   min-height: 38px;
   height: 38px;
 }
 
-.spectra-artifact-studio[data-blueprint="planner_task"] .spectra-planner-description .ProseMirror {
+.spectra-artifact-studio[data-blueprint="planner_task"]
+  .spectra-planner-description
+  .ProseMirror {
   min-height: 82px !important;
 }
 
-.spectra-artifact-studio[data-blueprint="planner_task"] .spectra-planner-advanced {
+.spectra-artifact-studio[data-blueprint="planner_task"]
+  .spectra-planner-advanced {
   order: 20;
 }
 
-.spectra-artifact-studio[data-blueprint="planner_task"] .spectra-planner-studio > aside {
+.spectra-artifact-studio[data-blueprint="planner_task"]
+  .spectra-planner-studio
+  > aside {
   display: grid !important;
   align-content: start;
   gap: 12px !important;
   margin-top: -120px !important;
 }
 
-.spectra-artifact-studio[data-blueprint="planner_task"] .spectra-planner-studio > aside > * {
+.spectra-artifact-studio[data-blueprint="planner_task"]
+  .spectra-planner-studio
+  > aside
+  > * {
   margin: 0 !important;
 }
 
-.spectra-artifact-studio[data-blueprint="planner_task"] [data-side-card-title="task-blueprint"] { order: 1; }
-.spectra-artifact-studio[data-blueprint="planner_task"] [data-side-card-title="schedule"] { order: 2; }
-.spectra-artifact-studio[data-blueprint="planner_task"] [data-side-card-title="linked-to"] { order: 3; }
-.spectra-artifact-studio[data-blueprint="planner_task"] [data-side-card-title="created"] { order: 4; }
-.spectra-artifact-studio[data-blueprint="planner_task"] .spectra-planner-studio > aside > button { order: 5; }
-.spectra-artifact-studio[data-blueprint="planner_task"] [data-side-card-title="reminders"] { order: 6; }
-.spectra-artifact-studio[data-blueprint="planner_task"] [data-side-card-title="import-&-export"] { order: 7; }
+.spectra-artifact-studio[data-blueprint="planner_task"]
+  [data-side-card-title="task-blueprint"] {
+  order: 1;
+}
+.spectra-artifact-studio[data-blueprint="planner_task"]
+  [data-side-card-title="schedule"] {
+  order: 2;
+}
+.spectra-artifact-studio[data-blueprint="planner_task"]
+  [data-side-card-title="linked-to"] {
+  order: 3;
+}
+.spectra-artifact-studio[data-blueprint="planner_task"]
+  [data-side-card-title="created"] {
+  order: 4;
+}
+.spectra-artifact-studio[data-blueprint="planner_task"]
+  .spectra-planner-studio
+  > aside
+  > button {
+  order: 5;
+}
+.spectra-artifact-studio[data-blueprint="planner_task"]
+  [data-side-card-title="reminders"] {
+  order: 6;
+}
+.spectra-artifact-studio[data-blueprint="planner_task"]
+  [data-side-card-title="import-&-export"] {
+  order: 7;
+}
 
 .spectra-planner-schedule-summary {
   display: grid;
@@ -682,7 +728,11 @@ body {
   padding-right: 20px !important;
 }
 
-.spectra-quiz-question-editor section.mt-4 .space-y-2 > :not([hidden]) ~ :not([hidden]) {
+.spectra-quiz-question-editor
+  section.mt-4
+  .space-y-2
+  > :not([hidden])
+  ~ :not([hidden]) {
   margin-top: 5px !important;
 }
 
@@ -711,18 +761,24 @@ body {
   padding-top: 32px !important;
 }
 
-.spectra-artifact-studio[data-blueprint="quiz"] [data-quiz-panel="settings"] :is(input, select) {
+.spectra-artifact-studio[data-blueprint="quiz"]
+  [data-quiz-panel="settings"]
+  :is(input, select) {
   min-height: 32px !important;
   height: 32px !important;
 }
 
-.spectra-artifact-studio[data-blueprint="quiz"] [data-quiz-panel="settings"] .spectra-quiz-media {
+.spectra-artifact-studio[data-blueprint="quiz"]
+  [data-quiz-panel="settings"]
+  .spectra-quiz-media {
   order: 6;
   position: relative;
   margin-top: 40px;
 }
 
-.spectra-artifact-studio[data-blueprint="quiz"] [data-quiz-panel="settings"] .spectra-quiz-media::before {
+.spectra-artifact-studio[data-blueprint="quiz"]
+  [data-quiz-panel="settings"]
+  .spectra-quiz-media::before {
   content: "Media (optional)";
   position: absolute;
   top: -25px;
@@ -745,35 +801,66 @@ body {
   text-underline-offset: 2px;
 }
 
-.spectra-artifact-studio[data-blueprint="quiz"] [data-quiz-panel="settings"] .spectra-quiz-advanced {
+.spectra-artifact-studio[data-blueprint="quiz"]
+  [data-quiz-panel="settings"]
+  .spectra-quiz-advanced {
   order: 7;
 }
 
 /* Reference 04 uses a wide operational rail that begins beside the title,
    while the editable task sheet retains a compact 30px inner gutter. */
-.spectra-artifact-studio[data-blueprint="planner_task"] .spectra-planner-studio {
+.spectra-artifact-studio[data-blueprint="planner_task"]
+  .spectra-planner-studio {
   margin-left: 13px;
   margin-top: -2px;
 }
 
-.spectra-artifact-studio[data-blueprint="planner_task"] .spectra-planner-studio > aside {
+.spectra-artifact-studio[data-blueprint="planner_task"]
+  .spectra-planner-studio
+  > aside {
   display: grid;
   align-content: start;
   gap: 12px;
   margin-top: -120px;
 }
 
-.spectra-artifact-studio[data-blueprint="planner_task"] .spectra-planner-studio > aside > * {
+.spectra-artifact-studio[data-blueprint="planner_task"]
+  .spectra-planner-studio
+  > aside
+  > * {
   margin: 0 !important;
 }
 
-.spectra-artifact-studio[data-blueprint="planner_task"] [data-side-card-title="task-blueprint"] { order: 1; }
-.spectra-artifact-studio[data-blueprint="planner_task"] [data-side-card-title="schedule"] { order: 2; }
-.spectra-artifact-studio[data-blueprint="planner_task"] [data-side-card-title="linked-to"] { order: 3; }
-.spectra-artifact-studio[data-blueprint="planner_task"] [data-side-card-title="created"] { order: 4; }
-.spectra-artifact-studio[data-blueprint="planner_task"] .spectra-planner-studio > aside > button { order: 5; }
-.spectra-artifact-studio[data-blueprint="planner_task"] [data-side-card-title="reminders"] { order: 6; }
-.spectra-artifact-studio[data-blueprint="planner_task"] [data-side-card-title="import-&-export"] { order: 7; }
+.spectra-artifact-studio[data-blueprint="planner_task"]
+  [data-side-card-title="task-blueprint"] {
+  order: 1;
+}
+.spectra-artifact-studio[data-blueprint="planner_task"]
+  [data-side-card-title="schedule"] {
+  order: 2;
+}
+.spectra-artifact-studio[data-blueprint="planner_task"]
+  [data-side-card-title="linked-to"] {
+  order: 3;
+}
+.spectra-artifact-studio[data-blueprint="planner_task"]
+  [data-side-card-title="created"] {
+  order: 4;
+}
+.spectra-artifact-studio[data-blueprint="planner_task"]
+  .spectra-planner-studio
+  > aside
+  > button {
+  order: 5;
+}
+.spectra-artifact-studio[data-blueprint="planner_task"]
+  [data-side-card-title="reminders"] {
+  order: 6;
+}
+.spectra-artifact-studio[data-blueprint="planner_task"]
+  [data-side-card-title="import-&-export"] {
+  order: 7;
+}
 
 .spectra-planner-schedule-summary {
   display: grid;
@@ -804,14 +891,17 @@ body {
 
 /* Flashcard reference composition: compact identity, a quiet three-zone
    toolbar, and a 330px rail separated from the card canvas by breathing room. */
-.spectra-artifact-studio[data-blueprint="flashcard_deck"] .spectra-artifact-identity {
+.spectra-artifact-studio[data-blueprint="flashcard_deck"]
+  .spectra-artifact-identity {
   padding-left: 8px !important;
   padding-right: 8px !important;
   padding-top: 6px !important;
   padding-bottom: 10px !important;
 }
 
-.spectra-artifact-studio[data-blueprint="flashcard_deck"] .spectra-artifact-identity textarea {
+.spectra-artifact-studio[data-blueprint="flashcard_deck"]
+  .spectra-artifact-identity
+  textarea {
   display: block;
   min-height: 30px !important;
   font-size: 25px !important;
@@ -932,7 +1022,11 @@ body {
   height: 56px;
   border: 0;
   border-top: 1px solid var(--border-default);
-  background: color-mix(in oklab, var(--bg-elevated) 84%, transparent) !important;
+  background: color-mix(
+    in oklab,
+    var(--bg-elevated) 84%,
+    transparent
+  ) !important;
   padding: 0 16px;
   font-size: 11px;
   color: var(--text-secondary);
@@ -956,13 +1050,19 @@ body {
   transform: translateY(-20px);
 }
 
-.spectra-artifact-studio[data-blueprint="flashcard_deck"] .spectra-studio-details > div:last-child {
+.spectra-artifact-studio[data-blueprint="flashcard_deck"]
+  .spectra-studio-details
+  > div:last-child {
   max-height: none !important;
   overflow: visible !important;
 }
 
-.spectra-artifact-studio[data-blueprint="flashcard_deck"] .spectra-related-artifacts,
-.spectra-artifact-studio[data-blueprint="flashcard_deck"] .spectra-studio-details > div > section:nth-of-type(5) {
+.spectra-artifact-studio[data-blueprint="flashcard_deck"]
+  .spectra-related-artifacts,
+.spectra-artifact-studio[data-blueprint="flashcard_deck"]
+  .spectra-studio-details
+  > div
+  > section:nth-of-type(5) {
   display: none !important;
 }
 
@@ -999,8 +1099,12 @@ body {
   overscroll-behavior: contain;
 }
 
-.spectra-artifact-studio[data-blueprint="flashcard_deck"] .spectra-related-artifacts,
-.spectra-artifact-studio[data-blueprint="flashcard_deck"] .spectra-studio-details > div > section:nth-of-type(5) {
+.spectra-artifact-studio[data-blueprint="flashcard_deck"]
+  .spectra-related-artifacts,
+.spectra-artifact-studio[data-blueprint="flashcard_deck"]
+  .spectra-studio-details
+  > div
+  > section:nth-of-type(5) {
   display: none !important;
 }
 
@@ -1031,16 +1135,24 @@ body {
   padding-bottom: 0;
 }
 
-.spectra-artifact-studio[data-blueprint="quiz"] .spectra-artifact-identity textarea {
+.spectra-artifact-studio[data-blueprint="quiz"]
+  .spectra-artifact-identity
+  textarea {
   min-height: 27px;
   line-height: 1;
 }
 
-.spectra-artifact-studio[data-blueprint="quiz"] .spectra-artifact-identity > div:nth-child(2) > div:nth-child(3) {
+.spectra-artifact-studio[data-blueprint="quiz"]
+  .spectra-artifact-identity
+  > div:nth-child(2)
+  > div:nth-child(3) {
   margin-top: -1px;
 }
 
-.spectra-artifact-studio[data-blueprint="quiz"] .spectra-artifact-identity > div:nth-child(2) > div:last-child {
+.spectra-artifact-studio[data-blueprint="quiz"]
+  .spectra-artifact-identity
+  > div:nth-child(2)
+  > div:last-child {
   margin-top: 5px;
 }
 
@@ -13219,7 +13331,9 @@ button:not(:disabled),
   padding-bottom: 0;
 }
 
-.spectra-artifact-studio[data-blueprint="quiz"] .spectra-artifact-identity textarea {
+.spectra-artifact-studio[data-blueprint="quiz"]
+  .spectra-artifact-identity
+  textarea {
   min-height: 27px;
   line-height: 1;
 }
@@ -13344,70 +13458,61 @@ button:not(:disabled),
 }
 
 :root {
-  --brand-primary: #7458ef;
+  --brand-primary: #7b5cf5;
   --brand-accent: #159b76;
-  --bg-primary: #f7f6f5;
-  --bg-secondary: #f1efed;
-  --bg-tertiary: #e9e6e3;
-  --bg-sidebar: #faf9f8;
-  --bg-elevated: #fbfaf9;
-  --bg-elevated-rgb: 251, 250, 249;
-  --bg-hover: #eeece9;
-  --text-primary: #1c1a18;
-  --text-secondary: #625d57;
-  --text-tertiary: #918a82;
-  --text-placeholder: #aaa39b;
-  --border-default: #dfdcd8;
-  --border-subtle: #ebe8e5;
-  --border-strong: #c9c4be;
-  --accent-cyan: #168fd2;
-  --accent-violet: #7659ef;
-  --accent-gold: #d89020;
-  --accent-orange: #e9783e;
+  --bg-primary: #f5f1ea;
+  --bg-secondary: #efebe4;
+  --bg-tertiary: #e8e3da;
+  --bg-sidebar: #faf8f2;
+  --bg-elevated: #fefdfb;
+  --bg-elevated-rgb: 254, 253, 251;
+  --bg-hover: #ede9e2;
+  --text-primary: #1c1917;
+  --text-secondary: #6e6860;
+  --text-tertiary: #9b948a;
+  --text-placeholder: #b0a89e;
+  --border-default: #e4dfd6;
+  --border-subtle: #ede9e1;
+  --border-strong: #d2cdc4;
+  --accent-cyan: #2e8fd4;
+  --accent-violet: #7b5cf5;
+  --accent-gold: #d89a28;
+  --accent-orange: #e8703c;
   --accent-coral: #ef684f;
   --accent-mint: #159b76;
   --mode-document: #159b76;
-  --mode-quiz: #7659ef;
-  --card-paper: #fcfbfa;
-  --card-paper-quiet: #f8f6f3;
-  --card-border: #dedad5;
-  --card-border-soft: #e8e4df;
-  --card-shadow: 0 1px 2px rgba(41, 34, 27, 0.025), 0 10px 28px -25px rgba(41, 34, 27, 0.24);
-  --card-shadow-hover: 0 2px 5px rgba(41, 34, 27, 0.045), 0 18px 38px -28px rgba(41, 34, 27, 0.32);
+  --mode-quiz: #7b5cf5;
+  --card-paper: #fefdfb;
+  --card-paper-quiet: #f8f5f1;
+  --card-border: #e5e1da;
+  --card-border-soft: #ede9e2;
+  --card-shadow:
+    0 1px 2px rgba(41, 34, 27, 0.025), 0 10px 28px -25px rgba(41, 34, 27, 0.24);
+  --card-shadow-hover:
+    0 2px 5px rgba(41, 34, 27, 0.045), 0 18px 38px -28px rgba(41, 34, 27, 0.32);
   --shadow-sm: 0 1px 2px rgba(41, 34, 27, 0.045);
   --shadow-card: 0 8px 24px -20px rgba(41, 34, 27, 0.2);
   --shadow-soft: 0 18px 42px -30px rgba(41, 34, 27, 0.25);
 }
 
 body {
-  background:
-    radial-gradient(circle at 76% -10%, rgba(118, 89, 239, 0.025), transparent 28%),
-    radial-gradient(circle at 8% 108%, rgba(21, 155, 118, 0.022), transparent 32%),
-    var(--bg-primary);
+  background: var(--bg-primary);
   letter-spacing: 0;
 }
 
 .spectra-shell-sidebar {
-  background:
-    radial-gradient(circle at 18% 4%, rgba(118, 89, 239, 0.025), transparent 23%),
-    linear-gradient(180deg, #fbfaf9 0%, #faf9f8 48%, #f8f7f5 100%);
-  box-shadow: inset -1px 0 rgba(255, 255, 255, 0.7);
+  background: var(--bg-sidebar);
 }
 
 .spectra-global-commandbar,
 .spectra-global-stage {
-  border-color: #dfdcd8 !important;
-  background:
-    radial-gradient(circle at 70% -25%, rgba(118, 89, 239, 0.018), transparent 34%),
-    linear-gradient(180deg, #fcfbfa 0%, #faf9f8 100%) !important;
+  border-color: var(--border-default) !important;
+  background: var(--bg-elevated) !important;
   box-shadow: 0 1px 2px rgba(42, 35, 28, 0.025);
 }
 
 .spectra-wave-y {
-  background:
-    radial-gradient(circle at 14% 0%, rgba(21, 155, 118, 0.025), transparent 24%),
-    radial-gradient(circle at 90% 8%, rgba(118, 89, 239, 0.018), transparent 28%),
-    #faf9f8 !important;
+  background: var(--bg-primary) !important;
 }
 
 .spectra-wave-y :where(.font-display, h1, h2, h3) {
@@ -13415,17 +13520,31 @@ body {
   text-rendering: geometricPrecision;
 }
 
-.spectra-wave-y .text-\[8px\] { font-size: 9px !important; }
-.spectra-wave-y .text-\[9px\] { font-size: 10px !important; }
-.spectra-wave-y .text-\[10px\] { font-size: 11px !important; }
-.spectra-wave-y .text-\[11px\] { font-size: 12px !important; }
-.spectra-wave-y .text-\[12px\] { font-size: 13px !important; }
+.spectra-wave-y .text-\[8px\] {
+  font-size: 9px !important;
+}
+.spectra-wave-y .text-\[9px\] {
+  font-size: 10px !important;
+}
+.spectra-wave-y .text-\[10px\] {
+  font-size: 11px !important;
+}
+.spectra-wave-y .text-\[11px\] {
+  font-size: 12px !important;
+}
+.spectra-wave-y .text-\[12px\] {
+  font-size: 13px !important;
+}
 
 .spectra-card,
 [data-spectra-card] {
   border-color: var(--card-border);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.56), rgba(255, 255, 255, 0.08) 52%),
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.56),
+      rgba(255, 255, 255, 0.08) 52%
+    ),
     var(--card-paper);
 }
 
@@ -13443,9 +13562,14 @@ body {
 }
 
 .spectra-document-studio,
-.spectra-document-studio[data-layout="continuous"] .spectra-document-canvas-shell {
+.spectra-document-studio[data-layout="continuous"]
+  .spectra-document-canvas-shell {
   background:
-    radial-gradient(circle at 16% 2%, rgba(21, 155, 118, 0.02), transparent 24%),
+    radial-gradient(
+      circle at 16% 2%,
+      rgba(21, 155, 118, 0.02),
+      transparent 24%
+    ),
     #faf9f8 !important;
 }
 
@@ -13489,11 +13613,16 @@ body {
   padding-right: 20px !important;
 }
 
-.spectra-artifact-studio[data-blueprint="document"] .spectra-artifact-identity textarea {
+.spectra-artifact-studio[data-blueprint="document"]
+  .spectra-artifact-identity
+  textarea {
   display: block;
 }
 
-.spectra-artifact-studio[data-blueprint="document"] .spectra-artifact-identity > div:nth-child(2) > div:has(> input) {
+.spectra-artifact-studio[data-blueprint="document"]
+  .spectra-artifact-identity
+  > div:nth-child(2)
+  > div:has(> input) {
   margin-top: 5px !important;
 }
 
@@ -13517,25 +13646,35 @@ body {
   padding-top: 20px !important;
 }
 
-.spectra-artifact-studio[data-blueprint="flashcard_deck"] .spectra-studio-details [data-spectra-card="side"] {
+.spectra-artifact-studio[data-blueprint="flashcard_deck"]
+  .spectra-studio-details
+  [data-spectra-card="side"] {
   padding: 10px !important;
 }
 
-.spectra-artifact-studio[data-blueprint="flashcard_deck"] .spectra-studio-details [data-spectra-card="side"] > h3 {
+.spectra-artifact-studio[data-blueprint="flashcard_deck"]
+  .spectra-studio-details
+  [data-spectra-card="side"]
+  > h3 {
   margin-bottom: 6px !important;
 }
 
-.spectra-artifact-studio[data-blueprint="flashcard_deck"] [data-side-card-title="tags"] > div:first-of-type {
+.spectra-artifact-studio[data-blueprint="flashcard_deck"]
+  [data-side-card-title="tags"]
+  > div:first-of-type {
   flex-wrap: nowrap !important;
   overflow-x: auto;
   scrollbar-width: none;
 }
 
-.spectra-artifact-studio[data-blueprint="flashcard_deck"] [data-side-card-title="tags"] > div:first-of-type::-webkit-scrollbar {
+.spectra-artifact-studio[data-blueprint="flashcard_deck"]
+  [data-side-card-title="tags"]
+  > div:first-of-type::-webkit-scrollbar {
   display: none;
 }
 
-.spectra-artifact-studio[data-blueprint="flashcard_deck"] .spectra-inspector-action {
+.spectra-artifact-studio[data-blueprint="flashcard_deck"]
+  .spectra-inspector-action {
   height: 22px;
 }
 
@@ -13543,7 +13682,9 @@ body {
   transform: translateY(-20px);
 }
 
-.spectra-artifact-studio[data-blueprint="flashcard_deck"] .spectra-studio-details > div:last-child {
+.spectra-artifact-studio[data-blueprint="flashcard_deck"]
+  .spectra-studio-details
+  > div:last-child {
   max-height: none !important;
   overflow: visible !important;
 }
@@ -13555,8 +13696,12 @@ body {
   overscroll-behavior: contain;
 }
 
-.spectra-artifact-studio[data-blueprint="flashcard_deck"] .spectra-related-artifacts,
-.spectra-artifact-studio[data-blueprint="flashcard_deck"] .spectra-studio-details > div > section:nth-of-type(5) {
+.spectra-artifact-studio[data-blueprint="flashcard_deck"]
+  .spectra-related-artifacts,
+.spectra-artifact-studio[data-blueprint="flashcard_deck"]
+  .spectra-studio-details
+  > div
+  > section:nth-of-type(5) {
   display: none !important;
 }
 
@@ -13668,7 +13813,9 @@ body {
   width: max-content !important;
 }
 
-.spectra-workspace-shell-controls--canvas .spectra-workspace-toolbar > :not(nav) {
+.spectra-workspace-shell-controls--canvas
+  .spectra-workspace-toolbar
+  > :not(nav) {
   display: none !important;
 }
 

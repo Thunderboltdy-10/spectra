@@ -367,7 +367,7 @@ export function CommandBar({
         ) : null}
         <div className="flex items-end gap-2">
           {context ? (
-            <div className="-mb-1.5 -ml-1.5 -mt-1.5 flex w-[88px] shrink-0 self-stretch items-stretch overflow-hidden rounded-l-[11px] border-r border-[var(--border-default)]">
+            <div className="-mb-1.5 -ml-1.5 -mt-1.5 flex w-auto min-w-[88px] max-w-[200px] shrink-0 self-stretch overflow-hidden rounded-l-[11px] border-r border-[var(--border-default)]">
               {context}
             </div>
           ) : null}
@@ -393,8 +393,13 @@ export function CommandBar({
               }
             }}
             placeholder={placeholder}
-            className="max-h-32 min-h-9 min-w-0 flex-1 resize-none overflow-y-auto bg-transparent px-1 py-2 text-[14px] leading-5 text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
+            className="max-h-32 min-h-9 min-w-0 flex-1 resize-none overflow-y-auto bg-transparent px-2 py-2 text-[13.5px] leading-5 text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
           />
+          {!value.trim() ? (
+            <span className="pointer-events-none mb-1.5 hidden shrink-0 items-center gap-1 self-end rounded-[5px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[9.5px] font-medium text-[var(--text-tertiary)] sm:flex">
+              ⌘ K
+            </span>
+          ) : null}
           {busy && allowConcurrent && onStop ? (
             <button
               type="button"

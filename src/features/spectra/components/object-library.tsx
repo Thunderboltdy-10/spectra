@@ -64,12 +64,12 @@ type SortMode =
 const types: Array<{ key: "all" | ObjectType; label: string }> = [
   { key: "all", label: "All" },
   { key: "document", label: "Documents" },
-  { key: "flashcard_deck", label: "Decks" },
+  { key: "flashcard_deck", label: "Flashcards" },
   { key: "quiz", label: "Quizzes" },
+  { key: "presentation", label: "Decks" },
   { key: "planner_task", label: "Tasks" },
   { key: "agent", label: "Agents" },
   { key: "timetable", label: "Timetables" },
-  { key: "presentation", label: "Presentations" },
   { key: "sheets", label: "Sheets" },
   { key: "code", label: "Code & visualisations" },
   { key: "whiteboard", label: "Whiteboards" },
@@ -692,7 +692,9 @@ export function ObjectLibrary({
       ) : null}
 
       {showToolbar ? (
-        <div className={`mt-5 flex flex-wrap items-center gap-2 pb-1 ${flatTable ? "spectra-object-flat-toolbar" : ""}`}>
+        <div
+          className={`mt-5 flex flex-wrap items-center gap-2 pb-1 ${flatTable ? "spectra-object-flat-toolbar" : ""}`}
+        >
           <div className="flex shrink-0 gap-1 overflow-x-auto">
             {(flatTable ? types.slice(0, 5) : types).map((type) => (
               <button
@@ -884,16 +886,27 @@ export function ObjectLibrary({
                 >
                   {selected ? <Check className="size-2.5" /> : null}
                 </span>
-                <span className="flex min-w-0 items-center gap-2">
-                  <Icon className="size-4 shrink-0" style={{ color: meta.color }} />
+                <span className="flex min-w-0 items-center gap-2.5">
+                  <span
+                    className="grid size-6 shrink-0 place-items-center rounded-[6px]"
+                    style={{
+                      background: `color-mix(in oklab, ${meta.color} 10%, white)`,
+                      color: meta.color,
+                    }}
+                  >
+                    <Icon className="size-3.5" />
+                  </span>
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[10px] font-medium text-[var(--text-primary)]">
+                    <span className="block truncate text-[12px] font-medium text-[var(--text-primary)]">
                       {objectTitle(entry)}
                     </span>
                     {entry.artifact?.tags?.length ? (
                       <span className="mt-0.5 flex gap-1">
                         {entry.artifact.tags.slice(0, 2).map((tag) => (
-                          <span key={tag} className="rounded-[4px] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[7px] text-[var(--text-secondary)]">
+                          <span
+                            key={tag}
+                            className="rounded-[4px] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[8px] text-[var(--text-secondary)]"
+                          >
                             {tag}
                           </span>
                         ))}
@@ -901,9 +914,29 @@ export function ObjectLibrary({
                     ) : null}
                   </span>
                 </span>
-                <span className="flex items-center gap-1.5 truncate text-[9px] text-[var(--text-primary)]">
-                  <Icon className="size-3 shrink-0" style={{ color: meta.color }} />
+                <span className="flex items-center gap-2 truncate text-[11px] text-[var(--text-primary)]">
+                  <span
+                    className="grid size-5 shrink-0 place-items-center rounded-[5px]"
+                    style={{
+                      background: `color-mix(in oklab, ${meta.color} 10%, white)`,
+                      color: meta.color,
+                    }}
+                  >
+                    <Icon className="size-3" />
+                  </span>
                   {meta.label}
+                </span>
+                <span className="truncate text-[11px] text-[var(--text-secondary)]">
+                  {workspaceName}
+                </span>
+                <span className="text-[11px] text-[var(--text-secondary)]">
+                  {formatRelativeTime(objectUpdatedAt(entry))}
+                </span>
+                <span className="flex items-center gap-1.5 text-[11px] text-[var(--text-primary)]">
+                  <span className="grid size-5 place-items-center rounded-full bg-[#d8d0fa] text-[7px] font-semibold text-[#3e327f]">
+                    You
+                  </span>
+                  You
                 </span>
                 <span className="truncate text-[9px] text-[var(--text-primary)]">
                   {workspaceName}
@@ -912,7 +945,9 @@ export function ObjectLibrary({
                   {formatRelativeTime(objectUpdatedAt(entry))}
                 </span>
                 <span className="flex items-center gap-1.5 text-[9px] text-[var(--text-primary)]">
-                  <span className="grid size-4 place-items-center rounded-full bg-[#b8a7ff] text-[6px] font-semibold text-[#33246e]">You</span>
+                  <span className="grid size-4 place-items-center rounded-full bg-[#b8a7ff] text-[6px] font-semibold text-[#33246e]">
+                    You
+                  </span>
                   You
                 </span>
                 <MoreHorizontal className="size-3.5 text-[var(--text-secondary)]" />

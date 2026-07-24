@@ -2171,7 +2171,7 @@ export const commitNormalizedPage = mutation({
         "INTEGRATION_PAGE_TOO_LARGE: Page exceeds the safe bound.",
       );
     const now = Date.now();
-    let counts = { ...syncRun.counts };
+    const counts = { ...syncRun.counts };
     counts.fetched += args.records.length;
     for (const input of args.records) {
       const existing = await ctx.db
@@ -2935,7 +2935,14 @@ export const recordsForPurpose = query({
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx);
     const integration = await integrationForSchool(ctx, actor.schoolId);
-    if (!integration) return { records: [], stale: true, provenance: null };
+    if (!integration)
+      return {
+        connected: false,
+        records: [],
+        stale: true,
+        unavailableReason: "not_connected",
+        provenance: null,
+      };
     const mapping = await ctx.db
       .query("externalIdentityMappings")
       .withIndex("by_integration_account", (q) =>
@@ -2944,9 +2951,11 @@ export const recordsForPurpose = query({
       .unique();
     if (!mapping || mapping.status !== "verified")
       return {
+        connected: true,
         records: [],
         stale: true,
         identityRequired: true,
+        unavailableReason: "identity_required",
         provenance: {
           provider: "ManageBac",
           lastSyncAt: integration.lastSyncAt,
@@ -3073,6 +3082,7 @@ export const recordsForPurpose = query({
       })
       .slice(0, Math.max(1, Math.min(args.limit ?? 50, 200)));
     return {
+      connected: true,
       records: limited.map((item) => ({
         id: item._id,
         recordType: item.recordType,

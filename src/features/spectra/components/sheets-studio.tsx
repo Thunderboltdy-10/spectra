@@ -246,7 +246,7 @@ function interpolateHexColor(start: string, end: string, amount: number) {
     .join("")}`;
 }
 
-function chartDataset(
+export function chartDataset(
   sheet: WorkbookSheet,
   chart: SheetChart,
   calculated: ReturnType<typeof calculateWorkbook>,
@@ -269,13 +269,16 @@ function chartDataset(
       ) || columnName(column),
     );
   }
+  const singleSeries = headers.length === 1;
   const data = [];
   for (
     let row = normalized.start.row + 1;
     row <= normalized.end.row;
     row += 1
   ) {
-    const entry: Record<string, string | number> = {};
+    const entry: Record<string, string | number> = singleSeries
+      ? { Category: String(row - normalized.start.row) }
+      : {};
     for (
       let column = normalized.start.column;
       column <= normalized.end.column;
@@ -291,7 +294,9 @@ function chartDataset(
     }
     data.push(entry);
   }
-  return { data, category: headers[0] ?? "Category", keys: headers.slice(1) };
+  return singleSeries
+    ? { data, category: "Category", keys: headers }
+    : { data, category: headers[0] ?? "Category", keys: headers.slice(1) };
 }
 
 function chartSummary(
@@ -696,6 +701,19 @@ export function SheetsStudio({
   const gridRef = useRef<HTMLDivElement>(null);
   const importRef = useRef<HTMLInputElement>(null);
   const lastEmittedKeyRef = useRef<string | null>(null);
+  const recentEmittedKeysRef = useRef(new Set<string>());
+
+  const rememberEmitted = useCallback((next: SheetsContent) => {
+    const key = JSON.stringify(next);
+    lastEmittedKeyRef.current = key;
+    const recent = recentEmittedKeysRef.current;
+    recent.add(key);
+    while (recent.size > 80) {
+      const oldest = recent.values().next().value;
+      if (typeof oldest !== "string") break;
+      recent.delete(oldest);
+    }
+  }, []);
 
   useEffect(() => {
     rangeRef.current = range;
@@ -712,9 +730,17 @@ export function SheetsStudio({
 
   useEffect(() => {
     const incomingKey = JSON.stringify(incoming);
+    if (incomingKey === JSON.stringify(workbook)) {
+      recentEmittedKeysRef.current.delete(incomingKey);
+      return;
+    }
+    // React can deliver several local `onChange` echoes after a newer edit has
+    // already rendered. Treat every recently emitted workbook as an
+    // acknowledgement, not just the latest one; otherwise an older echo rolls
+    // the grid back and rapid data entry appears to retain only the final cell.
     if (
-      incomingKey === JSON.stringify(workbook) ||
-      incomingKey === lastEmittedKeyRef.current
+      incomingKey === lastEmittedKeyRef.current ||
+      recentEmittedKeysRef.current.delete(incomingKey)
     )
       return;
     setWorkbook(incoming);
@@ -885,12 +911,12 @@ export function SheetsStudio({
           undoRef.current = [...undoRef.current.slice(-79), current];
           redoRef.current = [];
         }
-        lastEmittedKeyRef.current = JSON.stringify(next);
+        rememberEmitted(next);
         onChange(next);
         return next;
       });
     },
-    [onChange, readOnly],
+    [onChange, readOnly, rememberEmitted],
   );
 
   const updateActiveSheet = useCallback(
@@ -1143,7 +1169,7 @@ export function SheetsStudio({
     if (!previous) return;
     redoRef.current.push(workbook);
     setWorkbook(previous);
-    lastEmittedKeyRef.current = JSON.stringify(previous);
+    rememberEmitted(previous);
     onChange(previous);
   }
 
@@ -1153,7 +1179,7 @@ export function SheetsStudio({
     if (!next) return;
     undoRef.current.push(workbook);
     setWorkbook(next);
-    lastEmittedKeyRef.current = JSON.stringify(next);
+    rememberEmitted(next);
     onChange(next);
   }
 

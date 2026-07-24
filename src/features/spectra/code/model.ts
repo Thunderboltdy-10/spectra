@@ -64,7 +64,7 @@ export type CodeContent = {
     enabled: boolean;
     title?: string;
     description?: string;
-    openMode?: "source" | "preview";
+    openMode?: "source" | "preview" | "split";
     aspectRatio?: number;
   };
   dependencies?: Record<string, string>;
@@ -358,7 +358,9 @@ export function normalizeCodeContent(value: unknown): CodeContent {
       ...(typeof visual.description === "string"
         ? { description: visual.description }
         : {}),
-      ...(visual.openMode === "source" || visual.openMode === "preview"
+      ...(visual.openMode === "source" ||
+      visual.openMode === "preview" ||
+      visual.openMode === "split"
         ? { openMode: visual.openMode }
         : {}),
       ...(typeof visual.aspectRatio === "number"
@@ -927,7 +929,9 @@ export async function importCodeFiles(selected: readonly File[]) {
             ...(typeof visual.description === "string"
               ? { description: visual.description.slice(0, 2_000) }
               : {}),
-            ...(visual.openMode === "source" || visual.openMode === "preview"
+            ...(visual.openMode === "source" ||
+            visual.openMode === "preview" ||
+            visual.openMode === "split"
               ? { openMode: visual.openMode }
               : {}),
             ...(typeof visual.aspectRatio === "number" &&

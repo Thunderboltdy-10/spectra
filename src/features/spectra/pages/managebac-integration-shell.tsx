@@ -1,12 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   AlertCircle,
   AlertTriangle,
   BookOpen,
   CalendarDays,
-  Check,
   CheckCircle2,
   ChevronDown,
   CircleHelp,
@@ -28,13 +28,10 @@ import {
   RotateCcw,
   Save,
   School,
-  Search,
   Settings2,
   ShieldCheck,
-  Table2,
   TriangleAlert,
   UserCheck,
-  Users,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -319,6 +316,7 @@ function RecordsList({
 }
 
 export function ManageBacIntegrationShell() {
+  const router = useRouter();
   const [overview, setOverview] = useState<SpectraManageBacOverview | null>(
     null,
   );
@@ -381,7 +379,10 @@ export function ManageBacIntegrationShell() {
   const configuredIntegration = data?.integration ?? null;
   const integration =
     configuredIntegration?.status === "revoked" ? null : configuredIntegration;
-  const records = data?.records ?? data?.previews ?? [];
+  const records = useMemo(
+    () => data?.records ?? data?.previews ?? [],
+    [data?.previews, data?.records],
+  );
   const classes = useMemo(
     () => records.filter((record) => record.recordType === "class"),
     [records],
@@ -409,7 +410,6 @@ export function ManageBacIntegrationShell() {
     [records],
   );
   const coverage = integration?.capabilityCoverage;
-  const latestRun = data?.syncRuns[0];
   const coveragePercent = coverage?.discovered
     ? Math.round((coverage.verifiedReadable / coverage.discovered) * 100)
     : 0;
@@ -1181,9 +1181,11 @@ export function ManageBacIntegrationShell() {
           <CommandBar
             className="w-full"
             placeholder="Ask Spectra about permitted school data…"
-            onSubmit={() => {
-              setError(
-                "The ManageBac assistant will use purpose-coded school-data tools through the Spectra composer once an AI run is started.",
+            onSubmit={(prompt) => {
+              router.push(
+                `/chat?prompt=${encodeURIComponent(
+                  `Using only my permitted ManageBac school data, ${prompt}`,
+                )}`,
               );
               return true;
             }}

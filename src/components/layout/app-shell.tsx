@@ -406,21 +406,21 @@ function ShellNavigation() {
         </button>
         <Link
           href="/workspace?home=1"
-          className="mx-4 mt-4 flex h-9 items-center gap-2 rounded-[7px] px-1 outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-primary)]"
+          className="mx-4 mt-3 flex h-8 items-center gap-2 rounded-[6px] px-1 outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-primary)]"
           aria-label="Spectra home"
         >
-          <SpectraLogo size={22} />
-          <span className="font-[family-name:var(--font-display)] text-[19px] font-semibold tracking-[-.025em] text-[#171513]">
+          <SpectraLogo size={20} />
+          <span className="font-[family-name:var(--font-display)] text-[17px] font-semibold tracking-[-.025em] text-[#171513]">
             spectra
           </span>
         </Link>
-        <label className="relative mx-3 mt-3 block">
+        <label className="relative mx-3 mt-2.5 block">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-[var(--text-tertiary)]" />
           <input
             value={sidebarSearch}
             onChange={(event) => setSidebarSearch(event.target.value)}
             placeholder="Search"
-            className="h-9 w-full rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] pl-8 pr-10 text-[13px] outline-none placeholder:text-[var(--text-placeholder)] focus:border-[var(--border-strong)]"
+            className="h-8 w-full rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-elevated)] pl-8 pr-10 text-[11px] outline-none placeholder:text-[var(--text-placeholder)] focus:border-[var(--border-strong)]"
           />
           <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 rounded-[5px] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[11px] text-[var(--text-tertiary)]">
             ⌘ K
@@ -428,7 +428,7 @@ function ShellNavigation() {
         </label>
         <nav
           aria-label="Main destinations"
-          className="mt-3 flex flex-col gap-0.5 px-3"
+          className="mt-2.5 flex flex-col gap-px px-3"
         >
           {coreDestinations.map(({ href, label, icon: Icon }) => {
             const active = activeCoreHref === href;
@@ -444,7 +444,7 @@ function ShellNavigation() {
                 }}
                 aria-current={active ? "page" : undefined}
                 className={cn(
-                  "relative flex h-9 items-center gap-2.5 rounded-[8px] px-2.5 text-[13px] font-medium transition-colors",
+                  "relative flex h-8 items-center gap-2.5 rounded-[6px] px-2.5 text-[11px] font-medium transition-colors",
                   active
                     ? "bg-[#eeece9] text-[#171513]"
                     : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
@@ -459,7 +459,7 @@ function ShellNavigation() {
         </nav>
         <Link
           href="/chat"
-          className="mx-3 mt-3 flex h-9 items-center justify-center gap-2 rounded-[10px] bg-[var(--brand-primary)] text-[13px] font-semibold text-white shadow-[0_1px_2px_rgba(83,61,180,.22)] transition hover:brightness-95"
+          className="mx-3 mt-2.5 flex h-8 items-center justify-center gap-2 rounded-[7px] bg-[var(--brand-primary)] text-[11px] font-semibold text-white shadow-[0_1px_2px_rgba(83,61,180,.16)] transition hover:brightness-95"
         >
           <Plus size={15} /> New chat
         </Link>
@@ -469,7 +469,7 @@ function ShellNavigation() {
             value={sidebarSearch}
             onChange={(event) => setSidebarSearch(event.target.value)}
             placeholder="Search chats"
-            className="h-9 w-full rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] pl-8 pr-2 text-[12px] outline-none placeholder:text-[var(--text-placeholder)]"
+            className="h-8 w-full rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-elevated)] pl-8 pr-2 text-[11px] outline-none placeholder:text-[var(--text-placeholder)]"
           />
         </div>
         <div className="spectra-thin-scrollbar min-h-0 flex-1 overflow-y-auto px-3 pb-3">
@@ -485,7 +485,7 @@ function ShellNavigation() {
             if (!rows.length) return null;
             return (
               <section key={String(pinned)} className="mt-3">
-                <h2 className="px-1 text-[11px] font-semibold uppercase tracking-[.1em] text-[var(--text-tertiary)]">
+                <h2 className="px-1 text-[9px] font-semibold uppercase tracking-[.1em] text-[var(--text-tertiary)]">
                   {pinned ? "Pinned" : "Recents"}
                 </h2>
                 <div className="mt-1 space-y-0.5">
@@ -493,7 +493,7 @@ function ShellNavigation() {
                     <Link
                       key={thread._id}
                       href={`/chat?threadId=${encodeURIComponent(thread._id)}`}
-                      className="group flex h-8 items-center gap-2 rounded-[6px] px-1.5 text-[12px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                      className="group flex h-7 items-center gap-2 rounded-[5px] px-1.5 text-[10px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                     >
                       <i
                         className="size-1.5 shrink-0 rounded-full"
@@ -530,6 +530,26 @@ function ShellNavigation() {
         </div>
         <div className="relative shrink-0 border-t border-[var(--border-subtle)] px-3 py-2">
           <div className="flex items-center justify-between">
+            <button
+              type="button"
+              aria-label="Share current page"
+              onClick={() =>
+                window.dispatchEvent(new CustomEvent("spectra:page-share"))
+              }
+              className="grid size-8 place-items-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
+            >
+              <Share2 size={15} />
+            </button>
+            <button
+              type="button"
+              aria-label="Favorite current page"
+              onClick={() =>
+                window.dispatchEvent(new CustomEvent("spectra:page-favorite"))
+              }
+              className="grid size-8 place-items-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
+            >
+              <Star size={15} />
+            </button>
             <button
               type="button"
               aria-label={`Notifications${unreadCount ? `, ${unreadCount} unread` : ""}`}
@@ -800,6 +820,28 @@ function ShellNavigation() {
         </nav>
 
         <div className="relative mx-auto mb-3.5 flex shrink-0 flex-col items-center gap-1">
+          <button
+            type="button"
+            aria-label="Share current page"
+            onClick={() =>
+              window.dispatchEvent(new CustomEvent("spectra:page-share"))
+            }
+            className="group relative grid size-11 place-items-center rounded-[14px] text-[var(--text-tertiary)] outline-none transition-colors hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
+          >
+            <Share2 size={19} strokeWidth={1.7} />
+            <RailTooltip>Share</RailTooltip>
+          </button>
+          <button
+            type="button"
+            aria-label="Favorite current page"
+            onClick={() =>
+              window.dispatchEvent(new CustomEvent("spectra:page-favorite"))
+            }
+            className="group relative grid size-11 place-items-center rounded-[14px] text-[var(--text-tertiary)] outline-none transition-colors hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
+          >
+            <Star size={19} strokeWidth={1.7} />
+            <RailTooltip>Favorite</RailTooltip>
+          </button>
           <button
             type="button"
             aria-label={`Notifications${unreadCount ? `, ${unreadCount} unread` : ""}`}
@@ -1130,32 +1172,9 @@ export function AppShell({
   noScroll = false,
   contentClassName,
 }: AppShellProps) {
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
   const [shellSidebarCollapsed, setShellSidebarCollapsed] = useState(false);
-  const [pageContext, setPageContext] = useState<{
-    source?: string;
-    kind?: string;
-    title?: string;
-  } | null>(null);
-  const workspaceId = searchParams.get("workspaceId");
-  const sectionLabel = pathname.startsWith("/workspace")
-    ? "Workspaces"
-    : pathname.startsWith("/artifacts")
-      ? "Artifacts"
-      : pathname.startsWith("/agents")
-        ? "Agents"
-        : pathname.startsWith("/chat")
-          ? "Chat"
-          : pathname.startsWith("/superadmin")
-            ? "Super Admin"
-            : pathname.startsWith("/admin")
-              ? "Admin"
-              : pathname.startsWith("/managebac")
-                ? "ManageBac"
-                : "Spectra";
 
-  const requestPageAction = (action: "share" | "favorite" | "more") => {
+  const requestPageAction = (action: "more") => {
     window.dispatchEvent(new CustomEvent(`spectra:page-${action}`));
   };
 
@@ -1169,27 +1188,6 @@ export function AppShell({
     };
     window.addEventListener("spectra:sidebar-layout", update);
     return () => window.removeEventListener("spectra:sidebar-layout", update);
-  }, []);
-
-  useEffect(() => {
-    const update = (event: Event) => {
-      setPageContext(
-        (
-          event as CustomEvent<{
-            source?: string;
-            kind?: string;
-            title?: string;
-          }>
-        ).detail ?? null,
-      );
-    };
-    const clear = () => setPageContext(null);
-    window.addEventListener("spectra:page-context", update);
-    window.addEventListener("spectra:clear-page-context", clear);
-    return () => {
-      window.removeEventListener("spectra:page-context", update);
-      window.removeEventListener("spectra:clear-page-context", clear);
-    };
   }, []);
 
   return (
@@ -1207,30 +1205,9 @@ export function AppShell({
           !fullBleed && "px-5 py-6 sm:px-8",
         )}
       >
-        <header className="hidden h-[52px] shrink-0 items-center justify-between gap-3 border-b border-[var(--border-default)] bg-[var(--bg-primary)] px-5 md:flex">
+        <header className="hidden h-[44px] shrink-0 items-center justify-between gap-3 border-b border-[var(--border-default)] bg-[var(--bg-primary)] px-4 md:flex">
           <div className="min-w-0 flex-1" id="spectra-shell-tab-slot" />
           <div className="flex shrink-0 items-center gap-2">
-            <button
-              type="button"
-              onClick={() => requestPageAction("share")}
-              className="inline-flex h-8 items-center gap-1.5 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[12px] font-semibold text-[var(--text-primary)] shadow-[0_1px_2px_rgba(42,35,28,.04)] hover:bg-[var(--bg-hover)]"
-              title={
-                pageContext?.kind
-                  ? `Share this ${pageContext.kind.toLowerCase()}`
-                  : "Share current workspace"
-              }
-            >
-              <Share2 size={13} />
-              Share
-            </button>
-            <button
-              type="button"
-              onClick={() => requestPageAction("favorite")}
-              aria-label="Favorite"
-              className="grid size-8 place-items-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-            >
-              <Star size={14} />
-            </button>
             <button
               type="button"
               onClick={() => requestPageAction("more")}

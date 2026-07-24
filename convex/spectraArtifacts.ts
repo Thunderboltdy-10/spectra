@@ -1736,26 +1736,44 @@ export const pausePendingForConflict = mutation({
       "modify",
     );
     const run = await ctx.db.get(args.runId);
+    const ownsActivePreview =
+      artifact.aiRunId === args.runId &&
+      artifact.aiExecutionId === args.executionId;
+    const ownsEffect = (artifact.aiEffects ?? []).some(
+      (effect) =>
+        effect.runId === args.runId &&
+        effect.executionId === args.executionId,
+    );
     if (
       !run ||
       run.ownerAccountId !== actor.accountId ||
       run.executionId !== args.executionId ||
-      artifact.aiRunId !== args.runId ||
-      artifact.aiExecutionId !== args.executionId
+      (!ownsActivePreview && !ownsEffect)
     )
       throw new Error(
         "This pending artifact does not belong to the paused run.",
       );
-    if (artifact.aiState !== "creating") return { paused: false };
+    const now = Date.now();
+    const wasCreating = artifact.aiState === "creating";
+    const remainingEffects = currentAiEffects(artifact, now).filter(
+      (effect) =>
+        effect.runId !== args.runId ||
+        effect.executionId !== args.executionId,
+    );
+    const latest = remainingEffects.at(-1);
     await ctx.db.patch(artifact._id, {
-      aiState: undefined,
-      aiProgress: undefined,
-      aiPreview: undefined,
-      aiEffects: undefined,
-      summary: artifact.summary?.startsWith("Spectra is building ")
+      aiState: remainingEffects.length ? "updating" : undefined,
+      aiRunId: latest?.runId,
+      aiExecutionId: latest?.executionId,
+      aiStateExpiresAt: undefined,
+      aiProgress: remainingEffects.length ? artifact.aiProgress : undefined,
+      aiPreview: ownsActivePreview ? undefined : artifact.aiPreview,
+      aiEffects: remainingEffects.length ? remainingEffects : undefined,
+      summary:
+        wasCreating && artifact.summary?.startsWith("Spectra is building ")
         ? "Draft paused while an overlapping edit is resolved."
         : artifact.summary,
-      updatedAt: Date.now(),
+      updatedAt: now,
     });
     return { paused: true };
   },

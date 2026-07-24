@@ -1188,6 +1188,19 @@ function ReadonlyArtifactSnapshot({
         <div className="mt-6 space-y-4">
           {sheets.map((sheet, index) => {
             const cells = record(sheet.cells);
+            const visibleCells = Object.entries(cells)
+              .filter(([, value]) => {
+                if (
+                  value === null ||
+                  typeof value === "string" ||
+                  typeof value === "number" ||
+                  typeof value === "boolean"
+                )
+                  return true;
+                const cell = record(value);
+                return cell.value !== undefined || cell.formula !== undefined;
+              })
+              .slice(0, 48);
             return (
               <section
                 key={String(sheet.id ?? index)}
@@ -1197,9 +1210,7 @@ function ReadonlyArtifactSnapshot({
                   {String(sheet.name ?? `Sheet ${index + 1}`)}
                 </header>
                 <div className="grid grid-cols-4 gap-px bg-[var(--border-subtle)]">
-                  {Object.entries(cells)
-                    .slice(0, 48)
-                    .map(([address, value]) => (
+                  {visibleCells.map(([address, value]) => (
                       <div
                         key={address}
                         className="min-h-10 bg-[var(--bg-elevated)] px-2 py-1"
@@ -1208,11 +1219,15 @@ function ReadonlyArtifactSnapshot({
                           {address}
                         </span>
                         <span className="block truncate text-[9px]">
-                          {humanValue(record(value).value ?? value)}
+                          {humanValue(
+                            record(value).value ??
+                              record(value).formula ??
+                              value,
+                          )}
                         </span>
                       </div>
                     ))}
-                  {Object.keys(cells).length === 0 ? (
+                  {visibleCells.length === 0 ? (
                     <div className="col-span-4 p-8 text-center text-[10px] text-[var(--text-tertiary)]">
                       Empty sheet
                     </div>
@@ -2808,6 +2823,61 @@ export function useArtifactStudioState(
   _storageKey: string,
   artifacts: SpectraArtifact[],
 ) {
+  const [synchronizedSnapshots, setSynchronizedSnapshots] = useState(
+    () =>
+      new Map<
+        string,
+        {
+          syncedAt: number;
+          title: string;
+          summary: string;
+          tagDraft: string;
+          content: unknown;
+        }
+      >(),
+  );
+  useEffect(() => {
+    const receiveSynchronizedArtifact = (event: Event) => {
+      const detail = (event as CustomEvent).detail as
+        | {
+            artifactId?: unknown;
+            snapshot?: {
+              title?: unknown;
+              summary?: unknown;
+              tagDraft?: unknown;
+              content?: unknown;
+            };
+          }
+        | undefined;
+      if (
+        typeof detail?.artifactId !== "string" ||
+        typeof detail.snapshot?.title !== "string" ||
+        typeof detail.snapshot.summary !== "string" ||
+        typeof detail.snapshot.tagDraft !== "string"
+      )
+        return;
+      setSynchronizedSnapshots((current) => {
+        const next = new Map(current);
+        next.set(detail.artifactId as string, {
+          syncedAt: Date.now(),
+          title: detail.snapshot!.title as string,
+          summary: detail.snapshot!.summary as string,
+          tagDraft: detail.snapshot!.tagDraft as string,
+          content: detail.snapshot!.content,
+        });
+        return next;
+      });
+    };
+    window.addEventListener(
+      "spectra:artifact-synchronized",
+      receiveSynchronizedArtifact,
+    );
+    return () =>
+      window.removeEventListener(
+        "spectra:artifact-synchronized",
+        receiveSynchronizedArtifact,
+      );
+  }, []);
   const openObjects = useSpectraContextStore((state) => state.openObjects);
   const activeOpenObjectKey = useSpectraContextStore(
     (state) => state.activeOpenObjectKey,
@@ -2825,8 +2895,26 @@ export function useArtifactStudioState(
     (state) => state.setArtifactDirty,
   );
   const artifactById = useMemo(
-    () => new Map(artifacts.map((artifact) => [artifact._id, artifact])),
-    [artifacts],
+    () =>
+      new Map(
+        artifacts.map((artifact) => {
+          const synchronized = synchronizedSnapshots.get(artifact._id);
+          if (!synchronized || artifact.updatedAt >= synchronized.syncedAt)
+            return [artifact._id, artifact] as const;
+          return [
+            artifact._id,
+            {
+              ...artifact,
+              title: synchronized.title,
+              summary: synchronized.summary || undefined,
+              tags: tagsFromDraft(synchronized.tagDraft),
+              content: synchronized.content,
+              updatedAt: synchronized.syncedAt,
+            },
+          ] as const;
+        }),
+      ),
+    [artifacts, synchronizedSnapshots],
   );
   const studioObjects = useMemo(
     () =>
@@ -2939,7 +3027,6 @@ export function ArtifactStudio({
   mode,
   artifact,
   artifacts,
-  dirtyIds,
   busy = false,
   panelWidth,
   sourceLabel,
@@ -3060,14 +3147,12 @@ export function ArtifactStudio({
     ) : (
       <div className="flex h-full min-h-0 flex-col bg-[var(--bg-primary)]">
         <ArtifactStudioEditor
-          // A clean editor may safely rehydrate at a new remote revision or
-          // staged AI-preview boundary. Keeping only the artifact id here left
-          // the local rich-editor state pinned to the version that was open
-          // when a run began; the card and backend advanced while the visible
-          // document stayed stale until close/reopen. A locally dirty editor
-          // deliberately keeps a stable key so region-aware merging can
-          // preserve the student's unrelated work.
-          key={`${artifact._id}:${dirtyIds.has(artifact._id) ? "local" : `${artifact.updatedAt}:${artifact.aiPreview?.startedAt ?? 0}`}`}
+          // Editor identity must remain stable while its clean/dirty state
+          // changes. A key derived from `dirtyIds` remounted this tree on the
+          // first keystroke, restoring the server snapshot and making every
+          // artifact editor appear non-interactive. Remote revisions are
+          // reconciled by ArtifactStudioEditor's snapshot effects.
+          key={`${artifact._id}:editor`}
           mode={mode}
           artifact={artifact}
           artifacts={artifacts}
@@ -3275,15 +3360,16 @@ export function StudioTabRail({
 
   const rail = (
     <div
-      className={`flex min-h-0 min-w-0 flex-1 items-center gap-1.5 overflow-x-auto ${shellSlot ? "h-full bg-transparent px-0" : "h-12 shrink-0 border-b border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_60%,var(--bg-primary))] px-3.5"}`}
+      className={`flex min-h-0 min-w-0 flex-1 items-center gap-1.5 overflow-hidden ${shellSlot ? "h-full bg-transparent px-0" : "h-12 shrink-0 border-b border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_60%,var(--bg-primary))] px-3.5"}`}
     >
+      <div className="spectra-studio-tab-scroller flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto">
       {hubTabs.map((hubTab) => {
         const active = activeHubTabId === hubTab.id;
         return (
           <button
             key={hubTab.id}
             type="button"
-            className={`group flex h-9 min-w-[112px] max-w-[250px] shrink-0 items-center gap-2 rounded-[8px] border px-2.5 text-[12px] transition ${
+            className={`group flex h-8 min-w-[104px] max-w-[230px] shrink-0 items-center gap-1.5 rounded-[6px] border px-2 text-[10px] transition ${
               active
                 ? "border-[color-mix(in_oklab,var(--brand-primary)_36%,var(--border-default))] bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[inset_0_2px_var(--brand-primary),0_1px_6px_rgba(27,20,12,0.06)]"
                 : "border-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
@@ -3326,7 +3412,7 @@ export function StudioTabRail({
           <button
             key={tab.artifactId}
             type="button"
-            className={`group flex h-9 min-w-[112px] max-w-[250px] shrink-0 items-center gap-2 rounded-[8px] border px-2.5 text-[12px] transition ${
+            className={`group flex h-8 min-w-[104px] max-w-[230px] shrink-0 items-center gap-1.5 rounded-[6px] border px-2 text-[10px] transition ${
               active
                 ? "border-[color-mix(in_oklab,var(--brand-primary)_36%,var(--border-default))] bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[inset_0_2px_var(--brand-primary),0_1px_6px_rgba(27,20,12,0.06)]"
                 : "border-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
@@ -3384,9 +3470,10 @@ export function StudioTabRail({
           </button>
         );
       })}
+      </div>
       <button
         type="button"
-        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[6px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
         onClick={onAddHub}
         aria-label="Open a new home view"
         title="Open a new home view"
@@ -3473,7 +3560,7 @@ function ArtifactStudioEditor({
   const detailsEligible =
     artifact.blueprintKey !== "planner_task" &&
     artifact.blueprintKey !== "thread_reference";
-  const [detailsOpen, setDetailsOpen] = useState(detailsEligible);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const detailsPinnedRef = useRef(false);
   const [aiHighlightDismissed, setAiHighlightDismissed] = useState(false);
   const [versions, setVersions] = useState<SpectraArtifactVersion[]>([]);
@@ -3509,19 +3596,7 @@ function ArtifactStudioEditor({
 
   useEffect(() => {
     detailsPinnedRef.current = false;
-    setDetailsOpen(detailsEligible);
-  }, [artifact._id, detailsEligible]);
-
-  useEffect(() => {
-    if (!detailsEligible) return;
-    const media = window.matchMedia("(max-width: 1279px)");
-    const syncDetails = () => {
-      if (detailsPinnedRef.current) return;
-      setDetailsOpen(!media.matches);
-    };
-    syncDetails();
-    media.addEventListener("change", syncDetails);
-    return () => media.removeEventListener("change", syncDetails);
+    setDetailsOpen(false);
   }, [artifact._id, detailsEligible]);
 
   useEffect(() => {
@@ -3613,7 +3688,16 @@ function ArtifactStudioEditor({
           if (hadPendingTransportUpdate) {
             setBaseline(snapshot);
             setLiveConflict(null);
-            userHasEditedRef.current = false;
+            // The user may continue editing while the transport retry is in
+            // flight (spreadsheet paste/data entry makes this easy to hit).
+            // Only clear local intent when the synchronized snapshot is still
+            // the current one; otherwise an older acknowledgement can make a
+            // subsequent remote snapshot erase newer cells.
+            if (
+              snapshotKey(currentSnapshotRef.current) ===
+              snapshotKey(snapshot)
+            )
+              userHasEditedRef.current = false;
             return true;
           }
         }
@@ -3636,6 +3720,46 @@ function ArtifactStudioEditor({
             queuePosition: claim?.conflict?.queuePosition,
           });
           return false;
+        }
+        const acknowledgedValue = live.model?.getSnapshot().value;
+        if (acknowledgedValue) {
+          const acknowledged = {
+            title: acknowledgedValue.title,
+            summary: acknowledgedValue.summary ?? "",
+            tagDraft: acknowledgedValue.tags.join(", "),
+            content: acknowledgedValue.content,
+          };
+          localSyncKeysRef.current.add(snapshotKey(acknowledged));
+          // Region decomposition may normalize IDs/defaults while applying an
+          // otherwise identical draft (notably code line IDs). Reconcile to
+          // the locally acknowledged Yjs value so byte-level normalization
+          // cannot leave the editor in an endless save loop. Never replace
+          // keystrokes made while the network request was in flight.
+          if (
+            snapshotKey(currentSnapshotRef.current) === snapshotKey(snapshot)
+          ) {
+            reconcilingRemoteRef.current = true;
+            userHasEditedRef.current = false;
+            setTitle(acknowledged.title);
+            setSummary(acknowledged.summary);
+            setTagDraft(acknowledged.tagDraft);
+            setContent(acknowledged.content);
+            setBaseline(acknowledged);
+            setDirty(false);
+          } else {
+            setBaseline(acknowledged);
+          }
+          window.dispatchEvent(
+            new CustomEvent("spectra:artifact-synchronized", {
+              detail: { artifactId: artifact._id, snapshot: acknowledged },
+            }),
+          );
+        } else {
+          window.dispatchEvent(
+            new CustomEvent("spectra:artifact-synchronized", {
+              detail: { artifactId: artifact._id, snapshot },
+            }),
+          );
         }
         return true;
       } catch (error) {
@@ -3836,6 +3960,19 @@ function ArtifactStudioEditor({
     setAiHighlightDismissed(false);
   }, [artifact._id, artifact.updatedAt, artifact.aiState]);
 
+  const setActivePresence = useCallback(
+    (regionId: string) => {
+      try {
+        live.transport?.setPresence({ activeRegionId: regionId });
+      } catch {
+        // Presence is supportive metadata, never a prerequisite for editing.
+        // A transport may be replaced while React still delivers a queued
+        // focus/change event; local authoring must remain available.
+      }
+    },
+    [live.transport],
+  );
+
   useEffect(() => {
     const snapshotsDiffer =
       snapshotKey(currentSnapshot) !== snapshotKey(baseline);
@@ -4016,8 +4153,16 @@ function ArtifactStudioEditor({
   ) {
     if (readOnly) return;
     userHasEditedRef.current = true;
+    // Mark intent synchronously. Collaboration snapshots can arrive between
+    // this handler and the effect that derives `dirty` from React state. If
+    // `dirtyRef` is still false, that snapshot is treated as authoritative and
+    // can erase the user's first edit (most visibly: adding the first slide or
+    // object appears to do nothing).
+    reconcilingRemoteRef.current = false;
+    dirtyRef.current = true;
+    setDirty(true);
     if (next.title !== undefined) {
-      live.transport?.setPresence({ activeRegionId: "metadata:title" });
+      setActivePresence("metadata:title");
       setTitle(next.title);
       if (artifact.blueprintKey === "planner_task") {
         setContent((current: unknown) => ({
@@ -4027,11 +4172,11 @@ function ArtifactStudioEditor({
       }
     }
     if (next.summary !== undefined) {
-      live.transport?.setPresence({ activeRegionId: "metadata:summary" });
+      setActivePresence("metadata:summary");
       setSummary(next.summary);
     }
     if (next.tagDraft !== undefined) {
-      live.transport?.setPresence({ activeRegionId: "metadata:tags" });
+      setActivePresence("metadata:tags");
       setTagDraft(next.tagDraft);
     }
   }
@@ -4039,6 +4184,9 @@ function ArtifactStudioEditor({
   function changeContent(next: unknown) {
     if (readOnly) return;
     userHasEditedRef.current = true;
+    reconcilingRemoteRef.current = false;
+    dirtyRef.current = true;
+    setDirty(true);
     if (isArtifactTypeKey(artifact.blueprintKey)) {
       try {
         const regions = changedArtifactRegionIds(
@@ -4046,11 +4194,9 @@ function ArtifactStudioEditor({
           content,
           next,
         );
-        live.transport?.setPresence({
-          activeRegionId: regions[0] ?? "artifact:structure",
-        });
+        setActivePresence(regions[0] ?? "artifact:structure");
       } catch {
-        live.transport?.setPresence({ activeRegionId: "artifact:structure" });
+        setActivePresence("artifact:structure");
       }
     }
     setContent(next);
@@ -4234,7 +4380,7 @@ function ArtifactStudioEditor({
   const mainClass =
     artifact.blueprintKey === "document"
       ? "min-h-0 flex-1 overflow-y-auto pb-5"
-      : "min-h-0 flex-1 overflow-y-auto pb-5 pl-[15px] pr-0 pt-5";
+      : "min-h-0 flex-1 overflow-y-auto pb-5 pl-[15px] pr-0 pt-1";
   const collaboratorCount = live.presence.filter(
     (person) => person.clientId !== live.transport?.clientId,
   ).length;
@@ -4261,9 +4407,9 @@ function ArtifactStudioEditor({
   const handleActiveRegionChange = useCallback(
     (regionId: string) => {
       setActiveCommentRegionId(regionId);
-      live.transport?.setPresence({ activeRegionId: regionId });
+      setActivePresence(regionId);
     },
-    [live.transport],
+    [setActivePresence],
   );
   const syncLabel = permissionReadOnly
     ? "Read-only"
@@ -4307,9 +4453,6 @@ function ArtifactStudioEditor({
     .filter(Boolean)
     .slice(0, 3);
   const waveCBlueprint = WAVE_C_BLUEPRINTS.has(artifact.blueprintKey);
-  const waveCStats = waveCBlueprint
-    ? waveCIdentityStats(artifact.blueprintKey, editorContent)
-    : null;
   const identityStats =
     artifact.blueprintKey === "quiz"
       ? [
@@ -4317,7 +4460,7 @@ function ArtifactStudioEditor({
           [`${quizHeaderMinutes} min`, "Est. time"],
           [quizHeaderDifficulty, "Difficulty"],
         ]
-      : waveCStats;
+      : null;
   const showIdentityStats = Boolean(identityStats?.length) && !compact;
   const artifactSyncMessage = studioSyncMessage(syncLabel);
   const syncIndicatorBusy =
@@ -4356,7 +4499,7 @@ function ArtifactStudioEditor({
             rows={1}
             onFocus={() => {
               setActiveCommentRegionId("metadata:title");
-              live.transport?.setPresence({ activeRegionId: "metadata:title" });
+              setActivePresence("metadata:title");
             }}
             className={`min-h-8 w-full resize-none overflow-hidden bg-transparent font-display font-semibold leading-tight text-[var(--text-primary)] outline-none [field-sizing:content] ${compact ? "text-[28px]" : "text-[32px]"}`}
             placeholder="Untitled artifact"
@@ -4377,9 +4520,7 @@ function ArtifactStudioEditor({
             readOnly={readOnly}
             onFocus={() => {
               setActiveCommentRegionId("metadata:summary");
-              live.transport?.setPresence({
-                activeRegionId: "metadata:summary",
-              });
+              setActivePresence("metadata:summary");
             }}
             onChange={(event) => changeBase({ summary: event.target.value })}
             className="w-full bg-transparent text-[14px] leading-6 text-[var(--text-secondary)] outline-none placeholder:text-[var(--text-tertiary)]"
@@ -4408,7 +4549,7 @@ function ArtifactStudioEditor({
         ) : null}
       </div>
       {showIdentityStats ? (
-        <div className="mr-3.5 hidden w-[292px] shrink-0 flex-col items-stretch gap-2 lg:flex">
+        <div className="spectra-artifact-identity-stats mr-3.5 hidden w-[292px] shrink-0 flex-col items-stretch gap-2 lg:flex">
           <div className="grid h-16 grid-cols-3 overflow-hidden rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-primary)]">
             {identityStats!.map(([value, label], index) => (
               <span
@@ -4459,10 +4600,10 @@ function ArtifactStudioEditor({
         </div>
       ) : null}
       <header
-        className={`${mode === "tab" ? "flex" : "flex"} spectra-artifact-header h-12 shrink-0 items-center justify-between gap-4 bg-transparent px-5`}
+        className="spectra-artifact-header flex shrink-0 items-start justify-between gap-4 bg-transparent"
       >
-        <div className="min-w-0 flex-1" />
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="min-w-0 flex-1">{identityBlock}</div>
+        <div className="spectra-artifact-header-actions flex shrink-0 items-center gap-2">
           <span
             className="hidden items-center gap-1.5 text-[11px] text-[var(--text-secondary)] sm:inline-flex"
             role="status"
@@ -4487,6 +4628,8 @@ function ArtifactStudioEditor({
             <CollaborationPresenceIndicator
               presence={live.presence}
               currentClientId={live.transport?.clientId}
+              currentAccountId={live.accountId}
+              currentDisplayName={live.displayName}
               regions={commentRegions}
             />
           ) : null}
@@ -4675,7 +4818,7 @@ function ArtifactStudioEditor({
           (artifact.aiState === "creating" || artifact.aiState === "updating")
         }
       >
-        <div className={editorLayoutClass}>
+        <div className={`spectra-editor-layout ${editorLayoutClass}`}>
           <section className="min-w-0">
             {artifact.blueprintKey === "document" ? (
               <DocumentStudio
@@ -4686,10 +4829,9 @@ function ArtifactStudioEditor({
                 onChange={editorChange}
                 aiChangedPaths={highlightPaths}
                 readOnly={readOnly}
-                header={identityBlock}
+                header={null}
               />
             ) : null}
-            {artifact.blueprintKey !== "document" ? identityBlock : null}
             {artifact.blueprintKey === "flashcard_deck" ? (
               <FlashcardStudio
                 key={`${artifact._id}:deck`}
@@ -14313,6 +14455,19 @@ function StudioDetails({
   const meta = blueprintMeta[artifact.blueprintKey];
   const Icon = meta.icon;
   const placements = artifactPlacements(artifact);
+  const detailWaveStats = WAVE_C_BLUEPRINTS.has(artifact.blueprintKey)
+    ? waveCIdentityStats(artifact.blueprintKey, artifact.content)
+    : null;
+  const detailWaveTitle =
+    artifact.blueprintKey === "presentation"
+      ? "Presentation metrics"
+      : artifact.blueprintKey === "sheets"
+        ? "Sheet overview"
+        : artifact.blueprintKey === "code"
+          ? "Project overview"
+          : artifact.blueprintKey === "whiteboard"
+            ? "Board overview"
+            : "Calendar overview";
   const links = linkedArtifacts(artifact, artifacts);
   const [durableLinks, setDurableLinks] = useState<SpectraArtifactLink[]>([]);
   const [linkingId, setLinkingId] = useState<string | null>(null);
@@ -14474,6 +14629,22 @@ function StudioDetails({
               )}
             </div>
           </SideCard>
+          {detailWaveStats?.length ? (
+            <SideCard title={detailWaveTitle}>
+              <div className="grid grid-cols-3 divide-x divide-[var(--border-subtle)] text-center">
+                {detailWaveStats.map(([value, label]) => (
+                  <div key={label} className="px-1">
+                    <strong className="block font-sans text-[13px] font-semibold tracking-[-0.01em] text-[var(--text-primary)]">
+                      {value}
+                    </strong>
+                    <span className="text-[9px] text-[var(--text-tertiary)]">
+                      {label}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </SideCard>
+          ) : null}
           {artifact.blueprintKey === "flashcard_deck" ? (
             <SideCard title="Deck metrics">
               <div className="grid grid-cols-3 divide-x divide-[var(--border-subtle)] text-center">

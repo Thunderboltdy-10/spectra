@@ -18,6 +18,7 @@ import {
   CircleStop,
   CloudUpload,
   Code2,
+  Columns2,
   Download,
   Eye,
   File,
@@ -390,12 +391,20 @@ export function CodeStudio({
 }) {
   const incoming = useMemo(() => normalizeCodeContent(content), [content]);
   const incomingRef = useRef(incoming);
-  incomingRef.current = incoming;
+  useEffect(() => {
+    incomingRef.current = incoming;
+  }, [incoming]);
   const [workbook, setWorkbook] = useState<CodeContent>(incoming);
   const lastEmittedKeyRef = useRef<string | null>(null);
   const [activeFileId, setActiveFileId] = useState(incoming.entryFileId);
-  const [surface, setSurface] = useState<"editor" | "settings" | "preview">(
-    incoming.visualisation.openMode === "preview" ? "preview" : "editor",
+  const [surface, setSurface] = useState<
+    "preview" | "code" | "split" | "settings"
+  >(
+    incoming.visualisation.openMode === "preview"
+      ? "preview"
+      : incoming.visualisation.openMode === "split"
+        ? "split"
+        : "code",
   );
   const [mobilePane, setMobilePane] = useState<"source" | "preview">("source");
   const [sourceMode, setSourceMode] = useState<"code" | "parameters">("code");
@@ -447,7 +456,7 @@ export function CodeStudio({
   const [importError, setImportError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [formatting, setFormatting] = useState(false);
-  const [splitPercent, setSplitPercent] = useState(48);
+  const [splitPercent, setSplitPercent] = useState(43);
   const [fullPreview, setFullPreview] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [publishedBuild, setPublishedBuild] =
@@ -2169,23 +2178,40 @@ export function CodeStudio({
           role="tablist"
           aria-label="Code artifact views"
         >
-          {(["editor", "settings", "preview"] as const).map((value) => (
+          {(["preview", "code", "split", "settings"] as const).map((value) => (
             <button
               key={value}
               type="button"
               role="tab"
               aria-selected={surface === value}
-              onClick={() => setSurface(value)}
+              onClick={() => {
+                setSurface(value);
+                if (value !== "settings")
+                  mutate((draft) => {
+                    draft.visualisation.openMode =
+                      value === "code"
+                        ? "source"
+                        : value === "preview"
+                          ? "preview"
+                          : "split";
+                  });
+              }}
               className={`code-top-tab ${surface === value ? "is-active" : ""}`}
             >
-              {value === "editor" ? (
+              {value === "code" ? (
                 <Code2 className="h-3.5 w-3.5" />
               ) : value === "settings" ? (
                 <Settings2 className="h-3.5 w-3.5" />
+              ) : value === "split" ? (
+                <Columns2 className="h-3.5 w-3.5" />
               ) : (
                 <Eye className="h-3.5 w-3.5" />
               )}
-              {value[0]!.toUpperCase() + value.slice(1)}
+              {value === "preview"
+                ? "Visualisation"
+                : value === "split"
+                  ? "Both"
+                  : value[0]!.toUpperCase() + value.slice(1)}
             </button>
           ))}
         </div>
@@ -2482,9 +2508,13 @@ export function CodeStudio({
       {surface === "preview" ? (
         <div className="min-h-[650px] p-3">{preview}</div>
       ) : null}
-      {surface === "editor" ? (
+      {surface === "code" || surface === "split" ? (
         <>
-          <div className="code-mobile-switch flex h-10 items-center justify-between border-b border-[var(--border-subtle)] px-2 sm:hidden">
+          <div
+            className={`code-mobile-switch h-10 items-center justify-between border-b border-[var(--border-subtle)] px-2 sm:hidden ${
+              surface === "split" ? "flex" : "hidden"
+            }`}
+          >
             <button
               type="button"
               onClick={() => setMobilePane("source")}
@@ -2503,7 +2533,9 @@ export function CodeStudio({
             </button>
           </div>
           <div
-            className="code-editor-grid"
+            className={`code-editor-grid ${
+              surface === "code" ? "is-code-only" : ""
+            }`}
             style={
               { "--code-split": `${splitPercent}%` } as React.CSSProperties
             }
@@ -2606,7 +2638,11 @@ export function CodeStudio({
                 )}
               </div>
               {sourceMode === "code" ? (
-                <div className="code-source-body grid min-h-0 flex-1 grid-cols-[156px_minmax(0,1fr)] lg:grid-cols-[178px_minmax(0,1fr)]">
+                <div
+                  className={`code-source-body grid min-h-0 flex-1 ${
+                    fileRailOpen ? "is-files-open" : ""
+                  }`}
+                >
                   <aside
                     data-files-open={fileRailOpen || undefined}
                     className="flex min-h-0 flex-col border-r border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--bg-secondary)_72%,var(--bg-primary))]"
@@ -2895,21 +2931,25 @@ export function CodeStudio({
                 />
               )}
             </section>
-            <button
-              type="button"
-              className="code-split-handle hidden sm:flex"
-              onPointerDown={pointerResize}
-              aria-label="Resize source and preview panes"
-            >
-              <span />
-            </button>
-            <section
-              data-code-pane="preview"
-              data-code-pane-active={mobilePane === "preview" || undefined}
-              className={`${mobilePane === "preview" ? "flex" : "hidden"} min-h-0 min-w-0 sm:flex`}
-            >
-              {preview}
-            </section>
+            {surface === "split" ? (
+              <>
+                <button
+                  type="button"
+                  className="code-split-handle hidden sm:flex"
+                  onPointerDown={pointerResize}
+                  aria-label="Resize source and preview panes"
+                >
+                  <span />
+                </button>
+                <section
+                  data-code-pane="preview"
+                  data-code-pane-active={mobilePane === "preview" || undefined}
+                  className={`${mobilePane === "preview" ? "flex" : "hidden"} min-h-0 min-w-0 sm:flex`}
+                >
+                  {preview}
+                </section>
+              </>
+            ) : null}
           </div>
           <div className="border-t border-[var(--border-default)] bg-[var(--bg-secondary)]">
             <div className="flex h-9 items-center gap-1 px-2">
@@ -3960,12 +4000,15 @@ function CodeSettings({
                 onChange={(event) =>
                   onChange((draft) => {
                     draft.visualisation.openMode = event.target.value as
-                      "source" | "preview";
+                      | "source"
+                      | "preview"
+                      | "split";
                   })
                 }
               >
                 <option value="source">Source workspace</option>
                 <option value="preview">Rendered experience</option>
+                <option value="split">Code and visualisation</option>
               </select>
             </label>
             <label className="code-field-label">

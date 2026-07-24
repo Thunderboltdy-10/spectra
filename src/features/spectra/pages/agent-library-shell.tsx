@@ -603,24 +603,52 @@ export function AgentLibraryShell() {
       onPrimary={() => primaryAction(card)}
     />
   );
+  const activeAgentArtifact = studio.activeArtifact;
+  const artifactQuickChat = activeAgentArtifact ? (
+    <div className="agent-library-composer pointer-events-none">
+      <div className="pointer-events-auto w-full">
+        <CommandBar
+          className="w-full"
+          placeholder={`Ask Spectra anything about ${activeAgentArtifact.title}…`}
+          onSubmit={(prompt) => {
+            router.push(
+              `/chat?prompt=${encodeURIComponent(
+                `For my agent artifact "${activeAgentArtifact.title}", ${prompt}`,
+              )}`,
+            );
+            return true;
+          }}
+          context={
+            <span className="flex h-full min-w-[88px] items-center gap-2 px-3 text-[11px] font-semibold text-[var(--text-primary)]">
+              <Bot className="size-4 shrink-0 text-[var(--brand-primary)]" />
+              Agent
+            </span>
+          }
+        />
+      </div>
+    </div>
+  ) : null;
 
   if (studio.mode === "tab" && studio.activeArtifact) {
     return (
-      <ArtifactStudio
-        mode="tab"
-        artifact={studio.activeArtifact}
-        artifacts={artifacts}
-        tabs={studio.tabs}
-        dirtyIds={studio.dirtyIds}
-        sourceLabel="Agent Library"
-        onClose={studio.closeStudio}
-        onExpand={studio.openTab}
-        onActivateTab={studio.activateTab}
-        onCloseTab={closeTab}
-        onArchive={archiveAgent}
-        onShare={(artifact) => setShareTarget(artifact)}
-        onDirtyChange={studio.setDirty}
-      />
+      <div className="relative h-full min-h-0">
+        <ArtifactStudio
+          mode="tab"
+          artifact={studio.activeArtifact}
+          artifacts={artifacts}
+          tabs={studio.tabs}
+          dirtyIds={studio.dirtyIds}
+          sourceLabel="Agent Library"
+          onClose={studio.closeStudio}
+          onExpand={studio.openTab}
+          onActivateTab={studio.activateTab}
+          onCloseTab={closeTab}
+          onArchive={archiveAgent}
+          onShare={(artifact) => setShareTarget(artifact)}
+          onDirtyChange={studio.setDirty}
+        />
+        {artifactQuickChat}
+      </div>
     );
   }
 
@@ -819,6 +847,7 @@ export function AgentLibraryShell() {
           onDirtyChange={studio.setDirty}
         />
       ) : null}
+      {studio.mode === "split" ? artifactQuickChat : null}
 
       {!studio.activeArtifact ? (
         <div className="agent-library-composer pointer-events-none">
@@ -827,7 +856,11 @@ export function AgentLibraryShell() {
               className="w-full"
               placeholder="Ask Spectra anything about agents…"
               onSubmit={(prompt) => {
-                router.push(`/chat?prompt=${encodeURIComponent(prompt)}`);
+                router.push(
+                  `/chat?prompt=${encodeURIComponent(
+                    `About my Spectra agents, ${prompt}`,
+                  )}`,
+                );
                 return true;
               }}
               context={

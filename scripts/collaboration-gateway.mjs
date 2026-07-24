@@ -22,6 +22,7 @@ const jwtKey = new TextEncoder().encode(tokenSecret);
 const META_MAP = "spectra:artifact-meta";
 const REGION_MAP = "spectra:artifact-regions";
 const REGION_MARKER = "$spectraRegion";
+const CODE_LINES_MARKER = "$spectraCodeLines";
 const GATEWAY_PROTOCOL_VERSION = 1;
 const activeConnections = new Set();
 let policySweepRunning = false;
@@ -111,6 +112,32 @@ function expandProjection(value, regions, active = new Set()) {
     const nextActive = new Set(active);
     nextActive.add(regionId);
     return expandProjection(JSON.parse(encoded).value, regions, nextActive);
+  }
+  if (
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    Object.keys(value).length === 1 &&
+    Array.isArray(value[CODE_LINES_MARKER]) &&
+    value[CODE_LINES_MARKER].every((regionId) => typeof regionId === "string")
+  ) {
+    return value[CODE_LINES_MARKER]
+      .map((regionId) => {
+        if (active.has(regionId))
+          throw new Error("COLLABORATION_PROJECTION_CYCLE");
+        const encoded = regions.get(regionId);
+        if (typeof encoded !== "string")
+          throw new Error("COLLABORATION_PROJECTION_REGION_MISSING");
+        const nextActive = new Set(active);
+        nextActive.add(regionId);
+        const line = expandProjection(
+          JSON.parse(encoded).value,
+          regions,
+          nextActive,
+        );
+        return typeof line === "string" ? line : String(line ?? "");
+      })
+      .join("\n");
   }
   if (Array.isArray(value))
     return value.map((entry) => expandProjection(entry, regions, active));

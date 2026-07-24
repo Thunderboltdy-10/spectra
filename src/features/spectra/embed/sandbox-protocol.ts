@@ -587,7 +587,7 @@ export function buildSpectraSandboxDocument({
         for (const attribute of [...node.attributes]) {
           const name = attribute.name.toLowerCase();
           const value = attribute.value.trim();
-          if (name.startsWith('on') || (name === 'style' && /url\(\s*["']?(?:https?:|\/\/|javascript:|data:text)/i.test(value)) || ((name === 'href' || name.endsWith(':href') || name === 'src' || name === 'poster') && /^(?:https?:|javascript:|data:text\/html)/i.test(value))) node.removeAttribute(attribute.name);
+          if (name.startsWith('on') || (name === 'style' && /url\\(\\s*["']?(?:https?:|\\/\\/|javascript:|data:text)/i.test(value)) || ((name === 'href' || name.endsWith(':href') || name === 'src' || name === 'poster') && /^(?:https?:|javascript:|data:text\\/html)/i.test(value))) node.removeAttribute(attribute.name);
         }
       });
       let serialized = '';
@@ -598,8 +598,8 @@ export function buildSpectraSandboxDocument({
         serialized = new XMLSerializer().serializeToString(clone);
       } else {
         const css = [...document.styleSheets].map((sheet) => {
-          try { return [...sheet.cssRules].map((rule) => rule.cssText).join('\n'); } catch { return ''; }
-        }).join('\n').replace(/@import[^;]+;?/gi, '').replace(/url\(\s*(["']?)(?:https?:|\/\/|javascript:|data:text)[^)]*\)/gi, 'none').replace(/<\/style/gi, '<\\/style');
+          try { return [...sheet.cssRules].map((rule) => rule.cssText).join('\\n'); } catch { return ''; }
+        }).join('\\n').replace(/@import[^;]+;?/gi, '').replace(/url\\(\\s*(["']?)(?:https?:|\\/\\/|javascript:|data:text)[^)]*\\)/gi, 'none').replace(/<\\/style/gi, '<\\\\/style');
         const markup = new XMLSerializer().serializeToString(clone);
         serialized = '<svg xmlns="http://www.w3.org/2000/svg" width="' + width + '" height="' + height + '" viewBox="0 0 ' + width + ' ' + height + '"><foreignObject width="100%" height="100%"><div xmlns="http://www.w3.org/1999/xhtml" style="width:' + width + 'px;min-height:' + height + 'px;overflow:hidden"><style>' + css + '</style>' + markup + '</div></foreignObject></svg>';
       }

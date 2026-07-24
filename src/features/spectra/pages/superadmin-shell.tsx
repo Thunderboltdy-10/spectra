@@ -365,7 +365,7 @@ function PlatformOverviewSurface({
           <div className="mt-5 space-y-3 text-[11px]">
             <div className="flex items-baseline justify-between gap-3">
               <span className="text-[var(--text-secondary)]">Storage</span>
-              <strong className="font-[var(--font-serif)] text-[22px]">
+              <strong className="font-sans text-[21px] font-normal">
                 {formatBytes(data.storageBytes)}
               </strong>
             </div>
@@ -391,7 +391,7 @@ function PlatformOverviewSurface({
           <p className="mt-1 text-[9px] text-[var(--text-tertiary)]">
             No commercial seat enforcement
           </p>
-          <strong className="mt-6 block font-[var(--font-serif)] text-[29px] font-medium">
+          <strong className="mt-6 block font-sans text-[28px] font-normal">
             {formatCompact(data.metrics.totalUsers)}
           </strong>
           <span className="text-[9px] text-[var(--text-tertiary)]">
@@ -694,7 +694,7 @@ export function SuperadminShell() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
-  const range = useMemo(dateRange, []);
+  const range = useMemo(() => dateRange(), []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -735,7 +735,7 @@ export function SuperadminShell() {
     return <ErrorPanel message={error} retry={() => void load()} />;
   if (!overview) return null;
 
-  const rangeLabel = useMemo(() => {
+  const rangeLabel = (() => {
     const from = new Date(range.fromDay);
     const to = new Date(range.toDay);
     const fmt = new Intl.DateTimeFormat(undefined, {
@@ -744,7 +744,7 @@ export function SuperadminShell() {
       year: "numeric",
     });
     return `${fmt.format(from)} – ${fmt.format(to)}`;
-  }, [range]);
+  })();
 
   return (
     <div className="spectra-wave-y spectra-admin-stage min-h-dvh bg-[var(--bg-primary)] pb-24">

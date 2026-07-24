@@ -37,6 +37,9 @@ export function ChatShell() {
   const [studioPanelWidth, setStudioPanelWidth] = useState(700);
   const [liveThreadPanelWidth, setLiveThreadPanelWidth] = useState(560);
   const activeThreadRef = useRef<string | null>(requestedThreadId);
+  const syncedRequestedThreadRef = useRef<string | null | undefined>(
+    undefined,
+  );
   const consumedPromptRef = useRef<string | null>(null);
   const openObjects = useSpectraContextStore((state) => state.openObjects);
   const openObject = useSpectraContextStore((state) => state.openObject);
@@ -69,10 +72,18 @@ export function ChatShell() {
   }, []);
 
   useEffect(() => {
+    if (syncedRequestedThreadRef.current === requestedThreadId) return;
+    syncedRequestedThreadRef.current = requestedThreadId;
     setThreadId(requestedThreadId);
-    if (requestedThreadId !== (composerThread?.id ?? null)) {
-      setComposerThread(requestedThreadId ? { id: requestedThreadId, title: "Conversation" } : null);
-    }
+    // URL changes own navigation state. Do not subscribe this effect to the
+    // composer thread: a new run publishes its thread before router.replace()
+    // completes, and feeding that update back here repeatedly cleared the new
+    // thread and caused a request storm.
+    setComposerThread(
+      requestedThreadId
+        ? { id: requestedThreadId, title: "Conversation" }
+        : null,
+    );
     activeThreadRef.current = requestedThreadId;
     setLoading(Boolean(requestedThreadId));
     void refresh(requestedThreadId)
@@ -87,7 +98,7 @@ export function ChatShell() {
       })
       .catch((error) => toast.error(error instanceof Error ? error.message : "Could not load chat."))
       .finally(() => setLoading(false));
-  }, [composerThread?.id, requestedThreadId, refresh, router, setComposerThread]);
+  }, [requestedThreadId, refresh, router, setComposerThread]);
 
   useEffect(() => {
     if (!threadId || !detail?.traces.some((trace) => trace.run.status === "queued" || trace.run.status === "running" || trace.run.status === "awaiting_confirmation" || trace.run.status === "awaiting_resolution")) return;
@@ -221,10 +232,14 @@ export function ChatShell() {
 	  useEffect(() => {
 	    const prompt = requestedPrompt?.trim();
 	    if (!prompt || consumedPromptRef.current === prompt) return;
+	    // A prompt opened from another surface must wait until the URL-owned
+	    // continuation has been reconciled. Otherwise the first render can
+	    // accidentally append it to whichever thread was previously selected.
+	    if ((composerThread?.id ?? null) !== requestedThreadId) return;
 	    consumedPromptRef.current = prompt;
 	    void runEngine.run(prompt);
 	    router.replace(threadId ? `/chat?threadId=${encodeURIComponent(threadId)}` : "/chat?new=1");
-	  }, [requestedPrompt, router, runEngine, threadId]);
+	  }, [composerThread?.id, requestedPrompt, requestedThreadId, router, runEngine, threadId]);
 
   const visibleTitle = detail?.thread.title ?? "New conversation";
   const title = composerThread?.title ?? visibleTitle;

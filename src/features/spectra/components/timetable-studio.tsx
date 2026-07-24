@@ -2,12 +2,9 @@
 
 import {
   AlertTriangle,
-  Bot,
   CalendarDays,
   Check,
-  CheckCircle2,
   ChevronDown,
-  Circle,
   ChevronLeft,
   ChevronRight,
   Clock3,
@@ -22,7 +19,6 @@ import {
   Printer,
   Plus,
   Repeat2,
-  Sparkles,
   Trash2,
   X,
 } from "lucide-react";
@@ -302,7 +298,6 @@ export function TimetableStudio({
   aiChangedPaths = [],
   readOnly,
   synchronizationReady = true,
-  syncMessage = "Auto-saved",
   onActiveRegionChange,
 }: {
   artifactId: string;
@@ -339,8 +334,6 @@ export function TimetableStudio({
   const [selectedEventId, setSelectedEventId] = useState<string>();
   const [layersOpen, setLayersOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
-  const [aiOpen, setAiOpen] = useState(false);
-  const [aiPrompt, setAiPrompt] = useState("");
   const [importReport, setImportReport] = useState<TimetableImportReport>();
   const [importError, setImportError] = useState<string>();
   const [importBusy, setImportBusy] = useState<string>();
@@ -1096,20 +1089,6 @@ export function TimetableStudio({
           <strong>{formatDateRange(days, view.kind)}</strong>
         </div>
         <div className="timetable-toolbar-actions">
-          <span
-            className="hidden items-center gap-1.5 border-0 bg-transparent px-1 text-[10px] text-[var(--text-secondary)] lg:inline-flex"
-            role="status"
-            aria-live="polite"
-          >
-            {syncMessage === "Auto-saved" ? (
-              <CheckCircle2 className="h-3.5 w-3.5 text-[var(--success)]" />
-            ) : syncMessage === "Synchronizing" || syncMessage === "Reconnecting" ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-cyan)]" />
-            ) : (
-              <Circle className="h-3 w-3 fill-[#d88922] text-[#d88922]" />
-            )}
-            {syncMessage}
-          </span>
           <label>
             <span className="sr-only">Calendar view</span>
             <select
@@ -1140,13 +1119,6 @@ export function TimetableStudio({
             onClick={() => window.print()}
           >
             <Printer className="h-3.5 w-3.5" />
-          </button>
-          <button
-            type="button"
-            className="timetable-ai-trigger"
-            onClick={() => setAiOpen(!aiOpen)}
-          >
-            <Sparkles className="h-3.5 w-3.5" /> Plan with Spectra
           </button>
           <button
             type="button"
@@ -1311,43 +1283,6 @@ export function TimetableStudio({
             </span>
           </button>
         </aside>
-      ) : null}
-
-      {aiOpen ? (
-        <form
-          className="timetable-ai-popover"
-          onSubmit={(event) => {
-            event.preventDefault();
-            const prompt = aiPrompt.trim();
-            if (!prompt) return;
-            window.dispatchEvent(
-              new CustomEvent("spectra:ask", {
-                detail: {
-                  prompt: `${prompt}\n\nWork on timetable artifact ${artifactId}. Inspect only permitted layers, preserve locked and source-owned times, and preview consequential schedule changes before applying them.`,
-                },
-              }),
-            );
-            setAiPrompt("");
-            setAiOpen(false);
-          }}
-        >
-          <div>
-            <Bot className="h-4 w-4" />
-            <strong>Plan with Spectra</strong>
-            <button type="button" onClick={() => setAiOpen(false)}>
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-          <textarea
-            autoFocus
-            value={aiPrompt}
-            onChange={(event) => setAiPrompt(event.target.value)}
-            placeholder="e.g. Fit two focused review sessions before Friday without moving classes"
-          />
-          <button type="submit" disabled={!aiPrompt.trim()}>
-            Build a proposal
-          </button>
-        </form>
       ) : null}
 
       {importBusy ? (
@@ -1563,12 +1498,12 @@ export function TimetableStudio({
                 type="datetime-local"
                 value={localDateInput(selectedEvent.start, timetable.timezone)}
                 disabled={!selectedCanEditBase}
-                onChange={(event) =>
+                onInput={(event) =>
                   updateSelected((candidate) => {
                     const duration =
                       Date.parse(candidate.end) - Date.parse(candidate.start);
                     candidate.start = inputToIso(
-                      event.target.value,
+                      event.currentTarget.value,
                       timetable.timezone,
                     );
                     candidate.end = new Date(
@@ -1585,10 +1520,10 @@ export function TimetableStudio({
                 value={localDateInput(selectedEvent.end, timetable.timezone)}
                 disabled={!selectedCanEditBase}
                 min={localDateInput(selectedEvent.start, timetable.timezone)}
-                onChange={(event) =>
+                onInput={(event) =>
                   updateSelected((candidate) => {
                     const next = inputToIso(
-                      event.target.value,
+                      event.currentTarget.value,
                       timetable.timezone,
                     );
                     if (Date.parse(next) > Date.parse(candidate.start))
@@ -1805,7 +1740,7 @@ export function TimetableStudio({
                         timetable.timezone,
                       )}
                       disabled={!selectedCanEditOverlay}
-                      onChange={(event) =>
+                      onInput={(event) =>
                         updateSelected((candidate) => {
                           const duration =
                             Date.parse(
@@ -1817,7 +1752,7 @@ export function TimetableStudio({
                                 candidate.start,
                             );
                           const nextStart = inputToIso(
-                            event.target.value,
+                            event.currentTarget.value,
                             timetable.timezone,
                           );
                           candidate.overlay = {
@@ -1845,10 +1780,10 @@ export function TimetableStudio({
                         timetable.timezone,
                       )}
                       disabled={!selectedCanEditOverlay}
-                      onChange={(event) =>
+                      onInput={(event) =>
                         updateSelected((candidate) => {
                           const nextEnd = inputToIso(
-                            event.target.value,
+                            event.currentTarget.value,
                             timetable.timezone,
                           );
                           if (

@@ -82,7 +82,7 @@ export function MetricCard({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-[11px] text-[var(--text-secondary)]">{label}</p>
-          <strong className="mt-2 block truncate font-[var(--font-serif)] text-[27px] font-medium leading-none tracking-[-.025em] text-[var(--text-primary)]">
+          <strong className="mt-2 block truncate font-sans text-[26px] font-normal leading-none tracking-[-.02em] text-[var(--text-primary)]">
             {value}
           </strong>
           <p

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
   ArchiveX,
@@ -30,6 +31,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { CommandBar } from "@/features/spectra/components/command-bar";
 import {
   clearSpectraMemory,
   correctSpectraMemory,
@@ -142,11 +144,18 @@ function relativeDate(timestamp: number) {
   }).format(timestamp);
 }
 
-function scopeIcon(scope: SpectraMemoryScope) {
-  if (scope === "private_global" || scope === "system") return Globe2;
-  if (scope === "private_school") return School;
-  if (scope === "workspace") return Users;
-  return ShieldCheck;
+function ScopeIcon({
+  scope,
+  size,
+}: {
+  scope: SpectraMemoryScope;
+  size: number;
+}) {
+  if (scope === "private_global" || scope === "system")
+    return <Globe2 size={size} />;
+  if (scope === "private_school") return <School size={size} />;
+  if (scope === "workspace") return <Users size={size} />;
+  return <ShieldCheck size={size} />;
 }
 
 function downloadJson(value: unknown) {
@@ -218,7 +227,6 @@ function MemoryCard({
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(claim.proposition);
-  const ScopeIcon = scopeIcon(claim.scope);
   const activeBusy = busy === claim._id;
   const confidence =
     claim.assertion === "asserted"
@@ -274,7 +282,7 @@ function MemoryCard({
           </span>
           <span className="mt-2 flex flex-wrap items-center gap-3 text-[10px] text-[var(--text-tertiary)]">
             <span className="inline-flex items-center gap-1.5">
-              <ScopeIcon size={12} />
+              <ScopeIcon scope={claim.scope} size={12} />
               {scopeLabels[claim.scope]}
             </span>
             <span>{confidence}</span>
@@ -606,6 +614,7 @@ function AddMemoryPanel({
 }
 
 export function MemoryShell() {
+  const router = useRouter();
   const [preferences, setPreferences] =
     useState<SpectraMemoryPreferences | null>(null);
   const [claims, setClaims] = useState<SpectraMemoryClaim[]>([]);
@@ -1221,6 +1230,29 @@ export function MemoryShell() {
             </div>
           )}
         </main>
+      </div>
+
+      <div className="pointer-events-none fixed inset-x-0 bottom-4 z-30 flex justify-center px-4 md:left-[76px]">
+        <div className="pointer-events-auto w-full max-w-[760px]">
+          <CommandBar
+            className="w-full"
+            placeholder="Ask Spectra to remember, correct, or use something…"
+            onSubmit={(prompt) => {
+              router.push(
+                `/chat?prompt=${encodeURIComponent(
+                  `About my private Spectra memory, ${prompt}`,
+                )}`,
+              );
+              return true;
+            }}
+            context={
+              <span className="flex h-full min-w-[88px] items-center gap-2 px-3 text-[11px] font-semibold text-[var(--text-primary)]">
+                <Brain className="size-3.5 shrink-0 text-[var(--brand-primary)]" />
+                Memory
+              </span>
+            }
+          />
+        </div>
       </div>
 
       {addOpen ? (

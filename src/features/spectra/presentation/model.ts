@@ -139,11 +139,15 @@ export function createPresentationObject(
   type: PresentationObjectType,
   ordinal = 1,
 ): PresentationObject {
+  const cascade = ((Math.max(1, ordinal) - 1) % 7) * 22;
   const base = {
     id: `object-${Date.now().toString(36)}-${ordinal.toString(36)}`,
     type,
-    x: type === "text" ? 110 : 300,
-    y: type === "text" ? 120 : 180,
+    // Keep newly inserted layers discoverable instead of stacking them at the
+    // exact same coordinates. The subtle cascade also makes insertion order
+    // legible before the user starts arranging the slide.
+    x: (type === "text" ? 110 : 300) + cascade,
+    y: (type === "text" ? 120 : 180) + cascade,
     width: type === "text" ? 780 : 400,
     height: type === "text" ? 120 : 220,
     rotation: 0,

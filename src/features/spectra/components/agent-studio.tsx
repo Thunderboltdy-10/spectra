@@ -179,6 +179,7 @@ function ChipsEditor({
             key={value}
             onClick={() => onChange(values.filter((item) => item !== value))}
             title={`Remove ${value}`}
+            aria-label={`Remove ${value}`}
           >
             {value} <X />
           </button>
@@ -193,8 +194,14 @@ function ChipsEditor({
             }
           }}
           placeholder={placeholder}
+          aria-label={label}
         />
-        <button type="button" className="agent-chip-add" onClick={add}>
+        <button
+          type="button"
+          className="agent-chip-add"
+          onClick={add}
+          aria-label={`Add ${label.toLowerCase()}`}
+        >
           <Plus />
         </button>
       </div>
@@ -1169,6 +1176,7 @@ export function AgentStudio({
                       />
                       <button
                         type="button"
+                        aria-label={`Remove skill ${skill.name || "Untitled"}`}
                         onClick={() =>
                           commit({
                             ...agent,
@@ -1631,6 +1639,7 @@ export function AgentStudio({
                     />
                     <button
                       type="button"
+                      aria-label={`Remove evaluation case ${index + 1}`}
                       onClick={() =>
                         commit({
                           ...agent,
@@ -2061,7 +2070,7 @@ export function AgentStudio({
                 </span>
               </div>
               <p>
-                Only this release's enabled instructions, tools, bindings, and
+                Only this release&apos;s enabled instructions, tools, bindings, and
                 specialized context load after selection. Private prompts,
                 memory, and invocation threads remain outside the artifact.
               </p>

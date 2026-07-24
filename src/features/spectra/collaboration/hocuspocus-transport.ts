@@ -347,6 +347,11 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
   async flush() {
     if (!this.provider) throw new Error("COLLABORATION_NOT_CONNECTED");
     this.provider.flushPendingUpdates();
+    // Hocuspocus records a just-transacted update on its next task. Checking
+    // `hasUnsyncedChanges` immediately can therefore report a false clean
+    // state, causing the region claim to be released before the gateway has
+    // authorized and persisted the update.
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 16));
     if (this.provider.synced && !this.provider.hasUnsyncedChanges) return;
     await new Promise<void>((resolve, reject) => {
       const timeout = window.setTimeout(() => {

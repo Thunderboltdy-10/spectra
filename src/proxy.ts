@@ -11,6 +11,14 @@ const isPublicRoute = createRouteMatcher([
   "/sign-up(.*)",
   "/public(.*)",
   "/api/spectra/public(.*)",
+  // The scheduled connector worker authenticates with a short-lived HMAC in
+  // the route itself. Interactive actions still call requireActor(), so
+  // exposing this endpoint to the proxy does not expose ManageBac data.
+  "/api/spectra/managebac",
+  // Durable AI jobs are claimed by a separate local/production worker. Its
+  // internal_work action is HMAC-authenticated before the route asks for a
+  // user session; every interactive action still requires requireActor().
+  "/api/spectra/run",
   "/api/contact(.*)",
   "/api/health(.*)",
   "/api/webhooks(.*)",

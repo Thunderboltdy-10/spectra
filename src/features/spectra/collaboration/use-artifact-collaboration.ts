@@ -1,6 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { HocuspocusArtifactTransport } from "./hocuspocus-transport";
 import type { CollaborationTransportSnapshot } from "./types";
 
@@ -26,6 +32,7 @@ export function useArtifactCollaboration(
   // fresh one instead of resurrecting a destroyed Y.Doc.
   const [transport, setTransport] =
     useState<HocuspocusArtifactTransport | null>(null);
+  const recoveringRef = useRef(false);
   useEffect(() => {
     if (!artifactId) {
       setTransport(null);
@@ -48,6 +55,35 @@ export function useArtifactCollaboration(
     transport?.getSnapshot ?? getClosedSnapshot,
     getClosedSnapshot,
   );
+  useEffect(() => {
+    if (
+      !transport ||
+      recoveringRef.current ||
+      snapshot.unsynchronizedChanges === 0 ||
+      (snapshot.state !== "unsynchronized" &&
+        snapshot.state !== "reconnecting")
+    )
+      return;
+    // A gateway rejection closes the socket after the local Y.Doc has already
+    // recorded the rejected update. Reconnecting that same document resends
+    // the unauthorized frame forever. The authored React draft remains intact,
+    // so rebuild only the transport and let the normal synchronization path
+    // reapply that draft under a fresh region claim.
+    recoveringRef.current = true;
+    const timer = window.setTimeout(() => {
+      transport.destroy();
+      setGeneration((value) => value + 1);
+      recoveringRef.current = false;
+    }, 250);
+    return () => {
+      window.clearTimeout(timer);
+      recoveringRef.current = false;
+    };
+  }, [
+    snapshot.state,
+    snapshot.unsynchronizedChanges,
+    transport,
+  ]);
   const recoverAuthoritative = useCallback(() => {
     transport?.destroy();
     setGeneration((value) => value + 1);

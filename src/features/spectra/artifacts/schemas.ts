@@ -662,7 +662,7 @@ export const codeContentSchema = z
         enabled: z.boolean(),
         title: z.string().max(300).optional(),
         description: z.string().max(2_000).optional(),
-        openMode: z.enum(["source", "preview"]).optional(),
+        openMode: z.enum(["source", "preview", "split"]).optional(),
         aspectRatio: z.number().positive().max(5).optional(),
       })
       .strict(),

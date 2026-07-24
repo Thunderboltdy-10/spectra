@@ -8114,7 +8114,9 @@ button:not(:disabled),
 .presentation-presenter {
   position: fixed;
   inset: 0;
-  z-index: 120;
+  /* Presentation mode must sit above the persistent command composer,
+     dialogs, and shell chrome while the document element is fullscreen. */
+  z-index: 9999;
   display: grid;
   grid-template-rows: 52px minmax(0, 1fr) 108px;
   background: #11120f;
@@ -12867,7 +12869,7 @@ button:not(:disabled),
   opacity: 0.4;
 }
 .code-files-toggle {
-  display: none;
+  display: inline-flex !important;
 }
 
 .code-action-menu {
@@ -12912,6 +12914,26 @@ button:not(:disabled),
       calc(100% - var(--code-split) - 5px)
     );
   background: var(--bg-primary);
+}
+
+.code-editor-grid.is-code-only {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.code-source-body {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+
+.code-source-body > aside {
+  display: none !important;
+}
+
+.code-source-body.is-files-open {
+  grid-template-columns: 178px minmax(0, 1fr) !important;
+}
+
+.code-source-body.is-files-open > aside {
+  display: flex !important;
 }
 
 .code-split-handle {
@@ -13827,11 +13849,17 @@ body {
 .spectra-workspace-shell-controls {
   position: absolute !important;
   z-index: 40 !important;
-  top: 72px !important;
+  top: 152px !important;
   right: 24px !important;
   width: max-content !important;
 }
 
+.spectra-workspace-shell-controls--board
+  .spectra-workspace-toolbar
+  > div,
+.spectra-workspace-shell-controls--timeline
+  .spectra-workspace-toolbar
+  > div,
 .spectra-workspace-shell-controls--canvas
   .spectra-workspace-toolbar
   > :not(nav) {
@@ -13861,6 +13889,44 @@ body {
 
 .spectra-workspace-canvas [data-spectra-card] p {
   display: none !important;
+}
+
+/* The canvas lives beside the workspace details rail, so viewport breakpoints
+   alone can select a three-column cluster layout with too little real space. */
+.spectra-workspace-canvas {
+  container-type: inline-size;
+}
+
+@container (max-width: 980px) {
+  .spectra-workspace-canvas
+    > div:nth-child(2) {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .spectra-workspace-canvas
+    > div:nth-child(2)
+    > section {
+    grid-column: auto !important;
+    margin-top: 0 !important;
+  }
+
+  .spectra-workspace-canvas
+    > div:nth-child(2)
+    > section
+    > div {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@container (max-width: 620px) {
+  .spectra-workspace-canvas
+    > div:nth-child(2),
+  .spectra-workspace-canvas
+    > div:nth-child(2)
+    > section
+    > div {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
 }
 
 /* Shared Spectra redesign polish — transitions, composer, rails. */
@@ -13931,4 +13997,739 @@ body {
   font-size: 13px !important;
   border-radius: 8px !important;
   padding: 0 8px !important;
+}
+
+/* Reference-calibrated editor pass -----------------------------------------
+   The supplied editor captures use near-white paper, compact chrome and a
+   quieter hierarchy than the earlier warm/oversized pass. These tokens are
+   intentionally global so every studio is built on the same visual ground. */
+:root {
+  --bg-primary: #fbfaf8;
+  --bg-secondary: #f6f4f0;
+  --bg-tertiary: #efede8;
+  --bg-sidebar: #fcfbf9;
+  --bg-elevated: #fffefd;
+  --bg-elevated-rgb: 255, 254, 253;
+  --bg-hover: #f1efeb;
+  --bg-code: #f2f0ec;
+  --text-primary: #211f1c;
+  --text-secondary: #716d67;
+  --text-tertiary: #9b9690;
+  --text-placeholder: #aaa59e;
+  --border-default: #e5e2dc;
+  --border-subtle: #efede8;
+  --border-strong: #d4d0c8;
+  --card-paper: #fffefd;
+  --card-paper-quiet: #faf9f6;
+  --card-border: #e7e4de;
+  --card-border-soft: #efede8;
+  --header-height: 44px;
+  --details-rail-width: 292px;
+}
+
+/* Reference 15 — presentation editor. */
+.spectra-artifact-studio[data-blueprint="presentation"]
+  .spectra-artifact-identity {
+  gap: 9px !important;
+  padding: 16px 18px 9px !important;
+}
+
+.spectra-artifact-studio[data-blueprint="presentation"]
+  .spectra-artifact-identity
+  > span:first-child {
+  width: 30px !important;
+  height: 30px !important;
+  margin-top: 0 !important;
+  border-radius: 7px !important;
+}
+
+.spectra-artifact-studio[data-blueprint="presentation"]
+  .spectra-artifact-identity
+  > span:first-child
+  svg {
+  width: 15px;
+  height: 15px;
+}
+
+.spectra-artifact-studio[data-blueprint="presentation"]
+  .spectra-artifact-identity
+  > div:nth-child(2)
+  > div:first-child {
+  margin-bottom: 2px !important;
+  font-size: 8px !important;
+  line-height: 11px !important;
+  letter-spacing: 0.12em !important;
+}
+
+.spectra-artifact-studio[data-blueprint="presentation"]
+  .spectra-artifact-identity
+  textarea {
+  display: block !important;
+  field-sizing: fixed !important;
+  height: 28px !important;
+  min-height: 28px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  font-size: 24px !important;
+  line-height: 1.08 !important;
+  letter-spacing: -0.025em !important;
+}
+
+.spectra-artifact-studio[data-blueprint="presentation"]
+  .spectra-artifact-identity
+  input {
+  display: block !important;
+  height: 16px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  font-size: 11px !important;
+  line-height: 16px !important;
+}
+
+.spectra-artifact-studio[data-blueprint="presentation"]
+  .spectra-artifact-identity-stats {
+  width: 266px !important;
+  margin-right: 0 !important;
+  gap: 5px !important;
+}
+
+.spectra-artifact-studio[data-blueprint="presentation"]
+  .spectra-artifact-identity-stats
+  > div:first-child {
+  height: 56px !important;
+  border-radius: 7px !important;
+}
+
+.spectra-artifact-studio[data-blueprint="presentation"] .presentation-studio {
+  border-radius: 7px;
+  background: #fffefd;
+  box-shadow: none;
+}
+
+.spectra-artifact-studio[data-blueprint="presentation"]
+  .presentation-primary-bar {
+  min-height: 44px;
+  padding-inline: 11px;
+  gap: 8px;
+}
+
+.spectra-artifact-studio[data-blueprint="presentation"]
+  .presentation-primary-bar
+  [role="tab"] {
+  padding-inline: 9px;
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.spectra-artifact-studio[data-blueprint="presentation"]
+  .presentation-primary-bar
+  > div:last-child {
+  gap: 5px !important;
+}
+
+.spectra-artifact-studio[data-blueprint="presentation"]
+  :is(.presentation-secondary-action, .presentation-present-action) {
+  height: 28px;
+  gap: 4px;
+  border-radius: 5px;
+  padding-inline: 8px;
+  font-size: 8.5px;
+  font-weight: 650;
+}
+
+.spectra-artifact-studio[data-blueprint="presentation"]
+  .presentation-present-action {
+  background: #7658ed;
+  box-shadow: none;
+}
+
+.spectra-artifact-studio[data-blueprint="presentation"] .presentation-toolbar {
+  min-height: 42px;
+  gap: 2px;
+  padding: 5px 10px;
+}
+
+.spectra-artifact-studio[data-blueprint="presentation"]
+  .presentation-toolbar
+  :is(button, select) {
+  min-height: 26px;
+  border-radius: 5px;
+  padding-inline: 6px;
+  font-size: 8px;
+}
+
+.spectra-artifact-studio[data-blueprint="presentation"]
+  .presentation-toolbar
+  button:first-child {
+  padding-inline: 9px;
+}
+
+.spectra-artifact-studio[data-blueprint="presentation"]
+  .presentation-toolbar
+  select {
+  min-width: 102px;
+}
+
+.spectra-artifact-studio[data-blueprint="presentation"]
+  .presentation-toolbar-rule {
+  height: 18px;
+  margin-inline: 3px;
+}
+
+.spectra-artifact-studio[data-blueprint="presentation"]
+  .presentation-workspace {
+  min-height: 690px;
+  grid-template-columns: 184px minmax(0, 1fr);
+}
+
+.spectra-artifact-studio[data-blueprint="presentation"]
+  .presentation-slide-rail {
+  padding: 8px;
+  background: #f7f5f2;
+}
+
+.spectra-artifact-studio[data-blueprint="presentation"]
+  .presentation-slide-rail
+  > button:not(.presentation-add-slide) {
+  gap: 4px;
+  margin-bottom: 7px;
+  border-radius: 6px;
+  padding: 3px;
+}
+
+.spectra-artifact-studio[data-blueprint="presentation"]
+  .presentation-slide-rail
+  > button[data-active="true"] {
+  background: #f1edff;
+  box-shadow: inset 0 0 0 1px #7658ed;
+}
+
+.spectra-artifact-studio[data-blueprint="presentation"]
+  .presentation-add-slide {
+  min-height: 32px;
+  border-radius: 5px;
+  font-size: 8px;
+}
+
+.spectra-artifact-studio[data-blueprint="presentation"] .presentation-stage {
+  padding: 14px;
+  background: #f7f6f3;
+}
+
+.spectra-artifact-studio[data-blueprint="presentation"] .presentation-canvas {
+  border-radius: 5px;
+  border-color: #e3e0da;
+  box-shadow: 0 1px 2px rgba(35, 31, 25, 0.04);
+}
+
+.spectra-artifact-studio[data-blueprint="presentation"]
+  .presentation-canvas::after {
+  background: none;
+}
+
+.spectra-artifact-studio[data-blueprint="presentation"]
+  .presentation-object-text[data-text-preset="title"] {
+  font-family: "Fraunces", "Fraunces Fallback", Georgia, serif !important;
+  letter-spacing: -0.025em;
+}
+
+.spectra-artifact-studio[data-blueprint="presentation"]
+  .presentation-object-text:not([data-text-preset="title"]) {
+  font-family: var(--font-sans), sans-serif;
+}
+
+/* Wave-C artifact identities share the compact, editorial header used by
+   their source-of-truth screens instead of the oversized dashboard heading. */
+.spectra-artifact-studio:is(
+    [data-blueprint="sheets"],
+    [data-blueprint="code"],
+    [data-blueprint="whiteboard"],
+    [data-blueprint="timetable"]
+  )
+  .spectra-artifact-identity {
+  gap: 9px !important;
+  padding: 13px 14px 8px !important;
+}
+
+.spectra-artifact-studio:is(
+    [data-blueprint="sheets"],
+    [data-blueprint="code"],
+    [data-blueprint="whiteboard"],
+    [data-blueprint="timetable"]
+  )
+  .spectra-artifact-identity
+  > span:first-child {
+  width: 30px !important;
+  height: 30px !important;
+  margin-top: 0 !important;
+  border-radius: 7px !important;
+}
+
+.spectra-artifact-studio:is(
+    [data-blueprint="sheets"],
+    [data-blueprint="code"],
+    [data-blueprint="whiteboard"],
+    [data-blueprint="timetable"]
+  )
+  .spectra-artifact-identity
+  > span:first-child
+  svg {
+  width: 15px;
+  height: 15px;
+}
+
+.spectra-artifact-studio:is(
+    [data-blueprint="sheets"],
+    [data-blueprint="code"],
+    [data-blueprint="whiteboard"],
+    [data-blueprint="timetable"]
+  )
+  .spectra-artifact-identity
+  > div:nth-child(2)
+  > div:first-child {
+  margin-bottom: 1px !important;
+  font-size: 8px !important;
+  line-height: 10px !important;
+}
+
+.spectra-artifact-studio:is(
+    [data-blueprint="sheets"],
+    [data-blueprint="code"],
+    [data-blueprint="whiteboard"],
+    [data-blueprint="timetable"]
+  )
+  .spectra-artifact-identity
+  textarea {
+  display: block !important;
+  field-sizing: fixed !important;
+  height: 27px !important;
+  min-height: 27px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  font-size: 22px !important;
+  line-height: 1.1 !important;
+  letter-spacing: -0.022em !important;
+}
+
+.spectra-artifact-studio:is(
+    [data-blueprint="sheets"],
+    [data-blueprint="code"],
+    [data-blueprint="whiteboard"],
+    [data-blueprint="timetable"]
+  )
+  .spectra-artifact-identity
+  input {
+  display: block !important;
+  height: 16px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  font-size: 10.5px !important;
+  line-height: 16px !important;
+}
+
+@media (min-width: 1280px) {
+  .spectra-artifact-studio[data-blueprint="sheets"]
+    .spectra-editor-layout {
+    grid-template-columns: minmax(0, 1fr) 250px !important;
+  }
+
+  .spectra-artifact-studio[data-blueprint="code"]
+    .spectra-editor-layout {
+    grid-template-columns: minmax(0, 1fr) 272px !important;
+  }
+}
+
+.spectra-artifact-studio[data-blueprint="sheets"]
+  .spectra-artifact-identity {
+  gap: 9px !important;
+  padding: 13px 14px 8px !important;
+}
+
+.spectra-artifact-studio[data-blueprint="code"]
+  .spectra-artifact-identity {
+  gap: 9px !important;
+  padding: 13px 14px 8px !important;
+}
+
+.spectra-artifact-studio[data-blueprint="code"]
+  .spectra-artifact-identity
+  > span:first-child {
+  width: 30px !important;
+  height: 30px !important;
+  margin-top: 0 !important;
+  border-radius: 7px !important;
+}
+
+.spectra-artifact-studio[data-blueprint="code"]
+  .spectra-artifact-identity
+  textarea {
+  display: block !important;
+  field-sizing: fixed !important;
+  height: 27px !important;
+  min-height: 27px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  font-size: 22px !important;
+  line-height: 1.1 !important;
+}
+
+.spectra-artifact-studio[data-blueprint="code"]
+  .spectra-artifact-identity
+  input {
+  display: block !important;
+  height: 16px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  font-size: 10.5px !important;
+  line-height: 16px !important;
+}
+
+.spectra-artifact-studio[data-blueprint="code"] .code-studio {
+  border-radius: 7px;
+  box-shadow: none;
+}
+
+.spectra-artifact-studio[data-blueprint="code"]
+  .code-studio
+  > div:first-child {
+  min-height: 44px;
+  padding: 5px 10px;
+}
+
+.spectra-artifact-studio[data-blueprint="code"] .code-top-tab {
+  height: 30px;
+  padding-inline: 9px;
+  border-radius: 5px;
+  font-size: 9px;
+}
+
+.spectra-artifact-studio[data-blueprint="sheets"]
+  .spectra-artifact-identity
+  > span:first-child {
+  width: 30px !important;
+  height: 30px !important;
+  margin-top: 0 !important;
+}
+
+.spectra-artifact-studio[data-blueprint="sheets"]
+  .spectra-artifact-identity
+  textarea {
+  display: block !important;
+  field-sizing: fixed !important;
+  height: 27px !important;
+  min-height: 27px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  font-size: 22px !important;
+  line-height: 1.1 !important;
+}
+
+.spectra-artifact-studio[data-blueprint="sheets"]
+  .spectra-artifact-identity
+  input {
+  display: block !important;
+  height: 16px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  font-size: 10.5px !important;
+  line-height: 16px !important;
+}
+
+.spectra-artifact-studio[data-blueprint="sheets"] .sheets-grid-frame {
+  height: 330px !important;
+  min-height: 330px !important;
+}
+
+.spectra-artifact-studio[data-blueprint="presentation"] .presentation-notes {
+  margin-top: 10px;
+  border-radius: 5px;
+}
+
+.spectra-artifact-studio[data-blueprint="presentation"]
+  .presentation-notes
+  > div {
+  height: 30px;
+  gap: 11px;
+  padding-inline: 11px;
+  font-size: 8px;
+}
+
+.spectra-artifact-studio[data-blueprint="presentation"]
+  .presentation-notes-toggle {
+  display: grid;
+  width: 100%;
+  height: 30px;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 11px;
+  padding-inline: 11px;
+  color: var(--text-secondary);
+  font-size: 8px;
+  text-align: left;
+}
+
+.spectra-artifact-studio[data-blueprint="presentation"]
+  .presentation-notes-toggle
+  strong {
+  color: var(--text-primary);
+  font-weight: 650;
+}
+
+.spectra-artifact-studio[data-blueprint="presentation"]
+  .presentation-notes-toggle
+  span {
+  text-align: right;
+}
+
+.spectra-artifact-studio[data-blueprint="presentation"]
+  .presentation-notes
+  > div
+  strong {
+  height: 30px;
+  padding-top: 9px;
+}
+
+.spectra-artifact-studio[data-blueprint="presentation"]
+  .presentation-notes
+  textarea {
+  min-height: 92px;
+  padding: 10px 12px 20px;
+  font-size: 9px;
+  line-height: 1.55;
+}
+
+/* Full-height artifact shell. The editable identity shares the same top rail
+   as sync and close actions so the working surface begins immediately below. */
+.spectra-artifact-header {
+  min-height: 66px !important;
+  padding: 6px 14px 0 !important;
+}
+
+.spectra-artifact-header .spectra-artifact-identity {
+  min-width: 0;
+  padding: 0 !important;
+}
+
+.spectra-artifact-header-actions {
+  padding-top: 4px;
+}
+
+.spectra-artifact-main {
+  overflow: hidden !important;
+  padding: 0 0 0 15px !important;
+}
+
+.spectra-editor-layout,
+.spectra-editor-layout > section {
+  height: 100%;
+  min-height: 0;
+}
+
+.spectra-editor-layout > section {
+  display: flex;
+  flex-direction: column;
+}
+
+.spectra-editor-layout > section > :last-child {
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.spectra-artifact-studio[data-blueprint="whiteboard"] .whiteboard-studio {
+  height: 100%;
+  margin-top: 0;
+  border-bottom: 0;
+  border-radius: 12px 12px 0 0;
+}
+
+.spectra-artifact-studio[data-blueprint="whiteboard"] .whiteboard-toolbar {
+  margin-top: 7px;
+}
+
+.whiteboard-shell {
+  padding-bottom: 0;
+}
+
+.whiteboard-shell > main {
+  min-height: 0;
+}
+
+/* Quick Chat uses one contour, not a bordered shell around another bordered
+   shell. Keep context neutral, compact and visually secondary to the prompt. */
+.spectra-command-bar {
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none;
+}
+
+.spectra-command-bar:focus-within {
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.spectra-command-surface {
+  min-height: 46px !important;
+  border-radius: 11px !important;
+  background: var(--bg-elevated) !important;
+}
+
+.spectra-command-surface > div:last-child > div:first-child {
+  min-width: 0 !important;
+  max-width: 156px !important;
+  margin: 0 2px 0 0 !important;
+  align-self: center !important;
+  border: 0 !important;
+  border-radius: 8px !important;
+  background: var(--bg-elevated) !important;
+}
+
+.spectra-command-surface [aria-label="Choose AI focus"] {
+  min-width: 0 !important;
+  max-width: 156px !important;
+  height: 32px !important;
+  padding: 0 8px !important;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-elevated) !important;
+  font-size: 10.5px !important;
+  font-weight: 500 !important;
+}
+
+/* Saving belongs to the shared artifact rail; editor toolbars must not repeat
+   the same state a second time. */
+.presentation-studio [role="status"],
+.spectra-sheets-studio [role="status"],
+.code-studio [role="status"],
+.whiteboard-toolbar [role="status"] {
+  display: none !important;
+}
+
+.spectra-quiz-studio [role="status"],
+.spectra-artifact-identity-stats > [role="status"] {
+  display: none !important;
+}
+
+/* Numeric UI uses the same calm sans face as surrounding metadata. */
+.tabular-nums,
+.spectra-artifact-identity-stats strong,
+.timetable-studio time,
+.timetable-studio [data-day-number],
+.spectra-project-metric strong,
+.spectra-overview-metric strong {
+  font-family: var(--font-manrope), var(--font-sans), Arial, sans-serif !important;
+  font-weight: 500 !important;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em !important;
+}
+
+/* Editors should feel like familiar productivity software, not oversized
+   generated form cards. */
+.timetable-event-editor input:not([type="checkbox"]):not([type="color"]),
+.timetable-event-editor select,
+.timetable-event-editor textarea,
+.spectra-quiz-studio input:not([type="checkbox"]):not([type="radio"]),
+.spectra-quiz-studio select,
+.spectra-quiz-studio textarea {
+  border-radius: 6px !important;
+  border-color: var(--border-default) !important;
+  background: var(--bg-elevated) !important;
+  box-shadow: none !important;
+  font-family: var(--font-manrope), var(--font-sans), Arial, sans-serif !important;
+  font-weight: 400 !important;
+}
+
+.timetable-event-editor label,
+.spectra-quiz-studio label {
+  font-family: var(--font-manrope), var(--font-sans), Arial, sans-serif;
+  font-weight: 500;
+}
+
+.spectra-studio-tab-scroller {
+  scrollbar-width: none;
+}
+
+.spectra-studio-tab-scroller::-webkit-scrollbar {
+  display: none;
+}
+
+.timetable-toolbar > div:first-child > strong,
+.timetable-week-header strong,
+.timetable-day-header strong {
+  font-family: var(--font-manrope), var(--font-sans), Arial, sans-serif !important;
+  font-weight: 500 !important;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Flashcard rows must not stretch their compact metrics/header tracks simply
+   because the editor owns the full viewport height. */
+.spectra-artifact-studio[data-blueprint="flashcard_deck"]
+  .spectra-flashcard-studio {
+  height: 100%;
+  min-height: 0 !important;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  align-content: start;
+}
+
+.spectra-artifact-studio[data-blueprint="flashcard_deck"]
+  .spectra-flashcard-studio
+  > input
+  + div
+  > div:not(:last-child)
+  strong {
+  font-family: var(--font-manrope), var(--font-sans), Arial, sans-serif !important;
+  font-weight: 500 !important;
+  font-variant-numeric: tabular-nums;
+}
+
+.spectra-artifact-studio[data-blueprint="flashcard_deck"]
+  .spectra-flashcard-studio
+  textarea {
+  font-size: 18px !important;
+  font-weight: 400 !important;
+  line-height: 1.35 !important;
+}
+
+.spectra-deck-sync-actions > span:not([data-invalid]) {
+  display: none;
+}
+
+.spectra-deck-sync-actions:not(:has(button)):has(> span:not([data-invalid])) {
+  display: none;
+}
+
+.spectra-artifact-studio[data-blueprint="planner_task"]
+  .spectra-planner-studio
+  > aside {
+  margin-top: 0 !important;
+}
+
+@media (min-width: 1024px) {
+  .spectra-artifact-studio[data-blueprint="planner_task"]
+    .spectra-planner-studio {
+    grid-template-columns: minmax(0, 1fr) 332px !important;
+  }
+
+  .spectra-artifact-studio[data-blueprint="planner_task"]
+    .spectra-planner-studio
+    > fieldset
+    > section
+    > .mt-4.grid {
+    grid-template-columns: 0.9fr 0.95fr 1.35fr 1fr !important;
+  }
+}
+
+.spectra-artifact-studio[data-blueprint="planner_task"]
+  .spectra-planner-studio
+  input,
+.spectra-artifact-studio[data-blueprint="planner_task"]
+  .spectra-planner-studio
+  select,
+.spectra-artifact-studio[data-blueprint="planner_task"]
+  .spectra-planner-studio
+  textarea {
+  border-radius: 6px !important;
+  box-shadow: none !important;
+  font-family: var(--font-manrope), var(--font-sans), Arial, sans-serif !important;
+  font-weight: 400 !important;
 }

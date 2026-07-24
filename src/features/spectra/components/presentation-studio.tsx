@@ -336,6 +336,15 @@ function PresentationObjectView({
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
   const [textOverflow, setTextOverflow] = useState(false);
   const objectText = presentationObjectText(object);
+  const textFontSize = Number(styleValue(object, "fontSize", 42));
+  const textPreset =
+    textFontSize >= 44
+      ? "title"
+      : textFontSize >= 27
+        ? "subtitle"
+        : textFontSize >= 18
+          ? "body"
+          : "caption";
   useEffect(() => {
     if (object.type !== "text" || compact || object.hidden) {
       setTextOverflow(false);
@@ -387,6 +396,10 @@ function PresentationObjectView({
         } as CSSProperties
       }
       onClick={(event) => {
+        // Objects inside slide thumbnails are previews, not interactive
+        // layers. Let the click reach the slide-rail button so selecting a
+        // thumbnail works even when its artwork fills the whole preview.
+        if (compact) return;
         event.stopPropagation();
         onSelect(event.shiftKey || event.metaKey || event.ctrlKey);
       }}
@@ -395,6 +408,7 @@ function PresentationObjectView({
       {object.type === "text" ? (
         <textarea
           ref={textAreaRef}
+          data-text-preset={textPreset}
           value={objectText}
           readOnly={readOnly || object.locked || compact}
           onFocus={onTextFocus}
@@ -403,7 +417,14 @@ function PresentationObjectView({
           onPointerDown={(event) => event.stopPropagation()}
           style={{
             color: String(styleValue(object, "color", "#173f35")),
-            fontSize: `clamp(10px, ${Number(styleValue(object, "fontSize", 42)) / 65}cqw, ${Number(styleValue(object, "fontSize", 42))}px)`,
+            // Presentation geometry uses a 1000-unit logical canvas. One cqw
+            // represents ten of those units, so a 50-unit font maps to 5cqw.
+            // The previous /65 conversion collapsed nearly every text style
+            // to the 10px clamp and made Title, Subtitle, and Body visually
+            // indistinguishable.
+            fontSize: compact
+              ? `${textFontSize / 10}cqw`
+              : `clamp(10px, ${textFontSize / 10}cqw, ${textFontSize}px)`,
             fontWeight: Number(styleValue(object, "fontWeight", 600)),
             fontStyle: styleValue(object, "italic", false)
               ? "italic"
@@ -1027,6 +1048,7 @@ export function PresentationStudio({
 }) {
   const deck = useMemo(() => normalizePresentationContent(content), [content]);
   const [surface, setSurface] = useState<PresentationSurface>("slides");
+  const [notesOpen, setNotesOpen] = useState(false);
   const [activeSlideId, setActiveSlideId] = useState(deck.slides[0]!.id);
   const [selectedObjectId, setSelectedObjectId] = useState<string>();
   const [layerSelection, setLayerSelection] = useState<string[]>([]);
@@ -1068,6 +1090,16 @@ export function PresentationStudio({
   const selectedObject = activeSlide.objects.find(
     (object) => object.id === selectedObjectId,
   );
+  const selectedTextPreset =
+    selectedObject?.type === "text"
+      ? Number(styleValue(selectedObject, "fontSize", 42)) >= 44
+        ? "title"
+        : Number(styleValue(selectedObject, "fontSize", 42)) >= 27
+          ? "subtitle"
+          : Number(styleValue(selectedObject, "fontSize", 42)) >= 18
+            ? "body"
+            : "caption"
+      : undefined;
 
   useEffect(() => {
     if (!deck.slides.some((slide) => slide.id === activeSlideId)) {
@@ -1349,6 +1381,29 @@ export function PresentationStudio({
     setSelectedObjectId(object.id);
     setLayerSelection([object.id]);
     onActiveRegionChange?.(object.id);
+  }
+  function applyTextPreset(
+    preset: "title" | "subtitle" | "body" | "caption",
+  ) {
+    const tokens = {
+      title: { fontSize: 54, fontWeight: 700, color: "#143d34" },
+      subtitle: { fontSize: 27, fontWeight: 520, color: "#168767" },
+      body: { fontSize: 21, fontWeight: 430, color: "#2f3e39" },
+      caption: { fontSize: 15, fontWeight: 520, color: "#60706a" },
+    } as const;
+    updateSelected((object) => {
+      object.style = { ...object.style, ...tokens[preset] };
+      object.height = Math.max(
+        preset === "title"
+          ? 130
+          : preset === "subtitle"
+            ? 120
+            : preset === "body"
+              ? 80
+              : 50,
+        object.height,
+      );
+    });
   }
   function selectObject(objectId?: string, additive = false) {
     setSelectedObjectId(objectId);
@@ -2314,16 +2369,43 @@ export function PresentationStudio({
               <Redo2 className="h-3.5 w-3.5" />
             </button>
             <select
-              value={activeSlide.layoutId ?? "title-content"}
+              value={
+                selectedTextPreset ??
+                activeSlide.layoutId ??
+                "title-content"
+              }
               disabled={readOnly}
-              aria-label="Slide layout"
-              onChange={(event) => applySlideLayout(event.target.value)}
+              aria-label={
+                selectedTextPreset ? "Text style" : "Slide layout"
+              }
+              onChange={(event) => {
+                if (selectedTextPreset)
+                  applyTextPreset(
+                    event.target.value as
+                      | "title"
+                      | "subtitle"
+                      | "body"
+                      | "caption",
+                  );
+                else applySlideLayout(event.target.value);
+              }}
             >
-              <option value="title-content">Title & content</option>
-              <option value="title-only">Title only</option>
-              <option value="two-column">Two columns</option>
-              <option value="full-bleed">Full bleed</option>
-              <option value="blank">Blank</option>
+              {selectedTextPreset ? (
+                <>
+                  <option value="title">Title</option>
+                  <option value="subtitle">Subtitle</option>
+                  <option value="body">Body</option>
+                  <option value="caption">Caption</option>
+                </>
+              ) : (
+                <>
+                  <option value="title-content">Title & content</option>
+                  <option value="title-only">Title only</option>
+                  <option value="two-column">Two columns</option>
+                  <option value="full-bleed">Full bleed</option>
+                  <option value="blank">Blank</option>
+                </>
+              )}
             </select>
             <span className="presentation-toolbar-rule" />
             <button
@@ -2634,27 +2716,47 @@ export function PresentationStudio({
                 onTextBlur={finishText}
               />
               <section className="presentation-notes">
-                <div>
+                <button
+                  type="button"
+                  className="presentation-notes-toggle"
+                  aria-expanded={notesOpen}
+                  onClick={() => setNotesOpen((open) => !open)}
+                >
                   <strong>Speaker notes</strong>
-                  <span>Notes for this slide</span>
-                </div>
-                <textarea
-                  value={activeSlide.speakerNotes ?? ""}
-                  readOnly={readOnly}
-                  placeholder="Add private speaking prompts, source reminders, or rehearsal cues."
-                  onFocus={() =>
-                    onActiveRegionChange?.(`${activeSlide.id}:notes`)
-                  }
-                  onChange={(event) =>
-                    mutate((draft) => {
-                      draft.slides[activeSlideIndex]!.speakerNotes =
-                        event.target.value;
-                    })
-                  }
-                />
-                <span>
-                  {(activeSlide.speakerNotes ?? "").length} characters
-                </span>
+                  <span>
+                    {notesOpen
+                      ? "Hide notes"
+                      : activeSlide.speakerNotes
+                        ? "Notes added"
+                        : "Add notes"}
+                  </span>
+                  <ChevronRight
+                    className={`h-3 w-3 transition-transform ${
+                      notesOpen ? "rotate-90" : ""
+                    }`}
+                  />
+                </button>
+                {notesOpen ? (
+                  <>
+                    <textarea
+                      value={activeSlide.speakerNotes ?? ""}
+                      readOnly={readOnly}
+                      placeholder="Add private speaking prompts, source reminders, or rehearsal cues."
+                      onFocus={() =>
+                        onActiveRegionChange?.(`${activeSlide.id}:notes`)
+                      }
+                      onChange={(event) =>
+                        mutate((draft) => {
+                          draft.slides[activeSlideIndex]!.speakerNotes =
+                            event.target.value;
+                        })
+                      }
+                    />
+                    <span>
+                      {(activeSlide.speakerNotes ?? "").length} characters
+                    </span>
+                  </>
+                ) : null}
               </section>
             </div>
           </div>

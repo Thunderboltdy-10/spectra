@@ -1,7 +1,7 @@
 import "server-only";
 
 import { createHash, randomUUID } from "node:crypto";
-import { HocuspocusProvider, HocuspocusProviderWebsocket } from "@hocuspocus/provider";
+import { HocuspocusProvider } from "@hocuspocus/provider";
 import WebSocket from "ws";
 import * as Y from "yjs";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
@@ -141,7 +141,7 @@ function waitUntil(
   predicate: () => boolean,
   getError: () => Error | null,
   timeoutMs: number,
-  timeoutMessage: string,
+  timeoutMessage: string | (() => string),
 ) {
   return new Promise<void>((resolve, reject) => {
     const startedAt = Date.now();
@@ -149,7 +149,15 @@ function waitUntil(
       const error = getError();
       if (error) return reject(error);
       if (predicate()) return resolve();
-      if (Date.now() - startedAt >= timeoutMs) return reject(new Error(timeoutMessage));
+      if (Date.now() - startedAt >= timeoutMs) {
+        return reject(
+          new Error(
+            typeof timeoutMessage === "function"
+              ? timeoutMessage()
+              : timeoutMessage,
+          ),
+        );
+      }
       setTimeout(poll, 20);
     };
     poll();
@@ -323,29 +331,51 @@ export async function applyAiArtifactMutation(params: {
   const typeKey = requireArtifactType(session.artifact.blueprintKey);
   const document = new Y.Doc();
   let connectionError: Error | null = null;
-  const websocketProvider = new HocuspocusProviderWebsocket({
+  let connectionStatus = "initializing";
+  let opened = false;
+  let authenticated = false;
+  let syncEventReceived = false;
+  const provider = new HocuspocusProvider({
     url: session.url,
     WebSocketPolyfill: WebSocket,
-  });
-  const provider = new HocuspocusProvider({
-    websocketProvider,
     name: session.documentName,
     document,
     token: session.token,
     flushDelay: 40,
+    onOpen: () => {
+      opened = true;
+    },
+    onStatus: ({ status }) => {
+      connectionStatus = status;
+    },
+    onAuthenticated: () => {
+      authenticated = true;
+    },
+    onSynced: () => {
+      syncEventReceived = true;
+    },
     onAuthenticationFailed: ({ reason }) => {
       connectionError = new Error(`AI_ARTIFACT_PERMISSION_REVOKED: ${reason || "Collaboration access was rejected."}`);
     },
     onDisconnect: ({ event }) => {
-      if (event.code === 4403) connectionError = new Error(`AI_ARTIFACT_PERMISSION_REVOKED: ${event.reason || "Access was removed."}`);
+      if (event.code === 4403) {
+        connectionError = new Error(`AI_ARTIFACT_PERMISSION_REVOKED: ${event.reason || "Access was removed."}`);
+      } else if (!provider.synced) {
+        connectionError = new Error(
+          `AI_ARTIFACT_CONNECTION_CLOSED: The collaboration gateway closed before synchronization (${event.code}${event.reason ? `: ${event.reason}` : ""}).`,
+        );
+      }
     },
+  } as ConstructorParameters<typeof HocuspocusProvider>[0] & {
+    WebSocketPolyfill: typeof WebSocket;
   });
   try {
     await waitUntil(
       () => provider.synced && provider.isAuthenticated,
       () => connectionError,
       20_000,
-      "AI_ARTIFACT_CONNECT_TIMEOUT: The live artifact could not be synchronized.",
+      () =>
+        `AI_ARTIFACT_CONNECT_TIMEOUT: The live artifact could not be synchronized (status=${connectionStatus}, opened=${opened}, authenticated=${authenticated || provider.isAuthenticated}, syncEvent=${syncEventReceived}, synced=${provider.synced}).`,
     );
     provider.setAwarenessField("user", {
       clientId,
@@ -436,7 +466,6 @@ export async function applyAiArtifactMutation(params: {
     return { artifactId: params.artifactId, ...result };
   } finally {
     provider.destroy();
-    websocketProvider.destroy();
     document.destroy();
   }
 }

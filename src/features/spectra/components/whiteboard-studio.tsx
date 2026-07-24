@@ -4,7 +4,6 @@ import {
   AlignCenter,
   AlignLeft,
   AlignRight,
-  Bot,
   BoxSelect,
   CheckCircle2,
   Circle,
@@ -290,8 +289,6 @@ export function WhiteboardStudio({
   const [search, setSearch] = useState("");
   const [undo, setUndo] = useState<WhiteboardContent[]>([]);
   const [redo, setRedo] = useState<WhiteboardContent[]>([]);
-  const [aiOpen, setAiOpen] = useState(false);
-  const [aiPrompt, setAiPrompt] = useState("");
   const [presenting, setPresenting] = useState(false);
   const [assets, setAssets] = useState<SpectraArtifactAsset[]>([]);
   const [assetError, setAssetError] = useState<string>();
@@ -1314,31 +1311,36 @@ export function WhiteboardStudio({
       (candidate) => candidate.visible && !candidate.locked,
     );
     if (!layer || readOnly) return;
-    const baseX = board.viewport.x + 180;
-    const baseY = board.viewport.y + 120;
+    const baseX = board.viewport.x + (kind === "concept" ? 72 : 180);
+    const baseY = board.viewport.y + (kind === "concept" ? 34 : 120);
     mutate((draft) => {
       const specs =
         kind === "concept"
           ? ([
-              ["shape", "Central idea", 280, 170, "#f0ecff"],
-              ["card", "Evidence", 0, 0, "#ecf7f1"],
-              ["card", "Implications", 560, 0, "#fff3dc"],
-              ["note", "Questions", 560, 340, "#fff1c7"],
-              ["card", "Examples", 0, 340, "#fbecef"],
+              ["shape", "Central idea", 400, 210, "#f0ecff", 240, 124],
+              ["card", "Evidence", 0, 0, "#ecf7f1", 260, 132],
+              ["note", "Key fact", 320, 12, "#fff1c7", 220, 104],
+              ["card", "Implications", 680, 0, "#fff3dc", 280, 132],
+              ["card", "Examples", 0, 230, "#fbecef", 260, 144],
+              ["note", "Remember", 710, 230, "#eaf1ff", 250, 144],
+              ["card", "Process", 70, 430, "#eef6ff", 250, 112],
+              ["note", "Questions", 365, 430, "#fff1c7", 240, 112],
+              ["card", "Connections", 650, 430, "#ecf7f1", 270, 112],
             ] as const)
           : kind === "study"
             ? ([
-                ["text", "Study map", 220, 0, "transparent"],
-                ["card", "What I know", 0, 150, "#ecf7f1"],
-                ["card", "What to review", 280, 150, "#fff3dc"],
-                ["card", "Questions", 560, 150, "#f0ecff"],
+                ["text", "Study map", 220, 0, "transparent", 320, 80],
+                ["card", "What I know", 0, 150, "#ecf7f1", 250, 180],
+                ["card", "What to review", 280, 150, "#fff3dc", 250, 180],
+                ["card", "Questions", 560, 150, "#f0ecff", 250, 180],
               ] as const)
             : ([
-                ["note", "Went well", 0, 100, "#e6f6eb"],
-                ["note", "Learned", 280, 100, "#fff1c7"],
-                ["note", "Try next", 560, 100, "#eee9ff"],
+                ["note", "Went well", 0, 100, "#e6f6eb", 250, 180],
+                ["note", "Learned", 280, 100, "#fff1c7", 250, 180],
+                ["note", "Try next", 560, 100, "#eee9ff", 250, 180],
               ] as const);
-      const created = specs.map(([type, label, x, y, fill], index) => {
+      const created = specs.map(
+        ([type, label, x, y, fill, width, height], index) => {
         const node = createWhiteboardNode(
           type,
           page.id,
@@ -1349,10 +1351,13 @@ export function WhiteboardStudio({
         );
         node.content = { text: label, title: label };
         node.semanticLabel = label;
+        node.width = width;
+        node.height = height;
         node.style = { ...node.style, fill };
         draft.nodes.push(node);
         return node;
-      });
+        },
+      );
       if (kind === "concept") {
         created.slice(1).forEach((node, index) =>
           draft.edges.push({
@@ -1691,13 +1696,6 @@ export function WhiteboardStudio({
           >
             <Grid3X3 className="h-4 w-4" />
           </button>
-          <button
-            type="button"
-            className="whiteboard-ai-action"
-            onClick={() => setAiOpen(!aiOpen)}
-          >
-            <Bot className="h-4 w-4" /> AI Assist
-          </button>
         </div>
         <span />
         <div>
@@ -1776,44 +1774,6 @@ export function WhiteboardStudio({
             <X className="h-3.5 w-3.5" />
           </button>
         </div>
-      ) : null}
-
-      {aiOpen ? (
-        <form
-          className="whiteboard-ai-popover"
-          onSubmit={(event) => {
-            event.preventDefault();
-            const prompt = aiPrompt.trim();
-            if (!prompt) return;
-            window.dispatchEvent(
-              new CustomEvent("spectra:ask", {
-                detail: {
-                  prompt: `${prompt}\n\nWork on whiteboard artifact ${artifactId}. Preserve locked nodes and propose broad layout changes before applying them.`,
-                },
-              }),
-            );
-            setAiOpen(false);
-            setAiPrompt("");
-          }}
-        >
-          <label>
-            What should Spectra change on this board?
-            <textarea
-              autoFocus
-              value={aiPrompt}
-              onChange={(event) => setAiPrompt(event.target.value)}
-              placeholder="e.g. Group these ideas into a clear concept map"
-            />
-          </label>
-          <div>
-            <button type="button" onClick={() => setAiOpen(false)}>
-              Cancel
-            </button>
-            <button type="submit" disabled={!aiPrompt.trim()}>
-              Ask Spectra
-            </button>
-          </div>
-        </form>
       ) : null}
 
       <div className="whiteboard-shell">

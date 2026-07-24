@@ -442,7 +442,7 @@ function WorkspaceHome({
                     <span className="block truncate text-[10px] text-[var(--text-secondary)]">
                       {label}
                     </span>
-                    <strong className="block font-display text-[21px] font-semibold leading-6 text-[var(--text-primary)]">
+                    <strong className="block font-sans text-[20px] font-normal leading-6 tracking-[-0.01em] text-[var(--text-primary)]">
                       {count}
                     </strong>
                     <span className="block text-[8.5px] font-medium text-[var(--success)]">
@@ -602,7 +602,7 @@ function WorkspaceHome({
                           {workspace.description}
                         </span>
                         <span className="mt-2.5 flex items-center gap-1.5 text-[8.5px] text-[var(--text-tertiary)]">
-                          <span className="font-medium text-[var(--text-secondary)]">
+                          <span className="font-normal text-[var(--text-secondary)]">
                             {count} artifacts
                           </span>
                           <span aria-hidden="true">·</span>
@@ -1039,6 +1039,7 @@ function WorkspaceLibraryToolbar({
   selectionMode,
   onToggleSelection,
   searchControl,
+  compact = false,
 }: {
   viewMode: ViewMode;
   onViewModeChange: (mode: ViewMode) => void;
@@ -1049,6 +1050,7 @@ function WorkspaceLibraryToolbar({
   selectionMode: boolean;
   onToggleSelection: () => void;
   searchControl: ReactNode;
+  compact?: boolean;
 }) {
   const [sortOpen, setSortOpen] = useState(false);
   const [typeOpen, setTypeOpen] = useState(false);
@@ -1083,7 +1085,7 @@ function WorkspaceLibraryToolbar({
       className="spectra-workspace-toolbar flex flex-wrap items-center gap-2"
       aria-label="Workspace library controls"
     >
-      <div className="ml-auto flex items-center gap-2">
+      {!compact ? <div className="ml-auto flex items-center gap-2">
         {searchControl}
         <div className="relative" ref={typeRef}>
           <button
@@ -1140,8 +1142,8 @@ function WorkspaceLibraryToolbar({
             {selectionMode ? "Done selecting" : "Select objects"}
           </button>
         ) : null}
-      </div>
-      <div className="relative" ref={ref}>
+      </div> : null}
+      {!compact ? <div className="relative" ref={ref}>
         <button
           type="button"
           className="flex h-9 min-w-[164px] items-center justify-between gap-3 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-primary)] shadow-[0_1px_4px_rgba(27,20,12,0.04)] hover:bg-[var(--bg-hover)]"
@@ -1174,7 +1176,7 @@ function WorkspaceLibraryToolbar({
             )}
           </div>
         ) : null}
-      </div>
+      </div> : null}
       <nav className="flex items-center gap-1 rounded-[10px] bg-[color-mix(in_oklab,var(--bg-elevated)_72%,transparent)] p-1">
         {viewModes.map((view) => {
           const Icon = view.icon;
@@ -2261,7 +2263,7 @@ function CanvasView({
                 </span>
               </header>
               <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                {group.entries.map((entry) => {
+                {group.entries.slice(0, 6).map((entry) => {
                   const objectKey = `${entry.thread ? "thread" : "artifact"}:${entry.thread?._id ?? entry.artifact?._id ?? ""}`;
                   return (
                     <WorkspaceEntryCard
@@ -2278,6 +2280,11 @@ function CanvasView({
                     />
                   );
                 })}
+                {group.entries.length > 6 ? (
+                  <div className="col-span-full flex h-8 items-center justify-center rounded-[6px] border border-dashed border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_72%,transparent)] font-sans text-[10px] font-normal text-[var(--text-tertiary)]">
+                    {group.entries.length - 6} more in this cluster
+                  </div>
+                ) : null}
               </div>
             </section>
           );
@@ -2686,7 +2693,7 @@ function MetricRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between">
       <span className="text-[var(--text-secondary)]">{label}</span>
-      <strong className="font-semibold text-[var(--text-primary)]">
+      <strong className="font-sans font-normal text-[var(--text-primary)]">
         {value}
       </strong>
     </div>
@@ -4890,6 +4897,7 @@ export function WorkspaceShell() {
                       className={`spectra-workspace-shell-controls spectra-workspace-shell-controls--${viewMode}`}
                     >
                       <WorkspaceLibraryToolbar
+                        compact
                         viewMode={viewMode}
                         onViewModeChange={setViewMode}
                         sort={workspaceSort}

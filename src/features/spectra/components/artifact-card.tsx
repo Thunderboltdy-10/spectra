@@ -117,7 +117,7 @@ export function ArtifactCard({
             <div className="mt-5 grid grid-cols-3 gap-2">
               {metrics.slice(0, 3).map(([label, value]) => (
                 <div key={label} className="border-l border-[var(--card-border-soft)] px-2 py-0.5 first:border-l-0 first:pl-0">
-                  <div className="text-[12px] font-semibold text-[var(--text-primary)]">{value}</div>
+                  <div className="font-sans text-[12px] font-normal text-[var(--text-primary)]">{value}</div>
                   <div className="text-[9px] text-[var(--text-tertiary)]">{label}</div>
                 </div>
               ))}

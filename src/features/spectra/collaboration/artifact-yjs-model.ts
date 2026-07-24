@@ -5,6 +5,7 @@ import {
   validateArtifactContent,
 } from "../artifacts/registry";
 import type { ArtifactTypeKey, SemanticRegion } from "../artifacts/types";
+import { normalizeWhiteboardContent } from "../whiteboard/model";
 import type { ArtifactRegionController } from "./region-controller";
 import type { ArtifactCollaborationTransport } from "./types";
 
@@ -15,6 +16,11 @@ export const ARTIFACT_YJS_DESCRIPTOR_MAP =
 const REGION_MARKER = "$spectraRegion";
 const CODE_LINES_MARKER = "$spectraCodeLines";
 const MODEL_VERSION = 1;
+
+function coerceArtifactContent(typeKey: ArtifactTypeKey, content: unknown) {
+  if (typeKey === "whiteboard") return normalizeWhiteboardContent(content);
+  return content;
+}
 
 export type ArtifactLiveValue = {
   title: string;
@@ -177,7 +183,9 @@ export function decomposeArtifactContent(
   content: unknown,
 ): DecomposedArtifact {
   const manifest = requireArtifactTypeManifest(typeKey);
-  const parsed = manifest.schemas.content.parse(content);
+  const parsed = manifest.schemas.content.parse(
+    coerceArtifactContent(typeKey, content),
+  );
   if (typeKey === "code") return decomposeCodeContent(parsed);
   const regions = enumerateArtifactRegions(typeKey, parsed);
   const descriptors = new Map<string, StoredArtifactRegionDescriptor>();
@@ -423,7 +431,10 @@ export function readArtifactYjsDocument(
   }
   const validation = validateArtifactContent(
     typeKey,
-    recomposeArtifactContent(rootTemplate, new Map(regions.entries())),
+    coerceArtifactContent(
+      typeKey,
+      recomposeArtifactContent(rootTemplate, new Map(regions.entries())),
+    ),
   );
   if (!validation.success)
     throw new Error(
@@ -623,9 +634,12 @@ export class ArtifactYjsModel {
       const rootTemplate = this.metadata.get("rootTemplate");
       if (typeof rootTemplate !== "string")
         throw new Error("ARTIFACT_ROOT_TEMPLATE_MISSING");
-      const content = recomposeArtifactContent(
-        rootTemplate,
-        new Map(this.regions.entries()),
+      const content = coerceArtifactContent(
+        this.typeKey,
+        recomposeArtifactContent(
+          rootTemplate,
+          new Map(this.regions.entries()),
+        ),
       );
       const validation = validateArtifactContent(this.typeKey, content);
       if (!validation.success)
@@ -702,13 +716,20 @@ export class ArtifactYjsModel {
         applied: false as const,
         reason: "already_initialized" as const,
       };
-    const decomposed = decomposeArtifactContent(this.typeKey, value.content);
+    const nextValue =
+      this.typeKey === "whiteboard"
+        ? {
+            ...value,
+            content: coerceArtifactContent(this.typeKey, value.content),
+          }
+        : value;
+    const decomposed = decomposeArtifactContent(this.typeKey, nextValue.content);
     const result = await controller.edit(
       "artifact:structure",
       ["artifact:structure"],
       () => {
         if (this.metadata.get("initialized") === true) return;
-        this.writeComplete(value, decomposed);
+        this.writeComplete(nextValue, decomposed);
       },
     );
     return result.applied

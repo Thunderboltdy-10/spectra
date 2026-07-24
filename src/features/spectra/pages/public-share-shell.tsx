@@ -106,7 +106,7 @@ function ArtifactContent({
     return (
       <article className="group rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4 transition-colors hover:border-[var(--border-strong)]">
         <div className="flex items-start gap-3">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[9px] bg-[color-mix(in_oklab,var(--accent-cyan)_9%,var(--bg-secondary))] text-[var(--accent-cyan)]">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[9px] bg-[color-mix(in_oklab,var(--brand-primary)_9%,var(--bg-secondary))] text-[var(--brand-primary)]">
             <Icon className="h-4 w-4" />
           </span>
           <div className="min-w-0">
@@ -162,7 +162,7 @@ function ArtifactContent({
               ) : text(block.type) === "callout" ? (
                 <aside
                   key={String(block.id ?? index)}
-                  className="rounded-[10px] border border-[color-mix(in_oklab,var(--accent-cyan)_24%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_5%,var(--bg-primary))] px-4 py-3"
+                  className="rounded-[10px] border border-[color-mix(in_oklab,var(--brand-primary)_24%,var(--border-default))] bg-[color-mix(in_oklab,var(--brand-primary)_5%,var(--bg-primary))] px-4 py-3"
                 >
                   {text(block.text)}
                 </aside>
@@ -407,7 +407,7 @@ function ArtifactContent({
         ) : null}
         {artifact.blueprintKey === "agent" ? (
           <div className="rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-5">
-            <span className="text-[10px] font-semibold uppercase tracking-[.1em] text-[var(--accent-cyan)]">
+            <span className="text-[10px] font-semibold uppercase tracking-[.1em] text-[var(--brand-primary)]">
               Instructions
             </span>
             <p className="mt-3 whitespace-pre-wrap text-[13px] leading-6">
@@ -505,8 +505,8 @@ export function PublicShareShell() {
   );
 
   return (
-    <main className="min-h-screen bg-[var(--bg-secondary)] text-[var(--text-primary)]">
-      <nav className="sticky top-0 z-20 border-b border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--bg-elevated)_92%,transparent)] px-4 py-3 backdrop-blur-xl sm:px-7">
+    <main className="spectra-wave-y min-h-screen bg-[var(--bg-primary)] text-[var(--text-primary)]">
+      <nav className="sticky top-0 z-20 border-b border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--bg-elevated)_92%,transparent)] px-5 py-3.5 backdrop-blur-xl sm:px-8">
         <div className="mx-auto flex max-w-[1120px] items-center justify-between gap-4">
           <a
             href="/landing"
@@ -527,7 +527,7 @@ export function PublicShareShell() {
       <div className="mx-auto max-w-[1120px] px-4 py-8 sm:px-7 sm:py-12">
         {state === "loading" ? (
           <div className="flex min-h-[55vh] flex-col items-center justify-center">
-            <Loader2 className="h-6 w-6 animate-spin text-[var(--accent-cyan)]" />
+            <Loader2 className="h-6 w-6 animate-spin text-[var(--brand-primary)]" />
             <p className="mt-4 text-[12px] text-[var(--text-secondary)]">
               Opening the shared view…
             </p>
@@ -550,7 +550,7 @@ export function PublicShareShell() {
         {state === "ready" && projection?.resourceType === "workspace" ? (
           <>
             <header className="mb-7">
-              <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[.12em] text-[var(--accent-cyan)]">
+              <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[.12em] text-[var(--brand-primary)]">
                 <LayoutDashboard className="h-3.5 w-3.5" />
                 Shared workspace
               </div>

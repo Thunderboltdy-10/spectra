@@ -26,7 +26,7 @@ export function LiveThreadPanel({
     <StudioSplitShell width={width} onWidthChange={onWidthChange} ariaLabel="Live thread">
       <div className="flex h-full min-h-0 flex-col bg-[var(--bg-primary)]">
         <header className="flex h-14 shrink-0 items-center gap-3 border-b border-[var(--border-default)] px-4">
-          <span className="spectra-card-type-icon !h-8 !w-8 text-[var(--accent-orange)]" style={{ "--card-accent": "var(--accent-orange)" } as CSSProperties}>
+          <span className="spectra-card-type-icon !h-8 !w-8 text-[var(--brand-primary)]" style={{ "--card-accent": "var(--brand-primary)" } as CSSProperties}>
             <MessageSquare className="h-4 w-4" />
           </span>
           <div className="min-w-0 flex-1">

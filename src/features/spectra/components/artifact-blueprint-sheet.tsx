@@ -35,6 +35,7 @@ import { blueprintMeta, type ArtifactCardView } from "./artifact-card";
 import type { SpectraArtifact, SpectraBlueprintKey } from "../data/api";
 import { requireBlueprint, requireArtifactTypeManifest } from "../blueprints/registry";
 import type { ArtifactTypeKey } from "../artifacts/types";
+import { normalizeWhiteboardContent } from "../whiteboard/model";
 
 type EditableBlueprintKey = ArtifactTypeKey;
 type SheetMode = "create" | "edit";
@@ -125,11 +126,15 @@ export function defaultArtifactTitle(blueprintKey: EditableBlueprintKey) {
 }
 
 export function createDefaultArtifactPayload(blueprintKey: EditableBlueprintKey): ArtifactPayload {
+  const content = structuredClone(requireBlueprint(blueprintKey).defaultContent);
   return {
     blueprintKey,
     title: defaultArtifactTitle(blueprintKey),
     summary: defaultArtifactSummary(blueprintKey),
-    content: structuredClone(requireBlueprint(blueprintKey).defaultContent),
+    content:
+      blueprintKey === "whiteboard"
+        ? normalizeWhiteboardContent(content)
+        : content,
     tags: [],
   };
 }

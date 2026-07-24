@@ -791,19 +791,19 @@ export function MemoryShell() {
   }
 
   return (
-    <div className="min-h-dvh bg-[var(--bg-primary)]">
+    <div className="spectra-wave-y min-h-dvh bg-[var(--bg-primary)]">
       <header className="border-b border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--bg-elevated)_90%,var(--bg-primary))]">
-        <div className="mx-auto flex max-w-[1320px] flex-col gap-5 px-5 py-7 sm:px-8 lg:flex-row lg:items-end lg:justify-between lg:px-10">
+        <div className="flex flex-col gap-5 px-6 py-7 sm:px-9 lg:flex-row lg:items-end lg:justify-between">
           <div className="max-w-2xl">
             <div className="mb-3 flex items-center gap-3">
-              <span className="grid size-10 place-items-center rounded-[14px] bg-[color-mix(in_oklab,var(--brand-primary)_10%,var(--bg-secondary))] text-[var(--brand-primary)]">
+              <span className="grid size-10 place-items-center rounded-[12px] bg-[color-mix(in_oklab,var(--brand-primary)_10%,var(--bg-secondary))] text-[var(--brand-primary)]">
                 <Brain size={20} strokeWidth={1.75} />
               </span>
-              <h1 className="font-display text-[28px] font-semibold tracking-[-0.02em] text-[var(--text-primary)] sm:text-[32px]">
+              <h1 className="font-display text-[32px] font-semibold tracking-[-0.02em] text-[var(--text-primary)]">
                 Memory & personalization
               </h1>
             </div>
-            <p className="text-[13px] leading-6 text-[var(--text-secondary)]">
+            <p className="text-[14px] leading-relaxed text-[var(--text-secondary)]">
               Spectra remembers a small set of useful, permission-bound details
               so work can continue naturally. You can inspect, correct, pause,
               export, or forget any of them.
@@ -841,7 +841,7 @@ export function MemoryShell() {
         </div>
       </header>
 
-      <div className="mx-auto grid max-w-[1320px] gap-6 px-5 py-6 sm:px-8 lg:grid-cols-[260px_minmax(0,1fr)] lg:px-10">
+      <div className="grid gap-6 px-6 py-6 sm:px-9 lg:grid-cols-[280px_minmax(0,1fr)]">
         <aside className="space-y-4">
           <section className="rounded-[18px] border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-4">
             <div className="flex items-start justify-between gap-3">

@@ -91,12 +91,81 @@ export function ArtifactTileSurface({
     >
       <div className="absolute right-3 top-3 z-50 flex items-center gap-1 rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[0_8px_24px_rgba(27,20,12,0.12)]">
         {actionSlot}
-        {onAddArtifact ? <div className="relative"><button type="button" onClick={() => setAddOpen((value) => !value)} className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" aria-label="Add artifact to tiled set" aria-expanded={addOpen}><Plus className="h-4 w-4" /></button>{addOpen ? <div className="absolute right-0 top-[calc(100%+7px)] max-h-[280px] w-[260px] overflow-y-auto rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 shadow-[0_16px_38px_rgba(27,20,12,0.15)]">{allArtifacts.filter((artifact) => !visibleArtifacts.some((visible) => visible._id === artifact._id)).map((artifact) => <button key={artifact._id} type="button" onClick={() => { onAddArtifact(artifact._id); setAddOpen(false); }} className="flex w-full items-center gap-2 rounded-[7px] px-2.5 py-2 text-left hover:bg-[var(--bg-hover)]"><span className="min-w-0 flex-1 truncate text-[11px] text-[var(--text-primary)]">{artifact.title}</span><span className="text-[9px] capitalize text-[var(--text-tertiary)]">{artifact.blueprintKey.replaceAll("_", " ")}</span></button>)}{allArtifacts.every((artifact) => visibleArtifacts.some((visible) => visible._id === artifact._id)) ? <div className="px-2.5 py-3 text-[11px] text-[var(--text-tertiary)]">Every available artifact is already open.</div> : null}</div> : null}</div> : null}
-        <button type="button" onClick={isolated ? onExitFocusSet : onFocusSet} className="flex h-8 items-center gap-1.5 rounded-[7px] px-2 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" title={isolated ? "Return to workspace with these tiles still available" : "Expand tiled workspace"}>
-          {isolated ? <PanelRightClose className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+        {onAddArtifact ? (
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setAddOpen((value) => !value)}
+              className="flex h-9 w-9 items-center justify-center rounded-[8px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+              aria-label="Add artifact to tiled set"
+              aria-expanded={addOpen}
+            >
+              <Plus className="h-4 w-4" />
+            </button>
+            {addOpen ? (
+              <div className="absolute right-0 top-[calc(100%+7px)] max-h-[280px] w-[260px] overflow-y-auto rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 shadow-[0_16px_38px_rgba(27,20,12,0.15)]">
+                {allArtifacts
+                  .filter(
+                    (artifact) =>
+                      !visibleArtifacts.some(
+                        (visible) => visible._id === artifact._id,
+                      ),
+                  )
+                  .map((artifact) => (
+                    <button
+                      key={artifact._id}
+                      type="button"
+                      onClick={() => {
+                        onAddArtifact(artifact._id);
+                        setAddOpen(false);
+                      }}
+                      className="flex w-full items-center gap-2 rounded-[8px] px-2.5 py-2 text-left transition hover:bg-[var(--bg-hover)]"
+                    >
+                      <span className="min-w-0 flex-1 truncate text-[13px] text-[var(--text-primary)]">
+                        {artifact.title}
+                      </span>
+                      <span className="text-[11px] capitalize text-[var(--text-tertiary)]">
+                        {artifact.blueprintKey.replaceAll("_", " ")}
+                      </span>
+                    </button>
+                  ))}
+                {allArtifacts.every((artifact) =>
+                  visibleArtifacts.some(
+                    (visible) => visible._id === artifact._id,
+                  ),
+                ) ? (
+                  <div className="px-2.5 py-3 text-[12px] text-[var(--text-tertiary)]">
+                    Every available artifact is already open.
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+        <button
+          type="button"
+          onClick={isolated ? onExitFocusSet : onFocusSet}
+          className="flex h-9 items-center gap-1.5 rounded-[8px] px-2.5 text-[13px] font-medium text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+          title={
+            isolated
+              ? "Return to workspace with these tiles still available"
+              : "Expand tiled workspace"
+          }
+        >
+          {isolated ? (
+            <PanelRightClose className="h-3.5 w-3.5" />
+          ) : (
+            <Maximize2 className="h-3.5 w-3.5" />
+          )}
           {isolated ? "Return" : "Expand tiles"}
         </button>
-        <button type="button" onClick={safeCloseAll} className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" aria-label="Close tiled set" title="Close tiled set">
+        <button
+          type="button"
+          onClick={safeCloseAll}
+          className="flex h-9 w-9 items-center justify-center rounded-[8px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+          aria-label="Close tiled set"
+          title="Close tiled set"
+        >
           <X className="h-4 w-4" />
         </button>
       </div>

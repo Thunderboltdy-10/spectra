@@ -42,7 +42,6 @@ import {
   Radio,
   Play,
   RotateCcw,
-  Save,
   Search,
   Shuffle,
   SlidersHorizontal,
@@ -82,6 +81,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import { SlashCommand } from "../editor/slash-command-extension";
 import { createSlashCommandRenderer } from "../editor/slash-command-renderer";
 import {
@@ -157,7 +157,14 @@ import {
 import { pythonChartToHtml } from "../code/python-chart";
 import { loadCodeRuntimeAssets } from "../code/runtime-assets-client";
 import type { SpectraSandboxAsset } from "../embed/sandbox-protocol";
-import { parseDelimited } from "../sheets/model";
+import { normalizePresentationContent } from "../presentation/model";
+import {
+  normalizeSheetsContent,
+  parseAddress,
+  parseDelimited,
+} from "../sheets/model";
+import { sharedTimetableContent } from "../timetable/model";
+import { normalizeWhiteboardContent } from "../whiteboard/model";
 import {
   parseQuizImport,
   quizCsv,
@@ -166,6 +173,121 @@ import {
   validateQuizForPublishing,
   type PortableQuizQuestion,
 } from "../quiz/interchange";
+
+const WAVE_C_BLUEPRINTS = new Set([
+  "presentation",
+  "sheets",
+  "code",
+  "whiteboard",
+  "timetable",
+]);
+
+function waveCIdentityStats(
+  blueprintKey: SpectraArtifact["blueprintKey"],
+  content: unknown,
+): Array<[string, string]> | null {
+  switch (blueprintKey) {
+    case "presentation": {
+      const deck = normalizePresentationContent(content);
+      const minutes = Math.max(1, Math.ceil(deck.slides.length * 0.75));
+      const complexity =
+        deck.slides.length > 14
+          ? "Complex"
+          : deck.slides.length > 6
+            ? "Medium"
+            : "Light";
+      return [
+        [String(deck.slides.length), "Slides"],
+        [`~${minutes} min`, "Est. time"],
+        [complexity, "Complexity"],
+      ];
+    }
+    case "sheets": {
+      const workbook = normalizeSheetsContent(content);
+      const sheet =
+        workbook.sheets.find((item) => item.id === workbook.activeSheetId) ??
+        workbook.sheets[0];
+      if (!sheet) return null;
+      const addresses = Object.keys(sheet.cells ?? {});
+      let maxRow = 0;
+      let maxCol = 0;
+      for (const address of addresses) {
+        const coordinate = parseAddress(address);
+        if (!coordinate) continue;
+        maxRow = Math.max(maxRow, coordinate.row + 1);
+        maxCol = Math.max(maxCol, coordinate.column + 1);
+      }
+      const chartCount = (sheet.charts ?? []).length;
+      return [
+        [String(maxRow || addresses.length), "Rows"],
+        [String(maxCol || 1), "Columns"],
+        [String(chartCount), chartCount === 1 ? "Chart" : "Charts"],
+      ];
+    }
+    case "code": {
+      const project = normalizeCodeContent(content);
+      const lines = project.files.reduce(
+        (total, file) => total + file.source.split("\n").length,
+        0,
+      );
+      const runtimeLabel =
+        project.runtime === "none"
+          ? "Source"
+          : project.runtime === "python"
+            ? "Python"
+            : "Browser";
+      return [
+        [String(project.files.length), "Files"],
+        [String(lines), "Lines"],
+        [runtimeLabel, "Runtime"],
+      ];
+    }
+    case "whiteboard": {
+      const board = normalizeWhiteboardContent(content);
+      const pageCount = board.pages.length;
+      return [
+        [String(pageCount), pageCount === 1 ? "Page" : "Pages"],
+        [String(board.nodes.length), "Objects"],
+        [String(board.edges.length), "Links"],
+      ];
+    }
+    case "timetable": {
+      const shared = sharedTimetableContent(content);
+      const eventCount = shared.events.length;
+      const layerCount = shared.layers.filter((layer) => layer.visible).length;
+      const viewLabel =
+        shared.view?.kind === "month"
+          ? "Month"
+          : shared.view?.kind === "day"
+            ? "Day"
+            : shared.view?.kind === "agenda"
+              ? "Agenda"
+              : "Week";
+      return [
+        [String(eventCount), "Events"],
+        [String(layerCount), "Calendars"],
+        [viewLabel, "View"],
+      ];
+    }
+    default:
+      return null;
+  }
+}
+
+function studioSyncMessage(syncLabel: string) {
+  if (syncLabel === "Synchronized" || syncLabel === "Saved" || syncLabel === "Live") {
+    return "Auto-saved";
+  }
+  return syncLabel;
+}
+
+function isSyncReady(syncLabel: string) {
+  return (
+    syncLabel === "Synchronized" ||
+    syncLabel === "Saved" ||
+    syncLabel === "Live"
+  );
+}
 
 type StudioMode = "closed" | "split" | "tab";
 type StudioTab = { artifactId: string; openedAt: number };
@@ -1329,11 +1451,11 @@ function HistoryComparisonOverlay({
       <header className="flex h-12 shrink-0 items-center justify-between gap-4 border-b border-[var(--border-default)] bg-[var(--bg-elevated)] px-4">
         <div className="flex min-w-0 items-center gap-3">
           <History className="h-4 w-4 text-[var(--text-secondary)]" />
-          <span className="text-[11px] font-medium text-[var(--text-secondary)]">
+          <span className="text-[13px] font-medium text-[var(--text-secondary)]">
             Comparing versions
           </span>
           {selected ? (
-            <span className="truncate rounded-[6px] bg-[color-mix(in_oklab,#8b6ff0_8%,var(--bg-secondary))] px-2 py-1 text-[10px] font-medium text-[#6f59cf]">
+            <span className="truncate rounded-[6px] bg-[color-mix(in_oklab,#8b6ff0_8%,var(--bg-secondary))] px-2 py-1 text-[12px] font-medium text-[#6f59cf]">
               Previewing v{selected.versionNumber ?? "—"} from{" "}
               {new Date(selected.createdAt).toLocaleString()}
             </span>
@@ -1342,7 +1464,7 @@ function HistoryComparisonOverlay({
         <button
           type="button"
           onClick={onClose}
-          className="flex h-8 items-center gap-1.5 rounded-[7px] px-2 text-[10px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+          className="flex h-9 items-center gap-1.5 rounded-[8px] px-2.5 text-[13px] font-medium text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
         >
           <X className="h-3.5 w-3.5" />
           Close comparison
@@ -3146,8 +3268,15 @@ export function StudioTabRail({
   onActivateTab: (artifactId: string) => void;
   onCloseTab: (artifactId: string) => void;
 }) {
-  return (
-    <div className="flex h-12 shrink-0 items-center gap-1.5 overflow-x-auto border-b border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_60%,var(--bg-primary))] px-3.5">
+  const [shellSlot, setShellSlot] = useState<HTMLElement | null>(null);
+  useEffect(() => {
+    setShellSlot(document.getElementById("spectra-shell-tab-slot"));
+  }, []);
+
+  const rail = (
+    <div
+      className={`flex min-h-0 min-w-0 flex-1 items-center gap-1.5 overflow-x-auto ${shellSlot ? "h-full bg-transparent px-0" : "h-12 shrink-0 border-b border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_60%,var(--bg-primary))] px-3.5"}`}
+    >
       {hubTabs.map((hubTab) => {
         const active = activeHubTabId === hubTab.id;
         return (
@@ -3156,7 +3285,7 @@ export function StudioTabRail({
             type="button"
             className={`group flex h-9 min-w-[112px] max-w-[250px] shrink-0 items-center gap-2 rounded-[8px] border px-2.5 text-[12px] transition ${
               active
-                ? "border-[color-mix(in_oklab,var(--accent-cyan)_42%,var(--border-default))] bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-[inset_0_2px_var(--accent-cyan),0_1px_6px_rgba(27,20,12,0.08)]"
+                ? "border-[color-mix(in_oklab,var(--brand-primary)_36%,var(--border-default))] bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[inset_0_2px_var(--brand-primary),0_1px_6px_rgba(27,20,12,0.06)]"
                 : "border-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
             }`}
             onClick={() => onActivateHub(hubTab.id)}
@@ -3168,6 +3297,7 @@ export function StudioTabRail({
             <span
               role="button"
               tabIndex={0}
+              aria-label={`Close ${hubTab.label}`}
               className="ml-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
               onClick={(event) => {
                 event.stopPropagation();
@@ -3198,7 +3328,7 @@ export function StudioTabRail({
             type="button"
             className={`group flex h-9 min-w-[112px] max-w-[250px] shrink-0 items-center gap-2 rounded-[8px] border px-2.5 text-[12px] transition ${
               active
-                ? "border-[color-mix(in_oklab,var(--accent-cyan)_42%,var(--border-default))] bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-[inset_0_2px_var(--accent-cyan),0_1px_6px_rgba(27,20,12,0.08)]"
+                ? "border-[color-mix(in_oklab,var(--brand-primary)_36%,var(--border-default))] bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[inset_0_2px_var(--brand-primary),0_1px_6px_rgba(27,20,12,0.06)]"
                 : "border-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
             }`}
             onClick={() => onActivateTab(artifact._id)}
@@ -3217,6 +3347,7 @@ export function StudioTabRail({
             <span
               role="button"
               tabIndex={0}
+              aria-label={`Close ${artifact.title}`}
               className="ml-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
               onClick={(event) => {
                 event.stopPropagation();
@@ -3264,6 +3395,9 @@ export function StudioTabRail({
       </button>
     </div>
   );
+
+  if (shellSlot) return createPortal(rail, shellSlot);
+  return rail;
 }
 
 function ArtifactStudioEditor({
@@ -3294,6 +3428,10 @@ function ArtifactStudioEditor({
   compact: boolean;
 }) {
   const permissionReadOnly = artifact.accessLevel === "read";
+  const isCollaborativeArtifact =
+    Boolean(artifact.isShared) ||
+    artifact.ownership === "shared" ||
+    (artifact.sharedWithCount ?? 0) > 0;
   const accessExplanation =
     artifact.ownership === "shared"
       ? artifact.accessReason === "workspace_inheritance"
@@ -3313,9 +3451,13 @@ function ArtifactStudioEditor({
     artifact._id,
     artifact.blueprintKey,
     initialLiveValue,
+    // Always connect for persistence (Yjs is the write path), but never treat
+    // a slow/missing socket as a reason to freeze private editing.
     !(permissionReadOnly && artifact.blueprintKey === "quiz"),
   );
-  const readOnly = permissionReadOnly || (live.supported && !live.canEdit);
+  const readOnly =
+    permissionReadOnly ||
+    (isCollaborativeArtifact && live.supported && live.level === "read");
   const [title, setTitle] = useState(artifact.title);
   const [summary, setSummary] = useState(artifact.summary ?? "");
   const [tagDraft, setTagDraft] = useState((artifact.tags ?? []).join(", "));
@@ -3328,12 +3470,12 @@ function ArtifactStudioEditor({
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [activeCommentRegionId, setActiveCommentRegionId] = useState<string>();
   const [embedsOpen, setEmbedsOpen] = useState(false);
-  const [detailsOpen, setDetailsOpen] = useState(
-    () =>
-      artifact.blueprintKey !== "document" &&
-      artifact.blueprintKey !== "planner_task" &&
-      artifact.blueprintKey !== "thread_reference",
-  );
+  const detailsEligible =
+    artifact.blueprintKey !== "planner_task" &&
+    artifact.blueprintKey !== "thread_reference";
+  const [detailsOpen, setDetailsOpen] = useState(detailsEligible);
+  const detailsPinnedRef = useRef(false);
+  const [aiHighlightDismissed, setAiHighlightDismissed] = useState(false);
   const [versions, setVersions] = useState<SpectraArtifactVersion[]>([]);
   const [historyBusy, setHistoryBusy] = useState<string | null>(null);
   const [previewVersion, setPreviewVersion] =
@@ -3364,6 +3506,23 @@ function ArtifactStudioEditor({
   // explicitly so a freshly opened or AI-updated artifact never advertises
   // unsaved work that the student did not create.
   const userHasEditedRef = useRef(false);
+
+  useEffect(() => {
+    detailsPinnedRef.current = false;
+    setDetailsOpen(detailsEligible);
+  }, [artifact._id, detailsEligible]);
+
+  useEffect(() => {
+    if (!detailsEligible) return;
+    const media = window.matchMedia("(max-width: 1279px)");
+    const syncDetails = () => {
+      if (detailsPinnedRef.current) return;
+      setDetailsOpen(!media.matches);
+    };
+    syncDetails();
+    media.addEventListener("change", syncDetails);
+    return () => media.removeEventListener("change", syncDetails);
+  }, [artifact._id, detailsEligible]);
 
   useEffect(() => {
     if (mode !== "tab") return;
@@ -3481,19 +3640,21 @@ function ArtifactStudioEditor({
         return true;
       } catch (error) {
         localSyncKeysRef.current.delete(key);
-        setLiveConflict({
-          message:
-            error instanceof Error
-              ? error.message
-              : "This change could not be synchronized.",
-        });
+        if (isCollaborativeArtifact) {
+          setLiveConflict({
+            message:
+              error instanceof Error
+                ? error.message
+                : "This change could not be synchronized.",
+          });
+        }
         return false;
       } finally {
         syncingRef.current = false;
         setSyncBusy(false);
       }
     },
-    [artifact.blueprintKey, live, permissionReadOnly],
+    [artifact.blueprintKey, isCollaborativeArtifact, live, permissionReadOnly],
   );
   const previewDiff = useMemo(() => {
     if (!previewVersion?.after) return [];
@@ -3612,6 +3773,8 @@ function ArtifactStudioEditor({
     ]),
   ];
   const aiWorkingActive = aiPreviewActive || activeAiEffects.length > 0;
+  const visibleAiWorking = aiWorkingActive && !aiHighlightDismissed;
+  const highlightPaths = aiHighlightDismissed ? [] : aiChangedPaths;
   const editorContent =
     aiPreviewActive && artifact.aiPreview?.content !== undefined
       ? mergeAiRegions(content, artifact.aiPreview.content, aiChangedPaths)
@@ -3668,6 +3831,10 @@ function ArtifactStudioEditor({
     onDirtyChange(dirty);
     dirtyRef.current = dirty;
   }, [dirty, onDirtyChange]);
+
+  useEffect(() => {
+    setAiHighlightDismissed(false);
+  }, [artifact._id, artifact.updatedAt, artifact.aiState]);
 
   useEffect(() => {
     const snapshotsDiffer =
@@ -3768,16 +3935,44 @@ function ArtifactStudioEditor({
       if (!dirty) return;
       event.preventDefault();
     }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      const target = event.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      if (historyOpen) {
+        setHistoryOpen(false);
+        return;
+      }
+      if (commentsOpen) {
+        setCommentsOpen(false);
+        return;
+      }
+      if (embedsOpen) {
+        setEmbedsOpen(false);
+        return;
+      }
+      event.preventDefault();
+      void closeAfterSynchronization();
+    }
     window.addEventListener("spectra:request-artifact-close", requestClose);
     window.addEventListener("beforeunload", beforeUnload);
+    window.addEventListener("keydown", onKeyDown);
     return () => {
       window.removeEventListener(
         "spectra:request-artifact-close",
         requestClose,
       );
       window.removeEventListener("beforeunload", beforeUnload);
+      window.removeEventListener("keydown", onKeyDown);
     };
-  }, [artifact._id, dirty]);
+  }, [artifact._id, commentsOpen, dirty, embedsOpen, historyOpen]);
 
   useEffect(() => {
     if (
@@ -4029,12 +4224,12 @@ function ArtifactStudioEditor({
   // shown in their source-of-truth layout. Nesting the generic artifact
   // details rail beside it creates an unusable three-column editor.
   const showDetails =
-    detailsOpen && mode === "tab" && !compact && artifact.blueprintKey !== "planner_task";
+    detailsOpen && !compact && artifact.blueprintKey !== "planner_task";
   const contentMode = compact ? ("split" as const) : mode;
   const editorLayoutClass = showDetails
     ? mode === "tab"
       ? "mx-auto grid w-[calc(100%+10px)] max-w-[1690px] gap-3 xl:grid-cols-[minmax(0,1fr)_302px]"
-      : "grid gap-5 2xl:grid-cols-[minmax(0,1fr)_302px]"
+      : "grid gap-3 min-[560px]:grid-cols-[minmax(0,1fr)_min(240px,38%)]"
     : "block";
   const mainClass =
     artifact.blueprintKey === "document"
@@ -4074,17 +4269,19 @@ function ArtifactStudioEditor({
     ? "Read-only"
     : live.state === "permission_lost"
       ? "Access removed"
-      : live.state === "reconnecting" || live.state === "unsynchronized"
-        ? "Reconnecting"
-        : live.state === "connecting" || live.state === "synchronizing"
-          ? "Synchronizing"
-          : syncBusy || live.unsynchronizedChanges > 0
+      : isCollaborativeArtifact
+        ? live.state === "reconnecting" || live.state === "unsynchronized"
+          ? "Reconnecting"
+          : live.state === "connecting" || live.state === "synchronizing"
             ? "Synchronizing"
-            : dirty
+            : syncBusy || live.unsynchronizedChanges > 0 || dirty
               ? "Waiting to sync"
               : live.modelSnapshot.validity === "invalid"
                 ? "Needs attention"
-                : "Synchronized";
+                : "Live"
+        : syncBusy || dirty
+          ? "Saving…"
+          : "Saved";
   const quizHeaderQuestions =
     artifact.blueprintKey === "quiz" ? quizQuestions(editorContent) : [];
   const quizHeaderMinutes = Math.max(
@@ -4109,9 +4306,28 @@ function ArtifactStudioEditor({
     .map((tag) => tag.trim())
     .filter(Boolean)
     .slice(0, 3);
+  const waveCBlueprint = WAVE_C_BLUEPRINTS.has(artifact.blueprintKey);
+  const waveCStats = waveCBlueprint
+    ? waveCIdentityStats(artifact.blueprintKey, editorContent)
+    : null;
+  const identityStats =
+    artifact.blueprintKey === "quiz"
+      ? [
+          [String(quizHeaderQuestions.length), "Questions"],
+          [`${quizHeaderMinutes} min`, "Est. time"],
+          [quizHeaderDifficulty, "Difficulty"],
+        ]
+      : waveCStats;
+  const showIdentityStats = Boolean(identityStats?.length) && !compact;
+  const artifactSyncMessage = studioSyncMessage(syncLabel);
+  const syncIndicatorBusy =
+    syncBusy ||
+    live.state === "connecting" ||
+    live.state === "synchronizing" ||
+    live.state === "reconnecting";
   const identityBlock = (
     <div
-      className={`spectra-artifact-identity flex w-full items-start ${compact ? "gap-3 px-5 pb-5 pt-5" : artifact.blueprintKey === "document" ? "gap-4 px-6 pb-2 pt-6" : artifact.blueprintKey === "quiz" ? "gap-[10px] px-2 pb-0 pt-1" : "gap-4 px-1 pb-2 pt-1"}`}
+      className={`spectra-artifact-identity flex w-full items-start ${compact ? "gap-3 px-5 pb-5 pt-5" : artifact.blueprintKey === "document" ? "gap-4 px-6 pb-2 pt-6" : artifact.blueprintKey === "quiz" || waveCBlueprint ? "gap-[10px] px-2 pb-0 pt-1" : "gap-4 px-1 pb-2 pt-1"}`}
     >
       <span
         className="mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-[9px] border border-[color-mix(in_oklab,currentColor_24%,transparent)] bg-[color-mix(in_oklab,currentColor_9%,var(--bg-elevated))]"
@@ -4120,14 +4336,17 @@ function ArtifactStudioEditor({
         <Icon className="h-5 w-5" />
       </span>
       <div className="min-w-0 flex-1">
-        <div className="mb-1 text-[9px] font-semibold uppercase tracking-[.13em] text-[var(--text-tertiary)]">
+        <div className="mb-1 text-[11px] font-semibold uppercase tracking-[.13em] text-[var(--text-tertiary)]">
           {meta.label}
         </div>
         <div
           className="rounded-[7px]"
           data-ai-region={
-            (aiPreviewActive && artifact.aiPreview?.title !== undefined) ||
-            undefined
+            !aiHighlightDismissed &&
+            aiPreviewActive &&
+            artifact.aiPreview?.title !== undefined
+              ? true
+              : undefined
           }
         >
           <textarea
@@ -4139,15 +4358,18 @@ function ArtifactStudioEditor({
               setActiveCommentRegionId("metadata:title");
               live.transport?.setPresence({ activeRegionId: "metadata:title" });
             }}
-            className={`min-h-8 w-full resize-none overflow-hidden bg-transparent font-display font-semibold leading-tight text-[var(--text-primary)] outline-none [field-sizing:content] ${compact ? "text-[26px]" : "text-[28px]"}`}
+            className={`min-h-8 w-full resize-none overflow-hidden bg-transparent font-display font-semibold leading-tight text-[var(--text-primary)] outline-none [field-sizing:content] ${compact ? "text-[28px]" : "text-[32px]"}`}
             placeholder="Untitled artifact"
           />
         </div>
         <div
           className="mt-0.5 rounded-[7px]"
           data-ai-region={
-            (aiPreviewActive && artifact.aiPreview?.summary !== undefined) ||
-            undefined
+            !aiHighlightDismissed &&
+            aiPreviewActive &&
+            artifact.aiPreview?.summary !== undefined
+              ? true
+              : undefined
           }
         >
           <input
@@ -4160,7 +4382,7 @@ function ArtifactStudioEditor({
               });
             }}
             onChange={(event) => changeBase({ summary: event.target.value })}
-            className="w-full bg-transparent text-[12px] leading-5 text-[var(--text-secondary)] outline-none placeholder:text-[var(--text-tertiary)]"
+            className="w-full bg-transparent text-[14px] leading-6 text-[var(--text-secondary)] outline-none placeholder:text-[var(--text-tertiary)]"
             placeholder="Short useful summary"
           />
         </div>
@@ -4185,14 +4407,10 @@ function ArtifactStudioEditor({
           </div>
         ) : null}
       </div>
-      {artifact.blueprintKey === "quiz" && !compact ? (
+      {showIdentityStats ? (
         <div className="mr-3.5 hidden w-[292px] shrink-0 flex-col items-stretch gap-2 lg:flex">
           <div className="grid h-16 grid-cols-3 overflow-hidden rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-primary)]">
-            {[
-              [String(quizHeaderQuestions.length), "Questions"],
-              [`${quizHeaderMinutes} min`, "Est. time"],
-              [quizHeaderDifficulty, "Difficulty"],
-            ].map(([value, label], index) => (
+            {identityStats!.map(([value, label], index) => (
               <span
                 key={label}
                 className={`grid place-items-center content-center gap-1 ${index ? "border-l border-[var(--border-subtle)]" : ""}`}
@@ -4206,57 +4424,30 @@ function ArtifactStudioEditor({
               </span>
             ))}
           </div>
-          <span className="inline-flex items-center justify-start gap-1.5 text-[10px] text-[var(--text-secondary)]">
-            <CheckCircle2 className="h-3.5 w-3.5 text-[var(--success)]" />
-            {syncLabel === "Synchronized" ? "Auto-saved" : syncLabel}
+          <span
+            className="inline-flex items-center justify-start gap-1.5 text-[10px] text-[var(--text-secondary)]"
+            role="status"
+            aria-live="polite"
+          >
+            {artifactSyncMessage === "Auto-saved" ? (
+              <CheckCircle2 className="h-3.5 w-3.5 text-[var(--success)]" />
+            ) : syncIndicatorBusy ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-cyan)]" />
+            ) : (
+              <Circle className="h-3 w-3 fill-[#d88922] text-[#d88922]" />
+            )}
+            {artifactSyncMessage}
           </span>
         </div>
-      ) : (
-      <div className="hidden shrink-0 items-center gap-2 sm:flex">
-        <span className="inline-flex items-center gap-1.5 text-[11px] text-[var(--text-secondary)]">
-          {syncLabel === "Synchronized" ? (
-            <CheckCircle2 className="h-4 w-4 text-[var(--success)]" />
-          ) : syncBusy ||
-            live.state === "connecting" ||
-            live.state === "synchronizing" ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-cyan)]" />
-          ) : (
-            <Circle className="h-3 w-3 fill-[#d88922] text-[#d88922]" />
-          )}
-          {syncLabel}
-          {collaboratorCount > 0 ? ` · ${collaboratorCount} here` : ""}
-        </span>
-        <button
-          type="button"
-          aria-label="Synchronize changes"
-          disabled={readOnly || !dirty || busy || syncBusy || !title.trim()}
-          onClick={() => void save()}
-          className="inline-flex h-9 items-center gap-1.5 rounded-[8px] px-2.5 text-[12px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-35"
-        >
-          {busy || syncBusy ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : syncLabel === "Synchronized" ? (
-            <Check className="h-4 w-4" />
-          ) : (
-            <Save className="h-4 w-4" />
-          )}
-          {permissionReadOnly
-            ? "Read-only"
-            : syncBusy
-              ? "Syncing"
-              : dirty
-                ? "Sync now"
-                : "Synced"}
-        </button>
-      </div>
-      )}
+      ) : null}
     </div>
   );
 
   return (
     <div
       className="spectra-artifact-studio relative flex h-full min-h-0 flex-col"
-      data-ai-state={aiWorkingActive ? artifact.aiState : undefined}
+      data-studio-mode={mode}
+      data-ai-state={visibleAiWorking ? artifact.aiState : undefined}
       data-blueprint={artifact.blueprintKey}
       style={{ "--studio-accent": meta.color } as CSSProperties}
     >
@@ -4267,28 +4458,39 @@ function ArtifactStudioEditor({
           ))}
         </div>
       ) : null}
-      <header className={`${mode === "tab" ? "hidden" : "flex"} spectra-artifact-header h-12 shrink-0 items-center justify-between gap-4 bg-transparent px-5`}>
-        <div
-          className={`${compact ? "hidden" : "flex"} min-w-0 items-center gap-2 text-[11px] text-[var(--text-secondary)]`}
-        >
-          <span>{sourceLabel}</span>
-          <span>/</span>
-          <span className="flex items-center gap-1.5">
-            <Icon className="h-3.5 w-3.5" style={{ color: meta.color }} />
-            {meta.label}
-          </span>
-          <span>/</span>
-          <span className="truncate text-[var(--text-primary)]">
-            {artifact.title}
-          </span>
-        </div>
+      <header
+        className={`${mode === "tab" ? "flex" : "flex"} spectra-artifact-header h-12 shrink-0 items-center justify-between gap-4 bg-transparent px-5`}
+      >
+        <div className="min-w-0 flex-1" />
         <div className="flex shrink-0 items-center gap-2">
-          <CollaborationPresenceIndicator
-            presence={live.presence}
-            currentClientId={live.transport?.clientId}
-            regions={commentRegions}
-          />
-          {onShare ? (
+          <span
+            className="hidden items-center gap-1.5 text-[11px] text-[var(--text-secondary)] sm:inline-flex"
+            role="status"
+            aria-live="polite"
+          >
+            {syncLabel === "Saved" || syncLabel === "Live" ? (
+              <CheckCircle2 className="h-3.5 w-3.5 text-[var(--success)]" />
+            ) : syncBusy ||
+              live.state === "connecting" ||
+              live.state === "synchronizing" ||
+              live.state === "reconnecting" ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-cyan)]" />
+            ) : (
+              <Circle className="h-3 w-3 fill-[#d88922] text-[#d88922]" />
+            )}
+            {syncLabel}
+            {isCollaborativeArtifact && collaboratorCount > 0
+              ? ` · ${collaboratorCount} here`
+              : ""}
+          </span>
+          {isCollaborativeArtifact ? (
+            <CollaborationPresenceIndicator
+              presence={live.presence}
+              currentClientId={live.transport?.clientId}
+              regions={commentRegions}
+            />
+          ) : null}
+          {onShare && mode === "split" ? (
             <IconButton
               label="Share artifact"
               onClick={onShare}
@@ -4305,10 +4507,13 @@ function ArtifactStudioEditor({
             onClick={() => setEmbedsOpen(true)}
             icon={Link2}
           />
-          {mode === "tab" && artifact.blueprintKey !== "planner_task" ? (
+          {artifact.blueprintKey !== "planner_task" ? (
             <IconButton
               label={detailsOpen ? "Close details" : "Open details"}
-              onClick={() => setDetailsOpen((open) => !open)}
+              onClick={() => {
+                detailsPinnedRef.current = true;
+                setDetailsOpen((open) => !open);
+              }}
               icon={PanelRight}
             />
           ) : null}
@@ -4354,6 +4559,25 @@ function ArtifactStudioEditor({
           {accessExplanation} · You can modify this artifact.
         </div>
       ) : null}
+      {visibleAiWorking && artifact.aiState === "edited" ? (
+        <div className="spectra-ai-highlight-banner flex shrink-0 flex-wrap items-center gap-3 border-y border-[color-mix(in_oklab,#4f8dff_22%,var(--border-subtle))] bg-[color-mix(in_oklab,#4f8dff_5%,var(--bg-primary))] px-5 py-2 text-[11px] text-[var(--text-secondary)]">
+          <Sparkles className="h-3.5 w-3.5 shrink-0 text-[#4f8dff]" />
+          <span className="min-w-0 flex-1">
+            {aiEffectTitles[0] ?? "Spectra updated this artifact"}
+            {aiEffectTitles.length > 1
+              ? ` and ${aiEffectTitles.length - 1} more region${aiEffectTitles.length === 2 ? "" : "s"}`
+              : ""}
+            . Highlights show what changed.
+          </span>
+          <button
+            type="button"
+            onClick={() => setAiHighlightDismissed(true)}
+            className="rounded-[7px] px-2.5 py-1 text-[11px] font-semibold text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
+          >
+            Clear highlights
+          </button>
+        </div>
+      ) : null}
       {!permissionReadOnly && live.state === "permission_lost" ? (
         <div
           role="alert"
@@ -4364,16 +4588,17 @@ function ArtifactStudioEditor({
         </div>
       ) : null}
       {!permissionReadOnly &&
+      isCollaborativeArtifact &&
       (live.state === "reconnecting" || live.state === "unsynchronized") ? (
         <div
           role="status"
           className="shrink-0 border-y border-[color-mix(in_oklab,#d88922_26%,var(--border-subtle))] bg-[color-mix(in_oklab,#d88922_7%,var(--bg-primary))] px-5 py-2 text-[11px] text-[var(--text-secondary)]"
         >
-          Connection interrupted. Spectra is preserving the current visible
-          draft, but editing is paused until synchronization is restored.
+          Connection interrupted. Spectra is reconnecting collaborators while
+          keeping your draft.
         </div>
       ) : null}
-      {liveConflict ? (
+      {isCollaborativeArtifact && liveConflict ? (
         <div
           role="alert"
           className="flex shrink-0 items-center gap-3 border-y border-[color-mix(in_oklab,#d88922_28%,var(--border-subtle))] bg-[color-mix(in_oklab,#d88922_7%,var(--bg-primary))] px-5 py-2 text-[11px] text-[var(--text-secondary)]"
@@ -4400,7 +4625,9 @@ function ArtifactStudioEditor({
           </button>
         </div>
       ) : null}
-      {live.initializationError || live.modelSnapshot.validity === "invalid" ? (
+      {isCollaborativeArtifact &&
+      (live.initializationError ||
+        live.modelSnapshot.validity === "invalid") ? (
         <div
           role="alert"
           className="shrink-0 border-y border-[color-mix(in_oklab,var(--danger)_24%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--danger)_6%,var(--bg-primary))] px-5 py-2 text-[11px] text-[var(--danger)]"
@@ -4437,14 +4664,14 @@ function ArtifactStudioEditor({
       ) : null}
       <main
         className={`spectra-artifact-main ${mainClass}`}
-        data-ai-preview={aiWorkingActive || undefined}
+        data-ai-preview={visibleAiWorking || undefined}
         data-ai-effect-count={activeAiEffects.length || undefined}
         data-ai-activity={
           activeAiEffects.at(-1)?.activity ??
           (aiPreviewActive ? artifact.aiPreview?.effectActivity : undefined)
         }
         aria-busy={
-          aiWorkingActive &&
+          visibleAiWorking &&
           (artifact.aiState === "creating" || artifact.aiState === "updating")
         }
       >
@@ -4457,7 +4684,7 @@ function ArtifactStudioEditor({
                 title={title}
                 content={editorContent}
                 onChange={editorChange}
-                aiChangedPaths={aiChangedPaths}
+                aiChangedPaths={highlightPaths}
                 readOnly={readOnly}
                 header={identityBlock}
               />
@@ -4470,7 +4697,7 @@ function ArtifactStudioEditor({
                 mode={contentMode}
                 content={editorContent}
                 onChange={editorChange}
-                aiChangedPaths={aiChangedPaths}
+                aiChangedPaths={highlightPaths}
                 readOnly={readOnly}
               />
             ) : null}
@@ -4481,9 +4708,9 @@ function ArtifactStudioEditor({
                 mode={contentMode}
                 content={editorContent}
                 onChange={editorChange}
-                aiChangedPaths={aiChangedPaths}
+                aiChangedPaths={highlightPaths}
                 readOnly={readOnly}
-                synchronizationReady={syncLabel === "Synchronized"}
+                synchronizationReady={isSyncReady(syncLabel)}
               />
             ) : null}
             {artifact.blueprintKey === "planner_task" ? (
@@ -4496,7 +4723,7 @@ function ArtifactStudioEditor({
                 onTagDraftChange={(value) => changeBase({ tagDraft: value })}
                 content={editorContent}
                 onChange={editorChange}
-                aiChangedPaths={aiChangedPaths}
+                aiChangedPaths={highlightPaths}
                 onArchive={onArchive}
                 onOpenArtifact={onOpenArtifact}
                 readOnly={readOnly}
@@ -4508,8 +4735,10 @@ function ArtifactStudioEditor({
                 artifactId={artifact._id}
                 content={editorContent}
                 onChange={editorChange}
-                aiChangedPaths={aiChangedPaths}
+                aiChangedPaths={highlightPaths}
                 readOnly={readOnly}
+                synchronizationReady={isSyncReady(syncLabel)}
+                syncMessage={artifactSyncMessage}
                 onActiveRegionChange={handleActiveRegionChange}
               />
             ) : null}
@@ -4521,9 +4750,10 @@ function ArtifactStudioEditor({
                 title={title}
                 content={editorContent}
                 onChange={editorChange}
-                aiChangedPaths={aiChangedPaths}
+                aiChangedPaths={highlightPaths}
                 readOnly={readOnly}
-                synchronizationReady={syncLabel === "Synchronized"}
+                synchronizationReady={isSyncReady(syncLabel)}
+                syncMessage={artifactSyncMessage}
                 onActiveRegionChange={handleActiveRegionChange}
               />
             ) : null}
@@ -4534,9 +4764,10 @@ function ArtifactStudioEditor({
                 artifacts={artifacts}
                 content={editorContent}
                 onChange={editorChange}
-                aiChangedPaths={aiChangedPaths}
+                aiChangedPaths={highlightPaths}
                 readOnly={readOnly}
-                synchronizationReady={syncLabel === "Synchronized"}
+                synchronizationReady={isSyncReady(syncLabel)}
+                syncMessage={artifactSyncMessage}
                 onActiveRegionChange={handleActiveRegionChange}
               />
             ) : null}
@@ -4547,8 +4778,10 @@ function ArtifactStudioEditor({
                 artifacts={artifacts}
                 content={editorContent}
                 onChange={editorChange}
-                aiChangedPaths={aiChangedPaths}
+                aiChangedPaths={highlightPaths}
                 readOnly={readOnly}
+                synchronizationReady={isSyncReady(syncLabel)}
+                syncMessage={artifactSyncMessage}
                 onActiveRegionChange={handleActiveRegionChange}
               />
             ) : null}
@@ -4559,8 +4792,10 @@ function ArtifactStudioEditor({
                 artifacts={artifacts}
                 content={editorContent}
                 onChange={editorChange}
-                aiChangedPaths={aiChangedPaths}
+                aiChangedPaths={highlightPaths}
                 readOnly={readOnly}
+                synchronizationReady={isSyncReady(syncLabel)}
+                syncMessage={artifactSyncMessage}
                 onActiveRegionChange={handleActiveRegionChange}
               />
             ) : null}
@@ -4572,7 +4807,7 @@ function ArtifactStudioEditor({
                 artifacts={artifacts}
                 content={editorContent}
                 onChange={editorChange}
-                aiChangedPaths={aiChangedPaths}
+                aiChangedPaths={highlightPaths}
                 readOnly={readOnly}
                 canPublish={
                   artifact.capabilities?.includes("publish") ??
@@ -5020,6 +5255,18 @@ function DocumentStudio({
   const importRef = useRef<HTMLInputElement>(null);
   const editorReadyForUserChanges = useRef(false);
   const editorJsonKeyRef = useRef(JSON.stringify(initialContent));
+
+  useEffect(() => {
+    if (!focusMode) return;
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      setFocusMode(false);
+    }
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [focusMode]);
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -6201,7 +6448,7 @@ function DocumentStudio({
           </div>
           <EditorContent
             editor={editor}
-            className="tiptap-root mx-auto max-w-[1040px] [&_.ProseMirror-focused]:outline-none [&_.ProseMirror]:outline-none [&_.ProseMirror_blockquote]:border-l-2 [&_.ProseMirror_blockquote]:border-[var(--border-default)] [&_.ProseMirror_blockquote]:pl-4 [&_.ProseMirror_h1]:font-display [&_.ProseMirror_h1]:text-[30px] [&_.ProseMirror_h1]:leading-tight [&_.ProseMirror_h2]:font-display [&_.ProseMirror_h2]:text-[23px] [&_.ProseMirror_h2]:leading-tight [&_.ProseMirror_li]:my-1 [&_.ProseMirror_p]:my-4"
+            className="tiptap-root mx-auto max-w-[920px] [&_.ProseMirror-focused]:outline-none [&_.ProseMirror]:outline-none [&_.ProseMirror_blockquote]:border-l-2 [&_.ProseMirror_blockquote]:border-[var(--border-default)] [&_.ProseMirror_blockquote]:pl-4 [&_.ProseMirror_h1]:font-display [&_.ProseMirror_h1]:text-[30px] [&_.ProseMirror_h1]:leading-tight [&_.ProseMirror_h2]:font-display [&_.ProseMirror_h2]:text-[23px] [&_.ProseMirror_h2]:leading-tight [&_.ProseMirror_li]:my-1 [&_.ProseMirror_p]:my-4"
           />
         </main>
       </div>
@@ -8951,29 +9198,27 @@ function FlashcardStudio({
                     : !activeCard.front.trim() || !activeCard.back.trim()
                       ? "Add both sides before studying this card"
                       : activeCardDirty
-                        ? "Live changes synchronized · revert available"
-                        : "Current card synchronized"}
+                        ? "Syncing changes…"
+                        : "Synchronized"}
               </span>
-              <button
-                type="button"
-                disabled={!activeCardDirty}
-                onClick={() => {
-                  const baseline = cardEditBaselineRef.current;
-                  if (!baseline || baseline.id !== activeCard.id) return;
-                  commit(
-                    cards.map((card) =>
-                      card.id === activeCard.id
-                        ? structuredClone(baseline)
-                        : card,
-                    ),
-                  );
-                }}
-              >
-                Discard current edits
-              </button>
-              <button type="button" disabled>
-                <CheckCircle2 className="h-3.5 w-3.5" /> Synchronized
-              </button>
+              {activeCardDirty ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const baseline = cardEditBaselineRef.current;
+                    if (!baseline || baseline.id !== activeCard.id) return;
+                    commit(
+                      cards.map((card) =>
+                        card.id === activeCard.id
+                          ? structuredClone(baseline)
+                          : card,
+                      ),
+                    );
+                  }}
+                >
+                  Revert card
+                </button>
+              ) : null}
             </div>
           </div>
         ) : null}

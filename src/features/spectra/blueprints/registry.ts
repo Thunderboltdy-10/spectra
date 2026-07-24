@@ -149,10 +149,19 @@ const defaultContent: Record<ArtifactTypeKey, unknown> = {
     visualisation: { enabled: true },
   },
   whiteboard: {
-    viewport: { x: 0, y: 0, zoom: 1 },
+    viewport: { pageId: "page-1", x: 0, y: 0, zoom: 1 },
+    pages: [{ id: "page-1", name: "Page 1" }],
     nodes: [],
     edges: [],
-    layers: [{ id: "layer-1", name: "Canvas", visible: true, locked: false }],
+    layers: [
+      {
+        id: "layer-1",
+        name: "Canvas",
+        pageId: "page-1",
+        visible: true,
+        locked: false,
+      },
+    ],
   },
 };
 

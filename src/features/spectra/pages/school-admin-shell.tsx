@@ -57,6 +57,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { CommandBar } from "../components/command-bar";
 import {
   getAdministration,
   mutateAdministration,
@@ -196,27 +197,6 @@ function dateRange() {
   };
 }
 
-function MiniUsageRing({ used, maximum }: { used: number; maximum?: number }) {
-  const ratio = maximum ? Math.min(100, Math.round((used / maximum) * 100)) : 0;
-  return (
-    <div
-      className="relative grid size-[92px] place-items-center rounded-full"
-      style={{
-        background: `conic-gradient(#15946d ${ratio * 3.6}deg, var(--bg-secondary) 0deg)`,
-      }}
-    >
-      <div className="grid size-[70px] place-items-center rounded-full bg-[var(--bg-elevated)] text-center">
-        <span className="font-[var(--font-serif)] text-[20px] font-medium">
-          {maximum ? `${ratio}%` : "—"}
-          <small className="block font-sans text-[8px] font-normal text-[var(--text-tertiary)]">
-            {maximum ? "used" : "no limit"}
-          </small>
-        </span>
-      </div>
-    </div>
-  );
-}
-
 function OverviewSurface({
   data,
   onTab,
@@ -224,10 +204,6 @@ function OverviewSurface({
   data: SchoolAdministrationOverview;
   onTab: (tab: Tab) => void;
 }) {
-  const storage = data.usage.totals.storage_bytes ?? 0;
-  const storageRule = data.limits.rules.find(
-    (rule) => rule.category === "storage_bytes",
-  );
   const series = data.usage.series.map(
     (point) =>
       Object.values(point.values).reduce((sum, value) => sum + value, 0) || 0,
@@ -443,54 +419,54 @@ function OverviewSurface({
 
       <aside className="space-y-3">
         <AdminCard className="p-4">
-          <h2 className="font-[var(--font-serif)] text-[15px] font-medium">
-            Storage & usage
-          </h2>
-          <div className="mt-4 flex items-center gap-4">
-            <MiniUsageRing used={storage} maximum={storageRule?.maximum} />
-            <div className="min-w-0">
-              <strong className="text-[13px]">
-                {formatBytes(storage)} used
-              </strong>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="font-[var(--font-serif)] text-[15px] font-medium">
+                Usage
+              </h2>
               <p className="mt-1 text-[10px] text-[var(--text-tertiary)]">
-                {storageRule
-                  ? `of ${formatBytes(storageRule.maximum)} configured`
-                  : "No commercial limit is enforced"}
+                Privacy-safe meters for this school.
               </p>
-              <button
-                type="button"
-                onClick={() => onTab("usage")}
-                className="mt-2 text-[10px] font-medium text-[#16805f] hover:underline"
-              >
-                View usage
-              </button>
             </div>
+            <AdminButton onClick={() => onTab("usage")}>View usage</AdminButton>
           </div>
-          <div className="mt-4 border-t border-[var(--border-subtle)] pt-4 text-[10px]">
+          <div className="mt-4 space-y-2 text-[10px]">
+            {(
+              [
+                ["Storage", data.usage.totals.storage_bytes, "bytes"],
+                ["Model input", data.usage.totals.model_input_tokens, "count"],
+                ["Model output", data.usage.totals.model_output_tokens, "count"],
+                [
+                  "Collaboration",
+                  data.usage.totals.collaboration_bytes,
+                  "bytes",
+                ],
+              ] as const
+            )
+              .filter(([, value]) => value !== null && value !== undefined)
+              .map(([label, value, kind]) => (
+                <div
+                  key={label}
+                  className="flex justify-between gap-4 border-b border-[var(--border-subtle)] py-1.5 last:border-0"
+                >
+                  <span className="text-[var(--text-secondary)]">{label}</span>
+                  <strong>
+                    {kind === "bytes"
+                      ? formatBytes(value as number)
+                      : formatCompact(value as number)}
+                  </strong>
+                </div>
+              ))}
             {[
-              ["Model input", data.usage.totals.model_input_tokens],
-              ["Model output", data.usage.totals.model_output_tokens],
-              ["Collaboration", data.usage.totals.collaboration_bytes],
-              ["Bandwidth", data.usage.totals.bandwidth_bytes],
-            ].map(([label, value]) => (
-              <div
-                key={String(label)}
-                className="flex justify-between gap-4 py-1.5"
-              >
-                <span className="text-[var(--text-secondary)]">{label}</span>
-                <strong>{formatCompact(value as number | undefined)}</strong>
-              </div>
-            ))}
-          </div>
-          <div className="mt-3 flex items-center justify-between border-t border-[var(--border-subtle)] pt-3">
-            <span className="text-[9px] text-[var(--text-tertiary)]">
-              Limits
-            </span>
-            <StatusBadge
-              tone={data.limits.enforcement === "disabled" ? "good" : "warn"}
-            >
-              {data.limits.enforcement}
-            </StatusBadge>
+              data.usage.totals.storage_bytes,
+              data.usage.totals.model_input_tokens,
+              data.usage.totals.model_output_tokens,
+              data.usage.totals.collaboration_bytes,
+            ].every((value) => value === null || value === undefined) ? (
+              <p className="text-[10px] text-[var(--text-tertiary)]">
+                No metered usage has been recorded for this range yet.
+              </p>
+            ) : null}
           </div>
         </AdminCard>
 
@@ -568,7 +544,6 @@ export function SchoolAdminShell() {
   const [loading, setLoading] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
   const [busy, setBusy] = useState("");
-  const [composer, setComposer] = useState("");
 
   const queryArgs = useMemo(
     () => ({ ...dateRange(), operatorSessionId }),
@@ -656,7 +631,7 @@ export function SchoolAdminShell() {
   if (!overview) return null;
 
   return (
-    <div className="min-h-dvh bg-[var(--bg-primary)] pb-24">
+    <div className="spectra-wave-y spectra-admin-stage min-h-dvh bg-[var(--bg-primary)] pb-24">
       {overview.operatorSession ? (
         <div className="sticky top-0 z-30 flex min-h-10 items-center justify-between gap-3 border-b border-[#d5e5f0] bg-[#eef7fc] px-5 py-2 text-[10px] text-[#315e78]">
           <span className="flex items-center gap-2">
@@ -687,37 +662,18 @@ export function SchoolAdminShell() {
       ) : null}
 
       <header className="border-b border-[var(--border-subtle)] bg-[var(--bg-elevated)]">
-        <div className="flex min-h-12 items-center justify-between gap-4 px-5 lg:px-7">
-          <div className="flex min-w-0 items-center gap-2 text-[10px] text-[var(--text-tertiary)]">
-            <Link
-              href="/workspace"
-              className="grid size-7 place-items-center rounded-[6px] hover:bg-[var(--bg-secondary)]"
-              aria-label="Home"
-            >
-              <School size={13} />
-            </Link>
-            <span>/</span>
-            <span>Admin</span>
-            <span>/</span>
-            <strong className="truncate font-medium text-[var(--text-primary)]">
-              {tabs.find((item) => item.key === tab)?.label}
-            </strong>
-          </div>
-          <div className="flex items-center gap-2 text-[9px] text-[var(--text-tertiary)]">
-            <Check size={12} className="text-[#1b9b75]" />
-            Synced just now
-            <AdminButton
-              className="min-h-8"
-              onClick={() => setRefreshKey((value) => value + 1)}
-            >
-              <RefreshCw size={12} />
-              Refresh
-            </AdminButton>
-          </div>
+        <div className="flex min-h-12 items-center justify-end gap-4 px-5 lg:px-7">
+          <AdminButton
+            className="min-h-8"
+            onClick={() => setRefreshKey((value) => value + 1)}
+          >
+            <RefreshCw size={12} />
+            Refresh
+          </AdminButton>
         </div>
       </header>
 
-      <div className="mx-auto w-full max-w-[1540px] px-4 py-5 sm:px-6 lg:px-8">
+      <div className="w-full px-4 py-5 sm:px-6 lg:px-8 xl:px-10">
         <div className="mb-5 flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
           <div className="flex items-center gap-4">
             <span className="grid size-14 shrink-0 place-items-center rounded-[13px] bg-[#e8f5ef] text-[#14916b]">
@@ -787,37 +743,28 @@ export function SchoolAdminShell() {
         )}
       </div>
 
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          const prompt = composer.trim();
-          if (!prompt) return;
-          router.push(
-            `/chat?prompt=${encodeURIComponent(
-              `As a school administrator for ${overview.school.name}, ${prompt}`,
-            )}`,
-          );
-        }}
-        className="fixed bottom-4 left-1/2 z-20 flex w-[min(calc(100%-2rem),760px)] -translate-x-1/2 items-center gap-2 rounded-[12px] border border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_94%,transparent)] p-2 shadow-[0_14px_45px_rgba(33,28,20,.13)] backdrop-blur-xl md:ml-[38px]"
-      >
-        <span className="grid size-8 shrink-0 place-items-center rounded-[8px] bg-[#e8f5ef] text-[#16805f]">
-          <School size={14} />
-        </span>
-        <input
-          value={composer}
-          onChange={(event) => setComposer(event.target.value)}
-          placeholder="Ask Spectra anything about your school…"
-          className="h-8 min-w-0 flex-1 bg-transparent px-1 text-[12px] outline-none placeholder:text-[var(--text-placeholder)]"
-        />
-        <button
-          type="submit"
-          disabled={!composer.trim()}
-          className="grid size-8 place-items-center rounded-[8px] bg-[var(--text-primary)] text-[var(--bg-primary)] disabled:opacity-35"
-          aria-label="Ask Spectra"
-        >
-          <Send size={13} />
-        </button>
-      </form>
+      <div className="pointer-events-none fixed bottom-4 left-1/2 z-20 w-[min(calc(100%-2rem),760px)] -translate-x-1/2 md:ml-[38px]">
+        <div className="pointer-events-auto">
+          <CommandBar
+            className="w-full"
+            placeholder="Ask Spectra anything about your school…"
+            onSubmit={(prompt) => {
+              router.push(
+                `/chat?prompt=${encodeURIComponent(
+                  `As a school administrator for ${overview.school.name}, ${prompt}`,
+                )}`,
+              );
+              return true;
+            }}
+            context={
+              <span className="flex h-full min-w-[88px] items-center gap-2 px-3 text-[11px] font-semibold text-[var(--text-primary)]">
+                <School className="size-3.5 shrink-0 text-[#16805f]" />
+                School
+              </span>
+            }
+          />
+        </div>
+      </div>
     </div>
   );
 }

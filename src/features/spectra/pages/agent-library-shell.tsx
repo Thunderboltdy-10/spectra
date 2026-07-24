@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  ArrowUp,
   Beaker,
   Bot,
   BookOpen,
@@ -38,6 +37,7 @@ import {
   ArtifactStudio,
   useArtifactStudioState,
 } from "../components/artifact-studio";
+import { CommandBar } from "../components/command-bar";
 import { ShareDialog } from "../components/share-dialog";
 import { normalizeAgentContent } from "../agents/model";
 import {
@@ -190,7 +190,9 @@ function AgentCard({
   const placed = Boolean(card.artifact?.placements?.length);
   const primaryLabel =
     card.section === "owned"
-      ? "Open agent"
+      ? card.artifact?.placements?.length
+        ? "Open agent"
+        : "Added"
       : card.section === "public"
         ? "Add agent"
         : placed
@@ -272,10 +274,12 @@ function AgentCard({
         type="button"
         disabled={busy}
         onClick={onPrimary}
-        className="agent-library-card__action"
+        className={`agent-library-card__action${card.section === "owned" ? " is-added" : ""}`}
       >
         {busy ? (
           <Loader2 className="size-3.5 animate-spin" />
+        ) : card.section === "owned" ? (
+          <CheckCircle2 className="size-3.5" />
         ) : card.section === "public" ||
           (card.section === "shared" && !placed) ? (
           <Plus className="size-3.5" />
@@ -376,7 +380,6 @@ export function AgentLibraryShell() {
   const [publicPreview, setPublicPreview] = useState<SpectraPublicAgent | null>(
     null,
   );
-  const [composer, setComposer] = useState("");
   const [panelWidth, setPanelWidth] = useState(780);
   const openedQueryRef = useRef<string | null>(null);
   const studio = useArtifactStudioState(
@@ -591,12 +594,6 @@ export function AgentLibraryShell() {
     studio.closeTab(artifactId);
   }
 
-  function submitComposer() {
-    const prompt = composer.trim();
-    if (!prompt) return;
-    router.push(`/chat?prompt=${encodeURIComponent(prompt)}`);
-  }
-
   const renderCard = (card: LibraryCard) => (
     <AgentCard
       key={card.id}
@@ -628,7 +625,7 @@ export function AgentLibraryShell() {
   }
 
   return (
-    <div className="relative flex h-full min-h-0 overflow-hidden bg-[var(--bg-primary)]">
+    <div className="spectra-wave-y relative flex h-full min-h-0 overflow-hidden bg-[var(--bg-primary)]">
       <div className="min-w-0 flex-1 overflow-y-auto pb-32">
         <div className="agent-library-topbar">
           <span className="flex items-center gap-2">
@@ -703,7 +700,7 @@ export function AgentLibraryShell() {
               <select
                 value={subject}
                 onChange={(event) => setSubject(event.target.value)}
-                className="w-full appearance-none bg-transparent pr-6 text-[11px] outline-none"
+                className="w-full appearance-none bg-transparent pr-6 text-[13px] outline-none"
               >
                 <option value="all">All subjects</option>
                 {subjects.map((value) => (
@@ -719,7 +716,7 @@ export function AgentLibraryShell() {
               <select
                 value={capability}
                 onChange={(event) => setCapability(event.target.value)}
-                className="w-full appearance-none bg-transparent pr-6 text-[11px] outline-none"
+                className="w-full appearance-none bg-transparent pr-6 text-[13px] outline-none"
               >
                 <option value="all">All capabilities</option>
                 {capabilities.map((value) => (
@@ -737,7 +734,7 @@ export function AgentLibraryShell() {
                 onChange={(event) =>
                   setSortMode(event.target.value as SortMode)
                 }
-                className="w-full appearance-none bg-transparent pr-6 text-[11px] outline-none"
+                className="w-full appearance-none bg-transparent pr-6 text-[13px] outline-none"
               >
                 <option value="relevance">Sort: Relevance</option>
                 <option value="recent">Sort: Recent</option>
@@ -824,41 +821,34 @@ export function AgentLibraryShell() {
       ) : null}
 
       {!studio.activeArtifact ? (
-        <form
-          className="agent-library-composer"
-          onSubmit={(event) => {
-            event.preventDefault();
-            submitComposer();
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => void createAgent()}
-            className="grid size-9 place-items-center rounded-[9px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-            aria-label="Create an agent"
-          >
-            <Plus className="size-4" />
-          </button>
-          <span className="flex h-9 shrink-0 items-center gap-2 rounded-[9px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 text-[11px] font-semibold text-[var(--text-primary)]">
-            <Bot className="size-4 text-[var(--brand-primary)]" />
-            Agents
-            <ChevronDown className="size-3 text-[var(--text-tertiary)]" />
-          </span>
-          <input
-            value={composer}
-            onChange={(event) => setComposer(event.target.value)}
-            className="min-w-0 flex-1 bg-transparent text-[12px] outline-none placeholder:text-[var(--text-tertiary)]"
-            placeholder="Ask Spectra anything about agents…"
-          />
-          <button
-            type="submit"
-            disabled={!composer.trim()}
-            className="grid size-9 place-items-center rounded-[9px] bg-[var(--text-primary)] text-[var(--bg-primary)] disabled:opacity-30"
-            aria-label="Ask Spectra"
-          >
-            <ArrowUp className="size-4" />
-          </button>
-        </form>
+        <div className="agent-library-composer pointer-events-none">
+          <div className="pointer-events-auto w-full">
+            <CommandBar
+              className="w-full"
+              placeholder="Ask Spectra anything about agents…"
+              onSubmit={(prompt) => {
+                router.push(`/chat?prompt=${encodeURIComponent(prompt)}`);
+                return true;
+              }}
+              context={
+                <span className="flex h-full min-w-[88px] items-center gap-2 px-3 text-[11px] font-semibold text-[var(--text-primary)]">
+                  <Bot className="size-4 shrink-0 text-[var(--brand-primary)]" />
+                  Agents
+                </span>
+              }
+              menu={
+                <button
+                  type="button"
+                  onClick={() => void createAgent()}
+                  className="flex w-full items-center gap-2 rounded-[6px] px-2.5 py-2 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                >
+                  <Plus className="h-4 w-4" />
+                  New agent
+                </button>
+              }
+            />
+          </div>
+        </div>
       ) : null}
 
       {placementTarget ? (

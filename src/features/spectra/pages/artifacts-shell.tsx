@@ -625,10 +625,10 @@ export function ArtifactsShell() {
       <div className="flex min-w-0 flex-1 flex-col">
         {studio.mode !== "tab" ? <StudioTabRail
           hubTabs={workSetIsolated && activeHubTabId ? hubTabs.map((tab) => tab.id === activeHubTabId ? { ...tab, label: `Work set · ${tiledArtifacts.length} objects` } : tab) : hubTabs}
-          activeHubTabId={studio.mode === "tab" ? null : activeHubTabId}
+          activeHubTabId={activeHubTabId}
           artifacts={allArtifacts}
           tabs={studio.tabs}
-          activeArtifactId={studio.mode === "tab" ? studio.activeArtifactId : null}
+          activeArtifactId={null}
           dirtyIds={studio.dirtyIds}
           onActivateHub={activateAllHub}
           onCloseHub={closeAllHubTab}

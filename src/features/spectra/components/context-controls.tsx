@@ -3,6 +3,7 @@
 import { AnimatePresence, motion } from "framer-motion";
 import {
   BookOpen,
+  Bot,
   Check,
   ChevronDown,
   Files,
@@ -274,7 +275,11 @@ export function ContextFocusControl({
       ? { key: "workspace", label: workspace.title, Icon: BookOpen }
       : null,
     artifact
-      ? { key: "artifact", label: artifact.title, Icon: FileText }
+      ? {
+          key: "artifact",
+          label: artifact.title,
+          Icon: artifact.blueprintKey === "agent" ? Bot : FileText,
+        }
       : null,
     selectedCount
       ? { key: "selection", label: `${selectedCount} selected`, Icon: Files }
@@ -317,7 +322,9 @@ export function ContextFocusControl({
     mode === "thread"
       ? MessageSquare
       : mode === "artifact"
-        ? FileText
+        ? artifact?.blueprintKey === "agent"
+          ? Bot
+          : FileText
         : mode === "workspace"
           ? Sprout
           : mode === "selection"
@@ -344,10 +351,10 @@ export function ContextFocusControl({
         }}
         data-focus-state={mode}
         className="group flex h-full min-w-[78px] max-w-[190px] items-center justify-center gap-1.5 px-3 text-[11.5px] font-semibold text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
-        aria-label="Choose AI context"
+        aria-label="Choose AI focus"
         aria-expanded={open}
         aria-controls="spectra-context-browser"
-        title={focusSummary || "Choose what Spectra will use"}
+        title={focusSummary || "Choose what Spectra will focus on"}
       >
         <TriggerIcon
           className="h-3.5 w-3.5 shrink-0 text-[var(--brand-accent)]"
@@ -415,7 +422,7 @@ export function ContextFocusControl({
                     autoFocus
                     value={query}
                     onChange={(event) => setQuery(event.target.value)}
-                    placeholder="Find artifacts, workspaces, or threads…"
+                    placeholder="Find artifacts, agents, workspaces, or threads…"
                     className="min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-[var(--text-tertiary)]"
                   />
                 </div>
@@ -494,7 +501,15 @@ export function ContextFocusControl({
                         </span>
                       </button>
                     ))}
-                    {results.artifacts.map((item) => (
+                    {results.artifacts.map((item) => {
+                      const isAgent = item.blueprintKey === "agent";
+                      const ItemIcon = isAgent
+                        ? Bot
+                        : blueprintMeta[item.blueprintKey]?.icon ?? FileText;
+                      const itemColor = isAgent
+                        ? "var(--brand-primary)"
+                        : blueprintMeta[item.blueprintKey]?.color ?? "#d88922";
+                      return (
                       <button
                         key={item._id}
                         type="button"
@@ -508,20 +523,26 @@ export function ContextFocusControl({
                             capability:
                               item.blueprintKey === "thread_reference"
                                 ? "context"
-                                : "tile",
+                                : isAgent
+                                  ? "context"
+                                  : "tile",
                           })
                         }
                         className="flex w-full items-center gap-2 rounded-[7px] px-2 py-2 text-left hover:bg-[var(--bg-hover)]"
                       >
-                        <FileText className="h-3.5 w-3.5 text-[#d88922]" />
+                        <ItemIcon
+                          className="h-3.5 w-3.5"
+                          style={{ color: itemColor }}
+                        />
                         <span className="min-w-0 flex-1 truncate text-[11px]">
                           {item.title}
                         </span>
                         <span className="text-[9px] text-[var(--text-tertiary)]">
-                          Add context
+                          {isAgent ? "Add agent" : "Add context"}
                         </span>
                       </button>
-                    ))}
+                      );
+                    })}
                     {threads
                       .filter((item) =>
                         `${item.title} ${item.summaryShort ?? ""}`

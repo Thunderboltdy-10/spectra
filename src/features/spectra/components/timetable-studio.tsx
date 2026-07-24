@@ -5,7 +5,9 @@ import {
   Bot,
   CalendarDays,
   Check,
+  CheckCircle2,
   ChevronDown,
+  Circle,
   ChevronLeft,
   ChevronRight,
   Clock3,
@@ -299,6 +301,8 @@ export function TimetableStudio({
   onChange,
   aiChangedPaths = [],
   readOnly,
+  synchronizationReady = true,
+  syncMessage = "Auto-saved",
   onActiveRegionChange,
 }: {
   artifactId: string;
@@ -307,6 +311,8 @@ export function TimetableStudio({
   onChange: (content: unknown) => void;
   aiChangedPaths?: string[];
   readOnly: boolean;
+  synchronizationReady?: boolean;
+  syncMessage?: string;
   onActiveRegionChange?: (regionId: string) => void;
 }) {
   const sharedTimetable = useMemo(
@@ -1090,6 +1096,20 @@ export function TimetableStudio({
           <strong>{formatDateRange(days, view.kind)}</strong>
         </div>
         <div className="timetable-toolbar-actions">
+          <span
+            className="hidden items-center gap-1.5 border-0 bg-transparent px-1 text-[10px] text-[var(--text-secondary)] lg:inline-flex"
+            role="status"
+            aria-live="polite"
+          >
+            {syncMessage === "Auto-saved" ? (
+              <CheckCircle2 className="h-3.5 w-3.5 text-[var(--success)]" />
+            ) : syncMessage === "Synchronizing" || syncMessage === "Reconnecting" ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-cyan)]" />
+            ) : (
+              <Circle className="h-3 w-3 fill-[#d88922] text-[#d88922]" />
+            )}
+            {syncMessage}
+          </span>
           <label>
             <span className="sr-only">Calendar view</span>
             <select

@@ -34,7 +34,6 @@ import {
   RefreshCw,
   School,
   Search,
-  Send,
   ServerCog,
   Settings2,
   ShieldAlert,
@@ -50,6 +49,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { CommandBar } from "../components/command-bar";
 import {
   getAdministration,
   mutateAdministration,
@@ -360,26 +360,20 @@ function PlatformOverviewSurface({
             Storage & compute
           </h2>
           <p className="mt-1 text-[9px] text-[var(--text-tertiary)]">
-            Overall platform consumption
+            Metered platform consumption for the selected range
           </p>
-          <div className="mt-5 grid place-items-center">
-            <div className="relative grid size-28 place-items-center rounded-full bg-[conic-gradient(#765cff_0_62%,#2aa27b_62%_76%,#f2b16e_76%_88%,var(--bg-secondary)_88%)]">
-              <div className="grid size-[86px] place-items-center rounded-full bg-[var(--bg-elevated)] text-center">
-                <strong className="font-[var(--font-serif)] text-[20px]">
-                  {formatBytes(data.storageBytes)}
-                </strong>
-                <span className="text-[8px] text-[var(--text-tertiary)]">
-                  metered storage
-                </span>
-              </div>
+          <div className="mt-5 space-y-3 text-[11px]">
+            <div className="flex items-baseline justify-between gap-3">
+              <span className="text-[var(--text-secondary)]">Storage</span>
+              <strong className="font-[var(--font-serif)] text-[22px]">
+                {formatBytes(data.storageBytes)}
+              </strong>
             </div>
-          </div>
-          <div className="mt-5 space-y-2 text-[9px]">
-            <div className="flex justify-between">
+            <div className="flex justify-between gap-3 text-[9px]">
               <span className="text-[var(--text-secondary)]">Model tokens</span>
               <strong>{formatCompact(totalTokens)}</strong>
             </div>
-            <div className="flex justify-between">
+            <div className="flex justify-between gap-3 text-[9px]">
               <span className="text-[var(--text-secondary)]">
                 Operational units
               </span>
@@ -599,6 +593,88 @@ function PlatformOverviewSurface({
           </div>
         </AdminCard>
       </div>
+      <AdminCard>
+        <AdminSectionHeader
+          title="Recent activity"
+          detail="Operational events derived from incidents and school requests."
+          action={
+            <InlineLink onClick={() => onTab("security")}>
+              View audit log
+            </InlineLink>
+          }
+        />
+        <div className="overflow-x-auto px-4 pb-4">
+          <table className="w-full min-w-[720px] text-left text-[10px]">
+            <thead className="text-[var(--text-tertiary)]">
+              <tr className="border-b border-[var(--border-subtle)]">
+                <th className="pb-2 font-normal">Event</th>
+                <th className="pb-2 font-normal">Type</th>
+                <th className="pb-2 font-normal">Status</th>
+                <th className="pb-2 text-right font-normal">Time</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[
+                ...data.incidents.map((incident) => ({
+                  id: incident._id,
+                  label: incident.title,
+                  type: "Incident",
+                  status: incident.status,
+                  at: incident.updatedAt,
+                })),
+                ...data.requests.map((request) => ({
+                  id: request._id,
+                  label: request.subject,
+                  type: request.type.replaceAll("_", " "),
+                  status: request.status,
+                  at: request.createdAt,
+                })),
+              ]
+                .sort((left, right) => right.at - left.at)
+                .slice(0, 8)
+                .map((row) => (
+                  <tr
+                    key={row.id}
+                    className="border-b border-[var(--border-subtle)] last:border-0"
+                  >
+                    <td className="py-2.5 font-medium">{row.label}</td>
+                    <td className="py-2.5 capitalize text-[var(--text-secondary)]">
+                      {row.type}
+                    </td>
+                    <td className="py-2.5">
+                      <StatusBadge tone={toneForStatus(row.status)}>
+                        {row.status.replaceAll("_", " ")}
+                      </StatusBadge>
+                    </td>
+                    <td className="py-2.5 text-right text-[var(--text-tertiary)]">
+                      {formatRelative(row.at)}
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
+      </AdminCard>
+
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <AdminButton tone="primary" onClick={() => onTab("schools")}>
+          <Plus size={12} />
+          Add school
+        </AdminButton>
+        <AdminButton onClick={() => onTab("schools")}>
+          <UserPlus size={12} />
+          Invite users
+        </AdminButton>
+        <AdminButton onClick={() => onTab("usage")}>
+          <BarChart3 size={12} />
+          View reports
+        </AdminButton>
+        <AdminButton onClick={() => onTab("governance")}>
+          <Settings2 size={12} />
+          System settings
+        </AdminButton>
+      </div>
+
       <PrivacyNotice>{data.privacy}</PrivacyNotice>
     </div>
   );
@@ -618,7 +694,6 @@ export function SuperadminShell() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
-  const [composer, setComposer] = useState("");
   const range = useMemo(dateRange, []);
 
   const load = useCallback(async () => {
@@ -660,17 +735,26 @@ export function SuperadminShell() {
     return <ErrorPanel message={error} retry={() => void load()} />;
   if (!overview) return null;
 
+  const rangeLabel = useMemo(() => {
+    const from = new Date(range.fromDay);
+    const to = new Date(range.toDay);
+    const fmt = new Intl.DateTimeFormat(undefined, {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    });
+    return `${fmt.format(from)} – ${fmt.format(to)}`;
+  }, [range]);
+
   return (
-    <div className="min-h-dvh bg-[var(--bg-primary)] pb-24">
-      <header className="border-b border-[var(--border-subtle)] bg-[var(--bg-elevated)]">
-        <div className="flex min-h-12 items-center justify-between gap-4 px-5 lg:px-7">
-          <div className="flex items-center gap-2 text-[9px] font-semibold uppercase tracking-[.12em] text-[var(--text-tertiary)]">
-            <ShieldCheck size={13} className="text-[#725cf0]" />
-            Platform operations
-          </div>
+    <div className="spectra-wave-y spectra-admin-stage min-h-dvh bg-[var(--bg-primary)] pb-24">
+      <header className="border-b border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--bg-elevated)_88%,transparent)]">
+        <div className="flex min-h-12 items-center justify-end gap-4 px-5 lg:px-8">
           <div className="flex items-center gap-2 text-[9px] text-[var(--text-tertiary)]">
-            <Check size={12} className="text-[#1b9b75]" />
-            Operational view updated
+            <span className="hidden items-center gap-1.5 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 py-1.5 text-[10px] font-medium text-[var(--text-secondary)] sm:inline-flex">
+              <CalendarDays size={12} />
+              {rangeLabel}
+            </span>
             <AdminButton
               className="min-h-8"
               onClick={() => setRefreshKey((value) => value + 1)}
@@ -681,7 +765,7 @@ export function SuperadminShell() {
           </div>
         </div>
       </header>
-      <div className="mx-auto w-full max-w-[1640px] px-4 py-5 sm:px-6 lg:px-8">
+      <div className="w-full px-4 py-5 sm:px-6 lg:px-8 xl:px-10">
         <div className="mb-5">
           <p className="text-[9px] font-semibold uppercase tracking-[.12em] text-[var(--text-tertiary)]">
             Superadmin
@@ -725,35 +809,28 @@ export function SuperadminShell() {
           />
         )}
       </div>
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          const prompt = composer.trim();
-          if (!prompt) return;
-          router.push(
-            `/chat?prompt=${encodeURIComponent(`As a Spectra platform operator, ${prompt}`)}`,
-          );
-        }}
-        className="fixed bottom-4 left-1/2 z-20 flex w-[min(calc(100%-2rem),760px)] -translate-x-1/2 items-center gap-2 rounded-[12px] border border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_94%,transparent)] p-2 shadow-[0_14px_45px_rgba(33,28,20,.13)] backdrop-blur-xl md:ml-[38px]"
-      >
-        <span className="grid size-8 shrink-0 place-items-center rounded-[8px] bg-[#eeeafd] text-[#725cf0]">
-          <ShieldCheck size={14} />
-        </span>
-        <input
-          value={composer}
-          onChange={(event) => setComposer(event.target.value)}
-          placeholder="Ask Spectra about platform operations…"
-          className="h-8 min-w-0 flex-1 bg-transparent px-1 text-[12px] outline-none placeholder:text-[var(--text-placeholder)]"
-        />
-        <button
-          type="submit"
-          disabled={!composer.trim()}
-          className="grid size-8 place-items-center rounded-[8px] bg-[var(--text-primary)] text-[var(--bg-primary)] disabled:opacity-35"
-          aria-label="Ask Spectra"
-        >
-          <Send size={13} />
-        </button>
-      </form>
+      <div className="pointer-events-none fixed bottom-4 left-1/2 z-20 w-[min(calc(100%-2rem),760px)] -translate-x-1/2 md:ml-[38px]">
+        <div className="pointer-events-auto">
+          <CommandBar
+            className="w-full"
+            placeholder="Ask Spectra about platform operations…"
+            onSubmit={(prompt) => {
+              router.push(
+                `/chat?prompt=${encodeURIComponent(
+                  `As a Spectra platform operator, ${prompt}`,
+                )}`,
+              );
+              return true;
+            }}
+            context={
+              <span className="flex h-full min-w-[88px] items-center gap-2 px-3 text-[11px] font-semibold text-[var(--text-primary)]">
+                <ShieldCheck className="size-3.5 shrink-0 text-[#725cf0]" />
+                Platform
+              </span>
+            }
+          />
+        </div>
+      </div>
     </div>
   );
 }

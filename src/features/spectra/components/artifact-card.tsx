@@ -32,7 +32,7 @@ export const blueprintMeta: Record<ArtifactCardView["blueprintKey"], { label: st
   agent: { label: "Agent", icon: Bot, color: "#1785a5", soft: "color-mix(in oklab, #1785a5 9%, var(--bg-elevated))" },
   timetable: { label: "Timetable", icon: CalendarDays, color: "#16735d", soft: "color-mix(in oklab, #16735d 9%, var(--bg-elevated))" },
   presentation: { label: "Presentation", icon: Presentation, color: "#cf6d48", soft: "color-mix(in oklab, #cf6d48 9%, var(--bg-elevated))" },
-  sheets: { label: "Sheets", icon: Table2, color: "#2f855a", soft: "color-mix(in oklab, #2f855a 9%, var(--bg-elevated))" },
+  sheets: { label: "Sheet", icon: Table2, color: "#2f855a", soft: "color-mix(in oklab, #2f855a 9%, var(--bg-elevated))" },
   code: { label: "Code", icon: Code2, color: "#5166a8", soft: "color-mix(in oklab, #5166a8 9%, var(--bg-elevated))" },
   whiteboard: { label: "Whiteboard", icon: Workflow, color: "#9a6a39", soft: "color-mix(in oklab, #9a6a39 9%, var(--bg-elevated))" },
 };

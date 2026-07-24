@@ -144,12 +144,6 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
       // is still being issued. Never resurrect a provider after its transport
       // has been destroyed; doing so creates an invisible reconnect/token loop.
       if (this.destroyed) return;
-      this.update({
-        level: initial.level,
-        accountId: initial.accountId,
-        displayName: initial.displayName,
-        state: "synchronizing",
-      });
       this.provider = new HocuspocusProvider({
         url: initial.url,
         name: initial.documentName,
@@ -285,12 +279,13 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
         name: initial.displayName,
       });
     } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Could not start collaboration.";
-      this.update({ state: "unsynchronized", error: message });
-      throw error;
+      this.update({
+        state: "unsynchronized",
+        error:
+          error instanceof Error
+            ? error.message
+            : "Could not start collaboration.",
+      });
     }
   }
 

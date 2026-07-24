@@ -10,7 +10,10 @@ import {
   Copy,
   Download,
   Filter,
+  CheckCircle2,
+  Circle,
   Italic,
+  Loader2,
   MoreHorizontal,
   Plus,
   Redo2,
@@ -626,6 +629,8 @@ export function SheetsStudio({
   onChange,
   aiChangedPaths = [],
   readOnly = false,
+  synchronizationReady = true,
+  syncMessage = "Auto-saved",
   onActiveRegionChange,
 }: {
   artifactId: string;
@@ -633,6 +638,8 @@ export function SheetsStudio({
   onChange: (content: unknown) => void;
   aiChangedPaths?: string[];
   readOnly?: boolean;
+  synchronizationReady?: boolean;
+  syncMessage?: string;
   onActiveRegionChange?: (regionId: string) => void;
 }) {
   const incoming = useMemo(() => normalizeSheetsContent(content), [content]);
@@ -2319,7 +2326,21 @@ export function SheetsStudio({
             </div>
           ),
         )}
-        <span className="ml-auto text-[10px] text-[var(--text-tertiary)]">
+        <span
+          className="ml-auto hidden items-center gap-1.5 text-[10px] text-[var(--text-secondary)] md:inline-flex"
+          role="status"
+          aria-live="polite"
+        >
+          {syncMessage === "Auto-saved" ? (
+            <CheckCircle2 className="h-3.5 w-3.5 text-[var(--success)]" />
+          ) : syncMessage === "Synchronizing" || syncMessage === "Reconnecting" ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-cyan)]" />
+          ) : (
+            <Circle className="h-3 w-3 fill-[#d88922] text-[#d88922]" />
+          )}
+          {syncMessage}
+        </span>
+        <span className="text-[10px] text-[var(--text-tertiary)] md:ml-2">
           {filteredOutRows.size
             ? `${visibleRowIndices.length.toLocaleString()} of ${bounds.rows.toLocaleString()}`
             : bounds.rows.toLocaleString()}{" "}

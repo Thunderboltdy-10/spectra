@@ -66,8 +66,8 @@ const types: Array<{ key: "all" | ObjectType; label: string }> = [
   { key: "document", label: "Documents" },
   { key: "flashcard_deck", label: "Flashcards" },
   { key: "quiz", label: "Quizzes" },
-  { key: "presentation", label: "Decks" },
   { key: "planner_task", label: "Tasks" },
+  { key: "presentation", label: "Presentations" },
   { key: "agent", label: "Agents" },
   { key: "timetable", label: "Timetables" },
   { key: "sheets", label: "Sheets" },
@@ -696,12 +696,13 @@ export function ObjectLibrary({
           className={`mt-5 flex flex-wrap items-center gap-2 pb-1 ${flatTable ? "spectra-object-flat-toolbar" : ""}`}
         >
           <div className="flex shrink-0 gap-1 overflow-x-auto">
-            {(flatTable ? types.slice(0, 5) : types).map((type) => (
+            {types.map((type) => (
               <button
                 key={type.key}
                 type="button"
+                data-active={activeType === type.key}
                 onClick={() => setActiveType(type.key)}
-                className={`inline-flex h-9 items-center rounded-[8px] px-3 text-[13px] font-medium transition-all ${activeType === type.key ? "bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[0_1px_7px_rgba(27,20,12,0.08)]" : "text-[var(--text-secondary)] hover:bg-[color-mix(in_oklab,var(--bg-elevated)_68%,transparent)]"}`}
+                className={`inline-flex h-9 shrink-0 items-center rounded-[8px] px-3 text-[13px] font-medium transition-all ${activeType === type.key ? "bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[0_1px_7px_rgba(27,20,12,0.08)]" : "text-[var(--text-secondary)] hover:bg-[color-mix(in_oklab,var(--bg-elevated)_68%,transparent)]"}`}
               >
                 {flatTable && type.key === "all" ? "All work" : type.label}
               </button>
@@ -774,24 +775,38 @@ export function ObjectLibrary({
               ) : null}
             </div>
             {showModeSwitcher ? (
-              <div className="flex shrink-0 rounded-[10px] bg-[color-mix(in_oklab,var(--bg-elevated)_74%,transparent)] p-1 shadow-[inset_0_0_0_1px_var(--border-default)]">
-                {[
-                  { key: "list" as const, label: "List", icon: List },
-                  { key: "board" as const, label: "Board", icon: PanelTop },
-                ].map((option) => {
-                  const Icon = option.icon;
-                  return (
-                    <button
-                      key={option.key}
-                      type="button"
-                      className={`inline-flex h-8 items-center gap-2 rounded-[7px] px-3 text-[12px] font-medium transition-all duration-200 ${mode === option.key ? "bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-[0_1px_6px_rgba(27,20,12,0.08)]" : "text-[var(--text-secondary)] hover:bg-[color-mix(in_oklab,var(--bg-primary)_52%,transparent)] hover:text-[var(--text-primary)]"}`}
-                      onClick={() => setMode(option.key)}
-                    >
-                      <Icon className="h-4 w-4" />
-                      {option.label}
-                    </button>
-                  );
-                })}
+              <div className="flex shrink-0 items-center gap-1.5">
+                {flatTable ? (
+                  <span className="mr-0.5 text-[11px] text-[var(--text-tertiary)]">
+                    View
+                  </span>
+                ) : null}
+                <div className="flex items-center gap-1">
+                  {[
+                    {
+                      key: "board" as const,
+                      label: "Board view",
+                      icon: PanelTop,
+                    },
+                    { key: "list" as const, label: "List view", icon: List },
+                  ].map((option) => {
+                    const Icon = option.icon;
+                    const active = mode === option.key;
+                    return (
+                      <button
+                        key={option.key}
+                        type="button"
+                        aria-label={option.label}
+                        aria-pressed={active}
+                        title={option.label}
+                        className={`grid size-8 place-items-center rounded-[7px] transition ${active ? "border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[0_1px_4px_rgba(27,20,12,0.06)]" : "text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"}`}
+                        onClick={() => setMode(option.key)}
+                      >
+                        <Icon className="h-3.5 w-3.5" />
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             ) : null}
           </div>
@@ -847,9 +862,9 @@ export function ObjectLibrary({
       ) : null}
 
       {showGroups && mode === "list" && flatTable ? (
-        <div className="spectra-object-flat-table mt-4 overflow-hidden rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)]">
-          <div className="grid h-9 grid-cols-[28px_minmax(250px,1.45fr)_140px_130px_105px_92px_28px] items-center gap-3 border-b border-[var(--border-default)] px-3 text-[9px] font-medium text-[var(--text-secondary)]">
-            <span className="size-3 rounded-[3px] border border-[var(--border-default)]" />
+        <div className="spectra-object-flat-table mt-4 overflow-hidden rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)]">
+          <div className="grid h-11 grid-cols-[28px_minmax(250px,1.45fr)_140px_130px_105px_92px_28px] items-center gap-3 border-b border-[var(--border-default)] px-3 text-[12px] font-medium text-[var(--text-secondary)]">
+            <span className="size-3.5 rounded-[3px] border border-[var(--border-default)]" />
             <span>Name</span>
             <span>Type</span>
             <span>Workspace</span>
@@ -857,7 +872,7 @@ export function ObjectLibrary({
             <span>Owner</span>
             <span />
           </div>
-          {visible.slice(0, 7).map((entry) => {
+          {visible.map((entry) => {
             const meta = objectMeta(entry);
             const Icon = meta.icon;
             const id = objectId(entry);
@@ -878,17 +893,17 @@ export function ObjectLibrary({
               <button
                 key={id}
                 type="button"
-                className="grid min-h-[50px] w-full grid-cols-[28px_minmax(250px,1.45fr)_140px_130px_105px_92px_28px] items-center gap-3 border-b border-[var(--card-border-soft)] px-3 text-left transition last:border-0 hover:bg-[var(--bg-hover)]"
+                className="grid min-h-[52px] w-full grid-cols-[28px_minmax(250px,1.45fr)_140px_130px_105px_92px_28px] items-center gap-3 border-b border-[var(--card-border-soft)] px-3 text-left transition last:border-0 hover:bg-[var(--bg-hover)]"
                 onClick={() => activateEntry(entry)}
               >
                 <span
-                  className={`grid size-3 place-items-center rounded-[3px] border ${selected ? "border-[var(--text-primary)] bg-[var(--text-primary)] text-white" : "border-[var(--border-default)]"}`}
+                  className={`grid size-3.5 place-items-center rounded-[3px] border ${selected ? "border-[var(--text-primary)] bg-[var(--text-primary)] text-white" : "border-[var(--border-default)]"}`}
                 >
                   {selected ? <Check className="size-2.5" /> : null}
                 </span>
                 <span className="flex min-w-0 items-center gap-2.5">
                   <span
-                    className="grid size-6 shrink-0 place-items-center rounded-[6px]"
+                    className="grid size-7 shrink-0 place-items-center rounded-[7px]"
                     style={{
                       background: `color-mix(in oklab, ${meta.color} 10%, white)`,
                       color: meta.color,
@@ -896,25 +911,23 @@ export function ObjectLibrary({
                   >
                     <Icon className="size-3.5" />
                   </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[12px] font-medium text-[var(--text-primary)]">
-                      {objectTitle(entry)}
-                    </span>
-                    {entry.artifact?.tags?.length ? (
-                      <span className="mt-0.5 flex gap-1">
-                        {entry.artifact.tags.slice(0, 2).map((tag) => (
-                          <span
-                            key={tag}
-                            className="rounded-[4px] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[8px] text-[var(--text-secondary)]"
-                          >
-                            {tag}
-                          </span>
-                        ))}
-                      </span>
-                    ) : null}
+                  <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-[var(--text-primary)]">
+                    {objectTitle(entry)}
                   </span>
+                  {entry.artifact?.tags?.length ? (
+                    <span className="flex shrink-0 gap-1">
+                      {entry.artifact.tags.slice(0, 2).map((tag) => (
+                        <span
+                          key={tag}
+                          className="rounded-[5px] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[11px] text-[var(--text-secondary)]"
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                    </span>
+                  ) : null}
                 </span>
-                <span className="flex items-center gap-2 truncate text-[11px] text-[var(--text-primary)]">
+                <span className="flex items-center gap-2 truncate text-[13px] text-[var(--text-primary)]">
                   <span
                     className="grid size-5 shrink-0 place-items-center rounded-[5px]"
                     style={{
@@ -926,31 +939,19 @@ export function ObjectLibrary({
                   </span>
                   {meta.label}
                 </span>
-                <span className="truncate text-[11px] text-[var(--text-secondary)]">
+                <span className="truncate text-[13px] text-[var(--text-secondary)]">
                   {workspaceName}
                 </span>
-                <span className="text-[11px] text-[var(--text-secondary)]">
+                <span className="text-[13px] text-[var(--text-secondary)]">
                   {formatRelativeTime(objectUpdatedAt(entry))}
                 </span>
-                <span className="flex items-center gap-1.5 text-[11px] text-[var(--text-primary)]">
-                  <span className="grid size-5 place-items-center rounded-full bg-[#d8d0fa] text-[7px] font-semibold text-[#3e327f]">
+                <span className="flex items-center gap-1.5 text-[13px] text-[var(--text-primary)]">
+                  <span className="grid size-6 place-items-center rounded-full bg-[#d8d0fa] text-[9px] font-semibold text-[#3e327f]">
                     You
                   </span>
                   You
                 </span>
-                <span className="truncate text-[9px] text-[var(--text-primary)]">
-                  {workspaceName}
-                </span>
-                <span className="text-[9px] text-[var(--text-secondary)]">
-                  {formatRelativeTime(objectUpdatedAt(entry))}
-                </span>
-                <span className="flex items-center gap-1.5 text-[9px] text-[var(--text-primary)]">
-                  <span className="grid size-4 place-items-center rounded-full bg-[#b8a7ff] text-[6px] font-semibold text-[#33246e]">
-                    You
-                  </span>
-                  You
-                </span>
-                <MoreHorizontal className="size-3.5 text-[var(--text-secondary)]" />
+                <MoreHorizontal className="size-4 text-[var(--text-secondary)]" />
               </button>
             );
           })}

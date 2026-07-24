@@ -14,6 +14,7 @@ import {
   Box,
   Check,
   CheckCircle2,
+  Circle,
   CircleStop,
   CloudUpload,
   Code2,
@@ -373,6 +374,7 @@ export function CodeStudio({
   aiChangedPaths = [],
   readOnly,
   synchronizationReady,
+  syncMessage = "Auto-saved",
   onActiveRegionChange,
 }: {
   artifactId: string;
@@ -383,6 +385,7 @@ export function CodeStudio({
   aiChangedPaths?: string[];
   readOnly: boolean;
   synchronizationReady: boolean;
+  syncMessage?: string;
   onActiveRegionChange?: (regionId: string) => void;
 }) {
   const incoming = useMemo(() => normalizeCodeContent(content), [content]);
@@ -2187,6 +2190,20 @@ export function CodeStudio({
           ))}
         </div>
         <div className="flex items-center gap-1.5">
+          <span
+            className="hidden items-center gap-1.5 text-[10px] text-[var(--text-secondary)] lg:inline-flex"
+            role="status"
+            aria-live="polite"
+          >
+            {syncMessage === "Auto-saved" ? (
+              <CheckCircle2 className="h-3.5 w-3.5 text-[var(--success)]" />
+            ) : syncMessage === "Synchronizing" || syncMessage === "Reconnecting" ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-cyan)]" />
+            ) : (
+              <Circle className="h-3 w-3 fill-[#d88922] text-[#d88922]" />
+            )}
+            {syncMessage}
+          </span>
           <button
             type="button"
             onClick={() => void run()}

@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { HocuspocusArtifactTransport } from "./hocuspocus-transport";
+import type { CollaborationTransportSnapshot } from "./types";
 
-const CLOSED_SNAPSHOT = {
+const CLOSED_SNAPSHOT: CollaborationTransportSnapshot = {
   state: "closed" as const,
   level: null,
   unsynchronizedChanges: 0,
@@ -13,14 +14,35 @@ const CLOSED_SNAPSHOT = {
 const subscribeClosed = () => () => undefined;
 const getClosedSnapshot = () => CLOSED_SNAPSHOT;
 
-export function useArtifactCollaboration(artifactId: string | null | undefined, partitionKey = "root", schemaVersion = 1) {
+export function useArtifactCollaboration(
+  artifactId: string | null | undefined,
+  partitionKey = "root",
+  schemaVersion = 1,
+) {
   const [generation, setGeneration] = useState(0);
-  const transport = useMemo(() => artifactId ? new HocuspocusArtifactTransport(artifactId, partitionKey, schemaVersion) : null, [artifactId, generation, partitionKey, schemaVersion]);
+  // The transport is created inside the effect rather than in useMemo so that
+  // React StrictMode's simulated unmount/remount cycle always yields a live
+  // transport: the cleanup destroys the instance, and the re-run builds a
+  // fresh one instead of resurrecting a destroyed Y.Doc.
+  const [transport, setTransport] =
+    useState<HocuspocusArtifactTransport | null>(null);
   useEffect(() => {
-    if (!transport) return;
-    void transport.connect().catch(() => undefined);
-    return () => transport.destroy();
-  }, [transport]);
+    if (!artifactId) {
+      setTransport(null);
+      return;
+    }
+    const next = new HocuspocusArtifactTransport(
+      artifactId,
+      partitionKey,
+      schemaVersion,
+    );
+    setTransport(next);
+    void next.connect().catch(() => undefined);
+    return () => {
+      next.destroy();
+      setTransport(null);
+    };
+  }, [artifactId, generation, partitionKey, schemaVersion]);
   const snapshot = useSyncExternalStore(
     transport?.subscribe ?? subscribeClosed,
     transport?.getSnapshot ?? getClosedSnapshot,
@@ -30,5 +52,15 @@ export function useArtifactCollaboration(artifactId: string | null | undefined, 
     transport?.destroy();
     setGeneration((value) => value + 1);
   }, [transport]);
-  return { transport, ...snapshot, recoverAuthoritative, canEdit: snapshot.state === "synchronized" && snapshot.level === "modify" && snapshot.unsynchronizedChanges === 0 };
+  return {
+    transport,
+    ...snapshot,
+    recoverAuthoritative,
+    // Only hard-lock when access is known read-only or revoked. Connecting,
+    // closed, reconnecting, and unsynchronized must not freeze the editor —
+    // private artifacts still need to be editable when the live socket is
+    // slow or unavailable, and shared sessions should keep local drafts.
+    canEdit:
+      snapshot.state !== "permission_lost" && snapshot.level !== "read",
+  };
 }

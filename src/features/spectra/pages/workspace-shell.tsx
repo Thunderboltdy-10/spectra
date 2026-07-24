@@ -402,11 +402,10 @@ function WorkspaceHome({
   return (
     <main
       data-selection-count={selectedObjectKeys.size}
-      className="spectra-mission-control min-h-0 flex-1 overflow-y-auto bg-[var(--bg-primary)] pb-[150px] pt-16 sm:pt-0"
-      style={{ containerType: "inline-size" }}
+      className="spectra-mission-control flex min-h-0 flex-1 flex-col overflow-y-auto xl:flex-row xl:overflow-hidden"
     >
-      <div className="spectra-mission-control-grid grid w-full items-start gap-3 xl:grid-cols-[minmax(0,1fr)_312px]">
-        <div className="spectra-mission-control-primary xl:col-start-1 xl:row-start-1">
+      <div className="min-w-0 flex-1 px-6 pb-[170px] pt-6 sm:px-9 xl:h-full xl:overflow-y-auto">
+        <div className="spectra-mission-control-primary">
           <div className="flex items-start gap-3">
             <span className="grid size-9 shrink-0 place-items-center rounded-[9px] bg-[#e8f7f1] text-[#15946d]">
               <Sprout className="h-[18px] w-[18px]" />
@@ -415,10 +414,10 @@ function WorkspaceHome({
               <div className="mb-1.5 text-[9px] font-semibold uppercase tracking-[0.13em] text-[var(--text-tertiary)]">
                 Workspace
               </div>
-              <h1 className="font-display text-[28px] font-semibold leading-[1.05] tracking-[-.025em] text-[var(--text-primary)]">
+              <h1 className="font-display text-[34px] font-semibold leading-[1.05] tracking-[-.025em] text-[var(--text-primary)]">
                 Mission Control
               </h1>
-              <p className="mt-2 text-[11px] text-[var(--text-secondary)]">
+              <p className="mt-2 max-w-[46ch] text-[14px] leading-relaxed text-[var(--text-secondary)]">
                 Your overview of work, artifacts, and activity across Spectra.
               </p>
             </div>
@@ -456,13 +455,39 @@ function WorkspaceHome({
           </div>
         </div>
 
-        <div className="spectra-workspace-home-grid mt-5 xl:contents">
-          <section className="spectra-mission-control-workspaces xl:col-start-1 xl:row-start-2 xl:mt-0">
+        <div className="spectra-workspace-home-grid mt-8">
+          <section className="spectra-mission-control-workspaces">
             <div className="mb-3 flex items-center justify-between">
-              <div>
-                <h2 className="text-[12px] font-semibold text-[var(--text-primary)]">
-                  Workspace at a glance
-                </h2>
+              <h2 className="text-[12px] font-semibold text-[var(--text-primary)]">
+                Workspace at a glance
+              </h2>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  aria-label="Scroll workspaces left"
+                  onClick={(event) =>
+                    event.currentTarget
+                      .closest("section")
+                      ?.querySelector(".spectra-workspace-card-grid")
+                      ?.scrollBy({ left: -320, behavior: "smooth" })
+                  }
+                  className="grid size-6 place-items-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                >
+                  <ChevronDown className="h-3.5 w-3.5 rotate-90" />
+                </button>
+                <button
+                  type="button"
+                  aria-label="Scroll workspaces right"
+                  onClick={(event) =>
+                    event.currentTarget
+                      .closest("section")
+                      ?.querySelector(".spectra-workspace-card-grid")
+                      ?.scrollBy({ left: 320, behavior: "smooth" })
+                  }
+                  className="grid size-6 place-items-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                >
+                  <ChevronDown className="h-3.5 w-3.5 -rotate-90" />
+                </button>
               </div>
             </div>
             <div className="spectra-workspace-card-grid grid content-start gap-2 md:grid-cols-2 xl:grid-cols-3">
@@ -610,233 +635,207 @@ function WorkspaceHome({
               </button>
             </div>
           </section>
-          <aside className="spectra-mission-control-rail mt-5 self-start space-y-5 xl:sticky xl:top-0 xl:col-start-2 xl:row-start-1 xl:row-span-[7] xl:mt-0">
-            <section>
-              <div className="flex items-center justify-between px-1">
-                <h2 className="text-[11px] font-semibold text-[var(--text-primary)]">
-                  Recent activity
-                </h2>
-                <span className="text-[9px] font-medium text-[var(--text-tertiary)]">
-                  View all
-                </span>
-              </div>
-              <div className="mt-2 grid gap-0.5">
-                {activity.map((entry) => {
-                  const meta = blueprintMeta[entry.artifact.blueprintKey];
-                  const ActivityIcon = meta.icon;
-                  return (
-                    <button
-                      key={entry.id}
-                      type="button"
-                      className="flex min-h-10 w-full items-start gap-2.5 rounded-[7px] px-1.5 py-1.5 text-left hover:bg-[var(--bg-hover)]"
-                      onClick={() => onOpenArtifact(entry.artifact)}
-                    >
-                      <span
-                        className="mt-0.5 grid size-5.5 shrink-0 place-items-center rounded-[6px]"
-                        style={{
-                          background: `color-mix(in oklab, ${meta.color} 10%, var(--bg-elevated))`,
-                          color: meta.color,
-                        }}
-                      >
-                        <ActivityIcon size={12} />
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-[10px] font-semibold text-[var(--text-primary)]">
-                          {entry.title}
-                        </div>
-                        <div className="mt-px text-[8.5px] text-[var(--text-secondary)]">
-                          You {entry.detail.toLowerCase()}{" "}
-                          {meta.label
-                            ? `a ${meta.label.toLowerCase()}`
-                            : "an artifact"}
-                        </div>
-                      </div>
-                      <span className="mt-0.5 shrink-0 text-[8px] tabular-nums text-[var(--text-tertiary)]">
-                        {formatRelativeTime(entry.time)}
-                      </span>
-                    </button>
-                  );
-                })}
-                {activity.length === 0 ? (
-                  <div className="px-1.5 text-[10px] text-[var(--text-secondary)]">
-                    No activity yet.
-                  </div>
-                ) : null}
-              </div>
-            </section>
-            {pinnedArtifacts.length ? (
-              <section>
-                <div className="flex items-center justify-between px-1">
-                  <h2 className="text-[11px] font-semibold text-[var(--text-primary)]">
-                    Pinned
-                  </h2>
-                  <span className="text-[9px] font-medium text-[var(--text-tertiary)]">
-                    Manage
-                  </span>
-                </div>
-                <div className="mt-2 space-y-0.5">
-                  {pinnedArtifacts.slice(0, 4).map((artifact) => {
-                    const meta = blueprintMeta[artifact.blueprintKey];
-                    const ArtifactIcon = meta.icon;
-                    return (
-                      <button
-                        type="button"
-                        key={artifact._id}
-                        onClick={() => onOpenArtifact(artifact)}
-                        className="flex w-full items-center gap-2.5 rounded-[7px] px-1.5 py-1.5 text-left hover:bg-[var(--bg-hover)]"
-                      >
-                        <span
-                          className="grid size-5.5 shrink-0 place-items-center rounded-[6px]"
-                          style={{
-                            background: `color-mix(in oklab, ${meta.color} 10%, var(--bg-elevated))`,
-                            color: meta.color,
-                          }}
-                        >
-                          <ArtifactIcon size={12} />
-                        </span>
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-[10px] font-semibold text-[var(--text-primary)]">
-                            {artifact.title}
-                          </span>
-                          <span className="block text-[8.5px] text-[var(--text-tertiary)]">
-                            {meta.label}
-                          </span>
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </section>
-            ) : null}
-            <section>
-              <div className="flex items-center justify-between px-1">
-                <h2 className="text-[11px] font-semibold text-[var(--text-primary)]">
-                  Tags
-                </h2>
-                <span className="text-[9px] font-medium text-[var(--text-tertiary)]">
-                  Manage
-                </span>
-              </div>
-              <div className="mt-2 flex flex-wrap gap-1.5 px-1">
-                {visibleTags.length ? (
-                  visibleTags.map((tag) => (
-                    <span
-                      key={tag}
-                      className="rounded-[6px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-2 py-1 text-[9px] font-medium text-[var(--text-secondary)]"
-                    >
-                      {tag}
-                    </span>
-                  ))
-                ) : (
-                  <span className="text-[9px] text-[var(--text-tertiary)]">
-                    Tags appear as you organise work.
-                  </span>
-                )}
-              </div>
-            </section>
-            <section>
-              <h2 className="px-1 text-[11px] font-semibold text-[var(--text-primary)]">
-                Quick actions
-              </h2>
-              <div className="mt-2 space-y-0.5">
-                {createTypes.map(({ key, label, icon: QuickIcon }) => (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={() => onCreateArtifact(key)}
-                    className="flex h-7.5 w-full items-center gap-2.5 rounded-[6px] px-1.5 text-[10px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-                  >
-                    <QuickIcon
-                      size={13}
-                      className="text-[var(--text-tertiary)]"
-                    />
-                    New {label.toLowerCase()}
-                  </button>
-                ))}
-              </div>
-            </section>
-          </aside>
-        </div>
 
-        {false ? (
-          <section className="mt-6 xl:col-start-1 xl:row-start-3">
-            <button
-              type="button"
-              onClick={() => setPinnedOpen((open) => !open)}
-              className="mb-4 flex w-full items-center gap-2 text-left"
-            >
-              <ChevronDown
-                className={`h-4 w-4 text-[var(--text-tertiary)] transition ${pinnedOpen ? "" : "-rotate-90"}`}
-              />
-              <Pin className="h-4 w-4 text-[#b67616]" />
-              <h2 className="font-display text-[20px] font-semibold text-[var(--text-primary)]">
-                Pinned work
-              </h2>
-              <span className="rounded-[6px] bg-[var(--bg-secondary)] px-1.5 text-[12px] text-[var(--text-secondary)]">
-                {pinnedArtifacts.length}
-              </span>
-              <span className="ml-1 text-[12px] text-[var(--text-tertiary)]">
-                Important objects across your workspaces
-              </span>
-            </button>
-            {pinnedOpen ? (
-              <PinnedArtifactShelf
-                artifacts={pinnedArtifacts}
-                onSelect={onOpenArtifact}
-              />
-            ) : null}
-          </section>
-        ) : null}
-
-        <div className="hidden">
-          <ObjectLibrary
-            entries={unplacedArtifacts.map((artifact) => ({ artifact }))}
-            workspaces={workspaces}
-            groupBy="workspace"
-            showHeader={false}
-            showToolbar={false}
-            showGroups={false}
-            onOpen={(entry) => onOpenArtifact(entry.artifact!)}
-            onAddToWorkspace={(entry, workspaceId) =>
-              onAddArtifactToWorkspace(entry.artifact!, workspaceId)
-            }
-            onMoveToWorkspace={(entry, workspaceId) =>
-              onMoveArtifactToWorkspace(entry.artifact!, workspaceId)
-            }
-            onMoveToInbox={(entry) => onMoveArtifactToInbox(entry.artifact!)}
-            onDelete={(entry) => onDeleteArtifact(entry.artifact!)}
-            selectionMode={selectionMode}
-            selectedContextIds={selectedContextIds}
-            onToggleContext={(entry) => onToggleContext(entry.artifact!)}
-          />
-        </div>
-
-        <div className="spectra-mission-control-library xl:col-start-1 xl:row-start-3">
-          <ObjectLibrary
-            entries={artifacts.map((artifact) => ({ artifact }))}
-            workspaces={workspaces}
-            groupBy="workspace"
-            title="All work"
-            subtitle="Artifacts and conversations across your workspaces"
-            showHeader={false}
-            flatTable
-            showInbox={false}
-            onOpen={(entry) => onOpenArtifact(entry.artifact!)}
-            onAddToWorkspace={(entry, workspaceId) =>
-              onAddArtifactToWorkspace(entry.artifact!, workspaceId)
-            }
-            onMoveToWorkspace={(entry, workspaceId) =>
-              onMoveArtifactToWorkspace(entry.artifact!, workspaceId)
-            }
-            onMoveToInbox={(entry) => onMoveArtifactToInbox(entry.artifact!)}
-            onCreateArtifact={onCreateArtifact}
-            onDelete={(entry) => onDeleteArtifact(entry.artifact!)}
-            selectionMode={selectionMode}
-            selectedContextIds={selectedContextIds}
-            onToggleContext={(entry) => onToggleContext(entry.artifact!)}
-          />
+          <div
+            id="spectra-mission-all-work"
+            className="spectra-mission-control-library mt-9 scroll-mt-6"
+          >
+            <ObjectLibrary
+              entries={artifacts.map((artifact) => ({ artifact }))}
+              workspaces={workspaces}
+              groupBy="workspace"
+              title="All work"
+              subtitle="Artifacts and conversations across your workspaces"
+              showHeader={false}
+              flatTable
+              showInbox={false}
+              onOpen={(entry) => onOpenArtifact(entry.artifact!)}
+              onAddToWorkspace={(entry, workspaceId) =>
+                onAddArtifactToWorkspace(entry.artifact!, workspaceId)
+              }
+              onMoveToWorkspace={(entry, workspaceId) =>
+                onMoveArtifactToWorkspace(entry.artifact!, workspaceId)
+              }
+              onMoveToInbox={(entry) => onMoveArtifactToInbox(entry.artifact!)}
+              onCreateArtifact={onCreateArtifact}
+              onDelete={(entry) => onDeleteArtifact(entry.artifact!)}
+              selectionMode={selectionMode}
+              selectedContextIds={selectedContextIds}
+              onToggleContext={(entry) => onToggleContext(entry.artifact!)}
+            />
+          </div>
         </div>
       </div>
+
+      <aside className="spectra-mission-control-rail w-full shrink-0 space-y-6 border-t border-[var(--border-default)] bg-[var(--mission-rail)] px-5 py-6 xl:h-full xl:w-[320px] xl:overflow-y-auto xl:border-l xl:border-t-0">
+        <section>
+          <div className="flex items-center justify-between px-1">
+            <h2 className="text-[13px] font-semibold text-[var(--text-primary)]">
+              Recent activity
+            </h2>
+            <button
+              type="button"
+              className="text-[12px] font-medium text-[var(--text-tertiary)] transition hover:text-[var(--text-primary)]"
+              onClick={() => {
+                document
+                  .getElementById("spectra-mission-all-work")
+                  ?.scrollIntoView({ behavior: "smooth", block: "start" });
+              }}
+            >
+              View all
+            </button>
+          </div>
+          <div className="mt-2 grid gap-0.5">
+            {activity.map((entry) => {
+              const meta = blueprintMeta[entry.artifact.blueprintKey];
+              const ActivityIcon = meta.icon;
+              return (
+                <button
+                  key={entry.id}
+                  type="button"
+                  className="flex min-h-10 w-full items-start gap-2.5 rounded-[7px] px-1.5 py-1.5 text-left hover:bg-[var(--bg-hover)]"
+                  onClick={() => onOpenArtifact(entry.artifact)}
+                >
+                  <span
+                    className="mt-0.5 grid size-5.5 shrink-0 place-items-center rounded-[6px]"
+                    style={{
+                      background: `color-mix(in oklab, ${meta.color} 10%, var(--bg-elevated))`,
+                      color: meta.color,
+                    }}
+                  >
+                    <ActivityIcon size={12} />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-[12px] font-semibold text-[var(--text-primary)]">
+                      {entry.title}
+                    </div>
+                    <div className="mt-px text-[11px] text-[var(--text-secondary)]">
+                      You {entry.detail.toLowerCase()}{" "}
+                      {meta.label
+                        ? `a ${meta.label.toLowerCase()}`
+                        : "an artifact"}
+                    </div>
+                  </div>
+                  <span className="mt-0.5 shrink-0 text-[11px] tabular-nums text-[var(--text-tertiary)]">
+                    {formatRelativeTime(entry.time)}
+                  </span>
+                </button>
+              );
+            })}
+            {activity.length === 0 ? (
+              <div className="px-1.5 text-[10px] text-[var(--text-secondary)]">
+                No activity yet.
+              </div>
+            ) : null}
+          </div>
+        </section>
+        {pinnedArtifacts.length ? (
+          <section>
+            <div className="flex items-center justify-between px-1">
+              <h2 className="text-[13px] font-semibold text-[var(--text-primary)]">
+                Pinned
+              </h2>
+              <button
+                type="button"
+                className="text-[12px] font-medium text-[var(--text-tertiary)] transition hover:text-[var(--text-primary)]"
+                onClick={() => {
+                  document
+                    .getElementById("spectra-mission-all-work")
+                    ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  const firstPinned = pinnedArtifacts[0];
+                  if (firstPinned) onOpenArtifact(firstPinned);
+                }}
+              >
+                Manage
+              </button>
+            </div>
+            <div className="mt-2 space-y-0.5">
+              {pinnedArtifacts.slice(0, 4).map((artifact) => {
+                const meta = blueprintMeta[artifact.blueprintKey];
+                const ArtifactIcon = meta.icon;
+                return (
+                  <button
+                    type="button"
+                    key={artifact._id}
+                    onClick={() => onOpenArtifact(artifact)}
+                    className="flex w-full items-center gap-2.5 rounded-[7px] px-1.5 py-1.5 text-left hover:bg-[var(--bg-hover)]"
+                  >
+                    <span
+                      className="grid size-5.5 shrink-0 place-items-center rounded-[6px]"
+                      style={{
+                        background: `color-mix(in oklab, ${meta.color} 10%, var(--bg-elevated))`,
+                        color: meta.color,
+                      }}
+                    >
+                      <ArtifactIcon size={12} />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[12px] font-semibold text-[var(--text-primary)]">
+                        {artifact.title}
+                      </span>
+                      <span className="block text-[11px] text-[var(--text-tertiary)]">
+                        {meta.label}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        ) : null}
+        <section>
+          <div className="flex items-center justify-between px-1">
+            <h2 className="text-[13px] font-semibold text-[var(--text-primary)]">
+              Tags
+            </h2>
+            <button
+              type="button"
+              className="text-[12px] font-medium text-[var(--text-tertiary)] transition hover:text-[var(--text-primary)]"
+              onClick={() => {
+                document
+                  .getElementById("spectra-mission-all-work")
+                  ?.scrollIntoView({ behavior: "smooth", block: "start" });
+              }}
+            >
+              Manage
+            </button>
+          </div>
+          <div className="mt-2 flex flex-wrap gap-1.5 px-1">
+            {visibleTags.length ? (
+              visibleTags.map((tag) => (
+                <span
+                  key={tag}
+                  className="rounded-[6px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-2 py-1 text-[11px] font-medium text-[var(--text-secondary)]"
+                >
+                  {tag}
+                </span>
+              ))
+            ) : (
+              <span className="text-[12px] text-[var(--text-tertiary)]">
+                Tags appear as you organise work.
+              </span>
+            )}
+          </div>
+        </section>
+        <section>
+          <h2 className="px-1 text-[13px] font-semibold text-[var(--text-primary)]">
+            Quick actions
+          </h2>
+          <div className="mt-2 space-y-0.5">
+            {createTypes.map(({ key, label, icon: QuickIcon }) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => onCreateArtifact(key)}
+                className="flex h-9 w-full items-center gap-2.5 rounded-[8px] px-1.5 text-[13px] font-medium text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+              >
+                <QuickIcon size={14} className="text-[var(--text-tertiary)]" />
+                New {label.toLowerCase()}
+              </button>
+            ))}
+          </div>
+        </section>
+      </aside>
     </main>
   );
 }
@@ -929,7 +928,7 @@ function WorkspaceHeader({
                 <Sparkles className="size-3.5" />
               </button>
             </div>
-            <p className="mt-1.5 truncate text-[11px] text-[var(--text-secondary)]">
+            <p className="mt-1.5 max-w-[52ch] text-[14px] leading-relaxed text-[var(--text-secondary)]">
               {workspace?.description ?? "All your work, organized and ready."}
             </p>
           </div>
@@ -993,7 +992,7 @@ function WorkspaceHeader({
       >
         <button
           type="button"
-          className="relative h-10 shrink-0 text-[12px] font-semibold text-[var(--text-primary)] after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:rounded-full after:bg-[var(--text-primary)]"
+          className="relative h-11 shrink-0 text-[13px] font-semibold text-[var(--brand-primary)] after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:rounded-full after:bg-[var(--brand-primary)]"
           onClick={() => onViewModeChange(viewMode)}
           aria-current="page"
         >
@@ -1001,14 +1000,14 @@ function WorkspaceHeader({
         </button>
         <button
           type="button"
-          className="h-10 shrink-0 text-[12px] font-medium text-[var(--text-secondary)] transition hover:text-[var(--text-primary)]"
+          className="h-11 shrink-0 text-[13px] font-medium text-[var(--text-secondary)] transition hover:text-[var(--text-primary)]"
           onClick={() => onViewModeChange("timeline")}
         >
           Activity
         </button>
         <button
           type="button"
-          className="flex h-10 shrink-0 items-center gap-1.5 text-[12px] font-medium text-[var(--text-secondary)] transition hover:text-[var(--text-primary)]"
+          className="flex h-11 shrink-0 items-center gap-1.5 text-[13px] font-medium text-[var(--text-secondary)] transition hover:text-[var(--text-primary)]"
           onClick={onShareWorkspace}
         >
           People
@@ -1071,6 +1070,12 @@ function WorkspaceLibraryToolbar({
     { key: "flashcard_deck", label: "Decks" },
     { key: "quiz", label: "Quizzes" },
     { key: "planner_task", label: "Tasks" },
+    { key: "agent", label: "Agents" },
+    { key: "presentation", label: "Presentations" },
+    { key: "sheets", label: "Sheets" },
+    { key: "code", label: "Code" },
+    { key: "whiteboard", label: "Whiteboards" },
+    { key: "timetable", label: "Timetable" },
     { key: "thread", label: "Threads" },
   ];
   return (
@@ -1826,6 +1831,10 @@ function LibraryView({
   selectedObjectKeys: Set<string>;
   onToggleContext: (entry: WorkspaceEntry) => void;
 }) {
+  const [expandedKeys, setExpandedKeys] = useState<Set<string>>(
+    () => new Set(),
+  );
+
   if (entries.length === 0) {
     return (
       <EmptyWorkspaceState
@@ -1863,65 +1872,47 @@ function LibraryView({
       }))
       .filter((group) => group.entries.length > 0);
 
+    const allExpanded =
+      groups.length > 0 && groups.every((group) => expandedKeys.has(group.key));
+
     return (
-      <div className="spectra-workspace-type-index overflow-hidden rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)]">
-        {groups.map((group) => {
-          const meta =
-            group.key === "thread"
-              ? { icon: MessageSquare, color: "#8b6ff0" }
-              : blueprintMeta[group.key];
-          const GroupIcon = meta.icon;
-          return (
-            <div
+      <div>
+        <div className="mb-3 mt-5 flex items-center justify-between">
+          <h2 className="font-display text-[16px] font-semibold text-[var(--text-primary)]">
+            All artifacts
+          </h2>
+          <button
+            type="button"
+            className="text-[12px] font-medium text-[var(--text-tertiary)] transition hover:text-[var(--text-primary)]"
+            onClick={() => {
+              if (allExpanded) {
+                setExpandedKeys(new Set());
+                return;
+              }
+              setExpandedKeys(new Set(groups.map((group) => group.key)));
+            }}
+          >
+            {allExpanded ? "Collapse all" : "Expand all"}
+          </button>
+        </div>
+        <div className="spectra-workspace-type-index overflow-hidden rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)]">
+          {groups.map((group) => (
+            <WorkspaceTypeGroupRow
               key={group.key}
-              className="grid min-h-[42px] grid-cols-[210px_minmax(0,1fr)_32px] items-center gap-2 border-b border-[var(--card-border-soft)] px-3 last:border-0"
-            >
-              <div className="flex min-w-0 items-center gap-2">
-                <GroupIcon
-                  className="size-4 shrink-0"
-                  style={{ color: meta.color }}
-                />
-                <span className="truncate font-display text-[11px] font-semibold text-[var(--text-primary)]">
-                  {group.label}
-                </span>
-                <span className="rounded-[4px] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[8px] text-[var(--text-secondary)]">
-                  {group.entries.length}
-                </span>
-              </div>
-              <div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
-                {group.entries.slice(0, 3).map((entry) => (
-                  <button
-                    key={entry.item._id}
-                    type="button"
-                    onClick={() => onSelect(entry)}
-                    className="flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-[5px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-left text-[9px] text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
-                  >
-                    <GroupIcon
-                      className="size-3 shrink-0"
-                      style={{ color: meta.color }}
-                    />
-                    <span className="truncate">
-                      {workspaceEntryTitle(entry)}
-                    </span>
-                  </button>
-                ))}
-                {group.entries.length > 3 ? (
-                  <span className="shrink-0 rounded-[5px] bg-[var(--bg-secondary)] px-2 py-1 text-[8px] text-[var(--text-secondary)]">
-                    +{group.entries.length - 3}
-                  </span>
-                ) : null}
-              </div>
-              <button
-                type="button"
-                onClick={() => group.entries[0] && onSelect(group.entries[0])}
-                aria-label={`Open ${group.label}`}
-                className="grid size-7 place-items-center rounded-[5px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-              >
-                <ChevronDown className="size-3.5 -rotate-90" />
-              </button>
-            </div>
-          );
-        })}
+              group={group}
+              expanded={expandedKeys.has(group.key)}
+              onExpandedChange={(next) => {
+                setExpandedKeys((current) => {
+                  const copy = new Set(current);
+                  if (next) copy.add(group.key);
+                  else copy.delete(group.key);
+                  return copy;
+                });
+              }}
+              onSelect={onSelect}
+            />
+          ))}
+        </div>
       </div>
     );
   }
@@ -1981,6 +1972,89 @@ function LibraryView({
           if (target) onToggleContext(target);
         }}
       />
+    </div>
+  );
+}
+
+function WorkspaceTypeGroupRow({
+  group,
+  expanded,
+  onExpandedChange,
+  onSelect,
+}: {
+  group: {
+    key: SpectraBlueprintKey | "thread";
+    label: string;
+    entries: WorkspaceEntry[];
+  };
+  expanded: boolean;
+  onExpandedChange: (expanded: boolean) => void;
+  onSelect: (entry: WorkspaceEntry) => void;
+}) {
+  const meta =
+    group.key === "thread"
+      ? { icon: MessageSquare, color: "#8b6ff0" }
+      : blueprintMeta[group.key];
+  const GroupIcon = meta.icon;
+  const entryChip = (entry: WorkspaceEntry, full?: boolean) => (
+    <button
+      key={entry.item._id}
+      type="button"
+      onClick={() => onSelect(entry)}
+      className={`flex h-8 min-w-0 items-center gap-1.5 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 text-left text-[12px] text-[var(--text-primary)] transition hover:bg-[var(--bg-hover)] ${full ? "w-full" : "flex-1"}`}
+    >
+      <GroupIcon className="size-3.5 shrink-0" style={{ color: meta.color }} />
+      <span className="truncate">{workspaceEntryTitle(entry)}</span>
+    </button>
+  );
+  return (
+    <div className="border-b border-[var(--card-border-soft)] px-3 last:border-0">
+      <div className="grid min-h-[48px] grid-cols-[220px_minmax(0,1fr)_36px] items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <GroupIcon
+            className="size-4 shrink-0"
+            style={{ color: meta.color }}
+          />
+          <span className="truncate font-display text-[13px] font-semibold text-[var(--text-primary)]">
+            {group.label}
+          </span>
+          <span className="rounded-[5px] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[11px] text-[var(--text-secondary)]">
+            {group.entries.length}
+          </span>
+        </div>
+        <div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
+          {expanded
+            ? null
+            : group.entries.slice(0, 3).map((entry) => entryChip(entry))}
+          {!expanded && group.entries.length > 3 ? (
+            <button
+              type="button"
+              onClick={() => onExpandedChange(true)}
+              className="shrink-0 rounded-[6px] bg-[var(--bg-secondary)] px-2 py-1 text-[11px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+            >
+              +{group.entries.length - 3}
+            </button>
+          ) : null}
+        </div>
+        <button
+          type="button"
+          onClick={() => onExpandedChange(!expanded)}
+          aria-expanded={expanded}
+          aria-label={
+            expanded ? `Collapse ${group.label}` : `Expand ${group.label}`
+          }
+          className="grid size-8 place-items-center rounded-[6px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
+        >
+          <ChevronDown
+            className={`size-4 transition-transform ${expanded ? "" : "-rotate-90"}`}
+          />
+        </button>
+      </div>
+      {expanded ? (
+        <div className="grid gap-1.5 pb-3 pl-1 sm:grid-cols-2 xl:grid-cols-3">
+          {group.entries.map((entry) => entryChip(entry, true))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -2394,39 +2468,96 @@ function Inspector({
         (placement) => placement.workspaceId === workspace._id,
       ),
   );
+  const recentActivity = [...workspaceArtifacts]
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .slice(0, 5);
+  const workspaceTags = Array.from(
+    new Set(workspaceArtifacts.flatMap((artifact) => artifact.tags ?? [])),
+  ).slice(0, 12);
   const activeRuns = runs.filter(
     (run) => run.status === "queued" || run.status === "running",
   ).length;
+  const sharedWithCount = workspace?.sharedWithCount ?? 0;
 
   return (
-    <aside className="hidden w-[318px] shrink-0 border-l border-[var(--border-default)] bg-[var(--bg-primary)] px-5 py-6 xl:block">
+    <aside className="hidden w-[320px] shrink-0 border-l border-[var(--border-default)] bg-[var(--bg-primary)] px-5 py-6 xl:block">
       <div className="flex items-center justify-between">
         <h2 className="text-[14px] font-semibold text-[var(--text-primary)]">
-          {workspace?.title ?? "Workspace"} overview
+          {workspace?.title ?? "Workspace"} details
         </h2>
-        <span className="flex items-center gap-2 text-[12px] text-[var(--text-secondary)]">
-          <span className="h-2 w-2 rounded-full bg-[var(--success)]" />
-          All systems normal
-        </span>
+        {workspace?.status === "active" ? (
+          <span className="flex items-center gap-2 text-[12px] text-[var(--text-secondary)]">
+            <span className="h-2 w-2 rounded-full bg-[var(--success)]" />
+            Active
+          </span>
+        ) : null}
       </div>
-      <InspectorSection title="Workspace">
-        <div className="space-y-3 text-[13px]">
-          <MetricRow
-            label="Artifacts"
-            value={String(workspaceArtifacts.length)}
-          />
-          <MetricRow label="Cards" value={String(workspaceArtifacts.length)} />
-          <MetricRow
-            label="Documents"
-            value={String(
-              workspaceArtifacts.filter(
-                (artifact) => artifact.blueprintKey === "document",
-              ).length,
-            )}
-          />
-          <MetricRow label="Active runs" value={String(activeRuns)} />
+
+      <section className="mt-5 space-y-3 text-[13px]">
+        {workspace?.description ? (
+          <p className="leading-5 text-[var(--text-secondary)]">
+            {workspace.description}
+          </p>
+        ) : null}
+        <MetricRow
+          label="Created"
+          value={workspace ? formatShortDate(workspace.createdAt) : "—"}
+        />
+        {sharedWithCount > 0 ? (
+          <MetricRow label="Shared with" value={String(sharedWithCount)} />
+        ) : null}
+        <MetricRow
+          label="Artifacts"
+          value={String(workspaceArtifacts.length)}
+        />
+        <MetricRow label="Active runs" value={String(activeRuns)} />
+      </section>
+
+      <InspectorSection title="Recent activity">
+        <div className="space-y-1">
+          {recentActivity.map((artifact) => {
+            const meta = blueprintMeta[artifact.blueprintKey];
+            return (
+              <button
+                key={artifact._id}
+                type="button"
+                className="flex w-full items-start gap-2.5 rounded-[8px] px-1.5 py-1.5 text-left transition hover:bg-[var(--bg-hover)]"
+                onClick={() => onOpenArtifact(artifact)}
+              >
+                <span className="mt-0.5 min-w-0 flex-1">
+                  <span className="block truncate text-[12px] font-medium text-[var(--text-primary)]">
+                    {artifact.title}
+                  </span>
+                  <span className="block text-[11px] text-[var(--text-tertiary)]">
+                    {meta.label} · updated {formatRelativeTime(artifact.updatedAt)}
+                  </span>
+                </span>
+              </button>
+            );
+          })}
+          {recentActivity.length === 0 ? (
+            <p className="text-[13px] text-[var(--text-secondary)]">
+              No activity yet.
+            </p>
+          ) : null}
         </div>
       </InspectorSection>
+
+      {workspaceTags.length ? (
+        <InspectorSection title="Tags">
+          <div className="flex flex-wrap gap-1.5">
+            {workspaceTags.map((tag) => (
+              <span
+                key={tag}
+                className="rounded-[6px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-2 py-1 text-[11px] font-medium text-[var(--text-secondary)]"
+              >
+                {tag}
+              </span>
+            ))}
+          </div>
+        </InspectorSection>
+      ) : null}
+
       <InspectorSection title="Quick actions">
         <ActionRow
           icon={FileText}
@@ -2880,6 +3011,18 @@ export function WorkspaceShell() {
       : null;
 
   useEffect(() => {
+    if (!workspace) return;
+    window.dispatchEvent(
+      new CustomEvent("spectra:page-context", {
+        detail: { source: "Workspaces", title: workspace.title },
+      }),
+    );
+    return () => {
+      window.dispatchEvent(new Event("spectra:clear-page-context"));
+    };
+  }, [workspace]);
+
+  useEffect(() => {
     if (
       !selectedWorkspaceId ||
       restoredViewWorkspaceId.current === selectedWorkspaceId
@@ -3150,12 +3293,12 @@ export function WorkspaceShell() {
   ]);
   const naturalFocusMode: ComposerFocusMode = composerThread
     ? "thread"
-    : commandFocusArtifact
-      ? "artifact"
-      : contextualArtifactIds.length > 0
-        ? "selection"
-        : workspace
-          ? "workspace"
+    : workspace
+      ? "workspace"
+      : commandFocusArtifact
+        ? "artifact"
+        : contextualArtifactIds.length > 0
+          ? "selection"
           : "global";
   const effectiveFocusMode =
     focusModeOverride === "selection" && contextualArtifactIds.length === 0
@@ -3641,7 +3784,7 @@ export function WorkspaceShell() {
         return;
       }
     }
-    studio.openSplit(artifact);
+    studio.openTab(artifact);
   }
 
   function openThreadPanel(thread: SpectraThread) {
@@ -4195,34 +4338,32 @@ export function WorkspaceShell() {
         }}
       />
       <div className="flex min-w-0 flex-1 flex-col">
-        {false ? (
-          <StudioTabRail
-            hubTabs={
-              workSetIsolated && activeHubTabId
-                ? hubTabs.map((tab) =>
-                    tab.id === activeHubTabId
-                      ? {
-                          ...tab,
-                          label: `Work set · ${tiledArtifacts.length} objects`,
-                        }
-                      : tab,
-                  )
-                : hubTabs
-            }
-            activeHubTabId={studio.mode === "tab" ? null : activeHubTabId}
-            artifacts={allArtifacts}
-            tabs={studio.tabs}
-            activeArtifactId={
-              studio.mode === "tab" ? studio.activeArtifactId : null
-            }
-            dirtyIds={studio.dirtyIds}
-            onActivateHub={activateHubTab}
-            onCloseHub={closeHubTab}
-            onAddHub={addHomeHubTab}
-            onActivateTab={studio.activateTab}
-            onCloseTab={closeArtifactTab}
-          />
-        ) : null}
+        <StudioTabRail
+          hubTabs={
+            workSetIsolated && activeHubTabId
+              ? hubTabs.map((tab) =>
+                  tab.id === activeHubTabId
+                    ? {
+                        ...tab,
+                        label: `Work set · ${tiledArtifacts.length} objects`,
+                      }
+                    : tab,
+                )
+              : hubTabs
+          }
+          activeHubTabId={studio.mode === "tab" ? null : activeHubTabId}
+          artifacts={allArtifacts}
+          tabs={studio.tabs}
+          activeArtifactId={
+            studio.mode === "tab" ? studio.activeArtifactId : null
+          }
+          dirtyIds={studio.dirtyIds}
+          onActivateHub={activateHubTab}
+          onCloseHub={closeHubTab}
+          onAddHub={addHomeHubTab}
+          onActivateTab={studio.activateTab}
+          onCloseTab={closeArtifactTab}
+        />
         <div className="relative flex min-h-0 flex-1">
           {pendingCreateType ? (
             <div
@@ -4867,21 +5008,11 @@ export function WorkspaceShell() {
                           </section>
                         ) : null}
                         {viewMode === "list" ? (
-                          <>
-                            <WorkspacePinnedShelf
-                              entries={entries}
-                              workspaceTitle={workspace.title}
-                              onSelect={openWorkspaceEntry}
-                            />
-                            <div className="mb-3 mt-5 flex items-center justify-between">
-                              <h2 className="font-display text-[14px] font-semibold text-[var(--text-primary)]">
-                                All artifacts
-                              </h2>
-                              <span className="text-[9px] text-[var(--text-tertiary)]">
-                                Collapse all
-                              </span>
-                            </div>
-                          </>
+                          <WorkspacePinnedShelf
+                            entries={entries}
+                            workspaceTitle={workspace.title}
+                            onSelect={openWorkspaceEntry}
+                          />
                         ) : null}
                         {viewMode === "timeline" ? (
                           <TimelineView

@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
   AlertTriangle,
-  ArrowRight,
   BookOpen,
   CalendarDays,
   Check,
@@ -23,7 +22,6 @@ import {
   ListChecks,
   LoaderCircle,
   LockKeyhole,
-  MoreHorizontal,
   Network,
   Play,
   RefreshCw,
@@ -33,7 +31,6 @@ import {
   Search,
   Settings2,
   ShieldCheck,
-  Sparkles,
   Table2,
   TriangleAlert,
   UserCheck,
@@ -41,6 +38,7 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { CommandBar } from "../components/command-bar";
 import {
   configureSpectraManageBac,
   disconnectSpectraManageBac,
@@ -335,7 +333,6 @@ export function ManageBacIntegrationShell() {
   const [manifestOpen, setManifestOpen] = useState(false);
   const [disconnectOpen, setDisconnectOpen] = useState(false);
   const [manifestText, setManifestText] = useState("");
-  const [composer, setComposer] = useState("");
   const [config, setConfig] = useState({
     baseUrl: "",
     referenceUrl: "",
@@ -491,41 +488,31 @@ export function ManageBacIntegrationShell() {
     );
 
   return (
-    <div className="relative flex h-full min-h-0 overflow-hidden bg-[#fbfaf8] text-[var(--text-primary)]">
+    <div className="spectra-wave-y relative flex h-full min-h-0 overflow-hidden bg-[var(--bg-primary)] text-[var(--text-primary)]">
       <main className="min-w-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex min-h-full max-w-[1500px] flex-col px-3 pb-24 pt-3 sm:px-5">
-          <div className="mb-2 flex h-11 items-center justify-between rounded-[10px] border border-[var(--border-subtle)] bg-white/80 px-4 shadow-[0_1px_4px_rgba(38,35,30,.025)] backdrop-blur">
-            <div className="flex min-w-0 items-center gap-2 text-[11px] text-[var(--text-tertiary)]">
-              <ShieldCheck size={14} />
-              <span>{overview?.admin ? "Admin" : "School data"}</span>
-              <span className="text-[var(--border-strong)]">›</span>
-              <span>Integrations</span>
-              <span className="text-[var(--border-strong)]">›</span>
-              <strong className="truncate font-medium text-[var(--text-primary)]">
-                ManageBac Integration
-              </strong>
-            </div>
-            <div className="flex items-center gap-3">
-              <span className="hidden items-center gap-1.5 text-[10px] text-[#46866d] sm:flex">
-                <CheckCircle2 size={13} />
-                {busy ? "Working…" : "Synchronized"}
-              </span>
-              <button
-                type="button"
-                onClick={() => void refresh()}
-                className="grid size-8 place-items-center rounded-md border border-[var(--border-subtle)] bg-white text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]"
-                aria-label="Refresh integration"
-              >
-                <RefreshCw size={14} />
-              </button>
-              <button
-                type="button"
-                className="grid size-8 place-items-center rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]"
-                aria-label="More integration actions"
-              >
-                <MoreHorizontal size={16} />
-              </button>
-            </div>
+        <div className="flex min-h-full w-full flex-col px-4 pb-24 pt-3 sm:px-6 lg:px-8">
+          <div className="mb-3 flex h-11 items-center justify-end gap-3">
+            <span className="hidden items-center gap-1.5 text-[10px] text-[var(--text-secondary)] sm:flex">
+              {integration ? (
+                <>
+                  <CheckCircle2 size={13} className="text-[#46866d]" />
+                  {busy ? "Working…" : "Connected"}
+                </>
+              ) : (
+                <>
+                  <AlertCircle size={13} />
+                  {busy ? "Working…" : "Not connected"}
+                </>
+              )}
+            </span>
+            <button
+              type="button"
+              onClick={() => void refresh()}
+              className="grid size-8 place-items-center rounded-md border border-[var(--border-subtle)] bg-white text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]"
+              aria-label="Refresh integration"
+            >
+              <RefreshCw size={14} />
+            </button>
           </div>
 
           {error ? (
@@ -546,8 +533,8 @@ export function ManageBacIntegrationShell() {
             </div>
           ) : null}
 
-          <section className="overflow-hidden rounded-[11px] border border-[var(--border-subtle)] bg-white shadow-[0_2px_12px_rgba(45,39,31,.035)]">
-            <header className="flex flex-wrap items-start justify-between gap-4 px-5 pb-4 pt-5 sm:px-7 sm:pt-6">
+          <section className="min-w-0">
+            <header className="flex flex-wrap items-start justify-between gap-4 pb-4 pt-1 sm:pt-2">
               <div className="flex min-w-0 items-start gap-3.5">
                 <span className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-[9px] bg-[linear-gradient(145deg,#eef8fd,#e5ecff)] text-[#367ea8] shadow-inner">
                   <Network size={18} />
@@ -597,7 +584,7 @@ export function ManageBacIntegrationShell() {
             </header>
 
             {integration ? (
-              <div className="mx-5 grid overflow-hidden rounded-[8px] border border-[var(--border-subtle)] sm:mx-7 sm:grid-cols-3 lg:grid-cols-6">
+              <div className="grid overflow-hidden rounded-[8px] border border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--bg-elevated)_72%,transparent)] sm:grid-cols-3 lg:grid-cols-6">
                 <SummaryMetric
                   label="Connection status"
                   value={integration.status.replaceAll("_", " ")}
@@ -646,7 +633,7 @@ export function ManageBacIntegrationShell() {
                 />
               </div>
             ) : (
-              <div className="mx-5 mb-1 rounded-[9px] border border-dashed border-[var(--border-strong)] bg-[var(--bg-secondary)]/45 px-5 py-5 sm:mx-7">
+              <div className="mb-1 rounded-[9px] border border-dashed border-[var(--border-strong)] bg-[color-mix(in_oklab,var(--bg-secondary)_45%,transparent)] px-5 py-5">
                 <div className="flex flex-wrap items-center justify-between gap-4">
                   <div className="flex items-start gap-3">
                     <span className="grid size-9 place-items-center rounded-lg bg-white text-[#39799e] shadow-sm">
@@ -680,7 +667,7 @@ export function ManageBacIntegrationShell() {
             )}
 
             <nav
-              className="mt-4 flex min-w-0 gap-1 overflow-x-auto border-b border-[var(--border-subtle)] px-5 sm:px-7"
+              className="mt-4 flex min-w-0 gap-1 overflow-x-auto border-b border-[var(--border-subtle)]"
               aria-label="ManageBac sections"
             >
               {tabs.map((item) => (
@@ -704,7 +691,7 @@ export function ManageBacIntegrationShell() {
               ))}
             </nav>
 
-            <div className="min-h-[470px] p-4 sm:p-5">
+            <div className="min-h-[470px] py-4">
               {!integration ? (
                 <EmptyState
                   icon={LockKeyhole}
@@ -999,8 +986,8 @@ export function ManageBacIntegrationShell() {
         </div>
       </main>
 
-      <aside className="hidden w-[286px] shrink-0 overflow-y-auto border-l border-[var(--border-subtle)] bg-white xl:block">
-        <div className="sticky top-0 z-10 grid h-12 grid-cols-2 border-b border-[var(--border-subtle)] bg-white">
+      <aside className="hidden w-[286px] shrink-0 overflow-y-auto border-l border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--bg-elevated)_55%,var(--bg-primary))] xl:block">
+        <div className="sticky top-0 z-10 grid h-12 grid-cols-2 border-b border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--bg-elevated)_88%,transparent)]">
           {(["details", "activity"] as const).map((item) => (
             <button
               key={item}
@@ -1189,41 +1176,26 @@ export function ManageBacIntegrationShell() {
         )}
       </aside>
 
-      <form
-        className="pointer-events-none absolute inset-x-0 bottom-3 z-20 flex justify-center px-4 xl:right-[286px]"
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (!composer.trim()) return;
-          setComposer("");
-          setError(
-            "The ManageBac assistant will use purpose-coded school-data tools through the Spectra composer once an AI run is started.",
-          );
-        }}
-      >
-        <div className="pointer-events-auto flex h-12 w-full max-w-[760px] items-center gap-2 rounded-[12px] border border-[var(--border-subtle)] bg-white/95 p-1.5 shadow-[0_8px_30px_rgba(40,35,28,.12)] backdrop-blur">
-          <button
-            type="button"
-            className="grid size-9 shrink-0 place-items-center rounded-[8px] border border-[var(--border-subtle)] text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]"
-            aria-label="Add context"
-          >
-            <Sparkles size={15} />
-          </button>
-          <input
-            value={composer}
-            onChange={(event) => setComposer(event.target.value)}
+      <div className="pointer-events-none absolute inset-x-0 bottom-3 z-20 flex justify-center px-4 xl:right-[286px]">
+        <div className="pointer-events-auto w-full max-w-[760px]">
+          <CommandBar
+            className="w-full"
             placeholder="Ask Spectra about permitted school data…"
-            className="min-w-0 flex-1 bg-transparent px-2 text-[12px] outline-none placeholder:text-[var(--text-tertiary)]"
+            onSubmit={() => {
+              setError(
+                "The ManageBac assistant will use purpose-coded school-data tools through the Spectra composer once an AI run is started.",
+              );
+              return true;
+            }}
+            context={
+              <span className="flex h-full min-w-[88px] items-center gap-2 px-3 text-[11px] font-semibold text-[var(--text-primary)]">
+                <School className="size-3.5 shrink-0 text-[var(--brand-primary)]" />
+                ManageBac
+              </span>
+            }
           />
-          <button
-            type="submit"
-            disabled={!composer.trim()}
-            className="grid size-9 shrink-0 place-items-center rounded-[8px] bg-[#20211e] text-white disabled:bg-[var(--bg-secondary)] disabled:text-[var(--text-tertiary)]"
-            aria-label="Ask Spectra"
-          >
-            <ArrowRight size={15} />
-          </button>
         </div>
-      </form>
+      </div>
 
       {settingsOpen ? (
         <SettingsDialog

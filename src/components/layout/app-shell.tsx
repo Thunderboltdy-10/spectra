@@ -41,7 +41,6 @@ import {
   Star,
   MoreHorizontal,
   ChevronRight,
-  CircleCheck,
   PanelLeftClose,
   PanelLeftOpen,
   type LucideIcon,
@@ -421,9 +420,9 @@ function ShellNavigation() {
             value={sidebarSearch}
             onChange={(event) => setSidebarSearch(event.target.value)}
             placeholder="Search"
-            className="h-8 w-full rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-elevated)] pl-8 pr-10 text-[11px] outline-none placeholder:text-[var(--text-placeholder)] focus:border-[var(--border-strong)]"
+            className="h-9 w-full rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] pl-8 pr-10 text-[13px] outline-none placeholder:text-[var(--text-placeholder)] focus:border-[var(--border-strong)]"
           />
-          <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 rounded-[4px] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[9px] text-[var(--text-tertiary)]">
+          <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 rounded-[5px] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[11px] text-[var(--text-tertiary)]">
             ⌘ K
           </span>
         </label>
@@ -445,13 +444,14 @@ function ShellNavigation() {
                 }}
                 aria-current={active ? "page" : undefined}
                 className={cn(
-                  "flex h-8 items-center gap-2.5 rounded-[6px] px-2 text-[11px] font-medium transition-colors",
+                  "relative flex h-9 items-center gap-2.5 rounded-[8px] px-2.5 text-[13px] font-medium transition-colors",
                   active
                     ? "bg-[#eeece9] text-[#171513]"
                     : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
                 )}
               >
-                <Icon size={14} strokeWidth={active ? 2.05 : 1.65} />
+                {active ? <ActiveRailMarker /> : null}
+                <Icon size={15} strokeWidth={active ? 2.05 : 1.65} />
                 <span>{label === "Home" ? "Workspace" : label}</span>
               </Link>
             );
@@ -459,9 +459,9 @@ function ShellNavigation() {
         </nav>
         <Link
           href="/chat"
-          className="mx-3 mt-3 flex h-8 items-center justify-center gap-2 rounded-[6px] bg-[#7659ef] text-[11px] font-semibold text-white shadow-[0_1px_2px_rgba(83,61,180,.22)] transition hover:bg-[#684ce3]"
+          className="mx-3 mt-3 flex h-9 items-center justify-center gap-2 rounded-[10px] bg-[var(--brand-primary)] text-[13px] font-semibold text-white shadow-[0_1px_2px_rgba(83,61,180,.22)] transition hover:brightness-95"
         >
-          <Plus size={14} /> New chat
+          <Plus size={15} /> New chat
         </Link>
         <div className="relative mx-3 mt-2">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-[var(--text-tertiary)]" />
@@ -469,7 +469,7 @@ function ShellNavigation() {
             value={sidebarSearch}
             onChange={(event) => setSidebarSearch(event.target.value)}
             placeholder="Search chats"
-            className="h-8 w-full rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-elevated)] pl-8 pr-2 text-[10px] outline-none placeholder:text-[var(--text-placeholder)]"
+            className="h-9 w-full rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] pl-8 pr-2 text-[12px] outline-none placeholder:text-[var(--text-placeholder)]"
           />
         </div>
         <div className="spectra-thin-scrollbar min-h-0 flex-1 overflow-y-auto px-3 pb-3">
@@ -485,7 +485,7 @@ function ShellNavigation() {
             if (!rows.length) return null;
             return (
               <section key={String(pinned)} className="mt-3">
-                <h2 className="px-1 text-[8.5px] font-semibold uppercase tracking-[.1em] text-[var(--text-tertiary)]">
+                <h2 className="px-1 text-[11px] font-semibold uppercase tracking-[.1em] text-[var(--text-tertiary)]">
                   {pinned ? "Pinned" : "Recents"}
                 </h2>
                 <div className="mt-1 space-y-0.5">
@@ -493,7 +493,7 @@ function ShellNavigation() {
                     <Link
                       key={thread._id}
                       href={`/chat?threadId=${encodeURIComponent(thread._id)}`}
-                      className="group flex h-7 items-center gap-2 rounded-[5px] px-1.5 text-[10px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                      className="group flex h-8 items-center gap-2 rounded-[6px] px-1.5 text-[12px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                     >
                       <i
                         className="size-1.5 shrink-0 rounded-full"
@@ -1202,69 +1202,23 @@ export function AppShell({
       <ShellNavigation />
       <main
         className={cn(
-          "relative min-h-dvh pb-24 md:flex md:h-dvh md:min-h-0 md:flex-col md:gap-1 md:px-[17px] md:pb-3 md:pt-5",
+          "relative min-h-dvh pb-24 md:flex md:h-dvh md:min-h-0 md:flex-col md:pb-0",
           noScroll && "h-dvh min-h-0 overflow-hidden",
-          !fullBleed &&
-            "mx-auto w-full max-w-[1540px] px-5 py-6 sm:px-8 lg:px-10",
+          !fullBleed && "px-5 py-6 sm:px-8",
         )}
       >
-        <header className="hidden h-11 shrink-0 items-center justify-between px-5 md:flex">
-          <nav
-            aria-label="Breadcrumb"
-            className="flex min-w-0 items-center gap-1.5 text-[11px] text-[var(--text-secondary)]"
-          >
-            <button
-              type="button"
-              className="inline-flex h-7 items-center gap-1.5 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 font-medium text-[var(--text-primary)] shadow-[0_1px_2px_rgba(42,35,28,.04)] hover:bg-[var(--bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-primary)]"
-              onClick={() =>
-                window.dispatchEvent(
-                  new CustomEvent("spectra:return-to-section"),
-                )
-              }
-            >
-              <LayoutGrid size={13} strokeWidth={1.7} />
-              {pageContext?.source ?? sectionLabel}
-            </button>
-            {pageContext?.kind ? (
-              <>
-                <ChevronRight
-                  size={12}
-                  className="text-[var(--text-tertiary)]"
-                />
-                <span>{pageContext.kind}</span>
-              </>
-            ) : null}
-            {pageContext?.title ? (
-              <>
-                <ChevronRight
-                  size={12}
-                  className="text-[var(--text-tertiary)]"
-                />
-                <span className="truncate font-semibold text-[var(--text-primary)]">
-                  {pageContext.title}
-                </span>
-              </>
-            ) : workspaceId ? (
-              <>
-                <ChevronRight
-                  size={12}
-                  className="text-[var(--text-tertiary)]"
-                />
-                <span className="truncate font-semibold text-[var(--text-primary)]">
-                  Current workspace
-                </span>
-              </>
-            ) : null}
-          </nav>
-          <div className="flex items-center gap-2">
-            <span className="mr-2 inline-flex items-center gap-1.5 text-[10px] font-medium text-[var(--text-tertiary)]">
-              <CircleCheck size={13} className="text-[var(--success)]" />
-              Saved just now
-            </span>
+        <header className="hidden h-[52px] shrink-0 items-center justify-between gap-3 border-b border-[var(--border-default)] bg-[var(--bg-primary)] px-5 md:flex">
+          <div className="min-w-0 flex-1" id="spectra-shell-tab-slot" />
+          <div className="flex shrink-0 items-center gap-2">
             <button
               type="button"
               onClick={() => requestPageAction("share")}
-              className="inline-flex h-8 items-center gap-1.5 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[10.5px] font-semibold text-[var(--text-primary)] shadow-[0_1px_2px_rgba(42,35,28,.04)] hover:bg-[var(--bg-hover)]"
+              className="inline-flex h-8 items-center gap-1.5 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[12px] font-semibold text-[var(--text-primary)] shadow-[0_1px_2px_rgba(42,35,28,.04)] hover:bg-[var(--bg-hover)]"
+              title={
+                pageContext?.kind
+                  ? `Share this ${pageContext.kind.toLowerCase()}`
+                  : "Share current workspace"
+              }
             >
               <Share2 size={13} />
               Share
@@ -1289,7 +1243,7 @@ export function AppShell({
         </header>
         <div
           className={cn(
-            "spectra-global-stage min-h-0 flex-1 md:overflow-hidden md:rounded-[8px] md:border md:border-[var(--border-default)] md:bg-[var(--bg-elevated)]",
+            "spectra-global-stage min-h-0 flex-1 md:overflow-hidden",
             noScroll && "overflow-hidden",
             contentClassName,
           )}

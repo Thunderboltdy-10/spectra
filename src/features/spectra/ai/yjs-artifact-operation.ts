@@ -134,8 +134,8 @@ async function createCollaborationSession(
     schoolId: actor.schoolId,
     clientId,
     displayName: actor.name.trim()
-      ? `${actor.name.trim()}'s Spectra`
-      : "Spectra",
+      ? `${actor.name.trim()}'s AI`
+      : "Spectra AI",
     level,
     policyVersion: room.policyVersion,
     schemaVersion: room.schemaVersion ?? artifact.schemaVersion ?? 1,
@@ -472,8 +472,8 @@ export async function applyAiArtifactMutation(params: {
       synced: provider.synced,
     });
     const presenceName = session.actor.name.trim()
-      ? `${session.actor.name.trim()}'s Spectra`
-      : "Spectra";
+      ? `${session.actor.name.trim()}'s AI`
+      : "Spectra AI";
     provider.setAwarenessField("user", {
       clientId,
       accountId: session.actor.accountId,
@@ -482,7 +482,12 @@ export async function applyAiArtifactMutation(params: {
       actorKind: "ai",
       runId: params.runId,
       operationId: params.operationId,
+      cursor: { x: 0.72, y: 0.28, updatedAt: Date.now() },
     });
+    // Awareness is a visible part of the operation, not disposable metadata.
+    // Give the gateway one bounded paint window to fan out the AI collaborator
+    // before a fast Yjs transaction can finish and tear down the provider.
+    await new Promise<void>((resolve) => setTimeout(resolve, 500));
 
     let current = readArtifactYjsDocument(document, typeKey);
     if (!current) {
@@ -600,6 +605,15 @@ export async function applyAiArtifactMutation(params: {
     });
     return { artifactId: params.artifactId, ...result };
   } finally {
+    const lastPresence = provider.awareness?.getLocalState()?.user;
+    if (lastPresence && typeof lastPresence === "object") {
+      provider.setAwarenessField("user", {
+        ...(lastPresence as Record<string, unknown>),
+        cursor: { x: 0.76, y: 0.34, updatedAt: Date.now() },
+      });
+      // Keep completion legible on peers without materially delaying a run.
+      await new Promise<void>((resolve) => setTimeout(resolve, 240));
+    }
     provider.destroy();
     document.destroy();
   }

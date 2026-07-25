@@ -24,7 +24,7 @@ States: pending | in_progress | alarming | pass | excellent.
 | B-05 | 2026-07-24 | pass | evidence/B-05/ | 2.5s poll gap | Active poll 750ms | QC elapsedMs 2938 | pass |
 | B-06 | 2026-07-24 | pass | evidence/B-06/ | Dead-end openTab | openSplit default + studio in tab mode | Home list split open verified | pass |
 | B-07 | 2026-07-24 | excellent | evidence/B-07/ | Dead /models /analytics /request-access | Pages + shells + shortcuts | Chrome click-through | excellent |
-| B-08 | 2026-07-24 | excellent | evidence/B-08/ | Stale updateArtifact test | Align test with Yjs edit path | lint/tsc/test green | excellent |
+| B-08 | 2026-07-26 | excellent | evidence/B-08/ | Current commit had 10 tsc errors and 19 lint warnings | Narrowed run-frame union; fixed intent/test typing; removed stale timetable/workspace warnings | lint clean; tsc clean; 36 files / 222 tests passed | excellent |
 
 ## Phase C — UI cleanup
 
@@ -89,9 +89,9 @@ States: pending | in_progress | alarming | pass | excellent.
 
 | Task | Date | Grade | Evidence | Defects | Repairs | Retests | Final |
 |------|------|-------|----------|---------|---------|---------|-------|
-| F-01 | | pending | evidence/F-01/ | | | | |
-| F-02 | | pending | evidence/F-02/ | | | | |
-| F-03 | | pending | evidence/F-03/ | | | | |
+| F-01 | 2026-07-26 | in_progress | evidence/F-01/ | Accounts were in different schools; stale owner session after accepted invite | Repaired audited school topology; direct modify share accepted | Both profiles live on one shared document; remaining permission matrix pending | in_progress |
+| F-02 | 2026-07-26 | pass | evidence/F-02/ | Anonymous/coarse presence; no cursors; 1.76s key propagation | Merged awareness identity; named cursor layer; elevated Here now surface | Human cursor visible and documents converge; leave/idle/refresh and latency reruns pending | pass |
+| F-03 | 2026-07-26 | in_progress | evidence/F-02/ | Undo propagated slowly (~3s) but converged | Cursor/presence foundation repaired | Different-region insertion + undo smoke green; full contention/lease battery pending | in_progress |
 | F-04 | | pending | evidence/F-04/ | | | | |
 | F-05 | | pending | evidence/F-05/ | | | | |
 | F-06 | | pending | evidence/F-06/ | | | | |
@@ -106,7 +106,7 @@ States: pending | in_progress | alarming | pass | excellent.
 | Task | Date | Grade | Evidence | Defects | Repairs | Retests | Final |
 |------|------|-------|----------|---------|---------|---------|-------|
 | G-01 | | pending | evidence/G-01/ | | | | |
-| G-02 | | pending | evidence/G-02/ | | | | |
+| G-02 | 2026-07-26 | in_progress | evidence/G-02/ | Alarming: shared AI edit landed with zero visible AI presence | Extended AI awareness lifecycle; cyan cursor; `{name}'s AI`; shared cursor renderer | Reverse run started; clean two-direction visual retest pending after Chrome control reset | in_progress |
 | G-03 | | pending | evidence/G-03/ | | | | |
 | G-04 | | pending | evidence/G-04/ | | | | |
 | G-05 | | pending | evidence/G-05/ | | | | |

@@ -117,7 +117,12 @@ describe("decomposeArtifactContent", () => {
     const validation = validateArtifactContent("sheets", coerced);
     expect(validation.success).toBe(true);
     if (!validation.success) return;
-    const identities = validation.data.sheets[0]!.rowIdentities ?? {};
+    const identities =
+      (
+        validation.data as {
+          sheets: Array<{ rowIdentities?: Record<string, string> }>;
+        }
+      ).sheets[0]!.rowIdentities ?? {};
     expect(Object.values(identities).every((id) => typeof id === "string")).toBe(
       true,
     );

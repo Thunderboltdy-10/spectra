@@ -151,7 +151,10 @@ import {
   type ArtifactCommentRegion,
 } from "./artifact-comments-panel";
 import { ArtifactEmbedsPanel } from "./artifact-embeds-panel";
-import { CollaborationPresenceIndicator } from "./collaboration-presence";
+import {
+  CollaborationCursorLayer,
+  CollaborationPresenceIndicator,
+} from "./collaboration-presence";
 import { changedArtifactRegionIds } from "../collaboration/artifact-yjs-model";
 import { isArtifactTypeKey } from "../artifacts/registry";
 import { SheetsStudio } from "./sheets-studio";
@@ -4144,6 +4147,41 @@ function ArtifactStudioEditor({
     },
     [live.transport],
   );
+  const presenceFrameRef = useRef<number | null>(null);
+  const pendingCursorRef = useRef<{ x: number; y: number } | null>(null);
+  const handlePresencePointerMove = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (!live.transport || live.state !== "synchronized") return;
+      const bounds = event.currentTarget.getBoundingClientRect();
+      if (!bounds.width || !bounds.height) return;
+      pendingCursorRef.current = {
+        x: Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width)),
+        y: Math.max(0, Math.min(1, (event.clientY - bounds.top) / bounds.height)),
+      };
+      if (presenceFrameRef.current !== null) return;
+      presenceFrameRef.current = window.requestAnimationFrame(() => {
+        presenceFrameRef.current = null;
+        const cursor = pendingCursorRef.current;
+        if (!cursor) return;
+        live.transport?.setPresence({
+          actorKind: "human",
+          cursor: { ...cursor, updatedAt: Date.now() },
+        });
+      });
+    },
+    [live.state, live.transport],
+  );
+  const clearPresenceCursor = useCallback(() => {
+    pendingCursorRef.current = null;
+    live.transport?.setPresence({ cursor: null });
+  }, [live.transport]);
+  useEffect(
+    () => () => {
+      if (presenceFrameRef.current !== null)
+        window.cancelAnimationFrame(presenceFrameRef.current);
+    },
+    [],
+  );
 
   useEffect(() => {
     const snapshotsDiffer =
@@ -4759,6 +4797,8 @@ function ArtifactStudioEditor({
   return (
     <div
       className="spectra-artifact-studio relative flex h-full min-h-0 flex-col"
+      onPointerMove={handlePresencePointerMove}
+      onPointerLeave={clearPresenceCursor}
       data-studio-mode={mode}
       data-ai-state={
         visibleAiWorking
@@ -4775,6 +4815,12 @@ function ArtifactStudioEditor({
       data-blueprint={artifact.blueprintKey}
       style={{ "--studio-accent": meta.color } as CSSProperties}
     >
+      <CollaborationCursorLayer
+        presence={live.presence}
+        currentClientId={live.transport?.clientId}
+        currentAccountId={live.accountId}
+        currentDisplayName={live.displayName}
+      />
       {aiEffectTitles.length ? (
         <div className="sr-only" role="status" aria-live="polite">
           {aiEffectTitles.map((title) => (
@@ -4807,7 +4853,7 @@ function ArtifactStudioEditor({
               ? ` · ${collaboratorCount} here`
               : ""}
           </span>
-          {isCollaborativeArtifact ? (
+          {isCollaborativeArtifact || collaboratorCount > 0 ? (
             <CollaborationPresenceIndicator
               presence={live.presence}
               currentClientId={live.transport?.clientId}

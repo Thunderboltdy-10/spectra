@@ -863,7 +863,7 @@ export function TimetableStudio({
             <div key={dateKey(day)}>
               {allDayEvents
                 .filter((event) => eventSpansLocalDay(event, day))
-                .map((event, index) => (
+                .map((event) => (
                   <EventCard
                     key={event.occurrenceKey}
                     event={event}
@@ -918,7 +918,7 @@ export function TimetableStudio({
                     localDateInput(event.start, event.timezone).slice(0, 10) ===
                     dateKey(day),
                 )
-                .map((event, index) => {
+                .map((event) => {
                   const timing = eventMinutes(event);
                   const collision = eventCollisionLayout.get(
                     event.occurrenceKey,
@@ -1018,7 +1018,7 @@ export function TimetableStudio({
               >
                 {day.getDate()}
               </button>
-              {events.slice(0, 4).map((event, index) => (
+              {events.slice(0, 4).map((event) => (
                 <EventCard
                   key={event.occurrenceKey}
                   event={event}
@@ -1071,7 +1071,7 @@ export function TimetableStudio({
               </strong>
               <span>{events.length} events</span>
             </header>
-            {events.map((event, index) => (
+            {events.map((event) => (
               <button
                 key={event.occurrenceKey}
                 type="button"

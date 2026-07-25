@@ -12,9 +12,15 @@ export type CollaborationPresence = {
   operationId?: string;
   activeRegionId?: string;
   activeRegionIds?: string[];
-  cursor?: unknown;
+  cursor?: CollaborationCursor | null;
   selection?: unknown;
   viewport?: unknown;
+};
+
+export type CollaborationCursor = {
+  x: number;
+  y: number;
+  updatedAt?: number;
 };
 
 export type CollaborationTransportSnapshot = {

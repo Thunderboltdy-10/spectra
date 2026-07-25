@@ -9751,7 +9751,9 @@ async function runAttempt(
                       // mid-open studios light regions before Convex sync.
                       // Sheets keep [] (cell-exact only) via progressive frames.
                       changedPaths:
-                        frame.changedPaths ??
+                        ("changedPaths" in frame
+                          ? frame.changedPaths
+                          : undefined) ??
                         (operation.input.blueprintKey === "sheets"
                           ? []
                           : ["/"]),

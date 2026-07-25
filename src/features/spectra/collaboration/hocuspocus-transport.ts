@@ -33,6 +33,28 @@ type SessionResponse = {
   displayName: string;
 };
 
+function collaborationCursor(
+  value: unknown,
+): NonNullable<CollaborationPresence["cursor"]> | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const candidate = value as Record<string, unknown>;
+  if (
+    typeof candidate.x !== "number" ||
+    !Number.isFinite(candidate.x) ||
+    typeof candidate.y !== "number" ||
+    !Number.isFinite(candidate.y)
+  )
+    return undefined;
+  return {
+    x: candidate.x,
+    y: candidate.y,
+    ...(typeof candidate.updatedAt === "number" &&
+    Number.isFinite(candidate.updatedAt)
+      ? { updatedAt: candidate.updatedAt }
+      : {}),
+  };
+}
+
 function clientIdentity(artifactId: string) {
   const key = `spectra.collaboration.client.${artifactId}`;
   const existing = window.sessionStorage.getItem(key);
@@ -79,6 +101,7 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
   private displayName?: string;
   private unsynchronizedChanges = 0;
   private presence: CollaborationPresence[] = [];
+  private localPresence: CollaborationPresence | null = null;
   private error?: string;
   private destroyed = false;
   private intentionallyDisconnected = false;
@@ -243,7 +266,9 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
                 )
                   ? { activeRegionIds: user.activeRegionIds as string[] }
                   : {}),
-                ...(user.cursor !== undefined ? { cursor: user.cursor } : {}),
+                ...(collaborationCursor(user.cursor)
+                  ? { cursor: collaborationCursor(user.cursor) }
+                  : {}),
                 ...(user.selection !== undefined
                   ? { selection: user.selection }
                   : {}),
@@ -287,11 +312,13 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
           });
         },
       });
-      this.provider.setAwarenessField("user", {
+      this.localPresence = {
         clientId: this.clientId,
         accountId: initial.accountId,
         name: initial.displayName,
-      });
+        actorKind: "human",
+      };
+      this.provider.setAwarenessField("user", this.localPresence);
     } catch (error) {
       this.update({
         state: "unsynchronized",
@@ -338,10 +365,12 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
   }
 
   setPresence(fields: Omit<CollaborationPresence, "clientId">) {
-    this.provider?.setAwarenessField("user", {
-      clientId: this.clientId,
+    this.localPresence = {
+      ...(this.localPresence ?? {}),
       ...fields,
-    });
+      clientId: this.clientId,
+    };
+    this.provider?.setAwarenessField("user", this.localPresence);
   }
 
   transact(regionId: string, change: () => void) {

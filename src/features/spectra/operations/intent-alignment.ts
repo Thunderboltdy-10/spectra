@@ -52,7 +52,7 @@ export function alignIntentWithCreates(value: unknown): unknown {
   const hasOtherMutations = operations.some(
     (operation) => operation.type !== "artifact.create",
   );
-  const intent =
+  const intent: Record<string, unknown> =
     plan.intent && typeof plan.intent === "object" && !Array.isArray(plan.intent)
       ? { ...(plan.intent as Record<string, unknown>) }
       : {
@@ -78,13 +78,14 @@ export function alignIntentWithCreates(value: unknown): unknown {
     return plan;
   }
   intent.mode = hasOtherMutations ? "mixed" : "create";
-  intent.requestedArtifactTypes = [
+  const alignedTypes = [
     ...new Set([...priorTypes, ...created]),
   ].slice(0, 5);
+  intent.requestedArtifactTypes = alignedTypes;
   intent.requestedVisibleArtifactCount = Math.max(
     visible,
     created.length,
-    intent.requestedArtifactTypes.length > 0 ? 1 : 0,
+    alignedTypes.length > 0 ? 1 : 0,
   );
   if (!("targetArtifactId" in intent)) intent.targetArtifactId = null;
   if (!("targetWorkspaceId" in intent)) intent.targetWorkspaceId = null;

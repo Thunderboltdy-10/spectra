@@ -32,8 +32,6 @@ import {
   Sparkles,
   Sprout,
   Trash2,
-  ChevronLeft,
-  ChevronRight,
   X,
   Presentation,
   Table2,
@@ -1767,7 +1765,7 @@ function CompactShelf({
   );
 }
 
-function TimelineView({
+function _TimelineView({
   entries,
   runs,
   selected,
@@ -2059,19 +2057,19 @@ function TimelineView({
 
 function LibraryView({
   entries,
-  workspaces,
+  workspaces: _workspaces,
   mode,
-  selected,
+  selected: _selected,
   onSelect,
-  onTogglePin,
-  onRemove,
-  onDelete,
-  onMoveArtifactToWorkspace,
-  onMoveArtifactToInbox,
-  busy,
-  onCreateArtifact,
+  onTogglePin: _onTogglePin,
+  onRemove: _onRemove,
+  onDelete: _onDelete,
+  onMoveArtifactToWorkspace: _onMoveArtifactToWorkspace,
+  onMoveArtifactToInbox: _onMoveArtifactToInbox,
+  busy: _busy,
+  onCreateArtifact: _onCreateArtifact,
   selectionMode,
-  selectedContextIds,
+  selectedContextIds: _selectedContextIds,
   selectedObjectKeys,
   onToggleContext,
 }: {
@@ -4193,6 +4191,7 @@ export function WorkspaceShell() {
     void loadOverview(selectedWorkspaceId, true);
   }, [
     loadOverview,
+    runEngine.liveExchange,
     runEngine.liveExchange?.runId,
     runEngine.liveExchange?.status,
     selectedWorkspaceId,
@@ -4271,7 +4270,7 @@ export function WorkspaceShell() {
     // Event handlers intentionally read the current shell closures after each render.
   });
 
-  async function openRunPanel(runId: string, title: string) {
+  async function _openRunPanel(runId: string, title: string) {
     try {
       await getSpectraRunDetail(runId);
       setActiveRunPanelId(runId, title);

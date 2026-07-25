@@ -13,6 +13,8 @@ import {
   Check,
   CheckCircle2,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Circle,
   Code2,
   Copy,
@@ -34,10 +36,10 @@ import {
   Maximize2,
   MessageSquare,
   MessageSquarePlus,
-  MoreHorizontal,
   Minus,
   PanelLeft,
   PanelRight,
+  Pencil,
   Plus,
   Radio,
   Play,
@@ -72,6 +74,9 @@ import { Image } from "@tiptap/extension-image";
 import TextAlign from "@tiptap/extension-text-align";
 import Highlight from "@tiptap/extension-highlight";
 import {
+  Children,
+  cloneElement,
+  isValidElement,
   useCallback,
   useEffect,
   useMemo,
@@ -79,9 +84,11 @@ import {
   useState,
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
+  type ReactElement,
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
+import { currentTimeMs, shuffleInPlace, uniqueToken } from "@/lib/unique-token";
 import { SlashCommand } from "../editor/slash-command-extension";
 import { createSlashCommandRenderer } from "../editor/slash-command-renderer";
 import {
@@ -92,6 +99,16 @@ import { Callout } from "../editor/callout-node";
 import { DragHandle } from "../editor/drag-handle";
 import { StableBlockId } from "../editor/stable-block-id";
 import { Equation, InlineEquation } from "../editor/equation-node";
+import {
+  aiRegionAttr,
+  contentDerivedHighlightPaths,
+  creationHighlightFallbackPaths,
+  materializeAiChangedPaths,
+  pathTouches,
+  preferStreamingContentSource,
+  resolveAiHighlightPaths,
+  updatingHighlightFallbackPaths,
+} from "./ai-region-path";
 import { blueprintMeta } from "./artifact-card";
 import {
   artifactPlacements,
@@ -124,7 +141,6 @@ import {
   type SpectraFlashcardRating,
   type SpectraFlashcardStudyState,
   type SpectraQuizPracticeAttempt,
-  type SpectraQuizPracticeQuestion,
   type SpectraSchoolMember,
 } from "../data/api";
 import { ThreadConversation } from "./conversation-surface";
@@ -586,13 +602,6 @@ function mergeAiRegions(
   );
 }
 
-function pathTouches(paths: string[], prefix: string) {
-  return (
-    paths.includes("/") ||
-    paths.some((path) => path === prefix || path.startsWith(`${prefix}/`))
-  );
-}
-
 function semanticPathToPointer(path: readonly (string | number)[]) {
   return `/${path
     .map((segment) =>
@@ -601,7 +610,7 @@ function semanticPathToPointer(path: readonly (string | number)[]) {
     .join("/")}`;
 }
 
-function aiPreviewSections(artifact: SpectraArtifact) {
+function _aiPreviewSections(artifact: SpectraArtifact) {
   const content = record(artifact.aiPreview?.content);
   const rows = Array.isArray(content.blocks)
     ? content.blocks
@@ -2217,6 +2226,9 @@ function documentJsonFromContent(content: unknown, title: string): JSONContent {
                 level: [1, 2, 3].includes(Number(record(block.attrs).level))
                   ? Number(record(block.attrs).level)
                   : 2,
+                ...(typeof block.id === "string" && block.id
+                  ? { blockId: block.id }
+                  : {}),
               },
               content: inlineMathContent(text),
             };
@@ -2229,6 +2241,10 @@ function documentJsonFromContent(content: unknown, title: string): JSONContent {
               .filter(Boolean);
             return {
               type: "bulletList",
+              attrs:
+                typeof block.id === "string" && block.id
+                  ? { blockId: block.id }
+                  : undefined,
               content: (items.length > 0 ? items : [text]).map((item) => ({
                 type: "listItem",
                 content: [
@@ -2243,6 +2259,10 @@ function documentJsonFromContent(content: unknown, title: string): JSONContent {
           if (type === "blockquote")
             return {
               type: "blockquote",
+              attrs:
+                typeof block.id === "string" && block.id
+                  ? { blockId: block.id }
+                  : undefined,
               content: [
                 {
                   type: "paragraph",
@@ -2252,6 +2272,10 @@ function documentJsonFromContent(content: unknown, title: string): JSONContent {
             };
           return {
             type: "paragraph",
+            attrs:
+              typeof block.id === "string" && block.id
+                ? { blockId: block.id }
+                : undefined,
             content: inlineMathContent(text),
           };
         })
@@ -2270,9 +2294,13 @@ function blocksFromJson(json: JSONContent) {
   const nodes = Array.isArray(json.content) ? json.content : [];
   return nodes
     .map((node, index) => {
+      const stableId =
+        typeof node.attrs?.blockId === "string" && node.attrs.blockId
+          ? node.attrs.blockId
+          : `block-${index + 1}`;
       if (node.type === "equation")
         return {
-          id: `block-${index + 1}`,
+          id: stableId,
           type: "equation",
           text: typeof node.attrs?.latex === "string" ? node.attrs.latex : "",
           latex: typeof node.attrs?.latex === "string" ? node.attrs.latex : "",
@@ -2283,7 +2311,7 @@ function blocksFromJson(json: JSONContent) {
         };
       if (node.type === "callout")
         return {
-          id: `block-${index + 1}`,
+          id: stableId,
           type: "callout",
           text: contentTextFromJson(node),
           attrs: { tone: node.attrs?.tone ?? "info" },
@@ -2297,7 +2325,7 @@ function blocksFromJson(json: JSONContent) {
           )
           .filter(Boolean);
         return {
-          id: `block-${index + 1}`,
+          id: stableId,
           type: "table",
           text: rows.join("\n"),
         };
@@ -2318,7 +2346,7 @@ function blocksFromJson(json: JSONContent) {
               ? "list"
               : "paragraph";
       return {
-        id: `block-${index + 1}`,
+        id: stableId,
         type,
         text,
         ...(node.type === "heading"
@@ -3199,12 +3227,17 @@ export function StudioSplitShell({
   onWidthChange,
   ariaLabel,
   cssWidthVariable,
+  minWidth = 320,
+  contentReserve = 280,
   children,
 }: {
   width: number;
   onWidthChange?: (width: number) => void;
   ariaLabel: string;
   cssWidthVariable?: string;
+  minWidth?: number;
+  /** Minimum main-canvas width kept when fitting this panel. */
+  contentReserve?: number;
   children: ReactNode;
 }) {
   const resizingRef = useRef(false);
@@ -3224,46 +3257,63 @@ export function StudioSplitShell({
     const updateWidth = onWidthChange;
     function fitPanel() {
       const panel = panelRef.current;
-      const parent = panel?.parentElement;
-      if (!panel || !parent) return;
-      const siblingWidth = Array.from(
-        parent.querySelectorAll<HTMLElement>(":scope > [data-studio-panel]"),
-      )
+      if (!panel) return;
+      const host =
+        panel.closest<HTMLElement>(".spectra-wave-y") ?? panel.parentElement;
+      if (!host) return;
+      const peers = Array.from(
+        host.querySelectorAll<HTMLElement>("[data-studio-panel]"),
+      );
+      const siblingWidth = peers
         .filter((candidate) => candidate !== panel)
         .reduce(
           (total, candidate) => total + candidate.getBoundingClientRect().width,
           0,
         );
+      const siblingCount = peers.length - 1;
+      const reserve =
+        siblingCount > 0 ? Math.min(contentReserve, 240) : contentReserve;
+      const floor = siblingCount > 0 ? Math.min(minWidth, 300) : minWidth;
+      const hostWidth = host.clientWidth;
       const maximum = Math.max(
-        360,
-        Math.min(1120, parent.clientWidth - siblingWidth - 560),
+        floor,
+        Math.min(960, hostWidth - siblingWidth - reserve),
       );
-      if (width > maximum) updateWidth(maximum);
+      // Fair share when multiple panels compete: never let one lane take more
+      // than ~52% of the host while another panel is open.
+      const fairCap =
+        siblingCount > 0 ? Math.max(floor, Math.floor(hostWidth * 0.52)) : maximum;
+      const next = Math.max(floor, Math.min(width, maximum, fairCap));
+      if (Math.abs(next - width) >= 8) updateWidth(next);
+      else if (width > maximum || width > fairCap)
+        updateWidth(Math.min(maximum, fairCap));
+      else if (width < floor) updateWidth(floor);
     }
     const frame = window.requestAnimationFrame(fitPanel);
-    const parent = panelRef.current?.parentElement;
-    const observer = parent ? new ResizeObserver(fitPanel) : null;
-    if (parent) observer?.observe(parent);
+    const host =
+      panelRef.current?.closest<HTMLElement>(".spectra-wave-y") ??
+      panelRef.current?.parentElement;
+    const observer = host ? new ResizeObserver(fitPanel) : null;
+    if (host) observer?.observe(host);
     window.addEventListener("resize", fitPanel);
     return () => {
       window.cancelAnimationFrame(frame);
       observer?.disconnect();
       window.removeEventListener("resize", fitPanel);
     };
-  }, [onWidthChange, width]);
+  }, [contentReserve, minWidth, onWidthChange, width]);
   useEffect(() => {
     function onMove(event: PointerEvent) {
       if (!resizingRef.current || !onWidthChange) return;
       const panel = panelRef.current;
-      const parent = panel?.parentElement;
-      const panelLeft = panel?.getBoundingClientRect().left ?? 0;
-      const siblings = parent
-        ? Array.from(
-            parent.querySelectorAll<HTMLElement>(
-              ":scope > [data-studio-panel]",
-            ),
-          ).filter((candidate) => candidate !== panel)
+      if (!panel) return;
+      const host =
+        panel.closest<HTMLElement>(".spectra-wave-y") ?? panel.parentElement;
+      const panelLeft = panel.getBoundingClientRect().left;
+      const peers = host
+        ? Array.from(host.querySelectorAll<HTMLElement>("[data-studio-panel]"))
         : [];
+      const siblings = peers.filter((candidate) => candidate !== panel);
       const rightSiblingWidth = siblings
         .filter(
           (candidate) => candidate.getBoundingClientRect().left > panelLeft,
@@ -3276,18 +3326,22 @@ export function StudioSplitShell({
         (total, candidate) => total + candidate.getBoundingClientRect().width,
         0,
       );
-      const parentRight =
-        parent?.getBoundingClientRect().right ?? window.innerWidth;
-      const available = Math.max(
-        360,
-        (parent?.clientWidth ?? window.innerWidth) - allSiblingWidth - 560,
-      );
+      const hostRight = host?.getBoundingClientRect().right ?? window.innerWidth;
+      const floor = siblings.length > 0 ? Math.min(minWidth, 300) : minWidth;
+      const reserve =
+        siblings.length > 0 ? Math.min(contentReserve, 240) : contentReserve;
+      const hostWidth = host?.clientWidth ?? window.innerWidth;
+      const available = Math.max(floor, hostWidth - allSiblingWidth - reserve);
+      const fairCap =
+        siblings.length > 0
+          ? Math.max(floor, Math.floor(hostWidth * 0.52))
+          : available;
       onWidthChange(
         Math.max(
-          360,
+          floor,
           Math.min(
-            Math.round(parentRight - event.clientX - rightSiblingWidth),
-            Math.min(1120, available),
+            Math.round(hostRight - event.clientX - rightSiblingWidth),
+            Math.min(960, available, fairCap),
           ),
         ),
       );
@@ -3303,12 +3357,12 @@ export function StudioSplitShell({
       document.removeEventListener("pointermove", onMove);
       document.removeEventListener("pointerup", onUp);
     };
-  }, [onWidthChange]);
+  }, [contentReserve, minWidth, onWidthChange]);
   return (
     <aside
       ref={panelRef}
       data-studio-panel
-      className="fixed inset-y-0 right-0 z-[90] flex h-full min-w-[320px] max-w-[94vw] shrink-0 border-l border-[var(--border-default)] bg-[var(--bg-primary)] shadow-[-18px_0_40px_rgba(27,20,12,0.10)] min-[1920px]:relative min-[1920px]:inset-auto min-[1920px]:z-40 min-[1920px]:min-w-[360px]"
+      className="fixed inset-y-0 right-0 z-[90] flex h-full min-w-[280px] max-w-[94vw] shrink-0 border-l border-[var(--border-default)] bg-[var(--bg-primary)] shadow-[-18px_0_40px_rgba(27,20,12,0.10)] min-[1920px]:relative min-[1920px]:inset-auto min-[1920px]:z-40 min-[1920px]:min-w-[300px]"
       style={{ width, containerType: "inline-size" }}
       aria-label={ariaLabel}
     >
@@ -3323,7 +3377,9 @@ export function StudioSplitShell({
           document.body.style.userSelect = "none";
         }}
       />
-      {children}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        {children}
+      </div>
     </aside>
   );
 }
@@ -3340,6 +3396,10 @@ export function StudioTabRail({
   onAddHub,
   onActivateTab,
   onCloseTab,
+  canGoBack = false,
+  canGoForward = false,
+  onGoBack,
+  onGoForward,
 }: {
   hubTabs: Array<{ id: string; label: string }>;
   activeHubTabId: string | null;
@@ -3352,105 +3412,117 @@ export function StudioTabRail({
   onAddHub: () => void;
   onActivateTab: (artifactId: string) => void;
   onCloseTab: (artifactId: string) => void;
+  canGoBack?: boolean;
+  canGoForward?: boolean;
+  onGoBack?: () => void;
+  onGoForward?: () => void;
 }) {
   const [shellSlot, setShellSlot] = useState<HTMLElement | null>(null);
   useEffect(() => {
     setShellSlot(document.getElementById("spectra-shell-tab-slot"));
   }, []);
 
+  const tabClass = (active: boolean) =>
+    `group flex h-8 min-w-[120px] max-w-[220px] shrink-0 items-center gap-1.5 rounded-[6px] border px-2.5 text-[12px] font-medium transition ${
+      active
+        ? "border-[color-mix(in_oklab,var(--brand-primary)_36%,var(--border-default))] bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[inset_0_2px_var(--brand-primary),0_1px_6px_rgba(27,20,12,0.06)]"
+        : "border-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+    }`;
+
   const rail = (
     <div
-      className={`flex min-h-0 min-w-0 flex-1 items-center gap-1.5 overflow-hidden ${shellSlot ? "h-full bg-transparent px-0" : "h-12 shrink-0 border-b border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_60%,var(--bg-primary))] px-3.5"}`}
+      className={`flex min-h-0 min-w-0 flex-1 items-center overflow-hidden ${shellSlot ? "h-full bg-transparent px-0" : "h-12 shrink-0 border-b border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_60%,var(--bg-primary))] px-3.5"}`}
     >
-      <div className="spectra-studio-tab-scroller flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto">
-      {hubTabs.map((hubTab) => {
-        const active = activeHubTabId === hubTab.id;
-        return (
-          <button
-            key={hubTab.id}
-            type="button"
-            className={`group flex h-8 min-w-[104px] max-w-[230px] shrink-0 items-center gap-1.5 rounded-[6px] border px-2 text-[10px] transition ${
-              active
-                ? "border-[color-mix(in_oklab,var(--brand-primary)_36%,var(--border-default))] bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[inset_0_2px_var(--brand-primary),0_1px_6px_rgba(27,20,12,0.06)]"
-                : "border-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-            }`}
-            onClick={() => onActivateHub(hubTab.id)}
-          >
-            <BookOpen className="h-3.5 w-3.5 shrink-0 text-[var(--text-secondary)]" />
-            <span className="min-w-0 flex-1 truncate text-left">
-              {hubTab.label}
-            </span>
-            <span
-              role="button"
-              tabIndex={0}
-              aria-label={`Close ${hubTab.label}`}
-              className="ml-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-              onClick={(event) => {
-                event.stopPropagation();
-                onCloseHub(hubTab.id);
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
+      <div className="mr-1.5 flex shrink-0 items-center gap-0.5 border-r border-[var(--border-subtle)] pr-1.5">
+        <button
+          type="button"
+          aria-label="Go back"
+          title="Go back"
+          disabled={!canGoBack || !onGoBack}
+          onClick={onGoBack}
+          className="flex h-8 w-8 items-center justify-center rounded-[6px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:pointer-events-none disabled:opacity-35"
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          aria-label="Go forward"
+          title="Go forward"
+          disabled={!canGoForward || !onGoForward}
+          onClick={onGoForward}
+          className="flex h-8 w-8 items-center justify-center rounded-[6px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:pointer-events-none disabled:opacity-35"
+        >
+          <ChevronRight className="h-4 w-4" />
+        </button>
+      </div>
+      <div className="spectra-studio-tab-scroller inline-flex w-max max-w-full items-center gap-1.5 overflow-x-auto pr-1">
+        {hubTabs.map((hubTab) => {
+          const active = activeHubTabId === hubTab.id;
+          return (
+            <button
+              key={hubTab.id}
+              type="button"
+              className={tabClass(active)}
+              onClick={() => onActivateHub(hubTab.id)}
+            >
+              <BookOpen className="h-3.5 w-3.5 shrink-0 text-[var(--text-secondary)]" />
+              <span className="min-w-0 flex-1 truncate text-left">
+                {hubTab.label}
+              </span>
+              <span
+                role="button"
+                tabIndex={0}
+                aria-label={`Close ${hubTab.label}`}
+                className="ml-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                onClick={(event) => {
                   event.stopPropagation();
                   onCloseHub(hubTab.id);
-                }
-              }}
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    onCloseHub(hubTab.id);
+                  }
+                }}
+              >
+                <X className="h-3 w-3" />
+              </span>
+            </button>
+          );
+        })}
+        {tabs.map((tab) => {
+          const artifact = artifacts.find((item) => item._id === tab.artifactId);
+          if (!artifact) return null;
+          const meta = blueprintMeta[artifact.blueprintKey];
+          const Icon = meta.icon;
+          const active = activeArtifactId === artifact._id;
+          return (
+            <button
+              key={tab.artifactId}
+              type="button"
+              className={tabClass(active)}
+              onClick={() => onActivateTab(artifact._id)}
             >
-              <X className="h-3 w-3" />
-            </span>
-          </button>
-        );
-      })}
-      {tabs.map((tab) => {
-        const artifact = artifacts.find((item) => item._id === tab.artifactId);
-        if (!artifact) return null;
-        const meta = blueprintMeta[artifact.blueprintKey];
-        const Icon = meta.icon;
-        const active = activeArtifactId === artifact._id;
-        return (
-          <button
-            key={tab.artifactId}
-            type="button"
-            className={`group flex h-8 min-w-[104px] max-w-[230px] shrink-0 items-center gap-1.5 rounded-[6px] border px-2 text-[10px] transition ${
-              active
-                ? "border-[color-mix(in_oklab,var(--brand-primary)_36%,var(--border-default))] bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[inset_0_2px_var(--brand-primary),0_1px_6px_rgba(27,20,12,0.06)]"
-                : "border-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-            }`}
-            onClick={() => onActivateTab(artifact._id)}
-          >
-            <Icon
-              className="h-3.5 w-3.5 shrink-0"
-              style={{ color: meta.color }}
-            />
-            <span className="truncate">{artifact.title}</span>
-            {dirtyIds.has(artifact._id) ? (
-              <span
-                className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#d88922]"
-                title="Unsaved changes"
+              <Icon
+                className="h-3.5 w-3.5 shrink-0"
+                style={{ color: meta.color }}
               />
-            ) : null}
-            <span
-              role="button"
-              tabIndex={0}
-              aria-label={`Close ${artifact.title}`}
-              className="ml-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-              onClick={(event) => {
-                event.stopPropagation();
-                if (dirtyIds.has(artifact._id)) {
-                  onActivateTab(artifact._id);
-                  requestAnimationFrame(() =>
-                    window.dispatchEvent(
-                      new CustomEvent("spectra:request-artifact-close", {
-                        detail: { artifactId: artifact._id },
-                      }),
-                    ),
-                  );
-                } else onCloseTab(artifact._id);
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
+              <span className="min-w-0 flex-1 truncate text-left">
+                {artifact.title}
+              </span>
+              {dirtyIds.has(artifact._id) ? (
+                <span
+                  className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--accent-gold)]"
+                  title="Unsaved changes"
+                />
+              ) : null}
+              <span
+                role="button"
+                tabIndex={0}
+                aria-label={`Close ${artifact.title}`}
+                className="ml-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                onClick={(event) => {
                   event.stopPropagation();
                   if (dirtyIds.has(artifact._id)) {
                     onActivateTab(artifact._id);
@@ -3462,24 +3534,39 @@ export function StudioTabRail({
                       ),
                     );
                   } else onCloseTab(artifact._id);
-                }
-              }}
-            >
-              <X className="h-3 w-3" />
-            </span>
-          </button>
-        );
-      })}
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    if (dirtyIds.has(artifact._id)) {
+                      onActivateTab(artifact._id);
+                      requestAnimationFrame(() =>
+                        window.dispatchEvent(
+                          new CustomEvent("spectra:request-artifact-close", {
+                            detail: { artifactId: artifact._id },
+                          }),
+                        ),
+                      );
+                    } else onCloseTab(artifact._id);
+                  }
+                }}
+              >
+                <X className="h-3 w-3" />
+              </span>
+            </button>
+          );
+        })}
+        <button
+          type="button"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[6px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+          onClick={onAddHub}
+          aria-label="Open a new home view"
+          title="Open a new home view"
+        >
+          <Plus className="h-3.5 w-3.5" />
+        </button>
       </div>
-      <button
-        type="button"
-        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[6px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-        onClick={onAddHub}
-        aria-label="Open a new home view"
-        title="Open a new home view"
-      >
-        <Plus className="h-3.5 w-3.5" />
-      </button>
     </div>
   );
 
@@ -3611,22 +3698,9 @@ function ArtifactStudioEditor({
       }),
     );
     const shareFromShell = () => onShare?.();
-    const moreFromShell = () => {
-      setHistoryOpen(true);
-      void getSpectraArtifactVersions(artifact._id, 100).then((result) => {
-        setVersions(result.versions);
-        setPreviewVersion(
-          result.versions.find((version) => version.after) ??
-            result.versions[0] ??
-            null,
-        );
-      });
-    };
     window.addEventListener("spectra:page-share", shareFromShell);
-    window.addEventListener("spectra:page-more", moreFromShell);
     return () => {
       window.removeEventListener("spectra:page-share", shareFromShell);
-      window.removeEventListener("spectra:page-more", moreFromShell);
       window.dispatchEvent(new Event("spectra:clear-page-context"));
     };
   }, [artifact._id, artifact.title, meta.label, mode, onShare, sourceLabel]);
@@ -3778,7 +3852,7 @@ function ArtifactStudioEditor({
         setSyncBusy(false);
       }
     },
-    [artifact.blueprintKey, isCollaborativeArtifact, live, permissionReadOnly],
+    [artifact._id, artifact.blueprintKey, isCollaborativeArtifact, live, permissionReadOnly],
   );
   const previewDiff = useMemo(() => {
     if (!previewVersion?.after) return [];
@@ -3840,54 +3914,128 @@ function ArtifactStudioEditor({
           ),
     [artifact.aiEffects, artifact.aiState, live.state, previewClock],
   );
+  const editedFlashExpiresAt =
+    artifact.aiState === "edited"
+      ? (artifact.aiStateExpiresAt ??
+        (artifact.updatedAt ? artifact.updatedAt + 12_000 : 0))
+      : 0;
   const aiPreviewActive =
     Boolean(artifact.aiPreview) &&
     (artifact.aiState === "creating" ||
       artifact.aiState === "updating" ||
-      (artifact.aiState === "edited" &&
-        (artifact.aiStateExpiresAt ?? 0) > previewClock));
-  const liveCreationPaths = useMemo(() => {
-    if (artifact.aiState !== "creating") return [];
-    const value = record(content);
-    const collection =
-      artifact.blueprintKey === "document"
-        ? "blocks"
-        : artifact.blueprintKey === "flashcard_deck"
-          ? "cards"
-          : artifact.blueprintKey === "quiz"
-            ? "questions"
-            : artifact.blueprintKey === "planner_task"
-              ? "subtasks"
-              : artifact.blueprintKey === "presentation"
-                ? "slides"
-                : artifact.blueprintKey === "sheets"
-                  ? "sheets"
-                  : artifact.blueprintKey === "code"
-                    ? "files"
-                    : artifact.blueprintKey === "whiteboard"
-                      ? "nodes"
-                      : artifact.blueprintKey === "timetable"
-                        ? "events"
-                        : null;
-    if (!collection) return ["/"];
-    const items = Array.isArray(value[collection]) ? value[collection] : [];
-    return items.length ? [`/${collection}/${items.length - 1}`] : [];
-  }, [artifact.aiState, artifact.blueprintKey, content]);
-  const aiChangedPaths = [
-    ...new Set([
-      ...(aiPreviewActive ? (artifact.aiPreview?.changedPaths ?? []) : []),
-      ...activeAiEffects.flatMap((effect) => effect.changedPaths),
-      ...activeAiEffects.flatMap((effect) =>
-        effect.regionIds.flatMap((regionId) => {
-          const descriptor = live.model?.descriptor(regionId);
-          return descriptor ? [semanticPathToPointer(descriptor.path)] : [];
-        }),
+      (artifact.aiState === "edited" && editedFlashExpiresAt > previewClock));
+  const catchUpActive =
+    !aiHighlightDismissed &&
+    artifact.aiState === "edited" &&
+    editedFlashExpiresAt > previewClock;
+  // Pending creates often attach an empty aiPreview / aiEffects shell for
+  // progress chrome before any concrete changedPaths arrive. Do not let that
+  // empty shell suppress the create fallback — otherwise mid-open whiteboard
+  // (and peers) show rich content with 0 `data-ai-region` attributes.
+  // Focused updates have the same empty-path window (route publishes
+  // changedPaths: [] immediately); light with `/` until exact paths stream.
+  const liveCreationPaths = useMemo(
+    () =>
+      creationHighlightFallbackPaths(artifact.aiState, artifact.blueprintKey),
+    [artifact.aiState, artifact.blueprintKey],
+  );
+  const catchUpFallbackPaths =
+    catchUpActive && artifact.blueprintKey !== "sheets" ? ["/"] : [];
+  const streamingSource =
+    aiPreviewActive && artifact.aiPreview?.content !== undefined
+      ? preferStreamingContentSource({
+          local: content,
+          preview: artifact.aiPreview.content,
+          blueprintKey: artifact.blueprintKey,
+          aiState: artifact.aiState,
+        })
+      : "local";
+  const streamingContent =
+    streamingSource === "preview" && artifact.aiPreview?.content !== undefined
+      ? artifact.aiPreview.content
+      : content;
+  const contentDerivedPaths = useMemo(
+    () =>
+      artifact.aiState === "creating" ||
+      artifact.aiState === "updating" ||
+      catchUpActive
+        ? contentDerivedHighlightPaths(
+            artifact.blueprintKey,
+            streamingContent,
+          )
+        : [],
+    [
+      artifact.aiState,
+      artifact.blueprintKey,
+      catchUpActive,
+      streamingContent,
+    ],
+  );
+  const previewHighlightPaths = useMemo(
+    () =>
+      materializeAiChangedPaths(
+        aiPreviewActive || catchUpActive
+          ? (artifact.aiPreview?.changedPaths ?? [])
+          : [],
+        streamingContent,
+        artifact.blueprintKey,
       ),
-      ...(aiPreviewActive || activeAiEffects.length > 0
-        ? []
-        : liveCreationPaths),
-    ]),
-  ];
+    [
+      aiPreviewActive,
+      artifact.aiPreview?.changedPaths,
+      artifact.blueprintKey,
+      catchUpActive,
+      streamingContent,
+    ],
+  );
+  const effectHighlightPaths = useMemo(
+    () =>
+      materializeAiChangedPaths(
+        activeAiEffects.flatMap((effect) => effect.changedPaths),
+        streamingContent,
+        artifact.blueprintKey,
+      ),
+    [activeAiEffects, artifact.blueprintKey, streamingContent],
+  );
+  const effectRegionHighlightPaths = useMemo(
+    () =>
+      materializeAiChangedPaths(
+        activeAiEffects.flatMap((effect) =>
+          effect.regionIds.flatMap((regionId) => {
+            const descriptor = live.model?.descriptor(regionId);
+            return descriptor ? [semanticPathToPointer(descriptor.path)] : [];
+          }),
+        ),
+        streamingContent,
+        artifact.blueprintKey,
+      ),
+    [activeAiEffects, artifact.blueprintKey, live.model, streamingContent],
+  );
+  const hasConcreteHighlightPaths =
+    previewHighlightPaths.length > 0 ||
+    effectHighlightPaths.length > 0 ||
+    effectRegionHighlightPaths.length > 0;
+  const liveUpdatingPaths = useMemo(
+    () =>
+      updatingHighlightFallbackPaths(
+        artifact.aiState,
+        artifact.blueprintKey,
+        hasConcreteHighlightPaths,
+      ),
+    [artifact.aiState, artifact.blueprintKey, hasConcreteHighlightPaths],
+  );
+  const aiChangedPaths = resolveAiHighlightPaths({
+    previewPaths: previewHighlightPaths,
+    effectChangedPaths: effectHighlightPaths,
+    effectRegionPointers: effectRegionHighlightPaths,
+    creationFallbackPaths:
+      liveCreationPaths.length > 0
+        ? liveCreationPaths
+        : liveUpdatingPaths.length > 0
+          ? liveUpdatingPaths
+          : catchUpFallbackPaths,
+    contentDerivedPaths,
+  });
   const aiEffectTitles = [
     ...new Set([
       ...activeAiEffects.map((effect) => effect.title),
@@ -3896,18 +4044,33 @@ function ArtifactStudioEditor({
         : []),
     ]),
   ];
-  const aiWorkingActive = aiPreviewActive || activeAiEffects.length > 0;
+  const aiWorkingActive =
+    aiPreviewActive ||
+    activeAiEffects.length > 0 ||
+    (catchUpActive && aiChangedPaths.length > 0) ||
+    ((artifact.aiState === "creating" || artifact.aiState === "updating") &&
+      aiChangedPaths.length > 0);
   const visibleAiWorking = aiWorkingActive && !aiHighlightDismissed;
   const highlightPaths = aiHighlightDismissed ? [] : aiChangedPaths;
+  // During create/update, prefer the richer of live Yjs vs Convex preview so
+  // mid-open never sticks on empty placeholders while AI writes through Yjs.
   const editorContent =
     aiPreviewActive && artifact.aiPreview?.content !== undefined
-      ? mergeAiRegions(content, artifact.aiPreview.content, aiChangedPaths)
+      ? streamingSource === "local"
+        ? content
+        : mergeAiRegions(content, artifact.aiPreview.content, aiChangedPaths)
       : content;
   const editorChange =
     aiPreviewActive && artifact.aiPreview?.content !== undefined
       ? (next: unknown) =>
           changeContent(
-            mergeAiRegions(next, artifact.aiPreview?.content, aiChangedPaths),
+            streamingSource === "local"
+              ? next
+              : mergeAiRegions(
+                  next,
+                  artifact.aiPreview?.content,
+                  aiChangedPaths,
+                ),
           )
       : changeContent;
 
@@ -3918,17 +4081,17 @@ function ArtifactStudioEditor({
     if (
       artifact.aiState !== "edited" ||
       !artifact.aiPreview ||
-      !artifact.aiStateExpiresAt
+      editedFlashExpiresAt <= 0
     )
       return;
     setPreviewClock(Date.now());
-    const remaining = Math.max(0, artifact.aiStateExpiresAt - Date.now());
+    const remaining = Math.max(0, editedFlashExpiresAt - Date.now());
     const timer = window.setTimeout(
       () => setPreviewClock(Date.now()),
       remaining + 24,
     );
     return () => window.clearTimeout(timer);
-  }, [artifact.aiPreview, artifact.aiState, artifact.aiStateExpiresAt]);
+  }, [artifact.aiPreview, artifact.aiState, editedFlashExpiresAt]);
   useEffect(() => {
     const nextExpiry = (artifact.aiEffects ?? [])
       .flatMap((effect) => (effect.expiresAt ? [effect.expiresAt] : []))
@@ -3958,7 +4121,16 @@ function ArtifactStudioEditor({
 
   useEffect(() => {
     setAiHighlightDismissed(false);
-  }, [artifact._id, artifact.updatedAt, artifact.aiState]);
+  }, [artifact._id, artifact.aiState]);
+
+  // Catch-up materialize plays once on first open after AI finishes, then clears.
+  useEffect(() => {
+    if (!catchUpActive) return;
+    const timer = window.setTimeout(() => {
+      setAiHighlightDismissed(true);
+    }, 1250);
+    return () => window.clearTimeout(timer);
+  }, [catchUpActive, artifact._id, editedFlashExpiresAt]);
 
   const setActivePresence = useCallback(
     (regionId: string) => {
@@ -4109,6 +4281,8 @@ function ArtifactStudioEditor({
       window.removeEventListener("beforeunload", beforeUnload);
       window.removeEventListener("keydown", onKeyDown);
     };
+    // closeAfterSynchronization is declared later; dirty/panel flags already retrigger this effect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- close handler closes over latest studio state
   }, [artifact._id, commentsOpen, dirty, embedsOpen, historyOpen]);
 
   useEffect(() => {
@@ -4482,16 +4656,7 @@ function ArtifactStudioEditor({
         <div className="mb-1 text-[11px] font-semibold uppercase tracking-[.13em] text-[var(--text-tertiary)]">
           {meta.label}
         </div>
-        <div
-          className="rounded-[7px]"
-          data-ai-region={
-            !aiHighlightDismissed &&
-            aiPreviewActive &&
-            artifact.aiPreview?.title !== undefined
-              ? true
-              : undefined
-          }
-        >
+        <div className="rounded-[7px]">
           <textarea
             value={title}
             readOnly={readOnly}
@@ -4501,20 +4666,19 @@ function ArtifactStudioEditor({
               setActiveCommentRegionId("metadata:title");
               setActivePresence("metadata:title");
             }}
+            data-ai-region={aiRegionAttr(
+              !aiHighlightDismissed &&
+                ((aiPreviewActive &&
+                  artifact.aiPreview?.title !== undefined) ||
+                  activeAiEffects.some((effect) =>
+                    effect.regionIds.includes("metadata:title"),
+                  )),
+            )}
             className={`min-h-8 w-full resize-none overflow-hidden bg-transparent font-display font-semibold leading-tight text-[var(--text-primary)] outline-none [field-sizing:content] ${compact ? "text-[28px]" : "text-[32px]"}`}
             placeholder="Untitled artifact"
           />
         </div>
-        <div
-          className="mt-0.5 rounded-[7px]"
-          data-ai-region={
-            !aiHighlightDismissed &&
-            aiPreviewActive &&
-            artifact.aiPreview?.summary !== undefined
-              ? true
-              : undefined
-          }
-        >
+        <div className="mt-0.5 rounded-[7px]">
           <input
             value={summary}
             readOnly={readOnly}
@@ -4523,6 +4687,14 @@ function ArtifactStudioEditor({
               setActivePresence("metadata:summary");
             }}
             onChange={(event) => changeBase({ summary: event.target.value })}
+            data-ai-region={aiRegionAttr(
+              !aiHighlightDismissed &&
+                ((aiPreviewActive &&
+                  artifact.aiPreview?.summary !== undefined) ||
+                  activeAiEffects.some((effect) =>
+                    effect.regionIds.includes("metadata:summary"),
+                  )),
+            )}
             className="w-full bg-transparent text-[14px] leading-6 text-[var(--text-secondary)] outline-none placeholder:text-[var(--text-tertiary)]"
             placeholder="Short useful summary"
           />
@@ -4588,7 +4760,18 @@ function ArtifactStudioEditor({
     <div
       className="spectra-artifact-studio relative flex h-full min-h-0 flex-col"
       data-studio-mode={mode}
-      data-ai-state={visibleAiWorking ? artifact.aiState : undefined}
+      data-ai-state={
+        visibleAiWorking
+          ? artifact.aiState === "edited"
+            ? "edited"
+            : artifact.aiState === "creating" || artifact.aiState === "updating"
+              ? artifact.aiState
+              : "updating"
+          : undefined
+      }
+      data-ai-catchup={
+        catchUpActive && highlightPaths.length > 0 ? "true" : undefined
+      }
       data-blueprint={artifact.blueprintKey}
       style={{ "--studio-accent": meta.color } as CSSProperties}
     >
@@ -4668,7 +4851,7 @@ function ArtifactStudioEditor({
             />
           ) : null}
           <IconButton
-            label="History and more"
+            label="Version history"
             onClick={() => {
               setHistoryOpen(true);
               void getSpectraArtifactVersions(artifact._id, 100).then(
@@ -4682,7 +4865,7 @@ function ArtifactStudioEditor({
                 },
               );
             }}
-            icon={MoreHorizontal}
+            icon={History}
           />
           <IconButton
             label={dirty ? "Synchronize before closing" : "Close"}
@@ -5492,41 +5675,52 @@ function DocumentStudio({
   useEffect(() => {
     if (!editor) return;
     const incomingKey = JSON.stringify(incomingEditorJson);
-    if (incomingKey === editorJsonKeyRef.current) return;
-    editorJsonKeyRef.current = incomingKey;
+    const contentChanged = incomingKey !== editorJsonKeyRef.current;
+    if (contentChanged) editorJsonKeyRef.current = incomingKey;
     // Tiptap may flush synchronously while React is reconciling a streamed
-    // artifact subscription. Move the external-content reconciliation to the
-    // next microtask so live AI blocks do not trigger React's nested flushSync
-    // warning or fight the current render.
+    // artifact subscription. Move external-content reconciliation (and AI
+    // region lighting) to the next microtask so live AI blocks do not trigger
+    // React's nested flushSync warning, and so data-ai-region survives setContent.
     let cancelled = false;
     queueMicrotask(() => {
-      if (!cancelled && !editor.isDestroyed)
+      if (cancelled || editor.isDestroyed) return;
+      if (contentChanged)
         editor.commands.setContent(incomingEditorJson, { emitUpdate: false });
+      const blocks = Array.from(editor.view.dom.children) as HTMLElement[];
+      blocks.forEach((block) => block.removeAttribute("data-ai-region"));
+      if (!aiChangedPaths.length) return;
+      if (aiChangedPaths.includes("/")) {
+        blocks.forEach((block) => block.setAttribute("data-ai-region", "true"));
+        return;
+      }
+      const indices = new Set<number>();
+      const blockIds = new Set<string>();
+      for (const path of aiChangedPaths) {
+        const indexMatch = path.match(/^\/(?:content\/)?blocks\/(\d+)/);
+        if (indexMatch) indices.add(Number(indexMatch[1]));
+        const idMatch = path.match(
+          /^\/(?:content\/)?blocks\/(?:id:|byId\/)([^/]+)/i,
+        );
+        if (idMatch)
+          blockIds.add(
+            idMatch[1]!.replaceAll("~1", "/").replaceAll("~0", "~"),
+          );
+      }
+      indices.forEach((index) =>
+        blocks[index]?.setAttribute("data-ai-region", "true"),
+      );
+      if (blockIds.size > 0) {
+        blocks.forEach((block) => {
+          const id = block.getAttribute("data-block-id");
+          if (id && blockIds.has(id))
+            block.setAttribute("data-ai-region", "true");
+        });
+      }
     });
     return () => {
       cancelled = true;
     };
-  }, [editor, incomingEditorJson]);
-
-  useEffect(() => {
-    if (!editor) return;
-    const blocks = Array.from(editor.view.dom.children) as HTMLElement[];
-    blocks.forEach((block) => block.removeAttribute("data-ai-region"));
-    if (!aiChangedPaths.length) return;
-    if (aiChangedPaths.includes("/")) {
-      blocks.forEach((block) => block.setAttribute("data-ai-region", "true"));
-      return;
-    }
-    const indices = new Set(
-      aiChangedPaths.flatMap((path) => {
-        const match = path.match(/^\/(?:content\/)?blocks\/(\d+)/);
-        return match ? [Number(match[1])] : [];
-      }),
-    );
-    indices.forEach((index) =>
-      blocks[index]?.setAttribute("data-ai-region", "true"),
-    );
-  }, [aiChangedPaths, content, editor]);
+  }, [aiChangedPaths, editor, incomingEditorJson]);
 
   const equationActive = editor?.isActive("equation") ?? false;
   const equationAttrs = equationActive
@@ -6126,7 +6320,7 @@ function DocumentStudio({
         </button>
         <ToolbarButton
           label="More formatting options"
-          icon={MoreHorizontal}
+          icon={SlidersHorizontal}
           active={toolsOpen}
           onClick={() => setToolsOpen((open) => !open)}
         />
@@ -6604,7 +6798,7 @@ function FlashcardStudio({
   content,
   onChange,
   aiChangedPaths = [],
-  readOnly = false,
+  readOnly: _readOnly = false,
 }: {
   artifactId: string;
   mode: "split" | "tab";
@@ -6665,8 +6859,12 @@ function FlashcardStudio({
     currentX: number;
     currentY: number;
   }>();
-  const cardEditBaselineRef = useRef<DeckCard | undefined>(undefined);
-  const baselineCardIdRef = useRef<string | undefined>(undefined);
+  const [cardEditBaseline, setCardEditBaseline] = useState<
+    DeckCard | undefined
+  >(undefined);
+  const [baselineCardId, setBaselineCardId] = useState<string | undefined>(
+    undefined,
+  );
   const deckMediaInputRef = useRef<HTMLInputElement>(null);
   const sections = useMemo(
     () => Array.from(new Set(cards.map((card) => card.section || "Section 1"))),
@@ -6677,14 +6875,16 @@ function FlashcardStudio({
   const activeDeckMedia = activeCard?.media
     ? deckAssets.find((asset) => asset.assetId === activeCard.media?.assetId)
     : undefined;
-  if (activeCard && baselineCardIdRef.current !== activeCard.id) {
-    baselineCardIdRef.current = activeCard.id;
-    cardEditBaselineRef.current = structuredClone(activeCard);
-  }
+  useEffect(() => {
+    if (activeCard && baselineCardId !== activeCard.id) {
+      setBaselineCardId(activeCard.id);
+      setCardEditBaseline(structuredClone(activeCard));
+    }
+  }, [activeCard, baselineCardId]);
   const activeCardDirty = Boolean(
     activeCard &&
-    cardEditBaselineRef.current &&
-    JSON.stringify(activeCard) !== JSON.stringify(cardEditBaselineRef.current),
+    cardEditBaseline &&
+    JSON.stringify(activeCard) !== JSON.stringify(cardEditBaseline),
   );
   const duplicateKeys = new Set(
     Array.from(
@@ -6811,14 +7011,53 @@ function FlashcardStudio({
     };
   }, [artifactId]);
 
+  const beginStudySession = () => {
+    const now = currentTimeMs();
+    const due = studyItems.filter((item) => {
+      const state = studyStates.get(deckStudyKey(item.cardId, item.direction));
+      return !state || state.nextDueAt <= now;
+    });
+    const dueKeys = new Set(
+      due.map((item) => deckStudyKey(item.cardId, item.direction)),
+    );
+    const future = studyItems
+      .filter((item) => !dueKeys.has(deckStudyKey(item.cardId, item.direction)))
+      .sort(
+        (left, right) =>
+          (studyStates.get(deckStudyKey(left.cardId, left.direction))
+            ?.nextDueAt ?? Number.MAX_SAFE_INTEGER) -
+          (studyStates.get(deckStudyKey(right.cardId, right.direction))
+            ?.nextDueAt ?? Number.MAX_SAFE_INTEGER),
+      );
+    const candidates = due.length ? due : future;
+    const shuffle = deckSettings.shuffle !== false;
+    const queue = [...candidates];
+    if (shuffle) shuffleInPlace(queue);
+    setStudyQueue(queue);
+    setStudyIndex(0);
+    setStudyRevealed(false);
+    setStudyTypedAnswer("");
+    setStudyTypedCorrect(undefined);
+    setStudyComplete(false);
+    setStudyRatings({ again: 0, hard: 0, good: 0, easy: 0 });
+    setStudyCardStartedAt(now);
+    setStudyClock(now);
+    setStudyError(undefined);
+    setStudyOpen(true);
+  };
+  const beginStudySessionRef = useRef(beginStudySession);
+  useEffect(() => {
+    beginStudySessionRef.current = beginStudySession;
+  });
+
   useEffect(() => {
     function beginFromInspector(event: Event) {
       const requestedId = (event as CustomEvent<{ artifactId?: string }>).detail?.artifactId;
-      if (requestedId === artifactId) beginStudySession();
+      if (requestedId === artifactId) beginStudySessionRef.current();
     }
     window.addEventListener("spectra:study-deck", beginFromInspector);
     return () => window.removeEventListener("spectra:study-deck", beginFromInspector);
-  }, [artifactId, cards, studyStates]);
+  }, [artifactId]);
 
   useEffect(() => {
     let active = true;
@@ -7938,46 +8177,6 @@ function FlashcardStudio({
     }
   }
 
-  function beginStudySession() {
-    const now = Date.now();
-    const due = studyItems.filter((item) => {
-      const state = studyStates.get(deckStudyKey(item.cardId, item.direction));
-      return !state || state.nextDueAt <= now;
-    });
-    const dueKeys = new Set(
-      due.map((item) => deckStudyKey(item.cardId, item.direction)),
-    );
-    const future = studyItems
-      .filter((item) => !dueKeys.has(deckStudyKey(item.cardId, item.direction)))
-      .sort(
-        (left, right) =>
-          (studyStates.get(deckStudyKey(left.cardId, left.direction))
-            ?.nextDueAt ?? Number.MAX_SAFE_INTEGER) -
-          (studyStates.get(deckStudyKey(right.cardId, right.direction))
-            ?.nextDueAt ?? Number.MAX_SAFE_INTEGER),
-      );
-    const candidates = due.length ? due : future;
-    const shuffle = deckSettings.shuffle !== false;
-    const queue = [...candidates];
-    if (shuffle) {
-      for (let index = queue.length - 1; index > 0; index -= 1) {
-        const swap = Math.floor(Math.random() * (index + 1));
-        [queue[index], queue[swap]] = [queue[swap]!, queue[index]!];
-      }
-    }
-    setStudyQueue(queue);
-    setStudyIndex(0);
-    setStudyRevealed(false);
-    setStudyTypedAnswer("");
-    setStudyTypedCorrect(undefined);
-    setStudyComplete(false);
-    setStudyRatings({ again: 0, hard: 0, good: 0, easy: 0 });
-    setStudyCardStartedAt(now);
-    setStudyClock(now);
-    setStudyError(undefined);
-    setStudyOpen(true);
-  }
-
   function revealStudyAnswer() {
     if (!activeStudyCard) return;
     if (
@@ -8013,16 +8212,13 @@ function FlashcardStudio({
     setStudyReviewBusy(true);
     setStudyError(undefined);
     try {
-      const now = Date.now();
+      const now = currentTimeMs();
       const result = await reviewSpectraFlashcard({
         artifactId,
         cardId: activeStudyCard.id,
         direction: activeStudyItem.direction,
         rating,
-        clientReviewId:
-          typeof crypto.randomUUID === "function"
-            ? crypto.randomUUID()
-            : `review-${now}-${Math.random().toString(36).slice(2)}`,
+        clientReviewId: `review-${uniqueToken()}`,
         elapsedMs: Math.max(0, now - studyCardStartedAt),
       });
       setStudyStates((current) => {
@@ -8196,6 +8392,11 @@ function FlashcardStudio({
           }}
           disabled={!studyCards.length}
           className="spectra-deck-study-trigger inline-flex h-9 items-center gap-2 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-primary)] disabled:opacity-40"
+          aria-label={
+            !studyStateLoading && dueStudyCount
+              ? `Start study session, ${dueStudyCount} cards due`
+              : "Start study session"
+          }
         >
           <BookOpen className="h-4 w-4" />
           Study
@@ -8205,10 +8406,12 @@ function FlashcardStudio({
           type="button"
           onClick={() => setDeckMenuOpen(!deckMenuOpen)}
           data-active={deckMenuOpen || undefined}
-          className="spectra-deck-menu-trigger"
-          aria-label="Deck templates and export"
+          className="spectra-deck-menu-trigger inline-flex h-9 items-center gap-2 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-primary)]"
+          aria-label="Deck templates, study settings, and export"
+          title="Templates and export"
         >
-          <MoreHorizontal className="h-4 w-4" />
+          <LayoutTemplate className="h-4 w-4" />
+          <span className="hidden sm:inline">Templates</span>
         </button>
         <div
           className={`spectra-deck-pagination ${mode === "split" ? "w-full justify-between border-t border-[var(--border-subtle)] pt-2" : "ml-auto"} flex min-w-0 items-center gap-1 text-[11px] text-[var(--text-secondary)]`}
@@ -8552,7 +8755,7 @@ function FlashcardStudio({
                         setSectionNameDraft(section);
                       }}
                     >
-                      <MoreHorizontal className="h-3.5 w-3.5" />
+                      <Pencil className="h-3.5 w-3.5" />
                     </button>
                   </>
                 )}
@@ -8695,14 +8898,6 @@ function FlashcardStudio({
         </div>
       </aside>
       <section
-        data-ai-region={
-          activeCard
-            ? pathTouches(
-                aiChangedPaths,
-                `/cards/${cards.findIndex((card) => card.id === activeCard.id)}`,
-              ) || undefined
-            : undefined
-        }
         className="spectra-deck-card-editor min-w-0 overflow-hidden rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4"
       >
         {activeCard ? (
@@ -8772,6 +8967,10 @@ function FlashcardStudio({
               placeholder="Question or prompt"
               onChange={(value) => updateCard(activeCard.id, { front: value })}
               clozeMode={activeCard.variant === "cloze"}
+              aiActive={pathTouches(
+                aiChangedPaths,
+                `/cards/${cards.findIndex((card) => card.id === activeCard.id)}/front`,
+              )}
             />
             {activeCard.variant !== "image_occlusion" &&
             activeCard.media?.placement !== "back" &&
@@ -9016,6 +9215,14 @@ function FlashcardStudio({
               onNoteChange={(value) =>
                 updateCard(activeCard.id, { hint: value })
               }
+              aiActive={pathTouches(
+                aiChangedPaths,
+                `/cards/${cards.findIndex((card) => card.id === activeCard.id)}/back`,
+              )}
+              aiNoteActive={pathTouches(
+                aiChangedPaths,
+                `/cards/${cards.findIndex((card) => card.id === activeCard.id)}/hint`,
+              )}
             />
             {activeCard.variant !== "image_occlusion" &&
             activeCard.media?.placement === "back" &&
@@ -9082,7 +9289,13 @@ function FlashcardStudio({
             {advancedOpen ? (
               <div className="spectra-deck-advanced">
                 <div>
-                  <Field label="Card type">
+                  <Field
+                    label="Card type"
+                    aiActive={pathTouches(
+                      aiChangedPaths,
+                      `/cards/${cards.findIndex((card) => card.id === activeCard.id)}/variant`,
+                    )}
+                  >
                     <select
                       value={activeCard.variant ?? "basic"}
                       onChange={(event) => {
@@ -9102,7 +9315,13 @@ function FlashcardStudio({
                       <option value="image_occlusion">Image occlusion</option>
                     </select>
                   </Field>
-                  <Field label="Difficulty">
+                  <Field
+                    label="Difficulty"
+                    aiActive={pathTouches(
+                      aiChangedPaths,
+                      `/cards/${cards.findIndex((card) => card.id === activeCard.id)}/difficulty`,
+                    )}
+                  >
                     <select
                       value={activeCard.difficulty ?? "medium"}
                       onChange={(event) =>
@@ -9118,7 +9337,13 @@ function FlashcardStudio({
                       <option value="hard">Hard</option>
                     </select>
                   </Field>
-                  <Field label="Confidence">
+                  <Field
+                    label="Confidence"
+                    aiActive={pathTouches(
+                      aiChangedPaths,
+                      `/cards/${cards.findIndex((card) => card.id === activeCard.id)}/confidence`,
+                    )}
+                  >
                     <select
                       value={activeCard.confidence ?? "unknown"}
                       onChange={(event) =>
@@ -9347,7 +9572,7 @@ function FlashcardStudio({
                 <button
                   type="button"
                   onClick={() => {
-                    const baseline = cardEditBaselineRef.current;
+                    const baseline = cardEditBaseline;
                     if (!baseline || baseline.id !== activeCard.id) return;
                     commit(
                       cards.map((card) =>
@@ -9373,6 +9598,8 @@ function FlashcardStudio({
           aria-label="Private flashcard study session"
           onKeyDown={(event) => {
             if (event.key === "Escape") {
+              event.preventDefault();
+              event.stopPropagation();
               setStudyOpen(false);
               return;
             }
@@ -10529,7 +10756,7 @@ function QuizStudio({
               />
               <button
                 type="button"
-                className="sr-only"
+                className={smallActionClass()}
                 disabled={quizImporting}
                 onClick={() => quizImportRef.current?.click()}
               >
@@ -10538,11 +10765,11 @@ function QuizStudio({
                 ) : (
                   <Import className="h-3.5 w-3.5" />
                 )}
-                <span className="hidden xl:inline">Import</span>
+                Import
               </button>
             </>
           ) : null}
-          <details className="spectra-quiz-export-menu relative sr-only">
+          <details className="spectra-quiz-export-menu relative">
             <summary className={smallActionClass()}>
               <FileDown className="h-3.5 w-3.5" />
               <span className="hidden xl:inline">Export</span>
@@ -11004,8 +11231,8 @@ function QuizStudio({
                     />
                   )}
                 </div>
-                {submitted ||
-                revealedPracticeResultByQuestion.has(question.id) ? (
+                {revealedPracticeResultByQuestion.has(question.id) ||
+                (submitted && !readOnly && !practiceAttempt) ? (
                   <div className="mt-3 border-t border-[var(--border-subtle)] pt-3 text-[11px] leading-5 text-[var(--text-secondary)]">
                     <div>
                       <strong className="text-[var(--text-primary)]">
@@ -11428,10 +11655,9 @@ function QuizStudio({
                       : "border-[var(--border-default)] bg-[var(--bg-primary)] hover:bg-[var(--bg-hover)]"
                   }`}
                   onClick={() => setActiveQuestionId(question.id)}
-                  data-ai-region={
-                    pathTouches(aiChangedPaths, `/questions/${index}`) ||
-                    undefined
-                  }
+                  data-ai-region={aiRegionAttr(
+                    pathTouches(aiChangedPaths, `/questions/${index}`),
+                  )}
                 >
                   <span className="rounded-[6px] border border-[var(--border-default)] py-1 text-center text-[12px] text-[var(--text-secondary)]">
                     {index + 1}
@@ -11468,14 +11694,6 @@ function QuizStudio({
           </aside>
           <section
             data-quiz-panel="editor"
-            data-ai-region={
-              activeQuestion
-                ? pathTouches(
-                    aiChangedPaths,
-                    `/questions/${questions.findIndex((question) => question.id === activeQuestion.id)}`,
-                  ) || undefined
-                : undefined
-            }
             className={`min-w-0 ${mode === "tab" ? "border-r" : "border-b"} border-[var(--border-default)] p-4`}
           >
             {activeQuestion ? (
@@ -11487,6 +11705,10 @@ function QuizStudio({
                   ) + 1
                 }
                 questionCount={questions.length}
+                questionIndex={questions.findIndex(
+                  (question) => question.id === activeQuestion.id,
+                )}
+                aiChangedPaths={aiChangedPaths}
                 onChange={(patch) => updateQuestion(activeQuestion.id, patch)}
                 onRemove={() => void removeQuestion(activeQuestion.id)}
                 onDuplicate={() => {
@@ -11507,7 +11729,13 @@ function QuizStudio({
           <aside data-quiz-panel="settings" className="p-3">
             {activeQuestion ? (
               <div className="grid gap-3">
-                <Field label="Difficulty">
+                <Field
+                  label="Difficulty"
+                  aiActive={pathTouches(
+                    aiChangedPaths,
+                    `/questions/${questions.findIndex((question) => question.id === activeQuestion.id)}/difficulty`,
+                  )}
+                >
                   <select
                     value={activeQuestion.difficulty ?? "medium"}
                     onChange={(event) =>
@@ -11523,7 +11751,13 @@ function QuizStudio({
                     <option value="hard">Hard</option>
                   </select>
                 </Field>
-                <Field label="Points">
+                <Field
+                  label="Points"
+                  aiActive={pathTouches(
+                    aiChangedPaths,
+                    `/questions/${questions.findIndex((question) => question.id === activeQuestion.id)}/points`,
+                  )}
+                >
                   <input
                     type="number"
                     value={activeQuestion.points ?? 1}
@@ -11849,7 +12083,10 @@ function PlannerDescriptionEditor({
   const contentKeyRef = useRef(plannerDescriptionHtml(value));
   const [linkOpen, setLinkOpen] = useState(false);
   const [linkDraft, setLinkDraft] = useState("https://");
-  onChangeRef.current = onChange;
+  const [initialContent] = useState(() => plannerDescriptionHtml(value));
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ link: false, underline: false }),
@@ -11857,7 +12094,7 @@ function PlannerDescriptionEditor({
       TiptapLink.configure({ openOnClick: false, autolink: true }),
       Placeholder.configure({ placeholder: "What needs to happen?" }),
     ],
-    content: contentKeyRef.current,
+    content: initialContent,
     editable: !disabled,
     immediatelyRender: false,
     editorProps: {
@@ -13257,6 +13494,8 @@ function QuestionEditor({
   question,
   questionNumber,
   questionCount,
+  questionIndex,
+  aiChangedPaths = [],
   onChange,
   onRemove,
   onDuplicate,
@@ -13264,11 +13503,16 @@ function QuestionEditor({
   question: QuizQuestion;
   questionNumber: number;
   questionCount: number;
+  questionIndex: number;
+  aiChangedPaths?: string[];
   onChange: (patch: Partial<QuizQuestion>) => void;
   onRemove: () => void;
   onDuplicate: () => void;
 }) {
   const [tagDraft, setTagDraft] = useState("");
+  const qPath = `/questions/${questionIndex}`;
+  const aiField = (suffix: string) =>
+    pathTouches(aiChangedPaths, `${qPath}/${suffix}`);
 
   function addTag() {
     const tag = tagDraft.trim().replace(/^#+/, "");
@@ -13321,6 +13565,7 @@ function QuestionEditor({
         <span>Type</span>
         <select
           value={question.type}
+          data-ai-region={aiRegionAttr(aiField("type"))}
           onChange={(event) => {
             const type = event.target.value as QuizQuestion["type"];
             onChange({
@@ -13382,6 +13627,7 @@ function QuestionEditor({
             <textarea
               value={question.prompt}
               onChange={(event) => onChange({ prompt: event.target.value })}
+              data-ai-region={aiRegionAttr(aiField("prompt"))}
               className="min-h-[58px] w-full resize-none bg-transparent px-3 py-2 text-[12px] leading-5 text-[var(--text-primary)] outline-none"
               placeholder="Write a clear question"
             />
@@ -13450,6 +13696,7 @@ function QuestionEditor({
                 <input
                   value={option}
                   onChange={(event) => updateOption(index, event.target.value)}
+                  data-ai-region={aiRegionAttr(aiField(`options/${index}`))}
                   className={inputClass()}
                   placeholder={`Option ${index + 1}`}
                 />
@@ -13575,12 +13822,37 @@ function QuestionEditor({
               </button>
             ) : null}
           </div>
-          <p className="mt-2 text-[9px] text-[var(--text-tertiary)]">
+          {question.type !== "ordering" && question.type !== "select_all" ? (
+            <label className="mt-3 block">
+              <span className="mb-1.5 block text-[12px] font-semibold text-[var(--text-secondary)]">
+                Correct answer
+              </span>
+              <select
+                value={question.correctAnswer ?? ""}
+                onChange={(event) =>
+                  onChange({ correctAnswer: event.target.value })
+                }
+                data-ai-region={aiRegionAttr(aiField("correctAnswer"))}
+                className="h-9 w-full rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 text-[13px] text-[var(--text-primary)] outline-none"
+                aria-label="Correct answer"
+              >
+                <option value="">Select the correct option</option>
+                {question.options
+                  .filter((option) => option.trim())
+                  .map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+              </select>
+            </label>
+          ) : null}
+          <p className="mt-2 text-[11px] text-[var(--text-tertiary)]">
             {question.type === "ordering"
               ? "The order shown above is the canonical answer."
               : question.type === "select_all"
-                ? "Select every correct option using the single marker beside it."
-                : "Mark the one correct option using the circle beside it."}
+                ? "Select every correct option using the marker beside it."
+                : "Use the markers beside options or the Correct answer control."}
           </p>
         </section>
       ) : question.type === "matching" ? (
@@ -13622,6 +13894,10 @@ function QuestionEditor({
                       ),
                     })
                   }
+                  data-ai-region={aiRegionAttr(
+                    aiField(`matchingPairs/${index}/left`) ||
+                      aiField(`matchingPairs/${index}`),
+                  )}
                   className={inputClass()}
                   placeholder={`Prompt ${index + 1}`}
                 />
@@ -13640,6 +13916,10 @@ function QuestionEditor({
                       ),
                     })
                   }
+                  data-ai-region={aiRegionAttr(
+                    aiField(`matchingPairs/${index}/right`) ||
+                      aiField(`matchingPairs/${index}`),
+                  )}
                   className={inputClass()}
                   placeholder={`Match ${index + 1}`}
                 />
@@ -13668,7 +13948,7 @@ function QuestionEditor({
         </section>
       ) : question.type === "long_response" ? (
         <div className="mt-4">
-          <Field label="Formative rubric / review guidance">
+          <Field label="Formative rubric / review guidance" aiActive={aiField("rubric")}>
             <textarea
               value={question.rubric ?? ""}
               onChange={(event) => onChange({ rubric: event.target.value })}
@@ -13683,7 +13963,7 @@ function QuestionEditor({
         </div>
       ) : question.type === "numeric" ? (
         <div className="mt-4 grid gap-3 md:grid-cols-2">
-          <Field label="Expected number">
+          <Field label="Expected number" aiActive={aiField("correctAnswer")}>
             <input
               type="number"
               value={question.correctAnswer ?? ""}
@@ -13694,7 +13974,7 @@ function QuestionEditor({
               placeholder="42"
             />
           </Field>
-          <Field label="Accepted tolerance (±)">
+          <Field label="Accepted tolerance (±)" aiActive={aiField("numericTolerance")}>
             <input
               type="number"
               min={0}
@@ -13721,6 +14001,7 @@ function QuestionEditor({
                 ? "Primary accepted answer"
                 : "Expected answer"
             }
+            aiActive={aiField("correctAnswer")}
           >
             <input
               value={question.correctAnswer ?? ""}
@@ -13737,7 +14018,7 @@ function QuestionEditor({
           </Field>
           {question.type === "fill_blank" ? (
             <div className="mt-3">
-              <Field label="Other accepted answers">
+              <Field label="Other accepted answers" aiActive={aiField("correctAnswers")}>
                 <input
                   value={(question.correctAnswers ?? []).join("; ")}
                   onChange={(event) =>
@@ -13757,7 +14038,7 @@ function QuestionEditor({
         </div>
       )}
       <div className="mt-4">
-        <Field label="Explanation">
+        <Field label="Explanation" aiActive={aiField("explanation")}>
           <textarea
             value={question.explanation ?? ""}
             onChange={(event) => onChange({ explanation: event.target.value })}
@@ -13767,7 +14048,7 @@ function QuestionEditor({
         </Field>
       </div>
       <div className="mt-4">
-        <Field label="Tags / topics">
+        <Field label="Tags / topics" aiActive={aiField("tags")}>
           <div className="spectra-quiz-tag-editor">
             {(question.tags ?? []).map((tag) => (
               <span key={tag}>
@@ -13803,7 +14084,7 @@ function QuestionEditor({
           <ChevronDown className="ml-auto h-3.5 w-3.5" />
         </summary>
         <div className="grid gap-4 pt-3">
-          <Field label="Formative feedback / next step">
+          <Field label="Formative feedback / next step" aiActive={aiField("feedback")}>
             <textarea
               value={question.feedback ?? ""}
               onChange={(event) => onChange({ feedback: event.target.value })}
@@ -13811,7 +14092,7 @@ function QuestionEditor({
               placeholder="Offer a useful next step without turning practice into a grade."
             />
           </Field>
-          <Field label="Sources / provenance">
+          <Field label="Sources / provenance" aiActive={aiField("sourceRefs")}>
             <input
               value={(question.sourceRefs ?? []).join(", ")}
               onChange={(event) =>
@@ -13870,9 +14151,6 @@ function TaskListEditor({
           <div
             key={subtask.id}
             className="grid grid-cols-[32px_minmax(0,1fr)_34px] items-center gap-2 border-b border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 last:border-b-0"
-            data-ai-region={
-              pathTouches(aiChangedPaths, `/subtasks/${index}`) || undefined
-            }
           >
             <button
               type="button"
@@ -13885,6 +14163,10 @@ function TaskListEditor({
                     : `Mark ${subtask.title || "subtask"} complete`
               }
               className="text-[var(--text-secondary)] disabled:opacity-35"
+              data-ai-region={aiRegionAttr(
+                pathTouches(aiChangedPaths, `/subtasks/${index}/done`) ||
+                  pathTouches(aiChangedPaths, `/subtasks/${index}`),
+              )}
               onClick={() =>
                 commit({
                   ...task,
@@ -13923,6 +14205,10 @@ function TaskListEditor({
                         ),
                 })
               }
+              data-ai-region={aiRegionAttr(
+                pathTouches(aiChangedPaths, `/subtasks/${index}/title`) ||
+                  pathTouches(aiChangedPaths, `/subtasks/${index}`),
+              )}
               className="h-8 bg-transparent text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
               placeholder="Add the first subtask"
               aria-label="Subtask"
@@ -14918,6 +15204,8 @@ function CardFace({
   clozeMode = false,
   noteValue,
   onNoteChange,
+  aiActive = false,
+  aiNoteActive = false,
 }: {
   label: string;
   value: string;
@@ -14926,6 +15214,8 @@ function CardFace({
   clozeMode?: boolean;
   noteValue?: string;
   onNoteChange?: (value: string) => void;
+  aiActive?: boolean;
+  aiNoteActive?: boolean;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -14976,6 +15266,7 @@ function CardFace({
           ref={textareaRef}
           value={value}
           onChange={(event) => onChange(event.target.value)}
+          data-ai-region={aiRegionAttr(aiActive)}
           className="min-h-[180px] w-full resize-none rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-6 py-8 text-center font-serif text-[24px] leading-snug text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[color-mix(in_oklab,#8b6ff0_55%,var(--border-default))]"
           placeholder={placeholder}
         />
@@ -14983,6 +15274,7 @@ function CardFace({
           <input
             value={noteValue ?? ""}
             onChange={(event) => onNoteChange(event.target.value)}
+            data-ai-region={aiRegionAttr(aiNoteActive)}
             className="spectra-card-face-note"
             placeholder="Add a note (optional)"
             aria-label="Note or hint"
@@ -15014,6 +15306,8 @@ function SideCard({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
+const AI_FORM_CONTROL_TAGS = new Set(["input", "textarea", "select", "button"]);
+
 function Field({
   label,
   children,
@@ -15023,15 +15317,42 @@ function Field({
   children: ReactNode;
   aiActive?: boolean;
 }) {
+  let markedControl = false;
+  let control: ReactNode = children;
+  if (aiActive && isValidElement(children)) {
+    const type = children.type;
+    if (typeof type === "string" && AI_FORM_CONTROL_TAGS.has(type)) {
+      markedControl = true;
+      control = cloneElement(
+        children as ReactElement<Record<string, unknown>>,
+        { "data-ai-region": true },
+      );
+    } else if (
+      Children.count(children) === 1 &&
+      isValidElement(Children.only(children))
+    ) {
+      const only = Children.only(children) as ReactElement;
+      if (
+        typeof only.type === "string" &&
+        AI_FORM_CONTROL_TAGS.has(only.type)
+      ) {
+        markedControl = true;
+        control = cloneElement(
+          only as ReactElement<Record<string, unknown>>,
+          { "data-ai-region": true },
+        );
+      }
+    }
+  }
   return (
     <label
       className="block rounded-[8px]"
-      data-ai-region={aiActive || undefined}
+      data-ai-region={aiRegionAttr(aiActive && !markedControl)}
     >
       <span className="mb-1.5 block text-[12px] font-semibold text-[var(--text-secondary)]">
         {label}
       </span>
-      {children}
+      {control}
     </label>
   );
 }

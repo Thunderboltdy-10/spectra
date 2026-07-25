@@ -613,7 +613,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   return withRouteErrorHandling(async () => {
-    const actor = await requireActor();
+    const _actor = await requireActor();
     const body = (await request.json()) as Record<string, unknown>;
     const action = requireString(body.action, "action");
 
@@ -720,6 +720,7 @@ export async function POST(request: NextRequest) {
     if (action === "selectRunTab") {
       const result = await spectraMutation("spectraRuns:selectTab", {
         runId: optionalString(body.runId),
+        threadId: optionalString(body.threadId),
       });
       return ok(result);
     }

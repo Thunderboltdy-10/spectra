@@ -7,6 +7,10 @@ import {
   defaultArtifactContent,
   defaultArtifactSchemaVersion,
   fallbackArtifactSummary,
+  finalizeArtifactSummary,
+  hollowFinalizeFailureMessage,
+  isHollowDefaultContent,
+  isPlaceholderBuildingSummary,
   normalizeArtifactId,
   requireArtifactCapability,
   requireWorkspaceCapability,
@@ -44,10 +48,63 @@ function contentForArtifactStorage(typeKey: string, content: unknown) {
     : content;
 }
 
+const AI_EDITED_FLASH_MS = 12_000;
+
 function currentAiEffects(artifact: Doc<"spectraArtifacts">, now = Date.now()) {
   return (artifact.aiEffects ?? []).filter(
     (effect) => !effect.expiresAt || effect.expiresAt > now,
   );
+}
+
+function effectsForRun(
+  artifact: Doc<"spectraArtifacts">,
+  runId: Id<"spectraAiRuns">,
+  executionId: string,
+  now = Date.now(),
+) {
+  return currentAiEffects(artifact, now).filter(
+    (effect) =>
+      effect.runId === runId && effect.executionId === executionId,
+  );
+}
+
+function effectsExcludingRun(
+  artifact: Doc<"spectraArtifacts">,
+  runId: Id<"spectraAiRuns">,
+  executionId: string,
+  now = Date.now(),
+) {
+  return currentAiEffects(artifact, now).filter(
+    (effect) =>
+      effect.runId !== runId || effect.executionId !== executionId,
+  );
+}
+
+function toSettlingEffects(
+  effects: NonNullable<Doc<"spectraArtifacts">["aiEffects"]>,
+  now: number,
+  expiresAt: number,
+) {
+  return effects.map((effect) => ({
+    ...effect,
+    state: "settling" as const,
+    expiresAt,
+    updatedAt: now,
+  }));
+}
+
+function previewChangedPathsOnly(
+  preview: Doc<"spectraArtifacts">["aiPreview"],
+  fallbackPaths?: string[],
+) {
+  const changedPaths =
+    preview?.changedPaths?.filter(Boolean).slice(0, 256) ??
+    fallbackPaths?.filter(Boolean).slice(0, 256);
+  if (!changedPaths?.length) return undefined;
+  return {
+    changedPaths,
+    startedAt: preview?.startedAt ?? Date.now(),
+  };
 }
 
 function versionSnapshotStrategy(typeKey: string): SnapshotStrategy {
@@ -1030,7 +1087,7 @@ export const manageAgentRelease = mutation({
 export const agentResourceHealth = query({
   args: { agentId: v.id("spectraArtifacts") },
   handler: async (ctx, args) => {
-    const { actor, artifact } = await requireArtifactCapability(
+    const { actor: _actor, artifact } = await requireArtifactCapability(
       ctx,
       args.agentId,
       "modify",
@@ -1663,6 +1720,7 @@ export const finalizePendingLive = mutation({
     artifactId: v.id("spectraArtifacts"),
     runId: v.id("spectraAiRuns"),
     executionId: v.string(),
+    summary: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const { actor, artifact } = await requireArtifactCapability(
@@ -1693,16 +1751,43 @@ export const finalizePendingLive = mutation({
       version.runId !== args.runId
     )
       throw new Error("The synchronized AI version is unavailable.");
+    const blueprintKey = artifact.blueprintKey as BlueprintKey;
+    // Never finalize an empty default shell as a completed create — leave it
+    // pending so fail/discard cleanup (or a quiet retry) can remove it.
+    if (isHollowDefaultContent(blueprintKey, artifact.content))
+      throw new Error(hollowFinalizeFailureMessage(blueprintKey));
+    const summary = finalizeArtifactSummary({
+      blueprintKey,
+      title: artifact.title,
+      summary: args.summary?.trim() || artifact.summary,
+      content: artifact.content,
+    });
     const now = Date.now();
+    const expiresAt = now + AI_EDITED_FLASH_MS;
+    const settlingEffects = toSettlingEffects(
+      currentAiEffects(artifact, now),
+      now,
+      expiresAt,
+    );
     await ctx.db.patch(version._id, { summary: "Created with Spectra" });
     await ctx.db.patch(args.artifactId, {
-      aiState: undefined,
+      summary,
+      textIndex: buildArtifactTextIndex({
+        title: artifact.title,
+        summary,
+        content: artifact.content,
+        tags: artifact.tags,
+      }),
+      aiState: "edited",
       aiRunId: undefined,
       aiExecutionId: undefined,
-      aiStateExpiresAt: undefined,
+      aiStateExpiresAt: expiresAt,
       aiProgress: undefined,
-      aiPreview: undefined,
-      aiEffects: undefined,
+      aiPreview: previewChangedPathsOnly(
+        artifact.aiPreview,
+        artifact.blueprintKey === "sheets" ? [] : ["/"],
+      ),
+      aiEffects: settlingEffects.length ? settlingEffects : undefined,
       updatedAt: now,
     });
     const placements = await ctx.db
@@ -1714,7 +1799,7 @@ export const finalizePendingLive = mutation({
     await Promise.all(
       placements.map((placement) =>
         ctx.db.patch(placement._id, {
-          viewData: { ...placement.viewData, compactSummary: artifact.summary },
+          viewData: { ...placement.viewData, compactSummary: summary },
           updatedAt: now,
         }),
       ),
@@ -1824,7 +1909,11 @@ export const patchPendingContent = mutation({
         title,
         summary: args.summary ?? artifact.summary,
         content,
-        changedPaths: ["/"],
+        // Sheets cell grids must stay cell-exact; other creates use "/".
+        changedPaths:
+          artifact.blueprintKey === "sheets"
+            ? (artifact.aiPreview?.changedPaths ?? [])
+            : ["/"],
         startedAt: artifact.aiPreview?.startedAt ?? Date.now(),
       },
       updatedAt: Date.now(),
@@ -1909,10 +1998,26 @@ export const updateAiEffect = mutation({
       changedPaths: [
         ...new Set(
           (
-            args.changedPaths ??
-            previous?.changedPaths ??
-            artifact.aiPreview?.changedPaths ??
-            []
+            (args.changedPaths && args.changedPaths.length > 0
+              ? args.changedPaths
+              : undefined) ??
+            (previous?.changedPaths && previous.changedPaths.length > 0
+              ? previous.changedPaths
+              : undefined) ??
+            (artifact.aiPreview?.changedPaths &&
+            artifact.aiPreview.changedPaths.length > 0
+              ? artifact.aiPreview.changedPaths
+              : undefined) ??
+            // Creating shells often receive progress effects before content
+            // patches; default to whole-artifact so mid-open studios light.
+            // Sheets stay cell-exact (no "/"). Empty arrays must not win over
+            // this fallback via `??`.
+            (artifact.blueprintKey !== "sheets" &&
+            (artifact.aiState === "creating" ||
+              (artifact.createdFrom?.runId === args.runId &&
+                !artifact.currentVersionId))
+              ? ["/"]
+              : [])
           )
             .map((path) => path.trim().slice(0, 500))
             .filter(Boolean),
@@ -1922,13 +2027,11 @@ export const updateAiEffect = mutation({
       startedAt: previous?.startedAt ?? now,
       updatedAt: now,
     };
+    const creating =
+      artifact.aiState === "creating" ||
+      (artifact.createdFrom?.runId === args.runId && !artifact.currentVersionId);
     await ctx.db.patch(args.artifactId, {
-      aiState:
-        artifact.aiState === "creating" ||
-        (artifact.createdFrom?.runId === args.runId &&
-          !artifact.currentVersionId)
-          ? "creating"
-          : "updating",
+      aiState: creating ? "creating" : "updating",
       aiRunId: args.runId,
       aiExecutionId: args.executionId,
       aiEffects: [
@@ -1937,6 +2040,9 @@ export const updateAiEffect = mutation({
       ].slice(-24),
       aiPreview: {
         ...(artifact.aiPreview ?? { startedAt: now }),
+        ...(creating && !(artifact.aiPreview?.changedPaths?.length)
+          ? { changedPaths: nextEffect.changedPaths }
+          : {}),
         effectTitle,
         ...(effectDetail ? { effectDetail } : {}),
         effectActivity: args.activity,
@@ -2131,7 +2237,14 @@ export const failPendingForRun = mutation({
       pending.map(async (artifact) => {
         // A provisional shell with no generated content is not useful work. Do
         // not leave an empty red artifact behind after an internal format error.
-        if ((artifact.aiProgress ?? 0) <= 0.05) {
+        // Also discard shells that only ever received hollow defaults (empty
+        // timetable events, trivial <main></main> code, empty sheets, etc.)
+        // even if progress streamed past the early threshold.
+        const hollowDefaults = isHollowDefaultContent(
+          artifact.blueprintKey,
+          artifact.content,
+        );
+        if ((artifact.aiProgress ?? 0) <= 0.05 || hollowDefaults) {
           const placements = await ctx.db
             .query("spectraWorkspaceItems")
             .withIndex("by_source", (q) =>
@@ -2154,7 +2267,9 @@ export const failPendingForRun = mutation({
           aiPreview: undefined,
           aiEffects: undefined,
           summary:
-            "Incomplete draft preserved from an interrupted Spectra run.",
+            isPlaceholderBuildingSummary(artifact.summary)
+              ? "Incomplete draft preserved from an interrupted Spectra run."
+              : artifact.summary,
           updatedAt: Date.now(),
         });
       }),
@@ -2196,25 +2311,58 @@ export const settleStagedForRun = mutation({
           )),
     );
     const now = Date.now();
+    const expiresAt = now + AI_EDITED_FLASH_MS;
     await Promise.all(
       staged.map((artifact) => {
-        const remainingEffects = currentAiEffects(artifact, now).filter(
-          (effect) =>
-            effect.runId !== args.runId ||
-            effect.executionId !== args.executionId,
+        const remainingEffects = effectsExcludingRun(
+          artifact,
+          args.runId,
+          args.executionId,
+          now,
         );
         const keepCurrentPreview =
           artifact.aiRunId !== args.runId ||
           artifact.aiExecutionId !== args.executionId;
         const latest = remainingEffects.at(-1);
+        if (remainingEffects.length) {
+          return ctx.db.patch(artifact._id, {
+            aiState: "updating",
+            aiRunId: latest?.runId,
+            aiExecutionId: latest?.executionId,
+            aiStateExpiresAt: undefined,
+            aiProgress: artifact.aiProgress,
+            aiPreview: keepCurrentPreview ? artifact.aiPreview : undefined,
+            aiEffects: remainingEffects,
+            updatedAt: now,
+          });
+        }
+        if (args.outcome === "failed") {
+          return ctx.db.patch(artifact._id, {
+            aiState: undefined,
+            aiRunId: undefined,
+            aiExecutionId: undefined,
+            aiStateExpiresAt: undefined,
+            aiProgress: undefined,
+            aiPreview: undefined,
+            aiEffects: undefined,
+            updatedAt: now,
+          });
+        }
+        const settlingEffects = toSettlingEffects(
+          effectsForRun(artifact, args.runId, args.executionId, now),
+          now,
+          expiresAt,
+        );
         return ctx.db.patch(artifact._id, {
-          aiState: remainingEffects.length ? "updating" : undefined,
-          aiRunId: latest?.runId,
-          aiExecutionId: latest?.executionId,
-          aiStateExpiresAt: undefined,
-          aiProgress: remainingEffects.length ? artifact.aiProgress : undefined,
-          aiPreview: keepCurrentPreview ? artifact.aiPreview : undefined,
-          aiEffects: remainingEffects.length ? remainingEffects : undefined,
+          aiState: "edited",
+          aiRunId: undefined,
+          aiExecutionId: undefined,
+          aiStateExpiresAt: expiresAt,
+          aiProgress: undefined,
+          aiPreview: keepCurrentPreview
+            ? artifact.aiPreview
+            : previewChangedPathsOnly(artifact.aiPreview),
+          aiEffects: settlingEffects.length ? settlingEffects : undefined,
           updatedAt: now,
         });
       }),
@@ -2262,11 +2410,40 @@ export const markAiState = mutation({
         aiExecutionId: args.executionId,
         updatedAt: now,
       });
+    } else if (args.state === "edited") {
+      const expiresAt = now + AI_EDITED_FLASH_MS;
+      const remainingEffects = effectsExcludingRun(
+        artifact,
+        args.runId,
+        args.executionId,
+        now,
+      );
+      const settlingEffects = toSettlingEffects(
+        effectsForRun(artifact, args.runId, args.executionId, now),
+        now,
+        expiresAt,
+      );
+      const latest = remainingEffects.at(-1);
+      const nextEffects = [...remainingEffects, ...settlingEffects];
+      await ctx.db.patch(args.artifactId, {
+        aiState: "edited",
+        aiRunId: latest?.runId,
+        aiExecutionId: latest?.executionId,
+        aiStateExpiresAt: expiresAt,
+        aiProgress: remainingEffects.length ? artifact.aiProgress : undefined,
+        aiPreview:
+          artifact.aiRunId === args.runId
+            ? previewChangedPathsOnly(artifact.aiPreview)
+            : artifact.aiPreview,
+        aiEffects: nextEffects.length ? nextEffects : undefined,
+        updatedAt: now,
+      });
     } else {
-      const remainingEffects = currentAiEffects(artifact, now).filter(
-        (effect) =>
-          effect.runId !== args.runId ||
-          effect.executionId !== args.executionId,
+      const remainingEffects = effectsExcludingRun(
+        artifact,
+        args.runId,
+        args.executionId,
+        now,
       );
       const latest = remainingEffects.at(-1);
       await ctx.db.patch(args.artifactId, {

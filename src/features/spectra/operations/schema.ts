@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { normalizeArtifactContent } from "../ai/content-normalization";
 import { validateBlueprintContent } from "../blueprints/registry";
 import { documentContentSchema } from "../blueprints/document";
 import { flashcardDeckContentSchema } from "../blueprints/flashcard-deck";
@@ -13,6 +14,7 @@ import {
   whiteboardContentSchema,
 } from "../artifacts/schemas";
 import { ARTIFACT_TYPE_KEYS } from "../artifacts/types";
+import { coerceCommonPlanSchemaSlips } from "./plan-diagnostics";
 
 export const SPECTRA_BLUEPRINT_KEYS = ARTIFACT_TYPE_KEYS;
 
@@ -453,8 +455,36 @@ export function parseOperationInput(value: unknown) {
   return operationInputSchema.parse(value);
 }
 
+function preprocessModelOperationContent(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const row = value as Record<string, unknown>;
+  if (
+    (row.type !== "artifact.create" && row.type !== "artifact.update") ||
+    !row.input ||
+    typeof row.input !== "object" ||
+    Array.isArray(row.input)
+  )
+    return value;
+  const input = { ...(row.input as Record<string, unknown>) };
+  if (
+    typeof input.blueprintKey === "string" &&
+    (SPECTRA_BLUEPRINT_KEYS as readonly string[]).includes(
+      input.blueprintKey,
+    ) &&
+    input.content != null
+  ) {
+    input.content = normalizeArtifactContent(
+      input.blueprintKey as (typeof SPECTRA_BLUEPRINT_KEYS)[number],
+      input.content,
+    );
+  }
+  return { ...row, input };
+}
+
 export function parseModelOperation(value: unknown) {
-  const operation = modelOperationSchema.parse(value);
+  const operation = modelOperationSchema.parse(
+    preprocessModelOperationContent(value),
+  );
   const serialized = JSON.stringify(operation.input);
   if (serialized.length > 250_000)
     throw new Error("Operation input exceeds the Wave 4 size limit.");
@@ -489,6 +519,23 @@ export function parseModelOperation(value: unknown) {
       content.blocks.length > 300
     )
       throw new Error("A generated document may contain at most 300 blocks.");
+  }
+  if (
+    operation.type === "artifact.update" &&
+    operation.input.content !== null &&
+    operation.input.content !== undefined
+  ) {
+    const validated = validateBlueprintContent(
+      operation.input.blueprintKey,
+      operation.input.content,
+    );
+    if (!validated.success) {
+      const issue = validated.error.issues[0];
+      const path = issue?.path.length ? ` at ${issue.path.join(".")}` : "";
+      throw new Error(
+        `Invalid ${operation.input.blueprintKey} content${path}: ${issue?.message ?? "schema mismatch"}`,
+      );
+    }
   }
   if (
     operation.type === "artifact.update" &&
@@ -558,7 +605,9 @@ function normalizePlanIntentMode(value: unknown) {
 }
 
 export function parseSpectraPlan(value: unknown) {
-  const plan = spectraPlanSchema.parse(normalizePlanIntentMode(value));
+  const plan = spectraPlanSchema.parse(
+    normalizePlanIntentMode(coerceCommonPlanSchemaSlips(value)),
+  );
   return { ...plan, operations: plan.operations.map(parseModelOperation) };
 }
 
@@ -870,6 +919,55 @@ export const SPECTRA_ARTIFACT_CONTENT_JSON_SCHEMAS = {
   code: z.toJSONSchema(codeContentSchema),
   whiteboard: z.toJSONSchema(whiteboardContentSchema),
 } as const;
+
+/**
+ * Create-tool transport schemas add minConstraints so the model must supply
+ * real content. Storage Zod schemas stay permissive for blank manual creates.
+ */
+export function creationToolContentJsonSchema(
+  blueprintKey: (typeof SPECTRA_BLUEPRINT_KEYS)[number],
+) {
+  const base = structuredClone(
+    SPECTRA_ARTIFACT_CONTENT_JSON_SCHEMAS[blueprintKey],
+  ) as Record<string, unknown>;
+  const properties =
+    base.properties &&
+    typeof base.properties === "object" &&
+    !Array.isArray(base.properties)
+      ? (base.properties as Record<string, unknown>)
+      : null;
+  if (!properties) return base;
+  if (blueprintKey === "timetable" && properties.events) {
+    properties.events = {
+      ...(properties.events as object),
+      minItems: 1,
+      description:
+        "Required schedule entries. Never return an empty events array for a timetable create.",
+    };
+  }
+  if (blueprintKey === "code" && properties.files) {
+    properties.files = {
+      ...(properties.files as object),
+      minItems: 1,
+      description:
+        "Required source files. Do not emit a default <main></main> shell — include meaningful HTML/SVG/JS for the requested sketch.",
+    };
+  }
+  if (blueprintKey === "whiteboard" && properties.nodes) {
+    properties.nodes = {
+      ...(properties.nodes as object),
+      minItems: 1,
+      description: "Required canvas nodes for a whiteboard create.",
+    };
+  }
+  if (blueprintKey === "sheets") {
+    // Workbook creates must include at least one sheet with real cell data;
+    // hollow detection enforces non-empty cells at parse/verify time.
+    base.description =
+      "Workbook content with at least one sheet containing real cell values.";
+  }
+  return base;
+}
 
 function artifactCreateVariant(
   blueprintKey: (typeof SPECTRA_BLUEPRINT_KEYS)[number],

@@ -43,7 +43,7 @@ function ProvenanceLine({ card }: { card: ResultCardView }) {
   const hasAgent = Boolean(provenance.agentId && provenance.agentTitle);
   if (!hasSources && !hasAgent) return null;
 
-  async function useOrdinarySpectra() {
+  async function switchToOrdinarySpectra() {
     if (clearingAgent || ordinaryNext) return;
     setClearingAgent(true);
     try {
@@ -63,7 +63,7 @@ function ProvenanceLine({ card }: { card: ResultCardView }) {
       <Bot className="h-3 w-3 shrink-0 text-[var(--accent-cyan)]" />
       <span className="truncate">Using {provenance.agentTitle}</span>
       <span className="text-[9px] text-[var(--text-tertiary)]">{provenance.agentRoutingSource === "continued" ? "retained" : provenance.agentRoutingSource === "explicit" ? "selected" : "auto"}</span>
-      <button type="button" disabled={clearingAgent || ordinaryNext} className="ml-0.5 inline-flex items-center gap-0.5 rounded-[4px] px-1 py-0.5 font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)] disabled:opacity-65" onClick={(event) => { event.stopPropagation(); void useOrdinarySpectra(); }} title="Stop retaining this agent for the thread">
+      <button type="button" disabled={clearingAgent || ordinaryNext} className="ml-0.5 inline-flex items-center gap-0.5 rounded-[4px] px-1 py-0.5 font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)] disabled:opacity-65" onClick={(event) => { event.stopPropagation(); void switchToOrdinarySpectra(); }} title="Stop retaining this agent for the thread">
         {clearingAgent ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : ordinaryNext ? <Check className="h-2.5 w-2.5" /> : <Undo2 className="h-2.5 w-2.5" />}
         {ordinaryNext ? "Ordinary next" : "Use ordinary Spectra"}
       </button>

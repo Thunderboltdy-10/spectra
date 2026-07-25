@@ -23,7 +23,10 @@ describe("withRouteErrorHandling", () => {
   it("logs the actual status for intentional non-200 responses", async () => {
     const request = {
       method: "POST",
-      nextUrl: { pathname: "/api/demo" },
+      nextUrl: {
+        pathname: "/api/demo",
+        searchParams: { get: () => null },
+      },
     };
     const logSpy = vi.spyOn(logging, "logAPIResponse").mockImplementation(() => undefined);
 

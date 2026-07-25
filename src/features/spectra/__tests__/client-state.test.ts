@@ -83,6 +83,28 @@ describe("canonical Spectra client state", () => {
     expect(next.explicit).toEqual([{ type: "artifact", id: "gone", label: "Gone artifact", source: "explicit", stale: true }]);
   });
 
+  it("keeps a just-opened live thread panel while the thread index is still catching up", () => {
+    const state = contextStore.getState();
+    state.openObject({
+      type: "thread",
+      id: "brand-new-thread",
+      label: "Current conversation",
+      presentation: "thread-panel",
+    });
+    state.reconcile([
+      { type: "artifact", id: "doc-a", label: "Document" },
+      { type: "thread", id: "older-thread", label: "Older chat" },
+    ]);
+    expect(contextStore.getState().openObjects).toEqual([
+      {
+        type: "thread",
+        id: "brand-new-thread",
+        label: "Current conversation",
+        presentation: "thread-panel",
+      },
+    ]);
+  });
+
   it("closes tile presentation atomically without leaving layout state behind", () => {
     contextStore.getState().setTileObjects([
       { type: "artifact", id: "a", label: "A", presentation: "tile" },

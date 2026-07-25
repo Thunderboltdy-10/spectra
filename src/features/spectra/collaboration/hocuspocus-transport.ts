@@ -260,6 +260,20 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
             error: revoked ? reason || "Access was removed." : undefined,
           });
         },
+        onStateless: ({ payload }) => {
+          try {
+            const message = JSON.parse(payload) as { type?: string };
+            if (message?.type !== "spectra.permission_changed") return;
+            this.update({
+              state: "permission_lost",
+              error: "Access was removed.",
+              level: "read",
+            });
+            this.provider?.disconnect();
+          } catch {
+            // Ignore malformed stateless payloads from the gateway.
+          }
+        },
         onDisconnect: ({ event }) => {
           const revoked =
             event.code === 4403 && authenticationActuallyRevoked(event.reason);

@@ -128,7 +128,7 @@ export function evaluatePlanPolicy(
         ? content.resourceBindings
         : [];
     if (
-      bindings.length ||
+      bindings.length > 0 ||
       patchPaths.some((path) => path.startsWith("/resourceBindings"))
     ) {
       reasons.push("Approve new or changed permissioned runtime resources");
@@ -145,8 +145,17 @@ export function evaluatePlanPolicy(
     ) {
       reasons.push("Approve a Code network-policy change");
     }
+    // normalizeCodeContent always materializes `dependencies: {}`. An empty
+    // map is not a consequential dependency change and must not pause a
+    // successful single-artifact create behind Apply changes.
+    const dependencyEntries =
+      content?.dependencies &&
+      typeof content.dependencies === "object" &&
+      !Array.isArray(content.dependencies)
+        ? Object.keys(content.dependencies as Record<string, unknown>)
+        : [];
     if (
-      (content?.dependencies && typeof content.dependencies === "object") ||
+      dependencyEntries.length > 0 ||
       patchPaths.some((path) => path.startsWith("/dependencies"))
     ) {
       reasons.push("Review Code dependency changes");

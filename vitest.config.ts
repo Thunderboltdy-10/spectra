@@ -10,6 +10,8 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "src"),
+      // Vitest runs in Node without Next's react-server condition mapping.
+      "server-only": path.resolve(__dirname, "src/test/server-only-shim.ts"),
     },
   },
 });

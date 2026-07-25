@@ -35,6 +35,7 @@ import {
   Maximize2,
   MoreHorizontal,
   PanelBottom,
+  Pencil,
   Play,
   RefreshCw,
   Search,
@@ -115,6 +116,7 @@ import {
   SandboxedArtifactRuntime,
   type SpectraRuntimeStatus,
 } from "./sandboxed-artifact-runtime";
+import { aiRegionAttr, pathTouches } from "./ai-region-path";
 
 type CodeProblem = {
   id: string;
@@ -542,10 +544,9 @@ export function CodeStudio({
   const activeIndex = workbook.files.findIndex(
     (file) => file.id === activeFile.id,
   );
-  const activeAiEffect = aiChangedPaths.some(
-    (path) =>
-      path === `/files/${activeIndex}` ||
-      path.startsWith(`/files/${activeIndex}/`),
+  const activeAiEffect = pathTouches(
+    aiChangedPaths,
+    `/files/${activeIndex}`,
   );
   const sourceBytes = useMemo(
     () =>
@@ -2776,15 +2777,14 @@ export function CodeStudio({
                           const fileIndex = workbook.files.findIndex(
                             (candidate) => candidate.id === file.id,
                           );
-                          const fileHasAiEffect = aiChangedPaths.some(
-                            (path) =>
-                              path === `/files/${fileIndex}` ||
-                              path.startsWith(`/files/${fileIndex}/`),
+                          const fileHasAiEffect = pathTouches(
+                            aiChangedPaths,
+                            `/files/${fileIndex}`,
                           );
                           return (
                             <div
                               key={file.id}
-                              data-ai-region={fileHasAiEffect || undefined}
+                              data-ai-region={aiRegionAttr(fileHasAiEffect)}
                               className={`group flex min-h-7 items-center gap-1.5 rounded-[6px] px-1.5 text-[9px] ${selected ? "bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-[0_1px_4px_rgba(30,25,20,.06)]" : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}
                             >
                               <button
@@ -2831,8 +2831,9 @@ export function CodeStudio({
                                     setRenameDraft(file.path);
                                   }}
                                   aria-label={`Rename ${file.path}`}
+                                  title={`Rename ${file.path}`}
                                 >
-                                  <MoreHorizontal className="h-3 w-3" />
+                                  <Pencil className="h-3 w-3" />
                                 </button>
                               ) : null}
                             </div>
@@ -2891,7 +2892,7 @@ export function CodeStudio({
                   </aside>
                   <div
                     className="relative min-h-[520px] min-w-0 overflow-hidden bg-[var(--bg-primary)]"
-                    data-ai-region={activeAiEffect || undefined}
+                    data-ai-region={aiRegionAttr(activeAiEffect)}
                   >
                     <CodeMirror
                       value={activeFile.source}
@@ -3224,15 +3225,14 @@ function CodeParameterPanel({
         </div>
         <div className="mt-3 space-y-2.5">
           {parameters.map((parameter, index) => {
-            const activeEffect = aiChangedPaths.some(
-              (path) =>
-                path === `/parameters/${index}` ||
-                path.startsWith(`/parameters/${index}/`),
+            const activeEffect = pathTouches(
+              aiChangedPaths,
+              `/parameters/${index}`,
             );
             return (
               <section
                 key={parameter.id}
-                data-ai-region={activeEffect || undefined}
+                data-ai-region={aiRegionAttr(activeEffect)}
                 className="rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3"
                 onFocusCapture={() => onActiveRegionChange?.(parameter.id)}
               >

@@ -1075,7 +1075,10 @@ export const hideTab = mutation({
 });
 
 export const selectTab = mutation({
-  args: { runId: v.optional(v.id("spectraAiRuns")) },
+  args: {
+    runId: v.optional(v.id("spectraAiRuns")),
+    threadId: v.optional(v.id("spectraThreads")),
+  },
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx);
     const tabs = await ctx.db
@@ -1083,15 +1086,94 @@ export const selectTab = mutation({
       .withIndex("by_account_updated", (q) => q.eq("ownerAccountId", actor._id))
       .collect();
     const now = Date.now();
-    let selected = false;
-    for (const tab of tabs) {
-      if (tab.schoolId !== actor.schoolId || tab.hiddenAt) continue;
-      const next = Boolean(args.runId && tab.runId === args.runId);
-      if (tab.selected !== next)
-        await ctx.db.patch(tab._id, { selected: next, updatedAt: now });
-      selected ||= next;
+    const schoolTabs = tabs.filter(
+      (tab) => !tab.schoolId || tab.schoolId === actor.schoolId,
+    );
+    let targetRunId = args.runId;
+    let targetThreadId = args.threadId;
+
+    if (args.threadId) {
+      const thread = await ctx.db.get(args.threadId);
+      if (!thread || thread.schoolId !== actor.schoolId)
+        throw new Error("That conversation is not available.");
+      targetThreadId = thread._id;
+      const forThread = schoolTabs
+        .filter((tab) => tab.threadId === thread._id)
+        .sort((a, b) => b.updatedAt - a.updatedAt);
+      // Prefer an existing tab's run, then the thread's last run, then the
+      // explicitly requested runId.
+      targetRunId =
+        forThread[0]?.runId ?? thread.lastRunId ?? args.runId ?? targetRunId;
     }
-    return { runId: args.runId, selected };
+
+    if (targetRunId && !targetThreadId) {
+      const run = await ctx.db.get(targetRunId);
+      if (!run || run.schoolId !== actor.schoolId)
+        throw new Error("That run is not available.");
+      targetThreadId = run.threadId;
+    }
+
+    if (!targetRunId || !targetThreadId)
+      throw new Error("This conversation has no run to continue yet.");
+
+    let selected = false;
+    const threadTabs = schoolTabs
+      .filter((tab) => tab.threadId === targetThreadId)
+      .sort((a, b) => b.updatedAt - a.updatedAt);
+    const canonical = threadTabs[0];
+
+    for (const tab of schoolTabs) {
+      if (canonical && tab._id === canonical._id) {
+        await ctx.db.patch(tab._id, {
+          runId: targetRunId,
+          selected: true,
+          hiddenAt: undefined,
+          updatedAt: now,
+        });
+        selected = true;
+        continue;
+      }
+      if (tab.threadId === targetThreadId) {
+        // Collapse duplicate tabs for the same thread.
+        await ctx.db.patch(tab._id, {
+          selected: false,
+          hiddenAt: now,
+          updatedAt: now,
+        });
+        continue;
+      }
+      if (tab.selected)
+        await ctx.db.patch(tab._id, {
+          selected: false,
+          updatedAt: now,
+        });
+    }
+
+    if (!selected) {
+      const run = await ctx.db.get(targetRunId);
+      if (!run || run.schoolId !== actor.schoolId)
+        throw new Error("That run is not available.");
+      const surface =
+        run.sourceSurface === "chat" ||
+        run.sourceSurface === "workspace" ||
+        run.sourceSurface === "artifact"
+          ? run.sourceSurface
+          : "workspace";
+      await ctx.db.insert("spectraRunTabs", {
+        ownerAccountId: actor._id,
+        schoolId: actor.schoolId,
+        runId: targetRunId,
+        threadId: targetThreadId,
+        workspaceId: run.workspaceId,
+        surface,
+        selected: true,
+        createdAt: now,
+        updatedAt: now,
+      });
+      selected = true;
+    }
+
+    return { runId: targetRunId, threadId: targetThreadId, selected };
   },
 });
 

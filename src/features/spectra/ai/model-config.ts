@@ -1,8 +1,27 @@
-export const SPECTRA_DEFAULT_MODEL_ID = "xiaomi/mimo-v2.5-pro";
+export const SPECTRA_DEFAULT_MODEL_ID = "deepseek/deepseek-v4-pro";
+/**
+ * Vision is handled by MiMo V2.5 (Xiaomi). DeepSeek V4 Pro has no reliable
+ * OpenRouter vision route through the native DeepSeek provider, so image
+ * attachments are analysed by MiMo first; the text evidence packet is then
+ * passed into the DeepSeek planning turn.
+ */
 export const SPECTRA_DEFAULT_VISION_MODEL_ID = "xiaomi/mimo-v2.5";
-export const SPECTRA_PRIMARY_PROVIDER = "Xiaomi" as const;
-export const SPECTRA_FALLBACK_PROVIDERS = ["AtlasCloud"] as const;
-export const SPECTRA_BLOCKED_PROVIDERS = ["DigitalOcean", "DeepInfra"] as const;
+/** OpenRouter native provider slug for DeepSeek (must match provider.order/only). */
+export const SPECTRA_PRIMARY_PROVIDER = "deepseek" as const;
+/** OpenRouter provider slug for Spectra vision evidence (MiMo). */
+export const SPECTRA_VISION_PROVIDER = "Xiaomi" as const;
+/**
+ * Emergency-only recovery routes for the same DeepSeek model id.
+ * A fallback firing during normal acceptance tests is a defect to diagnose —
+ * these routes must never mask primary DeepSeek provider failures.
+ */
+export const SPECTRA_FALLBACK_PROVIDERS = [
+  "baidu",
+  "streamlake",
+  "deepinfra",
+] as const;
+/** Providers never eligible for Spectra production traffic. */
+export const SPECTRA_BLOCKED_PROVIDERS = ["DigitalOcean"] as const;
 
 function modelIdFromEnvironment(name: string, fallback: string) {
   const value = process.env[name]?.trim();
@@ -22,33 +41,34 @@ export function getSpectraVisionModelId() {
   );
 }
 
-// The native Xiaomi route is kept stable for cache locality. AtlasCloud is
-// used only after a genuine transport/provider failure and serves the exact
-// same model. Expensive endpoints remain explicitly excluded as a second
-// guard even though `only` already restricts the eligible route.
+/**
+ * Primary calls are restricted to the native DeepSeek OpenRouter route.
+ * Fallback mode lists emergency providers that still serve the configured
+ * DeepSeek model id after a genuine primary transport/provider failure.
+ */
 export function getSpectraProviderRouting(
   mode: "primary" | "fallback" = "primary",
 ) {
-  const providers =
-    mode === "fallback"
-      ? [...SPECTRA_FALLBACK_PROVIDERS]
-      : [SPECTRA_PRIMARY_PROVIDER];
+  if (mode === "fallback") {
+    return {
+      order: [...SPECTRA_FALLBACK_PROVIDERS],
+      only: [...SPECTRA_FALLBACK_PROVIDERS],
+      allow_fallbacks: true,
+      require_parameters: true,
+    } as const;
+  }
   return {
-    order: providers,
-    only: providers,
-    ignore: [...SPECTRA_BLOCKED_PROVIDERS],
+    order: [SPECTRA_PRIMARY_PROVIDER],
+    only: [SPECTRA_PRIMARY_PROVIDER],
     allow_fallbacks: false,
-    require_parameters: true,
   } as const;
 }
 
 export function getSpectraVisionProviderRouting() {
   return {
-    order: [SPECTRA_PRIMARY_PROVIDER],
-    only: [SPECTRA_PRIMARY_PROVIDER],
-    ignore: [...SPECTRA_BLOCKED_PROVIDERS],
+    order: [SPECTRA_VISION_PROVIDER],
+    only: [SPECTRA_VISION_PROVIDER],
     allow_fallbacks: false,
-    require_parameters: true,
   } as const;
 }
 
@@ -64,15 +84,12 @@ export function assertPrimarySpectraRouting(
     routing.order[0] !== SPECTRA_PRIMARY_PROVIDER ||
     routing.only[0] !== SPECTRA_PRIMARY_PROVIDER ||
     routing.only.length !== 1 ||
-    routing.allow_fallbacks !== false ||
-    SPECTRA_BLOCKED_PROVIDERS.some(
-      (provider) => !routing.ignore.includes(provider),
-    )
+    routing.allow_fallbacks !== false
   )
     throw new Error(
-      "Spectra primary requests must use the configured native provider and exclude blocked endpoints.",
+      "Spectra primary requests must use the native DeepSeek OpenRouter route and disable provider fallbacks on the primary call.",
     );
 }
 
-export const SPECTRA_MODEL_PROVIDER = "xiaomi" as const;
+export const SPECTRA_MODEL_PROVIDER = "deepseek" as const;
 export const SPECTRA_MODEL_GATEWAY = "openrouter" as const;

@@ -122,13 +122,18 @@ export const list = query({
   handler: async (ctx, args) => {
     const actor = await requireSpectraActor(ctx);
     const limit = Math.max(1, Math.min(args.limit ?? 30, 100));
+    // Active workspaces can be buried under a large recently-archived set
+    // (e.g. ManageBac cleanup). Scan far enough to surface live ones.
+    const ownedScan = args.includeArchived
+      ? Math.max(limit * 2, 60)
+      : Math.max(limit * 8, 2_000);
     const owned = await ctx.db
       .query("spectraWorkspaces")
       .withIndex("by_account_activity", (q) =>
         q.eq("ownerAccountId", actor._id),
       )
       .order("desc")
-      .take(limit * 2);
+      .take(ownedScan);
     const grantedIds = await listDirectlyGrantedResourceIds(
       ctx,
       actor,
@@ -247,7 +252,7 @@ export const update = mutation({
     executionId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const { actor, workspace } = await requireWorkspaceCapability(
+    const { actor, workspace: _workspace } = await requireWorkspaceCapability(
       ctx,
       args.workspaceId,
       "modify",
@@ -492,7 +497,7 @@ export const stageAiPatch = mutation({
     color: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const { actor, workspace } = await requireWorkspaceCapability(
+    const { actor, workspace: _workspace } = await requireWorkspaceCapability(
       ctx,
       args.workspaceId,
       "modify",

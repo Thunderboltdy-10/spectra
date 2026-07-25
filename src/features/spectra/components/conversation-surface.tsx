@@ -33,6 +33,7 @@ import { toast } from "sonner";
 import { RichText } from "@/components/chat/rich-text";
 import { cn } from "@/lib/utils";
 import { useSpectraRun, type SpectraLiveExchange } from "../ai/use-spectra-run";
+import { pastTenseProgressTitle } from "./progress-title";
 import {
   clearSpectraRunAgent,
   getSpectraOperationConflict,
@@ -788,12 +789,15 @@ function ProgressTrace({
   }, [active, steps]);
   if (steps.length === 0) return null;
   return (
-    <div className="mb-3 space-y-1.5" aria-label="Spectra progress">
-      {steps.map((step) => {
+    <div
+      className="sticky top-0 z-[5] mb-3 space-y-1.5 bg-[color-mix(in_oklab,var(--bg-primary)_88%,transparent)] py-1 backdrop-blur-[2px]"
+      aria-label="Spectra progress"
+    >
+      {steps.map((step, index) => {
         const open = openStepId === step.id;
         return (
           <div
-            key={step.id}
+            key={`${step.id}:${index}`}
             className="rounded-[8px] bg-[color-mix(in_oklab,var(--bg-elevated)_82%,transparent)] px-2.5 py-1.5"
           >
             <button
@@ -809,7 +813,10 @@ function ProgressTrace({
                 <Check className="h-3.5 w-3.5 text-[var(--success)]" />
               )}
               <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-[var(--text-secondary)]">
-                {step.title}
+                {pastTenseProgressTitle(
+                  step.title,
+                  step.status !== "running",
+                )}
               </span>
               <ChevronDown
                 className={`h-3.5 w-3.5 text-[var(--text-tertiary)] transition ${open ? "rotate-180" : ""}`}
@@ -817,7 +824,10 @@ function ProgressTrace({
             </button>
             {open && step.summary ? (
               <p className="ml-5 mt-1 text-[10px] leading-4 text-[var(--text-tertiary)]">
-                {step.summary}
+                {pastTenseProgressTitle(
+                  step.summary,
+                  step.status !== "running",
+                )}
               </p>
             ) : null}
           </div>
@@ -897,7 +907,7 @@ function PersistedProgressTrace({ trace }: { trace: SpectraThreadTrace }) {
         ? message.slice(message.indexOf(" · ") + 3).trim()
         : publicMessage || message);
     return {
-      id: event._id,
+      id: `${event._id}:${index}`,
       title: nativeTitle ?? previewTitle ?? terminalTitle ?? message,
       summary,
       status: ((event.type === "error" || event.type === "interrupted") &&
@@ -1106,7 +1116,7 @@ function ArtifactResult({
   return (
     <div
       data-spectra-card="result"
-      data-card-state={artifact.createdFrom?.runId ? "edited" : "normal"}
+      data-card-state="normal"
       data-interactive={onOpen ? "true" : undefined}
       className="mt-4 px-4 py-3 outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--accent-cyan)_44%,transparent)]"
       style={{ "--card-accent": "var(--card-pinned)" } as CSSProperties}
@@ -1218,7 +1228,7 @@ function WorkspaceResult({
     <button
       type="button"
       data-spectra-card="result"
-      data-card-state="edited"
+      data-card-state="normal"
       data-interactive="true"
       className="mt-3 flex w-full items-start gap-3 px-4 py-3 text-left"
       onClick={() => onOpen?.(workspace._id)}
@@ -1444,8 +1454,11 @@ export function ConversationSurface({
                       </div>
                     </div>
                   ) : (
-                    <div className="relative pl-7">
+                      <div className="relative pl-7">
                       <span className="absolute left-0 top-1.5 h-2 w-2 rounded-full bg-[var(--accent-cyan)] shadow-[0_0_0_4px_color-mix(in_oklab,var(--accent-cyan)_12%,transparent)]" />
+                      {trace && trace.run.providerUsed !== "Spectra" ? (
+                        <PersistedProgressTrace trace={trace} />
+                      ) : null}
                       <RichText
                         content={message.content}
                         className={cn(
@@ -1473,9 +1486,6 @@ export function ConversationSurface({
                       <div className="mt-2 text-[10px] text-[var(--text-tertiary)]">
                         {messageMeta(message)}
                       </div>
-                      {trace && trace.run.providerUsed !== "Spectra" ? (
-                        <PersistedProgressTrace trace={trace} />
-                      ) : null}
                       {trace ? <AgentRoutingControl trace={trace} /> : null}
                       {trace &&
                       (trace.operations.length > 0 ||
@@ -1496,7 +1506,16 @@ export function ConversationSurface({
                         ),
                       ) ? (
                         <ResultCardStack
-                          cards={trace.cards.map((card) => ({
+                          cards={trace.cards
+                            .filter((card) =>
+                              card.actions.some(
+                                (action) =>
+                                  action.key === "confirm" ||
+                                  action.key === "cancel" ||
+                                  action.key === "reject",
+                              ),
+                            )
+                            .map((card) => ({
                             id: card._id,
                             runId: card.runId,
                             status: card.status,
@@ -1565,26 +1584,29 @@ export function ConversationSurface({
                           !compact && "sm:text-[15px]",
                         )}
                       />
-                    ) : (
+                    ) : liveExchange.steps.length === 0 &&
+                      liveExchange.status !== "failed" ? (
                       <div className="flex items-center gap-2 py-1 text-[12px] text-[var(--text-tertiary)]">
                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        Preparing response
+                        Getting started
                       </div>
-                    )}
-                    <div className="mt-2 text-[10px] text-[var(--text-tertiary)]">
-                      {liveExchange.status === "streaming"
-                        ? "Responding"
-                        : liveExchange.status}
-                    </div>
+                    ) : null}
                   </div>
                 </article>
               ) : null}
             </>
           ) : null}
           {!liveExchange
-            ? unresolvedTraces.map((trace) => (
+            ? unresolvedTraces
+                .filter(
+                  (trace, index, all) =>
+                    all.findIndex(
+                      (candidate) => candidate.run._id === trace.run._id,
+                    ) === index,
+                )
+                .map((trace) => (
                 <div
-                  key={trace.run._id}
+                  key={`unresolved:${trace.run._id}`}
                   className="mb-7 ml-7 rounded-[9px] bg-[var(--bg-secondary)] px-3.5 py-3"
                 >
                   <div className="flex items-center gap-2 text-[11px] font-semibold text-[var(--text-secondary)]">
@@ -1620,14 +1642,25 @@ export function ConversationSurface({
                 </div>
               ))
             : null}
-          {activeCards?.some(
-            (card) => card.variant !== "status" || card.status !== "completed",
+          {activeCards?.some((card) =>
+            card.actions.some(
+              (action) =>
+                action.key === "confirm" ||
+                action.key === "cancel" ||
+                action.key === "reject" ||
+                action.key === "retry",
+            ),
           ) ? (
             <ResultCardStack
               cards={activeCards
-                .filter(
-                  (card) =>
-                    card.variant !== "status" || card.status !== "completed",
+                .filter((card) =>
+                  card.actions.some(
+                    (action) =>
+                      action.key === "confirm" ||
+                      action.key === "cancel" ||
+                      action.key === "reject" ||
+                      action.key === "retry",
+                  ),
                 )
                 .slice(0, 2)}
               className="mt-5"
@@ -1674,12 +1707,14 @@ export function ThreadConversation({
   threadId,
   compact = false,
   showComposer = true,
+  liveExchange: parentLiveExchange = null,
   onOpenArtifact,
   onOpenWorkspace,
 }: {
   threadId: string;
   compact?: boolean;
   showComposer?: boolean;
+  liveExchange?: SpectraLiveExchange | null;
   onOpenArtifact?: (artifactId: string) => void;
   onOpenWorkspace?: (workspaceId: string) => void;
 }) {
@@ -1733,14 +1768,16 @@ export function ThreadConversation({
     threadId,
     onDataChanged: refresh,
     onOpenArtifact,
-    observeDurableRuns: false,
+    // When the parent workspace QC already owns the SSE stream, observe durable
+    // tabs so this panel can still recover live progress after a refresh.
+    observeDurableRuns: !parentLiveExchange,
   });
   return (
     <ConversationSurface
       detail={detail}
       loading={loading}
       compact={compact}
-      liveExchange={runEngine.liveExchange}
+      liveExchange={parentLiveExchange ?? runEngine.liveExchange}
       workspaces={workspaces}
       onOpenArtifact={onOpenArtifact}
       onOpenWorkspace={onOpenWorkspace}
@@ -1751,7 +1788,15 @@ export function ThreadConversation({
             : choice.title,
         )
       }
-      activeCards={runEngine.cards}
+      activeCards={runEngine.cards.filter((card) =>
+        card.actions.some(
+          (action) =>
+            action.key === "confirm" ||
+            action.key === "cancel" ||
+            action.key === "reject" ||
+            action.key === "retry",
+        ),
+      )}
       onCardAction={(card, action, target) =>
         void runEngine.onCardAction(card, action, target)
       }

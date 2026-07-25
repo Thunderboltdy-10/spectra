@@ -48,7 +48,10 @@ function placements(artifact: ArtifactRecord) {
     : [];
 }
 
-function typedArtifactStructure(artifact: ArtifactRecord) {
+function typedArtifactStructure(
+  artifact: ArtifactRecord,
+  options?: { preferTrailingBlocks?: boolean },
+) {
   const content =
     artifact.content && typeof artifact.content === "object"
       ? (artifact.content as Record<string, unknown>)
@@ -97,18 +100,115 @@ function typedArtifactStructure(artifact: ArtifactRecord) {
         ? content.subtasks.slice(0, 20).map((item) => text(item, 300))
         : [],
     };
-  if (artifact.blueprintKey === "document" && Array.isArray(content.blocks))
+  if (artifact.blueprintKey === "document" && Array.isArray(content.blocks)) {
+    const blocks = content.blocks;
+    const mapBlock = (value: unknown, index: number) => {
+      const row = value as Record<string, unknown>;
+      return {
+        index,
+        id:
+          typeof row.id === "string" && row.id.trim()
+            ? row.id
+            : `block-${index + 1}`,
+        type: row.type,
+        text: text(row.text, 700),
+        heading: text(row.heading, 240),
+        level: row.level,
+      };
+    };
+    // Focused reviews must see trailing planted claims; keep head + tail when
+    // the document exceeds the ordinary structure budget.
+    if (options?.preferTrailingBlocks && blocks.length > 24) {
+      const headCount = 16;
+      const tailCount = 8;
+      const head = blocks
+        .slice(0, headCount)
+        .map((value, index) => mapBlock(value, index));
+      const tailStart = Math.max(headCount, blocks.length - tailCount);
+      const tail = blocks
+        .slice(tailStart)
+        .map((value, offset) => mapBlock(value, tailStart + offset));
+      return {
+        blocks: [...head, ...tail],
+        omittedMiddleBlockCount: Math.max(0, tailStart - headCount),
+      };
+    }
     return {
-      blocks: content.blocks.slice(0, 24).map((value) => {
+      blocks: blocks.slice(0, 24).map((value, index) => mapBlock(value, index)),
+    };
+  }
+  if (artifact.blueprintKey === "sheets" && Array.isArray(content.sheets)) {
+    const sheets = content.sheets.slice(0, 4).map((value) => {
+      const sheet = value as Record<string, unknown>;
+      const cells =
+        sheet.cells &&
+        typeof sheet.cells === "object" &&
+        !Array.isArray(sheet.cells)
+          ? (sheet.cells as Record<string, unknown>)
+          : {};
+      const entries = Object.entries(cells).slice(0, 80);
+      return {
+        id: sheet.id,
+        name: text(sheet.name, 120),
+        rowCount: sheet.rowCount,
+        columnCount: sheet.columnCount,
+        cells: Object.fromEntries(
+          entries.map(([address, cell]) => {
+            const row =
+              cell && typeof cell === "object" && !Array.isArray(cell)
+                ? (cell as Record<string, unknown>)
+                : {};
+            return [
+              address,
+              {
+                value: text(row.value, 160),
+                formula:
+                  typeof row.formula === "string"
+                    ? row.formula.slice(0, 160)
+                    : undefined,
+              },
+            ];
+          }),
+        ),
+      };
+    });
+    return { sheets };
+  }
+  if (artifact.blueprintKey === "whiteboard" && Array.isArray(content.nodes)) {
+    return {
+      nodes: content.nodes.slice(0, 40).map((value, index) => {
         const row = value as Record<string, unknown>;
+        const nodeContent =
+          row.content &&
+          typeof row.content === "object" &&
+          !Array.isArray(row.content)
+            ? (row.content as Record<string, unknown>)
+            : {};
+        const style =
+          row.style && typeof row.style === "object" && !Array.isArray(row.style)
+            ? (row.style as Record<string, unknown>)
+            : {};
         return {
+          index,
+          id:
+            typeof row.id === "string" && row.id.trim()
+              ? row.id
+              : `node-${index + 1}`,
           type: row.type,
-          text: text(row.text, 700),
-          heading: text(row.heading, 240),
-          level: row.level,
+          text: text(
+            typeof row.content === "string"
+              ? row.content
+              : (nodeContent.text ?? nodeContent.title ?? nodeContent.label),
+            240,
+          ),
+          semanticLabel: text(row.semanticLabel, 160),
+          fill: text(style.fill, 40),
+          stroke: text(style.stroke, 40),
+          color: text(style.color, 40),
         };
       }),
     };
+  }
   return undefined;
 }
 
@@ -119,6 +219,7 @@ export function artifactContextSnapshot(
     excerptCharacters?: number;
     relevance?: string;
     links?: unknown[];
+    preferTrailingBlocks?: boolean;
   },
 ) {
   const createdFrom =
@@ -143,7 +244,11 @@ export function artifactContextSnapshot(
         }
       : {}),
     ...(options?.includeExcerpt
-      ? { structure: typedArtifactStructure(artifact) }
+      ? {
+          structure: typedArtifactStructure(artifact, {
+            preferTrailingBlocks: options.preferTrailingBlocks,
+          }),
+        }
       : {}),
     tags: Array.isArray(artifact.tags) ? artifact.tags.slice(0, 12) : [],
     placements: placements(artifact),
@@ -241,7 +346,7 @@ export function buildBoundedContextPacket(input: {
   const focusedMutation =
     Boolean(input.focusedArtifact) &&
     !broadPrompt &&
-    /\b(?:only|exactly|single|one|hint|title|summary|field|card|question|answer|explanation|description|status|priority|due|date|section|paragraph|sentence|rename|replace|change|update|improve|rewrite)\b/i.test(
+    /\b(?:only|exactly|single|one|hint|title|summary|field|card|question|answer|explanation|description|status|priority|due|date|section|paragraph|sentence|column|cell|row|sheet|workbook|range|validation|rename|replace|change|update|improve|rewrite|add|remove)\b/i.test(
       input.prompt,
     );
   let conversationCharacters = 0;
@@ -328,6 +433,7 @@ export function buildBoundedContextPacket(input: {
     ? artifactContextSnapshot(input.focusedArtifact, {
         includeExcerpt: true,
         excerptCharacters: focusedMutation ? 900 : undefined,
+        preferTrailingBlocks: true,
         relevance: "visibly open artifact",
         links: input.linksByArtifact?.[String(input.focusedArtifact._id)],
       })

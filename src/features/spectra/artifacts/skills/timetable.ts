@@ -10,6 +10,8 @@ export const timetableSkill = defineArtifactSkill({
   inspect: [
     "Inspect only the requested date range, timezone, visible permissioned layers, hard constraints, availability, estimates, and source overlays.",
     "Load linked task or artifact details only when necessary to schedule or explain a tradeoff.",
+    "For 'this week' / 'today' / relative ranges, use the Current date and time from the turn plus an IANA timezone (prefer the user's when known). Prefer the calendar week that contains today in that timezone — do not jump to next week unless only weekend remains and the plan clearly needs weekday slots.",
+    "AI-created shared study/revision layers must use kind study (or class/tasks) with authority workspace or school — never authority user — so events persist in shared timetable content.",
   ],
   regions: [
     "layer setting",

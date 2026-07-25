@@ -333,13 +333,7 @@ export function ManageBacIntegrationShell() {
   const [manifestText, setManifestText] = useState("");
   const [config, setConfig] = useState({
     baseUrl: "",
-    referenceUrl: "",
-    authHeaderName: "Authorization",
-    authScheme: "bearer" as "raw" | "bearer",
     token: "",
-    frequencyMinutes: 60,
-    autoApplySafeUpdates: true,
-    conflictMode: "review" as "review" | "ask_me",
   });
 
   const refresh = useCallback(async () => {
@@ -352,12 +346,14 @@ export function ManageBacIntegrationShell() {
         setConfig((current) => ({
           ...current,
           baseUrl: integration.baseUrl,
-          referenceUrl: integration.referenceUrl ?? "",
-          authHeaderName: integration.authHeaderName,
-          authScheme: integration.authScheme,
-          frequencyMinutes: integration.syncPolicy.frequencyMinutes,
-          autoApplySafeUpdates: integration.syncPolicy.autoApplySafeUpdates,
-          conflictMode: integration.syncPolicy.conflictMode,
+        }));
+      } else if (
+        typeof value.data.envBaseUrlHint === "string" &&
+        value.data.envBaseUrlHint
+      ) {
+        setConfig((current) => ({
+          ...current,
+          baseUrl: current.baseUrl || value.data.envBaseUrlHint || "",
         }));
       }
     } catch (nextError) {
@@ -436,7 +432,10 @@ export function ManageBacIntegrationShell() {
 
   const saveConfiguration = () =>
     runAction("configure", async () => {
-      await configureSpectraManageBac(config);
+      await configureSpectraManageBac({
+        baseUrl: config.baseUrl,
+        token: config.token,
+      });
       setSettingsOpen(false);
       setConfig((current) => ({ ...current, token: "" }));
     });
@@ -541,14 +540,22 @@ export function ManageBacIntegrationShell() {
                 </span>
                 <div className="min-w-0">
                   <span className="block text-[9px] font-semibold uppercase tracking-[.12em] text-[var(--text-tertiary)]">
-                    ManageBac
+                    ManageBac · Admin setup
                   </span>
-                  <h1 className="mt-1 font-[var(--font-serif)] text-[26px] font-medium tracking-[-.025em]">
-                    ManageBac Integration
+                  <h1 className="mt-1 font-display text-[26px] font-semibold tracking-[-.025em]">
+                    ManageBac connection
                   </h1>
-                  <p className="mt-1 text-[11px] text-[var(--text-tertiary)]">
-                    Import classes, timetables and tasks from verified read-only
-                    routes while preserving your work.
+                  <p className="mt-1 max-w-[520px] text-[11px] text-[var(--text-tertiary)]">
+                    School administrators configure the API base URL, school-wide
+                    key, and run school syncs here. Individual class workspaces
+                    are created from{" "}
+                    <a
+                      href="/school-data"
+                      className="font-medium text-[var(--text-primary)] underline-offset-2 hover:underline"
+                    >
+                      School data
+                    </a>
+                    , not automatically.
                   </p>
                 </div>
               </div>
@@ -784,7 +791,7 @@ export function ManageBacIntegrationShell() {
                       Source-owned times remain locked; personal overlays stay
                       private.
                     </p>
-                    <div className="mt-4 grid grid-cols-[46px_repeat(5,minmax(58px,1fr))] overflow-hidden rounded-md border border-[var(--border-subtle)] text-[8px]">
+                    <div className="mt-4 grid grid-cols-[46px_repeat(5,minmax(58px,1fr))] overflow-hidden rounded-md border border-[var(--border-subtle)] text-[10px]">
                       <div className="bg-[var(--bg-secondary)]" />
                       {["Mon", "Tue", "Wed", "Thu", "Fri"].map((day) => (
                         <div
@@ -1055,22 +1062,28 @@ export function ManageBacIntegrationShell() {
               <DetailRow
                 icon={School}
                 label="Auto-import new classes"
-                value="Automatic"
-                good
+                value={
+                  integration ? "Automatic" : "Unavailable until connected"
+                }
+                good={Boolean(integration)}
               />
               <DetailRow
                 icon={ListChecks}
                 label="Auto-import tasks"
-                value="Automatic"
-                good
+                value={
+                  integration ? "Automatic" : "Unavailable until connected"
+                }
+                good={Boolean(integration)}
               />
               <DetailRow
                 icon={AlertCircle}
                 label="Conflict resolution"
                 value={
-                  integration?.syncPolicy.conflictMode === "ask_me"
-                    ? "Ask me"
-                    : "Review"
+                  integration
+                    ? integration.syncPolicy.conflictMode === "ask_me"
+                      ? "Ask me"
+                      : "Review"
+                    : "Unavailable until connected"
                 }
               />
               {overview?.admin ? (
@@ -1205,6 +1218,7 @@ export function ManageBacIntegrationShell() {
           setConfig={setConfig}
           busy={busy === "configure"}
           connected={Boolean(integration)}
+          envTokenAvailable={Boolean(data?.envTokenAvailable)}
           onClose={() => setSettingsOpen(false)}
           onSave={saveConfiguration}
           onManifest={() => {
@@ -1656,64 +1670,32 @@ function QuickAction({
   );
 }
 
-function Toggle({
-  checked,
-  onChange,
-  label,
-  detail,
-}: {
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-  label: string;
-  detail: string;
-}) {
-  return (
-    <label className="flex cursor-pointer items-start gap-3 py-2">
-      <span className="min-w-0 flex-1">
-        <strong className="block text-[11px] font-medium">{label}</strong>
-        <span className="mt-0.5 block text-[9px] leading-4 text-[var(--text-tertiary)]">
-          {detail}
-        </span>
-      </span>
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(event) => onChange(event.target.checked)}
-        className="peer sr-only"
-      />
-      <span className="relative mt-0.5 h-5 w-9 rounded-full bg-[var(--border-strong)] transition peer-checked:bg-[#2f9670] after:absolute after:left-0.5 after:top-0.5 after:size-4 after:rounded-full after:bg-white after:shadow-sm after:transition-transform peer-checked:after:translate-x-4" />
-    </label>
-  );
-}
-
 function SettingsDialog({
   config,
   setConfig,
   busy,
   connected,
+  envTokenAvailable,
   onClose,
   onSave,
   onManifest,
 }: {
   config: {
     baseUrl: string;
-    referenceUrl: string;
-    authHeaderName: string;
-    authScheme: "raw" | "bearer";
     token: string;
-    frequencyMinutes: number;
-    autoApplySafeUpdates: boolean;
-    conflictMode: "review" | "ask_me";
   };
   setConfig: React.Dispatch<React.SetStateAction<typeof config>>;
   busy: boolean;
   connected: boolean;
+  envTokenAvailable: boolean;
   onClose: () => void;
   onSave: () => void;
   onManifest: () => void;
 }) {
   const input =
     "h-9 w-full rounded-[7px] border border-[var(--border-subtle)] bg-white px-3 text-[11px] outline-none focus:border-[#7aa999] focus:ring-2 focus:ring-[#dceee7]";
+  const canConnectWithoutTypedToken =
+    !connected && envTokenAvailable && config.token.length === 0;
   return (
     <div
       className="fixed inset-0 z-50 grid place-items-center bg-[#1d211e]/25 p-4 backdrop-blur-[2px]"
@@ -1721,14 +1703,16 @@ function SettingsDialog({
       aria-modal="true"
       aria-label="ManageBac settings"
     >
-      <div className="max-h-[92vh] w-full max-w-[620px] overflow-y-auto rounded-[13px] border border-white/70 bg-[#fbfaf8] shadow-[0_24px_80px_rgba(20,24,21,.25)]">
+      <div className="max-h-[92vh] w-full max-w-[520px] overflow-y-auto rounded-[13px] border border-white/70 bg-[#fbfaf8] shadow-[0_24px_80px_rgba(20,24,21,.25)]">
         <header className="sticky top-0 z-10 flex items-start justify-between border-b border-[var(--border-subtle)] bg-[#fbfaf8]/95 px-5 py-4 backdrop-blur">
           <div>
             <h2 className="font-[var(--font-serif)] text-xl font-medium">
               ManageBac connection
             </h2>
             <p className="mt-1 text-[10px] text-[var(--text-tertiary)]">
-              Configure only values documented by your tenant API Manager.
+              School administrators connect with the tenant API base URL and a
+              school-wide read-only API key. Spectra syncs about every three
+              hours and can refresh on demand when AI needs fresher data.
             </p>
           </div>
           <button
@@ -1740,149 +1724,51 @@ function SettingsDialog({
             <X size={15} />
           </button>
         </header>
-        <div className="space-y-5 p-5">
-          <section>
-            <h3 className="text-[10px] font-semibold uppercase tracking-[.1em] text-[var(--text-tertiary)]">
-              Tenant API
-            </h3>
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              <label className="sm:col-span-2">
-                <span className="mb-1.5 block text-[10px] font-medium">
-                  API base URL
-                </span>
-                <input
-                  value={config.baseUrl}
-                  onChange={(event) =>
-                    setConfig((current) => ({
-                      ...current,
-                      baseUrl: event.target.value,
-                    }))
-                  }
-                  className={input}
-                  placeholder="https://your-school.managebac.com/v2p2/"
-                />
-              </label>
-              <label className="sm:col-span-2">
-                <span className="mb-1.5 block text-[10px] font-medium">
-                  Tenant reference URL
-                </span>
-                <input
-                  value={config.referenceUrl}
-                  onChange={(event) =>
-                    setConfig((current) => ({
-                      ...current,
-                      referenceUrl: event.target.value,
-                    }))
-                  }
-                  className={input}
-                  placeholder="API Manager reference documentation"
-                />
-              </label>
-              <label>
-                <span className="mb-1.5 block text-[10px] font-medium">
-                  Authentication header
-                </span>
-                <input
-                  value={config.authHeaderName}
-                  onChange={(event) =>
-                    setConfig((current) => ({
-                      ...current,
-                      authHeaderName: event.target.value,
-                    }))
-                  }
-                  className={input}
-                  placeholder="From tenant reference"
-                />
-              </label>
-              <label>
-                <span className="mb-1.5 block text-[10px] font-medium">
-                  Header value format
-                </span>
-                <select
-                  value={config.authScheme}
-                  onChange={(event) =>
-                    setConfig((current) => ({
-                      ...current,
-                      authScheme:
-                        event.target.value === "raw" ? "raw" : "bearer",
-                    }))
-                  }
-                  className={input}
-                >
-                  <option value="bearer">Bearer token</option>
-                  <option value="raw">Raw token</option>
-                </select>
-              </label>
-              <label className="sm:col-span-2">
-                <span className="mb-1.5 block text-[10px] font-medium">
-                  Read-only school token
-                </span>
-                <input
-                  type="password"
-                  autoComplete="new-password"
-                  value={config.token}
-                  onChange={(event) =>
-                    setConfig((current) => ({
-                      ...current,
-                      token: event.target.value,
-                    }))
-                  }
-                  className={input}
-                  placeholder={
-                    connected
-                      ? "Enter a replacement token to rotate the credential"
-                      : "Stored encrypted; never returned to this browser"
-                  }
-                />
-              </label>
-            </div>
-          </section>
-          <section className="border-t border-[var(--border-subtle)] pt-4">
-            <h3 className="text-[10px] font-semibold uppercase tracking-[.1em] text-[var(--text-tertiary)]">
-              Synchronization policy
-            </h3>
-            <label className="mt-3 block">
-              <span className="mb-1.5 block text-[10px] font-medium">
-                Frequency
-              </span>
-              <select
-                value={config.frequencyMinutes}
-                onChange={(event) =>
-                  setConfig((current) => ({
-                    ...current,
-                    frequencyMinutes: Number(event.target.value),
-                  }))
-                }
-                className={input}
-              >
-                <option value={15}>Every 15 minutes</option>
-                <option value={30}>Every 30 minutes</option>
-                <option value={60}>Every hour</option>
-                <option value={180}>Every 3 hours</option>
-                <option value={360}>Every 6 hours</option>
-                <option value={1440}>Daily</option>
-              </select>
-            </label>
-            <div className="mt-3 rounded-[8px] border border-[#cfe5da] bg-[#f3f9f6] p-3 text-[10px] leading-4 text-[#426b5c]">
-              Current classes and source-linked tasks are always imported for
-              the verified user. This is an ordinary Spectra capability, not an
-              administrator feature switch. Imported workspaces begin private,
-              and later sync preserves personal customization.
-            </div>
-            <div className="mt-2 divide-y divide-[var(--border-subtle)]">
-              <Toggle
-                checked={config.autoApplySafeUpdates}
-                onChange={(autoApplySafeUpdates) =>
-                  setConfig((current) => ({
-                    ...current,
-                    autoApplySafeUpdates,
-                  }))
-                }
-                label="Apply safe source updates"
-                detail="Only source-controlled fields update automatically; customization overlap stops for review."
-              />
-            </div>
-          </section>
+        <div className="space-y-4 p-5">
+          <label className="block">
+            <span className="mb-1.5 block text-[10px] font-medium">
+              API base URL
+            </span>
+            <input
+              value={config.baseUrl}
+              onChange={(event) =>
+                setConfig((current) => ({
+                  ...current,
+                  baseUrl: event.target.value,
+                }))
+              }
+              className={input}
+              placeholder="https://api.managebac.com"
+            />
+          </label>
+          <label className="block">
+            <span className="mb-1.5 block text-[10px] font-medium">
+              School-wide API key
+            </span>
+            <input
+              type="password"
+              autoComplete="new-password"
+              value={config.token}
+              onChange={(event) =>
+                setConfig((current) => ({
+                  ...current,
+                  token: event.target.value,
+                }))
+              }
+              className={input}
+              placeholder={
+                connected
+                  ? "Enter a replacement key to rotate the credential"
+                  : envTokenAvailable
+                    ? "Optional — a temporary server test key is available"
+                    : "Stored encrypted; never returned to this browser"
+              }
+            />
+          </label>
+          <div className="rounded-[8px] border border-[#cfe5da] bg-[#f3f9f6] p-3 text-[10px] leading-4 text-[#426b5c]">
+            Sync cadence, auth header format, and conflict policy are fixed by
+            Spectra. Individual users cannot supply their own ManageBac keys.
+          </div>
           <section className="rounded-lg border border-[#cfe5da] bg-[#f1f8f5] p-3">
             <div className="flex gap-2">
               <ShieldCheck
@@ -1890,9 +1776,9 @@ function SettingsDialog({
                 className="mt-0.5 shrink-0 text-[#2e8665]"
               />
               <p className="text-[10px] leading-4 text-[#426b5c]">
-                Spectra will reject write routes, private-network hosts,
-                redirects, unverified schemas, broad identity enumeration, and
-                any client-supplied ManageBac user ID.
+                Spectra rejects write routes, private-network hosts, redirects,
+                unverified schemas, broad identity enumeration, and any
+                client-supplied ManageBac user ID.
               </p>
             </div>
           </section>
@@ -1920,8 +1806,9 @@ function SettingsDialog({
               disabled={
                 busy ||
                 !config.baseUrl ||
-                !config.authHeaderName ||
-                (!connected && config.token.length < 16) ||
+                (!connected &&
+                  !canConnectWithoutTypedToken &&
+                  config.token.length < 16) ||
                 (config.token.length > 0 && config.token.length < 16)
               }
               onClick={onSave}

@@ -54,7 +54,9 @@ import {
   useState,
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
+  type MutableRefObject,
   type PointerEvent as ReactPointerEvent,
+  type ReactNode,
 } from "react";
 import {
   calculateWorkbook,
@@ -77,7 +79,6 @@ import {
   type SheetConditionalFormat,
   type SheetScalar,
   type SheetValidation,
-  type SheetTable,
   type SheetsContent,
   type WorkbookSheet,
 } from "../sheets/model";
@@ -88,6 +89,12 @@ import {
   completeArtifactImport,
   uploadArtifactImportOriginal,
 } from "../data/api";
+import {
+  aiRegionAttr,
+  pathTouches,
+  sheetsAiTouchesCell,
+  sheetsAiTouchesColumn,
+} from "./ai-region-path";
 
 const ROW_HEIGHT = 31;
 const COLUMN_WIDTH = 122;
@@ -179,13 +186,7 @@ function selected(range: CellRange, row: number, column: number) {
 }
 
 function aiTouches(paths: string[], sheetIndex: number, address: string) {
-  if (paths.includes("/")) return true;
-  const encoded = address.replaceAll("~", "~0").replaceAll("/", "~1");
-  return paths.some(
-    (path) =>
-      path === `/sheets/${sheetIndex}/cells/${encoded}` ||
-      path.startsWith(`/sheets/${sheetIndex}/cells/${encoded}/`),
-  );
+  return sheetsAiTouchesCell(paths, sheetIndex, address);
 }
 
 function replaceSheet(
@@ -610,7 +611,7 @@ function ToolbarButton({
   label: string;
   active?: boolean;
   onClick: () => void;
-  children: React.ReactNode;
+  children: ReactNode;
   disabled?: boolean;
 }) {
   return (
@@ -628,13 +629,86 @@ function ToolbarButton({
   );
 }
 
+
+type SheetsCellHandlers = {
+  onPointerDown: (
+    coordinate: CellCoordinate,
+    event: ReactPointerEvent,
+    merged: { range: CellRange } | undefined,
+  ) => void;
+  onPointerEnter: (coordinate: CellCoordinate) => void;
+  onFillHandlePointerDown: (
+    event: ReactPointerEvent,
+    selection: CellRange,
+    cells: Record<string, SheetCell>,
+  ) => void;
+};
+
+function SheetsCellPointerTarget({
+  handlersRef,
+  coordinate,
+  merged,
+  className,
+  style,
+  children,
+  onDoubleClick,
+  ...rest
+}: {
+  handlersRef: MutableRefObject<SheetsCellHandlers>;
+  coordinate: CellCoordinate;
+  merged?: { range: CellRange };
+  className?: string;
+  style?: CSSProperties;
+  children: React.ReactNode;
+  onDoubleClick?: () => void;
+} & Record<string, unknown>) {
+  return (
+    <div
+      {...rest}
+      className={className}
+      style={style}
+      onPointerDown={(event) =>
+        handlersRef.current.onPointerDown(coordinate, event, merged)
+      }
+      onPointerEnter={() => handlersRef.current.onPointerEnter(coordinate)}
+      onDoubleClick={onDoubleClick}
+    >
+      {children}
+    </div>
+  );
+}
+
+function SheetsFillHandle({
+  handlersRef,
+  selection,
+  cells,
+  selectionLabel,
+}: {
+  handlersRef: MutableRefObject<SheetsCellHandlers>;
+  selection: CellRange;
+  cells: Record<string, SheetCell>;
+  selectionLabel: string;
+}) {
+  return (
+    <button
+      type="button"
+      className="sheets-fill-handle"
+      aria-label={`Fill from ${selectionLabel}`}
+      title="Drag to fill values and formulas"
+      onPointerDown={(event) =>
+        handlersRef.current.onFillHandlePointerDown(event, selection, cells)
+      }
+    />
+  );
+}
+
 export function SheetsStudio({
   artifactId,
   content,
   onChange,
   aiChangedPaths = [],
   readOnly = false,
-  synchronizationReady = true,
+  synchronizationReady: _synchronizationReady = true,
   syncMessage = "Auto-saved",
   onActiveRegionChange,
 }: {
@@ -691,6 +765,8 @@ export function SheetsStudio({
   });
   const undoRef = useRef<SheetsContent[]>([]);
   const redoRef = useRef<SheetsContent[]>([]);
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
   const draggingRef = useRef(false);
   const fillSourceRef = useRef<{
     range: CellRange;
@@ -698,6 +774,11 @@ export function SheetsStudio({
   } | null>(null);
   const rangeRef = useRef(range);
   const finishFillRef = useRef<() => void>(() => undefined);
+  const cellHandlersRef = useRef<SheetsCellHandlers>({
+    onPointerDown: () => {},
+    onPointerEnter: () => {},
+    onFillHandlePointerDown: () => {},
+  });
   const gridRef = useRef<HTMLDivElement>(null);
   const importRef = useRef<HTMLInputElement>(null);
   const lastEmittedKeyRef = useRef<string | null>(null);
@@ -910,6 +991,8 @@ export function SheetsStudio({
         if (remember) {
           undoRef.current = [...undoRef.current.slice(-79), current];
           redoRef.current = [];
+          setCanUndo(true);
+          setCanRedo(false);
         }
         rememberEmitted(next);
         onChange(next);
@@ -926,68 +1009,70 @@ export function SheetsStudio({
     [activeSheet, commit, workbook],
   );
 
-  finishFillRef.current = () => {
-    const source = fillSourceRef.current;
-    if (!source) return;
-    fillSourceRef.current = null;
-    const from = normalizeRange(source.range);
-    const target = normalizeRange(rangeRef.current);
-    if (
-      from.start.row === target.start.row &&
-      from.start.column === target.start.column &&
-      from.end.row === target.end.row &&
-      from.end.column === target.end.column
-    )
-      return;
-    const height = from.end.row - from.start.row + 1;
-    const width = from.end.column - from.start.column + 1;
-    const modulo = (value: number, size: number) =>
-      ((value % size) + size) % size;
-    updateActiveSheet((sheet) => {
-      const cells = { ...sheet.cells };
-      for (let row = target.start.row; row <= target.end.row; row += 1) {
-        for (
-          let column = target.start.column;
-          column <= target.end.column;
-          column += 1
-        ) {
-          if (
-            row >= from.start.row &&
-            row <= from.end.row &&
-            column >= from.start.column &&
-            column <= from.end.column
-          )
-            continue;
-          const sourceCoordinate = {
-            row: from.start.row + modulo(row - from.start.row, height),
-            column:
-              from.start.column + modulo(column - from.start.column, width),
-          };
-          const sourceAddress = coordinateToAddress(sourceCoordinate);
-          const targetAddress = coordinateToAddress({ row, column });
-          const sourceCell = source.cells[sourceAddress];
-          if (!sourceCell) {
-            delete cells[targetAddress];
-            continue;
+  useEffect(() => {
+    finishFillRef.current = () => {
+      const source = fillSourceRef.current;
+      if (!source) return;
+      fillSourceRef.current = null;
+      const from = normalizeRange(source.range);
+      const target = normalizeRange(rangeRef.current);
+      if (
+        from.start.row === target.start.row &&
+        from.start.column === target.start.column &&
+        from.end.row === target.end.row &&
+        from.end.column === target.end.column
+      )
+        return;
+      const height = from.end.row - from.start.row + 1;
+      const width = from.end.column - from.start.column + 1;
+      const modulo = (value: number, size: number) =>
+        ((value % size) + size) % size;
+      updateActiveSheet((sheet) => {
+        const cells = { ...sheet.cells };
+        for (let row = target.start.row; row <= target.end.row; row += 1) {
+          for (
+            let column = target.start.column;
+            column <= target.end.column;
+            column += 1
+          ) {
+            if (
+              row >= from.start.row &&
+              row <= from.end.row &&
+              column >= from.start.column &&
+              column <= from.end.column
+            )
+              continue;
+            const sourceCoordinate = {
+              row: from.start.row + modulo(row - from.start.row, height),
+              column:
+                from.start.column + modulo(column - from.start.column, width),
+            };
+            const sourceAddress = coordinateToAddress(sourceCoordinate);
+            const targetAddress = coordinateToAddress({ row, column });
+            const sourceCell = source.cells[sourceAddress];
+            if (!sourceCell) {
+              delete cells[targetAddress];
+              continue;
+            }
+            cells[targetAddress] = {
+              ...sourceCell,
+              ...(sourceCell.formula
+                ? {
+                    formula: translateFormula(
+                      sourceCell.formula,
+                      row - sourceCoordinate.row,
+                      column - sourceCoordinate.column,
+                    ),
+                  }
+                : {}),
+              provenance: { source: "fill", importedAt: Date.now() },
+            };
           }
-          cells[targetAddress] = {
-            ...sourceCell,
-            ...(sourceCell.formula
-              ? {
-                  formula: translateFormula(
-                    sourceCell.formula,
-                    row - sourceCoordinate.row,
-                    column - sourceCoordinate.column,
-                  ),
-                }
-              : {}),
-            provenance: { source: "fill", importedAt: Date.now() },
-          };
         }
-      }
-      return { ...sheet, cells };
-    });
-  };
+        return { ...sheet, cells };
+      });
+    };
+  }, [updateActiveSheet]);
 
   function setCell(address: string, cell: SheetCell, remember = true) {
     updateActiveSheet((sheet) => {
@@ -1168,6 +1253,8 @@ export function SheetsStudio({
     const previous = undoRef.current.pop();
     if (!previous) return;
     redoRef.current.push(workbook);
+    setCanUndo(undoRef.current.length > 0);
+    setCanRedo(true);
     setWorkbook(previous);
     rememberEmitted(previous);
     onChange(previous);
@@ -1178,6 +1265,8 @@ export function SheetsStudio({
     const next = redoRef.current.pop();
     if (!next) return;
     undoRef.current.push(workbook);
+    setCanUndo(true);
+    setCanRedo(redoRef.current.length > 0);
     setWorkbook(next);
     rememberEmitted(next);
     onChange(next);
@@ -1269,7 +1358,8 @@ export function SheetsStudio({
     const command = event.metaKey || event.ctrlKey;
     if (command && event.key.toLowerCase() === "z") {
       event.preventDefault();
-      event.shiftKey ? redo() : undo();
+      if (event.shiftKey) redo();
+      else undo();
       return;
     }
     if (command && event.key.toLowerCase() === "y") {
@@ -1352,6 +1442,48 @@ export function SheetsStudio({
     }));
     gridRef.current?.focus();
   }
+
+  useEffect(() => {
+    cellHandlersRef.current = {
+      onPointerDown(coordinate, event, merged) {
+        if (merged && !event.shiftKey) {
+          event.preventDefault();
+          setRange(merged.range);
+          rangeRef.current = merged.range;
+          draggingRef.current = false;
+          return;
+        }
+        selectCell(coordinate, event);
+      },
+      onPointerEnter(coordinate) {
+        const fill = fillSourceRef.current;
+        if (fill) {
+          const source = normalizeRange(fill.range);
+          setRange({
+            start: {
+              row: Math.min(source.start.row, coordinate.row),
+              column: Math.min(source.start.column, coordinate.column),
+            },
+            end: {
+              row: Math.max(source.end.row, coordinate.row),
+              column: Math.max(source.end.column, coordinate.column),
+            },
+          });
+        } else if (draggingRef.current)
+          setRange((current) => ({
+            ...current,
+            end: coordinate,
+          }));
+      },
+      onFillHandlePointerDown(event, selection, cells) {
+        event.preventDefault();
+        event.stopPropagation();
+        draggingRef.current = false;
+        fillSourceRef.current = { range: selection, cells: { ...cells } };
+        rangeRef.current = selection;
+      },
+    };
+  });
 
   function addSheet() {
     if (readOnly) return;
@@ -2066,7 +2198,7 @@ export function SheetsStudio({
                     <>
                       <button
                         type="button"
-                        disabled={!undoRef.current.length}
+                        disabled={!canUndo}
                         onClick={undo}
                       >
                         <Undo2 />
@@ -2074,7 +2206,7 @@ export function SheetsStudio({
                       </button>
                       <button
                         type="button"
-                        disabled={!redoRef.current.length}
+                        disabled={!canRedo}
                         onClick={redo}
                       >
                         <Redo2 />
@@ -2388,14 +2520,14 @@ export function SheetsStudio({
         <ToolbarButton
           label="Undo"
           onClick={undo}
-          disabled={readOnly || !undoRef.current.length}
+          disabled={readOnly || !canUndo}
         >
           <Undo2 />
         </ToolbarButton>
         <ToolbarButton
           label="Redo"
           onClick={redo}
-          disabled={readOnly || !redoRef.current.length}
+          disabled={readOnly || !canRedo}
         >
           <Redo2 />
         </ToolbarButton>
@@ -2967,6 +3099,13 @@ export function SheetsStudio({
                   })
                 }
                 className="sheets-column-header"
+                data-ai-region={aiRegionAttr(
+                  sheetsAiTouchesColumn(
+                    aiChangedPaths,
+                    activeSheetIndex,
+                    column,
+                  ),
+                )}
                 data-frozen={
                   column < (activeSheet.frozenColumns ?? 0) || undefined
                 }
@@ -3085,8 +3224,11 @@ export function SheetsStudio({
                 const style = cell?.format;
                 const conditionalStyle = conditionalStyles.get(address);
                 return (
-                  <div
+                  <SheetsCellPointerTarget
                     key={address}
+                    handlersRef={cellHandlersRef}
+                    coordinate={coordinate}
+                    merged={merged}
                     role="gridcell"
                     aria-rowindex={row + 1}
                     aria-colindex={column + 1}
@@ -3107,10 +3249,9 @@ export function SheetsStudio({
                       column === (activeSheet.frozenColumns ?? 0) - 1 ||
                       undefined
                     }
-                    data-ai-region={
-                      aiTouches(aiChangedPaths, activeSheetIndex, address) ||
-                      undefined
-                    }
+                    data-ai-region={aiRegionAttr(
+                      aiTouches(aiChangedPaths, activeSheetIndex, address),
+                    )}
                     className="sheets-cell"
                     style={{
                       left:
@@ -3147,7 +3288,7 @@ export function SheetsStudio({
                       textAlign: style?.align,
                       fontFamily:
                         style?.fontFamily === "serif"
-                          ? "var(--font-serif), Georgia, serif"
+                          ? "var(--font-serif), ui-sans-serif, system-ui, sans-serif"
                           : style?.fontFamily === "mono"
                             ? "ui-monospace, SFMono-Regular, Consolas, monospace"
                             : undefined,
@@ -3157,36 +3298,6 @@ export function SheetsStudio({
                       color: conditionalStyle?.color ?? style?.textColor,
                       backgroundColor:
                         conditionalStyle?.backgroundColor ?? style?.fillColor,
-                    }}
-                    onPointerDown={(event) => {
-                      if (merged && !event.shiftKey) {
-                        event.preventDefault();
-                        setRange(merged.range);
-                        rangeRef.current = merged.range;
-                        draggingRef.current = false;
-                        return;
-                      }
-                      selectCell(coordinate, event);
-                    }}
-                    onPointerEnter={() => {
-                      const fill = fillSourceRef.current;
-                      if (fill) {
-                        const source = normalizeRange(fill.range);
-                        setRange({
-                          start: {
-                            row: Math.min(source.start.row, row),
-                            column: Math.min(source.start.column, column),
-                          },
-                          end: {
-                            row: Math.max(source.end.row, row),
-                            column: Math.max(source.end.column, column),
-                          },
-                        });
-                      } else if (draggingRef.current)
-                        setRange((current) => ({
-                          ...current,
-                          end: coordinate,
-                        }));
                     }}
                     onDoubleClick={() => {
                       if (!readOnly) {
@@ -3273,24 +3384,14 @@ export function SheetsStudio({
                       </button>
                     ) : null}
                     {isFillAnchor && !isEditing && !readOnly ? (
-                      <button
-                        type="button"
-                        className="sheets-fill-handle"
-                        aria-label={`Fill from ${selectionLabel}`}
-                        title="Drag to fill values and formulas"
-                        onPointerDown={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          draggingRef.current = false;
-                          fillSourceRef.current = {
-                            range: normalizedSelection,
-                            cells: { ...activeSheet.cells },
-                          };
-                          rangeRef.current = normalizedSelection;
-                        }}
+                      <SheetsFillHandle
+                        handlersRef={cellHandlersRef}
+                        selection={normalizedSelection}
+                        cells={activeSheet.cells}
+                        selectionLabel={selectionLabel}
                       />
                     ) : null}
-                  </div>
+                  </SheetsCellPointerTarget>
                 );
               }),
             )}
@@ -3446,13 +3547,12 @@ export function SheetsStudio({
               return (
                 <article
                   key={chart.id}
-                  data-ai-region={
-                    aiChangedPaths.some((path) =>
-                      path.startsWith(
-                        `/sheets/${activeSheetIndex}/charts/${activeSheet.charts.indexOf(chart)}`,
-                      ),
-                    ) || undefined
-                  }
+                  data-ai-region={aiRegionAttr(
+                    pathTouches(
+                      aiChangedPaths,
+                      `/sheets/${activeSheetIndex}/charts/${activeSheet.charts.indexOf(chart)}`,
+                    ),
+                  )}
                   className="sheets-chart-card"
                 >
                   <header>
@@ -3583,10 +3683,13 @@ export function SheetsStudio({
         >
           <Plus />
         </button>
-        {workbook.sheets.map((sheet) => (
+        {workbook.sheets.map((sheet, sheetIndex) => (
           <div
             key={sheet.id}
             className={`sheets-tab ${sheet.id === activeSheet.id ? "is-active" : ""}`}
+            data-ai-region={aiRegionAttr(
+              pathTouches(aiChangedPaths, `/sheets/${sheetIndex}`),
+            )}
           >
             <button
               type="button"

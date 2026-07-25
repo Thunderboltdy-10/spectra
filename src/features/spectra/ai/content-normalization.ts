@@ -1,5 +1,10 @@
 import type { SpectraBlueprintKey } from "../data/api";
+import { normalizeAgentContent } from "../agents/model";
+import { normalizeCodeContent } from "../code/model";
+import { normalizePresentationContent } from "../presentation/model";
+import { normalizeSheetsContent } from "../sheets/model";
 import { sharedTimetableContent } from "../timetable/model";
+import { normalizeWhiteboardContent } from "../whiteboard/model";
 
 type Row = Record<string, unknown>;
 
@@ -198,14 +203,48 @@ export function normalizeQuizContent(value: unknown) {
       question.options = ["True", "False"];
     if (!Array.isArray(question.options) && Array.isArray(question.choices))
       question.options = question.choices;
-    const options = Array.isArray(question.options)
-      ? question.options.map(String)
-      : [];
+    const options = (
+      Array.isArray(question.options) ? question.options : []
+    ).flatMap((option) => {
+      if (typeof option === "string") {
+        const text = option.trim();
+        return text ? [text] : [];
+      }
+      if (!option || typeof option !== "object" || Array.isArray(option))
+        return [];
+      const rowOption = option as Record<string, unknown>;
+      const text = stringValue(
+        rowOption.text,
+        rowOption.label,
+        rowOption.value,
+        rowOption.title,
+        rowOption.option,
+        rowOption.answer,
+      ).trim();
+      return text ? [text] : [];
+    });
     question.options = options;
+    if (question.type === "true_false" && options.length < 2)
+      question.options = ["True", "False"];
+    if (
+      (question.type === "multiple_choice" ||
+        question.type === "select_all" ||
+        question.type === "ordering") &&
+      options.length < 2
+    ) {
+      // Models sometimes emit MCQ shells with blank options. Prefer a
+      // short-answer fallback over failing the entire create plan.
+      question.type = "short_answer";
+      question.options = [];
+      question.optionIds = [];
+    }
     const existingOptionIds = Array.isArray(question.optionIds)
       ? question.optionIds.map(String)
       : [];
-    question.optionIds = options.map(
+    question.optionIds = (Array.isArray(question.options)
+      ? question.options
+      : []
+    ).map(
       (_, optionIndex) =>
         existingOptionIds[optionIndex] ??
         `${String(question.id)}:option:${optionIndex + 1}`,
@@ -373,5 +412,15 @@ export function normalizeArtifactContent(
     return normalizePlannerTaskContent(value);
   if (blueprintKey === "timetable")
     return sharedTimetableContent(value) as unknown as Row;
+  if (blueprintKey === "presentation")
+    return normalizePresentationContent(value) as unknown as Row;
+  if (blueprintKey === "sheets")
+    return normalizeSheetsContent(value) as unknown as Row;
+  if (blueprintKey === "code")
+    return normalizeCodeContent(value) as unknown as Row;
+  if (blueprintKey === "whiteboard")
+    return normalizeWhiteboardContent(value) as unknown as Row;
+  if (blueprintKey === "agent")
+    return normalizeAgentContent(value) as unknown as Row;
   return row(value);
 }

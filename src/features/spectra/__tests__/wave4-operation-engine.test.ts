@@ -106,6 +106,101 @@ describe("Wave 4 controlled operation engine", () => {
     })).toThrow(/questions|correctAnswer|options/);
   });
 
+  it("does not require confirmation for a simple code sketch with empty dependency defaults", () => {
+    const intent = {
+      mode: "create" as const,
+      requestedArtifactTypes: ["code" as const],
+      requestedVisibleArtifactCount: 1,
+      targetArtifactId: null,
+      targetWorkspaceId: null,
+    };
+    const plan = parseSpectraPlan({
+      decision: "operate",
+      intent,
+      finalResponse: "Created a tiny carbon cycle sketch.",
+      operations: [
+        {
+          type: "artifact.create",
+          input: {
+            blueprintKey: "code",
+            title: "Tiny Carbon Cycle Sketch",
+            summary: "A compact SVG diagram of the carbon cycle.",
+            content: {
+              runtime: "browser",
+              entryFileId: "file-1",
+              files: [
+                {
+                  id: "file-1",
+                  path: "index.html",
+                  language: "html",
+                  source: "<main><svg viewBox='0 0 320 240'><circle cx='160' cy='120' r='40'/></svg></main>",
+                },
+              ],
+              visualisation: { enabled: true },
+              dependencies: {},
+              networkPolicy: { mode: "none" },
+              assets: [],
+              parameters: [],
+            },
+            tags: ["biology"],
+            workspaceId: null,
+            placement: "context",
+          },
+        },
+      ],
+    });
+    const policy = evaluatePlanPolicy(plan.operations, { intent });
+    expect(policy.requiresConfirmation).toBe(false);
+  });
+
+  it("requires confirmation when a code create declares curated dependencies", () => {
+    const intent = {
+      mode: "create" as const,
+      requestedArtifactTypes: ["code" as const],
+      requestedVisibleArtifactCount: 1,
+      targetArtifactId: null,
+      targetWorkspaceId: null,
+    };
+    const plan = parseSpectraPlan({
+      decision: "operate",
+      intent,
+      finalResponse: "Created a React chart.",
+      operations: [
+        {
+          type: "artifact.create",
+          input: {
+            blueprintKey: "code",
+            title: "Km Vmax Chart",
+            summary: "Interactive chart.",
+            content: {
+              runtime: "react",
+              entryFileId: "file-1",
+              files: [
+                {
+                  id: "file-1",
+                  path: "App.tsx",
+                  language: "tsx",
+                  source: "export default function App(){ return null }",
+                },
+              ],
+              visualisation: { enabled: true },
+              dependencies: { recharts: "2.15.4" },
+              networkPolicy: { mode: "none" },
+              assets: [],
+              parameters: [],
+            },
+            tags: [],
+            workspaceId: null,
+            placement: "context",
+          },
+        },
+      ],
+    });
+    const policy = evaluatePlanPolicy(plan.operations, { intent });
+    expect(policy.requiresConfirmation).toBe(true);
+    expect(policy.reasons.join(" ")).toMatch(/dependency/i);
+  });
+
   it("rejects unrelated and synthetic placement removals before persistence", () => {
     const unrelated = parseSpectraPlan({
       decision: "operate",

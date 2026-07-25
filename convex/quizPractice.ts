@@ -317,7 +317,7 @@ async function attemptProjection(
   const questions = Array.isArray(snapshot.questions)
     ? (snapshot.questions as QuizQuestion[])
     : [];
-  const manifestByQuestion = new Map(
+  const _manifestByQuestion = new Map(
     attempt.presentationManifest.map((entry) => [entry.questionId, entry]),
   );
   const responses = await ctx.db

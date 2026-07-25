@@ -1,9 +1,29 @@
 import type { LucideIcon } from "lucide-react";
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { BookOpen, Bot, Building2, CalendarCheck2, CalendarDays, Check, Code2, FileText, HelpCircle, MessageSquare, Presentation, Share2, Table2, Workflow } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ArtifactTypeKey } from "../artifacts/types";
 import { CardTypeIcon, SpectraCard, type SpectraCardState } from "./card-system";
+
+const AI_EDITED_FLASH_FALLBACK_MS = 12_000;
+
+function resolveCardAiState(
+  aiState: ArtifactCardView["aiState"] | undefined,
+  updatedAt: number | undefined,
+  now: number,
+  expiresAt?: number,
+): ArtifactCardView["aiState"] | undefined {
+  if (aiState === "creating" || aiState === "updating" || aiState === "failed")
+    return aiState;
+  if (aiState === "edited" || aiState === "generated") {
+    const expiry =
+      expiresAt ??
+      (updatedAt ? updatedAt + AI_EDITED_FLASH_FALLBACK_MS : undefined);
+    if (expiry && expiry > now) return "edited";
+    return undefined;
+  }
+  return aiState;
+}
 
 export type ArtifactCardView = {
   id: string;
@@ -16,6 +36,7 @@ export type ArtifactCardView = {
   accessLevel?: "read" | "modify";
   accessExplanation?: string;
   updatedAt?: number;
+  aiStateExpiresAt?: number;
   pinned?: boolean;
   variant?: string;
   metrics?: Record<string, string | number>;
@@ -64,15 +85,47 @@ export function ArtifactCard({
   const Icon = meta.icon;
   const interactive = Boolean(onSelect);
   const metrics = Object.entries(artifact.metrics ?? {}).slice(0, size === "compact" ? 0 : 4);
+  const [aiClock, setAiClock] = useState(() => Date.now());
+  useEffect(() => {
+    const resolved = resolveCardAiState(
+      artifact.aiState,
+      artifact.updatedAt,
+      aiClock,
+      artifact.aiStateExpiresAt,
+    );
+    if (resolved !== "edited" && resolved !== "generated") return;
+    const expiry =
+      artifact.aiStateExpiresAt ??
+      (artifact.updatedAt
+        ? artifact.updatedAt + AI_EDITED_FLASH_FALLBACK_MS
+        : undefined);
+    if (!expiry || expiry <= aiClock) return;
+    const timer = window.setTimeout(
+      () => setAiClock(Date.now()),
+      Math.max(16, expiry - Date.now() + 24),
+    );
+    return () => window.clearTimeout(timer);
+  }, [
+    aiClock,
+    artifact.aiState,
+    artifact.aiStateExpiresAt,
+    artifact.updatedAt,
+  ]);
+  const liveAiState = resolveCardAiState(
+    artifact.aiState,
+    artifact.updatedAt,
+    aiClock,
+    artifact.aiStateExpiresAt,
+  );
   const cardState: SpectraCardState = contextSelected
     ? selectionMode ? "multi-selected" : "context"
     : selected
       ? "focused"
-      : artifact.aiState === "creating"
+      : liveAiState === "creating"
         ? "creating"
-        : artifact.aiState === "updating"
+        : liveAiState === "updating"
           ? "updating"
-          : artifact.aiState === "edited" || artifact.aiState === "generated"
+          : liveAiState === "edited" || liveAiState === "generated"
             ? "edited"
             : "normal";
 
@@ -96,7 +149,7 @@ export function ArtifactCard({
         onSelect?.();
       }}
       data-interactive={interactive ? "true" : undefined}
-      data-ai-state={artifact.aiState}
+      data-ai-state={liveAiState}
       data-context-state={contextSelected ? "selected" : selected ? "focused" : "normal"}
     >
       {selectionMode ? <button type="button" onClick={(event) => { event.stopPropagation(); onToggleContext?.(); }} className={`absolute right-2.5 top-2.5 z-20 flex h-6 w-6 items-center justify-center rounded-[6px] border transition-all duration-200 ${contextSelected ? "scale-100 border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-primary)]" : "border-[var(--border-default)] bg-[var(--bg-elevated)] text-transparent hover:border-[var(--text-primary)]"}`} aria-label={contextSelected ? "Remove from selection" : "Add to selection"}><Check className="h-3.5 w-3.5" /></button> : null}

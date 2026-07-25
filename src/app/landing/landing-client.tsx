@@ -3,11 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
-  ChevronRight,
   Sparkles,
   Network,
   ShieldCheck,
-  BarChart3,
   BookOpen,
   Users,
   GraduationCap,
@@ -17,7 +15,6 @@ import {
   MessageCircle,
   FileText,
   CircleHelp,
-  Lightbulb,
   ArrowRight,
   Bot,
   Zap,

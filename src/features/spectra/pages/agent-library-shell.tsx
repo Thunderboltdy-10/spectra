@@ -100,7 +100,7 @@ function subjectLabel(tags: string[], skills: string[]) {
   const candidate = [...tags, ...skills].find(
     (value) => value.trim() && value.trim().length < 36,
   );
-  return candidate?.trim() || "All subjects";
+  return candidate?.trim() || "General";
 }
 
 function accessibleCard(artifact: SpectraArtifact): LibraryCard {
@@ -167,7 +167,7 @@ function LibraryAvatar({ owner }: { owner: LibraryCard["owner"] }) {
       className="size-5 rounded-full object-cover"
     />
   ) : (
-    <span className="grid size-5 place-items-center rounded-full bg-[var(--bg-secondary)] text-[8px] font-bold text-[var(--text-secondary)]">
+    <span className="grid size-5 place-items-center rounded-full bg-[var(--bg-secondary)] text-[10px] font-bold text-[var(--text-secondary)]">
       {avatarFallback(owner.name)}
     </span>
   );
@@ -229,7 +229,7 @@ function AgentCard({
                 />
               ) : null}
             </span>
-            <span className="mt-0.5 block truncate text-[10px] text-[var(--text-tertiary)]">
+            <span className="mt-0.5 block truncate text-[11px] text-[var(--text-tertiary)]">
               {card.subject}
             </span>
           </span>
@@ -328,7 +328,7 @@ function LibrarySectionBlock({
           <button
             type="button"
             onClick={onViewAll}
-            className="shrink-0 text-[10px] font-semibold text-[var(--brand-primary)] hover:underline"
+            className="shrink-0 text-[11px] font-semibold text-[var(--brand-primary)] hover:underline"
           >
             View all ({cards.length})
           </button>
@@ -443,7 +443,13 @@ export function AgentLibraryShell() {
 
   const subjects = useMemo(
     () =>
-      [...new Set(cards.map((card) => card.subject).filter(Boolean))].sort(),
+      [
+        ...new Set(
+          cards
+            .map((card) => card.subject)
+            .filter((value) => value && value !== "General"),
+        ),
+      ].sort(),
     [cards],
   );
   const capabilities = useMemo(
@@ -666,7 +672,7 @@ export function AgentLibraryShell() {
           <strong className="font-semibold text-[var(--text-primary)]">
             Agent Library
           </strong>
-          <span className="ml-auto hidden items-center gap-1.5 text-[10px] text-[var(--success)] sm:flex">
+          <span className="ml-auto hidden items-center gap-1.5 text-[11px] text-[var(--success)] sm:flex">
             <CheckCircle2 className="size-3.5" />
             Live collection
           </span>
@@ -691,7 +697,7 @@ export function AgentLibraryShell() {
               <LibraryBig className="size-5" />
             </span>
             <div className="min-w-0">
-              <span className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[var(--text-tertiary)]">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-tertiary)]">
                 Agent library
               </span>
               <h1 className="mt-1 font-display text-[31px] font-semibold leading-none text-[var(--text-primary)]">
@@ -941,7 +947,7 @@ export function AgentLibraryShell() {
                       <span className="block truncate text-[12px] font-semibold">
                         {workspace.title}
                       </span>
-                      <span className="text-[10px] text-[var(--text-tertiary)]">
+                      <span className="text-[11px] text-[var(--text-tertiary)]">
                         {alreadyPlaced
                           ? "Already added"
                           : workspace.ownership === "shared"

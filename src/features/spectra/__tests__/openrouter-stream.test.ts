@@ -1,12 +1,30 @@
 import { describe, expect, it } from "vitest";
-import { extractPartialJsonStringField, readOpenRouterAgentTurn, readOpenRouterResponse } from "../ai/openrouter-stream";
-import { allowSpectraProviderFallbacks, getSpectraProviderRouting } from "../ai/model-config";
+import {
+  extractPartialJsonStringField,
+  formatProviderStallLabel,
+  ProviderStreamStalledError,
+  readOpenRouterAgentTurn,
+  readOpenRouterResponse,
+  streamEventIsMeaningful,
+} from "../ai/openrouter-stream";
+import {
+  allowSpectraProviderFallbacks,
+  getSpectraProviderRouting,
+  getSpectraVisionModelId,
+  getSpectraVisionProviderRouting,
+} from "../ai/model-config";
 
 describe("OpenRouter public response streaming", () => {
   it("restricts the primary call to native DeepSeek and keeps fallback routing explicit", () => {
     delete process.env.SPECTRA_ALLOW_PROVIDER_FALLBACKS;
     expect(allowSpectraProviderFallbacks()).toBe(true);
     expect(getSpectraProviderRouting("primary")).toEqual({ order: ["deepseek"], only: ["deepseek"], allow_fallbacks: false });
+    expect(getSpectraVisionProviderRouting()).toEqual({
+      order: ["Xiaomi"],
+      only: ["Xiaomi"],
+      allow_fallbacks: false,
+    });
+    expect(getSpectraVisionModelId()).toBe("xiaomi/mimo-v2.5");
     expect(getSpectraProviderRouting("fallback")).toEqual({ order: ["baidu", "streamlake", "deepinfra"], only: ["baidu", "streamlake", "deepinfra"], allow_fallbacks: true, require_parameters: true });
   });
   it("decodes only the public finalResponse JSON string", () => {
@@ -162,6 +180,81 @@ describe("OpenRouter public response streaming", () => {
       id: "call-1",
       name: "read_artifact",
       arguments: '{"artifactId":"artifact-1"}',
+    });
+  });
+
+  it("treats reasoning deltas and SSE keep-alives as meaningful stream activity", () => {
+    expect(streamEventIsMeaningful({ line: ": keep-alive" })).toBe(true);
+    expect(streamEventIsMeaningful({ delta: { reasoning: "Planning the answer." } })).toBe(true);
+    expect(streamEventIsMeaningful({
+      delta: { reasoning_details: [{ type: "reasoning.text", text: "Still thinking." }] },
+    })).toBe(true);
+    expect(streamEventIsMeaningful({ delta: { role: "assistant" } })).toBe(true);
+    expect(streamEventIsMeaningful({ pendingJsonContinued: true })).toBe(true);
+    expect(streamEventIsMeaningful({ line: "event: ping" })).toBe(false);
+  });
+
+  it("names the live provider in stall errors", () => {
+    expect(formatProviderStallLabel("deepseek")).toBe("DeepSeek");
+    expect(formatProviderStallLabel("baidu")).toBe("Baidu");
+    const error = new ProviderStreamStalledError(25_000, formatProviderStallLabel("DeepSeek"));
+    expect(error.message).toContain("DeepSeek");
+    expect(error.message).toContain("25 seconds");
+    expect(error.providerLabel).toBe("DeepSeek");
+  });
+
+  it("does not stall while reasoning keep-alives continue under a short idle timeout", async () => {
+    const encoder = new TextEncoder();
+    let step = 0;
+    const response = new Response(new ReadableStream({
+      async pull(controller) {
+        step += 1;
+        if (step === 1) {
+          controller.enqueue(encoder.encode(": ping\n\n"));
+          await new Promise((resolve) => setTimeout(resolve, 40));
+          return;
+        }
+        if (step === 2) {
+          controller.enqueue(encoder.encode(
+            'data: {"provider":"DeepSeek","choices":[{"delta":{"reasoning":"Checking."}}]}\n\n',
+          ));
+          await new Promise((resolve) => setTimeout(resolve, 40));
+          return;
+        }
+        if (step === 3) {
+          controller.enqueue(encoder.encode(
+            'data: {"choices":[{"delta":{"content":"{\\"decision\\":\\"answer\\",\\"finalResponse\\":\\"Alive\\",\\"operations\\":[]}"}}]}\n\n',
+          ));
+          return;
+        }
+        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        controller.close();
+      },
+    }), { headers: { "content-type": "text/event-stream" } });
+    const result = await readOpenRouterResponse(
+      response,
+      undefined,
+      undefined,
+      undefined,
+      80,
+      "DeepSeek",
+    );
+    expect(result.text).toContain('"finalResponse":"Alive"');
+    expect(result.provider).toBe("DeepSeek");
+  });
+
+  it("rejects a true idle stall with the configured provider label", async () => {
+    const response = new Response(new ReadableStream({
+      start() {
+        // Never enqueue — the idle watchdog must fire with the hint label.
+      },
+    }), { headers: { "content-type": "text/event-stream" } });
+    await expect(
+      readOpenRouterResponse(response, undefined, undefined, undefined, 50, "Baidu"),
+    ).rejects.toMatchObject({
+      name: "ProviderStreamStalledError",
+      providerLabel: "Baidu",
+      message: expect.stringContaining("Baidu"),
     });
   });
 });

@@ -34,13 +34,6 @@ function getSvixHeaders(request: NextRequest) {
   };
 }
 
-function getUserName(event: ClerkWebhookEvent["data"]) {
-  const first = event?.first_name?.trim();
-  const last = event?.last_name?.trim();
-  const full = [first, last].filter(Boolean).join(" ").trim();
-  return full || event?.username?.trim() || "Student";
-}
-
 function getVerifiedEmail(event: ClerkWebhookEvent["data"]) {
   const candidates = event?.email_addresses ?? [];
   const primary = candidates.find((entry) => entry.id === event?.primary_email_address_id);

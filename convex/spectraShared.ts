@@ -123,19 +123,17 @@ export function defaultArtifactContent(blueprintKey: BlueprintKey) {
         settings: { shuffle: true, revealMode: "click" },
       };
     case "quiz":
+      // Keep the empty shell schema-valid. Blank MCQ option strings fail
+      // quizContentSchema (choice questions need >=2 non-empty options), which
+      // blocked Yjs baseline seeding during AI create and left orphan shells.
       return {
         questions: [
           {
             id: "question-1",
             prompt: "",
-            type: "multiple_choice",
-            options: ["", "", "", ""],
-            optionIds: [
-              "question-1:option:1",
-              "question-1:option:2",
-              "question-1:option:3",
-              "question-1:option:4",
-            ],
+            type: "short_answer",
+            options: [],
+            optionIds: [],
             correctAnswer: "",
             explanation: "",
             difficulty: "medium",
@@ -443,6 +441,264 @@ export function fallbackArtifactSummary(blueprintKey: BlueprintKey) {
       return "A multi-file code and interactive visualisation artifact.";
     case "whiteboard":
       return "A collaborative spatial canvas for ideas and relationships.";
+  }
+}
+
+function asContentRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+/** Matches createPending / provisional shell summaries that must not finalize. */
+export function isPlaceholderBuildingSummary(summary: unknown) {
+  const clean = typeof summary === "string" ? summary.trim() : "";
+  if (!clean) return true;
+  return /^Spectra is building\b/i.test(clean);
+}
+
+/**
+ * Default/empty AI create shells that must never be finalized as workspace
+ * artifacts. Kept local to Convex (no src/ import) and aligned with
+ * src/features/spectra/operations/hollow-content.ts.
+ */
+export function isHollowDefaultContent(
+  blueprintKey: BlueprintKey | string,
+  content: unknown,
+) {
+  const record = asContentRecord(content);
+  switch (blueprintKey) {
+    case "timetable":
+      return !Array.isArray(record.events) || record.events.length === 0;
+    case "whiteboard":
+      return !Array.isArray(record.nodes) || record.nodes.length === 0;
+    case "sheets": {
+      const sheets = Array.isArray(record.sheets) ? record.sheets : [];
+      if (sheets.length === 0) return true;
+      return sheets.every((sheet) => {
+        if (!sheet || typeof sheet !== "object" || Array.isArray(sheet))
+          return true;
+        const cells = (sheet as { cells?: unknown }).cells;
+        if (!cells || typeof cells !== "object" || Array.isArray(cells))
+          return true;
+        return !Object.values(cells as Record<string, unknown>).some((cell) => {
+          if (cell == null) return false;
+          if (typeof cell === "string" || typeof cell === "number")
+            return String(cell).trim().length > 0;
+          if (typeof cell !== "object" || Array.isArray(cell)) return false;
+          const row = cell as Record<string, unknown>;
+          const value = row.value ?? row.input ?? row.text ?? row.formula;
+          return value != null && String(value).trim().length > 0;
+        });
+      });
+    }
+    case "code": {
+      const files = Array.isArray(record.files) ? record.files : [];
+      if (files.length === 0) return true;
+      return files.every((file) => {
+        if (!file || typeof file !== "object" || Array.isArray(file)) return true;
+        const source =
+          typeof (file as { source?: unknown }).source === "string"
+            ? String((file as { source: string }).source).trim()
+            : "";
+        return (
+          !source ||
+          /^<main>\s*<\/main>$/i.test(source) ||
+          /^<(?:html|body|main|div)[^>]*>\s*<\/(?:html|body|main|div)>$/i.test(
+            source,
+          )
+        );
+      });
+    }
+    case "document": {
+      const blocks = Array.isArray(record.blocks) ? record.blocks : [];
+      return !blocks.some((block) => {
+        if (!block || typeof block !== "object" || Array.isArray(block))
+          return false;
+        const text = (block as Record<string, unknown>).text;
+        const latex = (block as Record<string, unknown>).latex;
+        return (
+          (typeof text === "string" && text.trim().length >= 8) ||
+          (typeof latex === "string" && latex.trim().length >= 4)
+        );
+      });
+    }
+    case "flashcard_deck": {
+      const cards = Array.isArray(record.cards) ? record.cards : [];
+      return !cards.some((card) => {
+        if (!card || typeof card !== "object" || Array.isArray(card)) return false;
+        const row = card as Record<string, unknown>;
+        return (
+          typeof row.front === "string" &&
+          row.front.trim().length > 0 &&
+          typeof row.back === "string" &&
+          row.back.trim().length > 0
+        );
+      });
+    }
+    case "quiz": {
+      const questions = Array.isArray(record.questions) ? record.questions : [];
+      return !questions.some((question) => {
+        if (!question || typeof question !== "object" || Array.isArray(question))
+          return false;
+        const prompt = (question as Record<string, unknown>).prompt;
+        const stem = (question as Record<string, unknown>).stem;
+        return (
+          (typeof prompt === "string" && prompt.trim().length > 0) ||
+          (typeof stem === "string" && stem.trim().length > 0)
+        );
+      });
+    }
+    case "planner_task": {
+      const description =
+        typeof record.description === "string"
+          ? record.description.trim()
+          : "";
+      const subtasks = Array.isArray(record.subtasks) ? record.subtasks : [];
+      const titled = subtasks.filter(
+        (item) =>
+          item &&
+          typeof item === "object" &&
+          typeof (item as { title?: unknown }).title === "string" &&
+          String((item as { title: string }).title).trim(),
+      );
+      return description.length < 8 && titled.length === 0;
+    }
+    case "presentation": {
+      const slides = Array.isArray(record.slides) ? record.slides : [];
+      const placeholder =
+        /^(?:add a clear idea|click to edit|title|subtitle|new slide)\s*$/i;
+      return !slides.some((slide) => {
+        if (!slide || typeof slide !== "object" || Array.isArray(slide))
+          return false;
+        const objects = Array.isArray((slide as Record<string, unknown>).objects)
+          ? ((slide as Record<string, unknown>).objects as unknown[])
+          : [];
+        return objects.some((object) => {
+          if (!object || typeof object !== "object" || Array.isArray(object))
+            return false;
+          const text = (object as Record<string, unknown>).text;
+          const contentText = asContentRecord(
+            (object as Record<string, unknown>).content,
+          ).text;
+          const value =
+            typeof text === "string"
+              ? text.trim()
+              : typeof contentText === "string"
+                ? contentText.trim()
+                : "";
+          return value.length >= 8 && !placeholder.test(value);
+        });
+      });
+    }
+    case "agent": {
+      const instructions = asContentRecord(record.instructions);
+      const text =
+        typeof instructions.text === "string" ? instructions.text.trim() : "";
+      return text.length < 40;
+    }
+    default:
+      return false;
+  }
+}
+
+export function hollowFinalizeFailureMessage(blueprintKey: BlueprintKey | string) {
+  switch (blueprintKey) {
+    case "sheets":
+      return "The generated workbook is hollow/incomplete — sheets have no cell values.";
+    case "code":
+      return "The generated code artifact is hollow/incomplete — files are missing or only contain an empty <main></main> shell with no meaningful SVG or script.";
+    case "timetable":
+      return "The generated timetable is hollow/incomplete — content.events must include at least one scheduled event.";
+    case "presentation":
+      return "The generated presentation is hollow/incomplete — slides have no meaningful content.";
+    case "document":
+      return "The generated document is hollow/incomplete — it has no meaningful blocks.";
+    case "flashcard_deck":
+      return "The generated flashcard deck is hollow/incomplete — it has no usable cards.";
+    case "quiz":
+      return "The generated quiz is hollow/incomplete — it has no usable questions.";
+    case "planner_task":
+      return "The generated planner task is hollow/incomplete — it has no description or subtasks.";
+    case "whiteboard":
+      return "The generated whiteboard is hollow/incomplete — it has no nodes.";
+    case "agent":
+      return "The generated agent is hollow/incomplete — instructions are missing or too short.";
+    default:
+      return "The generated artifact is hollow/incomplete — it has no meaningful content.";
+  }
+}
+
+export function finalizeArtifactSummary(params: {
+  blueprintKey: BlueprintKey;
+  title: string;
+  summary?: string | null;
+  content: unknown;
+}) {
+  if (
+    params.summary?.trim() &&
+    !isPlaceholderBuildingSummary(params.summary)
+  )
+    return params.summary.trim().slice(0, 320);
+  const record = asContentRecord(params.content);
+  const topic = params.title.trim() || "this topic";
+  switch (params.blueprintKey) {
+    case "sheets": {
+      const sheets = Array.isArray(record.sheets) ? record.sheets : [];
+      const cells = sheets.reduce((total, sheet) => {
+        if (!sheet || typeof sheet !== "object" || Array.isArray(sheet))
+          return total;
+        const cells = asContentRecord((sheet as { cells?: unknown }).cells);
+        return total + Object.keys(cells).length;
+      }, 0);
+      return cells > 0
+        ? `Workbook with ${cells} filled cell${cells === 1 ? "" : "s"} about ${topic}.`
+        : fallbackArtifactSummary("sheets");
+    }
+    case "quiz": {
+      const count = Array.isArray(record.questions) ? record.questions.length : 0;
+      return count
+        ? `${count}-question quiz about ${topic}.`
+        : fallbackArtifactSummary("quiz");
+    }
+    case "flashcard_deck": {
+      const count = Array.isArray(record.cards) ? record.cards.length : 0;
+      return count
+        ? `${count}-card deck about ${topic}.`
+        : fallbackArtifactSummary("flashcard_deck");
+    }
+    case "presentation": {
+      const count = Array.isArray(record.slides) ? record.slides.length : 0;
+      return count
+        ? `${count}-slide presentation about ${topic}.`
+        : fallbackArtifactSummary("presentation");
+    }
+    case "document": {
+      const count = Array.isArray(record.blocks) ? record.blocks.length : 0;
+      return count
+        ? `${count}-block document about ${topic}.`
+        : fallbackArtifactSummary("document");
+    }
+    case "timetable": {
+      const count = Array.isArray(record.events) ? record.events.length : 0;
+      return count
+        ? `${count}-event timetable about ${topic}.`
+        : fallbackArtifactSummary("timetable");
+    }
+    case "code": {
+      const count = Array.isArray(record.files) ? record.files.length : 0;
+      return count
+        ? `${count}-file code artifact about ${topic}.`
+        : fallbackArtifactSummary("code");
+    }
+    case "whiteboard": {
+      const count = Array.isArray(record.nodes) ? record.nodes.length : 0;
+      return count
+        ? `${count}-node whiteboard about ${topic}.`
+        : fallbackArtifactSummary("whiteboard");
+    }
+    default:
+      return fallbackArtifactSummary(params.blueprintKey);
   }
 }
 

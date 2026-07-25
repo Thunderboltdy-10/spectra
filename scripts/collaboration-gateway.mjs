@@ -428,14 +428,36 @@ const server = new Server({
     for (const [clientId, state] of states) {
       const supplied =
         state?.user && typeof state.user === "object" ? state.user : {};
+      const actorKind =
+        supplied.actorKind === "ai" || supplied.actorKind === "human"
+          ? supplied.actorKind
+          : "human";
+      const activeRegionIds = Array.isArray(supplied.activeRegionIds)
+        ? supplied.activeRegionIds
+            .filter((regionId) => typeof regionId === "string")
+            .map((regionId) => regionId.slice(0, 240))
+            .slice(0, 32)
+        : undefined;
       states.set(clientId, {
         user: {
           clientId: context.clientId,
           accountId: context.accountId,
+          // AI connections keep the owner's accountId/name so peers can render
+          // owner-specific presence like "Pablo's Spectra".
           name: context.displayName,
           color: presenceColor(context.accountId),
+          actorKind,
+          ...(actorKind === "ai" && typeof supplied.runId === "string"
+            ? { runId: supplied.runId.slice(0, 120) }
+            : {}),
+          ...(actorKind === "ai" && typeof supplied.operationId === "string"
+            ? { operationId: supplied.operationId.slice(0, 120) }
+            : {}),
           ...(typeof supplied.activeRegionId === "string"
             ? { activeRegionId: supplied.activeRegionId.slice(0, 240) }
+            : {}),
+          ...(activeRegionIds && activeRegionIds.length > 0
+            ? { activeRegionIds }
             : {}),
           ...(boundedPresence(supplied.cursor) !== undefined
             ? { cursor: boundedPresence(supplied.cursor) }

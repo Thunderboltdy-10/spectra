@@ -3,7 +3,6 @@ import {
   columnName,
   coordinateToAddress,
   parseAddress,
-  parseRange,
   type SheetCell,
   type SheetsContent,
   type WorkbookSheet,

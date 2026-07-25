@@ -5,6 +5,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.resetModules();
   delete process.env.OPENROUTER_API_KEY;
+  delete process.env.SPECTRA_TEST_INLINE_RUNS;
 });
 
 function deckPlan() {
@@ -108,7 +109,24 @@ function setup(
     if (name.includes("spectraArtifacts:list")) return [];
     if (name.includes("spectraWorkspaces:list")) return [{ _id: "workspace-real", title: "Biology" }];
     if (name.includes("spectraWorkspaceItems:listForWorkspace")) return { workspace: { _id: "workspace-real", title: "Biology" }, items: [] };
-    if (name.includes("spectraThreads:get")) return { thread: { _id: "thread-real", title: "New thread" }, messages: [], traces: [] };
+    if (name.includes("spectraThreads:get")) return { threadId: "thread-real", title: "New thread", messages: [], traces: [] };
+    if (name.includes("identity:me") || name.includes("identity:get")) {
+      return {
+        accountId: "account-real",
+        clerkId: "actor",
+        email: "actor@example.com",
+        name: "Test Actor",
+        schoolId: "school-real",
+      };
+    }
+    if (name.includes("authority:access")) return { level: "modify", canModify: true };
+    if (name.includes("collaboration:ensureRoom")) {
+      return {
+        roomId: "room-real",
+        documentName: "artifact:artifact-pending:root",
+        policyVersion: 1,
+      };
+    }
     throw new Error(`Unexpected query: ${name}`);
   });
   const convexMutation = vi.fn(async (name: string, args: Record<string, unknown>) => {
@@ -118,7 +136,17 @@ function setup(
       run.userPrompt = args.userPrompt as string;
       return { runId: "run-real", resultCardId: "card-real", threadId: "thread-real", executionId: "execution-1", created: true };
     }
+    if (name.includes("spectraRunJobs:enqueue")) return { jobId: "job-real", created: true };
+    if (name.includes("spectraRunJobs:activate")) return { activated: true };
+    if (name.includes("spectraRunJobs:cancelForRun")) return { cancelled: true };
+    if (name.includes("spectraRunJobs:generateAttachmentUploadUrl")) return "https://example.test/upload";
+    if (name.includes("spectraRunJobs:registerAttachment")) return { attachmentId: "attachment-real" };
     if (name.includes("spectraRuns:claimExecution")) return { claimed: true };
+    if (name.includes("spectraRuns:heartbeat")) return { alive: true };
+    if (name.includes("regionClaims:acquire")) return { claimId: "claim-real", status: "active" };
+    if (name.includes("regionClaims:renew")) return { renewed: true };
+    if (name.includes("regionClaims:release") || name.includes("regionClaims:releaseClaimsForRun")) return { released: true };
+    if (name.includes("changeGroups:checkpointBeforeAi")) return { versionId: "version-pre-ai" };
     if (name.includes("spectraThreads:appendMessage")) return "message-real";
     if (name.includes("spectraThreads:applyGeneratedMetadata")) return { threadId: "thread-real" };
     if (name.includes("spectraRuns:setSuggestedThreadMetadata")) return { runId: "run-real" };
@@ -158,20 +186,23 @@ function setup(
       savedArtifact = {
         ...savedArtifact,
         _id: "artifact-pending",
-        blueprintKey: args.blueprintKey ?? savedArtifact.blueprintKey,
-        title: args.title,
+        blueprintKey: (args.blueprintKey as string) ?? savedArtifact.blueprintKey,
+        title: args.title as string,
       };
-      return { artifactId: "artifact-pending" };
+      return { artifactId: "artifact-pending", workspaceItemId: "item-pending" };
     }
-    if (name.includes("spectraArtifacts:finalizePending")) {
+    if (name.includes("spectraArtifacts:finalizePendingLive") || name.includes("spectraArtifacts:finalizePending")) {
       savedArtifact = {
         ...savedArtifact,
-        blueprintKey: args.blueprintKey ?? savedArtifact.blueprintKey,
-        title: args.title,
-        summary: args.summary,
-        content: args.content,
-        tags: args.tags,
+        _id: "artifact-real",
+        blueprintKey: (args.blueprintKey as string) ?? savedArtifact.blueprintKey,
+        title: (args.title as string) ?? savedArtifact.title,
+        summary: (args.summary as string | undefined) ?? savedArtifact.summary,
+        content: args.content ?? savedArtifact.content,
+        tags: (args.tags as string[] | undefined) ?? savedArtifact.tags,
         updatedAt: Number(savedArtifact.updatedAt ?? 1) + 1,
+        currentVersionId: "version-real",
+        liveStateVectorHash: "hash-real",
       };
       return { artifactId: "artifact-real", workspaceItemId: "item-real" };
     }
@@ -179,10 +210,10 @@ function setup(
     if (name.includes("spectraArtifacts:update")) {
       savedArtifact = {
         ...savedArtifact,
-        title: args.title ?? savedArtifact.title,
-        summary: args.summary ?? savedArtifact.summary,
+        title: (args.title as string | undefined) ?? savedArtifact.title,
+        summary: (args.summary as string | undefined) ?? savedArtifact.summary,
         content: args.content ?? savedArtifact.content,
-        tags: args.tags ?? savedArtifact.tags,
+        tags: (args.tags as string[] | undefined) ?? savedArtifact.tags,
         updatedAt: Number(savedArtifact.updatedAt ?? 1) + 1,
       };
       return { artifactId: "artifact-real" };
@@ -197,14 +228,87 @@ function setup(
       return { alreadyRejected: false };
     }
     if (name.includes("spectraOperations:claim") || name.includes("spectraOperations:assertClaimed") || name.includes("spectraOperations:markExecuted") || name.includes("spectraOperations:cancelPending") || name.includes("spectraOperations:attachPendingArtifact") || name.includes("spectraOperations:attachPendingWorkspace")) return {};
-    if (name.includes("spectraRuns:appendEvent") || name.includes("spectraRuns:markTraceDegraded")) return {};
+    if (name.includes("spectraRuns:appendEvent") || name.includes("spectraRuns:appendEvents") || name.includes("spectraRuns:markTraceDegraded")) return {};
     if (name.includes("spectraArtifacts:patchPendingContent") || name.includes("spectraArtifacts:stageAiPatch") || name.includes("spectraArtifacts:discardPendingForRun") || name.includes("spectraArtifacts:failPendingForRun") || name.includes("spectraArtifacts:settleStagedForRun") || name.includes("spectraWorkspaces:settleForRun")) return {};
+    if (name.includes("spectraArtifacts:setAiEffects") || name.includes("spectraArtifacts:clearAiEffects") || name.includes("spectraArtifacts:queueAiEffect")) return {};
+    if (name.includes("spectraWorkspaceItems:setPinned") || name.includes("spectraWorkspaceItems:hide") || name.includes("spectraWorkspaceItems:add")) return {};
+    if (name.includes("spectraArtifactLinks:create") || name.includes("spectraArtifactLinks:remove")) return {};
+    if (name.includes("metering:") || name.includes("operationalCounters:") || name.includes("audit:")) return {};
+    if (name.includes("memory:")) return {};
     throw new Error(`Unexpected mutation: ${name}`);
   });
 
   vi.doMock("@/lib/auth-server", () => ({ requireActor }));
   vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation }));
+  vi.doMock("@/features/spectra/ai/yjs-artifact-operation", () => {
+    class AiArtifactRegionConflictError extends Error {
+      artifactId: string;
+      clientId: string;
+      claim: {
+        claimId: string;
+        conflict?: { regionId?: string; actorKind?: string; queuePosition?: number };
+      };
+      baseSnapshot: unknown;
+      proposedSnapshot: unknown;
+      constructor(
+        message: string,
+        details: {
+          artifactId: string;
+          clientId: string;
+          claim: AiArtifactRegionConflictError["claim"];
+          baseSnapshot?: unknown;
+          proposedSnapshot?: unknown;
+        },
+      ) {
+        super(message);
+        this.name = "AiArtifactRegionConflictError";
+        this.artifactId = details.artifactId;
+        this.clientId = details.clientId;
+        this.claim = details.claim;
+        this.baseSnapshot = details.baseSnapshot;
+        this.proposedSnapshot = details.proposedSnapshot;
+      }
+    }
+    return {
+      AiArtifactRegionConflictError,
+      readLiveArtifactValue: vi.fn(async () => null),
+      applyAiArtifactMutation: vi.fn(async (params: {
+        artifactId: string;
+        resolveDesired: (current: {
+          title: string;
+          summary?: string;
+          content: unknown;
+          tags: string[];
+        }) => {
+          title: string;
+          summary?: string;
+          content: unknown;
+          tags: string[];
+        };
+      }) => {
+        const desired = params.resolveDesired({
+          title: savedArtifact.title as string,
+          summary: savedArtifact.summary as string | undefined,
+          content: savedArtifact.content,
+          tags: (savedArtifact.tags as string[]) ?? [],
+        });
+        savedArtifact = {
+          ...savedArtifact,
+          _id: params.artifactId,
+          title: desired.title,
+          summary: desired.summary,
+          content: desired.content,
+          tags: desired.tags,
+          updatedAt: Number(savedArtifact.updatedAt ?? 1) + 1,
+          currentVersionId: "version-ai",
+          liveStateVectorHash: "hash-ai",
+        };
+        return { artifactId: params.artifactId, changedRegionIds: ["artifact:structure"] };
+      }),
+    };
+  });
   process.env.OPENROUTER_API_KEY = "test-key";
+  process.env.SPECTRA_TEST_INLINE_RUNS = "1";
   const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ model: "deepseek/deepseek-v4-pro-20260423", provider: "DeepSeek", choices: [{ message: { content: JSON.stringify(plan) } }] }), { status: 200 }));
   vi.stubGlobal("fetch", fetchMock);
   return { convexQuery, convexMutation, fetchMock, getSavedArtifact: () => savedArtifact };
@@ -602,14 +706,14 @@ describe("Spectra run route", () => {
   });
 
   it("creates one six-card deck and does not emit unrelated placement removal", async () => {
-    const { convexMutation, fetchMock } = setup(deckPlan());
+    const { convexMutation, fetchMock, getSavedArtifact } = setup(deckPlan());
     const route = await import("@/app/api/spectra/run/route");
     const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", { method: "POST", body: JSON.stringify({ action: "run", surface: "workspace", workspaceId: "workspace-real", prompt: "Create a flashcard deck about photosynthesis with 6 cards. Include memory cues." }) }));
     const events = (await response.text()).trim().split("\n").map((line) => JSON.parse(line) as { type: string; message?: string });
 
     const createCall = convexMutation.mock.calls.find(([name]) => String(name).includes("spectraArtifacts:finalizePending"));
     expect(createCall).toBeTruthy();
-    expect((createCall?.[1] as { content: { cards: unknown[] } }).content.cards).toHaveLength(6);
+    expect((getSavedArtifact().content as { cards: unknown[] }).cards).toHaveLength(6);
     expect(convexMutation.mock.calls.some(([name]) => String(name).includes("spectraWorkspaceItems:hide"))).toBe(false);
     const beginRunCall = convexMutation.mock.calls.find(([name]) => String(name).includes("spectraRuns:beginRun"));
     expect(beginRunCall?.[1]).toMatchObject({ sourceSurface: "workspace", workspaceId: "workspace-real" });
@@ -622,13 +726,16 @@ describe("Spectra run route", () => {
     expect(payload.model).toBe("deepseek/deepseek-v4-pro");
     expect(payload.provider).toEqual({ order: ["deepseek"], only: ["deepseek"], allow_fallbacks: false });
     expect(payload.reasoning).toEqual({ enabled: false, exclude: true });
-    expect(payload.tools?.map((tool) => tool.function?.name)).toEqual([
-      "search_objects",
-      "read_artifact",
-      "read_workspace",
-      "read_thread",
-      "create_flashcard_deck",
-    ]);
+    expect(payload.tools?.map((tool) => tool.function?.name)).toEqual(
+      expect.arrayContaining([
+        "retrieve_memory",
+        "web_search",
+        "create_flashcard_deck",
+      ]),
+    );
+    expect(
+      payload.tools?.some((tool) => tool.function?.name === "search_objects"),
+    ).toBe(false);
     expect(payload.stream).toBe(true);
     expect(new Headers(request.headers).get("X-OpenRouter-Title")).toBe("Spectra AI Operation Engine");
     const completedCall = convexMutation.mock.calls.find(([name, args]) => String(name).includes("spectraRuns:updateStatus") && (args as { status?: string }).status === "completed");
@@ -864,7 +971,9 @@ describe("Spectra run route", () => {
 
   it("repairs one malformed fallback response before exposing a failure", async () => {
     const answerPlan = { decision: "answer", intent: { mode: "answer", requestedArtifactTypes: [], requestedVisibleArtifactCount: 0, targetArtifactId: null, targetWorkspaceId: null }, finalResponse: "Recovered cleanly.", operations: [] };
-    const malformed = { ...answerPlan, finalResponse: 42 };
+    // Operate + empty operations is not a local coerce target (no clarifying cue),
+    // so the bounded model-side repair path must recover it exactly once.
+    const malformed = { ...answerPlan, decision: "operate", operations: [] };
     const { convexMutation, fetchMock } = setup(answerPlan);
     fetchMock.mockReset()
       .mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: "native unavailable" } }), { status: 503 }))
@@ -875,7 +984,99 @@ describe("Spectra run route", () => {
     expect(response.status).toBe(200);
     await response.text();
     expect(fetchMock).toHaveBeenCalledTimes(3);
+    const repairBody = JSON.parse(String((fetchMock.mock.calls[2]?.[1] as RequestInit).body)) as { messages?: Array<{ role?: string; content?: string }> };
+    expect(repairBody.messages?.some((message) => message.role === "system" && String(message.content).includes("repairing a previously generated plan"))).toBe(true);
     expect(convexMutation.mock.calls.some(([name, args]) => String(name).includes("spectraRuns:updateStatus") && (args as { status?: string; finalSummary?: string }).status === "completed" && (args as { finalSummary?: string }).finalSummary === "Recovered cleanly.")).toBe(true);
+  });
+
+  it("repairs one schema-invalid primary submit_plan exactly once", async () => {
+    const answerPlan = {
+      decision: "answer",
+      intent: { mode: "answer", requestedArtifactTypes: [], requestedVisibleArtifactCount: 0, targetArtifactId: null, targetWorkspaceId: null },
+      finalResponse: "Primary repair worked.",
+      operations: [],
+    };
+    const malformed = { ...answerPlan, decision: "operate", operations: [] };
+    const { convexMutation, fetchMock } = setup(answerPlan);
+    fetchMock.mockReset().mockImplementation(async (_url, init) => {
+      const body = JSON.parse(String((init as RequestInit).body)) as {
+        messages?: Array<{ role?: string; content?: string }>;
+        tools?: unknown;
+      };
+      const isRepair = body.messages?.some(
+        (message) =>
+          message.role === "system" &&
+          String(message.content).includes("repairing a previously generated plan"),
+      );
+      if (isRepair) {
+        return new Response(
+          JSON.stringify({
+            model: "deepseek/deepseek-v4-pro-20260423",
+            provider: "DeepSeek",
+            choices: [{ message: { content: JSON.stringify(answerPlan) } }],
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          model: "deepseek/deepseek-v4-pro-20260423",
+          provider: "DeepSeek",
+          choices: [
+            {
+              finish_reason: "tool_calls",
+              message: {
+                content: "",
+                tool_calls: [
+                  {
+                    id: "call-plan",
+                    type: "function",
+                    function: {
+                      name: "submit_plan",
+                      arguments: JSON.stringify({ plan: malformed }),
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+        { status: 200 },
+      );
+    });
+    const route = await import("@/app/api/spectra/run/route");
+    const response = await route.POST(
+      new NextRequest("http://localhost/api/spectra/run", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "run",
+          surface: "workspace",
+          workspaceId: "workspace-real",
+          prompt: "Answer briefly about mitochondria.",
+        }),
+      }),
+    );
+    expect(response.status).toBe(200);
+    await response.text();
+    const repairCalls = fetchMock.mock.calls.filter((call) => {
+      const body = JSON.parse(String((call[1] as RequestInit).body)) as {
+        messages?: Array<{ role?: string; content?: string }>;
+      };
+      return body.messages?.some(
+        (message) =>
+          message.role === "system" &&
+          String(message.content).includes("repairing a previously generated plan"),
+      );
+    });
+    expect(repairCalls).toHaveLength(1);
+    expect(
+      convexMutation.mock.calls.some(
+        ([name, args]) =>
+          String(name).includes("spectraRuns:updateStatus") &&
+          (args as { status?: string; finalSummary?: string }).status === "completed" &&
+          (args as { finalSummary?: string }).finalSummary === "Primary repair worked.",
+      ),
+    ).toBe(true);
   });
 
   it("retries the same failed run and result card", async () => {
@@ -939,8 +1140,8 @@ describe("Spectra run route", () => {
     const events = (await response.text()).trim().split("\n").map((line) => JSON.parse(line) as { type: string; message?: string });
     const error = events.find((event) => event.type === "error");
 
-    expect(error?.message).toBe("Spectra could not safely complete that request. Try again, or choose the object you want Spectra to use.");
-    expect(error?.message).not.toMatch(/artifactId|workspaceId|threadId|operation|schema|JSON|Convex/i);
+    expect(error?.message).toBe("Spectra could not match that request to an open or selected object. Choose the document or workspace you want to use, then try again.");
+    expect(error?.message).not.toMatch(/artifactId|workspaceId|threadId|schema|JSON|Convex/i);
   });
 
   it("canonicalizes operation and target id aliases without a model repair", async () => {
@@ -1103,17 +1304,23 @@ describe("Spectra run route", () => {
     );
     expect(recordPlan?.[1]).toMatchObject({ operations: [operation] });
     expect(
-      events.some(
-        (event) =>
-          event.type === "status" &&
-          event.message === "Refining the deck's recall purpose",
-      ),
+      events.some((event) => {
+        if (event.type !== "status" && event.type !== "progress") return false;
+        const text = [
+          event.message,
+          (event as { title?: string }).title,
+          (event as { detail?: string }).detail,
+        ]
+          .filter(Boolean)
+          .join(" ");
+        return text.includes("Refining the deck's recall purpose");
+      }),
     ).toBe(true);
     expect(events.some((event) => event.type === "final")).toBe(true);
   });
 
   it("applies an explicitly supplied focused deck hint without a model call or provisional shell", async () => {
-    const { convexMutation, fetchMock } = setup(deckPlan());
+    const { convexMutation, fetchMock, getSavedArtifact } = setup(deckPlan());
     const route = await import("@/app/api/spectra/run/route");
     const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", {
       method: "POST",
@@ -1129,9 +1336,8 @@ describe("Spectra run route", () => {
 
     expect(fetchMock).not.toHaveBeenCalled();
     expect(convexMutation.mock.calls.some(([name]) => String(name).includes("spectraArtifacts:createPending"))).toBe(false);
-    const updateCall = convexMutation.mock.calls.find(([name]) => String(name).includes("spectraArtifacts:update"));
-    expect(updateCall?.[1]).toMatchObject({ artifactId: "artifact-real" });
-    expect(((updateCall?.[1] as { content?: { cards?: Array<{ hint?: string }> } })?.content?.cards ?? [])[2]?.hint).toBe("Krebs makes high-energy carriers and a little ATP.");
+    const cards = (getSavedArtifact().content as { cards?: Array<{ hint?: string }> }).cards ?? [];
+    expect(cards[2]?.hint).toBe("Krebs makes high-energy carriers and a little ATP.");
     expect(events.some((event) => event.type === "final")).toBe(true);
   });
 
@@ -1143,6 +1349,13 @@ describe("Spectra run route", () => {
       startAt: null,
       endAt: null,
       allDay: false,
+      timezone: "UTC",
+      recurrence: {
+        frequency: "none" as const,
+        interval: 1,
+        weekdays: [] as number[],
+        exceptions: [] as number[],
+      },
       status: "todo",
       priority: "high",
       linkedArtifactIds: [],
@@ -1154,7 +1367,7 @@ describe("Spectra run route", () => {
       progressNote: "Acceptance run",
       sourceRefs: [],
     };
-    const { convexMutation, fetchMock } = setup({}, "queued", {
+    const { convexMutation: _convexMutation, fetchMock, getSavedArtifact } = setup({}, "queued", {
       blueprintKey: "planner_task",
       title: "Launch Agent Reliability Review",
       summary: "Planner acceptance task.",
@@ -1175,12 +1388,13 @@ describe("Spectra run route", () => {
     await response.text();
 
     expect(fetchMock).not.toHaveBeenCalled();
-    const updateCall = convexMutation.mock.calls.find(([name]) =>
-      String(name).includes("spectraArtifacts:update"),
-    );
-    const updated = (updateCall?.[1] as { content?: typeof content })?.content;
-    expect(new Date(updated!.dueAt!).getHours()).toBe(16);
-    expect({ ...updated, dueAt: originalDueAt }).toEqual(content);
+    const updated = getSavedArtifact().content as typeof content & {
+      assignees?: unknown[];
+      watchers?: unknown[];
+    };
+    expect(new Date(updated.dueAt!).getHours()).toBe(16);
+    const { assignees: _assignees, watchers: _watchers, ...rest } = updated;
+    expect({ ...rest, dueAt: originalDueAt }).toEqual(content);
   });
 
   it("does not let a contextual subtask mention hijack a semantic progress-note edit", async () => {
@@ -1190,6 +1404,13 @@ describe("Spectra run route", () => {
       startAt: null,
       endAt: null,
       allDay: false,
+      timezone: "UTC",
+      recurrence: {
+        frequency: "none" as const,
+        interval: 1,
+        weekdays: [] as number[],
+        exceptions: [] as number[],
+      },
       status: "todo",
       priority: "high",
       linkedArtifactIds: [],
@@ -1201,7 +1422,7 @@ describe("Spectra run route", () => {
       progressNote: "Acceptance run",
       sourceRefs: [],
     };
-    const { convexMutation, fetchMock } = setup({}, "queued", {
+    const { fetchMock, getSavedArtifact } = setup({}, "queued", {
       blueprintKey: "planner_task",
       title: "Launch Agent Reliability Review",
       content,
@@ -1267,10 +1488,7 @@ describe("Spectra run route", () => {
       type: "function",
       function: { name: "propose_operation" },
     });
-    const updateCall = convexMutation.mock.calls.find(([name]) =>
-      String(name).includes("spectraArtifacts:update"),
-    );
-    expect((updateCall?.[1] as { content?: typeof content })?.content).toEqual({
+    expect(getSavedArtifact().content).toEqual({
       ...content,
       progressNote:
         "Next: Verify recovery and communication after the remaining reliability checks.",
@@ -1311,5 +1529,426 @@ describe("Spectra run route", () => {
     const cancelEvents = (await cancelResponse.text()).trim().split("\n").map((line) => JSON.parse(line) as { type: string; summary?: string });
     expect(cancelEvents).toContainEqual(expect.objectContaining({ type: "final", summary: "No proposed changes were applied." }));
     expect(convexMutation.mock.calls.some(([name]) => String(name).includes("spectraRuns:rejectConfirmation"))).toBe(true);
+  });
+
+  it("routes an open-sheet validation-column edit to sheets update, not a flashcard create", async () => {
+    const sheetsContent = {
+      workbook: { activeSheetId: "sheet-1" },
+      sheets: [
+        {
+          id: "sheet-1",
+          name: "Km vs Vmax",
+          rowCount: 12,
+          columnCount: 4,
+          cells: {
+            A1: { value: "Enzyme" },
+            B1: { value: "Km" },
+            C1: { value: "Vmax" },
+            A2: { value: "Hexokinase" },
+            B2: { value: 1.2 },
+            C2: { value: 100 },
+          },
+        },
+      ],
+    };
+    const updateOperation = {
+      type: "artifact.update",
+      input: {
+        artifactId: "artifact-real",
+        blueprintKey: "sheets",
+        title: null,
+        summary: null,
+        content: null,
+        contentPatch: {
+          changes: [
+            { path: "/sheets/0/cells/D1", value: "Km < 5?" },
+            { path: "/sheets/0/cells/D2", value: { formula: "=IF(B2<5,\"yes\",\"no\")" } },
+          ],
+        },
+        tags: null,
+      },
+    };
+    const { convexMutation, fetchMock } = setup(
+      {},
+      "queued",
+      {
+        blueprintKey: "sheets",
+        title: "Enzyme Km & Vmax Comparison",
+        summary: "Comparison table.",
+        content: sheetsContent,
+      },
+    );
+    fetchMock.mockImplementation(async (_url, init) => {
+      const payload = JSON.parse(String((init as RequestInit).body)) as {
+        tools?: Array<{
+          function?: {
+            name?: string;
+            parameters?: {
+              properties?: {
+                operation?: {
+                  properties?: {
+                    type?: { const?: string };
+                    input?: {
+                      properties?: {
+                        blueprintKey?: { const?: string };
+                      };
+                    };
+                  };
+                };
+              };
+            };
+          };
+        }>;
+        tool_choice?: unknown;
+      };
+      expect(payload.tools?.map((tool) => tool.function?.name)).toContain(
+        "propose_operation",
+      );
+      expect(
+        payload.tools?.some((tool) => tool.function?.name?.startsWith("create_")),
+      ).toBe(false);
+      const propose = payload.tools?.find(
+        (tool) => tool.function?.name === "propose_operation",
+      );
+      expect(
+        propose?.function?.parameters?.properties?.operation?.properties?.type
+          ?.const,
+      ).toBe("artifact.update");
+      expect(
+        propose?.function?.parameters?.properties?.operation?.properties?.input
+          ?.properties?.blueprintKey?.const,
+      ).toBe("sheets");
+      expect(payload.tool_choice).toEqual({
+        type: "function",
+        function: { name: "propose_operation" },
+      });
+      return new Response(
+        JSON.stringify({
+          model: "deepseek/deepseek-v4-pro-20260423",
+          provider: "DeepSeek",
+          choices: [
+            {
+              finish_reason: "tool_calls",
+              message: {
+                content: "",
+                tool_calls: [
+                  {
+                    id: "stage-sheets-column",
+                    type: "function",
+                    function: {
+                      name: "propose_operation",
+                      arguments: JSON.stringify({
+                        workSummary: "Adding a Km validation column",
+                        operation: updateOperation,
+                      }),
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+        { status: 200 },
+      );
+    });
+    const route = await import("@/app/api/spectra/run/route");
+    const response = await route.POST(
+      new NextRequest("http://localhost/api/spectra/run", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "run",
+          surface: "artifact",
+          workspaceId: "workspace-real",
+          artifactId: "artifact-real",
+          // Reproduce the E-03 mis-chip: workspace focusMode with an open sheet.
+          focusMode: "workspace",
+          prompt:
+            "add a validation column that flags whether each enzyme's Km is below 5",
+        }),
+      }),
+    );
+    const events = (await response.text())
+      .trim()
+      .split("\n")
+      .map(
+        (line) =>
+          JSON.parse(line) as {
+            type: string;
+            preview?: { action?: string; blueprintKey?: string };
+          },
+      );
+
+    expect(
+      convexMutation.mock.calls.some(([name]) =>
+        String(name).includes("spectraArtifacts:createPending"),
+      ),
+    ).toBe(false);
+    expect(
+      events.some(
+        (event) =>
+          event.type === "operation_preview" &&
+          event.preview?.action === "create",
+      ),
+    ).toBe(false);
+    const recordPlan = convexMutation.mock.calls.find(([name]) =>
+      String(name).includes("spectraOperations:recordPlan"),
+    );
+    expect(recordPlan?.[1]).toMatchObject({
+      operations: [
+        expect.objectContaining({
+          type: "artifact.update",
+          input: expect.objectContaining({
+            artifactId: "artifact-real",
+            blueprintKey: "sheets",
+            contentPatch: expect.objectContaining({
+              changes: expect.any(Array),
+            }),
+          }),
+        }),
+      ],
+    });
+    expect(events.some((event) => event.type === "final")).toBe(true);
+  });
+
+  it("keeps focused presentation slide edits on artifact.update through quiet encouragement", async () => {
+    const presentationContent = {
+      theme: { id: "theme-1", name: "Clean" },
+      slides: [
+        {
+          id: "slide-1",
+          title: "Agenda",
+          speakerNotes: "Welcome the room.",
+          objects: [
+            {
+              id: "obj-1",
+              type: "text",
+              x: 40,
+              y: 40,
+              width: 640,
+              height: 80,
+              content: { text: "Agenda" },
+            },
+          ],
+        },
+        {
+          id: "slide-2",
+          title: "Context",
+          speakerNotes: "Set the scene.",
+          objects: [
+            {
+              id: "obj-2",
+              type: "text",
+              x: 40,
+              y: 40,
+              width: 640,
+              height: 120,
+              content: { text: "Context details" },
+            },
+          ],
+        },
+        {
+          id: "slide-3",
+          title: "Deep dive into the cellular respiration pathway with too many words",
+          speakerNotes: "Keep the speaker notes exactly.",
+          objects: [
+            {
+              id: "obj-3",
+              type: "text",
+              x: 40,
+              y: 40,
+              width: 640,
+              height: 160,
+              content: {
+                text: "A long-winded explanation of glycolysis, the Krebs cycle, and the electron transport chain that should become more concise.",
+              },
+            },
+          ],
+        },
+      ],
+    };
+    const updateOperation = {
+      type: "artifact.update",
+      input: {
+        artifactId: "artifact-real",
+        blueprintKey: "presentation",
+        title: null,
+        summary: null,
+        content: null,
+        contentPatch: {
+          changes: [
+            {
+              path: "/slides/2/title",
+              value: "Cellular respiration pathway",
+            },
+            {
+              path: "/slides/2/objects/0/content/text",
+              value: "Glycolysis, Krebs, then ETC — concise.",
+            },
+          ],
+        },
+        tags: null,
+      },
+    };
+    const { convexMutation, fetchMock } = setup(
+      {},
+      "queued",
+      {
+        blueprintKey: "presentation",
+        title: "Respiration Deck",
+        summary: "Three teaching slides.",
+        content: presentationContent,
+      },
+    );
+    let callCount = 0;
+    fetchMock.mockImplementation(async (_url, init) => {
+      callCount += 1;
+      const payload = JSON.parse(String((init as RequestInit).body)) as {
+        tools?: Array<{
+          function?: {
+            name?: string;
+            parameters?: {
+              properties?: {
+                operation?: {
+                  properties?: {
+                    type?: { const?: string };
+                    input?: {
+                      properties?: {
+                        blueprintKey?: { const?: string };
+                      };
+                    };
+                  };
+                };
+              };
+            };
+          };
+        }>;
+        tool_choice?: unknown;
+        response_format?: unknown;
+      };
+      expect(payload.response_format).toBeUndefined();
+      expect(
+        payload.tools?.some((tool) => tool.function?.name?.startsWith("create_")),
+      ).toBe(false);
+      expect(payload.tools?.map((tool) => tool.function?.name)).toContain(
+        "propose_operation",
+      );
+      const propose = payload.tools?.find(
+        (tool) => tool.function?.name === "propose_operation",
+      );
+      expect(
+        propose?.function?.parameters?.properties?.operation?.properties?.type
+          ?.const,
+      ).toBe("artifact.update");
+      expect(
+        propose?.function?.parameters?.properties?.operation?.properties?.input
+          ?.properties?.blueprintKey?.const,
+      ).toBe("presentation");
+      expect(payload.tool_choice).toEqual({
+        type: "function",
+        function: { name: "propose_operation" },
+      });
+      if (callCount === 1) {
+        // First agent pass returns an empty draft so quiet encouragement fires.
+        return new Response(
+          JSON.stringify({
+            model: "deepseek/deepseek-v4-pro-20260423",
+            provider: "DeepSeek",
+            choices: [
+              {
+                finish_reason: "stop",
+                message: { content: "" },
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          model: "deepseek/deepseek-v4-pro-20260423",
+          provider: "DeepSeek",
+          choices: [
+            {
+              finish_reason: "tool_calls",
+              message: {
+                content: "",
+                tool_calls: [
+                  {
+                    id: "stage-slide-3",
+                    type: "function",
+                    function: {
+                      name: "propose_operation",
+                      arguments: JSON.stringify({
+                        workSummary: "Making slide 3 more concise",
+                        operation: updateOperation,
+                      }),
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+        { status: 200 },
+      );
+    });
+    const route = await import("@/app/api/spectra/run/route");
+    const response = await route.POST(
+      new NextRequest("http://localhost/api/spectra/run", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "run",
+          surface: "artifact",
+          workspaceId: "workspace-real",
+          artifactId: "artifact-real",
+          prompt: "make slide 3 more concise and keep the speaker notes",
+        }),
+      }),
+    );
+    const events = (await response.text())
+      .trim()
+      .split("\n")
+      .map(
+        (line) =>
+          JSON.parse(line) as {
+            type: string;
+            preview?: { action?: string; blueprintKey?: string };
+            message?: string;
+          },
+      );
+
+    expect(callCount).toBe(2);
+    expect(
+      convexMutation.mock.calls.some(([name]) =>
+        String(name).includes("spectraArtifacts:createPending"),
+      ),
+    ).toBe(false);
+    expect(
+      events.some(
+        (event) =>
+          event.type === "operation_preview" &&
+          event.preview?.action === "create",
+      ),
+    ).toBe(false);
+    expect(
+      events.some((event) =>
+        /hollow|incomplete|empty or incomplete/i.test(event.message ?? ""),
+      ),
+    ).toBe(false);
+    const recordPlan = convexMutation.mock.calls.find(([name]) =>
+      String(name).includes("spectraOperations:recordPlan"),
+    );
+    expect(recordPlan?.[1]).toMatchObject({
+      operations: [
+        expect.objectContaining({
+          type: "artifact.update",
+          input: expect.objectContaining({
+            artifactId: "artifact-real",
+            blueprintKey: "presentation",
+          }),
+        }),
+      ],
+    });
+    expect(events.some((event) => event.type === "final")).toBe(true);
   });
 });

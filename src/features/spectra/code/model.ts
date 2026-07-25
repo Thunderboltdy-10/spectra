@@ -383,17 +383,19 @@ export function normalizeCodeContent(value: unknown): CodeContent {
         : { mode: "none" },
     ...(Array.isArray(input.environmentSchema)
       ? {
-          environmentSchema:
-            input.environmentSchema as CodeContent["environmentSchema"],
+          environmentSchema: normalizeEnvironmentSchema(
+            input.environmentSchema,
+          ),
         }
       : {}),
-    ...(Array.isArray(input.tests) ? { tests: input.tests as CodeTest[] } : {}),
+    ...(Array.isArray(input.tests)
+      ? { tests: normalizeCodeTests(input.tests, files) }
+      : {}),
     parameters: normalizeParameters(input.parameters),
     assets: normalizeAssetReferences(input.assets),
     ...(Array.isArray(input.resourceBindings)
       ? {
-          resourceBindings:
-            input.resourceBindings as CodeContent["resourceBindings"],
+          resourceBindings: normalizeResourceBindings(input.resourceBindings),
         }
       : {}),
     ...(input.accessibility && typeof input.accessibility === "object"
@@ -453,6 +455,106 @@ function normalizeAssetReferences(value: unknown): CodeAssetReference[] {
     });
   }
   return result;
+}
+
+function normalizeEnvironmentSchema(
+  value: unknown,
+): NonNullable<CodeContent["environmentSchema"]> {
+  if (!Array.isArray(value)) return [];
+  const keys = new Set<string>();
+  const schema: NonNullable<CodeContent["environmentSchema"]> = [];
+  for (const candidate of value.slice(0, 50)) {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate))
+      continue;
+    const row = candidate as Record<string, unknown>;
+    const rawKey =
+      typeof row.key === "string"
+        ? row.key
+            .trim()
+            .toUpperCase()
+            .replace(/[^A-Z0-9_]/g, "_")
+            .slice(0, 80)
+        : "";
+    if (!/^[A-Z][A-Z0-9_]{0,79}$/.test(rawKey) || keys.has(rawKey)) continue;
+    keys.add(rawKey);
+    schema.push({
+      key: rawKey,
+      ...(typeof row.description === "string"
+        ? { description: row.description.slice(0, 500) }
+        : {}),
+      ...(typeof row.required === "boolean" ? { required: row.required } : {}),
+    });
+  }
+  return schema;
+}
+
+function normalizeCodeTests(value: unknown, files: CodeFile[]): CodeTest[] {
+  if (!Array.isArray(value)) return [];
+  const fileIds = new Set(files.map((file) => file.id));
+  const ids = new Set<string>();
+  const tests: CodeTest[] = [];
+  for (const candidate of value.slice(0, 200)) {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate))
+      continue;
+    const row = candidate as Record<string, unknown>;
+    const source = typeof row.source === "string" ? row.source : "";
+    if (!source.trim()) continue;
+    let id =
+      typeof row.id === "string" && row.id.trim() ? row.id.trim() : uid("test");
+    while (ids.has(id)) id = uid("test");
+    ids.add(id);
+    const fileId =
+      typeof row.fileId === "string" && fileIds.has(row.fileId)
+        ? row.fileId
+        : undefined;
+    tests.push({
+      id,
+      name:
+        typeof row.name === "string" && row.name.trim()
+          ? row.name.trim().slice(0, 200)
+          : `Test ${tests.length + 1}`,
+      ...(fileId ? { fileId } : {}),
+      source: source.replaceAll("\r\n", "\n").slice(0, 900_000),
+      ...(typeof row.enabled === "boolean" ? { enabled: row.enabled } : {}),
+    });
+  }
+  return tests;
+}
+
+function normalizeResourceBindings(
+  value: unknown,
+): NonNullable<CodeContent["resourceBindings"]> {
+  if (!Array.isArray(value)) return [];
+  const ids = new Set<string>();
+  const bindings: NonNullable<CodeContent["resourceBindings"]> = [];
+  for (const candidate of value.slice(0, 100)) {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate))
+      continue;
+    const row = candidate as Record<string, unknown>;
+    if (typeof row.artifactId !== "string" || !row.artifactId.trim()) continue;
+    const kind =
+      row.kind === "sheets_range" || row.kind === "asset" || row.kind === "artifact"
+        ? row.kind
+        : "artifact";
+    let id =
+      typeof row.id === "string" && row.id.trim()
+        ? row.id.trim()
+        : uid("binding");
+    while (ids.has(id)) id = uid("binding");
+    ids.add(id);
+    bindings.push({
+      id,
+      artifactId: row.artifactId.trim().slice(0, 180),
+      kind,
+      ...(typeof row.range === "string"
+        ? { range: row.range.slice(0, 200) }
+        : {}),
+      ...(typeof row.label === "string"
+        ? { label: row.label.slice(0, 300) }
+        : {}),
+    });
+  }
+  return bindings;
 }
 
 function normalizeParameters(value: unknown): CodeParameter[] {

@@ -15,7 +15,7 @@ import {
   Sparkles,
   Table2,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { PublishedCodeRuntime } from "../components/published-code-runtime";
 
 type PublicArtifact = {
@@ -499,10 +499,9 @@ export function PublicShareShell() {
       document.removeEventListener("visibilitychange", refreshInBackground);
     };
   }, [load]);
-  const expiry = useMemo(
-    () => (projection?.expiresAt ? formatUpdated(projection.expiresAt) : null),
-    [projection?.expiresAt],
-  );
+  const expiry = projection?.expiresAt
+    ? formatUpdated(projection.expiresAt)
+    : null;
 
   return (
     <main className="spectra-wave-y min-h-screen bg-[var(--bg-primary)] text-[var(--text-primary)]">

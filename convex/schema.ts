@@ -916,6 +916,7 @@ export default defineSchema({
       v.literal("schedule"),
       v.literal("bootstrap"),
       v.literal("retry"),
+      v.literal("ai"),
     ),
     bootstrapVersion: v.optional(v.number()),
     stage: v.string(),

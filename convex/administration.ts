@@ -3228,7 +3228,7 @@ async function purgeSchoolRows(
     .query(table as "accessGrants")
     .filter((q) => q.eq(q.field("schoolId"), progress.schoolId))
     .take(75);
-  let deletedStorageObjects = 0;
+  const deletedStorageObjects = 0;
   for (const row of rows) await ctx.db.delete(row._id);
   return {
     stage: progress.stage,

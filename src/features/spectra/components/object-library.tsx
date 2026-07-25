@@ -17,7 +17,6 @@ import {
   List,
   Loader2,
   MessageSquare,
-  MoreHorizontal,
   PanelTop,
   Pin,
   PinOff,
@@ -946,12 +945,12 @@ export function ObjectLibrary({
                   {formatRelativeTime(objectUpdatedAt(entry))}
                 </span>
                 <span className="flex items-center gap-1.5 text-[13px] text-[var(--text-primary)]">
-                  <span className="grid size-6 place-items-center rounded-full bg-[#d8d0fa] text-[9px] font-semibold text-[#3e327f]">
+                  <span className="grid size-6 place-items-center rounded-full bg-[color-mix(in_oklab,var(--brand-primary)_18%,var(--bg-secondary))] text-[10px] font-semibold text-[var(--brand-primary)]">
                     You
                   </span>
                   You
                 </span>
-                <MoreHorizontal className="size-4 text-[var(--text-secondary)]" />
+                <span />
               </button>
             );
           })}

@@ -69,6 +69,28 @@ function string(value: unknown, maximum = 2_000) {
   return typeof value === "string" ? value.trim().slice(0, maximum) : "";
 }
 
+/**
+ * School portal hosts (e.g. gcm.managebac.com) are not the Public API.
+ * Map them to the regional API host documented by Faria (CA default).
+ */
+function normalizeManageBacBaseUrl(raw: string) {
+  const trimmed = raw.trim().replace(/\/+$/, "");
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    throw new Error(
+      "INTEGRATION_URL_INVALID: Enter the ManageBac Public API base URL (https://api.managebac.com).",
+    );
+  }
+  const host = parsed.hostname.toLowerCase();
+  if (host === "api.managebac.com" || host.startsWith("api."))
+    return `${parsed.protocol}//${parsed.host}`;
+  if (host.endsWith(".managebac.com") || host.endsWith(".managebac.us"))
+    return "https://api.managebac.com";
+  return `${parsed.protocol}//${parsed.host}`;
+}
+
 function canonicalJson(value: unknown): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
   if (Array.isArray(value))
@@ -84,7 +106,7 @@ function digest(value: unknown) {
 }
 
 function exactDigest(value: unknown) {
-  return createHash("sha256").update(JSON.stringify(value)).digest("base64url");
+  return createHash("sha256").update(canonicalJson(value)).digest("base64url");
 }
 
 async function bridgeArgs(input: {
@@ -424,10 +446,12 @@ function normalizeProviderPage(
   });
   return {
     records: result,
-    nextCursor: string(
-      atPath(payload, string(config.nextCursorPath, 300)),
-      1_000,
-    ),
+    nextCursor: (() => {
+      const raw = atPath(payload, string(config.nextCursorPath, 300));
+      if (typeof raw === "number" && Number.isFinite(raw))
+        return String(raw).slice(0, 1_000);
+      return string(raw, 1_000);
+    })(),
     actualSchemaHash: digest(shape(payload)),
   };
 }
@@ -802,7 +826,9 @@ async function runSync(
             records: normalized.records.map(
               ({ mappedAccountId: _mappedAccountId, ...item }) => item,
             ),
-            nextCursor: normalized.nextCursor || undefined,
+            ...(normalized.nextCursor
+              ? { nextCursor: normalized.nextCursor }
+              : {}),
             pageNumber: page,
           };
           await signedCommit(actor, {
@@ -840,14 +866,20 @@ async function runSync(
         )
           throw error;
         const reasonCode =
+          message.match(/\b(INTEGRATION_[A-Z0-9_]+)\b/)?.[1] ??
           message.match(/^([A-Z0-9_]+)/)?.[1] ??
           "INTEGRATION_CAPABILITY_FAILED";
-        const sanitizedSample = lastPayloadShape;
+        const sanitizedSample = {
+          error: message.slice(0, 800),
+          ...(lastPayloadShape !== undefined
+            ? { payloadShape: lastPayloadShape }
+            : {}),
+        };
         const quarantinePayload = {
           capabilityId: capability._id,
           reasonCode,
           payloadHash: digest(
-            sanitizedSample ?? {
+            lastPayloadShape ?? {
               category: capability.category,
               path: capability.path,
               page,
@@ -856,7 +888,7 @@ async function runSync(
           providerRecordKeyHash: digest(
             `${capability._id}:${capability.path}:${page}`,
           ),
-          ...(sanitizedSample !== undefined ? { sanitizedSample } : {}),
+          sanitizedSample,
         };
         await signedCommit(actor, {
           operation: "quarantine",
@@ -1034,6 +1066,11 @@ export async function GET(request: NextRequest) {
   return withRouteErrorHandling(async () => {
     const actor = await requireActor();
     const action = request.nextUrl.searchParams.get("action") ?? "overview";
+    if (action === "myClasses") {
+      return ok({
+        data: await convexQuery("managebac:listMyClassCandidates", {}),
+      });
+    }
     if (action !== "overview")
       return badRequest("That ManageBac action is unavailable.");
     const admin = actor.schoolRole === "school_admin";
@@ -1041,7 +1078,29 @@ export async function GET(request: NextRequest) {
       admin ? "managebac:adminOverview" : "managebac:myOverview",
       {},
     );
-    return ok({ admin, data });
+    const overviewData =
+      data && typeof data === "object" && !Array.isArray(data)
+        ? (data as Record<string, unknown>)
+        : {};
+    return ok({
+      admin,
+      data: {
+        ...overviewData,
+        ...(admin
+          ? {
+              envBaseUrlHint:
+                normalizeManageBacBaseUrl(
+                  process.env.MANAGEBAC_BASE_URL?.trim() ||
+                    "https://api.managebac.com",
+                ) || undefined,
+              envTokenAvailable: Boolean(
+                process.env.MANAGEBAC_API_KEY?.trim() &&
+                  (process.env.MANAGEBAC_API_KEY?.trim().length ?? 0) >= 16,
+              ),
+            }
+          : {}),
+      },
+    });
   }, request);
 }
 
@@ -1069,50 +1128,46 @@ export async function POST(request: NextRequest) {
         throw new Error(
           "AUTH_SCHOOL_ADMIN_REQUIRED: School administrator access is required.",
         );
-      const token = string(body.token, 20_000);
+      const typedToken = string(body.token, 20_000);
+      const envToken = process.env.MANAGEBAC_API_KEY?.trim() ?? "";
       const current = (await convexQuery("managebac:adminOverview", {})) as {
         integration?: { _id?: string; status?: string } | null;
       };
+      const token =
+        typedToken.length >= 16
+          ? typedToken
+          : !current.integration || current.integration.status === "revoked"
+            ? envToken
+            : "";
       if (token.length > 0 && token.length < 16)
         throw new Error(
-          "INTEGRATION_TOKEN_REQUIRED: Enter the read-only token.",
+          "INTEGRATION_TOKEN_REQUIRED: Enter the school-wide API key.",
         );
       if (
         (!current.integration || current.integration.status === "revoked") &&
         token.length < 16
       )
         throw new Error(
-          "INTEGRATION_TOKEN_REQUIRED: Enter the school read-only token.",
+          "INTEGRATION_TOKEN_REQUIRED: Enter the school-wide API key.",
         );
       const secret =
         token.length >= 16
           ? await storeSchoolSecret({
               schoolId: actor.schoolId,
               purpose: "managebac-api-token",
-              label: "ManageBac read-only API token",
+              label: "ManageBac school-wide API token",
               value: token,
               requestId: request.headers.get("x-request-id") ?? undefined,
             })
           : null;
       const result = await convexMutation("managebac:configure", {
-        baseUrl: string(body.baseUrl, 2_000),
-        referenceUrl: string(body.referenceUrl, 2_000) || undefined,
-        authHeaderName: string(body.authHeaderName, 120),
-        authScheme: body.authScheme === "bearer" ? "bearer" : "raw",
+        baseUrl: normalizeManageBacBaseUrl(string(body.baseUrl, 2_000)),
+        authHeaderName: "auth-token",
+        authScheme: "raw",
         credentialFingerprint: secret?.fingerprint,
-        frequencyMinutes:
-          typeof body.frequencyMinutes === "number"
-            ? body.frequencyMinutes
-            : undefined,
-        autoApplySafeUpdates:
-          typeof body.autoApplySafeUpdates === "boolean"
-            ? body.autoApplySafeUpdates
-            : undefined,
-        conflictMode: body.conflictMode === "ask_me" ? "ask_me" : "review",
-        rotationDueAt:
-          typeof body.rotationDueAt === "number"
-            ? body.rotationDueAt
-            : undefined,
+        frequencyMinutes: 180,
+        autoApplySafeUpdates: true,
+        conflictMode: "review",
       });
       return ok(result);
     }
@@ -1253,6 +1308,35 @@ export async function POST(request: NextRequest) {
           conflictId: string(body.conflictId, 200),
           resolution,
           linkProjectionId: string(body.linkProjectionId, 300) || undefined,
+        }),
+      );
+    }
+
+    if (action === "materializeClasses") {
+      const recordIds = Array.isArray(body.recordIds)
+        ? body.recordIds.filter(
+            (item): item is string => typeof item === "string" && item.length > 0,
+          )
+        : [];
+      return ok(
+        await convexMutation("managebac:materializeClassWorkspaces", {
+          recordIds,
+        }),
+      );
+    }
+
+    if (action === "purgeAutoClassWorkspaces") {
+      return ok(
+        await convexMutation("managebac:purgeAutoCreatedClassWorkspaces", {
+          confirmation: string(body.confirmation, 200),
+        }),
+      );
+    }
+
+    if (action === "requestAiRefresh") {
+      return ok(
+        await convexMutation("managebac:requestAiRefresh", {
+          reason: string(body.reason, 240) || undefined,
         }),
       );
     }

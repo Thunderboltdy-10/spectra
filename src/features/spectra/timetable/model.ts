@@ -376,7 +376,7 @@ export function expandTimetableEvents(
       }
       continue;
     }
-    let cursor = new Date(localStart);
+    const cursor = new Date(localStart);
     for (let guard = 0; guard < 200_000 && generated < countLimit; guard += 1) {
       const dayOffset = Math.floor(
         (Date.UTC(
@@ -707,14 +707,63 @@ export function normalizeTimetableContent(value: unknown): TimetableContent {
 }
 
 function isPrivateTimetableLayer(layer: TimetableLayer) {
-  return (
-    layer.private === true ||
-    layer.authority === "user" ||
-    ((layer.kind === "personal" || layer.kind === "study") &&
-      layer.authority !== "workspace" &&
-      layer.authority !== "school" &&
-      layer.authority !== "external")
-  );
+  // Only explicit personal marks are private. Kind-based heuristics used to
+  // treat bare study/personal layers as private, which wiped AI-created
+  // revision calendars during sharedTimetableContent normalization.
+  return layer.private === true || layer.authority === "user";
+}
+
+/**
+ * Prefer the local calendar day of the earliest upcoming event; if every
+ * event is in the past, use the earliest event. Used to open week/day views
+ * on a range that actually contains work instead of an empty "today" week.
+ */
+export function pickTimetableAnchorDate(input: {
+  events: TimetableEvent[];
+  timezone: string;
+  now?: Date;
+}): string | null {
+  const nowMs = (input.now ?? new Date()).getTime();
+  const dated = input.events
+    .map((event) => {
+      const start = new Date(event.overlay?.alternativeStart || event.start);
+      if (Number.isNaN(start.getTime())) return null;
+      const timezone = event.timezone || input.timezone;
+      const key = localDateInput(start.toISOString(), timezone).slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return null;
+      return { startMs: start.getTime(), key };
+    })
+    .filter((row): row is { startMs: number; key: string } => Boolean(row))
+    .sort((left, right) => left.startMs - right.startMs);
+  if (!dated.length) return null;
+  const upcoming = dated.find((row) => row.startMs >= nowMs - 60_000);
+  return (upcoming ?? dated[0]!).key;
+}
+
+/** Minutes counted toward Focus time for the events currently in view. */
+export function timetableFocusMinutes(
+  events: TimetableEvent[],
+  layers: TimetableLayer[],
+) {
+  const layerMap = new Map(layers.map((layer) => [layer.id, layer]));
+  const studyLike = events.filter((event) => {
+    const kind = layerMap.get(event.layerId)?.kind;
+    return kind === "study" || kind === "personal";
+  });
+  const source =
+    studyLike.length > 0
+      ? studyLike
+      : events.filter(
+          (event) =>
+            event.status !== "cancelled" && event.availability !== "free",
+        );
+  return source.reduce((total, event) => {
+    const start = Date.parse(event.overlay?.alternativeStart || event.start);
+    const end = Date.parse(event.overlay?.alternativeEnd || event.end);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start)
+      return total;
+    return total + (end - start) / 60_000;
+  }, 0);
 }
 
 function withoutPersonalLayerFields(layer: TimetableLayer): TimetableLayer {
@@ -731,19 +780,49 @@ function withoutPersonalEventFields(event: TimetableEvent): TimetableEvent {
  * Produces the only timetable shape that may enter artifact content, Yjs,
  * history, search, AI context, or embeds. View state, private calendars,
  * personal availability, and source overlays belong to artifactUserStates.
+ *
+ * Important: AI-authored study schedules often place events on `study` /
+ * `personal` layers (treated as private). If every event would be stripped,
+ * promote those occupied layers to workspace-shared so the artifact does not
+ * finalize as an empty calendar while the chat still narrates a full plan.
  */
 export function sharedTimetableContent(value: unknown): TimetableContent {
   const normalized = normalizeTimetableContent(value);
-  const privateLayerIds = new Set(
-    normalized.layers.filter(isPrivateTimetableLayer).map((layer) => layer.id),
-  );
+  let layers = normalized.layers;
+  const privateLayerIds = () =>
+    new Set(layers.filter(isPrivateTimetableLayer).map((layer) => layer.id));
+  let privateIds = privateLayerIds();
+  const sharedEventCount = normalized.events.filter(
+    (event) => !privateIds.has(event.layerId),
+  ).length;
+  if (normalized.events.length > 0 && sharedEventCount === 0) {
+    const occupiedPrivate = new Set(
+      normalized.events
+        .filter((event) => privateIds.has(event.layerId))
+        .map((event) => event.layerId),
+    );
+    layers = layers.map((layer) =>
+      occupiedPrivate.has(layer.id)
+        ? {
+            ...layer,
+            private: false,
+            authority: "workspace",
+            kind:
+              layer.kind === "personal" || layer.kind === "study"
+                ? "study"
+                : layer.kind,
+          }
+        : layer,
+    );
+    privateIds = privateLayerIds();
+  }
   return {
     timezone: normalized.timezone,
-    layers: normalized.layers
-      .filter((layer) => !privateLayerIds.has(layer.id))
+    layers: layers
+      .filter((layer) => !privateIds.has(layer.id))
       .map(withoutPersonalLayerFields),
     events: normalized.events
-      .filter((event) => !privateLayerIds.has(event.layerId))
+      .filter((event) => !privateIds.has(event.layerId))
       .map(withoutPersonalEventFields),
   };
 }

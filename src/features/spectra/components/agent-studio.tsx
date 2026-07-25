@@ -52,6 +52,7 @@ import {
   type SpectraAgentRelease,
   type SpectraArtifact,
 } from "../data/api";
+import { aiRegionAttr, pathTouches } from "./ai-region-path";
 
 const STEPS = [
   { title: "Purpose", detail: "Goal, scope and outcomes", icon: Sparkles },
@@ -774,20 +775,19 @@ export function AgentStudio({
           })}
         </nav>
         <main
-          data-ai-region={
-            aiChangedPaths.some((path) =>
-              path.startsWith(
-                [
-                  "/profile",
-                  "/routing",
-                  "/resources",
-                  "/skills",
-                  "/behavior",
-                  "/evals",
-                ][step]!,
-              ),
-            ) || undefined
-          }
+          data-ai-region={aiRegionAttr(
+            pathTouches(
+              aiChangedPaths,
+              [
+                "/profile",
+                "/routing",
+                "/resources",
+                "/skills",
+                "/behavior",
+                "/evals",
+              ][step]!,
+            ),
+          )}
         >
           <header>
             <span>{step + 1}</span>
@@ -806,6 +806,9 @@ export function AgentStudio({
                     value={agent.profile.purpose}
                     readOnly={readOnly}
                     maxLength={4000}
+                    data-ai-region={aiRegionAttr(
+                      pathTouches(aiChangedPaths, "/profile/purpose"),
+                    )}
                     onChange={(event) =>
                       updateProfile({ purpose: event.target.value })
                     }
@@ -893,12 +896,15 @@ export function AgentStudio({
             <div className="agent-step-content">
               <label className="agent-field">
                 <span>Who is this agent designed to help?</span>
-                <textarea
-                  value={agent.profile.audienceIntent}
-                  readOnly={readOnly}
-                  onChange={(event) =>
-                    updateProfile({ audienceIntent: event.target.value })
-                  }
+                  <textarea
+                    value={agent.profile.audienceIntent}
+                    readOnly={readOnly}
+                    data-ai-region={aiRegionAttr(
+                      pathTouches(aiChangedPaths, "/profile/audienceIntent"),
+                    )}
+                    onChange={(event) =>
+                      updateProfile({ audienceIntent: event.target.value })
+                    }
                   placeholder="Describe needs and context, not a product-role restriction."
                 />
                 <small>

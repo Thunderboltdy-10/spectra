@@ -1,8 +1,10 @@
 "use client";
 
-import type { ReactNode } from "react";
+import type { LucideIcon } from "lucide-react";
+import type { ButtonHTMLAttributes, ReactNode } from "react";
 import {
   ArrowUp,
+  ChevronRight,
   FileText,
   Image as ImageIcon,
   Loader2,
@@ -11,6 +13,7 @@ import {
   Square,
   X,
 } from "lucide-react";
+import { createPortal } from "react-dom";
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 
@@ -25,6 +28,8 @@ type CommandBarProps = {
   ) => void | boolean | Promise<void | boolean>;
   busy?: boolean;
   allowAttachments?: boolean;
+  /** When set, attachment bubbles render into this host (above the run tabs). */
+  attachmentsPortalTarget?: HTMLElement | null;
   onStop?: () => void;
   allowConcurrent?: boolean;
   onStartNewThread?: () => void;
@@ -57,6 +62,143 @@ function readFile(file: File, mode: "text" | "data-url") {
   });
 }
 
+export function CommandBarMenuItem({
+  children,
+  className,
+  ...props
+}: ButtonHTMLAttributes<HTMLButtonElement> & {
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      {...props}
+      className={cn(
+        "flex w-full items-center gap-2 rounded-[6px] px-2.5 py-2 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-45",
+        className,
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+/** Nested flyout that opens to the right of the parent menu item. */
+export function CommandBarSubmenu({
+  label,
+  icon: Icon,
+  children,
+}: {
+  label: string;
+  icon?: LucideIcon;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const closeTimer = useRef<number | null>(null);
+
+  function clearClose() {
+    if (closeTimer.current !== null) {
+      window.clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+  }
+
+  function scheduleClose() {
+    clearClose();
+    closeTimer.current = window.setTimeout(() => setOpen(false), 120);
+  }
+
+  useEffect(() => () => clearClose(), []);
+
+  return (
+    <div
+      className="relative"
+      onMouseEnter={() => {
+        clearClose();
+        setOpen(true);
+      }}
+      onMouseLeave={scheduleClose}
+    >
+      <CommandBarMenuItem
+        aria-expanded={open}
+        aria-haspopup="menu"
+        onClick={() => setOpen((current) => !current)}
+      >
+        {Icon ? <Icon className="h-4 w-4 shrink-0" /> : <Plus className="h-4 w-4 shrink-0" />}
+        <span className="min-w-0 flex-1">{label}</span>
+        <ChevronRight className="h-3.5 w-3.5 shrink-0 text-[var(--text-tertiary)]" />
+      </CommandBarMenuItem>
+      {open ? (
+        <div
+          role="menu"
+          className="absolute bottom-0 left-[calc(100%+6px)] z-30 max-h-[min(420px,70vh)] min-w-[220px] overflow-y-auto rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[0_10px_28px_rgba(0,0,0,0.12)]"
+          onMouseEnter={clearClose}
+          onMouseLeave={scheduleClose}
+        >
+          {children}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function AttachmentBubbles({
+  attachments,
+  onRemove,
+}: {
+  attachments: CommandAttachment[];
+  onRemove: (id: string) => void;
+}) {
+  if (attachments.length === 0) return null;
+  return (
+    <div
+      className="mb-2 flex w-full flex-wrap gap-1.5"
+      aria-label="Attached files"
+    >
+      {attachments.map((attachment) => (
+        <div
+          key={attachment.id}
+          className={`flex max-w-[280px] items-center gap-2 overflow-hidden rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 py-1.5 text-[10px] shadow-[0_4px_14px_-10px_rgba(20,26,32,0.35)] ${attachment.error ? "text-[var(--danger)]" : "text-[var(--text-secondary)]"}`}
+          title={attachment.error ?? attachment.name}
+        >
+          {attachment.handling === "image" &&
+          attachment.data &&
+          !attachment.error ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={attachment.data}
+              alt=""
+              className="h-9 w-9 shrink-0 rounded-[6px] object-cover"
+            />
+          ) : attachment.handling === "image" ? (
+            <ImageIcon className="h-3.5 w-3.5 shrink-0" />
+          ) : (
+            <FileText className="h-3.5 w-3.5 shrink-0" />
+          )}
+          <span className="min-w-0">
+            <span className="block truncate font-medium text-[var(--text-primary)]">
+              {attachment.name}
+            </span>
+            <span className="block truncate text-[var(--text-tertiary)]">
+              {attachment.error
+                ? attachment.error
+                : `${attachment.handling.toUpperCase()} · ${Math.max(1, Math.round(attachment.size / 1024))} KB`}
+            </span>
+          </span>
+          <button
+            type="button"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] hover:bg-[var(--bg-hover)]"
+            onClick={() => onRemove(attachment.id)}
+            aria-label={`Remove ${attachment.name}`}
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function CommandBar({
   placeholder,
   menu,
@@ -65,6 +207,7 @@ export function CommandBar({
   onSubmit,
   busy = false,
   allowAttachments = false,
+  attachmentsPortalTarget = null,
   onStop,
   allowConcurrent = false,
   onStartNewThread,
@@ -76,6 +219,8 @@ export function CommandBar({
   const [blockedAttempt, setBlockedAttempt] = useState(false);
   const sendingRef = useRef(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const menuPanelRef = useRef<HTMLDivElement | null>(null);
+  const menuTriggerRef = useRef<HTMLButtonElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const hasMenu = allowAttachments || Boolean(menu);
@@ -92,11 +237,11 @@ export function CommandBar({
           mimeType: file.type || "application/octet-stream",
           size: file.size,
         };
-        if (file.type.startsWith("image/")) {
+        if (file.type.startsWith("image/") || /\.(png|jpe?g|webp|gif)$/i.test(file.name)) {
+          const mime = file.type || "image/png";
           if (
-            !["image/png", "image/jpeg", "image/webp", "image/gif"].includes(
-              file.type,
-            )
+            !["image/png", "image/jpeg", "image/webp", "image/gif"].includes(mime) &&
+            !/\.(png|jpe?g|webp|gif)$/i.test(file.name)
           )
             return {
               ...base,
@@ -111,11 +256,12 @@ export function CommandBar({
             };
           return {
             ...base,
+            mimeType: mime.startsWith("image/") ? mime : "image/png",
             handling: "image",
             data: await readFile(file, "data-url"),
           };
         }
-        if (file.type === "application/pdf") {
+        if (file.type === "application/pdf" || /\.pdf$/i.test(file.name)) {
           if (file.size > 10 * 1024 * 1024)
             return {
               ...base,
@@ -234,11 +380,28 @@ export function CommandBar({
 
   useEffect(() => {
     if (!menuOpen) return;
-    function onPointerDown(event: PointerEvent) {
-      if (!rootRef.current?.contains(event.target as Node)) setMenuOpen(false);
+    function isInsideMenuUi(target: EventTarget | null) {
+      if (!(target instanceof Node)) return false;
+      // Close when clicking the composer/textarea/tabs — only the open menu
+      // panel and the + trigger count as "inside".
+      if (menuPanelRef.current?.contains(target)) return true;
+      if (menuTriggerRef.current?.contains(target)) return true;
+      return false;
     }
-    document.addEventListener("pointerdown", onPointerDown);
-    return () => document.removeEventListener("pointerdown", onPointerDown);
+    // Capture phase so outside closes even when a parent stops bubbling
+    // (workspace composer sits under pointer-events-none shells).
+    function onPointerDown(event: PointerEvent) {
+      if (!isInsideMenuUi(event.target)) setMenuOpen(false);
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setMenuOpen(false);
+    }
+    document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("keydown", onKeyDown, true);
+    };
   }, [menuOpen]);
 
   useEffect(() => {
@@ -251,6 +414,19 @@ export function CommandBar({
   useEffect(() => {
     if (!busy) setBlockedAttempt(false);
   }, [busy]);
+
+  const removeAttachment = (id: string) =>
+    setAttachments((current) => current.filter((item) => item.id !== id));
+
+  const bubbles = (
+    <AttachmentBubbles
+      attachments={attachments}
+      onRemove={removeAttachment}
+    />
+  );
+  const portalReady =
+    typeof document !== "undefined" && attachmentsPortalTarget != null;
+  const showInlineBubbles = !portalReady;
 
   return (
     <div
@@ -265,35 +441,54 @@ export function CommandBar({
         type="file"
         multiple
         hidden
-        accept=".pdf,.docx,.xlsx,.pptx,.txt,.md,.csv,.json,image/png,image/jpeg,image/webp,image/gif"
+        accept=".pdf,.docx,.xlsx,.pptx,.txt,.md,.csv,.json,.png,.jpg,.jpeg,.webp,.gif,image/png,image/jpeg,image/webp,image/gif,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         onChange={(event) => {
           void addFiles(event.target.files);
           event.currentTarget.value = "";
         }}
       />
+      {portalReady
+        ? createPortal(bubbles, attachmentsPortalTarget)
+        : null}
       {menuOpen && hasMenu ? (
         <div
+          ref={menuPanelRef}
           role="menu"
-          className="absolute bottom-[calc(100%+8px)] left-0 z-20 min-w-[220px] rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[0_6px_18px_rgba(0,0,0,0.10)]"
+          className="absolute bottom-[calc(100%+8px)] left-0 z-20 min-w-[240px] rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[0_6px_18px_rgba(0,0,0,0.10)]"
+          onClick={(event) => {
+            const target = event.target as HTMLElement | null;
+            if (!target) return;
+            // Close after choosing a leaf action; keep open for the
+            // "New artifact" flyout trigger (aria-haspopup).
+            const button = target.closest("button");
+            if (!button || button.getAttribute("aria-haspopup") === "menu")
+              return;
+            setMenuOpen(false);
+          }}
         >
-          {allowAttachments ? (
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="flex w-full items-center gap-2 rounded-[6px] px-2.5 py-2 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-            >
-              <Paperclip className="h-4 w-4" />
-              Attach a file
-            </button>
-          ) : null}
           {menu}
+          {allowAttachments ? (
+            <>
+              {menu ? (
+                <div className="my-1 h-px bg-[var(--border-subtle)]" />
+              ) : null}
+              <CommandBarMenuItem
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <Paperclip className="h-4 w-4" />
+                Select files
+              </CommandBarMenuItem>
+            </>
+          ) : null}
         </div>
       ) : null}
       <button
+        ref={menuTriggerRef}
         type="button"
         className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[8px] bg-[color-mix(in_oklab,var(--bg-elevated)_82%,transparent)] text-[var(--text-secondary)] shadow-[0_2px_8px_rgba(27,20,12,0.04)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-35"
         onClick={() => hasMenu && setMenuOpen((open) => !open)}
         disabled={!hasMenu}
+        aria-expanded={menuOpen}
         aria-label="Open actions"
         title="Add or attach"
       >
@@ -332,44 +527,10 @@ export function CommandBar({
             ) : null}
           </div>
         ) : null}
-        {attachments.length > 0 ? (
-          <div className="flex flex-wrap gap-1.5 px-1 pb-1.5">
-            {attachments.map((attachment) => (
-              <div
-                key={attachment.id}
-                className={`flex max-w-[260px] items-center gap-2 rounded-[8px] bg-[var(--bg-secondary)] px-2.5 py-1.5 text-[10px] ${attachment.error ? "text-[var(--danger)]" : "text-[var(--text-secondary)]"}`}
-                title={attachment.error ?? attachment.name}
-              >
-                {attachment.handling === "image" ? (
-                  <ImageIcon className="h-3.5 w-3.5 shrink-0" />
-                ) : (
-                  <FileText className="h-3.5 w-3.5 shrink-0" />
-                )}
-                <span className="min-w-0 truncate">{attachment.name}</span>
-                <span className="shrink-0 text-[var(--text-tertiary)]">
-                  {Math.max(1, Math.round(attachment.size / 1024))} KB
-                </span>
-                <button
-                  type="button"
-                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] hover:bg-[var(--bg-hover)]"
-                  onClick={() =>
-                    setAttachments((current) =>
-                      current.filter((item) => item.id !== attachment.id),
-                    )
-                  }
-                  aria-label={`Remove ${attachment.name}`}
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              </div>
-            ))}
-          </div>
-        ) : null}
+        {showInlineBubbles ? bubbles : null}
         <div className="flex items-end gap-2">
           {context ? (
-            <div className="-mb-1.5 -ml-1.5 -mt-1.5 flex w-auto min-w-[88px] max-w-[200px] shrink-0 self-stretch overflow-hidden rounded-l-[11px] border-r border-[var(--border-default)]">
-              {context}
-            </div>
+            <div className="mb-0.5 flex shrink-0 self-end">{context}</div>
           ) : null}
           <textarea
             ref={textareaRef}
@@ -396,7 +557,7 @@ export function CommandBar({
             className="max-h-32 min-h-9 min-w-0 flex-1 resize-none overflow-y-auto bg-transparent px-2 py-2 text-[13.5px] leading-5 text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
           />
           {!value.trim() ? (
-            <span className="pointer-events-none mb-1.5 hidden shrink-0 items-center gap-1 self-end rounded-[5px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[9.5px] font-medium text-[var(--text-tertiary)] sm:flex">
+            <span className="pointer-events-none mb-1.5 hidden shrink-0 items-center gap-1 self-end rounded-[5px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--text-tertiary)] sm:flex">
               ⌘ K
             </span>
           ) : null}

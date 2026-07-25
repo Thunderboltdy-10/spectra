@@ -127,7 +127,7 @@ export function pythonChartToHtml(value: unknown) {
     .join("");
   const legend = series
     .map(
-      (entry, index) =>
+      (entry, _index) =>
         `<span><i style="background:${entry.color}"></i>${escapeHtml(entry.name)}</span>`,
     )
     .join("");

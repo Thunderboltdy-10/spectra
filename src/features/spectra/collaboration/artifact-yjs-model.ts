@@ -6,6 +6,7 @@ import {
 } from "../artifacts/registry";
 import type { ArtifactTypeKey, SemanticRegion } from "../artifacts/types";
 import { normalizeWhiteboardContent } from "../whiteboard/model";
+import { normalizeArtifactContent } from "../ai/content-normalization";
 import type { ArtifactRegionController } from "./region-controller";
 import type { ArtifactCollaborationTransport } from "./types";
 
@@ -18,8 +19,14 @@ const CODE_LINES_MARKER = "$spectraCodeLines";
 const MODEL_VERSION = 1;
 
 function coerceArtifactContent(typeKey: ArtifactTypeKey, content: unknown) {
-  if (typeKey === "whiteboard") return normalizeWhiteboardContent(content);
-  return content;
+  try {
+    return normalizeArtifactContent(typeKey, content);
+  } catch {
+    // Last-resort whiteboard coerce keeps create/apply from hard-failing when
+    // the shared normalizer rejects an incomplete draft.
+    if (typeKey === "whiteboard") return normalizeWhiteboardContent(content);
+    return content;
+  }
 }
 
 export type ArtifactLiveValue = {
@@ -28,6 +35,25 @@ export type ArtifactLiveValue = {
   tags: string[];
   content: unknown;
 };
+
+/**
+ * Prefer a valid live Yjs projection over a Convex baseline record. Used when
+ * the collaboration room is ahead of spectraArtifacts.content (common right
+ * after a TipTap save before / without a durable projection write).
+ */
+export function overlayLiveArtifactRecord<T extends Record<string, unknown>>(
+  baseline: T,
+  live: ArtifactLiveValue | null | undefined,
+): T {
+  if (!live) return baseline;
+  return {
+    ...baseline,
+    title: live.title,
+    summary: live.summary ?? baseline.summary,
+    tags: live.tags,
+    content: live.content,
+  };
+}
 
 export type ArtifactLiveModelSnapshot = {
   initialized: boolean;
@@ -157,9 +183,27 @@ function replaceAtPath(
   replacement: unknown,
 ) {
   if (path.length === 0) return replacement;
+  if (value === null || typeof value !== "object") {
+    throw new Error(
+      `ARTIFACT_REGION_PATH_INVALID: cannot write ${path.join("/")} onto a non-object root`,
+    );
+  }
   let current = value as Record<string | number, unknown>;
   for (let index = 0; index < path.length - 1; index += 1) {
-    current = current[path[index]!] as Record<string | number, unknown>;
+    const segment = path[index]!;
+    const nextSegment = path[index + 1]!;
+    const existing = current[segment];
+    if (existing === null || typeof existing !== "object") {
+      // Sheets/presentation regions can address containers that are optional
+      // on the schema (e.g. rowIdentities). Materialize missing parents so
+      // decompose never throws "Cannot set properties of undefined".
+      current[segment] =
+        typeof nextSegment === "number" ||
+        (typeof nextSegment === "string" && /^\d+$/.test(nextSegment))
+          ? []
+          : {};
+    }
+    current = current[segment] as Record<string | number, unknown>;
   }
   current[path[path.length - 1]!] = replacement;
   return value;
@@ -436,10 +480,21 @@ export function readArtifactYjsDocument(
       recomposeArtifactContent(rootTemplate, new Map(regions.entries())),
     ),
   );
-  if (!validation.success)
+  if (!validation.success) {
+    const issue = validation.error.issues[0];
+    const path = issue?.path?.length ? issue.path.join(".") : "";
+    const detail = issue?.message ?? "Artifact content is invalid.";
+    // Include the Zod path so live sparse-schema misses (e.g. sheets
+    // rowIdentities.<n> after HMR / "Access removed") are diagnosable and
+    // quiet-retryable via isQuietRetryableApplyFailure.
     throw new Error(
-      validation.error.issues[0]?.message || "Artifact content is invalid.",
+      path
+        ? `Invalid input at ${path}: ${detail}`
+        : detail.startsWith("Invalid input")
+          ? detail
+          : `Invalid input: ${detail}`,
     );
+  }
   return {
     title,
     ...(typeof summary === "string" && summary ? { summary } : {}),

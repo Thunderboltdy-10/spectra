@@ -156,16 +156,79 @@ function containsCompleteJsonObject(source: string) {
 }
 
 export class ProviderStreamStalledError extends Error {
-  constructor(timeoutMs: number) {
-    super(`The current DeepSeek route produced no meaningful stream data for ${Math.round(timeoutMs / 1_000)} seconds.`);
+  readonly providerLabel: string;
+  readonly timeoutMs: number;
+
+  constructor(timeoutMs: number, providerLabel = "DeepSeek") {
+    super(
+      `The current ${providerLabel} route produced no meaningful stream data for ${Math.round(timeoutMs / 1_000)} seconds.`,
+    );
     this.name = "ProviderStreamStalledError";
+    this.providerLabel = providerLabel;
+    this.timeoutMs = timeoutMs;
   }
+}
+
+/** Display label for stall copy; prefer the live OpenRouter `provider` field. */
+export function formatProviderStallLabel(
+  provider?: string | null,
+  fallback = "DeepSeek",
+) {
+  const value = provider?.trim();
+  if (!value) return fallback;
+  if (/^deepseek$/i.test(value)) return "DeepSeek";
+  if (/^baidu$/i.test(value)) return "Baidu";
+  if (/^streamlake$/i.test(value)) return "StreamLake";
+  if (/^deepinfra$/i.test(value)) return "DeepInfra";
+  return value;
+}
+
+/**
+ * Stream health is about whether the route is still emitting traffic, not only
+ * user-visible content. Reasoning deltas, tool-argument fragments, empty role
+ * heartbeats, and SSE comment keep-alives all prove the provider is alive.
+ */
+export function streamEventIsMeaningful(input: {
+  line?: string;
+  delta?: Record<string, unknown> | null;
+  chunk?: Record<string, unknown> | null;
+  pendingJsonContinued?: boolean;
+}) {
+  const line = input.line?.trim() ?? "";
+  if (line.startsWith(":")) return true;
+  if (input.pendingJsonContinued) return true;
+  const delta = input.delta;
+  if (delta) {
+    if (typeof delta.content === "string" && delta.content) return true;
+    if (typeof delta.reasoning === "string" && delta.reasoning) return true;
+    if (Array.isArray(delta.reasoning_details) && delta.reasoning_details.length > 0)
+      return true;
+    if (Array.isArray(delta.tool_calls) && delta.tool_calls.length > 0)
+      return true;
+    if (
+      "role" in delta ||
+      "content" in delta ||
+      "reasoning" in delta ||
+      "reasoning_details" in delta ||
+      "tool_calls" in delta
+    )
+      return true;
+  }
+  const chunk = input.chunk;
+  if (chunk) {
+    if (chunk.usage) return true;
+    if (typeof chunk.provider === "string" && chunk.provider) return true;
+    const choices = Array.isArray(chunk.choices) ? chunk.choices : [];
+    if (choices.length > 0) return true;
+  }
+  return false;
 }
 
 async function readStreamChunk(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   lastMeaningfulAt: number,
   idleTimeoutMs?: number,
+  providerLabel = "DeepSeek",
 ) {
   if (!idleTimeoutMs) return reader.read();
   const remaining = Math.max(1, idleTimeoutMs - (Date.now() - lastMeaningfulAt));
@@ -174,7 +237,10 @@ async function readStreamChunk(
     return await Promise.race([
       reader.read(),
       new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(() => reject(new ProviderStreamStalledError(idleTimeoutMs)), remaining);
+        timer = setTimeout(
+          () => reject(new ProviderStreamStalledError(idleTimeoutMs, providerLabel)),
+          remaining,
+        );
       }),
     ]);
   } catch (error) {
@@ -192,6 +258,7 @@ export async function readOpenRouterResponse(
   onReasoningText?: (delta: string) => void,
   onPlanText?: (text: string) => void,
   idleTimeoutMs?: number,
+  providerLabelHint = "DeepSeek",
 ): Promise<OpenRouterPlanResult> {
   const startedAt = Date.now();
   const contentType = response.headers.get("content-type") ?? "";
@@ -236,14 +303,27 @@ export async function readOpenRouterResponse(
   let trailingError: Error | undefined;
   let lastMeaningfulAt = Date.now();
   while (true) {
-    const { value, done } = await readStreamChunk(reader, lastMeaningfulAt, idleTimeoutMs);
+    const stallLabel = formatProviderStallLabel(provider, providerLabelHint);
+    const { value, done } = await readStreamChunk(
+      reader,
+      lastMeaningfulAt,
+      idleTimeoutMs,
+      stallLabel,
+    );
     buffer += decoder.decode(value, { stream: !done });
     const lines = buffer.split("\n");
     buffer = lines.pop() ?? "";
     for (const line of lines) {
+      if (streamEventIsMeaningful({ line })) {
+        lastMeaningfulAt = Date.now();
+        continue;
+      }
       if (!line.startsWith("data:")) continue;
       const raw = line.slice(5).trim();
-      if (!raw || raw === "[DONE]") continue;
+      if (!raw || raw === "[DONE]") {
+        if (raw === "[DONE]") lastMeaningfulAt = Date.now();
+        continue;
+      }
       let chunk: Record<string, unknown>;
       try {
         chunk = JSON.parse(pendingJsonPayload + raw) as Record<string, unknown>;
@@ -259,10 +339,14 @@ export async function readOpenRouterResponse(
             pendingJsonPayload = "";
           } catch {
             pendingJsonPayload += raw;
+            if (streamEventIsMeaningful({ pendingJsonContinued: true }))
+              lastMeaningfulAt = Date.now();
             continue;
           }
         } else {
           pendingJsonPayload = raw;
+          if (streamEventIsMeaningful({ pendingJsonContinued: true }))
+            lastMeaningfulAt = Date.now();
           continue;
         }
       }
@@ -271,8 +355,8 @@ export async function readOpenRouterResponse(
       if (chunk.usage) rawUsage = chunk.usage;
       const choices = Array.isArray(chunk.choices) ? chunk.choices as Array<Record<string, unknown>> : [];
       const delta = choices[0]?.delta && typeof choices[0].delta === "object" ? choices[0].delta as Record<string, unknown> : {};
+      if (streamEventIsMeaningful({ delta, chunk })) lastMeaningfulAt = Date.now();
       if (typeof delta.content === "string") {
-        if (delta.content) lastMeaningfulAt = Date.now();
         text += delta.content;
         onPlanText?.(text);
       }
@@ -283,19 +367,18 @@ export async function readOpenRouterResponse(
           if (!fn || typeof fn !== "object") continue;
           const args = (fn as Record<string, unknown>).arguments;
           if (typeof args !== "string") continue;
-          if (args) lastMeaningfulAt = Date.now();
           toolArguments += args;
           text = toolArguments;
           onPlanText?.(text);
         }
       }
       if (typeof delta.reasoning === "string") {
-        if (delta.reasoning) lastMeaningfulAt = Date.now();
         onReasoningText?.(delta.reasoning);
       }
       if (Array.isArray(delta.reasoning_details)) {
         for (const detail of delta.reasoning_details) {
-          if (detail && typeof detail === "object" && typeof (detail as Record<string, unknown>).text === "string") onReasoningText?.((detail as Record<string, unknown>).text as string);
+          if (detail && typeof detail === "object" && typeof (detail as Record<string, unknown>).text === "string")
+            onReasoningText?.((detail as Record<string, unknown>).text as string);
         }
       }
       const publicText = extractPartialJsonStringField(text, "finalResponse").value;
@@ -335,6 +418,7 @@ export async function readOpenRouterAgentTurn(
   onReasoningText?: (delta: string) => void,
   onToolArguments?: (call: OpenRouterAgentToolCall) => void,
   idleTimeoutMs?: number,
+  providerLabelHint = "DeepSeek",
 ): Promise<OpenRouterAgentTurn> {
   const startedAt = Date.now();
   const contentType = response.headers.get("content-type") ?? "";
@@ -403,14 +487,27 @@ export async function readOpenRouterAgentTurn(
   let trailingError: Error | undefined;
   let lastMeaningfulAt = Date.now();
   while (true) {
-    const { value, done } = await readStreamChunk(reader, lastMeaningfulAt, idleTimeoutMs);
+    const stallLabel = formatProviderStallLabel(provider, providerLabelHint);
+    const { value, done } = await readStreamChunk(
+      reader,
+      lastMeaningfulAt,
+      idleTimeoutMs,
+      stallLabel,
+    );
     buffer += decoder.decode(value, { stream: !done });
     const lines = buffer.split("\n");
     buffer = lines.pop() ?? "";
     for (const line of lines) {
+      if (streamEventIsMeaningful({ line })) {
+        lastMeaningfulAt = Date.now();
+        continue;
+      }
       if (!line.startsWith("data:")) continue;
       const raw = line.slice(5).trim();
-      if (!raw || raw === "[DONE]") continue;
+      if (!raw || raw === "[DONE]") {
+        if (raw === "[DONE]") lastMeaningfulAt = Date.now();
+        continue;
+      }
       let chunk: Record<string, unknown>;
       try {
         chunk = JSON.parse(pendingJsonPayload + raw) as Record<string, unknown>;
@@ -427,10 +524,14 @@ export async function readOpenRouterAgentTurn(
             pendingJsonPayload = "";
           } catch {
             pendingJsonPayload += raw;
+            if (streamEventIsMeaningful({ pendingJsonContinued: true }))
+              lastMeaningfulAt = Date.now();
             continue;
           }
         } else {
           pendingJsonPayload = raw;
+          if (streamEventIsMeaningful({ pendingJsonContinued: true }))
+            lastMeaningfulAt = Date.now();
           continue;
         }
       }
@@ -446,14 +547,25 @@ export async function readOpenRouterAgentTurn(
       const delta = choice.delta && typeof choice.delta === "object"
         ? (choice.delta as Record<string, unknown>)
         : {};
+      if (streamEventIsMeaningful({ delta, chunk })) lastMeaningfulAt = Date.now();
       if (typeof delta.content === "string") {
-        if (delta.content) lastMeaningfulAt = Date.now();
         text += delta.content;
         onText?.(delta.content);
       }
       if (typeof delta.reasoning === "string") {
-        if (delta.reasoning) lastMeaningfulAt = Date.now();
         onReasoningText?.(delta.reasoning);
+      }
+      if (Array.isArray(delta.reasoning_details)) {
+        for (const detail of delta.reasoning_details) {
+          if (
+            detail &&
+            typeof detail === "object" &&
+            typeof (detail as Record<string, unknown>).text === "string"
+          )
+            onReasoningText?.(
+              (detail as Record<string, unknown>).text as string,
+            );
+        }
       }
       if (Array.isArray(delta.tool_calls)) {
         for (const value of delta.tool_calls) {
@@ -489,11 +601,6 @@ export async function readOpenRouterAgentTurn(
                 : previous.arguments,
           };
           calls.set(index, next);
-          if (
-            (typeof fn.name === "string" && fn.name) ||
-            (typeof fn.arguments === "string" && fn.arguments)
-          )
-            lastMeaningfulAt = Date.now();
           onToolArguments?.(next);
         }
       }

@@ -12,5 +12,6 @@ export const visualisationDesignGuide = Object.freeze({
     "Use native HTML controls and semantic landmarks. Expose a document title, primary heading, concise instructions, units, legend where necessary, and visible focus styles.",
     "Emit only named, bounded interaction events through the Spectra SDK. Never read ambient credentials, use external network calls, or place secrets in source or rendered output.",
     "Verify narrow and wide layouts, long labels, empty/extreme values, interaction reset, color-independent meaning, keyboard use, reduced motion, and embed sizing before considering the visualisation complete.",
+    "For tiny educational sketches and diagrams, keep SVG/HTML compact: prefer simple shapes and short labels over dense path dumps, embedded fonts, or multi-thousand-line markup so creation finishes in one tool call.",
   ],
 } as const);

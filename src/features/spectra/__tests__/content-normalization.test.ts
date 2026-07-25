@@ -25,4 +25,115 @@ describe("model artifact content normalization", () => {
     expect(validateBlueprintContent("quiz", quiz).success).toBe(true);
     expect(validateBlueprintContent("planner_task", task).success).toBe(true);
   });
+
+  it("recovers blank MCQ options as short-answer instead of failing the plan", () => {
+    const quiz = normalizeArtifactContent("quiz", {
+      questions: [
+        {
+          prompt: "What is ATP?",
+          type: "multiple_choice",
+          options: ["", " ", ""],
+          correctAnswer: "Energy currency",
+        },
+        {
+          prompt: "Mitochondria make ATP?",
+          type: "true_false",
+          correctAnswer: "True",
+        },
+        {
+          prompt: "Pick a stage",
+          type: "multiple_choice",
+          options: [{ label: "A", text: "Glycolysis" }, { text: "Krebs" }],
+          correctAnswer: "Glycolysis",
+        },
+      ],
+    });
+    expect(validateBlueprintContent("quiz", quiz).success).toBe(true);
+    expect((quiz.questions as Array<Record<string, unknown>>)?.[0]).toMatchObject({
+      type: "short_answer",
+      correctAnswer: "Energy currency",
+    });
+    expect((quiz.questions as Array<Record<string, unknown>>)?.[1]).toMatchObject({
+      type: "true_false",
+      options: ["True", "False"],
+    });
+    expect((quiz.questions as Array<Record<string, unknown>>)?.[2]).toMatchObject({
+      type: "multiple_choice",
+      options: ["Glycolysis", "Krebs"],
+      correctAnswer: "Glycolysis",
+    });
+  });
+
+  it("makes the classic blank-option pending quiz shell schema-valid after normalize", () => {
+    const shell = normalizeArtifactContent("quiz", {
+      questions: [
+        {
+          id: "question-1",
+          prompt: "",
+          type: "multiple_choice",
+          options: ["", "", "", ""],
+          optionIds: [
+            "question-1:option:1",
+            "question-1:option:2",
+            "question-1:option:3",
+            "question-1:option:4",
+          ],
+          correctAnswer: "",
+        },
+      ],
+      settings: {},
+      published: false,
+    });
+    expect(validateBlueprintContent("quiz", shell).success).toBe(true);
+    expect((shell.questions as Array<Record<string, unknown>>)?.[0]).toMatchObject({
+      type: "short_answer",
+    });
+  });
+
+  it("fills sparse live-Yjs sheets required strings and identity maps", () => {
+    const sparse = normalizeArtifactContent("sheets", {
+      workbook: { calculationMode: "automatic" },
+      activeSheetId: "sheet-1",
+      sheets: [
+        {
+          id: "sheet-1",
+          // name / locale / chart.title intentionally missing
+          cells: {
+            A1: { value: "Enzyme" },
+            B2: { value: 1.2 },
+          },
+          rowIdentities: { "0": undefined, "1": undefined },
+          columnIdentities: { "0": undefined, "1": undefined },
+          charts: [
+            {
+              id: "chart-1",
+              type: "line",
+              sourceRange: "A1:B2",
+              position: { x: 0, y: 0, width: 400, height: 240 },
+            },
+          ],
+          tables: [{ id: "table-1", range: "A1:B2" }],
+        },
+      ],
+    }) as {
+      workbook: { locale: string };
+      sheets: Array<{
+        name: string;
+        rowIdentities: Record<string, string>;
+        columnIdentities: Record<string, string>;
+        charts: Array<{ title: string }>;
+        tables: Array<{ name: string }>;
+      }>;
+    };
+
+    expect(validateBlueprintContent("sheets", sparse).success).toBe(true);
+    expect(sparse.workbook.locale).toBe("en-US");
+    expect(sparse.sheets[0]!.name).toBe("Sheet 1");
+    expect(sparse.sheets[0]!.charts[0]!.title).toBe("Chart 1");
+    expect(sparse.sheets[0]!.tables[0]!.name).toBe("Table 1");
+    expect(sparse.sheets[0]!.rowIdentities["0"]).toBe("sheet-1:row:1");
+    expect(sparse.sheets[0]!.rowIdentities["1"]).toBe("sheet-1:row:2");
+    expect(sparse.sheets[0]!.columnIdentities["0"]).toBe("sheet-1:column:1");
+    expect(sparse.sheets[0]!.columnIdentities["1"]).toBe("sheet-1:column:2");
+  });
 });

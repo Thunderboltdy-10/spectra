@@ -106,9 +106,19 @@ export async function runSpectraAgentLoop(input: {
     30_000,
     Math.min(10 * 60_000, input.budget?.maxElapsedMs ?? 4 * 60_000),
   );
-  const maxTotalTokens = Math.max(
+  // maxTotalTokens is a per-turn context-size guard (prompt tokens on one
+  // request), not a cumulative spend cap. Summing usage across turns falsely
+  // paused focused sheets/document edits once conversation + artifact context
+  // was large — the agent still had headroom, but the sum crossed 250k.
+  const maxPromptTokens = Math.max(
     20_000,
     Math.min(500_000, input.budget?.maxTotalTokens ?? 250_000),
+  );
+  // Cumulative spend remains bounded, but loosely — turn/time/tool caps are the
+  // primary runaway guards. Four full context windows is enough for complex QC.
+  const maxCumulativeTokens = Math.max(
+    maxPromptTokens,
+    Math.min(2_000_000, maxPromptTokens * 4),
   );
 
   while (true) {
@@ -125,9 +135,14 @@ export async function runSpectraAgentLoop(input: {
     const turn = await input.requestTurn(messages, turns);
     input.onTurn?.(turn, turns);
     usage = mergeUsage(usage, turn.usage);
-    if ((usage?.totalTokens ?? 0) > maxTotalTokens)
+    const turnPromptTokens = turn.usage?.promptTokens ?? 0;
+    if (turnPromptTokens > maxPromptTokens)
       throw new Error(
         "Spectra paused this agent after its reliability context budget. Continue in the thread to resume with a narrower context.",
+      );
+    if ((usage?.totalTokens ?? 0) > maxCumulativeTokens)
+      throw new Error(
+        "Spectra paused this agent after its reliability token spend budget. Continue in the thread to resume safely.",
       );
     model = turn.model ?? model;
     provider = turn.provider ?? provider;
@@ -183,7 +198,45 @@ export async function runSpectraAgentLoop(input: {
               message:
                 "This exact tool request already returned a result. Use that result, change the request, or finish the task.",
             }
-          : await input.executeTool(call);
+          : await (async () => {
+              let timer: ReturnType<typeof setTimeout> | undefined;
+              try {
+                return await Promise.race([
+                  input.executeTool(call),
+                  new Promise<never>((_, reject) => {
+                    timer = setTimeout(() => {
+                      reject(
+                        Object.assign(
+                          new Error(
+                            `Spectra paused because ${call.name} took too long. Continue with what you already have, or finish the plan now.`,
+                          ),
+                          { code: "tool_timeout" },
+                        ),
+                      );
+                    }, 20_000);
+                  }),
+                ]);
+              } catch (error) {
+                if (
+                  error &&
+                  typeof error === "object" &&
+                  "code" in error &&
+                  (error as { code?: string }).code === "tool_timeout"
+                ) {
+                  return {
+                    ok: false,
+                    code: "tool_timeout",
+                    message:
+                      error instanceof Error
+                        ? error.message
+                        : `${call.name} timed out.`,
+                  };
+                }
+                throw error;
+              } finally {
+                if (timer) clearTimeout(timer);
+              }
+            })();
       messages.push({
         role: "tool",
         tool_call_id: call.id,

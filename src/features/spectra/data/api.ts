@@ -224,6 +224,10 @@ export type SpectraManageBacOverview = {
   admin: boolean;
   data: {
     integration: SpectraManageBacIntegration | null;
+    /** Non-secret admin hint from MANAGEBAC_BASE_URL when no integration exists. */
+    envBaseUrlHint?: string;
+    /** True when MANAGEBAC_API_KEY is present server-side for temporary testing. */
+    envTokenAvailable?: boolean;
     school?: { _id: string; name: string } | null;
     mapping?: {
       status: "pending" | "verified" | "no_match" | "ambiguous" | "revoked";
@@ -1145,13 +1149,7 @@ export async function getSpectraManageBacOverview() {
 
 export async function configureSpectraManageBac(input: {
   baseUrl: string;
-  referenceUrl?: string;
-  authHeaderName: string;
-  authScheme: "raw" | "bearer";
   token: string;
-  frequencyMinutes: number;
-  autoApplySafeUpdates: boolean;
-  conflictMode: "review" | "ask_me";
 }) {
   return postManageBac<{ integrationId: string }>({
     action: "configure",
@@ -1406,13 +1404,18 @@ const runEventRequests = new Map<
   { at: number; promise: Promise<{ events: SpectraRunEvent[] }> }
 >();
 
+export function invalidateSpectraRunTabsCache() {
+  runTabsRequests.clear();
+}
+
 export async function getSpectraRunTabs(
-  options: { includeHidden?: boolean; limit?: number } = {},
+  options: { includeHidden?: boolean; limit?: number; force?: boolean } = {},
 ) {
   const qs = new URLSearchParams({ action: "runTabs" });
   if (options.includeHidden) qs.set("includeHidden", "true");
   if (options.limit) qs.set("limit", String(options.limit));
   const key = qs.toString();
+  if (options.force) runTabsRequests.delete(key);
   const existing = runTabsRequests.get(key);
   if (existing && Date.now() - existing.at < 1_100) return existing.promise;
   const promise = fetch(`/api/spectra?${key}`, { cache: "no-store" }).then(
@@ -2259,6 +2262,8 @@ export function toArtifactCardView(
     placement:
       artifact.placementStatus ??
       (placements.length > 0 ? "workspace" : "inbox"),
+    updatedAt: artifact.updatedAt,
+    aiStateExpiresAt: artifact.aiStateExpiresAt,
     shared: artifact.isShared,
     accessLevel: artifact.accessLevel ?? undefined,
     accessExplanation:
@@ -2291,6 +2296,8 @@ export function workspaceItemToArtifactCardView(
       "No summary yet.",
     meta: "Workspace card",
     placement: "workspace",
+    updatedAt: item.artifact.updatedAt,
+    aiStateExpiresAt: item.artifact.aiStateExpiresAt,
     shared: item.artifact.isShared,
     accessLevel: item.artifact.accessLevel ?? undefined,
     accessExplanation:
@@ -2299,5 +2306,12 @@ export function workspaceItemToArtifactCardView(
           ? "Access through this workspace"
           : "Shared directly with you"
         : undefined,
+    aiState:
+      item.artifact.aiState === "edited" &&
+      item.artifact.aiStateExpiresAt &&
+      item.artifact.aiStateExpiresAt <= Date.now()
+        ? undefined
+        : item.artifact.aiState,
+    aiProgress: item.artifact.aiProgress,
   };
 }

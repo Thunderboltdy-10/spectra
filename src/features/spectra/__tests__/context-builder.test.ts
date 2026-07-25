@@ -211,4 +211,41 @@ describe("Wave 6 bounded context builder", () => {
     });
     expect(packet.activeGoal?.rule).toMatch(/authoritative current goal/i);
   });
+
+  it("keeps trailing planted document blocks in focused structure", () => {
+    const focused = artifact("focused", {
+      content: {
+        blocks: [
+          ...Array.from({ length: 26 }, (_, index) => ({
+            id: `block-${index + 1}`,
+            type: index === 25 ? "heading" : "paragraph",
+            text:
+              index === 25
+                ? "Key Takeaways"
+                : `Body paragraph ${index + 1}`,
+            level: index === 25 ? 2 : undefined,
+          })),
+          {
+            id: "planted",
+            type: "paragraph",
+            text: "Enzyme A Km = 12.0 (planted claim)",
+          },
+        ],
+      },
+    });
+    const packet = buildBoundedContextPacket({
+      prompt: "Find inconsistencies between my sheet and this document",
+      focusMode: "artifact",
+      focusedArtifact: focused,
+      artifacts: [focused],
+    });
+    const structure = (
+      packet.focusedArtifact as {
+        structure?: { blocks?: Array<{ text?: unknown }> };
+      } | null
+    )?.structure;
+    const texts = (structure?.blocks ?? []).map((block) => block.text);
+    expect(texts).toContain("Key Takeaways");
+    expect(texts).toContain("Enzyme A Km = 12.0 (planted claim)");
+  });
 });

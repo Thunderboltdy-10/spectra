@@ -159,6 +159,20 @@ async function sha256(value: string) {
   );
 }
 
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value))
+    return `[${value.map((item) => canonicalJson(item)).join(",")}]`;
+  return `{${Object.entries(value as Record<string, unknown>)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`)
+    .join(",")}}`;
+}
+
+async function exactDigest(value: unknown) {
+  return sha256(canonicalJson(value));
+}
+
 async function verifyBridge(
   ctx: MutationCtx,
   actor: Actor,
@@ -449,7 +463,9 @@ export const configure = mutation({
         Math.min(
           1_440,
           Math.round(
-            args.frequencyMinutes ?? current?.syncPolicy.frequencyMinutes ?? 60,
+            args.frequencyMinutes ??
+              current?.syncPolicy.frequencyMinutes ??
+              180,
           ),
         ),
       ),
@@ -475,6 +491,7 @@ export const configure = mutation({
       credentialFingerprint:
         args.credentialFingerprint ?? current?.credentialFingerprint,
       syncPolicy,
+      freshnessSlaMinutes: Math.max(180, syncPolicy.frequencyMinutes + 20),
       rotationDueAt: args.rotationDueAt,
       updatedByAccountId: actor.accountId,
       blockedReason: undefined,
@@ -514,7 +531,6 @@ export const configure = mutation({
           failed: 0,
           quarantined: 0,
         },
-        freshnessSlaMinutes: 120,
         requestBudgetPerMinute: 180,
         bootstrapVersion: 1,
         createdByAccountId: actor.accountId,
@@ -1019,9 +1035,9 @@ export const claimScheduledSync = mutation({
       }
       const actor = await getActorForAccountId(ctx, preferred.accountId);
       if (!actor) continue;
-      const expectedDigest = await sha256(
-        JSON.stringify({ workerId: text(args.workerId, 200) }),
-      );
+      const expectedDigest = await exactDigest({
+        workerId: text(args.workerId, 200),
+      });
       if (expectedDigest !== args.payloadDigest)
         throw new Error(
           "INTEGRATION_PAYLOAD_INVALID: Scheduled claim payload changed.",
@@ -1285,6 +1301,93 @@ export const beginSync = mutation({
   },
 });
 
+/** AI-triggered refresh with anti-thrash cooldown (~15 minutes). */
+export const requestAiRefresh = mutation({
+  args: {
+    reason: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx);
+    const integration = await integrationForSchool(ctx, actor.schoolId);
+    if (!integration || integration.status !== "connected")
+      return {
+        started: false,
+        skipped: true,
+        reason: "not_connected" as const,
+      };
+    const now = Date.now();
+    const cooldownMs = 15 * 60_000;
+    if (integration.lastSyncAt && now - integration.lastSyncAt < cooldownMs)
+      return {
+        started: false,
+        skipped: true,
+        reason: "fresh" as const,
+        lastSyncAt: integration.lastSyncAt,
+        nextEligibleAt: integration.lastSyncAt + cooldownMs,
+      };
+    const active = await ctx.db
+      .query("externalSyncRuns")
+      .withIndex("by_integration_created", (q) =>
+        q.eq("integrationId", integration._id),
+      )
+      .order("desc")
+      .take(12);
+    if (
+      active.some(
+        (run) =>
+          ["queued", "leased", "running"].includes(run.status) &&
+          (!run.leaseExpiresAt || run.leaseExpiresAt > now),
+      )
+    )
+      return {
+        started: false,
+        skipped: true,
+        reason: "already_running" as const,
+        lastSyncAt: integration.lastSyncAt,
+      };
+    const mapping = await ctx.db
+      .query("externalIdentityMappings")
+      .withIndex("by_integration_account", (q) =>
+        q
+          .eq("integrationId", integration._id)
+          .eq("accountId", actor.accountId),
+      )
+      .unique();
+    if (
+      actor.schoolRole !== "school_admin" &&
+      (!mapping || mapping.status !== "verified")
+    )
+      return {
+        started: false,
+        skipped: true,
+        reason: "identity_required" as const,
+      };
+    // Pull the scheduled worker forward instead of orphaning a queued run.
+    await ctx.db.patch(integration._id, {
+      nextSyncAt: now,
+      updatedAt: now,
+    });
+    await writeAuditEvent(ctx, {
+      actorAccountId: actor.accountId,
+      schoolId: actor.schoolId,
+      action: "integration.managebac.ai_refresh",
+      targetType: "school_integration",
+      targetId: integration._id,
+      metadata: {
+        reason: (args.reason ?? "stale_school_data").slice(0, 240),
+        nextSyncAt: now,
+      },
+      retentionClass: "operational",
+    });
+    return {
+      started: true,
+      skipped: false,
+      lastSyncAt: integration.lastSyncAt,
+      nextSyncAt: now,
+    };
+  },
+});
+
 export const commitIdentityResolution = mutation({
   args: {
     integrationId: v.id("schoolIntegrations"),
@@ -1314,19 +1417,17 @@ export const commitIdentityResolution = mutation({
       syncRun.kind !== "identity"
     )
       throw new Error("INTEGRATION_SYNC_FORBIDDEN: Identity run mismatch.");
-    const expectedDigest = await sha256(
-      JSON.stringify({
-        matchCount: args.matchCount,
-        ...(args.providerUserId ? { providerUserId: args.providerUserId } : {}),
-        ...(args.providerUserIdHash
-          ? { providerUserIdHash: args.providerUserIdHash }
-          : {}),
-        verifiedEmailHash: args.verifiedEmailHash,
-        ...(args.evidenceCapabilityId
-          ? { evidenceCapabilityId: args.evidenceCapabilityId }
-          : {}),
-      }),
-    );
+    const expectedDigest = await exactDigest({
+      matchCount: args.matchCount,
+      ...(args.providerUserId ? { providerUserId: args.providerUserId } : {}),
+      ...(args.providerUserIdHash
+        ? { providerUserIdHash: args.providerUserIdHash }
+        : {}),
+      verifiedEmailHash: args.verifiedEmailHash,
+      ...(args.evidenceCapabilityId
+        ? { evidenceCapabilityId: args.evidenceCapabilityId }
+        : {}),
+    });
     if (expectedDigest !== args.payloadDigest)
       throw new Error("INTEGRATION_PAYLOAD_INVALID: Identity payload changed.");
     await verifyBridge(ctx, actor, {
@@ -2046,13 +2147,9 @@ async function projectRecord(
 ) {
   if (!syncRun.accountId) return { projected: false, created: false };
   if (source.recordType === "class") {
-    const result = await ensureClassWorkspace(
-      ctx,
-      integration,
-      syncRun.accountId,
-      source,
-    );
-    return { projected: true, created: result.created };
+    // Class workspaces are never auto-created. Sync stores the record only;
+    // each user chooses which classes to materialize from the school-data dashboard.
+    return { projected: false, created: false };
   }
   if (["assignment", "deadline", "assessment"].includes(source.recordType)) {
     const result = await ensurePlannerProjection(
@@ -2140,14 +2237,12 @@ export const commitNormalizedPage = mutation({
       !syncRun.capabilityIds.includes(capability._id)
     )
       throw new Error("INTEGRATION_SYNC_FORBIDDEN: Sync scope mismatch.");
-    const expectedDigest = await sha256(
-      JSON.stringify({
-        capabilityId: args.capabilityId,
-        records: args.records,
-        nextCursor: args.nextCursor ?? null,
-        pageNumber: args.pageNumber,
-      }),
-    );
+    const expectedDigest = await exactDigest({
+      capabilityId: args.capabilityId,
+      records: args.records,
+      ...(args.nextCursor ? { nextCursor: args.nextCursor } : {}),
+      pageNumber: args.pageNumber,
+    });
     if (expectedDigest !== args.payloadDigest)
       throw new Error("INTEGRATION_PAYLOAD_INVALID: Sync page changed.");
     await verifyBridge(ctx, actor, {
@@ -2378,17 +2473,15 @@ export const commitQuarantine = mutation({
       capability.integrationId !== integration._id
     )
       throw new Error("INTEGRATION_SYNC_FORBIDDEN: Quarantine scope mismatch.");
-    const expectedDigest = await sha256(
-      JSON.stringify({
-        capabilityId: args.capabilityId,
-        reasonCode: args.reasonCode,
-        payloadHash: args.payloadHash,
-        providerRecordKeyHash: args.providerRecordKeyHash,
-        ...(args.sanitizedSample !== undefined
-          ? { sanitizedSample: args.sanitizedSample }
-          : {}),
-      }),
-    );
+    const expectedDigest = await exactDigest({
+      capabilityId: args.capabilityId,
+      reasonCode: args.reasonCode,
+      payloadHash: args.payloadHash,
+      providerRecordKeyHash: args.providerRecordKeyHash,
+      ...(args.sanitizedSample !== undefined
+        ? { sanitizedSample: args.sanitizedSample }
+        : {}),
+    });
     if (expectedDigest !== args.payloadDigest)
       throw new Error(
         "INTEGRATION_PAYLOAD_INVALID: Quarantine payload changed.",
@@ -2480,15 +2573,13 @@ export const failSync = mutation({
         actor.schoolRole !== "school_admin")
     )
       throw new Error("INTEGRATION_SYNC_FORBIDDEN: Sync run mismatch.");
-    const expectedDigest = await sha256(
-      JSON.stringify({
-        errorCode: args.errorCode,
-        errorSummary: args.errorSummary,
-        ...(args.retryAfterAt !== undefined
-          ? { retryAfterAt: args.retryAfterAt }
-          : {}),
-      }),
-    );
+    const expectedDigest = await exactDigest({
+      errorCode: args.errorCode,
+      errorSummary: args.errorSummary,
+      ...(args.retryAfterAt !== undefined
+        ? { retryAfterAt: args.retryAfterAt }
+        : {}),
+    });
     if (expectedDigest !== args.payloadDigest)
       throw new Error("INTEGRATION_PAYLOAD_INVALID: Failure payload changed.");
     await verifyBridge(ctx, actor, {
@@ -2578,12 +2669,10 @@ export const completeSync = mutation({
         actor.schoolRole !== "school_admin")
     )
       throw new Error("INTEGRATION_SYNC_FORBIDDEN: Sync run mismatch.");
-    const expectedDigest = await sha256(
-      JSON.stringify({
-        seenProviderKeys: args.seenProviderKeys,
-        reconciledCapabilityIds: args.reconciledCapabilityIds,
-      }),
-    );
+    const expectedDigest = await exactDigest({
+      seenProviderKeys: args.seenProviderKeys,
+      reconciledCapabilityIds: args.reconciledCapabilityIds,
+    });
     if (expectedDigest !== args.payloadDigest)
       throw new Error(
         "INTEGRATION_PAYLOAD_INVALID: Reconciliation set changed.",
@@ -3102,5 +3191,188 @@ export const recordsForPurpose = query({
         purpose: args.purpose,
       },
     };
+  },
+});
+
+export const listMyClassCandidates = query({
+  args: {},
+  handler: async (ctx) => {
+    const actor = await getAuthenticatedActor(ctx);
+    if (!actor) return null;
+    const integration = await ctx.db
+      .query("schoolIntegrations")
+      .withIndex("by_school_provider", (q) =>
+        q.eq("schoolId", actor.schoolId).eq("provider", "managebac"),
+      )
+      .unique();
+    if (!integration || integration.status === "revoked")
+      return { integration: null, classes: [] as Array<Record<string, unknown>>, lastSyncAt: undefined as number | undefined, nextSyncAt: undefined as number | undefined };
+    const [records, projections] = await Promise.all([
+      ctx.db
+        .query("externalRecords")
+        .withIndex("by_school_updated", (q) => q.eq("schoolId", actor.schoolId))
+        .order("desc")
+        .take(2_000),
+      ctx.db
+        .query("externalProjections")
+        .withIndex("by_account_updated", (q) => q.eq("accountId", actor.accountId))
+        .order("desc")
+        .take(2_000),
+    ]);
+    const workspaceByProviderKey = new Map(
+      projections
+        .filter(
+          (item) =>
+            item.integrationId === integration._id &&
+            item.projectionType === "workspace" &&
+            item.state === "active",
+        )
+        .map((item) => [item.providerKey, item.projectionId] as const),
+    );
+    const classes = records
+      .filter((item) => item.recordType === "class" && !item.tombstone)
+      .map((item) => {
+        const normalized = record(item.normalized);
+        const archived =
+          normalized.archived === true || normalized.archived === "true";
+        const providerKey = `class:${item.providerClassId ?? item.providerRecordId}:${item.academicPeriodKey ?? "current"}`;
+        const workspaceId = workspaceByProviderKey.get(providerKey);
+        return {
+          recordId: item._id,
+          providerRecordId: item.providerRecordId,
+          providerClassId: item.providerClassId,
+          title: text(normalized.name ?? normalized.title, 180, "ManageBac class"),
+          program: text(normalized.program ?? normalized.programme, 120),
+          grade: text(normalized.grade, 80),
+          description: text(normalized.description, 400),
+          archived,
+          workspaceId: workspaceId ?? null,
+          fetchedAt: item.fetchedAt,
+        };
+      })
+      .filter((item) => !item.archived)
+      .sort((a, b) => a.title.localeCompare(b.title));
+    return {
+      integration: safeIntegration(integration),
+      classes,
+      lastSyncAt: integration.lastSyncAt,
+      nextSyncAt: integration.nextSyncAt,
+    };
+  },
+});
+
+export const materializeClassWorkspaces = mutation({
+  args: {
+    recordIds: v.array(v.id("externalRecords")),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getAuthenticatedActor(ctx);
+    if (!actor)
+      throw new Error("AUTH_REQUIRED: Sign in to create class workspaces.");
+    const integration = await ctx.db
+      .query("schoolIntegrations")
+      .withIndex("by_school_provider", (q) =>
+        q.eq("schoolId", actor.schoolId).eq("provider", "managebac"),
+      )
+      .unique();
+    if (!integration || integration.status === "revoked")
+      throw new Error(
+        "INTEGRATION_NOT_CONNECTED: ManageBac is not connected for this school.",
+      );
+    const selected = args.recordIds.slice(0, 100);
+    let created = 0;
+    let skipped = 0;
+    for (const recordId of selected) {
+      const source = await ctx.db.get(recordId);
+      if (
+        !source ||
+        source.schoolId !== actor.schoolId ||
+        source.integrationId !== integration._id ||
+        source.recordType !== "class" ||
+        source.tombstone
+      ) {
+        skipped += 1;
+        continue;
+      }
+      const result = await ensureClassWorkspace(
+        ctx,
+        integration,
+        actor.accountId,
+        source,
+      );
+      if (result.created) created += 1;
+      else skipped += 1;
+    }
+    return { created, skipped, requested: selected.length };
+  },
+});
+
+export const purgeAutoCreatedClassWorkspaces = mutation({
+  args: {
+    confirmation: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const actor = await getAuthenticatedActor(ctx);
+    if (!actor)
+      throw new Error("AUTH_REQUIRED: Sign in to clean up class workspaces.");
+    if (args.confirmation !== "Remove auto-created ManageBac workspaces")
+      throw new Error(
+        "INTEGRATION_CONFIRMATION_REQUIRED: Type the confirmation phrase to continue.",
+      );
+    const integration = await ctx.db
+      .query("schoolIntegrations")
+      .withIndex("by_school_provider", (q) =>
+        q.eq("schoolId", actor.schoolId).eq("provider", "managebac"),
+      )
+      .unique();
+    const owned = await ctx.db
+      .query("spectraWorkspaces")
+      .withIndex("by_account_starter", (q) =>
+        q
+          .eq("ownerAccountId", actor.accountId)
+          .eq("starterKey", "managebac-class"),
+      )
+      .collect();
+    const now = Date.now();
+    let removed = 0;
+    for (const workspace of owned) {
+      const items = await ctx.db
+        .query("spectraWorkspaceItems")
+        .withIndex("by_workspace", (q) => q.eq("workspaceId", workspace._id))
+        .collect();
+      for (const item of items) await ctx.db.delete(item._id);
+      await ctx.db.delete(workspace._id);
+      removed += 1;
+    }
+    if (integration) {
+      const projections = await ctx.db
+        .query("externalProjections")
+        .withIndex("by_account_updated", (q) =>
+          q.eq("accountId", actor.accountId),
+        )
+        .order("desc")
+        .take(5_000);
+      for (const projection of projections) {
+        if (
+          projection.integrationId !== integration._id ||
+          projection.projectionType !== "workspace"
+        )
+          continue;
+        await ctx.db.patch(projection._id, {
+          state: "detached",
+          updatedAt: now,
+        });
+      }
+    }
+    await writeAuditEvent(ctx, {
+      actorAccountId: actor.accountId,
+      schoolId: actor.schoolId,
+      action: "integration.managebac.class_workspaces_purged",
+      targetType: "school_integration",
+      targetId: integration?._id ?? actor.schoolId,
+      metadata: { removed },
+      retentionClass: "security",
+    });
+    return { removed };
   },
 });

@@ -8,15 +8,12 @@ import {
   type FormEvent,
 } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useNow } from "@/hooks/use-now";
 import {
   Activity,
   AlertTriangle,
-  ArrowUpRight,
   BarChart3,
-  Building2,
   CalendarDays,
-  Check,
-  ChevronDown,
   CircleDollarSign,
   CircleGauge,
   CloudCog,
@@ -38,14 +35,11 @@ import {
   Settings2,
   ShieldAlert,
   ShieldCheck,
-  SlidersHorizontal,
   Sparkles,
   TicketCheck,
   UserPlus,
   Users,
   Workflow,
-  Wrench,
-  XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -70,7 +64,6 @@ import {
   MetricCard,
   PrivacyNotice,
   SelectField,
-  Sparkline,
   StatusBadge,
   TextAreaField,
   TextField,
@@ -1705,7 +1698,7 @@ function SchoolsSurface({
 
 function OperationsSurface({
   overview,
-  refreshKey,
+  refreshKey: _refreshKey,
   onRefresh,
 }: {
   overview: PlatformAdministrationOverview;
@@ -2255,6 +2248,7 @@ function SecuritySurface({
   const [cancelJob, setCancelJob] = useState<LifecycleJob | null>(null);
   const [cancelReason, setCancelReason] = useState("");
   const [busy, setBusy] = useState("");
+  const now = useNow(30_000);
   useEffect(() => {
     setLoading(true);
     void Promise.all([
@@ -2464,7 +2458,7 @@ function SecuritySurface({
             <div className="divide-y divide-[var(--border-subtle)] px-4 pb-3">
               {securityLog.sessions.slice(0, 12).map((session) => {
                 const active =
-                  !session.revokedAt && session.expiresAt > Date.now();
+                  !session.revokedAt && session.expiresAt > now;
                 return (
                   <div
                     key={session.sessionId}

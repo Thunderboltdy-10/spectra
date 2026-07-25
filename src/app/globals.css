@@ -342,7 +342,7 @@ body {
 }
 
 .spectra-document-studio .ProseMirror :is(h1, h2, h3) {
-  font-family: "Fraunces", "Fraunces Fallback", Georgia, serif;
+  font-family: var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
   font-weight: 600;
   letter-spacing: -0.018em;
 }
@@ -844,8 +844,7 @@ body {
   padding-right: 18px;
 }
 
-.spectra-flashcard-studio > aside > div:first-child,
-.spectra-flashcard-studio .spectra-deck-searchbar {
+.spectra-flashcard-studio > aside > div:first-child {
   display: none !important;
 }
 
@@ -853,10 +852,6 @@ body {
   position: relative;
   min-height: 36px;
   padding-right: 0;
-}
-
-.spectra-deck-study-trigger {
-  display: none !important;
 }
 
 .spectra-deck-menu-trigger {
@@ -1028,6 +1023,52 @@ body {
   max-height: none;
   margin-top: 0 !important;
   transform: none;
+}
+
+/* Side-panel editors: redesign for ~360–520px widths so tools and fields
+   remain usable instead of overflowing like a squashed fullscreen layout. */
+.spectra-artifact-studio[data-studio-mode="split"] {
+  container-type: inline-size;
+  container-name: spectra-studio-split;
+}
+
+.spectra-artifact-studio[data-studio-mode="split"] .spectra-artifact-header {
+  flex-wrap: wrap;
+  gap: 10px;
+  padding-inline: 12px;
+}
+
+.spectra-artifact-studio[data-studio-mode="split"]
+  .spectra-artifact-header-actions {
+  width: 100%;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.spectra-artifact-studio[data-studio-mode="split"] .spectra-artifact-identity {
+  padding-inline: 12px !important;
+}
+
+.spectra-artifact-studio[data-studio-mode="split"]
+  .spectra-artifact-identity
+  textarea {
+  font-size: 22px !important;
+  line-height: 1.2 !important;
+}
+
+@container spectra-studio-split (max-width: 460px) {
+  .spectra-artifact-studio[data-studio-mode="split"]
+    [data-quiz-panel="editor"],
+  .spectra-artifact-studio[data-studio-mode="split"]
+    [data-quiz-panel="settings"] {
+    min-width: 0 !important;
+    width: 100% !important;
+  }
+
+  .spectra-artifact-studio[data-studio-mode="split"] .spectra-deck-pagination {
+    width: 100%;
+    justify-content: space-between;
+  }
 }
 
 .spectra-artifact-studio[data-blueprint="flashcard_deck"]
@@ -1210,7 +1251,7 @@ body {
 }
 
 .spectra-flashcard-studio textarea {
-  font-family: var(--font-fraunces), Georgia, serif;
+  font-family: var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
 }
 
 .spectra-studio-details {
@@ -1224,7 +1265,7 @@ body {
 }
 
 .spectra-flashcard-studio textarea {
-  font-family: var(--font-fraunces), Georgia, serif;
+  font-family: var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
 }
 
 .spectra-studio-details {
@@ -2169,7 +2210,7 @@ body {
 }
 
 .whiteboard-presenter-bar strong {
-  font-family: var(--font-display, Georgia, serif);
+  font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
   font-size: 17px;
 }
 
@@ -2183,6 +2224,39 @@ body {
 [data-ai-region="true"] > .whiteboard-node,
 .whiteboard-edges [data-ai-region="true"] {
   animation: spectra-whiteboard-form 680ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.spectra-artifact-studio[data-ai-state="creating"]
+  [data-ai-region="true"]
+  > .whiteboard-node,
+.spectra-artifact-studio[data-ai-state="updating"]
+  [data-ai-region="true"]
+  > .whiteboard-node,
+.spectra-artifact-studio[data-ai-state="creating"]
+  .whiteboard-edges
+  [data-ai-region="true"],
+.spectra-artifact-studio[data-ai-state="updating"]
+  .whiteboard-edges
+  [data-ai-region="true"] {
+  box-shadow:
+    0 0 0 2px rgba(84, 140, 255, 0.28),
+    0 10px 28px rgba(57, 99, 185, 0.14);
+  outline: 1px solid color-mix(in oklab, #4f8dff 34%, transparent);
+}
+
+.spectra-artifact-studio[data-ai-catchup="true"]
+  [data-ai-region="true"]
+  > .whiteboard-node,
+.spectra-artifact-studio[data-ai-state="edited"]
+  [data-ai-region="true"]
+  > .whiteboard-node,
+.spectra-artifact-studio[data-ai-catchup="true"]
+  .whiteboard-edges
+  [data-ai-region="true"],
+.spectra-artifact-studio[data-ai-state="edited"]
+  .whiteboard-edges
+  [data-ai-region="true"] {
+  animation: spectra-whiteboard-form 1.05s cubic-bezier(0.2, 0.8, 0.2, 1) 1 both;
 }
 
 @keyframes spectra-whiteboard-form {
@@ -2378,7 +2452,7 @@ body {
   min-width: 190px;
   margin-left: 7px;
   color: #2f3c36;
-  font-family: var(--font-display, Georgia, serif);
+  font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
   font-size: 16px;
   font-weight: 650;
   white-space: nowrap;
@@ -2900,7 +2974,7 @@ body {
 }
 
 .timetable-agenda > section > header strong {
-  font-family: var(--font-display, Georgia, serif);
+  font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
   font-size: 15px;
 }
 
@@ -3685,9 +3759,9 @@ body {
   --details-rail-width: 300px;
   --composer-max-width: 880px;
 
-  --font-sans: var(--font-manrope), sans-serif;
-  --font-serif: var(--font-fraunces), Georgia, serif;
-  --font-display: var(--font-fraunces), Georgia, serif;
+  --font-sans: var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-plex-mono), ui-monospace, monospace;
 
   --sheet-column-header: #f5f4f1;
@@ -3706,6 +3780,14 @@ body {
   --motion-base: 220ms;
   --motion-slow: 360ms;
   --ease-standard: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* Compact Spectra type scale — prefer these over ad-hoc text-[Npx]. */
+  --text-micro: 11px;
+  --text-caption: 12px;
+  --text-ui: 13px;
+  --text-body: 13.5px;
+  --text-title: 17px;
+  --text-display: 34px;
 
   --gradient-brand: linear-gradient(
     132deg,
@@ -3987,6 +4069,7 @@ body {
   font-size: 15px;
   line-height: 1.6;
   letter-spacing: 0.01em;
+  font-variant-numeric: lining-nums tabular-nums;
 }
 
 :focus-visible {
@@ -4085,7 +4168,8 @@ button:disabled {
 }
 
 .font-display {
-  font-family: var(--font-fraunces), var(--font-manrope), serif;
+  font-family: var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
+  font-variant-numeric: lining-nums tabular-nums;
 }
 
 .font-mono {
@@ -4149,7 +4233,7 @@ button:disabled {
 }
 
 .stat-number {
-  font-family: var(--font-fraunces), Georgia, serif;
+  font-family: var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
   letter-spacing: -0.04em;
 }
 
@@ -4949,7 +5033,7 @@ button:disabled {
 }
 
 .journal-heading {
-  font-family: var(--font-fraunces), Georgia, serif;
+  font-family: var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
   letter-spacing: -0.015em;
 }
 
@@ -5604,6 +5688,14 @@ button:disabled {
   }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  [data-ai-state="generated"]::after,
+  [data-ai-state="edited"]::after {
+    animation: none;
+    opacity: 0.35;
+  }
+}
+
 @media (max-width: 768px) {
   .editor-gutter-controls {
     display: none;
@@ -6174,6 +6266,52 @@ button:not(:disabled),
     infinite;
 }
 
+/* Catch-up after AI finished: one-shot materialize, not endless breathe */
+.spectra-artifact-studio[data-ai-state="edited"]
+  .spectra-artifact-main
+  [data-ai-region="true"],
+.spectra-artifact-studio[data-ai-catchup="true"]
+  .spectra-artifact-main
+  [data-ai-region="true"] {
+  animation: spectra-content-settle 680ms cubic-bezier(0.22, 0.72, 0.2, 1) both;
+}
+.spectra-artifact-studio[data-ai-state="edited"]
+  .spectra-artifact-main
+  [data-ai-region="true"]::after,
+.spectra-artifact-studio[data-ai-catchup="true"]
+  .spectra-artifact-main
+  [data-ai-region="true"]::after {
+  animation: spectra-region-materialize 1.15s cubic-bezier(0.4, 0, 0.2, 1) 1
+    both;
+}
+
+/* Form controls feel collaborator-written while AI streams */
+.spectra-artifact-main
+  input[data-ai-region="true"],
+.spectra-artifact-main
+  textarea[data-ai-region="true"],
+.spectra-artifact-main
+  select[data-ai-region="true"],
+.spectra-artifact-main
+  button[data-ai-region="true"],
+.spectra-artifact-main
+  [contenteditable="true"][data-ai-region="true"] {
+  caret-color: var(--accent-cyan);
+}
+
+@container spectra-studio-split (max-width: 460px) {
+  .spectra-artifact-main [data-ai-region="true"]::after {
+    padding-right: 6px;
+    font-size: 10px;
+  }
+
+  .spectra-deck-card-editor textarea[data-ai-region="true"] {
+    min-height: 120px;
+    padding-inline: 14px;
+    font-size: 18px;
+  }
+}
+
 @keyframes spectra-region-materialize {
   from {
     background-position: 110% 0;
@@ -6350,11 +6488,24 @@ button:not(:disabled),
   transition-delay: 380ms;
 }
 
-[data-focus-state]:not([data-focus-state="global"]) {
+[data-focus-state]:not([data-focus-state="global"]):not([data-spectra-context-trigger="true"]) {
   color: var(--text-primary);
   background: color-mix(in oklab, var(--card-focus) 7%, transparent);
   box-shadow: inset 2px 0
     color-mix(in oklab, var(--card-focus) 72%, transparent);
+}
+
+button[data-spectra-context-trigger="true"][data-focus-state],
+button[data-spectra-context-trigger="true"][data-focus-state]:not([data-focus-state="global"]) {
+  color: var(--text-secondary);
+  background: transparent;
+  box-shadow: none;
+}
+button[data-spectra-context-trigger="true"][data-focus-state]:hover,
+button[data-spectra-context-trigger="true"][aria-expanded="true"] {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+  box-shadow: none;
 }
 
 [data-board-column] {
@@ -6491,6 +6642,22 @@ button:not(:disabled),
     0 0 0 1px color-mix(in oklab, var(--accent-cyan) 18%, transparent),
     0 18px 48px -28px color-mix(in oklab, var(--accent-cyan) 34%, transparent),
     var(--card-shadow);
+}
+
+/* Context picker is a utility control — never inherit card working/continued
+   accents from nearby live AI chrome. */
+button[data-spectra-context-trigger="true"],
+button[data-spectra-context-trigger="true"][data-card-state],
+button[data-spectra-context-trigger="true"]::before,
+button[data-spectra-context-trigger="true"]::after {
+  box-shadow: none !important;
+  border-color: transparent !important;
+  background-image: none !important;
+  animation: none !important;
+}
+button[data-spectra-context-trigger="true"]::before,
+button[data-spectra-context-trigger="true"]::after {
+  content: none !important;
 }
 
 .spectra-quick-chat-tools button {
@@ -7156,7 +7323,7 @@ button:not(:disabled),
   border: 0;
   background: transparent;
   font-family:
-    var(--presentation-heading-font, var(--font-display)), Georgia, serif;
+    var(--presentation-heading-font, var(--font-display)), ui-sans-serif, system-ui, sans-serif;
   line-height: 1.1;
   outline: none;
 }
@@ -7247,7 +7414,7 @@ button:not(:disabled),
 
 .presentation-linked-artifact strong {
   margin-block: 3%;
-  font-family: var(--font-display), Georgia, serif;
+  font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
   font-size: 1.15cqw;
 }
 
@@ -7380,7 +7547,7 @@ button:not(:disabled),
 
 .presentation-settings-view > header h3 {
   color: var(--text-primary);
-  font-family: var(--font-display), Georgia, serif;
+  font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
   font-size: 19px;
   font-weight: 650;
 }
@@ -7496,7 +7663,7 @@ button:not(:disabled),
 
 .presentation-theme-grid > button strong {
   color: var(--text-primary);
-  font-family: var(--font-display), Georgia, serif;
+  font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
   font-size: 14px;
 }
 
@@ -9277,7 +9444,7 @@ button:not(:disabled),
   font-weight: 700;
 }
 .agent-studio-layout > main > header h2 {
-  font-family: var(--font-serif), Georgia, serif;
+  font-family: var(--font-serif), ui-sans-serif, system-ui, sans-serif;
   color: var(--text-primary);
   font-size: 17px;
   font-weight: 650;
@@ -9792,7 +9959,7 @@ button:not(:disabled),
 }
 .agent-review-summary strong {
   color: var(--text-primary);
-  font-family: var(--font-serif), Georgia, serif;
+  font-family: var(--font-serif), ui-sans-serif, system-ui, sans-serif;
   font-size: 14px;
 }
 .agent-review-summary small {
@@ -10284,7 +10451,7 @@ button:not(:disabled),
 .agent-preview-overlay header h2 {
   margin-top: 3px;
   color: var(--text-primary);
-  font-family: var(--font-serif), Georgia, serif;
+  font-family: var(--font-serif), ui-sans-serif, system-ui, sans-serif;
   font-size: 21px;
 }
 .agent-preview-overlay header p,
@@ -12133,7 +12300,7 @@ button:not(:disabled),
 
 .spectra-deck-study > main > section > strong {
   max-width: 590px;
-  font-family: var(--font-display, Georgia, serif);
+  font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
   font-size: clamp(20px, 3vw, 34px);
   font-weight: 570;
   line-height: 1.35;
@@ -12205,7 +12372,7 @@ button:not(:disabled),
 }
 
 .spectra-deck-study-complete h3 {
-  font-family: var(--font-display, Georgia, serif);
+  font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
   font-size: 25px;
   font-weight: 600;
 }
@@ -13046,7 +13213,7 @@ button:not(:disabled),
 
 .code-settings-nav-heading > strong {
   color: var(--text-primary);
-  font-family: var(--font-display), Georgia, serif;
+  font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
   font-size: 15px;
   font-weight: 650;
 }
@@ -13119,7 +13286,7 @@ button:not(:disabled),
   padding: 16px;
 }
 .code-settings-card > h3 {
-  font-family: var(--font-display), Georgia, serif;
+  font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
   color: var(--text-primary);
   font-size: 16px;
   font-weight: 650;
@@ -13486,7 +13653,7 @@ button:not(:disabled),
 }
 
 .spectra-flashcard-studio textarea {
-  font-family: var(--font-fraunces), Georgia, serif;
+  font-family: var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
 }
 
 .spectra-studio-details {
@@ -13773,7 +13940,7 @@ body {
 }
 
 .spectra-document-studio .ProseMirror :is(h1, h2, h3) {
-  font-family: "Fraunces", "Fraunces Fallback", Georgia, serif !important;
+  font-family: var(--font-manrope), ui-sans-serif, system-ui, sans-serif !important;
 }
 
 .spectra-artifact-identity > .hidden.shrink-0.items-center {
@@ -13808,7 +13975,7 @@ body {
 }
 
 .spectra-document-studio .ProseMirror :is(h1, h2, h3) {
-  font-family: var(--font-display), Georgia, serif;
+  font-family: var(--font-display), ui-sans-serif, system-ui, sans-serif;
   font-weight: 600;
   letter-spacing: -0.018em;
 }
@@ -14229,7 +14396,7 @@ body {
 
 .spectra-artifact-studio[data-blueprint="presentation"]
   .presentation-object-text[data-text-preset="title"] {
-  font-family: "Fraunces", "Fraunces Fallback", Georgia, serif !important;
+  font-family: var(--font-manrope), ui-sans-serif, system-ui, sans-serif !important;
   letter-spacing: -0.025em;
 }
 

@@ -5,7 +5,6 @@ import {
   BookOpen,
   Bot,
   Check,
-  ChevronDown,
   Files,
   FileText,
   FolderPlus,
@@ -308,16 +307,6 @@ export function ContextFocusControl({
       .filter((item) => !item.stale)
       .map((item) => `${item.type}:${item.id}`),
   ).size;
-  const triggerLabel =
-    mode === "thread" && threadTitle
-      ? threadTitle
-      : mode === "artifact" && artifact
-        ? artifact.title
-        : mode === "workspace" && workspace
-          ? workspace.title
-          : mode === "selection"
-            ? `${selectedCount ?? contextCount} selected`
-            : "All workspaces";
   const TriggerIcon =
     mode === "thread"
       ? MessageSquare
@@ -331,7 +320,7 @@ export function ContextFocusControl({
             ? Files
             : Globe2;
   return (
-    <div ref={ref} className="relative flex min-w-0 shrink-0 self-stretch">
+    <div ref={ref} className="relative flex shrink-0 self-center">
       <button
         ref={triggerRef}
         type="button"
@@ -350,20 +339,22 @@ export function ContextFocusControl({
           setOpen((value) => !value);
         }}
         data-focus-state={mode}
-        className="group flex h-full min-w-[78px] max-w-[190px] items-center justify-center gap-1.5 px-3 text-[11.5px] font-semibold text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)]"
-        aria-label="Choose AI focus"
+        data-spectra-context-trigger="true"
+        className={`relative grid size-9 place-items-center rounded-[8px] text-[var(--text-secondary)] shadow-none transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] ${open ? "bg-[var(--bg-hover)] text-[var(--text-primary)]" : ""}`}
+        aria-label={`Choose AI focus${focusSummary ? `: ${focusSummary}` : ""}${contextCount ? ` · ${contextCount} context` : ""}`}
         aria-expanded={open}
         aria-controls="spectra-context-browser"
         title={focusSummary || "Choose what Spectra will focus on"}
       >
-        <TriggerIcon
-          className="h-3.5 w-3.5 shrink-0 text-[var(--brand-accent)]"
-          strokeWidth={2}
-        />
-        <span className="truncate">{triggerLabel}</span>
-        <ChevronDown
-          className={`h-3 w-3 shrink-0 text-[var(--text-tertiary)] transition-transform duration-200 ${open ? "rotate-180" : ""}`}
-        />
+        <TriggerIcon className="h-4 w-4" strokeWidth={2} />
+        {contextCount > 0 ? (
+          <span
+            className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--text-primary)] px-1 text-[9px] font-semibold leading-none text-[var(--bg-primary)]"
+            aria-hidden
+          >
+            {contextCount > 99 ? "99+" : contextCount}
+          </span>
+        ) : null}
       </button>
       <>
         {open
@@ -616,12 +607,14 @@ export function SelectionActionBar({
   onExit,
   onAddToContext,
   onTile,
+  onMove,
 }: {
   count: number;
   onClear: () => void;
   onExit: () => void;
   onAddToContext?: () => void;
   onTile?: () => void;
+  onMove?: () => void;
 }) {
   return (
     <AnimatePresence>
@@ -634,7 +627,7 @@ export function SelectionActionBar({
           data-card-state="context"
           className="mb-2 ml-[52px] flex min-h-10 flex-wrap items-center gap-1.5 px-2.5 py-1.5"
         >
-          <span className="mr-1 inline-flex items-center gap-1.5 text-[11px] font-semibold text-[var(--text-primary)]">
+          <span className="mr-1 inline-flex items-center gap-1.5 text-[12px] font-semibold text-[var(--text-primary)]">
             <Files className="h-3.5 w-3.5 text-[var(--accent-cyan)]" />
             {count ? `${count} selected` : "Select objects"}
           </span>
@@ -643,7 +636,7 @@ export function SelectionActionBar({
               <button
                 type="button"
                 onClick={onAddToContext}
-                className="rounded-[6px] px-2 py-1 text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                className="rounded-[6px] px-2 py-1 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
               >
                 Add to context
               </button>
@@ -651,9 +644,18 @@ export function SelectionActionBar({
                 <button
                   type="button"
                   onClick={onTile}
-                  className="rounded-[6px] px-2 py-1 text-[11px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                  className="rounded-[6px] px-2 py-1 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                 >
-                  Group
+                  Group as tiles
+                </button>
+              ) : null}
+              {onMove ? (
+                <button
+                  type="button"
+                  onClick={onMove}
+                  className="rounded-[6px] px-2 py-1 text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                >
+                  Move
                 </button>
               ) : null}
               <button
@@ -667,14 +669,14 @@ export function SelectionActionBar({
               </button>
             </>
           ) : (
-            <span className="text-[10px] text-[var(--text-tertiary)]">
+            <span className="text-[11px] text-[var(--text-tertiary)]">
               Checkmarks appear only in this mode.
             </span>
           )}
           <button
             type="button"
             onClick={onExit}
-            className={`${count ? "" : "ml-auto"} rounded-[6px] px-2 py-1 text-[10px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]`}
+            className={`${count ? "" : "ml-auto"} rounded-[6px] px-2 py-1 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]`}
           >
             Done
           </button>

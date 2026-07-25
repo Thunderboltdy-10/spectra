@@ -19,6 +19,7 @@ import {
   type ArtifactTypeKey,
 } from "@/features/spectra/artifacts/types";
 import { validateArtifactContent } from "@/features/spectra/artifacts/registry";
+import { normalizeArtifactContent } from "@/features/spectra/ai/content-normalization";
 
 type ArtifactRecord = {
   _id: string;
@@ -88,6 +89,7 @@ function stateVectorHash(document: Y.Doc) {
 async function createCollaborationSession(
   artifactId: string,
   clientId: string,
+  level: "read" | "modify" = "modify",
 ): Promise<CollaborationSession> {
   const [actor, artifact] = await Promise.all([
     convexQuery<Record<string, never>, ActorIdentity | null>("identity:me", {}),
@@ -110,8 +112,17 @@ async function createCollaborationSession(
       { allowed: boolean; level: "read" | "modify" | null }
     >("authority:access", { resourceType, resourceId: artifactId }),
   ]);
-  if (!access.allowed || access.level !== "modify") {
-    throw new Error("AI_ARTIFACT_PERMISSION_REVOKED: Modify access was removed before the operation committed.");
+  const allowed =
+    access.allowed &&
+    (level === "read"
+      ? access.level === "read" || access.level === "modify"
+      : access.level === "modify");
+  if (!allowed) {
+    throw new Error(
+      level === "read"
+        ? "AI_ARTIFACT_PERMISSION_REVOKED: Read access was removed before the live document could be loaded."
+        : "AI_ARTIFACT_PERMISSION_REVOKED: Modify access was removed before the operation committed.",
+    );
   }
   const documentName = `artifact:${artifactId}:${Buffer.from("root").toString("base64url")}`;
   const token = await signCollaborationSession({
@@ -122,8 +133,10 @@ async function createCollaborationSession(
     accountId: actor.accountId,
     schoolId: actor.schoolId,
     clientId,
-    displayName: "Spectra",
-    level: "modify",
+    displayName: actor.name.trim()
+      ? `${actor.name.trim()}'s Spectra`
+      : "Spectra",
+    level,
     policyVersion: room.policyVersion,
     schemaVersion: room.schemaVersion ?? artifact.schemaVersion ?? 1,
   });
@@ -315,6 +328,77 @@ async function synchronizeMutation(params: {
   }
 }
 
+/**
+ * Read the synchronized collaborative Yjs document for an artifact.
+ * Returns null when the room is uninitialized, unreachable, or invalid so
+ * callers can fall back to the Convex baseline without failing the run.
+ */
+export async function readLiveArtifactValue(params: {
+  artifactId: string;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}): Promise<ArtifactLiveValue | null> {
+  const timeoutMs = Math.max(500, Math.min(params.timeoutMs ?? 4_000, 12_000));
+  const aborted = abortError(params.signal);
+  if (aborted) throw aborted;
+  const clientId = `ai-read:${params.artifactId}:${randomUUID()}`.slice(0, 180);
+  let session: CollaborationSession;
+  try {
+    session = await createCollaborationSession(params.artifactId, clientId, "read");
+  } catch {
+    return null;
+  }
+  const typeKey = requireArtifactType(session.artifact.blueprintKey);
+  const document = new Y.Doc();
+  let connectionError: Error | null = null;
+  const provider = new HocuspocusProvider({
+    url: session.url,
+    WebSocketPolyfill: WebSocket,
+    name: session.documentName,
+    document,
+    token: session.token,
+    flushDelay: 40,
+    onAuthenticationFailed: ({ reason }) => {
+      connectionError = new Error(
+        `AI_ARTIFACT_PERMISSION_REVOKED: ${reason || "Collaboration access was rejected."}`,
+      );
+    },
+    onDisconnect: ({ event }) => {
+      if (event.code === 4403) {
+        connectionError = new Error(
+          `AI_ARTIFACT_PERMISSION_REVOKED: ${event.reason || "Access was removed."}`,
+        );
+      } else if (!provider.synced) {
+        connectionError = new Error(
+          `AI_ARTIFACT_CONNECTION_CLOSED: The collaboration gateway closed before synchronization (${event.code}${event.reason ? `: ${event.reason}` : ""}).`,
+        );
+      }
+    },
+  } as ConstructorParameters<typeof HocuspocusProvider>[0] & {
+    WebSocketPolyfill: typeof WebSocket;
+  });
+  try {
+    await waitUntil(
+      () => provider.synced && provider.isAuthenticated,
+      () => abortError(params.signal) ?? connectionError,
+      timeoutMs,
+      () =>
+        `AI_ARTIFACT_CONNECT_TIMEOUT: Live artifact read timed out after ${timeoutMs}ms.`,
+    );
+    try {
+      return readArtifactYjsDocument(document, typeKey);
+    } catch {
+      // Invalid / sparse live state — fall back to Convex baseline.
+      return null;
+    }
+  } catch {
+    return null;
+  } finally {
+    provider.destroy();
+    document.destroy();
+  }
+}
+
 export async function applyAiArtifactMutation(params: {
   artifactId: string;
   runId: string;
@@ -369,18 +453,32 @@ export async function applyAiArtifactMutation(params: {
   } as ConstructorParameters<typeof HocuspocusProvider>[0] & {
     WebSocketPolyfill: typeof WebSocket;
   });
+  const connectStartedAt = Date.now();
   try {
     await waitUntil(
       () => provider.synced && provider.isAuthenticated,
       () => connectionError,
-      20_000,
+      12_000,
       () =>
-        `AI_ARTIFACT_CONNECT_TIMEOUT: The live artifact could not be synchronized (status=${connectionStatus}, opened=${opened}, authenticated=${authenticated || provider.isAuthenticated}, syncEvent=${syncEventReceived}, synced=${provider.synced}).`,
+        `AI_ARTIFACT_CONNECT_TIMEOUT: The live artifact could not be synchronized within 12s (status=${connectionStatus}, opened=${opened}, authenticated=${authenticated || provider.isAuthenticated}, syncEvent=${syncEventReceived}, synced=${provider.synced}, elapsedMs=${Date.now() - connectStartedAt}). Fast-fail so pending shells can be discarded instead of pulsing indefinitely.`,
     );
+    console.info("[spectra.ai.artifact.connect]", {
+      artifactId: params.artifactId,
+      runId: params.runId,
+      operationId: params.operationId,
+      connectMs: Date.now() - connectStartedAt,
+      status: connectionStatus,
+      authenticated: authenticated || provider.isAuthenticated,
+      synced: provider.synced,
+    });
+    const presenceName = session.actor.name.trim()
+      ? `${session.actor.name.trim()}'s Spectra`
+      : "Spectra";
     provider.setAwarenessField("user", {
       clientId,
       accountId: session.actor.accountId,
-      name: "Spectra",
+      name: presenceName,
+      displayName: presenceName,
       actorKind: "ai",
       runId: params.runId,
       operationId: params.operationId,
@@ -388,11 +486,27 @@ export async function applyAiArtifactMutation(params: {
 
     let current = readArtifactYjsDocument(document, typeKey);
     if (!current) {
+      const baselineContent = normalizeArtifactContent(
+        typeKey,
+        session.artifact.content,
+      );
+      const baselineValidation = validateArtifactContent(typeKey, baselineContent);
+      if (!baselineValidation.success) {
+        const issue = baselineValidation.error.issues[0];
+        const path = issue?.path?.length ? issue.path.join(".") : "";
+        const detail =
+          issue?.message ?? "Pending artifact content is invalid.";
+        throw new Error(
+          path
+            ? `AI_ARTIFACT_BASELINE_INVALID: Invalid input at ${path}: ${detail}`
+            : `AI_ARTIFACT_BASELINE_INVALID: ${detail}`,
+        );
+      }
       const baseline: ArtifactLiveValue = {
         title: session.artifact.title,
         ...(session.artifact.summary ? { summary: session.artifact.summary } : {}),
         tags: session.artifact.tags,
-        content: session.artifact.content,
+        content: baselineValidation.data,
       };
       const baselinePlan = planArtifactYjsMutation(document, typeKey, baseline);
       await synchronizeMutation({
@@ -413,9 +527,17 @@ export async function applyAiArtifactMutation(params: {
     if (!current) throw new Error("AI_ARTIFACT_INITIALIZATION_FAILED: The live artifact model is unavailable.");
 
     const desired = params.resolveDesired(current);
-    const validated = validateArtifactContent(typeKey, desired.content);
+    const desiredContent = normalizeArtifactContent(typeKey, desired.content);
+    const validated = validateArtifactContent(typeKey, desiredContent);
     if (!validated.success) {
-      throw new Error(`AI_ARTIFACT_SCHEMA_INVALID: ${validated.error.issues[0]?.message ?? "The edited artifact is invalid."}`);
+      const issue = validated.error.issues[0];
+      const path = issue?.path?.length ? issue.path.join(".") : "";
+      const detail = issue?.message ?? "The edited artifact is invalid.";
+      throw new Error(
+        path
+          ? `AI_ARTIFACT_SCHEMA_INVALID: Invalid input at ${path}: ${detail}`
+          : `AI_ARTIFACT_SCHEMA_INVALID: ${detail}`,
+      );
     }
     const normalizedDesired: ArtifactLiveValue = {
       title: desired.title.trim() || "Untitled artifact",
@@ -440,8 +562,21 @@ export async function applyAiArtifactMutation(params: {
     const refreshed = readArtifactYjsDocument(document, typeKey);
     if (!refreshed) throw new Error("AI_ARTIFACT_LIVE_STATE_LOST");
     const refreshedDesired = params.resolveDesired(refreshed);
-    const refreshedValidation = validateArtifactContent(typeKey, refreshedDesired.content);
-    if (!refreshedValidation.success) throw new Error(`AI_ARTIFACT_SCHEMA_INVALID: ${refreshedValidation.error.issues[0]?.message ?? "The edited artifact is invalid."}`);
+    const refreshedContent = normalizeArtifactContent(
+      typeKey,
+      refreshedDesired.content,
+    );
+    const refreshedValidation = validateArtifactContent(typeKey, refreshedContent);
+    if (!refreshedValidation.success) {
+      const issue = refreshedValidation.error.issues[0];
+      const path = issue?.path?.length ? issue.path.join(".") : "";
+      const detail = issue?.message ?? "The edited artifact is invalid.";
+      throw new Error(
+        path
+          ? `AI_ARTIFACT_SCHEMA_INVALID: Invalid input at ${path}: ${detail}`
+          : `AI_ARTIFACT_SCHEMA_INVALID: ${detail}`,
+      );
+    }
     const refreshedValue: ArtifactLiveValue = {
       title: refreshedDesired.title.trim() || "Untitled artifact",
       ...(refreshedDesired.summary?.trim() ? { summary: refreshedDesired.summary.trim() } : {}),

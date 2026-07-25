@@ -137,6 +137,7 @@ export function workspaceItemToCard(item: SpectraWorkspaceItem): ArtifactCardVie
         : "Shared directly with you"
       : undefined,
     updatedAt: item.updatedAt,
+    aiStateExpiresAt: item.artifact.aiStateExpiresAt,
     pinned: item.viewData.pinned,
     variant: item.viewData.cardVariant,
     metrics: meta.metrics,

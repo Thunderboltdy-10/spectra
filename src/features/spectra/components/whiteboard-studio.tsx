@@ -74,6 +74,8 @@ import {
   buildWhiteboardSvg,
   importWhiteboardFile,
 } from "../whiteboard/io";
+import { uniqueToken } from "@/lib/unique-token";
+import { aiRegionAttr, pathTouches } from "./ai-region-path";
 
 type Tool = "select" | "hand" | "connector" | WhiteboardNodeType;
 type Drag = {
@@ -261,7 +263,7 @@ export function WhiteboardStudio({
   onChange,
   aiChangedPaths = [],
   readOnly,
-  synchronizationReady = true,
+  synchronizationReady: _synchronizationReady = true,
   syncMessage = "Auto-saved",
   onActiveRegionChange,
 }: {
@@ -860,7 +862,7 @@ export function WhiteboardStudio({
     try {
       const uploaded = await uploadArtifactAsset({
         artifactId,
-        path: `whiteboard/${Date.now().toString(36)}-${file.name}`,
+        path: `whiteboard/${uniqueToken()}-${file.name}`,
         name: file.name,
         mediaType: file.type || "application/octet-stream",
         sha256: await sha256Blob(file),
@@ -1439,11 +1441,12 @@ export function WhiteboardStudio({
               const to = nodes.find((node) => node.id === edge.to);
               if (!from || !to) return null;
               const index = edgeIndexById.get(edge.id) ?? -1;
-              const changed = aiChangedPaths.some((path) =>
-                path.includes(`/edges/${index}`),
-              );
+              const changed =
+                index >= 0 &&
+                (pathTouches(aiChangedPaths, `/edges/${index}`) ||
+                  pathTouches(aiChangedPaths, `/edges/${edge.id}`));
               return (
-                <g key={edge.id} data-ai-region={changed || undefined}>
+                <g key={edge.id} data-ai-region={aiRegionAttr(changed)}>
                   <line
                     x1={from.x + from.width / 2}
                     y1={from.y + from.height / 2}
@@ -1474,14 +1477,14 @@ export function WhiteboardStudio({
                 !Array.isArray(node.content)
                   ? (node.content as Record<string, unknown>)
                   : {};
+              const nodeAiActive =
+                index >= 0 &&
+                (pathTouches(aiChangedPaths, `/nodes/${index}`) ||
+                  pathTouches(aiChangedPaths, `/nodes/${node.id}`));
               return (
                 <div
                   key={node.id}
-                  data-ai-region={
-                    aiChangedPaths.some((path) =>
-                      path.includes(`/nodes/${index}`),
-                    ) || undefined
-                  }
+                  data-ai-region={aiRegionAttr(nodeAiActive)}
                 >
                   <BoardNode
                     node={node}

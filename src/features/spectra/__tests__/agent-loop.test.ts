@@ -57,4 +57,105 @@ describe("runSpectraAgentLoop", () => {
       }),
     );
   });
+
+  it("treats maxTotalTokens as a per-turn prompt budget, not a cumulative sum", async () => {
+    const requestTurn = vi
+      .fn()
+      .mockResolvedValueOnce({
+        text: "",
+        usage: { promptTokens: 90_000, completionTokens: 500, totalTokens: 90_500 },
+        toolCalls: [
+          { id: "read-1", name: "read_artifact", arguments: '{"artifactId":"a1"}' },
+        ],
+      })
+      .mockResolvedValueOnce({
+        text: "",
+        usage: { promptTokens: 95_000, completionTokens: 800, totalTokens: 95_800 },
+        toolCalls: [
+          { id: "plan-1", name: "submit_plan", arguments: '{"decision":"operate"}' },
+        ],
+      });
+    const executeTool = vi.fn().mockResolvedValue({ ok: true });
+    const result = await runSpectraAgentLoop({
+      messages: [{ role: "user", content: "Add a validation column" }],
+      requestTurn,
+      executeTool,
+      isTerminalTool: (call) => call.name === "submit_plan",
+      budget: { maxTotalTokens: 120_000 },
+    });
+    expect(result.terminalTool?.id).toBe("plan-1");
+    // Cumulative spend is ~186k — previously this falsely tripped the 120k
+    // "context budget" because usage was summed across turns.
+    expect(result.usage?.totalTokens).toBeGreaterThan(120_000);
+  });
+
+  it("still pauses when a single turn's prompt exceeds the context budget", async () => {
+    const requestTurn = vi.fn().mockResolvedValue({
+      text: "",
+      usage: { promptTokens: 130_000, completionTokens: 10, totalTokens: 130_010 },
+      toolCalls: [
+        { id: "plan-1", name: "submit_plan", arguments: '{"decision":"operate"}' },
+      ],
+    });
+    await expect(
+      runSpectraAgentLoop({
+        messages: [{ role: "user", content: "Huge sheet" }],
+        requestTurn,
+        executeTool: vi.fn(),
+        isTerminalTool: (call) => call.name === "submit_plan",
+        budget: { maxTotalTokens: 120_000 },
+      }),
+    ).rejects.toThrow(/reliability context budget/i);
+  });
+
+  it("feeds tool_timeout back to the model instead of hanging forever", async () => {
+    vi.useFakeTimers();
+    try {
+      const requestTurn = vi
+        .fn()
+        .mockResolvedValueOnce({
+          text: "",
+          toolCalls: [
+            {
+              id: "read-1",
+              name: "read_artifact",
+              arguments: '{"artifactId":"a1"}',
+            },
+          ],
+        })
+        .mockResolvedValueOnce({
+          text: "",
+          toolCalls: [
+            {
+              id: "plan-1",
+              name: "submit_plan",
+              arguments: '{"decision":"operate"}',
+            },
+          ],
+        });
+      const executeTool = vi.fn(
+        () =>
+          new Promise(() => {
+            /* intentionally hung */
+          }),
+      );
+      const pending = runSpectraAgentLoop({
+        messages: [{ role: "user", content: "Read notes" }],
+        requestTurn,
+        executeTool,
+        isTerminalTool: (call) => call.name === "submit_plan",
+      });
+      await vi.advanceTimersByTimeAsync(20_000);
+      const result = await pending;
+      expect(result.terminalTool?.id).toBe("plan-1");
+      expect(requestTurn.mock.calls[1]?.[0]).toContainEqual(
+        expect.objectContaining({
+          role: "tool",
+          content: expect.stringContaining("tool_timeout"),
+        }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

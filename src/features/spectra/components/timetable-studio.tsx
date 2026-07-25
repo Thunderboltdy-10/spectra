@@ -30,6 +30,7 @@ import {
   type CSSProperties,
   type DragEvent,
 } from "react";
+import { useNow } from "@/hooks/use-now";
 import {
   abortArtifactImportUpload,
   beginArtifactImportOriginal,
@@ -47,7 +48,9 @@ import {
   mergeTimetableState,
   normalizeTimetablePersonalState,
   partitionTimetableState,
+  pickTimetableAnchorDate,
   sharedTimetableContent,
+  timetableFocusMinutes,
   type TimetableContent,
   type TimetableEvent,
   type TimetableOccurrence,
@@ -59,6 +62,7 @@ import {
   importTimetableFile,
   type TimetableImportReport,
 } from "../timetable/io";
+import { aiRegionAttr, pathTouches } from "./ai-region-path";
 
 const HOUR_HEIGHT = 68;
 const DAY_MS = 86_400_000;
@@ -245,7 +249,7 @@ function EventCard({
       data-source={event.sourceRef ? "source" : "local"}
       data-status={event.sourceStatus}
       data-conflict={conflict || undefined}
-      data-ai-region={changed || undefined}
+      data-ai-region={aiRegionAttr(changed)}
       draggable={
         !readOnly && !event.locked && !event.sourceRef && !event.recurrence
       }
@@ -297,7 +301,7 @@ export function TimetableStudio({
   onChange,
   aiChangedPaths = [],
   readOnly,
-  synchronizationReady = true,
+  synchronizationReady: _synchronizationReady = true,
   onActiveRegionChange,
 }: {
   artifactId: string;
@@ -325,6 +329,10 @@ export function TimetableStudio({
   const personalSaveTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const personalSaveChainRef = useRef<Promise<void>>(Promise.resolve());
   const personalSaveSequenceRef = useRef(0);
+  const [personalDraft, setPersonalDraft] = useState<TimetablePersonalState | null>(
+    null,
+  );
+  const nowMs = useNow(60_000);
   const timetable = useMemo(
     () => mergeTimetableState(sharedTimetable, personalState),
     [personalState, sharedTimetable],
@@ -339,6 +347,12 @@ export function TimetableStudio({
   const [importBusy, setImportBusy] = useState<string>();
   const [draggingId, setDraggingId] = useState<string>();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const autoAnchoredRef = useRef(false);
+  const userMovedAnchorRef = useRef(false);
+  useEffect(() => {
+    autoAnchoredRef.current = false;
+    userMovedAnchorRef.current = false;
+  }, [artifactId]);
   useEffect(() => {
     let active = true;
     setPersonalReady(false);
@@ -376,6 +390,12 @@ export function TimetableStudio({
     setPersonalState(next);
     setPersonalSaveState("saving");
     setPersonalError(undefined);
+    setPersonalDraft(next);
+  }
+
+  useEffect(() => {
+    if (personalDraft === null) return;
+    const next = personalDraft;
     const sequence = ++personalSaveSequenceRef.current;
     if (personalSaveTimerRef.current)
       clearTimeout(personalSaveTimerRef.current);
@@ -402,7 +422,11 @@ export function TimetableStudio({
           );
         });
     }, 180);
-  }
+    return () => {
+      if (personalSaveTimerRef.current)
+        clearTimeout(personalSaveTimerRef.current);
+    };
+  }, [artifactId, personalDraft]);
 
   const visibleLayers = timetable.layers.filter((layer) => layer.visible);
   const visibleLayerIds = new Set(visibleLayers.map((layer) => layer.id));
@@ -459,6 +483,38 @@ export function TimetableStudio({
       timetable.timezone,
     );
   }, [anchor, baseVisibleEvents, days, timetable.timezone, view.kind]);
+
+  // After AI create (or any load) where personal view still defaults to "today"
+  // but events live in another week, jump once to the earliest upcoming event.
+  useEffect(() => {
+    if (!personalReady || autoAnchoredRef.current || userMovedAnchorRef.current)
+      return;
+    if (!baseVisibleEvents.length) return;
+    if (visibleEvents.length > 0) {
+      autoAnchoredRef.current = true;
+      return;
+    }
+    const nextAnchor = pickTimetableAnchorDate({
+      events: baseVisibleEvents,
+      timezone: timetable.timezone,
+      now: new Date(nowMs),
+    });
+    autoAnchoredRef.current = true;
+    if (!nextAnchor || nextAnchor === view.anchorDate) return;
+    savePersonalState({
+      ...personalState,
+      view: { ...view, anchorDate: nextAnchor },
+    });
+  }, [
+    baseVisibleEvents,
+    nowMs,
+    personalReady,
+    personalState,
+    timetable.timezone,
+    view,
+    visibleEvents.length,
+  ]);
+
   const eventCollisionLayout = useMemo(
     () =>
       collisionLayout(
@@ -507,6 +563,7 @@ export function TimetableStudio({
   }
 
   function moveAnchor(direction: number) {
+    userMovedAnchorRef.current = true;
     const amount =
       view.kind === "month"
         ? 30 * direction
@@ -737,16 +794,37 @@ export function TimetableStudio({
     .map((id) => artifactMap.get(id))
     .filter((artifact): artifact is SpectraArtifact => Boolean(artifact));
   const upcoming = [...visibleEvents]
-    .filter((event) => new Date(event.end).getTime() >= Date.now())
+    .filter((event) => new Date(event.end).getTime() >= nowMs)
     .sort((a, b) => Date.parse(a.start) - Date.parse(b.start))
     .slice(0, 4);
-  const studyMinutes = visibleEvents
-    .filter((event) => layerMap.get(event.layerId)?.kind === "study")
-    .reduce(
-      (total, event) =>
-        total + (Date.parse(event.end) - Date.parse(event.start)) / 60_000,
-      0,
+  const studyMinutes = timetableFocusMinutes(visibleEvents, timetable.layers);
+  const eventAiChanged = (eventId: string) => {
+    if (!aiChangedPaths.length) return false;
+    // Whole-create / catch-up shells use "/" (and occasionally bare "/events").
+    // Do not use pathTouches("/events") here — that also matches "/events/0"
+    // and would light every card during a single-event edit.
+    if (
+      aiChangedPaths.includes("/") ||
+      aiChangedPaths.includes("/events")
+    )
+      return true;
+    const sharedIndex = sharedTimetable.events.findIndex(
+      (item) => item.id === eventId,
     );
+    if (
+      sharedIndex >= 0 &&
+      pathTouches(aiChangedPaths, `/events/${sharedIndex}`)
+    )
+      return true;
+    const mergedIndex = timetable.events.findIndex(
+      (item) => item.id === eventId,
+    );
+    return (
+      (mergedIndex >= 0 &&
+        pathTouches(aiChangedPaths, `/events/${mergedIndex}`)) ||
+      pathTouches(aiChangedPaths, `/events/${eventId}`)
+    );
+  };
 
   function renderWeekOrDay() {
     const timedEvents = visibleEvents.filter((event) => !event.allDay);
@@ -765,6 +843,7 @@ export function TimetableStudio({
               key={dateKey(day)}
               data-today={sameDay(day, timetableToday) || undefined}
               onClick={() => {
+                userMovedAnchorRef.current = true;
                 emit((draft) => {
                   draft.view!.kind = "day";
                   draft.view!.anchorDate = dateKey(day);
@@ -791,9 +870,7 @@ export function TimetableStudio({
                     color={layerMap.get(event.layerId)?.color ?? "#7865ea"}
                     compact
                     readOnly={readOnly && !privateLayerIds.has(event.layerId)}
-                    changed={aiChangedPaths.some((path) =>
-                      path.includes(`/events/${index}`),
-                    )}
+                    changed={eventAiChanged(event.id)}
                     onSelect={() => selectEvent(event)}
                   />
                 ))}
@@ -871,9 +948,7 @@ export function TimetableStudio({
                         readOnly={
                           readOnly && !privateLayerIds.has(event.layerId)
                         }
-                        changed={aiChangedPaths.some((path) =>
-                          path.includes(`/events/${index}`),
-                        )}
+                        changed={eventAiChanged(event.id)}
                         conflict={collision.conflict}
                         onSelect={() => selectEvent(event)}
                         onDragStart={(interaction) => {
@@ -934,6 +1009,7 @@ export function TimetableStudio({
               <button
                 type="button"
                 onClick={() => {
+                  userMovedAnchorRef.current = true;
                   emit((draft) => {
                     draft.view!.kind = "day";
                     draft.view!.anchorDate = dateKey(day);
@@ -949,9 +1025,7 @@ export function TimetableStudio({
                   color={layerMap.get(event.layerId)?.color ?? "#7865ea"}
                   compact
                   readOnly={readOnly && !privateLayerIds.has(event.layerId)}
-                  changed={aiChangedPaths.some((path) =>
-                    path.includes(`/events/${index}`),
-                  )}
+                  changed={eventAiChanged(event.id)}
                   conflict={
                     eventCollisionLayout.get(event.occurrenceKey)?.conflict
                   }
@@ -1003,11 +1077,7 @@ export function TimetableStudio({
                 type="button"
                 role="listitem"
                 onClick={() => selectEvent(event)}
-                data-ai-region={
-                  aiChangedPaths.some((path) =>
-                    path.includes(`/events/${index}`),
-                  ) || undefined
-                }
+                data-ai-region={aiRegionAttr(eventAiChanged(event.id))}
               >
                 <i
                   style={{
@@ -1064,11 +1134,12 @@ export function TimetableStudio({
         <div className="timetable-date-navigation">
           <button
             type="button"
-            onClick={() =>
+            onClick={() => {
+              userMovedAnchorRef.current = true;
               emit((draft) => {
                 draft.view!.anchorDate = dateKey(new Date());
-              })
-            }
+              });
+            }}
           >
             Today
           </button>

@@ -164,7 +164,17 @@ export const useSpectraContextStore = create<SpectraContextState>()(persist((set
       return next ? [{ ...row, label: next.label ?? row.label, workspaceId: next.workspaceId ?? row.workspaceId, stale: false }] : row.source === "explicit" ? [{ ...row, stale: true }] : [];
     });
     const reconcileOpenObjects = state.openObjects.flatMap((row) => {
-      if (row.type === "run" || !providedTypes.has(row.type)) return [row];
+      // Live QC panels can open on thread_ready / run_created before the
+      // independently refreshed thread index includes that id. Dropping them
+      // here blanks the workspace live UI (no traces, no collaborator panel).
+      if (
+        row.type === "run" ||
+        row.presentation === "thread-panel" ||
+        row.presentation === "run-panel" ||
+        !providedTypes.has(row.type)
+      ) {
+        return [row];
+      }
       const next = byKey.get(`${row.type}:${row.id}`);
       return next ? [{ ...row, label: next.label ?? row.label, workspaceId: next.workspaceId ?? row.workspaceId }] : [];
     });

@@ -31,6 +31,7 @@ import {
   HelpCircle,
   Moon,
   Plus,
+  School,
   Settings2,
   ShieldCheck,
   Sparkles,
@@ -39,8 +40,6 @@ import {
   X,
   Share2,
   Star,
-  MoreHorizontal,
-  ChevronRight,
   PanelLeftClose,
   PanelLeftOpen,
   type LucideIcon,
@@ -67,6 +66,7 @@ import {
   type AdministrationIdentity,
 } from "@/features/spectra/administration/api";
 import { formatRelativeTime } from "@/features/spectra/components/spectra-view-model";
+import { KeyboardShortcutsRegistrar } from "@/components/keyboard-shortcuts";
 
 type AppShellProps = {
   children: ReactNode;
@@ -80,6 +80,7 @@ const ordinaryDestinations = [
   { href: "/workspace", label: "Home", icon: LayoutGrid },
   { href: "/artifacts", label: "Artifacts", icon: LibraryBig },
   { href: "/agents", label: "Agents", icon: Bot },
+  { href: "/school-data", label: "School data", icon: School },
   { href: "/models", label: "Models", icon: Brain },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
 ] as const;
@@ -384,7 +385,7 @@ function ShellNavigation() {
         return pathname === baseHref || pathname.startsWith(`${baseHref}/`);
       })?.href ?? null
     );
-  }, [pathname, selectedWorkspaceId]);
+  }, [pathname, selectedWorkspaceId, coreDestinations]);
 
   return (
     <>
@@ -444,7 +445,7 @@ function ShellNavigation() {
                 }}
                 aria-current={active ? "page" : undefined}
                 className={cn(
-                  "relative flex h-8 items-center gap-2.5 rounded-[6px] px-2.5 text-[11px] font-medium transition-colors",
+                  "relative flex h-9 items-center gap-2.5 rounded-[6px] px-2.5 text-[13px] font-medium transition-colors",
                   active
                     ? "bg-[#eeece9] text-[#171513]"
                     : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
@@ -485,7 +486,7 @@ function ShellNavigation() {
             if (!rows.length) return null;
             return (
               <section key={String(pinned)} className="mt-3">
-                <h2 className="px-1 text-[9px] font-semibold uppercase tracking-[.1em] text-[var(--text-tertiary)]">
+                <h2 className="px-1 text-[10px] font-semibold uppercase tracking-[.1em] text-[var(--text-tertiary)]">
                   {pinned ? "Pinned" : "Recents"}
                 </h2>
                 <div className="mt-1 space-y-0.5">
@@ -493,7 +494,7 @@ function ShellNavigation() {
                     <Link
                       key={thread._id}
                       href={`/chat?threadId=${encodeURIComponent(thread._id)}`}
-                      className="group flex h-7 items-center gap-2 rounded-[5px] px-1.5 text-[10px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                      className="group flex h-8 items-center gap-2 rounded-[5px] px-1.5 text-[12px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                     >
                       <i
                         className="size-1.5 shrink-0 rounded-full"
@@ -598,6 +599,8 @@ function ShellNavigation() {
             <div className="mt-2 flex items-center gap-2 rounded-[7px] px-1 py-1">
               <span className="grid size-8 shrink-0 place-items-center overflow-hidden rounded-[7px] bg-[#d8d0fa] text-[10px] font-semibold text-[#3e327f]">
                 {administrationIdentity.account.avatarUrl ? (
+                  // External Clerk avatar URLs; next/image would need a broad remotePatterns allowlist.
+                  // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={administrationIdentity.account.avatarUrl}
                     alt=""
@@ -1174,10 +1177,6 @@ export function AppShell({
 }: AppShellProps) {
   const [shellSidebarCollapsed, setShellSidebarCollapsed] = useState(false);
 
-  const requestPageAction = (action: "more") => {
-    window.dispatchEvent(new CustomEvent(`spectra:page-${action}`));
-  };
-
   useEffect(() => {
     setShellSidebarCollapsed(
       window.localStorage.getItem("spectra:sidebar-collapsed") === "true",
@@ -1193,10 +1192,27 @@ export function AppShell({
   return (
     <div
       className={cn(
-        "min-h-dvh bg-[#fbfaf8] text-[var(--text-primary)] transition-[padding] duration-200",
+        "min-h-dvh bg-[var(--bg-primary)] text-[var(--text-primary)] transition-[padding] duration-200",
         shellSidebarCollapsed ? "md:pl-[76px]" : "md:pl-[240px]",
       )}
     >
+      <KeyboardShortcutsRegistrar
+        onEscape={() => {
+          window.dispatchEvent(new CustomEvent("spectra:escape"));
+        }}
+        onNewChat={() => {
+          window.location.assign("/chat");
+        }}
+        onOpenSettings={() => {
+          window.dispatchEvent(new CustomEvent("ai-school:toggle-settings"));
+        }}
+        onFocusComposer={() => {
+          const composer = document.querySelector<HTMLElement>(
+            "[data-spectra-composer], textarea[placeholder*='Ask Spectra'], [contenteditable='true']",
+          );
+          composer?.focus();
+        }}
+      />
       <ShellNavigation />
       <main
         className={cn(
@@ -1205,18 +1221,11 @@ export function AppShell({
           !fullBleed && "px-5 py-6 sm:px-8",
         )}
       >
-        <header className="hidden h-[44px] shrink-0 items-center justify-between gap-3 border-b border-[var(--border-default)] bg-[var(--bg-primary)] px-4 md:flex">
-          <div className="min-w-0 flex-1" id="spectra-shell-tab-slot" />
-          <div className="flex shrink-0 items-center gap-2">
-            <button
-              type="button"
-              onClick={() => requestPageAction("more")}
-              aria-label="More page actions"
-              className="grid size-8 place-items-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-            >
-              <MoreHorizontal size={15} />
-            </button>
-          </div>
+        <header className="hidden h-[44px] shrink-0 items-center gap-3 border-b border-[var(--border-default)] bg-[var(--bg-primary)] px-4 md:flex">
+          <div
+            className="flex min-w-0 flex-1 items-center overflow-hidden"
+            id="spectra-shell-tab-slot"
+          />
         </header>
         <div
           className={cn(

@@ -1,7 +1,7 @@
 "use client";
 
 import { GripVertical, Maximize2, PanelRightClose, Plus, Scaling, X } from "lucide-react";
-import { useMemo, useState, type DragEvent, type ReactNode } from "react";
+import {useMemo, useState, type DragEvent, type ReactNode } from "react";
 import { useSpectraContextStore } from "@/stores/spectra-context-store";
 import { ArtifactStudio } from "./artifact-studio";
 import type { SpectraArtifact } from "../data/api";

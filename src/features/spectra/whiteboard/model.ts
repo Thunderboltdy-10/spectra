@@ -293,10 +293,12 @@ export function normalizeWhiteboardContent(value: unknown): WhiteboardContent {
           ...(row.style && typeof row.style === "object"
             ? { style: record(row.style) }
             : {}),
-          ...(typeof row.parentId === "string"
-            ? { parentId: row.parentId }
+          ...(typeof row.parentId === "string" && row.parentId.trim()
+            ? { parentId: row.parentId.trim().slice(0, 180) }
             : {}),
-          ...(typeof row.frameId === "string" ? { frameId: row.frameId } : {}),
+          ...(typeof row.frameId === "string" && row.frameId.trim()
+            ? { frameId: row.frameId.trim().slice(0, 180) }
+            : {}),
           ...(typeof row.semanticLabel === "string"
             ? { semanticLabel: row.semanticLabel.slice(0, 500) }
             : {}),

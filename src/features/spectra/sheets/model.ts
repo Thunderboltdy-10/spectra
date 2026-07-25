@@ -207,6 +207,66 @@ function record(value: unknown): Record<string, unknown> {
     : {};
 }
 
+function stringMap(value: unknown): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(record(value)).flatMap(([key, entry]) =>
+      typeof key === "string" &&
+      key &&
+      typeof entry === "string" &&
+      entry.trim()
+        ? [[key, entry.trim().slice(0, 180)]]
+        : [],
+    ),
+  );
+}
+
+/**
+ * Live Yjs sheet regions address `rowIdentities` / `columnIdentities` slots for
+ * every used cell. Sparse trees often recompose those slots as `undefined`;
+ * fill stable string ids so schema validation never sees missing strings.
+ */
+function normalizeSheetIdentityMap(
+  raw: unknown,
+  sheetId: string,
+  kind: "row" | "column",
+  usedIndices: Iterable<number>,
+): Record<string, string> {
+  const result = stringMap(raw);
+  for (const [key, entry] of Object.entries(record(raw))) {
+    if (result[key] || !/^\d+$/.test(key)) continue;
+    // Keep materialized-but-empty slots from Yjs markers instead of dropping
+    // them (they would just be rematerialized as undefined on the next read).
+    if (entry !== undefined && typeof entry !== "string") continue;
+    const index = Number(key);
+    result[key] =
+      kind === "row"
+        ? `${sheetId}:row:${index + 1}`
+        : `${sheetId}:column:${index + 1}`;
+  }
+  for (const index of usedIndices) {
+    if (!Number.isInteger(index) || index < 0) continue;
+    const key = String(index);
+    if (result[key]) continue;
+    result[key] =
+      kind === "row"
+        ? `${sheetId}:row:${index + 1}`
+        : `${sheetId}:column:${index + 1}`;
+  }
+  return result;
+}
+
+function usedCellAxes(cells: Record<string, SheetCell>) {
+  const rows = new Set<number>();
+  const columns = new Set<number>();
+  for (const address of Object.keys(cells)) {
+    const match = addressPattern.exec(address);
+    if (!match) continue;
+    rows.add(Number(match[2]) - 1);
+    columns.add(columnIndex(match[1]!));
+  }
+  return { rows, columns };
+}
+
 export function normalizeSheetsContent(value: unknown): SheetsContent {
   const source = record(value);
   const workbookSource = record(source.workbook);
@@ -217,7 +277,17 @@ export function normalizeSheetsContent(value: unknown): SheetsContent {
     const cells = Object.fromEntries(
       Object.entries(rawCells).flatMap(([address, rawCell]) => {
         if (!addressPattern.test(address.toUpperCase())) return [];
-        const cell = record(rawCell);
+        // Models sometimes patch a bare scalar; lift it into a SheetCell so
+        // column appends and imports are not silently emptied.
+        const cell =
+          typeof rawCell === "string" ||
+          typeof rawCell === "number" ||
+          typeof rawCell === "boolean" ||
+          rawCell === null
+            ? {
+                value: rawCell as string | number | boolean | null,
+              }
+            : record(rawCell);
         const value = cell.value;
         const scalar =
           typeof value === "string" ||
@@ -226,14 +296,27 @@ export function normalizeSheetsContent(value: unknown): SheetsContent {
           value === null
             ? value
             : undefined;
+        const formula =
+          typeof cell.formula === "string"
+            ? cell.formula
+            : typeof cell.input === "string" &&
+                String(cell.input).trim().startsWith("=")
+              ? String(cell.input).trim()
+              : undefined;
+        if (scalar === undefined && formula === undefined) {
+          // Keep format-only / note-only cells; drop truly empty shells.
+          const hasExtras =
+            (cell.format && typeof cell.format === "object") ||
+            (cell.validation && typeof cell.validation === "object") ||
+            typeof cell.note === "string";
+          if (!hasExtras) return [];
+        }
         return [
           [
             address.toUpperCase(),
             {
               ...(scalar !== undefined ? { value: scalar } : {}),
-              ...(typeof cell.formula === "string"
-                ? { formula: cell.formula }
-                : {}),
+              ...(formula ? { formula } : {}),
               ...(cell.format && typeof cell.format === "object"
                 ? { format: cell.format as SheetCell["format"] }
                 : {}),
@@ -248,14 +331,16 @@ export function normalizeSheetsContent(value: unknown): SheetsContent {
         ];
       }),
     );
+    const sheetId =
+      typeof sheet.id === "string" && sheet.id.trim()
+        ? sheet.id.trim().slice(0, 180)
+        : `sheet-${index + 1}`;
+    const axes = usedCellAxes(cells);
     return {
-      id:
-        typeof sheet.id === "string" && sheet.id
-          ? sheet.id
-          : `sheet-${index + 1}`,
+      id: sheetId,
       name:
-        typeof sheet.name === "string" && sheet.name
-          ? sheet.name
+        typeof sheet.name === "string" && sheet.name.trim()
+          ? sheet.name.trim().slice(0, 100)
           : `Sheet ${index + 1}`,
       cells,
       tables: Array.isArray(sheet.tables)
@@ -447,11 +532,18 @@ export function normalizeSheetsContent(value: unknown): SheetsContent {
             },
           )
         : [],
-      rowIdentities: record(sheet.rowIdentities) as Record<string, string>,
-      columnIdentities: record(sheet.columnIdentities) as Record<
-        string,
-        string
-      >,
+      rowIdentities: normalizeSheetIdentityMap(
+        sheet.rowIdentities,
+        sheetId,
+        "row",
+        axes.rows,
+      ),
+      columnIdentities: normalizeSheetIdentityMap(
+        sheet.columnIdentities,
+        sheetId,
+        "column",
+        axes.columns,
+      ),
     };
   });
   if (sheets.length === 0)
@@ -482,14 +574,15 @@ export function normalizeSheetsContent(value: unknown): SheetsContent {
       calculationMode:
         workbookSource.calculationMode === "manual" ? "manual" : "automatic",
       locale:
-        typeof workbookSource.locale === "string"
-          ? workbookSource.locale
+        typeof workbookSource.locale === "string" &&
+        workbookSource.locale.trim().length >= 2
+          ? workbookSource.locale.trim().slice(0, 40)
           : "en-US",
-      timezone:
-        typeof workbookSource.timezone === "string"
-          ? workbookSource.timezone
-          : undefined,
-      namedRanges: record(workbookSource.namedRanges) as Record<string, string>,
+      ...(typeof workbookSource.timezone === "string" &&
+      workbookSource.timezone.trim()
+        ? { timezone: workbookSource.timezone.trim().slice(0, 100) }
+        : {}),
+      namedRanges: stringMap(workbookSource.namedRanges),
       calculationVersion:
         typeof workbookSource.calculationVersion === "number"
           ? workbookSource.calculationVersion

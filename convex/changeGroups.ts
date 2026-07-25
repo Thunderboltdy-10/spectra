@@ -487,7 +487,7 @@ export const commitCurrent = mutation({
 export const createNamedCheckpoint = mutation({
   args: { artifactId: v.id("spectraArtifacts"), name: v.string() },
   handler: async (ctx, args) => {
-    const { actor, artifact } = await requireArtifactCapability(
+    const { actor, artifact: _artifact } = await requireArtifactCapability(
       ctx,
       args.artifactId,
       "modify",

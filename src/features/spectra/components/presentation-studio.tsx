@@ -82,6 +82,7 @@ import {
   buildPresentationPptx,
   importPresentationFile,
 } from "../presentation/io";
+import { aiRegionAttr, pathTouches } from "./ai-region-path";
 import {
   calculateWorkbook,
   coordinateToAddress,
@@ -308,6 +309,7 @@ function PresentationObjectView({
   selected,
   readOnly,
   compact,
+  aiActive = false,
   onSelect,
   onPointerDown,
   onResizePointerDown,
@@ -323,6 +325,7 @@ function PresentationObjectView({
   selected: boolean;
   readOnly: boolean;
   compact: boolean;
+  aiActive?: boolean;
   onSelect: (additive: boolean) => void;
   onPointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onResizePointerDown: (
@@ -409,6 +412,7 @@ function PresentationObjectView({
         <textarea
           ref={textAreaRef}
           data-text-preset={textPreset}
+          data-ai-region={aiRegionAttr(aiActive)}
           value={objectText}
           readOnly={readOnly || object.locked || compact}
           onFocus={onTextFocus}
@@ -671,20 +675,17 @@ function SlideCanvas({
           !Array.isArray(object.content)
             ? (object.content as Record<string, unknown>)
             : {};
-        const aiActive = aiChangedPaths.some(
-          (path) =>
-            path ===
-              `/slides/${deck.slides.indexOf(slide)}/objects/${objectIndex}` ||
-            path.startsWith(
-              `/slides/${deck.slides.indexOf(slide)}/objects/${objectIndex}/`,
-            ),
+        const slideIndex = deck.slides.indexOf(slide);
+        const aiActive = pathTouches(
+          aiChangedPaths,
+          `/slides/${slideIndex}/objects/${objectIndex}`,
         );
         return (
           <div
             key={object.id}
             style={objectStyle(object, canvasHeight)}
             className="absolute"
-            data-ai-region={aiActive || undefined}
+            data-ai-region={aiRegionAttr(aiActive)}
           >
             <PresentationObjectView
               object={object}
@@ -709,6 +710,7 @@ function SlideCanvas({
               }
               readOnly={readOnly}
               compact={compact}
+              aiActive={aiActive}
               onSelect={(additive) => onSelectObject(object.id, additive)}
               onPointerDown={(event) => onPointerDown(object, event)}
               onResizePointerDown={(handle, event) =>
@@ -1183,6 +1185,7 @@ export function PresentationStudio({
     };
     window.addEventListener("keydown", keydown);
     return () => window.removeEventListener("keydown", keydown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- present handlers declared below
   }, [presentedDeck]);
   useEffect(() => {
     const seconds = presentedDeck?.settings?.autoAdvanceSeconds;
@@ -1190,6 +1193,7 @@ export function PresentationStudio({
     if (presentIndex >= presentedDeck.slides.length - 1) return;
     const timer = window.setTimeout(() => movePresentIndex(1), seconds * 1_000);
     return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- movePresentIndex declared below
   }, [presentIndex, presentedDeck]);
   useEffect(() => {
     if (!presentedDeck) return;
@@ -1199,6 +1203,7 @@ export function PresentationStudio({
     document.addEventListener("fullscreenchange", fullscreenChange);
     return () =>
       document.removeEventListener("fullscreenchange", fullscreenChange);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- stopPresenting declared below
   }, [presentedDeck]);
 
   const emit = useCallback(
@@ -1621,7 +1626,7 @@ export function PresentationStudio({
         id: theme.id,
         name: theme.name,
         tokens: { ...theme.tokens },
-        fonts: { heading: "Fraunces", body: "Manrope" },
+        fonts: { heading: "Manrope", body: "Manrope" },
       };
       draft.slides.forEach((slide) =>
         slide.objects.forEach((object) => {
@@ -2639,6 +2644,9 @@ export function PresentationStudio({
                   key={slide.id}
                   data-active={slide.id === activeSlide.id || undefined}
                   data-dragging={draggingSlideId === slide.id || undefined}
+                  data-ai-region={aiRegionAttr(
+                    pathTouches(aiChangedPaths, `/slides/${index}`),
+                  )}
                   draggable={!readOnly}
                   onDragStart={(event) => {
                     setDraggingSlideId(slide.id);

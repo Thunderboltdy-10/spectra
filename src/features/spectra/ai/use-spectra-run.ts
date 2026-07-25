@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { uniqueToken } from "@/lib/unique-token";
 import { parseSpectraStreamEvent, type ResultCardStreamView } from "./stream-events";
 import { getSpectraRunEvents, getSpectraRunTabs, postSpectra, type SpectraResultCard } from "../data/api";
 import type { CommandAttachment } from "../components/command-bar";
@@ -75,9 +76,12 @@ function operationPreviewMessage(preview: { action: "create" | "update" | "archi
 }
 
 function appendStep(exchange: SpectraLiveExchange, message: string): SpectraLiveExchange {
+  const title = authoredStepTitle(message);
+  // Filler pipeline labels belong elsewhere — keep only authored work bars.
+  if (/^(preparing response|responding|getting started|queued)$/i.test(title.trim()))
+    return exchange;
   const last = exchange.steps.at(-1);
   if (last?.summary === message && last.status === "running") return exchange;
-  const title = authoredStepTitle(message);
   const summary = message.includes(" · ") ? message.slice(message.indexOf(" · ") + 3).trim() : message;
   const existingIndex = exchange.steps.findIndex((step) => step.title === title);
   if (existingIndex >= 0) {
@@ -92,7 +96,10 @@ function appendStep(exchange: SpectraLiveExchange, message: string): SpectraLive
     ...exchange,
     steps: [
       ...exchange.steps.map((step, index) => index === exchange.steps.length - 1 && step.status === "running" ? { ...step, status: "done" as const } : step),
-      { id: `${exchange.runId ?? exchange.id}:${exchange.steps.length}:${Date.now()}`, title, summary, status: "running" as const, createdAt: Date.now() },
+      // Never use bare runId as the React key — live + durable progress can
+      // collide when multiple steps share a run. exchange.id is stable per UI
+      // session and uniqueToken() distinguishes concurrent appends.
+      { id: `${exchange.id}:step:${uniqueToken()}`, title, summary, status: "running" as const, createdAt: Date.now() },
     ].slice(-8),
   };
 }
@@ -158,11 +165,19 @@ export function useSpectraRun({
 
   useEffect(() => {
     const incoming = initialCards.filter((card) => !card.hiddenAt && !dismissedCardIds.current.has(card._id)).map(persistedToStream);
+    // While this client still owns the live SSE stream, ignore lagging failed
+    // snapshots from overview polls so a quiet retry never flashes Failed /
+    // error result cards before the stream ends.
+    const sanitized = incoming.map((card) =>
+      card.status === "failed" && activeRunIds.current.has(card.runId)
+        ? { ...card, status: "running" as const, variant: card.variant === "error" ? "status" : card.variant }
+        : card,
+    );
     if (previousScopeKey.current !== scopeKey) {
       previousScopeKey.current = scopeKey;
-      setCards((current) => current.length === 0 && incoming.length === 0 ? current : incoming);
+      setCards((current) => current.length === 0 && sanitized.length === 0 ? current : sanitized);
     } else {
-      setCards((current) => mergeCards(current, incoming));
+      setCards((current) => mergeCards(current, sanitized));
     }
     initialCards.forEach((card) => {
       if (card.run?.userPrompt) promptByRun.current.set(card.runId, card.run.userPrompt);
@@ -218,7 +233,7 @@ export function useSpectraRun({
             let event: ReturnType<typeof parseSpectraStreamEvent>;
             try { event = parseSpectraStreamEvent(row.payload); } catch { continue; }
             if (event.type === "run_created" || event.type === "result_card" || event.type === "confirmation_required" || event.type === "final") upsert(event.card);
-            if (event.type === "text_delta" || event.type === "text_replace" || event.type === "progress" || event.type === "operation_preview") {
+            if (event.type === "text_delta" || event.type === "text_replace" || event.type === "progress" || event.type === "operation_preview" || event.type === "status") {
               setLiveExchange((current) => {
                 const base = current?.runId === tab.runId ? current : {
                   id: `durable:${tab.runId}`,
@@ -232,6 +247,7 @@ export function useSpectraRun({
                 if (event.type === "text_delta") return { ...base, content: base.content + event.content, status: "streaming" };
                 if (event.type === "text_replace") return { ...base, content: event.content, status: "streaming" };
                 if (event.type === "progress") return appendStep(base, event.detail ? `${event.title} · ${event.detail}` : event.title);
+                if (event.type === "status") return appendStep({ ...base, status: "streaming" }, event.message);
                 if (event.type === "operation_preview" && event.preview) return appendStep(base, operationPreviewMessage(event.preview));
                 return base;
               });
@@ -255,11 +271,13 @@ export function useSpectraRun({
         // A transient observer failure must not interrupt the authoritative run.
       } finally {
         if (!disposed)
+          // Active runs poll aggressively so first progress meets the <5s
+          // budget; idle tabs stay quiet. Hidden tabs keep a slow heartbeat.
           timer = window.setTimeout(
             poll,
             document.visibilityState === "visible"
               ? observedActive
-                ? 2_500
+                ? 750
                 : 12_000
               : 20_000,
           );
@@ -335,6 +353,18 @@ export function useSpectraRun({
             status: "running",
             title: event.title,
             summary: event.detail ?? event.regionHint ?? event.title,
+            updatedAt: Date.now(),
+          } : card));
+        }
+        if (event.type === "status") {
+          // Quiet repair/apply retries publish calm status copy. Keep the strip
+          // streaming — never treat a first-pass recovery as a terminal failure.
+          setLiveExchange((current) => current && (!liveExchangeId || current.id === liveExchangeId) ? appendStep({ ...current, runId: event.runId, status: "streaming" }, event.message) : current);
+          setCards((current) => current.map((card) => card.runId === event.runId && card.status !== "failed" && card.status !== "completed" && card.status !== "cancelled" ? {
+            ...card,
+            status: "running",
+            title: event.message.includes("·") ? event.message.split("·")[0]!.trim() : event.message,
+            summary: event.message.includes("·") ? event.message.split("·").slice(1).join("·").trim() : event.message,
             updatedAt: Date.now(),
           } : card));
         }

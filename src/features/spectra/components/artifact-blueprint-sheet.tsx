@@ -32,7 +32,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { blueprintMeta, type ArtifactCardView } from "./artifact-card";
-import type { SpectraArtifact, SpectraBlueprintKey } from "../data/api";
+import type { SpectraArtifact} from "../data/api";
 import { requireBlueprint, requireArtifactTypeManifest } from "../blueprints/registry";
 import type { ArtifactTypeKey } from "../artifacts/types";
 import { normalizeWhiteboardContent } from "../whiteboard/model";

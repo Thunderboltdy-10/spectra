@@ -42,12 +42,10 @@ describe("Spectra API route", () => {
     expect(payload.runs).toHaveLength(1);
     expect(payload.resultCards).toHaveLength(1);
     expect(convexQuery).toHaveBeenNthCalledWith(1, "spectraWorkspaces:list", {
-      actorClerkId: "user_spectra",
       includeArchived: false,
       limit: 30,
     });
     expect(convexQuery).toHaveBeenNthCalledWith(2, "spectraArtifacts:list", {
-      actorClerkId: "user_spectra",
       placement: "all",
       limit: 60,
     });
@@ -77,14 +75,12 @@ describe("Spectra API route", () => {
     expect(createResponse.status).toBe(200);
     expect(archiveResponse.status).toBe(200);
     expect(convexMutation).toHaveBeenNthCalledWith(1, "spectraWorkspaces:create", {
-      actorClerkId: "user_spectra",
       title: "TOK Exhibition",
       description: undefined,
       icon: undefined,
       color: undefined,
     });
     expect(convexMutation).toHaveBeenNthCalledWith(2, "spectraWorkspaces:archive", {
-      actorClerkId: "user_spectra",
       workspaceId: "workspace_new",
     });
   });
@@ -100,17 +96,15 @@ describe("Spectra API route", () => {
     const response = await route.GET(new NextRequest("http://localhost/api/spectra?action=workspace&workspaceId=t57ax7akvh0w6j3zzqkr800kzd88vdrr"));
     expect(response.status).toBe(400);
     expect(convexQuery).toHaveBeenCalledWith("spectraWorkspaceItems:listForWorkspacePublic", {
-      actorClerkId: "user_spectra",
       workspaceId: "t57ax7akvh0w6j3zzqkr800kzd88vdrr",
     });
   });
 
-  it("creates, updates, and archives artifacts through Spectra CRUD functions", async () => {
+  it("creates and archives artifacts through Spectra CRUD functions", async () => {
     const requireActor = vi.fn().mockResolvedValue(mockActor());
     const convexQuery = vi.fn();
     const convexMutation = vi
       .fn()
-      .mockResolvedValueOnce({ artifactId: "artifact_1" })
       .mockResolvedValueOnce({ artifactId: "artifact_1" })
       .mockResolvedValueOnce({ artifactId: "artifact_1" });
 
@@ -126,14 +120,7 @@ describe("Spectra API route", () => {
         title: "Essay plan",
       }),
     }));
-    await route.POST(new NextRequest("http://localhost/api/spectra", {
-      method: "POST",
-      body: JSON.stringify({
-        action: "updateArtifact",
-        artifactId: "artifact_1",
-        title: "Essay plan revised",
-      }),
-    }));
+    // Title/summary/content edits are collaborative (Yjs); HTTP CRUD archives only.
     await route.POST(new NextRequest("http://localhost/api/spectra", {
       method: "POST",
       body: JSON.stringify({
@@ -143,7 +130,6 @@ describe("Spectra API route", () => {
     }));
 
     expect(convexMutation).toHaveBeenNthCalledWith(1, "spectraArtifacts:create", {
-      actorClerkId: "user_spectra",
       blueprintKey: "document",
       title: "Essay plan",
       summary: undefined,
@@ -152,18 +138,7 @@ describe("Spectra API route", () => {
       workspaceId: undefined,
       source: "manual",
     });
-    expect(convexMutation).toHaveBeenNthCalledWith(2, "spectraArtifacts:update", {
-      actorClerkId: "user_spectra",
-      artifactId: "artifact_1",
-      title: "Essay plan revised",
-      summary: undefined,
-      content: undefined,
-      tags: undefined,
-      source: "manual",
-      runId: undefined,
-    });
-    expect(convexMutation).toHaveBeenNthCalledWith(3, "spectraArtifacts:archive", {
-      actorClerkId: "user_spectra",
+    expect(convexMutation).toHaveBeenNthCalledWith(2, "spectraArtifacts:archive", {
       artifactId: "artifact_1",
     });
   });
@@ -201,12 +176,10 @@ describe("Spectra API route", () => {
     expect(hideResponse.status).toBe(200);
     expect(hidePayload.artifactStillExists).toBe(true);
     expect(convexMutation).toHaveBeenNthCalledWith(1, "spectraWorkspaceItems:addArtifact", {
-      actorClerkId: "user_spectra",
       workspaceId: "workspace_1",
       artifactId: "artifact_1",
     });
     expect(convexMutation).toHaveBeenNthCalledWith(2, "spectraWorkspaceItems:hide", {
-      actorClerkId: "user_spectra",
       workspaceItemId: "item_1",
     });
   });
@@ -232,31 +205,26 @@ describe("Spectra API route", () => {
     }));
 
     expect(convexMutation).toHaveBeenNthCalledWith(1, "spectraArtifacts:permanentlyDelete", {
-      actorClerkId: "user_spectra",
       artifactId: "artifact_1",
     });
     expect(convexMutation).toHaveBeenNthCalledWith(2, "spectraWorkspaces:permanentlyDelete", {
-      actorClerkId: "user_spectra",
       workspaceId: "workspace_1",
       confirmation: "Remove Biology permanently",
     });
   });
 
-  it("lists and reverts durable artifact versions", async () => {
+  it("lists durable artifact versions", async () => {
     const requireActor = vi.fn().mockResolvedValue(mockActor());
     const convexQuery = vi.fn().mockResolvedValue([{ _id: "version_1", artifactId: "artifact_1", source: "ai" }]);
-    const convexMutation = vi.fn().mockResolvedValue({ artifactId: "artifact_1" });
+    const convexMutation = vi.fn();
     vi.doMock("@/lib/auth-server", () => ({ requireActor }));
     vi.doMock("@/lib/convex-server", () => ({ convexQuery, convexMutation }));
 
     const route = await import("@/app/api/spectra/route");
     const versionsResponse = await route.GET(new NextRequest("http://localhost/api/spectra?action=artifactVersions&artifactId=artifact_1&limit=20"));
-    const revertResponse = await route.POST(new NextRequest("http://localhost/api/spectra", { method: "POST", body: JSON.stringify({ action: "revertArtifactVersion", artifactId: "artifact_1", versionId: "version_1" }) }));
 
     expect(versionsResponse.status).toBe(200);
-    expect(revertResponse.status).toBe(200);
-    expect(convexQuery).toHaveBeenCalledWith("spectraArtifacts:listVersions", { actorClerkId: "user_spectra", artifactId: "artifact_1", limit: 20 });
-    expect(convexMutation).toHaveBeenCalledWith("spectraArtifacts:revertVersion", { actorClerkId: "user_spectra", artifactId: "artifact_1", versionId: "version_1" });
+    expect(convexQuery).toHaveBeenCalledWith("spectraArtifacts:listVersions", { artifactId: "artifact_1", limit: 20 });
   });
 
   it("assigns a permanent chat thread only when a workspace is explicitly selected", async () => {
@@ -268,7 +236,7 @@ describe("Spectra API route", () => {
     const route = await import("@/app/api/spectra/route");
     const response = await route.POST(new NextRequest("http://localhost/api/spectra", { method: "POST", body: JSON.stringify({ action: "updateThread", threadId: "thread_1", workspaceId: "workspace_1" }) }));
     expect(response.status).toBe(200);
-    expect(convexMutation).toHaveBeenCalledWith("spectraThreads:update", { actorClerkId: "user_spectra", threadId: "thread_1", title: undefined, pinned: undefined, workspaceId: "workspace_1", status: undefined });
+    expect(convexMutation).toHaveBeenCalledWith("spectraThreads:update", { threadId: "thread_1", title: undefined, pinned: undefined, workspaceId: "workspace_1", status: undefined });
   });
 });
 

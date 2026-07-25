@@ -302,24 +302,32 @@ export function normalizePresentationContent(
             0,
             Math.round(finite(object.readingOrder, objectIndex)),
           ),
-          ...(typeof object.parentId === "string"
-            ? { parentId: object.parentId }
+          ...(typeof object.parentId === "string" && object.parentId.trim()
+            ? { parentId: object.parentId.trim().slice(0, 180) }
             : {}),
-          ...(typeof object.componentId === "string"
-            ? { componentId: object.componentId }
+          ...(typeof object.componentId === "string" &&
+          object.componentId.trim()
+            ? { componentId: object.componentId.trim().slice(0, 180) }
             : {}),
           ...(typeof sourceBinding.artifactId === "string" &&
+          sourceBinding.artifactId.trim() &&
           (sourceBinding.kind === "artifact" ||
             sourceBinding.kind === "sheets_range")
             ? {
                 sourceBinding: {
-                  artifactId: sourceBinding.artifactId,
+                  artifactId: sourceBinding.artifactId.trim().slice(0, 180),
                   kind: sourceBinding.kind,
-                  ...(typeof sourceBinding.range === "string"
-                    ? { range: sourceBinding.range }
+                  ...(typeof sourceBinding.range === "string" &&
+                  sourceBinding.range.trim()
+                    ? { range: sourceBinding.range.slice(0, 160) }
                     : {}),
-                  ...(typeof sourceBinding.versionId === "string"
-                    ? { versionId: sourceBinding.versionId }
+                  ...(typeof sourceBinding.versionId === "string" &&
+                  sourceBinding.versionId.trim()
+                    ? {
+                        versionId: sourceBinding.versionId
+                          .trim()
+                          .slice(0, 180),
+                      }
                     : {}),
                   ...(typeof sourceBinding.live === "boolean"
                     ? { live: sourceBinding.live }
@@ -412,11 +420,11 @@ export function normalizePresentationContent(
         title: text(slide.title, `Slide ${slideIndex + 1}`).slice(0, 300),
         speakerNotes: text(slide.speakerNotes).slice(0, 250_000),
         objects,
-        ...(typeof slide.layoutId === "string"
-          ? { layoutId: slide.layoutId }
+        ...(typeof slide.layoutId === "string" && slide.layoutId.trim()
+          ? { layoutId: slide.layoutId.trim().slice(0, 180) }
           : {}),
-        ...(typeof slide.masterId === "string"
-          ? { masterId: slide.masterId }
+        ...(typeof slide.masterId === "string" && slide.masterId.trim()
+          ? { masterId: slide.masterId.trim().slice(0, 180) }
           : {}),
         ...(typeof slide.sectionId === "string" &&
         sectionIdMap.has(slide.sectionId)
@@ -424,7 +432,7 @@ export function normalizePresentationContent(
               sectionId: sectionIdMap.get(slide.sectionId) ?? slide.sectionId,
             }
           : {}),
-        ...(typeof slide.background === "string"
+        ...(typeof slide.background === "string" && slide.background.trim()
           ? { background: slide.background.slice(0, 100) }
           : {}),
         ...(transition.kind === "none" ||

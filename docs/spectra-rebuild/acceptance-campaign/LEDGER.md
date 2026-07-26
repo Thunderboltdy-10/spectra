@@ -106,10 +106,10 @@ States: pending | in_progress | alarming | pass | excellent.
 | Task | Date | Grade | Evidence | Defects | Repairs | Retests | Final |
 |------|------|-------|----------|---------|---------|---------|-------|
 | G-01 | | pending | evidence/G-01/ | | | | |
-| G-02 | 2026-07-26 | in_progress | evidence/G-02/ | Alarming: shared AI edit landed with zero visible AI presence | Extended AI awareness lifecycle; cyan cursor; `{name}'s AI`; shared cursor renderer | Reverse run started; clean two-direction visual retest pending after Chrome control reset | in_progress |
+| G-02 | 2026-07-26 | Excellent | evidence/G-02/ | Original shared AI edit had zero presence/end refresh; reverse-owner edit then left a partial peer preview and orphan active AI effect because settlement only searched run-owner artifacts | Central awareness patches and one durable Yjs commit; owner-named AI lifecycle; native decoration/cursor/card activity; operation-target settlement for direct grants; completed-run effect pruning; last-region completion pause | Fresh P -> C and C -> P runs both showed the correct owner's AI, exact native block streaming, independent human presence, byte-complete convergence, and zero residual AI labels/regions | Excellent |
 | G-03 | | pending | evidence/G-03/ | | | | |
 | G-04 | | pending | evidence/G-04/ | | | | |
-| G-05 | | pending | evidence/G-05/ | | | | |
+| G-05 | 2026-07-26 | pass | evidence/G-05/ | Prior behavior was document-specific; nested sheet path blanked B6; punctuation looked artificial; broad code preview collapsed source transiently; timetable first-item add durably landed but falsely failed verification; off-screen event left AI detached | Central JSON-pointer protocol; sheet scalar-path repair; punctuation-safe 140 ms animator; broad-code atomic safety; deepest native targets; rich whiteboard cards; normalized numeric-array verification; timetable AI-follow and true Upcoming; immediate local AI-presence projection | Presentation, sheet, quiz, planner, code, whiteboard, flashcard and timetable native browser runs are Excellent; Agent and lifecycle/collaboration combinations pending | pass |
 | G-06 | | pending | evidence/G-06/ | | | | |
 | G-07 | | pending | evidence/G-07/ | | | | |
 | G-08 | | pending | evidence/G-08/ | | | | |

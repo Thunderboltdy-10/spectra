@@ -218,13 +218,18 @@ export const beginRun = mutation({
         throw new Error("That workspace is no longer available.");
     }
     if (args.artifactId) {
-      const artifact = await ctx.db.get(args.artifactId);
-      if (
-        !artifact ||
-        artifact.ownerAccountId !== actor._id ||
-        artifact.schoolId !== actor.schoolId ||
-        artifact.status === "deleted"
-      )
+      // A directly shared artifact is a legitimate AI context even when its
+      // owner belongs to another school. Keep the run/thread private in the
+      // actor's school, but authorize the artifact through the same audited
+      // capability graph as the editor. Mutation execution independently
+      // requires `modify`, so read-only collaborators can ask grounded
+      // questions without gaining write authority.
+      const { artifact } = await requireArtifactCapability(
+        ctx,
+        args.artifactId,
+        "read",
+      );
+      if (artifact.status === "deleted")
         throw new Error("That artifact is no longer available.");
     }
     if (thread) {
@@ -446,6 +451,11 @@ export const updateStatus = mutation({
     executionId: v.string(),
     phase: v.optional(vRunPhase),
     approvalReasons: v.optional(v.array(v.string())),
+    recoveryState: v.optional(
+      v.union(v.literal("interrupted"), v.literal("partial")),
+    ),
+    retryable: v.optional(v.boolean()),
+    preservedPartial: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const { run } = await requireOwnedRun(ctx, args.runId);
@@ -511,10 +521,17 @@ export const updateStatus = mutation({
             }
           : run.approval,
       recoveryState:
-        args.status === "completed" ? undefined : run.recoveryState,
-      retryable: args.status === "completed" ? undefined : run.retryable,
+        args.status === "completed"
+          ? undefined
+          : (args.recoveryState ?? run.recoveryState),
+      retryable:
+        args.status === "completed"
+          ? undefined
+          : (args.retryable ?? run.retryable),
       preservedPartial:
-        args.status === "completed" ? undefined : run.preservedPartial,
+        args.status === "completed"
+          ? undefined
+          : (args.preservedPartial ?? run.preservedPartial),
       workerId: terminal ? undefined : run.workerId,
       leaseExpiresAt: terminal ? undefined : run.leaseExpiresAt,
       agentUsageSettledAt:
@@ -1491,6 +1508,10 @@ export const stopRun = mutation({
       throw new Error(
         "This run is currently committing an operation. Try stopping again once that atomic change settles.",
       );
+    const hasAppliedWork = currentOperations.some(
+      (operation) =>
+        operation.status === "executed" || operation.status === "failed",
+    );
     const now = Date.now();
     if (
       !run.agentUsageSettledAt &&
@@ -1516,7 +1537,9 @@ export const stopRun = mutation({
     await ctx.db.patch(args.runId, {
       status: "cancelled",
       phase: "stopped",
-      retryable: true,
+      recoveryState: hasAppliedWork ? "partial" : "interrupted",
+      retryable: !hasAppliedWork,
+      preservedPartial: hasAppliedWork,
       completedAt: now,
       agentUsageSettledAt:
         run.selectedAgentId && run.selectedAgentVersionId
@@ -1551,14 +1574,16 @@ export const stopRun = mutation({
           title: "Stopped",
           summary:
             "Stopped by you. Any partial response remains available in the thread.",
-          actions: [
-            {
-              key: "retry",
-              label: "Retry",
-              targetType: "run",
-              targetId: args.runId,
-            },
-          ],
+          actions: hasAppliedWork
+            ? []
+            : [
+                {
+                  key: "retry",
+                  label: "Retry",
+                  targetType: "run",
+                  targetId: args.runId,
+                },
+              ],
           updatedAt: now,
         }),
       ),

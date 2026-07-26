@@ -198,7 +198,14 @@ function typedArtifactStructure(
           text: text(
             typeof row.content === "string"
               ? row.content
-              : (nodeContent.text ?? nodeContent.title ?? nodeContent.label),
+              : (nodeContent.text ??
+                  nodeContent.title ??
+                  nodeContent.label ??
+                  [nodeContent.header, nodeContent.body]
+                    .filter(
+                      (entry): entry is string => typeof entry === "string",
+                    )
+                    .join("\n\n")),
             240,
           ),
           semanticLabel: text(row.semanticLabel, 160),

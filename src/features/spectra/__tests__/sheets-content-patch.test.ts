@@ -69,16 +69,18 @@ describe("sheets contentPatch column append", () => {
           { path: "/sheets/0/cells/d1", value: "Km below 5?" },
           {
             path: "/sheets/0/cells/D2",
-            value: { formula: "=IF(B2<5,\"Yes\",\"No\")" },
+            value: { formula: '=IF(B2<5,"Yes","No")' },
           },
           {
             path: "/sheets/0/cells/D3",
-            value: { formula: "=IF(B3<5,\"Yes\",\"No\")" },
+            value: { formula: '=IF(B3<5,"Yes","No")' },
           },
         ],
       }),
     ) as {
-      sheets: Array<{ cells: Record<string, { value?: unknown; formula?: string }> }>;
+      sheets: Array<{
+        cells: Record<string, { value?: unknown; formula?: string }>;
+      }>;
     };
 
     const cells = next.sheets[0]!.cells;
@@ -88,6 +90,35 @@ describe("sheets contentPatch column append", () => {
     expect(cells.D1?.value).toBe("Km below 5?");
     expect(cells.D2?.formula).toBe('=IF(B2<5,"Yes","No")');
     expect(cells.D3?.formula).toBe('=IF(B3<5,"Yes","No")');
+  });
+
+  it("keeps nested cell-field writes scalar instead of nesting a cell object", () => {
+    expect(
+      canonicalizeSheetsPatchChange({
+        path: "/sheets/0/cells/b2/value",
+        value: "How tightly the enzyme binds its substrate",
+      }),
+    ).toEqual({
+      path: "/sheets/0/cells/B2/value",
+      value: "How tightly the enzyme binds its substrate",
+    });
+
+    const next = normalizeArtifactContent(
+      "sheets",
+      applyResolvedContentPatch(enzymeKmSheet(), {
+        changes: [
+          {
+            path: "/sheets/0/cells/B2/value",
+            value: "How tightly the enzyme binds its substrate",
+          },
+        ],
+      }),
+    ) as {
+      sheets: Array<{ cells: Record<string, { value?: unknown }> }>;
+    };
+    expect(next.sheets[0]!.cells.B2?.value).toBe(
+      "How tightly the enzyme binds its substrate",
+    );
   });
 
   it("merges a partial /sheets/0/cells map so column appends are surgical", () => {
@@ -106,12 +137,27 @@ describe("sheets contentPatch column append", () => {
         ],
       }),
     ) as {
-      sheets: Array<{ cells: Record<string, { value?: unknown; formula?: string }> }>;
+      sheets: Array<{
+        cells: Record<string, { value?: unknown; formula?: string }>;
+      }>;
     };
 
     const cells = next.sheets[0]!.cells;
     expect(Object.keys(cells).sort()).toEqual(
-      ["A1", "A2", "A3", "B1", "B2", "B3", "C1", "C2", "C3", "D1", "D2", "D3"].sort(),
+      [
+        "A1",
+        "A2",
+        "A3",
+        "B1",
+        "B2",
+        "B3",
+        "C1",
+        "C2",
+        "C3",
+        "D1",
+        "D2",
+        "D3",
+      ].sort(),
     );
     expect(cells.A1?.value).toBe("Enzyme");
     expect(cells.D1?.value).toBe("Km below 5?");
@@ -133,7 +179,7 @@ describe("sheets contentPatch column append", () => {
 
     const authoredFormula = canonicalizeSheetsPatchChange({
       path: "/sheets/0/cells/D2",
-      value: "=IF(B2<5,\"Yes\",\"No\")",
+      value: '=IF(B2<5,"Yes","No")',
     });
     expect(
       contentPatchChangeMatchesSaved(
@@ -205,7 +251,11 @@ describe("sheets contentPatch column append", () => {
       false,
     );
     expect(() =>
-      assertCreateContentNotHollow("sheets", { sheets: [{ cells: {} }] }, "create"),
+      assertCreateContentNotHollow(
+        "sheets",
+        { sheets: [{ cells: {} }] },
+        "create",
+      ),
     ).toThrow(/hollow\/incomplete/i);
     expect(
       isQuietRetryableApplyFailure(

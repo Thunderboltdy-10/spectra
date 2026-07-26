@@ -225,6 +225,35 @@ export const assertClaimed = mutation({
   },
 });
 
+export const reopenForCurrentStateRetry = mutation({
+  args: { operationId: v.id("spectraOperations"), executionId: v.string() },
+  handler: async (ctx, args) => {
+    const operation = await ctx.db.get(args.operationId);
+    if (!operation?.runId) throw new Error("Operation not found");
+    const run = await requireOwnedRun(ctx, operation.runId);
+    if (
+      run.status !== "running" ||
+      operation.executionId !== run.executionId ||
+      run.executionId !== args.executionId
+    )
+      throw new Error("Operation belongs to an older run attempt");
+    if (operation.status !== "executed")
+      throw new Error("Only a committed operation can resume from current state");
+    await ctx.db.patch(args.operationId, {
+      status: "executing",
+      output: {
+        ...(operation.output &&
+        typeof operation.output === "object" &&
+        !Array.isArray(operation.output)
+          ? operation.output
+          : {}),
+        currentStateRetryStartedAt: Date.now(),
+      },
+    });
+    return { operationId: args.operationId };
+  },
+});
+
 export const markExecuted = mutation({
   args: {
     operationId: v.id("spectraOperations"),

@@ -18,11 +18,14 @@ import {
   List,
   Loader2,
   Mail,
+  Maximize2,
   MessageSquare,
+  Minus,
   PanelTop,
   Plus,
   Search,
   Share2,
+  Sparkles,
   Table2,
   Trash2,
   Presentation,
@@ -68,7 +71,7 @@ import {
 } from "../data/api";
 import type { ArtifactTypeKey } from "../artifacts/types";
 
-type ArtifactMode = "list" | "board";
+type ArtifactMode = "list" | "board" | "canvas";
 type ArtifactSort = "updated" | "created" | "title" | "type" | "workspace" | "activity";
 type ArtifactCollection = "mine" | "shared" | "invitations";
 type ArtifactHubTab = { id: string; label: string };
@@ -126,6 +129,7 @@ export function ArtifactsShell() {
   const [search, setSearch] = useState("");
   const [sortMode, setSortMode] = useState<ArtifactSort>("updated");
   const [sortOpen, setSortOpen] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState("");
   const [multiSelectMode, setMultiSelectMode] = useState(false);
   const [attachmentsHost, setAttachmentsHost] = useState<HTMLDivElement | null>(null);
@@ -149,6 +153,7 @@ export function ArtifactsShell() {
   const [shareTarget, setShareTarget] = useState<SpectraArtifact | null>(null);
   const createMenuRef = useOutsideClick<HTMLDivElement>(createMenuOpen, () => setCreateMenuOpen(false));
   const sortMenuRef = useOutsideClick<HTMLDivElement>(sortOpen, () => setSortOpen(false));
+  const filterMenuRef = useOutsideClick<HTMLDivElement>(filterOpen, () => setFilterOpen(false));
   const openObjects = useSpectraContextStore((state) => state.openObjects);
   const tileArtifactIds = useSpectraContextStore((state) => state.tileArtifactIds);
   const workSetIsolated = useSpectraContextStore((state) => state.tilesIsolated);
@@ -741,23 +746,50 @@ export function ArtifactsShell() {
             })}
           </nav>
           {collection !== "invitations" ? <div className="mt-5 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-            <div className="flex flex-wrap gap-2">
-              {filters.map((filter) => {
-                const Icon = filter.icon;
+            <div className="relative" ref={filterMenuRef}>
+              {(() => {
+                const selectedFilter = filters.find((filter) => filter.key === activeFilter) ?? filters[0];
+                const SelectedIcon = selectedFilter.icon;
                 return (
-                  <button
-                    key={filter.key}
-                    type="button"
-                    onClick={() => setActiveFilter(filter.key)}
-                    className={`inline-flex h-9 items-center gap-2 rounded-[8px] border border-transparent px-3 text-[13px] font-medium transition-all duration-200 ${
-                      activeFilter === filter.key ? "bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[0_1px_7px_rgba(27,20,12,0.08)]" : "text-[var(--text-secondary)] hover:bg-[color-mix(in_oklab,var(--bg-elevated)_68%,transparent)] hover:text-[var(--text-primary)]"
-                    }`}
-                  >
-                    <Icon className="h-4 w-4" />
-                    {filter.label}
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setFilterOpen((open) => !open)}
+                      className="inline-flex h-9 min-w-[156px] items-center gap-2 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-primary)] shadow-[0_1px_2px_rgba(27,20,12,.03)] transition hover:bg-[var(--bg-hover)]"
+                      aria-haspopup="menu"
+                      aria-expanded={filterOpen}
+                    >
+                      <SelectedIcon className="h-4 w-4 text-[var(--text-secondary)]" />
+                      <span>{selectedFilter.label}</span>
+                      <ChevronDown className={`ml-auto h-3.5 w-3.5 text-[var(--text-tertiary)] transition-transform ${filterOpen ? "rotate-180" : ""}`} />
+                    </button>
+                    {filterOpen ? (
+                      <div className="absolute left-0 top-[calc(100%+7px)] z-40 grid w-[300px] grid-cols-2 gap-1 rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 shadow-[0_18px_44px_rgba(27,20,12,.14)]" role="menu" aria-label="Filter by artifact type">
+                        {filters.map((filter) => {
+                          const Icon = filter.icon;
+                          return (
+                            <button
+                              key={filter.key}
+                              type="button"
+                              role="menuitemradio"
+                              aria-checked={activeFilter === filter.key}
+                              onClick={() => {
+                                setActiveFilter(filter.key);
+                                setFilterOpen(false);
+                              }}
+                              className={`flex min-h-9 items-center gap-2 rounded-[7px] px-2.5 text-left text-[12px] font-medium transition ${activeFilter === filter.key ? "bg-[var(--bg-secondary)] text-[var(--text-primary)]" : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"}`}
+                            >
+                              <Icon className="h-3.5 w-3.5" />
+                              {filter.label}
+                              {activeFilter === filter.key ? <CheckCircle2 className="ml-auto h-3.5 w-3.5 text-[var(--success)]" /> : null}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                  </>
                 );
-              })}
+              })()}
             </div>
             <div className="ml-auto flex items-center gap-2">
             <button type="button" onClick={() => { setMultiSelectMode((value) => { const next = !value; if (next && selectedContextIds.size === 0) restoreLatestSelection(); return next; }); }} className={`flex h-9 items-center gap-2 rounded-[8px] border px-3 text-[12px] font-medium transition ${multiSelectMode ? "border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-primary)]" : "border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`} title={multiSelectMode ? "Finish selecting" : "Select objects for AI context"} aria-label={multiSelectMode ? "Finish selecting" : "Select multiple artifacts"} aria-pressed={multiSelectMode}><Files className="h-4 w-4" />{multiSelectMode ? "Done selecting" : "Select objects"}</button>
@@ -766,6 +798,7 @@ export function ArtifactsShell() {
               {[
                 { key: "list" as const, label: "List", icon: List },
                 { key: "board" as const, label: "Board", icon: PanelTop },
+                { key: "canvas" as const, label: "Canvas", icon: Sparkles },
               ].map((item) => {
                 const Icon = item.icon;
                 return (
@@ -782,8 +815,9 @@ export function ArtifactsShell() {
         {loading ? <ArtifactsSkeleton /> : null}
         {!loading && collection === "invitations" ? <InvitationInbox invitations={shareInvitations} busyKey={busyKey} onRespond={respondToShareInvitation} /> : null}
         {!loading && collection !== "invitations" && artifacts.length === 0 ? <EmptyArtifactsState /> : null}
-        {!loading && collection !== "invitations" && mode === "list" ? <GroupedList inbox={inbox} groups={byWorkspace} rowActions={rowActions} onOpen={openArtifactSurface} landingTitle={collection === "shared" ? "Shared with you" : "Unplaced"} landingDescription={collection === "shared" ? "Accepted artifacts that you have not placed in a workspace yet." : "Artifacts not yet placed in a workspace."} /> : null}
-        {!loading && collection !== "invitations" && mode === "board" ? <BoardColumns groups={byWorkspace} onOpen={openArtifactSurface} /> : null}
+        {!loading && collection !== "invitations" && artifacts.length > 0 && mode === "list" ? <GroupedList inbox={inbox} groups={byWorkspace} rowActions={rowActions} onOpen={openArtifactSurface} landingTitle={collection === "shared" ? "Shared with you" : "Unplaced"} landingDescription={collection === "shared" ? "Accepted artifacts that you have not placed in a workspace yet." : "Artifacts not yet placed in a workspace."} /> : null}
+        {!loading && collection !== "invitations" && artifacts.length > 0 && mode === "board" ? <BoardColumns groups={byWorkspace} onOpen={openArtifactSurface} /> : null}
+        {!loading && collection !== "invitations" && artifacts.length > 0 && mode === "canvas" ? <ArtifactsCanvas artifacts={artifacts} onOpen={openArtifactSurface} selectionMode={multiSelectMode} selectedIds={selectedContextIds} onToggleContext={toggleContextArtifact} /> : null}
       </section>
       {studio.mode === "split" && studio.activeArtifact ? (
         <ArtifactStudio
@@ -827,7 +861,7 @@ export function ArtifactsShell() {
 	      ) : null}
 	      </>
 	      )}
-	        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 bg-transparent px-2 pb-0 pt-2 sm:px-5 sm:pb-0 lg:px-8" style={activeRunPanelId ? { right: "var(--spectra-run-panel-width, 680px)" } : undefined}>
+	        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-[320] bg-transparent px-2 pb-0 pt-2 sm:px-5 sm:pb-0 lg:px-8" style={activeRunPanelId ? { right: "var(--spectra-run-panel-width, 680px)" } : undefined}>
           <div className="pointer-events-auto mx-auto max-w-[880px]">
 	            <div ref={setAttachmentsHost} />
 	            <DurableRunTabs
@@ -1175,6 +1209,127 @@ function BoardColumns({
         );
       })}
     </main>
+    </div>
+  );
+}
+
+function ArtifactsCanvas({
+  artifacts,
+  onOpen,
+  selectionMode,
+  selectedIds,
+  onToggleContext,
+}: {
+  artifacts: SpectraArtifact[];
+  onOpen: (artifact: SpectraArtifact) => void;
+  selectionMode: boolean;
+  selectedIds: Set<string>;
+  onToggleContext: (artifact: SpectraArtifact) => void;
+}) {
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const [zoom, setZoom] = useState(1);
+  const clusters = filters
+    .filter((filter) => filter.key !== "all")
+    .map((filter) => ({
+      ...filter,
+      color: blueprintMeta[filter.key as SpectraBlueprintKey].color,
+      artifacts: artifacts.filter(
+        (artifact) => artifact.blueprintKey === filter.key,
+      ),
+    }))
+    .filter((cluster) => cluster.artifacts.length > 0);
+  const layouts = [
+    "xl:col-span-4",
+    "xl:col-span-4 xl:col-start-5 xl:mt-12",
+    "xl:col-span-4 xl:col-start-9 xl:mt-4",
+    "xl:col-span-4 xl:col-start-2",
+    "xl:col-span-4 xl:col-start-6 xl:mt-10",
+    "xl:col-span-4 xl:col-start-9",
+  ];
+
+  function resetCanvas(nextZoom = 1) {
+    setZoom(nextZoom);
+    requestAnimationFrame(() =>
+      canvasRef.current?.scrollTo({ top: 0, left: 0, behavior: "smooth" }),
+    );
+  }
+
+  return (
+    <div
+      ref={canvasRef}
+      className="relative mt-5 min-h-[620px] overflow-auto rounded-[12px] border border-[var(--border-subtle)] bg-[radial-gradient(color-mix(in_oklab,var(--border-default)_62%,transparent)_0.65px,transparent_0.8px)] p-5 pb-28 [background-size:18px_18px]"
+    >
+      <div className="sticky top-0 z-20 ml-auto mb-5 flex w-fit items-center gap-1 rounded-[9px] border border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_96%,transparent)] p-1 shadow-[0_10px_28px_-22px_rgba(27,20,12,.45)] backdrop-blur">
+        <button type="button" onClick={() => resetCanvas(1)} className="flex h-8 items-center gap-1.5 rounded-[7px] px-2.5 text-[10px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]">
+          <Sparkles className="h-3.5 w-3.5" />
+          Auto arrange
+        </button>
+        <span className="h-5 w-px bg-[var(--border-subtle)]" />
+        <button type="button" onClick={() => setZoom((value) => Math.max(0.65, Number((value - 0.1).toFixed(2))))} disabled={zoom <= 0.65} className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-35" aria-label="Zoom canvas out">
+          <Minus className="h-3.5 w-3.5" />
+        </button>
+        <span className="w-11 text-center text-[10px] tabular-nums text-[var(--text-secondary)]">{Math.round(zoom * 100)}%</span>
+        <button type="button" onClick={() => setZoom((value) => Math.min(1.35, Number((value + 0.1).toFixed(2))))} disabled={zoom >= 1.35} className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-35" aria-label="Zoom canvas in">
+          <Plus className="h-3.5 w-3.5" />
+        </button>
+        <button type="button" onClick={() => resetCanvas(0.8)} className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" aria-label="Fit canvas to view">
+          <Maximize2 className="h-3.5 w-3.5" />
+        </button>
+        <span className="h-5 w-px bg-[var(--border-subtle)]" />
+        <span className="px-2 text-[10px] text-[var(--text-tertiary)]">Clustered by type</span>
+      </div>
+      <div
+        className="grid auto-rows-min gap-5 transition-transform duration-200 motion-reduce:transition-none lg:grid-cols-2 xl:grid-cols-12"
+        style={{ transform: `scale(${zoom})`, transformOrigin: "top left", width: `${100 / zoom}%` }}
+      >
+        {clusters.map((cluster, index) => {
+          const Icon = cluster.icon;
+          return (
+            <section
+              key={cluster.key}
+              className={`self-start rounded-[10px] border p-2.5 lg:col-span-1 ${layouts[index % layouts.length]}`}
+              style={{
+                borderColor: `color-mix(in oklab, ${cluster.color} 24%, var(--border-default))`,
+                background: `color-mix(in oklab, ${cluster.color} 5%, var(--bg-primary))`,
+                boxShadow: `0 20px 45px -38px color-mix(in oklab, ${cluster.color} 42%, transparent)`,
+              }}
+            >
+              <header className="mb-3 flex items-center gap-2 px-1">
+                <span className="flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-semibold" style={{ color: cluster.color, background: `color-mix(in oklab, ${cluster.color} 10%, var(--bg-elevated))` }}>{index + 1}</span>
+                <Icon className="h-4 w-4" style={{ color: cluster.color }} />
+                <span className="text-[13px] font-semibold text-[var(--text-primary)]">{cluster.label}</span>
+                <span className="ml-auto text-[11px] text-[var(--text-tertiary)]">{cluster.artifacts.length}</span>
+              </header>
+              <div className="grid gap-2">
+                {cluster.artifacts.slice(0, 6).map((artifact) => (
+                  <ArtifactCard
+                    key={artifact._id}
+                    artifact={artifactToCard(artifact)}
+                    size="compact"
+                    quiet
+                    className="spectra-card--canvas"
+                    selectionMode={selectionMode}
+                    contextSelected={selectedIds.has(artifact._id)}
+                    onToggleContext={() => onToggleContext(artifact)}
+                    onSelect={() => onOpen(artifact)}
+                  />
+                ))}
+                {cluster.artifacts.length > 6 ? (
+                  <div className="col-span-full flex h-8 items-center justify-center rounded-[6px] border border-dashed border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_72%,transparent)] text-[10px] text-[var(--text-tertiary)]">
+                    {cluster.artifacts.length - 6} more in this cluster
+                  </div>
+                ) : null}
+              </div>
+            </section>
+          );
+        })}
+      </div>
+      <div className="sticky bottom-5 z-20 ml-auto mt-8 hidden h-24 w-36 overflow-hidden rounded-[10px] border border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_94%,transparent)] p-2 shadow-[0_12px_30px_rgba(27,20,12,.12)] backdrop-blur sm:block" aria-label="Canvas minimap">
+        <div className="grid h-full grid-cols-3 gap-1.5">
+          {clusters.slice(0, 6).map((cluster) => <span key={`mini:${String(cluster.key)}`} className="rounded-[4px] border" style={{ borderColor: `color-mix(in oklab, ${cluster.color} 28%, var(--border-default))`, background: `color-mix(in oklab, ${cluster.color} 10%, var(--bg-primary))` }} />)}
+        </div>
+        <span className="pointer-events-none absolute inset-3 rounded-[5px] border border-[color-mix(in_oklab,var(--accent-cyan)_55%,transparent)]" />
+      </div>
     </div>
   );
 }

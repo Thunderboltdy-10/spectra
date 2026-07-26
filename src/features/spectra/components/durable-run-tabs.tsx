@@ -308,6 +308,11 @@ export function DurableRunTabs({
           // a lagging failed run snapshot paint Failed on the strip mid-retry.
           const failed =
             !optimisticOwnsTab && tab.run.status === "failed";
+          const canRetry =
+            (cancelled || failed) &&
+              tab.run.phase !== "partial" &&
+              tab.run.recoveryState !== "partial" &&
+              tab.run.retryable === true;
           const needsAnswer =
             !optimisticOwnsTab &&
             tab.run.status === "completed" &&
@@ -472,7 +477,7 @@ export function DurableRunTabs({
                   )}
                 </button>
               ) : null}
-              {(failed || cancelled) && onRetry ? (
+              {canRetry && onRetry ? (
                 <button
                   type="button"
                   onClick={() => onRetry(tab.runId)}

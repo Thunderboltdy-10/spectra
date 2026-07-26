@@ -530,6 +530,8 @@ export type SpectraRun = {
     elapsedMs?: number;
   };
   attemptCount?: number;
+  recoveryState?: "interrupted" | "partial";
+  retryable?: boolean;
   traceDegraded?: boolean;
   selectedAgentId?: string;
   selectedAgentVersionId?: string;

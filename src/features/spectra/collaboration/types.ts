@@ -1,6 +1,13 @@
 import type * as Y from "yjs";
 
-export type CollaborationSyncState = "connecting" | "synchronizing" | "synchronized" | "reconnecting" | "unsynchronized" | "permission_lost" | "closed";
+export type CollaborationSyncState =
+  | "connecting"
+  | "synchronizing"
+  | "synchronized"
+  | "reconnecting"
+  | "unsynchronized"
+  | "permission_lost"
+  | "closed";
 
 export type CollaborationPresence = {
   clientId: string;
@@ -12,6 +19,12 @@ export type CollaborationPresence = {
   operationId?: string;
   activeRegionId?: string;
   activeRegionIds?: string[];
+  previewPatches?: Array<{
+    path: string;
+    value: unknown;
+  }>;
+  previewSequence?: number;
+  previewPhase?: "streaming";
   cursor?: CollaborationCursor | null;
   selection?: unknown;
   viewport?: unknown;

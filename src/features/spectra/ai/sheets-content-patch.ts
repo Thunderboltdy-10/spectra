@@ -19,6 +19,11 @@ export function isSheetsCellPath(path: string) {
   return SHEETS_CELL_PATH.test(path);
 }
 
+export function isDirectSheetsCellPath(path: string) {
+  const match = path.match(SHEETS_CELL_PATH);
+  return Boolean(match && match[3] === "");
+}
+
 /** Uppercase the A1 address segment in `/sheets/N/cells/d2` → `.../D2`. */
 export function canonicalizeSheetsPatchPath(path: string): string {
   const match = path.match(SHEETS_CELL_PATH);
@@ -78,7 +83,7 @@ export function canonicalizeSheetsPatchChange(
   change: ContentPatchChange,
 ): ContentPatchChange {
   const path = canonicalizeSheetsPatchPath(change.path);
-  if (isSheetsCellPath(path))
+  if (isDirectSheetsCellPath(path))
     return { path, value: coerceSheetCellPatchValue(change.value) };
   if (isSheetsCellsMapPath(path))
     return { path, value: canonicalizeCellsMapValue(change.value) };

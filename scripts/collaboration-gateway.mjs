@@ -25,7 +25,34 @@ const REGION_MARKER = "$spectraRegion";
 const CODE_LINES_MARKER = "$spectraCodeLines";
 const GATEWAY_PROTOCOL_VERSION = 1;
 const activeConnections = new Set();
+const documentMessageTails = new WeakMap();
+const pendingMessageReleases = new Map();
 let policySweepRunning = false;
+
+async function acquireDocumentMessage(document, socketId) {
+  const previous = documentMessageTails.get(document) ?? Promise.resolve();
+  let releaseCurrent;
+  const current = new Promise((resolve) => {
+    releaseCurrent = resolve;
+  });
+  const tail = previous.then(() => current);
+  documentMessageTails.set(document, tail);
+  await previous;
+  const queue = pendingMessageReleases.get(socketId) ?? [];
+  queue.push(() => {
+    releaseCurrent();
+    if (documentMessageTails.get(document) === tail)
+      documentMessageTails.delete(document);
+  });
+  pendingMessageReleases.set(socketId, queue);
+}
+
+function releaseDocumentMessage(socketId) {
+  const queue = pendingMessageReleases.get(socketId);
+  const release = queue?.shift();
+  release?.();
+  if (!queue?.length) pendingMessageReleases.delete(socketId);
+}
 
 function bridge(operation, payload) {
   const payloadJson = JSON.stringify(payload);
@@ -121,23 +148,21 @@ function expandProjection(value, regions, active = new Set()) {
     Array.isArray(value[CODE_LINES_MARKER]) &&
     value[CODE_LINES_MARKER].every((regionId) => typeof regionId === "string")
   ) {
-    return value[CODE_LINES_MARKER]
-      .map((regionId) => {
-        if (active.has(regionId))
-          throw new Error("COLLABORATION_PROJECTION_CYCLE");
-        const encoded = regions.get(regionId);
-        if (typeof encoded !== "string")
-          throw new Error("COLLABORATION_PROJECTION_REGION_MISSING");
-        const nextActive = new Set(active);
-        nextActive.add(regionId);
-        const line = expandProjection(
-          JSON.parse(encoded).value,
-          regions,
-          nextActive,
-        );
-        return typeof line === "string" ? line : String(line ?? "");
-      })
-      .join("\n");
+    return value[CODE_LINES_MARKER].map((regionId) => {
+      if (active.has(regionId))
+        throw new Error("COLLABORATION_PROJECTION_CYCLE");
+      const encoded = regions.get(regionId);
+      if (typeof encoded !== "string")
+        throw new Error("COLLABORATION_PROJECTION_REGION_MISSING");
+      const nextActive = new Set(active);
+      nextActive.add(regionId);
+      const line = expandProjection(
+        JSON.parse(encoded).value,
+        regions,
+        nextActive,
+      );
+      return typeof line === "string" ? line : String(line ?? "");
+    }).join("\n");
   }
   if (Array.isArray(value))
     return value.map((entry) => expandProjection(entry, regions, active));
@@ -368,55 +393,70 @@ const server = new Server({
     connection.onClose(() => activeConnections.delete(connection));
   },
 
-  async beforeHandleMessage({ context, document, update: frame }) {
+  async beforeHandleMessage({ context, document, update: frame, socketId }) {
     await reauthorize(context);
     const documentUpdate = extractYjsUpdate(frame);
     if (!documentUpdate || documentUpdate.byteLength === 0) return;
-    if (documentUpdate.byteLength > 256 * 1024)
-      throw new Error("COLLABORATION_GATEWAY_UPDATE_SIZE");
-    const before = artifactModelState(document);
-    const baseStateVectorHash = createHash("sha256")
-      .update(Y.encodeStateVector(document))
-      .digest("base64url");
-    const scratch = new Y.Doc();
+    // Hocuspocus can run hooks from different sockets concurrently. Hold a
+    // per-document gate through `afterHandleMessage`, when the accepted update
+    // has actually been applied to the shared Y.Doc. Without this, two valid
+    // edits can both derive the same base vector and one is rejected as stale
+    // even when the collaborators changed independent regions.
+    await acquireDocumentMessage(document, socketId);
     try {
-      Y.applyUpdate(scratch, Y.encodeStateAsUpdate(document));
-      Y.applyUpdate(scratch, documentUpdate);
-      const after = artifactModelState(scratch);
-      const regionIds = changedArtifactRegions(before, after);
-      if (regionIds.length === 0) return;
-      if (!context.canModify) throw new Error("COLLABORATION_READ_ONLY");
-      if (regionIds.length > 128)
-        throw new Error("COLLABORATION_MODEL_CHANGE_UNRECOGNIZED");
-      const stateVectorHash = createHash("sha256")
-        .update(Y.encodeStateVector(scratch))
+      if (documentUpdate.byteLength > 256 * 1024)
+        throw new Error("COLLABORATION_GATEWAY_UPDATE_SIZE");
+      const before = artifactModelState(document);
+      const baseStateVectorHash = createHash("sha256")
+        .update(Y.encodeStateVector(document))
         .digest("base64url");
-      const updateHash = createHash("sha256")
-        .update(documentUpdate)
-        .digest("base64url");
-      const projectionJson = artifactProjection(scratch);
-      // Persist and authorize the exact semantic mutation before Hocuspocus is
-      // allowed to apply or broadcast it. A rejected claim can therefore never
-      // contaminate the shared in-memory document.
-      await bridge("append", {
-        artifactId: context.artifactId,
-        partitionKey: context.partitionKey,
-        accountId: context.accountId,
-        clientId: context.clientId,
-        policyVersion: context.policyVersion,
-        idempotencyKey: `${context.clientId}:${updateHash}`,
-        update: Buffer.from(documentUpdate).toString("base64"),
-        baseStateVectorHash,
-        stateVectorHash,
-        regionIds,
-        projectionJson,
-        projectionHash: projectionJson
-          ? createHash("sha256").update(projectionJson).digest("base64url")
-          : null,
-      });
-    } finally {
-      scratch.destroy();
+      const scratch = new Y.Doc();
+      try {
+        Y.applyUpdate(scratch, Y.encodeStateAsUpdate(document));
+        Y.applyUpdate(scratch, documentUpdate);
+        const after = artifactModelState(scratch);
+        const regionIds = changedArtifactRegions(before, after);
+        if (regionIds.length === 0) return;
+        if (!context.canModify) throw new Error("COLLABORATION_READ_ONLY");
+        if (regionIds.length > 128)
+          throw new Error("COLLABORATION_MODEL_CHANGE_UNRECOGNIZED");
+        const stateVectorHash = createHash("sha256")
+          .update(Y.encodeStateVector(scratch))
+          .digest("base64url");
+        const updateHash = createHash("sha256")
+          .update(documentUpdate)
+          .digest("base64url");
+        const projectionJson = artifactProjection(scratch);
+        // Persist and authorize the exact semantic mutation before Hocuspocus is
+        // allowed to apply or broadcast it. A rejected claim can therefore never
+        // contaminate the shared in-memory document.
+        await bridge("append", {
+          artifactId: context.artifactId,
+          partitionKey: context.partitionKey,
+          accountId: context.accountId,
+          clientId: context.clientId,
+          policyVersion: context.policyVersion,
+          idempotencyKey: `${context.clientId}:${updateHash}`,
+          update: Buffer.from(documentUpdate).toString("base64"),
+          baseStateVectorHash,
+          stateVectorHash,
+          regionIds,
+          projectionJson,
+          projectionHash: projectionJson
+            ? createHash("sha256").update(projectionJson).digest("base64url")
+            : null,
+        });
+      } finally {
+        scratch.destroy();
+      }
+    } catch (error) {
+      releaseDocumentMessage(socketId);
+      throw error;
     }
+  },
+
+  async afterHandleMessage({ socketId }) {
+    releaseDocumentMessage(socketId);
   },
 
   async beforeHandleAwareness({ context, states }) {
@@ -458,6 +498,21 @@ const server = new Server({
             : {}),
           ...(activeRegionIds && activeRegionIds.length > 0
             ? { activeRegionIds }
+            : {}),
+          ...(actorKind === "ai" &&
+          boundedPresence(supplied.previewPatches, 24_000) !== undefined
+            ? {
+                previewPatches: boundedPresence(
+                  supplied.previewPatches,
+                  24_000,
+                ),
+              }
+            : {}),
+          ...(actorKind === "ai" && Number.isInteger(supplied.previewSequence)
+            ? { previewSequence: supplied.previewSequence }
+            : {}),
+          ...(actorKind === "ai" && supplied.previewPhase === "streaming"
+            ? { previewPhase: "streaming" }
             : {}),
           ...(boundedPresence(supplied.cursor) !== undefined
             ? { cursor: boundedPresence(supplied.cursor) }

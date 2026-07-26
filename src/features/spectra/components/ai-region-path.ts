@@ -54,19 +54,13 @@ function decodePointerSegment(segment: string): string {
  * Expand RFC 6901 `-` append pointers against post-patch content so studios
  * can light the newly added index (`/questions/-` → `/questions/10`).
  */
-export function expandAppendPointer(
-  path: string,
-  content: unknown,
-): string {
+export function expandAppendPointer(path: string, content: unknown): string {
   const normalized = normalizeAiPointer(path);
   if (!normalized || normalized === "/" || !normalized.includes("/-"))
     return normalized;
   if (!content || typeof content !== "object") return normalized;
 
-  const rawSegments = normalized
-    .slice(1)
-    .split("/")
-    .map(decodePointerSegment);
+  const rawSegments = normalized.slice(1).split("/").map(decodePointerSegment);
   const resolved: string[] = [];
   let cursor: unknown = content;
 
@@ -138,7 +132,9 @@ export function sheetsCellHighlightPaths(
     const cells = (sheet as { cells?: unknown }).cells;
     if (!cells || typeof cells !== "object" || Array.isArray(cells)) continue;
 
-    for (const address of Object.keys(cells as Record<string, unknown>).sort()) {
+    for (const address of Object.keys(
+      cells as Record<string, unknown>,
+    ).sort()) {
       const normalizedAddress = address.trim().toUpperCase() || address;
       paths.push(
         `/sheets/${sheetIndex}/cells/${encodePointerSegment(normalizedAddress)}`,
@@ -163,9 +159,7 @@ export function materializeAiChangedPaths(
 ): string[] {
   const incoming = [
     ...new Set(
-      (paths ?? [])
-        .map(normalizeAiPointer)
-        .filter((path) => path.length > 0),
+      (paths ?? []).map(normalizeAiPointer).filter((path) => path.length > 0),
     ),
   ];
   if (!incoming.length) return [];
@@ -400,19 +394,19 @@ export function creationHighlightFallbackPaths(
 }
 
 /**
- * Focused-update fallback `/` only while concrete region paths are still empty.
- * Once exact paths stream in, drop the whole-artifact fallback so settle clears
- * cleanly without inventing permanent highlights.
+ * Focused updates never invent a whole-artifact highlight. Presence communicates
+ * that AI is preparing the edit until the first exact collaborative region
+ * arrives; lighting `/` produces a misleading page refresh.
  */
 export function updatingHighlightFallbackPaths(
   aiState: string | undefined,
   blueprintKey: string | undefined,
   hasConcretePaths: boolean,
 ): string[] {
-  if (aiState !== "updating" || hasConcretePaths) return [];
-  // Sheets stay cell / cells-prefix exact — never whole-artifact `/`.
-  if (blueprintKey === "sheets") return [];
-  return ["/"];
+  void aiState;
+  void blueprintKey;
+  void hasConcretePaths;
+  return [];
 }
 
 /**

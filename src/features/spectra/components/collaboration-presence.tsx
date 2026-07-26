@@ -1,7 +1,7 @@
 "use client";
 
 import { MousePointer2, Sparkles, Users, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { CollaborationPresence } from "../collaboration/types";
 import type { ArtifactCommentRegion } from "./artifact-comments-panel";
 
@@ -37,12 +37,12 @@ function validCursor(
 ): cursor is { x: number; y: number; updatedAt?: number } {
   return Boolean(
     cursor &&
-      Number.isFinite(cursor.x) &&
-      Number.isFinite(cursor.y) &&
-      cursor.x >= 0 &&
-      cursor.x <= 1 &&
-      cursor.y >= 0 &&
-      cursor.y <= 1,
+    Number.isFinite(cursor.x) &&
+    Number.isFinite(cursor.y) &&
+    cursor.x >= 0 &&
+    cursor.x <= 1 &&
+    cursor.y >= 0 &&
+    cursor.y <= 1,
   );
 }
 
@@ -67,10 +67,102 @@ export function CollaborationCursorLayer({
     (person) =>
       person.clientId !== currentClientId && validCursor(person.cursor),
   );
+  const layerRef = useRef<HTMLDivElement>(null);
+  const [aiRegionAnchor, setAiRegionAnchor] = useState<{
+    left: number;
+    top: number;
+    width: number;
+  } | null>(null);
+  const hasActiveAi = collaborators.some(
+    (person) => person.actorKind === "ai" && person.activeRegionId,
+  );
+  useEffect(() => {
+    if (!hasActiveAi) {
+      setAiRegionAnchor(null);
+      return;
+    }
+    const layer = layerRef.current;
+    const studio = layer?.closest(".spectra-artifact-studio");
+    if (!layer || !studio) return;
+    let frame = 0;
+    const update = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const target = Array.from(
+          studio.querySelectorAll<HTMLElement>('[data-ai-region="true"]'),
+        )
+          .filter((element) => {
+            const rect = element.getBoundingClientRect();
+            return rect.width > 0 && rect.height > 0;
+          })
+          .sort((left, right) => {
+            const priority = (element: HTMLElement) => {
+              if (
+                element.matches(
+                  'input, textarea, select, [contenteditable="true"]',
+                )
+              )
+                return 0;
+              if (element.hasAttribute("data-address")) return 1;
+              if (element.querySelector('[data-ai-region="true"]')) return 3;
+              return 2;
+            };
+            const priorityDelta = priority(left) - priority(right);
+            if (priorityDelta) return priorityDelta;
+            const leftRect = left.getBoundingClientRect();
+            const rightRect = right.getBoundingClientRect();
+            return (
+              leftRect.width * leftRect.height -
+              rightRect.width * rightRect.height
+            );
+          })[0];
+        if (!target) {
+          setAiRegionAnchor(null);
+          return;
+        }
+        const layerRect = layer.getBoundingClientRect();
+        const targetRect = target.getBoundingClientRect();
+        setAiRegionAnchor({
+          left: Math.max(
+            12,
+            Math.min(
+              layerRect.width - 180,
+              targetRect.left - layerRect.left + 18,
+            ),
+          ),
+          top: Math.max(
+            14,
+            Math.min(
+              layerRect.height - 42,
+              targetRect.top -
+                layerRect.top +
+                Math.min(26, targetRect.height / 2),
+            ),
+          ),
+          width: Math.max(32, Math.min(targetRect.width, layerRect.width - 40)),
+        });
+      });
+    };
+    update();
+    const observer = new MutationObserver(update);
+    observer.observe(studio, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ["data-ai-region"],
+    });
+    window.addEventListener("resize", update);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+      window.removeEventListener("resize", update);
+    };
+  }, [hasActiveAi]);
   if (!collaborators.length) return null;
 
   return (
     <div
+      ref={layerRef}
       className="pointer-events-none absolute inset-0 z-[66] overflow-hidden"
       aria-hidden="true"
     >
@@ -82,17 +174,36 @@ export function CollaborationCursorLayer({
           currentDisplayName,
         );
         const color = presenceColor(person);
+        const anchored =
+          person.actorKind === "ai" && person.activeRegionId && aiRegionAnchor;
+        const sequenceProgress =
+          typeof person.previewSequence === "number"
+            ? (person.previewSequence % 12) / 11
+            : 0;
+        if (person.actorKind === "ai" && !aiRegionAnchor) return null;
         return (
           <div
             key={person.clientId}
-            className="absolute transition-[left,top] duration-75 ease-out motion-reduce:transition-none"
-            style={{
-              left: `${person.cursor!.x * 100}%`,
-              top: `${person.cursor!.y * 100}%`,
-            }}
+            className={`absolute transition-[left,top] ease-out motion-reduce:transition-none ${person.actorKind === "ai" ? "duration-300" : "duration-75"}`}
+            style={
+              anchored
+                ? {
+                    left:
+                      anchored.left +
+                      Math.min(
+                        Math.max(0, anchored.width - 44),
+                        8 + sequenceProgress * anchored.width * 0.68,
+                      ),
+                    top: anchored.top,
+                  }
+                : {
+                    left: `${person.cursor!.x * 100}%`,
+                    top: `${person.cursor!.y * 100}%`,
+                  }
+            }
           >
             <MousePointer2
-              className="h-5 w-5 -translate-x-1 -translate-y-1 fill-current drop-shadow-[0_2px_3px_rgba(20,18,15,.18)]"
+              className={`h-5 w-5 -translate-x-1 -translate-y-1 fill-current ${person.actorKind === "ai" ? "drop-shadow-[0_0_8px_color-mix(in_oklab,var(--accent-cyan)_70%,transparent)]" : "drop-shadow-[0_2px_3px_rgba(20,18,15,.18)]"}`}
               style={{ color }}
             />
             <span
@@ -130,10 +241,19 @@ export function CollaborationPresenceIndicator({
     [currentClientId, presence],
   );
   if (collaborators.length === 0) return null;
-  const regionNames = new Map(regions.map((region) => [region.regionId, region.label]));
+  const regionNames = new Map(
+    regions.map((region) => [region.regionId, region.label]),
+  );
   const activeCount = collaborators.filter(
     (person) => person.activeRegionId || validCursor(person.cursor),
   ).length;
+  const activeAi = collaborators.find((person) => person.actorKind === "ai");
+  const activeAiName = activeAi
+    ? presenceName(activeAi, presence, currentAccountId, currentDisplayName)
+    : null;
+  const activeAiRegion = activeAi?.activeRegionId
+    ? (regionNames.get(activeAi.activeRegionId) ?? "this artifact")
+    : null;
   return (
     <div className="relative">
       <button
@@ -141,7 +261,7 @@ export function CollaborationPresenceIndicator({
         onClick={() => setOpen((value) => !value)}
         aria-expanded={open}
         aria-label={`${collaborators.length} collaborator${collaborators.length === 1 ? "" : "s"} present`}
-        className="group flex h-9 items-center gap-2 rounded-[8px] border border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--bg-primary)_84%,transparent)] px-2 shadow-[0_2px_8px_rgba(27,20,12,.04)] transition hover:border-[var(--border-default)] hover:bg-[var(--bg-hover)]"
+        className={`group flex h-9 items-center gap-2 rounded-[8px] border px-2 shadow-[0_2px_8px_rgba(27,20,12,.04)] transition ${activeAi ? "border-[color-mix(in_oklab,var(--accent-cyan)_42%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_8%,var(--bg-primary))] hover:bg-[color-mix(in_oklab,var(--accent-cyan)_12%,var(--bg-primary))]" : "border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--bg-primary)_84%,transparent)] hover:border-[var(--border-default)] hover:bg-[var(--bg-hover)]"}`}
       >
         <span className="flex -space-x-1.5">
           {collaborators.slice(0, 3).map((person) => (
@@ -164,14 +284,24 @@ export function CollaborationPresenceIndicator({
             </span>
           ))}
         </span>
-        <span className="hidden text-left xl:block">
-          <span className="block text-[9px] font-semibold leading-none text-[var(--text-primary)]">
-            Here now
+        <span
+          className={
+            activeAi ? "block max-w-44 text-left" : "hidden text-left xl:block"
+          }
+        >
+          <span
+            className={`block truncate text-[9px] font-semibold leading-none ${activeAi ? "text-[var(--accent-cyan)]" : "text-[var(--text-primary)]"}`}
+          >
+            {activeAiName ?? "Here now"}
           </span>
-          <span className="mt-1 block text-[8px] leading-none text-[var(--text-tertiary)]">
-            {activeCount
-              ? `${activeCount} active`
-              : `${collaborators.length} viewing`}
+          <span className="mt-1 block truncate text-[8px] leading-none text-[var(--text-tertiary)]">
+            {activeAi
+              ? activeAiRegion
+                ? `Editing ${activeAiRegion}`
+                : "Preparing a live edit"
+              : activeCount
+                ? `${activeCount} active`
+                : `${collaborators.length} viewing`}
           </span>
         </span>
       </button>

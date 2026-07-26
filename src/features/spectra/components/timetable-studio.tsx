@@ -483,6 +483,45 @@ export function TimetableStudio({
       timetable.timezone,
     );
   }, [anchor, baseVisibleEvents, days, timetable.timezone, view.kind]);
+  const aiRevealKeyRef = useRef<string>();
+
+  // A collaborator editing an event outside the current week should not look
+  // like a detached badge in the header. Follow the exact event once for each
+  // active AI target so its native card can stream, pulse, and receive the
+  // collaborator cursor in view.
+  useEffect(() => {
+    const target = aiChangedPaths
+      .map((path) => path.match(/^\/events\/([^/]+)/)?.[1])
+      .find((segment): segment is string => Boolean(segment));
+    if (!target) {
+      aiRevealKeyRef.current = undefined;
+      return;
+    }
+    const event = /^\d+$/.test(target)
+      ? sharedTimetable.events[Number(target)]
+      : sharedTimetable.events.find((item) => item.id === target);
+    if (!event) return;
+    const revealKey = `${event.id}:${event.start}`;
+    if (aiRevealKeyRef.current === revealKey) return;
+    aiRevealKeyRef.current = revealKey;
+    if (visibleEvents.some((item) => item.id === event.id)) return;
+    const nextAnchor = localDateInput(
+      event.overlay?.alternativeStart || event.start,
+      event.timezone || timetable.timezone,
+    ).slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(nextAnchor)) return;
+    savePersonalState({
+      ...personalState,
+      view: { ...view, anchorDate: nextAnchor },
+    });
+  }, [
+    aiChangedPaths,
+    personalState,
+    sharedTimetable.events,
+    timetable.timezone,
+    view,
+    visibleEvents,
+  ]);
 
   // After AI create (or any load) where personal view still defaults to "today"
   // but events live in another week, jump once to the earliest upcoming event.
@@ -793,7 +832,12 @@ export function TimetableStudio({
   )
     .map((id) => artifactMap.get(id))
     .filter((artifact): artifact is SpectraArtifact => Boolean(artifact));
-  const upcoming = [...visibleEvents]
+  const upcoming = expandTimetableEvents(
+    baseVisibleEvents,
+    new Date(nowMs - DAY_MS),
+    new Date(nowMs + 366 * DAY_MS),
+    timetable.timezone,
+  )
     .filter((event) => new Date(event.end).getTime() >= nowMs)
     .sort((a, b) => Date.parse(a.start) - Date.parse(b.start))
     .slice(0, 4);

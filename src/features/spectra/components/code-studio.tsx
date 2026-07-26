@@ -8,7 +8,7 @@ import { json } from "@codemirror/lang-json";
 import { markdown } from "@codemirror/lang-markdown";
 import { python } from "@codemirror/lang-python";
 import { openSearchPanel } from "@codemirror/search";
-import { EditorView } from "@codemirror/view";
+import { Decoration, EditorView } from "@codemirror/view";
 import {
   AlertTriangle,
   Box,
@@ -548,6 +548,20 @@ export function CodeStudio({
     aiChangedPaths,
     `/files/${activeIndex}`,
   );
+  const activeAiLineIndexes = useMemo(() => {
+    const prefix = `/files/${activeIndex}/source/`;
+    return [
+      ...new Set(
+        aiChangedPaths.flatMap((path) => {
+          if (!path.startsWith(prefix)) return [];
+          const lineIndex = Number(path.slice(prefix.length).split("/")[0]);
+          return Number.isInteger(lineIndex) && lineIndex >= 0
+            ? [lineIndex]
+            : [];
+        }),
+      ),
+    ].sort((left, right) => left - right);
+  }, [activeIndex, aiChangedPaths]);
   const sourceBytes = useMemo(
     () =>
       workbook.files.reduce(
@@ -2006,6 +2020,27 @@ export function CodeStudio({
       }),
     [activeFile.id, activeFile.lineIds, onActiveRegionChange],
   );
+  const aiLineExtension = useMemo(() => {
+    if (!activeAiLineIndexes.length) return [];
+    const ranges = activeAiLineIndexes.flatMap((lineIndex) => {
+      const lineNumber = lineIndex + 1;
+      const lines = activeFile.source.split(/\r?\n/);
+      if (lineNumber > lines.length) return [];
+      let from = 0;
+      for (let index = 0; index < lineIndex; index += 1)
+        from += lines[index]!.length + 1;
+      return [
+        Decoration.line({
+          attributes: {
+            "data-ai-region": "true",
+            "data-ai-code-line": String(lineNumber),
+          },
+          class: "cm-aiLine",
+        }).range(from),
+      ];
+    });
+    return EditorView.decorations.of(Decoration.set(ranges));
+  }, [activeAiLineIndexes, activeFile.source]);
 
   const preview = (
     <div className="code-preview-surface relative flex min-h-0 flex-1 flex-col bg-[var(--bg-primary)]">
@@ -2902,6 +2937,7 @@ export function CodeStudio({
                         languageExtension(activeFile),
                         editorTheme,
                         presenceExtension,
+                        aiLineExtension,
                         EditorView.lineWrapping,
                       ]}
                       basicSetup={{

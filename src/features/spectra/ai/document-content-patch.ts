@@ -16,6 +16,42 @@ export type ContentPatchChange = { path: string; value: unknown };
 
 type DocumentBlock = Record<string, unknown>;
 
+/**
+ * Read a JSON pointer after resolving document block selectors such as
+ * `/blocks/id:<blockId>/text`. Apply and verification must use the same
+ * resolution semantics or a successful stable-id write is falsely reported as
+ * missing after save.
+ */
+export function readResolvedContentPointer(content: unknown, path: string) {
+  const resolvedPath = resolveDocumentPatchPath(content, path);
+  const segments = resolvedPath
+    .slice(1)
+    .split("/")
+    .map((segment) => segment.replaceAll("~1", "/").replaceAll("~0", "~"));
+  let cursor = content;
+  for (const segment of segments) {
+    if (!cursor || typeof cursor !== "object") return undefined;
+    if (Array.isArray(cursor) && segment === "-") {
+      cursor = cursor.at(-1);
+      continue;
+    }
+    const key: string | number = Array.isArray(cursor)
+      ? Number(segment)
+      : segment;
+    if (Array.isArray(cursor) && !Number.isInteger(key)) return undefined;
+    let next = (cursor as Record<string | number, unknown>)[key];
+    if (
+      next === undefined &&
+      !Array.isArray(cursor) &&
+      typeof key === "string" &&
+      /^[A-Za-z]+[1-9][0-9]*$/.test(key)
+    )
+      next = (cursor as Record<string, unknown>)[key.toUpperCase()];
+    cursor = next;
+  }
+  return cursor;
+}
+
 function asBlocks(content: unknown): DocumentBlock[] {
   if (!content || typeof content !== "object" || Array.isArray(content))
     return [];

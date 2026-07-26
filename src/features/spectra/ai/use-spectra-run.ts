@@ -310,9 +310,10 @@ export function useSpectraRun({
       for (const line of lines) {
         if (!line.trim()) continue;
         const event = parseSpectraStreamEvent(JSON.parse(line));
-        if (event.type === "run_created" && typeof body.prompt === "string") {
+        if (event.type === "run_created") {
           if (optimisticCardId) setCards((current) => current.filter((card) => card.id !== optimisticCardId));
-          promptByRun.current.set(event.runId, body.prompt);
+          if (typeof body.prompt === "string")
+            promptByRun.current.set(event.runId, body.prompt);
           setLiveExchange((current) => current && (!liveExchangeId || current.id === liveExchangeId) ? { ...current, runId: event.runId } : current);
           activeRunIds.current.add(event.runId);
           requestRunId = event.runId;
@@ -539,10 +540,28 @@ export function useSpectraRun({
 
   const retry = useCallback(async (runId: string) => {
     toast.dismiss();
+    const exchangeId = crypto.randomUUID();
     setActiveRequestCount((count) => count + 1);
-    try { await consume({ action: "retry", runId, submissionKey: crypto.randomUUID() }); }
+    setLiveExchange({
+      id: exchangeId,
+      runId,
+      prompt: promptByRun.current.get(runId) ?? "Continue from the last safe point",
+      content: "",
+      steps: [{
+        id: `retry:${exchangeId}`,
+        title: "Resuming from the last safe point",
+        status: "running",
+        createdAt: Date.now(),
+      }],
+      status: "starting",
+      startedAt: Date.now(),
+    });
+    try { await consume({ action: "retry", runId, submissionKey: crypto.randomUUID() }, undefined, exchangeId); }
     catch (error) { toast.error(error instanceof Error ? error.message : "Could not retry run."); }
-    finally { setActiveRequestCount((count) => Math.max(0, count - 1)); }
+    finally {
+      setActiveRequestCount((count) => Math.max(0, count - 1));
+      setLiveExchange((current) => current?.id === exchangeId ? null : current);
+    }
   }, [consume]);
 
   const submitting = activeRequestCount > 0 || Boolean(observedContinuationRunId);

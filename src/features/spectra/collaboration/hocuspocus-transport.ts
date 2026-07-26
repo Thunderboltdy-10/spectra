@@ -14,6 +14,11 @@ function authenticationActuallyRevoked(reason?: string) {
   if (!value) return false;
   if (value.includes("TOKEN_EXPIRED") || value.includes("SESSION_EXPIRED"))
     return false;
+  // The gateway closes every connection whose policy version is stale so the
+  // provider can obtain a fresh token. That close is a reauthorization prompt,
+  // not proof that access was removed: upgrades, invitation acceptance, and
+  // workspace-policy changes all use the same signal.
+  if (value.includes("ACCESS OR PERMISSIONS CHANGED")) return false;
   return (
     value.includes("ACCESS") ||
     value.includes("FORBIDDEN") ||
@@ -105,6 +110,8 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
   private error?: string;
   private destroyed = false;
   private intentionallyDisconnected = false;
+  private authorizationTimer?: number;
+  private authorizationRefreshRunning = false;
   private snapshot: CollaborationTransportSnapshot = {
     state: "connecting",
     level: null,
@@ -152,6 +159,58 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
     this.emit();
   }
 
+  private startAuthorizationWatch() {
+    if (this.authorizationTimer !== undefined) return;
+    this.authorizationTimer = window.setInterval(() => {
+      // Read-only collaborators need an active recheck because an upgrade has
+      // no edit message that would naturally force server reauthorization.
+      // Keep the watch narrow so private and modify sessions create no polling
+      // traffic during normal editing.
+      if (
+        this.destroyed ||
+        this.intentionallyDisconnected ||
+        this.level !== "read" ||
+        this.authorizationRefreshRunning
+      )
+        return;
+      this.authorizationRefreshRunning = true;
+      void session(
+        this.artifactId,
+        this.partitionKey,
+        this.clientId,
+        this.schemaVersion,
+      )
+        .then((refreshed) => {
+          if (this.destroyed || refreshed.level === this.level) return;
+          this.update({
+            state: "reconnecting",
+            level: refreshed.level,
+            accountId: refreshed.accountId,
+            displayName: refreshed.displayName,
+            error: undefined,
+          });
+          // Reconnect so the gateway's connection-level readOnly flag is
+          // rebuilt from the new token before the editor is unlocked.
+          this.provider?.disconnect();
+          this.provider?.connect();
+        })
+        .catch((error) => {
+          const reason =
+            error instanceof Error ? error.message : "Access was removed.";
+          if (!authenticationActuallyRevoked(reason)) return;
+          this.update({
+            state: "permission_lost",
+            level: null,
+            error: reason,
+          });
+          this.provider?.disconnect();
+        })
+        .finally(() => {
+          this.authorizationRefreshRunning = false;
+        });
+    }, 2_000);
+  }
+
   async connect() {
     if (this.destroyed || this.provider) return;
     this.update({ state: "connecting", error: undefined });
@@ -189,11 +248,13 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
           return refreshed.token;
         },
         onStatus: ({ status }) => {
-          if (status === "connected")
+          if (status === "connected") {
+            if (this.localPresence)
+              this.provider?.setAwarenessField("user", this.localPresence);
             this.update({
               state: this.provider?.synced ? "synchronized" : "synchronizing",
             });
-          else if (
+          } else if (
             !this.intentionallyDisconnected &&
             this.state !== "permission_lost" &&
             this.state !== "closed"
@@ -266,6 +327,27 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
                 )
                   ? { activeRegionIds: user.activeRegionIds as string[] }
                   : {}),
+                ...(Array.isArray(user.previewPatches) &&
+                user.previewPatches.every(
+                  (patch) =>
+                    patch &&
+                    typeof patch === "object" &&
+                    typeof (patch as { path?: unknown }).path === "string" &&
+                    "value" in patch,
+                )
+                  ? {
+                      previewPatches: user.previewPatches as Array<{
+                        path: string;
+                        value: unknown;
+                      }>,
+                    }
+                  : {}),
+                ...(Number.isInteger(user.previewSequence)
+                  ? { previewSequence: user.previewSequence as number }
+                  : {}),
+                ...(user.previewPhase === "streaming"
+                  ? { previewPhase: "streaming" as const }
+                  : {}),
                 ...(collaborationCursor(user.cursor)
                   ? { cursor: collaborationCursor(user.cursor) }
                   : {}),
@@ -290,11 +372,10 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
             const message = JSON.parse(payload) as { type?: string };
             if (message?.type !== "spectra.permission_changed") return;
             this.update({
-              state: "permission_lost",
-              error: "Access was removed.",
-              level: "read",
+              state: "reconnecting",
+              error: undefined,
+              level: null,
             });
-            this.provider?.disconnect();
           } catch {
             // Ignore malformed stateless payloads from the gateway.
           }
@@ -319,6 +400,7 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
         actorKind: "human",
       };
       this.provider.setAwarenessField("user", this.localPresence);
+      this.startAuthorizationWatch();
     } catch (error) {
       this.update({
         state: "unsynchronized",
@@ -332,6 +414,10 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
 
   disconnect() {
     this.intentionallyDisconnected = true;
+    if (this.authorizationTimer !== undefined) {
+      window.clearInterval(this.authorizationTimer);
+      this.authorizationTimer = undefined;
+    }
     this.provider?.disconnect();
     this.update({
       state: this.unsynchronizedChanges > 0 ? "unsynchronized" : "closed",
@@ -342,6 +428,10 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
     if (this.destroyed) return;
     this.destroyed = true;
     this.intentionallyDisconnected = true;
+    if (this.authorizationTimer !== undefined) {
+      window.clearInterval(this.authorizationTimer);
+      this.authorizationTimer = undefined;
+    }
     this.provider?.destroy();
     this.provider = null;
     this.document.destroy();

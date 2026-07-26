@@ -2294,15 +2294,58 @@ export const settleStagedForRun = mutation({
       run.executionId !== args.executionId
     )
       throw new Error("This run attempt is no longer active.");
-    const artifacts = await ctx.db
+    const [ownedArtifacts, operations] = await Promise.all([
+      ctx.db
       .query("spectraArtifacts")
       .withIndex("by_account_status", (q) =>
         q.eq("ownerAccountId", actor._id).eq("status", "active"),
       )
-      .collect();
+        .collect(),
+      ctx.db
+        .query("spectraOperations")
+        .withIndex("by_run", (q) => q.eq("runId", args.runId))
+        .collect(),
+    ]);
+    // A run may edit an artifact through an explicit direct grant. Settlement
+    // must follow the run's recorded operation targets, not only artifacts
+    // owned by the run owner, otherwise the durable edit succeeds while its
+    // streaming preview and AI presence remain stuck forever.
+    const operationArtifactIds = new Set<string>();
+    for (const operation of operations) {
+      if (operation.executionId !== args.executionId) continue;
+      if (operation.pendingArtifactId)
+        operationArtifactIds.add(operation.pendingArtifactId);
+      if (operation.conflict?.artifactId)
+        operationArtifactIds.add(operation.conflict.artifactId);
+      for (const affected of operation.affected) {
+        if (affected.type === "artifact") operationArtifactIds.add(affected.id);
+      }
+      const input =
+        operation.input &&
+        typeof operation.input === "object" &&
+        !Array.isArray(operation.input)
+          ? (operation.input as Record<string, unknown>)
+          : undefined;
+      if (typeof input?.artifactId === "string")
+        operationArtifactIds.add(input.artifactId);
+    }
+    const operationArtifacts = (
+      await Promise.all(
+        [...operationArtifactIds].map((artifactId) =>
+          ctx.db.get(artifactId as Id<"spectraArtifacts">),
+        ),
+      )
+    ).filter((artifact): artifact is Doc<"spectraArtifacts"> => Boolean(artifact));
+    const artifacts = [
+      ...new Map(
+        [...ownedArtifacts, ...operationArtifacts].map((artifact) => [
+          artifact._id,
+          artifact,
+        ]),
+      ).values(),
+    ];
     const staged = artifacts.filter(
       (artifact) =>
-        artifact.schoolId === actor.schoolId &&
         (artifact.aiRunId === args.runId ||
           (artifact.aiEffects ?? []).some(
             (effect) =>
@@ -2312,6 +2355,22 @@ export const settleStagedForRun = mutation({
     );
     const now = Date.now();
     const expiresAt = now + AI_EDITED_FLASH_MS;
+    const referencedRunIds = [
+      ...new Set(
+        staged.flatMap((artifact) =>
+          (artifact.aiEffects ?? []).map((effect) => effect.runId),
+        ),
+      ),
+    ];
+    const referencedRuns = new Map(
+      (
+        await Promise.all(
+          referencedRunIds.map(async (runId) => [runId, await ctx.db.get(runId)] as const),
+        )
+      ).filter((entry): entry is readonly [Id<"spectraAiRuns">, Doc<"spectraAiRuns">] =>
+        Boolean(entry[1]),
+      ),
+    );
     await Promise.all(
       staged.map((artifact) => {
         const remainingEffects = effectsExcludingRun(
@@ -2319,7 +2378,17 @@ export const settleStagedForRun = mutation({
           args.runId,
           args.executionId,
           now,
-        );
+        ).filter((effect) => {
+          if (effect.state === "settling")
+            return effect.expiresAt !== undefined && effect.expiresAt > now;
+          const effectRun = referencedRuns.get(effect.runId);
+          return (
+            effectRun?.executionId === effect.executionId &&
+            (effectRun.status === "running" ||
+              effectRun.status === "awaiting_confirmation" ||
+              effectRun.status === "awaiting_resolution")
+          );
+        });
         const keepCurrentPreview =
           artifact.aiRunId !== args.runId ||
           artifact.aiExecutionId !== args.executionId;

@@ -115,7 +115,18 @@ function unique(candidate: string, fallback: string, used: Set<string>) {
 export function whiteboardNodeText(node: WhiteboardNode) {
   if (typeof node.content === "string") return node.content;
   const content = record(node.content);
-  return text(content.text, text(content.title, text(content.label)));
+  return text(
+    content.text,
+    text(
+      content.title,
+      text(
+        content.label,
+        [content.header, content.body]
+          .filter((value): value is string => typeof value === "string")
+          .join("\n\n"),
+      ),
+    ),
+  );
 }
 
 export function withWhiteboardNodeText(node: WhiteboardNode, value: string) {

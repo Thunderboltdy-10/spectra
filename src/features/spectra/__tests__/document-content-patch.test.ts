@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyResolvedContentPatch,
   findDocumentSectionRange,
+  readResolvedContentPointer,
   remapDocumentSectionRewriteChanges,
   resolveDocumentPatchPath,
 } from "../ai/document-content-patch";
@@ -94,6 +95,22 @@ describe("document contentPatch section rewrite", () => {
     expect(resolveDocumentPatchPath(content, "/blocks/byId/s2-body/text")).toBe(
       "/blocks/8/text",
     );
+  });
+
+  it("reads the saved value through the same stable-id path used on apply", () => {
+    const content = enzymeInhibitorsNotes();
+    const next = applyResolvedContentPatch(content, {
+      changes: [
+        {
+          path: "/blocks/id:s1-3-body/text",
+          value: "A precise collaborative edit.",
+        },
+      ],
+    });
+
+    expect(
+      readResolvedContentPointer(next, "/blocks/id:s1-3-body/text"),
+    ).toBe("A precise collaborative edit.");
   });
 
   it("remaps a mis-aimed section-2 rewrite so heading 1.3 survives", () => {

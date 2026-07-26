@@ -1057,8 +1057,7 @@ body {
 }
 
 @container spectra-studio-split (max-width: 460px) {
-  .spectra-artifact-studio[data-studio-mode="split"]
-    [data-quiz-panel="editor"],
+  .spectra-artifact-studio[data-studio-mode="split"] [data-quiz-panel="editor"],
   .spectra-artifact-studio[data-studio-mode="split"]
     [data-quiz-panel="settings"] {
     min-width: 0 !important;
@@ -1626,6 +1625,37 @@ body {
   font-family: inherit;
   line-height: 1.45;
   padding: 14px 15px;
+}
+
+.whiteboard-node[data-type="card"] {
+  overflow: hidden;
+  background: #fff !important;
+}
+
+.whiteboard-card-node {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.whiteboard-card-node > input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  padding: 11px 14px 10px;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 750;
+  letter-spacing: -0.015em;
+}
+
+.whiteboard-card-node > textarea {
+  min-height: 0;
+  padding: 13px 15px 15px;
+  line-height: 1.5;
 }
 
 .whiteboard-node[data-type="shape"] textarea {
@@ -2226,6 +2256,10 @@ body {
   animation: spectra-whiteboard-form 680ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 
+.spectra-artifact-studio[data-ai-state="creating"]
+  .whiteboard-node[data-ai-region="true"],
+.spectra-artifact-studio[data-ai-state="updating"]
+  .whiteboard-node[data-ai-region="true"],
 .spectra-artifact-studio[data-ai-state="creating"]
   [data-ai-region="true"]
   > .whiteboard-node,
@@ -6228,15 +6262,17 @@ button:not(:disabled),
   isolation: isolate;
   border-color: color-mix(
     in oklab,
-    var(--accent-cyan) 42%,
+    var(--accent-cyan) 28%,
     var(--border-default)
   );
-  background-color: color-mix(in oklab, var(--accent-cyan) 2.8%, transparent);
+  background-color: color-mix(in oklab, var(--accent-cyan) 2.2%, transparent);
   box-shadow:
-    0 0 0 1px color-mix(in oklab, var(--accent-cyan) 12%, transparent),
-    0 0 18px -8px color-mix(in oklab, #4f8dff 48%, transparent),
-    0 8px 24px -20px color-mix(in oklab, var(--accent-cyan) 62%, transparent);
-  animation: spectra-content-settle 520ms cubic-bezier(0.22, 0.72, 0.2, 1) both;
+    0 0 0 1px color-mix(in oklab, var(--accent-cyan) 9%, transparent),
+    0 0 16px -9px color-mix(in oklab, #4f8dff 38%, transparent),
+    0 8px 22px -20px color-mix(in oklab, var(--accent-cyan) 48%, transparent);
+  animation:
+    spectra-content-settle 520ms cubic-bezier(0.22, 0.72, 0.2, 1) both,
+    spectra-ai-target-breathe 1.8s ease-in-out 520ms infinite alternate;
 }
 
 .spectra-artifact-main [data-ai-region="true"]::after {
@@ -6257,8 +6293,8 @@ button:not(:disabled),
   background: linear-gradient(
     98deg,
     transparent 8%,
-    color-mix(in oklab, var(--accent-cyan) 7%, transparent) 38%,
-    color-mix(in oklab, white 28%, transparent) 50%,
+    color-mix(in oklab, var(--accent-cyan) 4%, transparent) 38%,
+    color-mix(in oklab, white 13%, transparent) 50%,
     transparent 72%
   );
   background-size: 230% 100%;
@@ -6286,16 +6322,11 @@ button:not(:disabled),
 }
 
 /* Form controls feel collaborator-written while AI streams */
-.spectra-artifact-main
-  input[data-ai-region="true"],
-.spectra-artifact-main
-  textarea[data-ai-region="true"],
-.spectra-artifact-main
-  select[data-ai-region="true"],
-.spectra-artifact-main
-  button[data-ai-region="true"],
-.spectra-artifact-main
-  [contenteditable="true"][data-ai-region="true"] {
+.spectra-artifact-main input[data-ai-region="true"],
+.spectra-artifact-main textarea[data-ai-region="true"],
+.spectra-artifact-main select[data-ai-region="true"],
+.spectra-artifact-main button[data-ai-region="true"],
+.spectra-artifact-main [contenteditable="true"][data-ai-region="true"] {
   caret-color: var(--accent-cyan);
 }
 
@@ -6339,6 +6370,34 @@ button:not(:disabled),
     opacity: 1;
     transform: translateY(0);
     filter: saturate(1);
+  }
+}
+
+@keyframes spectra-ai-target-breathe {
+  from {
+    box-shadow:
+      0 0 0 1px color-mix(in oklab, var(--accent-cyan) 8%, transparent),
+      0 0 12px -9px color-mix(in oklab, #4f8dff 26%, transparent);
+  }
+  to {
+    box-shadow:
+      0 0 0 1px color-mix(in oklab, var(--accent-cyan) 16%, transparent),
+      0 0 20px -8px color-mix(in oklab, #4f8dff 42%, transparent);
+  }
+}
+
+.spectra-card-ai-activity {
+  animation: spectra-ai-activity-pulse 1.5s ease-in-out infinite alternate;
+}
+
+@keyframes spectra-ai-activity-pulse {
+  from {
+    opacity: 0.68;
+  }
+  to {
+    opacity: 1;
+    box-shadow: 0 0 10px
+      color-mix(in oklab, var(--accent-cyan) 20%, transparent);
   }
 }
 
@@ -6488,7 +6547,9 @@ button:not(:disabled),
   transition-delay: 380ms;
 }
 
-[data-focus-state]:not([data-focus-state="global"]):not([data-spectra-context-trigger="true"]) {
+[data-focus-state]:not([data-focus-state="global"]):not(
+    [data-spectra-context-trigger="true"]
+  ) {
   color: var(--text-primary);
   background: color-mix(in oklab, var(--card-focus) 7%, transparent);
   box-shadow: inset 2px 0
@@ -6496,7 +6557,9 @@ button:not(:disabled),
 }
 
 button[data-spectra-context-trigger="true"][data-focus-state],
-button[data-spectra-context-trigger="true"][data-focus-state]:not([data-focus-state="global"]) {
+button[data-spectra-context-trigger="true"][data-focus-state]:not(
+    [data-focus-state="global"]
+  ) {
   color: var(--text-secondary);
   background: transparent;
   box-shadow: none;
@@ -7323,7 +7386,8 @@ button[data-spectra-context-trigger="true"]::after {
   border: 0;
   background: transparent;
   font-family:
-    var(--presentation-heading-font, var(--font-display)), ui-sans-serif, system-ui, sans-serif;
+    var(--presentation-heading-font, var(--font-display)), ui-sans-serif,
+    system-ui, sans-serif;
   line-height: 1.1;
   outline: none;
 }
@@ -13940,7 +14004,8 @@ body {
 }
 
 .spectra-document-studio .ProseMirror :is(h1, h2, h3) {
-  font-family: var(--font-manrope), ui-sans-serif, system-ui, sans-serif !important;
+  font-family:
+    var(--font-manrope), ui-sans-serif, system-ui, sans-serif !important;
 }
 
 .spectra-artifact-identity > .hidden.shrink-0.items-center {
@@ -14021,12 +14086,8 @@ body {
   width: max-content !important;
 }
 
-.spectra-workspace-shell-controls--board
-  .spectra-workspace-toolbar
-  > div,
-.spectra-workspace-shell-controls--timeline
-  .spectra-workspace-toolbar
-  > div,
+.spectra-workspace-shell-controls--board .spectra-workspace-toolbar > div,
+.spectra-workspace-shell-controls--timeline .spectra-workspace-toolbar > div,
 .spectra-workspace-shell-controls--canvas
   .spectra-workspace-toolbar
   > :not(nav) {
@@ -14065,33 +14126,23 @@ body {
 }
 
 @container (max-width: 980px) {
-  .spectra-workspace-canvas
-    > div:nth-child(2) {
+  .spectra-workspace-canvas > div:nth-child(2) {
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
   }
 
-  .spectra-workspace-canvas
-    > div:nth-child(2)
-    > section {
+  .spectra-workspace-canvas > div:nth-child(2) > section {
     grid-column: auto !important;
     margin-top: 0 !important;
   }
 
-  .spectra-workspace-canvas
-    > div:nth-child(2)
-    > section
-    > div {
+  .spectra-workspace-canvas > div:nth-child(2) > section > div {
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
   }
 }
 
 @container (max-width: 620px) {
-  .spectra-workspace-canvas
-    > div:nth-child(2),
-  .spectra-workspace-canvas
-    > div:nth-child(2)
-    > section
-    > div {
+  .spectra-workspace-canvas > div:nth-child(2),
+  .spectra-workspace-canvas > div:nth-child(2) > section > div {
     grid-template-columns: minmax(0, 1fr) !important;
   }
 }
@@ -14100,7 +14151,11 @@ body {
 .spectra-command-bar {
   border-radius: 18px !important;
   border: 1px solid var(--border-default) !important;
-  background: color-mix(in oklab, var(--bg-elevated) 92%, transparent) !important;
+  background: color-mix(
+    in oklab,
+    var(--bg-elevated) 92%,
+    transparent
+  ) !important;
   box-shadow:
     0 10px 36px -18px rgba(41, 34, 27, 0.35),
     0 1px 2px rgba(41, 34, 27, 0.04) !important;
@@ -14111,7 +14166,11 @@ body {
 }
 
 .spectra-command-bar:focus-within {
-  border-color: color-mix(in oklab, var(--brand-primary) 42%, var(--border-default)) !important;
+  border-color: color-mix(
+    in oklab,
+    var(--brand-primary) 42%,
+    var(--border-default)
+  ) !important;
   box-shadow:
     0 14px 40px -16px rgba(41, 34, 27, 0.4),
     0 0 0 3px color-mix(in oklab, var(--brand-primary) 14%, transparent) !important;
@@ -14396,7 +14455,8 @@ body {
 
 .spectra-artifact-studio[data-blueprint="presentation"]
   .presentation-object-text[data-text-preset="title"] {
-  font-family: var(--font-manrope), ui-sans-serif, system-ui, sans-serif !important;
+  font-family:
+    var(--font-manrope), ui-sans-serif, system-ui, sans-serif !important;
   letter-spacing: -0.025em;
 }
 
@@ -14495,25 +14555,21 @@ body {
 }
 
 @media (min-width: 1280px) {
-  .spectra-artifact-studio[data-blueprint="sheets"]
-    .spectra-editor-layout {
+  .spectra-artifact-studio[data-blueprint="sheets"] .spectra-editor-layout {
     grid-template-columns: minmax(0, 1fr) 250px !important;
   }
 
-  .spectra-artifact-studio[data-blueprint="code"]
-    .spectra-editor-layout {
+  .spectra-artifact-studio[data-blueprint="code"] .spectra-editor-layout {
     grid-template-columns: minmax(0, 1fr) 272px !important;
   }
 }
 
-.spectra-artifact-studio[data-blueprint="sheets"]
-  .spectra-artifact-identity {
+.spectra-artifact-studio[data-blueprint="sheets"] .spectra-artifact-identity {
   gap: 9px !important;
   padding: 13px 14px 8px !important;
 }
 
-.spectra-artifact-studio[data-blueprint="code"]
-  .spectra-artifact-identity {
+.spectra-artifact-studio[data-blueprint="code"] .spectra-artifact-identity {
   gap: 9px !important;
   padding: 13px 14px 8px !important;
 }
@@ -14556,9 +14612,7 @@ body {
   box-shadow: none;
 }
 
-.spectra-artifact-studio[data-blueprint="code"]
-  .code-studio
-  > div:first-child {
+.spectra-artifact-studio[data-blueprint="code"] .code-studio > div:first-child {
   min-height: 44px;
   padding: 5px 10px;
 }
@@ -14668,22 +14722,37 @@ body {
 /* Full-height artifact shell. The editable identity shares the same top rail
    as sync and close actions so the working surface begins immediately below. */
 .spectra-artifact-header {
-  min-height: 66px !important;
-  padding: 6px 14px 0 !important;
+  min-height: 98px !important;
+  padding: 8px 14px 0 !important;
+}
+
+.spectra-artifact-header-topline {
+  min-height: 36px;
 }
 
 .spectra-artifact-header .spectra-artifact-identity {
   min-width: 0;
-  padding: 0 !important;
+  padding-top: 5px !important;
 }
 
 .spectra-artifact-header-actions {
-  padding-top: 4px;
+  padding-top: 0;
 }
 
 .spectra-artifact-main {
   overflow: hidden !important;
   padding: 0 0 0 15px !important;
+}
+
+.spectra-artifact-studio[data-blueprint="document"] .spectra-artifact-main {
+  padding-left: 0 !important;
+}
+
+.spectra-artifact-studio[data-blueprint="document"] .spectra-document-studio {
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .spectra-editor-layout,
@@ -14784,7 +14853,8 @@ body {
 .timetable-studio [data-day-number],
 .spectra-project-metric strong,
 .spectra-overview-metric strong {
-  font-family: var(--font-manrope), var(--font-sans), Arial, sans-serif !important;
+  font-family:
+    var(--font-manrope), var(--font-sans), Arial, sans-serif !important;
   font-weight: 500 !important;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em !important;
@@ -14802,7 +14872,8 @@ body {
   border-color: var(--border-default) !important;
   background: var(--bg-elevated) !important;
   box-shadow: none !important;
-  font-family: var(--font-manrope), var(--font-sans), Arial, sans-serif !important;
+  font-family:
+    var(--font-manrope), var(--font-sans), Arial, sans-serif !important;
   font-weight: 400 !important;
 }
 
@@ -14823,7 +14894,8 @@ body {
 .timetable-toolbar > div:first-child > strong,
 .timetable-week-header strong,
 .timetable-day-header strong {
-  font-family: var(--font-manrope), var(--font-sans), Arial, sans-serif !important;
+  font-family:
+    var(--font-manrope), var(--font-sans), Arial, sans-serif !important;
   font-weight: 500 !important;
   font-variant-numeric: tabular-nums;
 }
@@ -14844,7 +14916,8 @@ body {
   + div
   > div:not(:last-child)
   strong {
-  font-family: var(--font-manrope), var(--font-sans), Arial, sans-serif !important;
+  font-family:
+    var(--font-manrope), var(--font-sans), Arial, sans-serif !important;
   font-weight: 500 !important;
   font-variant-numeric: tabular-nums;
 }
@@ -14897,6 +14970,7 @@ body {
   textarea {
   border-radius: 6px !important;
   box-shadow: none !important;
-  font-family: var(--font-manrope), var(--font-sans), Arial, sans-serif !important;
+  font-family:
+    var(--font-manrope), var(--font-sans), Arial, sans-serif !important;
   font-weight: 400 !important;
 }

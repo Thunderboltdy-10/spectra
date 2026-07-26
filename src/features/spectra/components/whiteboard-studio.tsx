@@ -122,23 +122,27 @@ function BoardNode({
   artifact,
   asset,
   selected,
+  aiActive,
   readOnly,
   compact,
   onSelect,
   onPointerDown,
   onResizePointerDown,
   onTextChange,
+  onContentChange,
 }: {
   node: WhiteboardNode;
   artifact?: SpectraArtifact;
   asset?: SpectraArtifactAsset;
   selected: boolean;
+  aiActive: boolean;
   readOnly: boolean;
   compact: boolean;
   onSelect: (additive: boolean) => void;
   onPointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onResizePointerDown: (event: ReactPointerEvent<HTMLButtonElement>) => void;
   onTextChange: (value: string) => void;
+  onContentChange: (change: Record<string, unknown>) => void;
 }) {
   if (node.hidden) return null;
   const content =
@@ -150,6 +154,7 @@ function BoardNode({
   return (
     <div
       className="whiteboard-node"
+      data-ai-region={aiRegionAttr(aiActive)}
       data-type={node.type}
       data-selected={selected || undefined}
       data-locked={node.locked || undefined}
@@ -164,11 +169,51 @@ function BoardNode({
           styleValue(
             node,
             "fill",
-            node.type === "note" ? "#fff3c9" : "#ffffff",
+            typeof content.fill === "string"
+              ? content.fill
+              : node.type === "note"
+                ? "#fff3c9"
+                : "#ffffff",
           ),
         ),
-        borderColor: String(styleValue(node, "stroke", "#d5d7d2")),
-        color: String(styleValue(node, "color", "#29352f")),
+        borderColor: String(
+          styleValue(
+            node,
+            "stroke",
+            typeof content.stroke === "string"
+              ? content.stroke
+              : "#d5d7d2",
+          ),
+        ),
+        borderWidth: Number(
+          styleValue(
+            node,
+            "strokeWidth",
+            typeof content.strokeWidth === "number"
+              ? content.strokeWidth
+              : 1,
+          ),
+        ),
+        borderRadius: Number(
+          styleValue(
+            node,
+            "borderRadius",
+            typeof content.borderRadius === "number"
+              ? content.borderRadius
+              : 11,
+          ),
+        ),
+        color: String(
+          styleValue(
+            node,
+            "color",
+            typeof content.textColor === "string"
+              ? content.textColor
+              : typeof content.color === "string"
+                ? content.color
+                : "#29352f",
+          ),
+        ),
       }}
       onClick={(event) => {
         event.stopPropagation();
@@ -222,6 +267,51 @@ function BoardNode({
         )
       ) : node.type === "group" ? (
         <span className="whiteboard-group-label">Group</span>
+      ) : node.type === "card" &&
+        (typeof content.header === "string" ||
+          typeof content.body === "string") ? (
+        <div className="whiteboard-card-node">
+          <input
+            value={String(content.header ?? "")}
+            readOnly={readOnly || node.locked || compact}
+            aria-label={`${node.semanticLabel || "Card"} title`}
+            onPointerDown={(event) => event.stopPropagation()}
+            onFocus={() => onSelect(false)}
+            onChange={(event) =>
+              onContentChange({ header: event.target.value })
+            }
+            style={{
+              background:
+                typeof content.headerBg === "string"
+                  ? content.headerBg
+                  : "#3f5f72",
+              color:
+                typeof content.headerColor === "string"
+                  ? content.headerColor
+                  : "#ffffff",
+            }}
+          />
+          <textarea
+            value={String(content.body ?? "")}
+            readOnly={readOnly || node.locked || compact}
+            aria-label={`${node.semanticLabel || "Card"} body`}
+            onPointerDown={(event) => event.stopPropagation()}
+            onFocus={() => onSelect(false)}
+            onChange={(event) =>
+              onContentChange({ body: event.target.value })
+            }
+            style={{
+              color:
+                typeof content.bodyColor === "string"
+                  ? content.bodyColor
+                  : "inherit",
+              fontSize:
+                typeof content.fontSize === "number"
+                  ? content.fontSize
+                  : 13,
+            }}
+          />
+        </div>
       ) : (
         <textarea
           value={whiteboardNodeText(node)}
@@ -232,11 +322,39 @@ function BoardNode({
           onChange={(event) => onTextChange(event.target.value)}
           style={{
             fontSize: Number(
-              styleValue(node, "fontSize", node.type === "text" ? 30 : 14),
+              styleValue(
+                node,
+                "fontSize",
+                typeof content.fontSize === "number"
+                  ? content.fontSize
+                  : node.type === "text"
+                    ? 30
+                    : 14,
+              ),
             ),
             fontWeight: Number(
-              styleValue(node, "fontWeight", node.type === "text" ? 650 : 500),
+              styleValue(
+                node,
+                "fontWeight",
+                typeof content.fontWeight === "number"
+                  ? content.fontWeight
+                  : content.fontWeight === "bold"
+                    ? 700
+                    : node.type === "text"
+                      ? 650
+                      : 500,
+              ),
             ),
+            fontStyle:
+              content.fontStyle === "italic" ? "italic" : undefined,
+            textAlign:
+              content.textAlign === "left" ||
+              content.textAlign === "right" ||
+              content.textAlign === "center"
+                ? content.textAlign
+                : node.type === "shape"
+                  ? "center"
+                  : undefined,
           }}
         />
       )}
@@ -1482,11 +1600,8 @@ export function WhiteboardStudio({
                 (pathTouches(aiChangedPaths, `/nodes/${index}`) ||
                   pathTouches(aiChangedPaths, `/nodes/${node.id}`));
               return (
-                <div
-                  key={node.id}
-                  data-ai-region={aiRegionAttr(nodeAiActive)}
-                >
                   <BoardNode
+                    key={node.id}
                     node={node}
                     artifact={
                       typeof source.artifactId === "string"
@@ -1528,8 +1643,23 @@ export function WhiteboardStudio({
                           );
                       })
                     }
+                    aiActive={nodeAiActive}
+                    onContentChange={(change) =>
+                      mutate((draft) => {
+                        const candidate = draft.nodes.find(
+                          (item) => item.id === node.id,
+                        );
+                        if (!candidate) return;
+                        const current =
+                          candidate.content &&
+                          typeof candidate.content === "object" &&
+                          !Array.isArray(candidate.content)
+                            ? (candidate.content as Record<string, unknown>)
+                            : {};
+                        candidate.content = { ...current, ...change };
+                      })
+                    }
                   />
-                </div>
               );
             })}
         </div>

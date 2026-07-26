@@ -1,6 +1,17 @@
+const IRREGULAR_PROGRESS_VERBS: Record<string, string> = {
+  beginning: "began",
+  building: "built",
+  doing: "did",
+  making: "made",
+  reading: "read",
+  running: "ran",
+  taking: "took",
+  writing: "wrote",
+};
+
 /**
- * Completed progress traces: put the first word into a simple past form.
- * If it ends with "ing", replace that suffix with "ed" (Preparing → Prepared).
+ * Completed progress traces use a human past-tense title. Keep this bounded to
+ * leading progress verbs so synthetic words like "Readed" never reach the UI.
  */
 export function pastTenseProgressTitle(title: string, completed: boolean): string {
   if (!completed) return title;
@@ -10,7 +21,15 @@ export function pastTenseProgressTitle(title: string, completed: boolean): strin
   if (!match) return title;
   const [, first, rest] = match;
   if (!/ing$/i.test(first)) return title;
-  const past = `${first.slice(0, -3)}ed`;
+  const lower = first.toLowerCase();
+  let past = IRREGULAR_PROGRESS_VERBS[lower];
+  if (!past) {
+    const stem = first.slice(0, -3);
+    if (/ying$/i.test(first))
+      past = `${first.slice(0, -4)}ied`;
+    else
+      past = `${stem}ed`;
+  }
   // Preserve original capitalization of the first letter.
   const cased =
     first[0] === first[0]?.toUpperCase()

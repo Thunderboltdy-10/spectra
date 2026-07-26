@@ -16,11 +16,17 @@ describe("pastTenseProgressTitle", () => {
       "Mapped Spectra Launch Studio",
     );
     expect(pastTenseProgressTitle("Building 10-question quiz", true)).toBe(
-      "Builded 10-question quiz",
+      "Built 10-question quiz",
     );
     expect(
       pastTenseProgressTitle("Loading the current artifact", true),
     ).toBe("Loaded the current artifact");
+    expect(pastTenseProgressTitle("Reading source material", true)).toBe(
+      "Read source material",
+    );
+    expect(pastTenseProgressTitle("Mapping the workspace", true)).toBe(
+      "Mapped the workspace",
+    );
   });
 
   it("leaves completed titles alone when the first word is not -ing", () => {

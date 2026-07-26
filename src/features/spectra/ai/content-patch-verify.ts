@@ -8,6 +8,7 @@ import {
   isSheetsCellPath,
   isSheetsCellsMapPath,
 } from "./sheets-content-patch";
+import { sharedTimetableContent } from "../timetable/model";
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -16,6 +17,14 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 function stringishMatch(authored: string, saved: string) {
   const a = authored.trim();
   const s = saved.trim();
+  const authoredDate = Date.parse(a);
+  const savedDate = Date.parse(s);
+  if (
+    Number.isFinite(authoredDate) &&
+    Number.isFinite(savedDate) &&
+    authoredDate === savedDate
+  )
+    return true;
   return s === a || s.includes(a);
 }
 
@@ -81,13 +90,43 @@ export function contentPatchChangeMatchesSaved(
   path: string,
   authoredValue: unknown,
   savedValue: unknown,
+  context?: {
+    blueprintKey?: string;
+    artifactContent?: unknown;
+  },
 ): boolean {
   if (JSON.stringify(savedValue) === JSON.stringify(authoredValue)) return true;
 
-  // Append pointers (`/cards/-`, `/questions/-`, `/sheets/-`) land after
-  // normalize, so saved objects often gain ids/defaults.
+  // Timetable normalization canonicalizes ISO dates and redirects an unknown
+  // layer id onto the first available shared layer. Verify the normalized
+  // authored event rather than falsely failing after the event is already
+  // durably visible.
   if (
-    /\/-$/.test(path) &&
+    context?.blueprintKey === "timetable" &&
+    /^\/(?:content\/)?events\/(?:-|\d+)$/.test(path) &&
+    isPlainObject(authoredValue) &&
+    isPlainObject(savedValue)
+  ) {
+    const artifact =
+      context.artifactContent &&
+      typeof context.artifactContent === "object" &&
+      !Array.isArray(context.artifactContent)
+        ? (context.artifactContent as Record<string, unknown>)
+        : {};
+    const normalized = sharedTimetableContent({
+      ...artifact,
+      events: [authoredValue],
+    }).events[0];
+    if (normalized && authoredObjectFieldsMatch(normalized, savedValue))
+      return true;
+  }
+
+  // Append pointers (`/cards/-`, `/questions/-`, `/sheets/-`) and first-item
+  // writes (`/events/0`, `/slides/0`) land after normalize, so saved objects
+  // often gain ids/defaults. A field-subset match still rejects unrelated
+  // no-ops while accepting the canonical saved representation.
+  if (
+    /\/(?:-|\d+)$/.test(path) &&
     isPlainObject(savedValue) &&
     isPlainObject(authoredValue)
   )

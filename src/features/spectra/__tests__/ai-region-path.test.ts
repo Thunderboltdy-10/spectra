@@ -88,7 +88,10 @@ describe("resolveAiHighlightPaths", () => {
     });
     const paths = resolveAiHighlightPaths({
       previewPaths: [],
-      creationFallbackPaths: creationHighlightFallbackPaths("creating", "sheets"),
+      creationFallbackPaths: creationHighlightFallbackPaths(
+        "creating",
+        "sheets",
+      ),
       contentDerivedPaths: derived,
     });
     expect(paths).toEqual(["/sheets/0/cells/A1", "/sheets/0/cells/B2"]);
@@ -115,16 +118,16 @@ describe("creationHighlightFallbackPaths", () => {
 });
 
 describe("updatingHighlightFallbackPaths", () => {
-  it("lights non-sheets focused edits while concrete paths are empty", () => {
+  it("never flashes the whole artifact while exact paths are pending", () => {
     expect(
       updatingHighlightFallbackPaths("updating", "document", false),
-    ).toEqual(["/"]);
-    expect(
-      updatingHighlightFallbackPaths("updating", "quiz", false),
-    ).toEqual(["/"]);
+    ).toEqual([]);
+    expect(updatingHighlightFallbackPaths("updating", "quiz", false)).toEqual(
+      [],
+    );
     expect(
       updatingHighlightFallbackPaths("updating", "whiteboard", false),
-    ).toEqual(["/"]);
+    ).toEqual([]);
   });
 
   it("drops the fallback once concrete paths stream in", () => {
@@ -134,18 +137,18 @@ describe("updatingHighlightFallbackPaths", () => {
   });
 
   it("never floods sheets via whole-artifact /", () => {
-    expect(
-      updatingHighlightFallbackPaths("updating", "sheets", false),
-    ).toEqual([]);
+    expect(updatingHighlightFallbackPaths("updating", "sheets", false)).toEqual(
+      [],
+    );
   });
 
   it("ignores creating/idle states", () => {
     expect(
       updatingHighlightFallbackPaths("creating", "document", false),
     ).toEqual([]);
-    expect(
-      updatingHighlightFallbackPaths("edited", "document", false),
-    ).toEqual([]);
+    expect(updatingHighlightFallbackPaths("edited", "document", false)).toEqual(
+      [],
+    );
   });
 });
 
@@ -210,9 +213,9 @@ describe("expandAppendPointer / materializeAiChangedPaths", () => {
     expect(
       expandAppendPointer("/cards/-", { cards: [{ id: "a" }, { id: "b" }] }),
     ).toBe("/cards/1");
-    expect(
-      expandAppendPointer("/events/-", { events: [{ id: "e1" }] }),
-    ).toBe("/events/0");
+    expect(expandAppendPointer("/events/-", { events: [{ id: "e1" }] })).toBe(
+      "/events/0",
+    );
   });
 
   it("expands sheets / into concrete cells and uppercases addresses", () => {
@@ -327,7 +330,9 @@ describe("preferStreamingContentSource", () => {
       preferStreamingContentSource({
         local: { sheets: [{ cells: { A1: { value: 1 } } }] },
         preview: {
-          sheets: [{ cells: { A1: { value: 1 }, B1: { value: 2 }, C1: { value: 3 } } }],
+          sheets: [
+            { cells: { A1: { value: 1 }, B1: { value: 2 }, C1: { value: 3 } } },
+          ],
         },
         blueprintKey: "sheets",
         aiState: "creating",
@@ -374,32 +379,16 @@ describe("focused-edit catch-up lighting", () => {
     expect(pathTouches(paths, "/edges/0")).toBe(true);
   });
 
-  it("lights mid-edit document/quiz studios while changedPaths are still empty", () => {
+  it("keeps focused edits visually quiet until exact regions arrive", () => {
     for (const key of ["document", "quiz", "presentation", "code"] as const) {
       const fallback = updatingHighlightFallbackPaths("updating", key, false);
       const paths = resolveAiHighlightPaths({
         previewPaths: [],
         effectChangedPaths: [],
         creationFallbackPaths: fallback,
-        contentDerivedPaths:
-          key === "document"
-            ? contentDerivedHighlightPaths("document", {
-                blocks: [{ id: "b1", text: "Hi" }],
-              })
-            : key === "quiz"
-              ? contentDerivedHighlightPaths("quiz", {
-                  questions: [{ id: "q1" }],
-                })
-              : key === "presentation"
-                ? contentDerivedHighlightPaths("presentation", {
-                    slides: [{ id: "s1" }],
-                  })
-                : contentDerivedHighlightPaths("code", {
-                    files: [{ id: "f1", path: "main.py" }],
-                  }),
       });
-      expect(paths.includes("/")).toBe(true);
-      expect(pathTouches(paths, "/")).toBe(true);
+      expect(paths.includes("/")).toBe(false);
+      expect(paths).toEqual([]);
     }
   });
 
@@ -412,7 +401,13 @@ describe("focused-edit catch-up lighting", () => {
         true,
       ),
       contentDerivedPaths: contentDerivedHighlightPaths("quiz", {
-        questions: [{ id: "q1" }, { id: "q2" }, { id: "q3" }, { id: "q4" }, { id: "q5" }],
+        questions: [
+          { id: "q1" },
+          { id: "q2" },
+          { id: "q3" },
+          { id: "q4" },
+          { id: "q5" },
+        ],
       }),
     });
     expect(paths).toEqual(["/questions/4"]);

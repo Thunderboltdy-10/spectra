@@ -39,6 +39,7 @@ import { normalizeArtifactContent } from "@/features/spectra/ai/content-normaliz
 import { contentPatchChangeMatchesSaved } from "@/features/spectra/ai/content-patch-verify";
 import {
   applyResolvedContentPatch,
+  readResolvedContentPointer,
   remapDocumentSectionRewriteChanges,
 } from "@/features/spectra/ai/document-content-patch";
 import { canonicalizeSheetsPatchChange } from "@/features/spectra/ai/sheets-content-patch";
@@ -7173,7 +7174,7 @@ async function callModel(
     // Focused updates must stay on the propose_operation agent path — never
     // fall into JSON single-creation repair that invents artifact.create.
     const repairablePlanFailure = isRepairablePlanFailure(primaryFailure);
-    if (response.ok && repairablePlanFailure && !directFocusedAction) {
+    if (response.ok && repairablePlanFailure) {
       onRepairRetry?.();
       if (emittedPublicText) replacePublic("");
       emittedOperationCount = 0;
@@ -7198,18 +7199,58 @@ async function callModel(
           result?.text ?? latestPlanText,
         ),
       });
-      const repairStartedAt = Date.now();
-      const repairResponse = await request(primaryRouting, "repair", {
-        raw: result?.text ?? latestPlanText,
-        error: primaryFailure,
-      });
-      console.info("[spectra.openrouter.phase]", {
-        phase: "repair_headers",
-        elapsedMs: Date.now() - repairStartedAt,
-        status: repairResponse.status,
-      });
-      if (repairResponse.ok) {
-        try {
+      try {
+        if (directFocusedAction) {
+          const repairIssues =
+            primaryFailure instanceof ZodError
+              ? primaryFailure.issues
+                  .slice(0, 10)
+                  .map(
+                    (issue) =>
+                      `${issue.path.join(".") || "plan"}: ${issue.message}`,
+                  )
+                  .join("\n")
+              : primaryFailure instanceof Error
+                ? primaryFailure.message
+                : String(primaryFailure);
+          const focusedTargetLabel = updateTarget
+            ? `${updateTarget.blueprintKey.replaceAll("_", " ")} (${updateTarget.artifactId})`
+            : "the focused artifact";
+          const repairMessages: SpectraAgentMessage[] = [
+            {
+              role: "system",
+              content: await buildAgentSystemContent(
+                `\n\nContinue from the prior focused ${directFocusedArchive ? "archive" : "update"} attempt. Do not restart or redo completed work. Target only ${focusedTargetLabel}. Correct the single validation issue below, then call propose_operation once for that focused mutation. Never create a new artifact.\nValidation issue:\n${repairIssues}\n\nPrior draft:\n${(result?.text ?? latestPlanText).slice(0, 48_000)}`,
+              ),
+            },
+            ...durableConversation,
+            { role: "user", content: userContent },
+          ];
+          const repairStartedAt = Date.now();
+          const repairedAgentPass = await runNativeAgentPass(
+            repairMessages,
+            "repair",
+          );
+          console.info("[spectra.openrouter.phase]", {
+            phase: "focused_repair_headers",
+            elapsedMs: Date.now() - repairStartedAt,
+            status: response.status,
+          });
+          plan = repairedAgentPass.plan;
+          result = repairedAgentPass.result;
+          primaryFailure = undefined;
+        } else {
+          const repairStartedAt = Date.now();
+          const repairResponse = await request(primaryRouting, "repair", {
+            raw: result?.text ?? latestPlanText,
+            error: primaryFailure,
+          });
+          console.info("[spectra.openrouter.phase]", {
+            phase: "repair_headers",
+            elapsedMs: Date.now() - repairStartedAt,
+            status: repairResponse.status,
+          });
+          if (!repairResponse.ok) throw primaryFailure;
           result = await readOpenRouterResponse(
             repairResponse,
             emitPublic,
@@ -7225,13 +7266,17 @@ async function callModel(
           plan = parseRecoveredModelText(result.text);
           primaryFailure = undefined;
           response = repairResponse;
-        } catch (error) {
-          primaryFailure = error;
         }
+      } catch (error) {
+        primaryFailure = error;
       }
     }
   }
-  if (primaryFailure && isRepairablePlanFailure(primaryFailure)) {
+  if (
+    primaryFailure &&
+    !response.ok &&
+    isRepairablePlanFailure(primaryFailure)
+  ) {
     // One quiet encouragement pass on the same primary model. Do not surface
     // the first validation miss to the user — regenerate once, then fail honestly.
     // Prefer onRepairRetry so the run strip/result card stay on calm progress
@@ -8222,34 +8267,7 @@ function readContentPointer(content: unknown, path: string) {
     path: sheetsPath,
     value: null,
   }).path;
-  const segments = canonicalPath
-    .slice(1)
-    .split("/")
-    .map((segment) => segment.replaceAll("~1", "/").replaceAll("~0", "~"));
-  let cursor = content;
-  for (const segment of segments) {
-    if (!cursor || typeof cursor !== "object") return undefined;
-    if (Array.isArray(cursor) && segment === "-") {
-      cursor = cursor.at(-1);
-      continue;
-    }
-    const key: string | number = Array.isArray(cursor)
-      ? Number(segment)
-      : segment;
-    if (Array.isArray(cursor) && !Number.isInteger(key)) return undefined;
-    let next = (cursor as Record<string | number, unknown>)[key];
-    // Sheets cells are stored under uppercase A1 keys; tolerate mixed-case
-    // lookups if a path slipped past canonicalize.
-    if (
-      next === undefined &&
-      !Array.isArray(cursor) &&
-      typeof key === "string" &&
-      /^[A-Za-z]+[1-9][0-9]*$/.test(key)
-    )
-      next = (cursor as Record<string, unknown>)[key.toUpperCase()];
-    cursor = next;
-  }
-  return cursor;
+  return readResolvedContentPointer(content, canonicalPath);
 }
 
 function artifactContentLooksUsable(
@@ -8426,6 +8444,10 @@ async function verifyCommittedOutcomes(
             canonical.path,
             canonical.value,
             savedValue,
+            {
+              blueprintKey: operation.input.blueprintKey,
+              artifactContent: artifact.content,
+            },
           )
         )
           continue;
@@ -9594,7 +9616,7 @@ async function runAttempt(
               );
         }
       : callModel;
-    let modelResult = focusedToolPlan
+    const modelResult = focusedToolPlan
       ? {
           plan: focusedToolPlan,
           model: "spectra/focused-tools",
@@ -9979,67 +10001,9 @@ async function runAttempt(
         params.prompt,
       );
     } catch (resolveError) {
-      // Intent/schema slips that local coerce missed still deserve one quiet
-      // encouragement pass — same UX as callModel repair, before Failed.
-      if (focusedToolPlan || !isRepairablePlanFailure(resolveError))
-        throw resolveError;
-      publishNativeProgress({
-        title: "Taking another careful pass",
-        detail: "Keeping your request in focus",
-        activity: "plan",
-      });
-      await mutate("spectraRuns:patchResultCard", {
-        actorClerkId: params.actorClerkId,
-        resultCardId: params.resultCardId,
-        executionId: params.executionId,
-        title: "Taking another careful pass",
-        summary: "Keeping your request in focus",
-      }).catch(() => null);
-      console.warn("[spectra.plan.resolve_encouragement_retry]", {
-        error: publicError(resolveError),
-        rawMessage:
-          resolveError instanceof Error
-            ? resolveError.message.slice(0, 400)
-            : String(resolveError).slice(0, 400),
-      });
-      if (publicText) publicText = "";
-      modelResult = await invokeModel(
-        params.surface,
-        params.prompt,
-        {
-          ...modelContextPacket,
-          ...(promptDirectlyUsesFocusedContent(params.prompt) &&
-          context.focusedArtifact
-            ? { focusedArtifact: context.focusedArtifact }
-            : {}),
-          conversation,
-        },
-        modelAttachments,
-        (content, mode) => {
-          publicText = mode === "replace" ? content : publicText + content;
-        },
-        undefined,
-        executionSignal,
-        undefined,
-        () => {
-          publishNativeProgress({
-            title: "Taking another careful pass",
-            detail: "Keeping your request in focus",
-            activity: "plan",
-          });
-        },
-        undefined,
-        undefined,
-        params.actorClerkId,
-        provisionalCreation
-          ? { ...provisionalCreation, clause: params.prompt }
-          : undefined,
-      );
-      plan = resolveAndValidatePlan(
-        modelResult.plan,
-        context,
-        params.prompt,
-      );
+      // callModel already performs the single bounded repair against its
+      // existing draft. Never restart the full model pass here.
+      throw resolveError;
     }
     assertSelectedAgentAllowsOperations(modelContextPacket, plan.operations);
     if (plan.operations.length > 0)
@@ -10589,6 +10553,63 @@ async function runAttempt(
             },
           );
         }
+        if (operation.type === "artifact.update") {
+          const outcome = { operation, affected };
+          try {
+            await verifyCommittedOutcomes(params.actorClerkId, [outcome]);
+          } catch (firstVerifyError) {
+            if (!isQuietRetryableApplyFailure(firstVerifyError))
+              throw firstVerifyError;
+            // A projection can briefly lag the Yjs commit. Check once after a
+            // short settle window; if the durable value is still wrong,
+            // resume this exact operation against the artifact's current
+            // state. Never restart planning or replay earlier operations.
+            await new Promise((resolve) => setTimeout(resolve, 400));
+            try {
+              await verifyCommittedOutcomes(params.actorClerkId, [outcome]);
+            } catch (secondVerifyError) {
+              if (!isQuietRetryableApplyFailure(secondVerifyError))
+                throw secondVerifyError;
+              console.warn("[spectra.operation.current_state_retry]", {
+                operationId,
+                type: operation.type,
+                error: publicError(secondVerifyError),
+              });
+              publishNativeProgress({
+                title: "Finishing this edit",
+                detail: "Continuing from the current saved state",
+                activity: "edit",
+                operationIndex: index,
+                artifactType: operation.input.blueprintKey,
+              });
+              await mutate("spectraRuns:patchResultCard", {
+                actorClerkId: params.actorClerkId,
+                resultCardId: params.resultCardId,
+                executionId: params.executionId,
+                title: "Finishing this edit",
+                summary: "Continuing from the current saved state",
+              }).catch(() => null);
+              await mutate("spectraOperations:reopenForCurrentStateRetry", {
+                actorClerkId: params.actorClerkId,
+                operationId,
+                executionId: params.executionId,
+              });
+              affected = await executeOperation(
+                params.actorClerkId,
+                params.runId,
+                operationId,
+                operation,
+                {
+                  ...executeContext,
+                  preclaimed: true,
+                },
+              );
+              await verifyCommittedOutcomes(params.actorClerkId, [
+                { operation, affected },
+              ]);
+            }
+          }
+        }
         allAffected.push(...affected);
         if (operation.type === "artifact.create") {
           const artifactId = affected.find(
@@ -10986,6 +11007,9 @@ async function runAttempt(
               targetId: params.runId,
             },
           ],
+      recoveryState: commitStarted ? "partial" : "interrupted",
+      retryable: !commitStarted,
+      preservedPartial: commitStarted,
     }).catch(() => null);
     card = await latestCard(params.actorClerkId, params.runId).catch(
       () => card,
@@ -11570,6 +11594,9 @@ async function resumeOperationsAttempt(params: {
       resultSummary: summary,
       resultVariant: "error",
       resultActions: [],
+      recoveryState: partial ? "partial" : "interrupted",
+      retryable: false,
+      preservedPartial: partial,
     }).catch(() => null);
     await Promise.all([
       saveAssistantMessage({

@@ -116,11 +116,35 @@ export async function evaluateAccessForActor(
 ) {
   const loaded = await loadResource(ctx, resourceType, resourceId);
   if (!loaded) return { allowed: false as const, level: null, capabilities: [] as Capability[], actor, reason: "not_found" as const, sources: [] };
-  if (loaded.schoolId && loaded.schoolId !== actor.schoolId) return { allowed: false as const, level: null, capabilities: [] as Capability[], actor, reason: "school_boundary" as const, sources: [] };
-  if (loaded.ownerAccountId === actor.accountId) return { allowed: true as const, level: "modify" as const, capabilities: ownerCapabilities, actor, loaded, reason: "owner" as const, sources: [{ kind: "owner" as const }] };
   if (loaded.lifecycle === "deleted") return { allowed: false as const, level: null, capabilities: [] as Capability[], actor, loaded, reason: "deleted" as const, sources: [] };
 
   const direct = await directAccess(ctx, actor, resourceType, resourceId);
+  if (loaded.schoolId && loaded.schoolId !== actor.schoolId) {
+    // Cross-school access is never inherited and never projected from a
+    // school principal. A deliberate account-level invitation is the sole
+    // exception: legacy/external collaborators who already have an active
+    // direct grant must receive the same authority in AI, comments, history,
+    // and live editing. New-share policy remains enforced by the share flow.
+    let directAccountLevel: AccessLevel | null = null;
+    for (const source of direct.sources) {
+      if (source.kind !== "direct") continue;
+      directAccountLevel = directAccountLevel
+        ? combineLevel(directAccountLevel, source.level)
+        : source.level;
+    }
+    if (!directAccountLevel)
+      return { allowed: false as const, level: null, capabilities: [] as Capability[], actor, loaded, reason: "school_boundary" as const, sources: [] };
+    return {
+      allowed: true as const,
+      level: directAccountLevel,
+      capabilities: capabilitiesForLevel(directAccountLevel),
+      actor,
+      loaded,
+      reason: "grant" as const,
+      sources: direct.sources.filter((source) => source.kind === "direct"),
+    };
+  }
+  if (loaded.ownerAccountId === actor.accountId) return { allowed: true as const, level: "modify" as const, capabilities: ownerCapabilities, actor, loaded, reason: "owner" as const, sources: [{ kind: "owner" as const }] };
   const inherited = resourceType === "artifact" || resourceType === "agent"
     ? await inheritedArtifactAccess(ctx, actor, loaded.resource._id as Id<"spectraArtifacts">)
     : { level: null, denied: false, sources: [] };

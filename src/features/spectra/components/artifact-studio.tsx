@@ -98,6 +98,11 @@ import {
 import { Callout } from "../editor/callout-node";
 import { DragHandle } from "../editor/drag-handle";
 import { StableBlockId } from "../editor/stable-block-id";
+import {
+  AiRegionDecoration,
+  aiRegionDecorationKey,
+  type AiRegionDecorationTarget,
+} from "../editor/ai-region-decoration";
 import { Equation, InlineEquation } from "../editor/equation-node";
 import {
   aiRegionAttr,
@@ -146,6 +151,8 @@ import {
 import { ThreadConversation } from "./conversation-surface";
 import { Tooltip } from "@/components/ui/tooltip";
 import { useArtifactLiveModel } from "../collaboration/use-artifact-live-model";
+import { publishArtifactAiActivity } from "../collaboration/artifact-ai-activity";
+import type { CollaborationPresence } from "../collaboration/types";
 import {
   ArtifactCommentsPanel,
   type ArtifactCommentRegion,
@@ -294,7 +301,11 @@ function waveCIdentityStats(
 }
 
 function studioSyncMessage(syncLabel: string) {
-  if (syncLabel === "Synchronized" || syncLabel === "Saved" || syncLabel === "Live") {
+  if (
+    syncLabel === "Synchronized" ||
+    syncLabel === "Saved" ||
+    syncLabel === "Live"
+  ) {
     return "Auto-saved";
   }
   return syncLabel;
@@ -1223,22 +1234,20 @@ function ReadonlyArtifactSnapshot({
                 </header>
                 <div className="grid grid-cols-4 gap-px bg-[var(--border-subtle)]">
                   {visibleCells.map(([address, value]) => (
-                      <div
-                        key={address}
-                        className="min-h-10 bg-[var(--bg-elevated)] px-2 py-1"
-                      >
-                        <span className="block text-[7px] text-[var(--text-tertiary)]">
-                          {address}
-                        </span>
-                        <span className="block truncate text-[9px]">
-                          {humanValue(
-                            record(value).value ??
-                              record(value).formula ??
-                              value,
-                          )}
-                        </span>
-                      </div>
-                    ))}
+                    <div
+                      key={address}
+                      className="min-h-10 bg-[var(--bg-elevated)] px-2 py-1"
+                    >
+                      <span className="block text-[7px] text-[var(--text-tertiary)]">
+                        {address}
+                      </span>
+                      <span className="block truncate text-[9px]">
+                        {humanValue(
+                          record(value).value ?? record(value).formula ?? value,
+                        )}
+                      </span>
+                    </div>
+                  ))}
                   {visibleCells.length === 0 ? (
                     <div className="col-span-4 p-8 text-center text-[10px] text-[var(--text-tertiary)]">
                       Empty sheet
@@ -3219,6 +3228,7 @@ export function ArtifactStudio({
       onWidthChange={onPanelWidthChange}
       ariaLabel="Artifact Studio"
       cssWidthVariable="--spectra-studio-width"
+      minWidth={560}
     >
       {body}
     </StudioSplitShell>
@@ -3285,7 +3295,9 @@ export function StudioSplitShell({
       // Fair share when multiple panels compete: never let one lane take more
       // than ~52% of the host while another panel is open.
       const fairCap =
-        siblingCount > 0 ? Math.max(floor, Math.floor(hostWidth * 0.52)) : maximum;
+        siblingCount > 0
+          ? Math.max(floor, Math.floor(hostWidth * 0.52))
+          : maximum;
       const next = Math.max(floor, Math.min(width, maximum, fairCap));
       if (Math.abs(next - width) >= 8) updateWidth(next);
       else if (width > maximum || width > fairCap)
@@ -3329,7 +3341,8 @@ export function StudioSplitShell({
         (total, candidate) => total + candidate.getBoundingClientRect().width,
         0,
       );
-      const hostRight = host?.getBoundingClientRect().right ?? window.innerWidth;
+      const hostRight =
+        host?.getBoundingClientRect().right ?? window.innerWidth;
       const floor = siblings.length > 0 ? Math.min(minWidth, 300) : minWidth;
       const reserve =
         siblings.length > 0 ? Math.min(contentReserve, 240) : contentReserve;
@@ -3495,7 +3508,9 @@ export function StudioTabRail({
           );
         })}
         {tabs.map((tab) => {
-          const artifact = artifacts.find((item) => item._id === tab.artifactId);
+          const artifact = artifacts.find(
+            (item) => item._id === tab.artifactId,
+          );
           if (!artifact) return null;
           const meta = blueprintMeta[artifact.blueprintKey];
           const Icon = meta.icon;
@@ -3632,8 +3647,11 @@ function ArtifactStudioEditor({
     // a slow/missing socket as a reason to freeze private editing.
     !(permissionReadOnly && artifact.blueprintKey === "quiz"),
   );
+  const livePermissionLost =
+    isCollaborativeArtifact && live.state === "permission_lost";
   const readOnly =
     permissionReadOnly ||
+    livePermissionLost ||
     (isCollaborativeArtifact && live.supported && live.level === "read");
   const [title, setTitle] = useState(artifact.title);
   const [summary, setSummary] = useState(artifact.summary ?? "");
@@ -3771,8 +3789,7 @@ function ArtifactStudioEditor({
             // the current one; otherwise an older acknowledgement can make a
             // subsequent remote snapshot erase newer cells.
             if (
-              snapshotKey(currentSnapshotRef.current) ===
-              snapshotKey(snapshot)
+              snapshotKey(currentSnapshotRef.current) === snapshotKey(snapshot)
             )
               userHasEditedRef.current = false;
             return true;
@@ -3855,7 +3872,13 @@ function ArtifactStudioEditor({
         setSyncBusy(false);
       }
     },
-    [artifact._id, artifact.blueprintKey, isCollaborativeArtifact, live, permissionReadOnly],
+    [
+      artifact._id,
+      artifact.blueprintKey,
+      isCollaborativeArtifact,
+      live,
+      permissionReadOnly,
+    ],
   );
   const previewDiff = useMemo(() => {
     if (!previewVersion?.after) return [];
@@ -3912,40 +3935,111 @@ function ArtifactStudioEditor({
             (effect) =>
               (!effect.expiresAt || effect.expiresAt > previewClock) &&
               (artifact.aiState === "creating" ||
-                artifact.aiState === "updating" ||
-                artifact.aiState === "edited"),
+                artifact.aiState === "updating"),
           ),
     [artifact.aiEffects, artifact.aiState, live.state, previewClock],
   );
-  const editedFlashExpiresAt =
-    artifact.aiState === "edited"
-      ? (artifact.aiStateExpiresAt ??
-        (artifact.updatedAt ? artifact.updatedAt + 12_000 : 0))
-      : 0;
+  const activeAiCollaborator = useMemo(() => {
+    const aiCollaborators = live.presence.filter(
+      (person) => person.actorKind === "ai",
+    );
+    // Awareness is the lifecycle of a real collaborator, not merely a carrier
+    // for preview frames. Keep the AI visible while it prepares and during its
+    // brief post-edit pause; prefer the currently streaming AI when two runs
+    // overlap so the native preview follows live work.
+    return (
+      aiCollaborators.find(
+        (person) => person.previewPhase === "streaming",
+      ) ?? aiCollaborators[0]
+    );
+  }, [live.presence]);
+  const activeAiPresence = activeAiCollaborator?.previewPatches?.length
+    ? activeAiCollaborator
+    : null;
+  const aiActivitySourceRef = useRef(uniqueToken());
+  useEffect(() => {
+    const sourceId = aiActivitySourceRef.current;
+    publishArtifactAiActivity(
+      artifact._id,
+      sourceId,
+      activeAiCollaborator
+        ? {
+            phase: activeAiPresence ? "editing" : "preparing",
+            ...(activeAiCollaborator.previewSequence !== undefined
+              ? { sequence: activeAiCollaborator.previewSequence }
+              : {}),
+          }
+        : null,
+    );
+    return () => publishArtifactAiActivity(artifact._id, sourceId, null);
+  }, [activeAiCollaborator, activeAiPresence, artifact._id]);
+  const presencePreview = useMemo(() => {
+    if (!activeAiPresence?.previewPatches?.length) return null;
+    let next: {
+      title: string;
+      summary: string;
+      tags: string[];
+      content: unknown;
+    } = {
+      title,
+      summary,
+      tags: tagsFromDraft(tagDraft),
+      content,
+    };
+    const paths: string[] = [];
+    for (const patch of activeAiPresence.previewPatches) {
+      next = setAtPointer(next, patch.path, patch.value) as typeof next;
+      if (patch.path === "/content") paths.push("/");
+      else if (patch.path.startsWith("/content/"))
+        paths.push(patch.path.slice("/content".length));
+      else paths.push(patch.path);
+    }
+    return {
+      ...next,
+      paths: [...new Set(paths)],
+    };
+  }, [activeAiPresence?.previewPatches, content, summary, tagDraft, title]);
+  const presencePathMemoryRef = useRef<{
+    operationKey: string;
+    paths: string[];
+  } | null>(null);
+  const activeAiOperationKey = activeAiCollaborator
+    ? `${activeAiCollaborator.runId ?? ""}:${activeAiCollaborator.operationId ?? ""}`
+    : "";
+  if (presencePreview?.paths.length) {
+    presencePathMemoryRef.current = {
+      operationKey: activeAiOperationKey,
+      paths: presencePreview.paths,
+    };
+  } else if (!activeAiCollaborator) {
+    presencePathMemoryRef.current = null;
+  }
+  const presenceHighlightPaths =
+    presencePreview?.paths.length && presencePreview.paths.length > 0
+      ? presencePreview.paths
+      : activeAiCollaborator &&
+          presencePathMemoryRef.current?.operationKey === activeAiOperationKey
+        ? presencePathMemoryRef.current.paths
+        : [];
   const aiPreviewActive =
     Boolean(artifact.aiPreview) &&
-    (artifact.aiState === "creating" ||
-      artifact.aiState === "updating" ||
-      (artifact.aiState === "edited" && editedFlashExpiresAt > previewClock));
-  const catchUpActive =
-    !aiHighlightDismissed &&
-    artifact.aiState === "edited" &&
-    editedFlashExpiresAt > previewClock;
+    (artifact.aiState === "creating" || artifact.aiState === "updating");
+  const catchUpActive = false;
   // Pending creates often attach an empty aiPreview / aiEffects shell for
   // progress chrome before any concrete changedPaths arrive. Do not let that
   // empty shell suppress the create fallback — otherwise mid-open whiteboard
   // (and peers) show rich content with 0 `data-ai-region` attributes.
-  // Focused updates have the same empty-path window (route publishes
-  // changedPaths: [] immediately); light with `/` until exact paths stream.
+  // Focused updates stay visually quiet until an exact region arrives. A
+  // whole-artifact fallback reads as a refresh and obscures the real edit.
   const liveCreationPaths = useMemo(
     () =>
       creationHighlightFallbackPaths(artifact.aiState, artifact.blueprintKey),
     [artifact.aiState, artifact.blueprintKey],
   );
-  const catchUpFallbackPaths =
-    catchUpActive && artifact.blueprintKey !== "sheets" ? ["/"] : [];
-  const streamingSource =
-    aiPreviewActive && artifact.aiPreview?.content !== undefined
+  const catchUpFallbackPaths: string[] = [];
+  const streamingSource = presencePreview
+    ? "presence"
+    : aiPreviewActive && artifact.aiPreview?.content !== undefined
       ? preferStreamingContentSource({
           local: content,
           preview: artifact.aiPreview.content,
@@ -3954,25 +4048,18 @@ function ArtifactStudioEditor({
         })
       : "local";
   const streamingContent =
-    streamingSource === "preview" && artifact.aiPreview?.content !== undefined
-      ? artifact.aiPreview.content
-      : content;
+    streamingSource === "presence"
+      ? presencePreview?.content
+      : streamingSource === "preview" &&
+          artifact.aiPreview?.content !== undefined
+        ? artifact.aiPreview.content
+        : content;
   const contentDerivedPaths = useMemo(
     () =>
-      artifact.aiState === "creating" ||
-      artifact.aiState === "updating" ||
-      catchUpActive
-        ? contentDerivedHighlightPaths(
-            artifact.blueprintKey,
-            streamingContent,
-          )
+      artifact.aiState === "creating"
+        ? contentDerivedHighlightPaths(artifact.blueprintKey, streamingContent)
         : [],
-    [
-      artifact.aiState,
-      artifact.blueprintKey,
-      catchUpActive,
-      streamingContent,
-    ],
+    [artifact.aiState, artifact.blueprintKey, streamingContent],
   );
   const previewHighlightPaths = useMemo(
     () =>
@@ -4014,7 +4101,50 @@ function ArtifactStudioEditor({
       ),
     [activeAiEffects, artifact.blueprintKey, live.model, streamingContent],
   );
+  const presenceRegionHighlightPaths = useMemo(
+    () =>
+      materializeAiChangedPaths(
+        activeAiCollaborator
+          ? [
+              activeAiCollaborator.activeRegionId,
+              ...(activeAiCollaborator.activeRegionIds ?? []),
+            ].flatMap((regionId) => {
+              if (!regionId) return [];
+              const descriptor = live.model?.descriptor(regionId);
+              return descriptor
+                ? [semanticPathToPointer(descriptor.path)]
+                : [];
+            })
+          : [],
+        streamingContent,
+        artifact.blueprintKey,
+      ),
+    [
+      activeAiCollaborator,
+      artifact.blueprintKey,
+      live.model,
+      streamingContent,
+    ],
+  );
+  const presenceTargetPaths = useMemo(() => {
+    const combined = [
+      ...presenceRegionHighlightPaths,
+      ...presenceHighlightPaths,
+    ];
+    return [
+      ...new Set(
+        combined.filter(
+          (path) =>
+            !combined.some(
+              (candidate) =>
+                candidate !== path && candidate.startsWith(`${path}/`),
+            ),
+        ),
+      ),
+    ];
+  }, [presenceHighlightPaths, presenceRegionHighlightPaths]);
   const hasConcreteHighlightPaths =
+    presenceTargetPaths.length > 0 ||
     previewHighlightPaths.length > 0 ||
     effectHighlightPaths.length > 0 ||
     effectRegionHighlightPaths.length > 0;
@@ -4028,7 +4158,10 @@ function ArtifactStudioEditor({
     [artifact.aiState, artifact.blueprintKey, hasConcreteHighlightPaths],
   );
   const aiChangedPaths = resolveAiHighlightPaths({
-    previewPaths: previewHighlightPaths,
+    previewPaths: [
+      ...presenceTargetPaths,
+      ...previewHighlightPaths,
+    ],
     effectChangedPaths: effectHighlightPaths,
     effectRegionPointers: effectRegionHighlightPaths,
     creationFallbackPaths:
@@ -4048,17 +4181,70 @@ function ArtifactStudioEditor({
     ]),
   ];
   const aiWorkingActive =
+    Boolean(activeAiCollaborator) ||
     aiPreviewActive ||
     activeAiEffects.length > 0 ||
     (catchUpActive && aiChangedPaths.length > 0) ||
     ((artifact.aiState === "creating" || artifact.aiState === "updating") &&
       aiChangedPaths.length > 0);
-  const visibleAiWorking = aiWorkingActive && !aiHighlightDismissed;
-  const highlightPaths = aiHighlightDismissed ? [] : aiChangedPaths;
+  const visibleAiWorking =
+    aiWorkingActive && (Boolean(activeAiCollaborator) || !aiHighlightDismissed);
+  const highlightPaths = activeAiCollaborator
+    ? aiChangedPaths
+    : aiHighlightDismissed
+      ? []
+      : aiChangedPaths;
+  // Short edits can finish before the separate AI Yjs connection has time to
+  // publish awareness. Keep presence truthful and immediate by projecting the
+  // artifact's durable AI state into the same collaboration UI until remote
+  // awareness arrives. The synthetic actor disappears as soon as the run
+  // settles, and is replaced—not duplicated—when the real AI peer connects.
+  const syntheticAiPresence = useMemo<CollaborationPresence | null>(() => {
+    if (activeAiCollaborator || !visibleAiWorking) return null;
+    const activeRegionId =
+      activeAiEffects.flatMap((effect) => effect.regionIds)[0] ??
+      (highlightPaths[0] ? `pointer:${highlightPaths[0]}` : undefined);
+    return {
+      clientId: `local-ai:${artifact.aiRunId ?? artifact._id}`,
+      accountId: live.accountId,
+      actorKind: "ai",
+      runId: artifact.aiRunId,
+      ...(activeRegionId ? { activeRegionId } : {}),
+      ...(activeRegionId
+        ? {
+            cursor: {
+              x: 0.5,
+              y: 0.5,
+              updatedAt: previewClock,
+            },
+          }
+        : {}),
+      previewSequence: artifact.aiPreview?.startedAt
+        ? Math.max(
+            0,
+            Math.floor((previewClock - artifact.aiPreview.startedAt) / 140),
+          )
+        : 0,
+    };
+  }, [
+    activeAiCollaborator,
+    activeAiEffects,
+    artifact._id,
+    artifact.aiPreview?.startedAt,
+    artifact.aiRunId,
+    highlightPaths,
+    live.accountId,
+    previewClock,
+    visibleAiWorking,
+  ]);
+  const displayPresence = syntheticAiPresence
+    ? [...live.presence, syntheticAiPresence]
+    : live.presence;
   // During create/update, prefer the richer of live Yjs vs Convex preview so
   // mid-open never sticks on empty placeholders while AI writes through Yjs.
-  const editorContent =
-    aiPreviewActive && artifact.aiPreview?.content !== undefined
+  const editorContent = presencePreview
+    ? presencePreview.content
+    : aiPreviewActive && artifact.aiPreview?.content !== undefined
       ? streamingSource === "local"
         ? content
         : mergeAiRegions(content, artifact.aiPreview.content, aiChangedPaths)
@@ -4080,21 +4266,6 @@ function ArtifactStudioEditor({
   useEffect(() => {
     currentSnapshotRef.current = currentSnapshot;
   }, [currentSnapshot]);
-  useEffect(() => {
-    if (
-      artifact.aiState !== "edited" ||
-      !artifact.aiPreview ||
-      editedFlashExpiresAt <= 0
-    )
-      return;
-    setPreviewClock(Date.now());
-    const remaining = Math.max(0, editedFlashExpiresAt - Date.now());
-    const timer = window.setTimeout(
-      () => setPreviewClock(Date.now()),
-      remaining + 24,
-    );
-    return () => window.clearTimeout(timer);
-  }, [artifact.aiPreview, artifact.aiState, editedFlashExpiresAt]);
   useEffect(() => {
     const nextExpiry = (artifact.aiEffects ?? [])
       .flatMap((effect) => (effect.expiresAt ? [effect.expiresAt] : []))
@@ -4125,15 +4296,9 @@ function ArtifactStudioEditor({
   useEffect(() => {
     setAiHighlightDismissed(false);
   }, [artifact._id, artifact.aiState]);
-
-  // Catch-up materialize plays once on first open after AI finishes, then clears.
   useEffect(() => {
-    if (!catchUpActive) return;
-    const timer = window.setTimeout(() => {
-      setAiHighlightDismissed(true);
-    }, 1250);
-    return () => window.clearTimeout(timer);
-  }, [catchUpActive, artifact._id, editedFlashExpiresAt]);
+    if (activeAiPresence) setAiHighlightDismissed(false);
+  }, [activeAiPresence]);
 
   const setActivePresence = useCallback(
     (regionId: string) => {
@@ -4149,14 +4314,85 @@ function ArtifactStudioEditor({
   );
   const presenceFrameRef = useRef<number | null>(null);
   const pendingCursorRef = useRef<{ x: number; y: number } | null>(null);
+  const studioSurfaceRef = useRef<HTMLDivElement>(null);
+  const lastStudioInteractionAtRef = useRef(0);
+  const lastAutoRevealKeyRef = useRef("");
+  const noteStudioInteraction = useCallback(() => {
+    lastStudioInteractionAtRef.current = Date.now();
+  }, []);
+  useEffect(() => {
+    if (!visibleAiWorking || highlightPaths.length === 0) {
+      lastAutoRevealKeyRef.current = "";
+      return;
+    }
+    const revealKey = highlightPaths.join("|");
+    if (lastAutoRevealKeyRef.current === revealKey) return;
+    let frame = 0;
+    let attempts = 0;
+    const reveal = () => {
+      const root = studioSurfaceRef.current;
+      if (!root) return;
+      const regions = [...root.querySelectorAll<HTMLElement>(
+        '[data-ai-region="true"]',
+      )].filter((region) => {
+        const style = window.getComputedStyle(region);
+        return style.display !== "none" && style.visibility !== "hidden";
+      });
+      const target =
+        regions.find((region) =>
+          region.matches(
+            "input, textarea, select, [contenteditable=true], [data-address]",
+          ),
+        ) ??
+        regions
+          .filter((region) => region.getClientRects().length > 0)
+          .sort((left, right) => {
+            const leftRect = left.getBoundingClientRect();
+            const rightRect = right.getBoundingClientRect();
+            return (
+              leftRect.width * leftRect.height -
+              rightRect.width * rightRect.height
+            );
+          })[0];
+      if (!target) {
+        attempts += 1;
+        if (attempts < 8) frame = window.requestAnimationFrame(reveal);
+        return;
+      }
+      lastAutoRevealKeyRef.current = revealKey;
+      if (Date.now() - lastStudioInteractionAtRef.current < 1_800) return;
+      const rect = target.getBoundingClientRect();
+      const headerBottom =
+        root
+          .querySelector<HTMLElement>(".spectra-artifact-header")
+          ?.getBoundingClientRect().bottom ?? 0;
+      const visible =
+        rect.top >= headerBottom + 12 &&
+        rect.bottom <= window.innerHeight - 72;
+      if (!visible)
+        target.scrollIntoView({
+          behavior: "smooth",
+          block: "center",
+          inline: "nearest",
+        });
+    };
+    frame = window.requestAnimationFrame(reveal);
+    return () => window.cancelAnimationFrame(frame);
+  }, [highlightPaths, visibleAiWorking]);
   const handlePresencePointerMove = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
       if (!live.transport || live.state !== "synchronized") return;
       const bounds = event.currentTarget.getBoundingClientRect();
       if (!bounds.width || !bounds.height) return;
       pendingCursorRef.current = {
-        x: Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width)),
-        y: Math.max(0, Math.min(1, (event.clientY - bounds.top) / bounds.height)),
+        x: Math.max(
+          0,
+          Math.min(1, (event.clientX - bounds.left) / bounds.width),
+        ),
+        y: Math.max(
+          0,
+          Math.min(1, (event.clientY - bounds.top) / bounds.height),
+        ),
       };
       if (presenceFrameRef.current !== null) return;
       presenceFrameRef.current = window.requestAnimationFrame(() => {
@@ -4593,7 +4829,7 @@ function ArtifactStudioEditor({
     artifact.blueprintKey === "document"
       ? "min-h-0 flex-1 overflow-y-auto pb-5"
       : "min-h-0 flex-1 overflow-y-auto pb-5 pl-[15px] pr-0 pt-1";
-  const collaboratorCount = live.presence.filter(
+  const collaboratorCount = displayPresence.filter(
     (person) => person.clientId !== live.transport?.clientId,
   ).length;
   const currentAccountId = live.accountId;
@@ -4623,10 +4859,10 @@ function ArtifactStudioEditor({
     },
     [setActivePresence],
   );
-  const syncLabel = permissionReadOnly
-    ? "Read-only"
-    : live.state === "permission_lost"
-      ? "Access removed"
+  const syncLabel = livePermissionLost
+    ? "Access removed"
+    : readOnly
+      ? "Read-only"
       : isCollaborativeArtifact
         ? live.state === "reconnecting" || live.state === "unsynchronized"
           ? "Reconnecting"
@@ -4682,21 +4918,12 @@ function ArtifactStudioEditor({
     live.state === "reconnecting";
   const identityBlock = (
     <div
-      className={`spectra-artifact-identity flex w-full items-start ${compact ? "gap-3 px-5 pb-5 pt-5" : artifact.blueprintKey === "document" ? "gap-4 px-6 pb-2 pt-6" : artifact.blueprintKey === "quiz" || waveCBlueprint ? "gap-[10px] px-2 pb-0 pt-1" : "gap-4 px-1 pb-2 pt-1"}`}
+      className={`spectra-artifact-identity flex w-full items-start ${compact ? "gap-3 px-5 pb-5" : artifact.blueprintKey === "document" ? "gap-4 px-6 pb-2" : artifact.blueprintKey === "quiz" || waveCBlueprint ? "gap-[10px] px-2 pb-0" : "gap-4 px-1 pb-2"}`}
     >
-      <span
-        className="mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-[9px] border border-[color-mix(in_oklab,currentColor_24%,transparent)] bg-[color-mix(in_oklab,currentColor_9%,var(--bg-elevated))]"
-        style={{ color: meta.color }}
-      >
-        <Icon className="h-5 w-5" />
-      </span>
       <div className="min-w-0 flex-1">
-        <div className="mb-1 text-[11px] font-semibold uppercase tracking-[.13em] text-[var(--text-tertiary)]">
-          {meta.label}
-        </div>
         <div className="rounded-[7px]">
           <textarea
-            value={title}
+            value={presencePreview?.title ?? title}
             readOnly={readOnly}
             onChange={(event) => changeBase({ title: event.target.value })}
             rows={1}
@@ -4706,8 +4933,9 @@ function ArtifactStudioEditor({
             }}
             data-ai-region={aiRegionAttr(
               !aiHighlightDismissed &&
-                ((aiPreviewActive &&
-                  artifact.aiPreview?.title !== undefined) ||
+                ((presencePreview?.paths.includes("/title") ?? false) ||
+                  (aiPreviewActive &&
+                    artifact.aiPreview?.title !== undefined) ||
                   activeAiEffects.some((effect) =>
                     effect.regionIds.includes("metadata:title"),
                   )),
@@ -4718,7 +4946,7 @@ function ArtifactStudioEditor({
         </div>
         <div className="mt-0.5 rounded-[7px]">
           <input
-            value={summary}
+            value={presencePreview?.summary ?? summary}
             readOnly={readOnly}
             onFocus={() => {
               setActiveCommentRegionId("metadata:summary");
@@ -4727,8 +4955,9 @@ function ArtifactStudioEditor({
             onChange={(event) => changeBase({ summary: event.target.value })}
             data-ai-region={aiRegionAttr(
               !aiHighlightDismissed &&
-                ((aiPreviewActive &&
-                  artifact.aiPreview?.summary !== undefined) ||
+                ((presencePreview?.paths.includes("/summary") ?? false) ||
+                  (aiPreviewActive &&
+                    artifact.aiPreview?.summary !== undefined) ||
                   activeAiEffects.some((effect) =>
                     effect.regionIds.includes("metadata:summary"),
                   )),
@@ -4796,27 +5025,29 @@ function ArtifactStudioEditor({
 
   return (
     <div
+      ref={studioSurfaceRef}
       className="spectra-artifact-studio relative flex h-full min-h-0 flex-col"
       onPointerMove={handlePresencePointerMove}
       onPointerLeave={clearPresenceCursor}
+      onPointerDownCapture={noteStudioInteraction}
+      onKeyDownCapture={noteStudioInteraction}
+      onWheelCapture={noteStudioInteraction}
+      onTouchStartCapture={noteStudioInteraction}
       data-studio-mode={mode}
       data-ai-state={
-        visibleAiWorking
-          ? artifact.aiState === "edited"
-            ? "edited"
-            : artifact.aiState === "creating" || artifact.aiState === "updating"
-              ? artifact.aiState
-              : "updating"
+        visibleAiWorking && artifact.aiState === "creating"
+          ? "creating"
           : undefined
       }
       data-ai-catchup={
         catchUpActive && highlightPaths.length > 0 ? "true" : undefined
       }
       data-blueprint={artifact.blueprintKey}
+      data-ai-highlight-paths={highlightPaths.join("|") || undefined}
       style={{ "--studio-accent": meta.color } as CSSProperties}
     >
       <CollaborationCursorLayer
-        presence={live.presence}
+        presence={displayPresence}
         currentClientId={live.transport?.clientId}
         currentAccountId={live.accountId}
         currentDisplayName={live.displayName}
@@ -4828,99 +5059,110 @@ function ArtifactStudioEditor({
           ))}
         </div>
       ) : null}
-      <header
-        className="spectra-artifact-header flex shrink-0 items-start justify-between gap-4 bg-transparent"
-      >
-        <div className="min-w-0 flex-1">{identityBlock}</div>
-        <div className="spectra-artifact-header-actions flex shrink-0 items-center gap-2">
-          <span
-            className="hidden items-center gap-1.5 text-[11px] text-[var(--text-secondary)] sm:inline-flex"
-            role="status"
-            aria-live="polite"
-          >
-            {syncLabel === "Saved" || syncLabel === "Live" ? (
-              <CheckCircle2 className="h-3.5 w-3.5 text-[var(--success)]" />
-            ) : syncBusy ||
-              live.state === "connecting" ||
-              live.state === "synchronizing" ||
-              live.state === "reconnecting" ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-cyan)]" />
-            ) : (
-              <Circle className="h-3 w-3 fill-[#d88922] text-[#d88922]" />
-            )}
-            {syncLabel}
-            {isCollaborativeArtifact && collaboratorCount > 0
-              ? ` · ${collaboratorCount} here`
-              : ""}
-          </span>
-          {isCollaborativeArtifact || collaboratorCount > 0 ? (
-            <CollaborationPresenceIndicator
-              presence={live.presence}
-              currentClientId={live.transport?.clientId}
-              currentAccountId={live.accountId}
-              currentDisplayName={live.displayName}
-              regions={commentRegions}
-            />
-          ) : null}
-          {onShare && mode === "split" ? (
+      <header className="spectra-artifact-header flex shrink-0 flex-col bg-transparent">
+        <div className="spectra-artifact-header-topline flex min-w-0 items-center justify-between gap-4">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <span
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] border border-[color-mix(in_oklab,currentColor_24%,transparent)] bg-[color-mix(in_oklab,currentColor_9%,var(--bg-elevated))]"
+              style={{ color: meta.color }}
+            >
+              <Icon className="h-4 w-4" />
+            </span>
+            <span className="truncate text-[11px] font-semibold uppercase tracking-[.13em] text-[var(--text-tertiary)]">
+              {meta.label}
+            </span>
+          </div>
+          <div className="spectra-artifact-header-actions flex shrink-0 items-center gap-2">
+            <span
+              className="hidden items-center gap-1.5 text-[11px] text-[var(--text-secondary)] sm:inline-flex"
+              role="status"
+              aria-live="polite"
+            >
+              {syncLabel === "Saved" || syncLabel === "Live" ? (
+                <CheckCircle2 className="h-3.5 w-3.5 text-[var(--success)]" />
+              ) : syncBusy ||
+                live.state === "connecting" ||
+                live.state === "synchronizing" ||
+                live.state === "reconnecting" ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-cyan)]" />
+              ) : (
+                <Circle className="h-3 w-3 fill-[#d88922] text-[#d88922]" />
+              )}
+              {syncLabel}
+              {isCollaborativeArtifact && collaboratorCount > 0
+                ? ` · ${collaboratorCount} here`
+                : ""}
+            </span>
+            {isCollaborativeArtifact || collaboratorCount > 0 ? (
+              <CollaborationPresenceIndicator
+                presence={displayPresence}
+                currentClientId={live.transport?.clientId}
+                currentAccountId={live.accountId}
+                currentDisplayName={live.displayName}
+                regions={commentRegions}
+              />
+            ) : null}
+            {onShare && mode === "split" ? (
+              <IconButton
+                label="Share artifact"
+                onClick={onShare}
+                icon={Share2}
+              />
+            ) : null}
             <IconButton
-              label="Share artifact"
-              onClick={onShare}
-              icon={Share2}
+              label="Comments"
+              onClick={() => setCommentsOpen(true)}
+              icon={MessageSquare}
             />
-          ) : null}
-          <IconButton
-            label="Comments"
-            onClick={() => setCommentsOpen(true)}
-            icon={MessageSquare}
-          />
-          <IconButton
-            label="Embedded artifacts"
-            onClick={() => setEmbedsOpen(true)}
-            icon={Link2}
-          />
-          {artifact.blueprintKey !== "planner_task" ? (
             <IconButton
-              label={detailsOpen ? "Close details" : "Open details"}
+              label="Embedded artifacts"
+              onClick={() => setEmbedsOpen(true)}
+              icon={Link2}
+            />
+            {artifact.blueprintKey !== "planner_task" ? (
+              <IconButton
+                label={detailsOpen ? "Close details" : "Open details"}
+                onClick={() => {
+                  detailsPinnedRef.current = true;
+                  setDetailsOpen((open) => !open);
+                }}
+                icon={PanelRight}
+              />
+            ) : null}
+            {mode === "split" ? (
+              <IconButton
+                label="Open as tab"
+                onClick={onExpand}
+                icon={Maximize2}
+              />
+            ) : null}
+            <IconButton
+              label="Version history"
               onClick={() => {
-                detailsPinnedRef.current = true;
-                setDetailsOpen((open) => !open);
+                setHistoryOpen(true);
+                void getSpectraArtifactVersions(artifact._id, 100).then(
+                  (result) => {
+                    setVersions(result.versions);
+                    setPreviewVersion(
+                      result.versions.find((version) => version.after) ??
+                        result.versions[0] ??
+                        null,
+                    );
+                  },
+                );
               }}
-              icon={PanelRight}
+              icon={History}
             />
-          ) : null}
-          {mode === "split" ? (
             <IconButton
-              label="Open as tab"
-              onClick={onExpand}
-              icon={Maximize2}
+              label={dirty ? "Synchronize before closing" : "Close"}
+              onClick={() => void closeAfterSynchronization()}
+              icon={X}
             />
-          ) : null}
-          <IconButton
-            label="Version history"
-            onClick={() => {
-              setHistoryOpen(true);
-              void getSpectraArtifactVersions(artifact._id, 100).then(
-                (result) => {
-                  setVersions(result.versions);
-                  setPreviewVersion(
-                    result.versions.find((version) => version.after) ??
-                      result.versions[0] ??
-                      null,
-                  );
-                },
-              );
-            }}
-            icon={History}
-          />
-          <IconButton
-            label={dirty ? "Synchronize before closing" : "Close"}
-            onClick={() => void closeAfterSynchronization()}
-            icon={X}
-          />
+          </div>
         </div>
+        <div className="min-w-0">{identityBlock}</div>
       </header>
-      {permissionReadOnly ? (
+      {readOnly && !livePermissionLost ? (
         <div className="shrink-0 border-y border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-5 py-2 text-[11px] text-[var(--text-secondary)]">
           Read-only access{accessExplanation ? ` · ${accessExplanation}` : ""} ·
           You can inspect, comment, and place this artifact, but only a
@@ -4931,26 +5173,7 @@ function ArtifactStudioEditor({
           {accessExplanation} · You can modify this artifact.
         </div>
       ) : null}
-      {visibleAiWorking && artifact.aiState === "edited" ? (
-        <div className="spectra-ai-highlight-banner flex shrink-0 flex-wrap items-center gap-3 border-y border-[color-mix(in_oklab,#4f8dff_22%,var(--border-subtle))] bg-[color-mix(in_oklab,#4f8dff_5%,var(--bg-primary))] px-5 py-2 text-[11px] text-[var(--text-secondary)]">
-          <Sparkles className="h-3.5 w-3.5 shrink-0 text-[#4f8dff]" />
-          <span className="min-w-0 flex-1">
-            {aiEffectTitles[0] ?? "Spectra updated this artifact"}
-            {aiEffectTitles.length > 1
-              ? ` and ${aiEffectTitles.length - 1} more region${aiEffectTitles.length === 2 ? "" : "s"}`
-              : ""}
-            . Highlights show what changed.
-          </span>
-          <button
-            type="button"
-            onClick={() => setAiHighlightDismissed(true)}
-            className="rounded-[7px] px-2.5 py-1 text-[11px] font-semibold text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
-          >
-            Clear highlights
-          </button>
-        </div>
-      ) : null}
-      {!permissionReadOnly && live.state === "permission_lost" ? (
+      {livePermissionLost ? (
         <div
           role="alert"
           className="shrink-0 border-y border-[color-mix(in_oklab,var(--danger)_28%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--danger)_7%,var(--bg-primary))] px-5 py-2 text-[11px] text-[var(--danger)]"
@@ -5620,7 +5843,9 @@ function DocumentStudio({
   const [replaceDraft, setReplaceDraft] = useState("");
   const [findCursor, setFindCursor] = useState(0);
   const [focusMode, setFocusMode] = useState(false);
-  const [pageLayout, setPageLayout] = useState<"page" | "continuous">("continuous");
+  const [pageLayout, setPageLayout] = useState<"page" | "continuous">(
+    "continuous",
+  );
   const [importReport, setImportReport] = useState<string>();
   const [importError, setImportError] = useState<string>();
   const importRef = useRef<HTMLInputElement>(null);
@@ -5661,6 +5886,7 @@ function DocumentStudio({
       InlineEquation,
       DragHandle,
       StableBlockId,
+      AiRegionDecoration,
       Placeholder.configure({ placeholder: "Type / for commands" }),
       SlashCommand.configure({
         suggestion: {
@@ -5723,49 +5949,35 @@ function DocumentStudio({
     const incomingKey = JSON.stringify(incomingEditorJson);
     const contentChanged = incomingKey !== editorJsonKeyRef.current;
     if (contentChanged) editorJsonKeyRef.current = incomingKey;
-    // Tiptap may flush synchronously while React is reconciling a streamed
-    // artifact subscription. Move external-content reconciliation (and AI
-    // region lighting) to the next microtask so live AI blocks do not trigger
-    // React's nested flushSync warning, and so data-ai-region survives setContent.
-    let cancelled = false;
-    queueMicrotask(() => {
-      if (cancelled || editor.isDestroyed) return;
+    const target: AiRegionDecorationTarget | null = aiChangedPaths.length
+      ? {
+          all: aiChangedPaths.includes("/"),
+          indices: aiChangedPaths.flatMap((path) => {
+            const match = path.match(/^\/(?:content\/)?blocks\/(\d+)/);
+            return match ? [Number(match[1])] : [];
+          }),
+          blockIds: aiChangedPaths.flatMap((path) => {
+            const match = path.match(
+              /^\/(?:content\/)?blocks\/(?:id:|byId\/)([^/]+)/i,
+            );
+            return match
+              ? [match[1]!.replaceAll("~1", "/").replaceAll("~0", "~")]
+              : [];
+          }),
+        }
+      : null;
+    // Reconcile after React's commit. The target is a ProseMirror decoration,
+    // so it remains attached to the same semantic block through every streamed
+    // setContent transaction instead of being wiped from the DOM.
+    const frame = window.requestAnimationFrame(() => {
+      if (editor.isDestroyed) return;
       if (contentChanged)
         editor.commands.setContent(incomingEditorJson, { emitUpdate: false });
-      const blocks = Array.from(editor.view.dom.children) as HTMLElement[];
-      blocks.forEach((block) => block.removeAttribute("data-ai-region"));
-      if (!aiChangedPaths.length) return;
-      if (aiChangedPaths.includes("/")) {
-        blocks.forEach((block) => block.setAttribute("data-ai-region", "true"));
-        return;
-      }
-      const indices = new Set<number>();
-      const blockIds = new Set<string>();
-      for (const path of aiChangedPaths) {
-        const indexMatch = path.match(/^\/(?:content\/)?blocks\/(\d+)/);
-        if (indexMatch) indices.add(Number(indexMatch[1]));
-        const idMatch = path.match(
-          /^\/(?:content\/)?blocks\/(?:id:|byId\/)([^/]+)/i,
-        );
-        if (idMatch)
-          blockIds.add(
-            idMatch[1]!.replaceAll("~1", "/").replaceAll("~0", "~"),
-          );
-      }
-      indices.forEach((index) =>
-        blocks[index]?.setAttribute("data-ai-region", "true"),
+      editor.view.dispatch(
+        editor.state.tr.setMeta(aiRegionDecorationKey, target),
       );
-      if (blockIds.size > 0) {
-        blocks.forEach((block) => {
-          const id = block.getAttribute("data-block-id");
-          if (id && blockIds.has(id))
-            block.setAttribute("data-ai-region", "true");
-        });
-      }
     });
-    return () => {
-      cancelled = true;
-    };
+    return () => window.cancelAnimationFrame(frame);
   }, [aiChangedPaths, editor, incomingEditorJson]);
 
   const equationActive = editor?.isActive("equation") ?? false;
@@ -7098,11 +7310,13 @@ function FlashcardStudio({
 
   useEffect(() => {
     function beginFromInspector(event: Event) {
-      const requestedId = (event as CustomEvent<{ artifactId?: string }>).detail?.artifactId;
+      const requestedId = (event as CustomEvent<{ artifactId?: string }>).detail
+        ?.artifactId;
       if (requestedId === artifactId) beginStudySessionRef.current();
     }
     window.addEventListener("spectra:study-deck", beginFromInspector);
-    return () => window.removeEventListener("spectra:study-deck", beginFromInspector);
+    return () =>
+      window.removeEventListener("spectra:study-deck", beginFromInspector);
   }, [artifactId]);
 
   useEffect(() => {
@@ -8943,9 +9157,7 @@ function FlashcardStudio({
           </button>
         </div>
       </aside>
-      <section
-        className="spectra-deck-card-editor min-w-0 overflow-hidden rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4"
-      >
+      <section className="spectra-deck-card-editor min-w-0 overflow-hidden rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
         {activeCard ? (
           <div>
             <div className="spectra-deck-card-heading mb-4 flex items-center justify-between">
@@ -9283,17 +9495,24 @@ function FlashcardStudio({
               </div>
             ) : null}
             <div className="spectra-deck-tag-field mt-3">
-              <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">Tags</span>
+              <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
+                Tags
+              </span>
               <div className="mt-2 flex min-h-9 flex-wrap items-center gap-1.5">
                 {(activeCard.tags ?? []).map((tag) => (
-                  <span key={tag} className="inline-flex h-7 items-center gap-1 rounded-[6px] border border-[color-mix(in_oklab,#8b6ff0_20%,var(--border-default))] bg-[color-mix(in_oklab,#8b6ff0_6%,var(--bg-elevated))] px-2 text-[10px] text-[var(--text-secondary)]">
+                  <span
+                    key={tag}
+                    className="inline-flex h-7 items-center gap-1 rounded-[6px] border border-[color-mix(in_oklab,#8b6ff0_20%,var(--border-default))] bg-[color-mix(in_oklab,#8b6ff0_6%,var(--bg-elevated))] px-2 text-[10px] text-[var(--text-secondary)]"
+                  >
                     {tag}
                     <button
                       type="button"
                       className="grid size-4 place-items-center rounded text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--danger)]"
                       onClick={() =>
                         updateCard(activeCard.id, {
-                          tags: (activeCard.tags ?? []).filter((candidate) => candidate !== tag),
+                          tags: (activeCard.tags ?? []).filter(
+                            (candidate) => candidate !== tag,
+                          ),
                         })
                       }
                       aria-label={`Remove ${tag}`}
@@ -9315,7 +9534,11 @@ function FlashcardStudio({
                   placeholder="Add tag"
                   aria-label="Add card tag"
                 />
-                <button type="button" className="inline-flex h-7 items-center gap-1 rounded-[6px] px-2 text-[10px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" onClick={addActiveCardTag}>
+                <button
+                  type="button"
+                  className="inline-flex h-7 items-center gap-1 rounded-[6px] px-2 text-[10px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                  onClick={addActiveCardTag}
+                >
                   <Plus className="h-3 w-3" /> Add tag
                 </button>
               </div>
@@ -9394,7 +9617,8 @@ function FlashcardStudio({
                       value={activeCard.confidence ?? "unknown"}
                       onChange={(event) =>
                         updateCard(activeCard.id, {
-                          confidence: event.target.value as DeckCard["confidence"],
+                          confidence: event.target
+                            .value as DeckCard["confidence"],
                         })
                       }
                       className={inputClass()}
@@ -9409,7 +9633,9 @@ function FlashcardStudio({
                     <select
                       value={activeCard.section ?? "Section 1"}
                       onChange={(event) =>
-                        updateCard(activeCard.id, { section: event.target.value })
+                        updateCard(activeCard.id, {
+                          section: event.target.value,
+                        })
                       }
                       className={inputClass()}
                     >
@@ -10053,10 +10279,12 @@ function QuizStudio({
   useEffect(() => {
     const openPreview = (event: Event) => {
       const detail = (event as CustomEvent<{ artifactId?: string }>).detail;
-      if (!detail?.artifactId || detail.artifactId === artifactId) setView("preview");
+      if (!detail?.artifactId || detail.artifactId === artifactId)
+        setView("preview");
     };
     window.addEventListener("spectra:preview-quiz", openPreview);
-    return () => window.removeEventListener("spectra:preview-quiz", openPreview);
+    return () =>
+      window.removeEventListener("spectra:preview-quiz", openPreview);
   }, [artifactId]);
 
   useEffect(() => {
@@ -11685,7 +11913,11 @@ function QuizStudio({
                 Questions ({questions.length})
               </span>
               {!readOnly ? (
-                <button type="button" className={smallActionClass()} onClick={addQuestion}>
+                <button
+                  type="button"
+                  className={smallActionClass()}
+                  onClick={addQuestion}
+                >
                   <Plus className="h-3.5 w-3.5" /> Add question
                 </button>
               ) : null}
@@ -11709,19 +11941,19 @@ function QuizStudio({
                     {index + 1}
                   </span>
                   <span className="rounded-[5px] bg-[color-mix(in_oklab,#8b6ff0_8%,var(--bg-primary))] px-1.5 py-1 text-[9px] font-medium text-[#7560e8]">
+                    {
                       {
-                        {
-                          multiple_choice: "MCQ",
-                          short_answer: "Short answer",
-                          true_false: "True / False",
-                          select_all: "Select all",
-                          ordering: "Ordering",
-                          numeric: "Numeric",
-                          fill_blank: "Fill blank",
-                          long_response: "Long response",
-                          matching: "Matching",
-                        }[question.type]
-                      }
+                        multiple_choice: "MCQ",
+                        short_answer: "Short answer",
+                        true_false: "True / False",
+                        select_all: "Select all",
+                        ordering: "Ordering",
+                        numeric: "Numeric",
+                        fill_blank: "Fill blank",
+                        long_response: "Long response",
+                        matching: "Matching",
+                      }[question.type]
+                    }
                   </span>
                   <span className="min-w-0">
                     <span className="block truncate text-[10px] font-medium text-[var(--text-primary)]">
@@ -11733,7 +11965,11 @@ function QuizStudio({
               ))}
             </div>
             {!readOnly ? (
-              <button type="button" className={`${smallActionClass()} mt-2`} onClick={addQuestion}>
+              <button
+                type="button"
+                className={`${smallActionClass()} mt-2`}
+                onClick={addQuestion}
+              >
                 <Plus className="h-3.5 w-3.5" /> Add question
               </button>
             ) : null}
@@ -11762,8 +11998,9 @@ function QuizStudio({
                   const duplicate: QuizQuestion = {
                     ...structuredClone(activeQuestion),
                     id: questionId,
-                    optionIds: activeQuestion.options.map((_, optionIndex) =>
-                      `${questionId}:option:${optionIndex + 1}`,
+                    optionIds: activeQuestion.options.map(
+                      (_, optionIndex) =>
+                        `${questionId}:option:${optionIndex + 1}`,
                     ),
                   };
                   commit([...questions, duplicate]);
@@ -11859,9 +12096,9 @@ function QuizStudio({
                           aria-label={`Remove ${standard}`}
                           onClick={() =>
                             updateQuestion(activeQuestion.id, {
-                              standards: (activeQuestion.standards ?? []).filter(
-                                (item) => item !== standard,
-                              ),
+                              standards: (
+                                activeQuestion.standards ?? []
+                              ).filter((item) => item !== standard),
                             })
                           }
                         >
@@ -11875,10 +12112,17 @@ function QuizStudio({
                       onKeyDown={(event) => {
                         if (event.key !== "Enter" && event.key !== ",") return;
                         event.preventDefault();
-                        const value = event.currentTarget.value.trim().replace(/,$/, "");
+                        const value = event.currentTarget.value
+                          .trim()
+                          .replace(/,$/, "");
                         if (!value) return;
                         updateQuestion(activeQuestion.id, {
-                          standards: Array.from(new Set([...(activeQuestion.standards ?? []), value])),
+                          standards: Array.from(
+                            new Set([
+                              ...(activeQuestion.standards ?? []),
+                              value,
+                            ]),
+                          ),
                         });
                         event.currentTarget.value = "";
                       }}
@@ -11992,13 +12236,21 @@ function QuizStudio({
                       onDrop={(event) => {
                         event.preventDefault();
                         const file = event.dataTransfer.files?.[0];
-                        if (file?.type.startsWith("image/")) void uploadQuestionMedia(file);
+                        if (file?.type.startsWith("image/"))
+                          void uploadQuestionMedia(file);
                       }}
                     >
                       {uploadingQuizMedia ? (
-                        <><Loader2 className="mx-auto mb-2 h-4 w-4 animate-spin" />Uploading image…</>
+                        <>
+                          <Loader2 className="mx-auto mb-2 h-4 w-4 animate-spin" />
+                          Uploading image…
+                        </>
                       ) : (
-                        <><span>Drag and drop image</span><span>or</span><strong>Browse</strong></>
+                        <>
+                          <span>Drag and drop image</span>
+                          <span>or</span>
+                          <strong>Browse</strong>
+                        </>
                       )}
                       <input
                         type="file"
@@ -13232,12 +13484,24 @@ function PlannerStudio({
             </div>
             <div className="-mt-1 grid grid-cols-2 gap-2">
               <div className="rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2">
-                <strong className="block text-[12px] font-semibold text-[var(--text-primary)]">{task.status === "done" ? "Completed" : task.status === "doing" ? "In progress" : "Active"}</strong>
-                <span className="text-[10px] text-[var(--text-tertiary)]">State</span>
+                <strong className="block text-[12px] font-semibold text-[var(--text-primary)]">
+                  {task.status === "done"
+                    ? "Completed"
+                    : task.status === "doing"
+                      ? "In progress"
+                      : "Active"}
+                </strong>
+                <span className="text-[10px] text-[var(--text-tertiary)]">
+                  State
+                </span>
               </div>
               <div className="rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2">
-                <strong className="block text-[12px] font-semibold text-[var(--text-primary)]">Task</strong>
-                <span className="text-[10px] text-[var(--text-tertiary)]">Type</span>
+                <strong className="block text-[12px] font-semibold text-[var(--text-primary)]">
+                  Task
+                </strong>
+                <span className="text-[10px] text-[var(--text-tertiary)]">
+                  Type
+                </span>
               </div>
             </div>
           </SideCard>
@@ -13245,60 +13509,68 @@ function PlannerStudio({
             <SideCard title="Schedule">
               {scheduleOpen ? (
                 <div className="spectra-planner-schedule-editor">
-              <Field
-                label="Starts"
-                aiActive={pathTouches(aiChangedPaths, "/startAt")}
-              >
-                <div className="grid grid-cols-[minmax(0,1fr)_88px] gap-1.5">
-                  <input
-                    type="date"
-                    value={startDate}
-                    disabled={sourceLocked("startAt")}
-                    onInput={(event) =>
-                      updateSchedule({ startDate: event.currentTarget.value })
-                    }
-                    className={inputClass()}
-                  />
-                  <input
-                    type="time"
-                    value={startTime}
-                    disabled={task.allDay || sourceLocked("startAt")}
-                    onInput={(event) =>
-                      updateSchedule({ startTime: event.currentTarget.value })
-                    }
-                    className={inputClass()}
-                    aria-label="Start time"
-                  />
-                </div>
-              </Field>
-              <div className="mt-3">
-                <Field
-                  label="Ends"
-                  aiActive={pathTouches(aiChangedPaths, "/endAt")}
-                >
-                  <div className="grid grid-cols-[minmax(0,1fr)_88px] gap-1.5">
-                    <input
-                      type="date"
-                      value={endDate}
-                      disabled={sourceLocked("endAt")}
-                      onInput={(event) =>
-                        updateSchedule({ endDate: event.currentTarget.value })
-                      }
-                      className={inputClass()}
-                    />
-                    <input
-                      type="time"
-                      value={endTime}
-                      disabled={task.allDay || sourceLocked("endAt")}
-                      onInput={(event) =>
-                        updateSchedule({ endTime: event.currentTarget.value })
-                      }
-                      className={inputClass()}
-                      aria-label="End time"
-                    />
+                  <Field
+                    label="Starts"
+                    aiActive={pathTouches(aiChangedPaths, "/startAt")}
+                  >
+                    <div className="grid grid-cols-[minmax(0,1fr)_88px] gap-1.5">
+                      <input
+                        type="date"
+                        value={startDate}
+                        disabled={sourceLocked("startAt")}
+                        onInput={(event) =>
+                          updateSchedule({
+                            startDate: event.currentTarget.value,
+                          })
+                        }
+                        className={inputClass()}
+                      />
+                      <input
+                        type="time"
+                        value={startTime}
+                        disabled={task.allDay || sourceLocked("startAt")}
+                        onInput={(event) =>
+                          updateSchedule({
+                            startTime: event.currentTarget.value,
+                          })
+                        }
+                        className={inputClass()}
+                        aria-label="Start time"
+                      />
+                    </div>
+                  </Field>
+                  <div className="mt-3">
+                    <Field
+                      label="Ends"
+                      aiActive={pathTouches(aiChangedPaths, "/endAt")}
+                    >
+                      <div className="grid grid-cols-[minmax(0,1fr)_88px] gap-1.5">
+                        <input
+                          type="date"
+                          value={endDate}
+                          disabled={sourceLocked("endAt")}
+                          onInput={(event) =>
+                            updateSchedule({
+                              endDate: event.currentTarget.value,
+                            })
+                          }
+                          className={inputClass()}
+                        />
+                        <input
+                          type="time"
+                          value={endTime}
+                          disabled={task.allDay || sourceLocked("endAt")}
+                          onInput={(event) =>
+                            updateSchedule({
+                              endTime: event.currentTarget.value,
+                            })
+                          }
+                          className={inputClass()}
+                          aria-label="End time"
+                        />
+                      </div>
+                    </Field>
                   </div>
-                </Field>
-              </div>
                 </div>
               ) : (
                 <div className="spectra-planner-schedule-summary">
@@ -13328,7 +13600,13 @@ function PlannerStudio({
                 </span>
               </button>
               {scheduleOpen ? (
-                <button type="button" className="mt-2 w-full text-center text-[10px] text-[var(--text-tertiary)] hover:text-[var(--text-primary)]" onClick={() => setScheduleOpen(false)}>Done editing schedule</button>
+                <button
+                  type="button"
+                  className="mt-2 w-full text-center text-[10px] text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
+                  onClick={() => setScheduleOpen(false)}
+                >
+                  Done editing schedule
+                </button>
               ) : null}
             </SideCard>
           </fieldset>
@@ -13563,7 +13841,11 @@ function QuestionEditor({
   function addTag() {
     const tag = tagDraft.trim().replace(/^#+/, "");
     if (!tag) return;
-    if (!(question.tags ?? []).some((candidate) => candidate.toLowerCase() === tag.toLowerCase())) {
+    if (
+      !(question.tags ?? []).some(
+        (candidate) => candidate.toLowerCase() === tag.toLowerCase(),
+      )
+    ) {
       onChange({ tags: [...(question.tags ?? []), tag] });
     }
     setTagDraft("");
@@ -13664,7 +13946,9 @@ function QuestionEditor({
         <Field label="Question">
           <div className="spectra-quiz-prompt-editor">
             <div role="toolbar" aria-label="Question formatting">
-              <strong>B</strong><em>I</em><u>U</u>
+              <strong>B</strong>
+              <em>I</em>
+              <u>U</u>
               <Link2 className="h-3.5 w-3.5" />
               <List className="h-3.5 w-3.5" />
               <ListOrdered className="h-3.5 w-3.5" />
@@ -13856,7 +14140,10 @@ function QuestionEditor({
                   }));
                   for (let index = paired.length - 1; index > 0; index -= 1) {
                     const target = Math.floor(Math.random() * (index + 1));
-                    [paired[index], paired[target]] = [paired[target]!, paired[index]!];
+                    [paired[index], paired[target]] = [
+                      paired[target]!,
+                      paired[index]!,
+                    ];
                   }
                   onChange({
                     options: paired.map(({ option }) => option),
@@ -13994,7 +14281,10 @@ function QuestionEditor({
         </section>
       ) : question.type === "long_response" ? (
         <div className="mt-4">
-          <Field label="Formative rubric / review guidance" aiActive={aiField("rubric")}>
+          <Field
+            label="Formative rubric / review guidance"
+            aiActive={aiField("rubric")}
+          >
             <textarea
               value={question.rubric ?? ""}
               onChange={(event) => onChange({ rubric: event.target.value })}
@@ -14020,7 +14310,10 @@ function QuestionEditor({
               placeholder="42"
             />
           </Field>
-          <Field label="Accepted tolerance (±)" aiActive={aiField("numericTolerance")}>
+          <Field
+            label="Accepted tolerance (±)"
+            aiActive={aiField("numericTolerance")}
+          >
             <input
               type="number"
               min={0}
@@ -14064,7 +14357,10 @@ function QuestionEditor({
           </Field>
           {question.type === "fill_blank" ? (
             <div className="mt-3">
-              <Field label="Other accepted answers" aiActive={aiField("correctAnswers")}>
+              <Field
+                label="Other accepted answers"
+                aiActive={aiField("correctAnswers")}
+              >
                 <input
                   value={(question.correctAnswers ?? []).join("; ")}
                   onChange={(event) =>
@@ -14102,7 +14398,13 @@ function QuestionEditor({
                 <button
                   type="button"
                   aria-label={`Remove ${tag} tag`}
-                  onClick={() => onChange({ tags: (question.tags ?? []).filter((item) => item !== tag) })}
+                  onClick={() =>
+                    onChange({
+                      tags: (question.tags ?? []).filter(
+                        (item) => item !== tag,
+                      ),
+                    })
+                  }
                 >
                   <X className="h-2.5 w-2.5" />
                 </button>
@@ -14130,7 +14432,10 @@ function QuestionEditor({
           <ChevronDown className="ml-auto h-3.5 w-3.5" />
         </summary>
         <div className="grid gap-4 pt-3">
-          <Field label="Formative feedback / next step" aiActive={aiField("feedback")}>
+          <Field
+            label="Formative feedback / next step"
+            aiActive={aiField("feedback")}
+          >
             <textarea
               value={question.feedback ?? ""}
               onChange={(event) => onChange({ feedback: event.target.value })}
@@ -14143,7 +14448,10 @@ function QuestionEditor({
               value={(question.sourceRefs ?? []).join(", ")}
               onChange={(event) =>
                 onChange({
-                  sourceRefs: event.target.value.split(",").map((item) => item.trim()).filter(Boolean),
+                  sourceRefs: event.target.value
+                    .split(",")
+                    .map((item) => item.trim())
+                    .filter(Boolean),
                 })
               }
               className={inputClass()}
@@ -14814,8 +15122,13 @@ function StudioDetails({
     SpectraArtifactVersion[]
   >([]);
   const visibleTags = tagsFromDraft(tagDraft);
-  const detailDeckCards = artifact.blueprintKey === "flashcard_deck" ? deckCards(artifact.content) : [];
-  const detailDeckSections = new Set(detailDeckCards.map((card) => card.section ?? "Section 1")).size;
+  const detailDeckCards =
+    artifact.blueprintKey === "flashcard_deck"
+      ? deckCards(artifact.content)
+      : [];
+  const detailDeckSections = new Set(
+    detailDeckCards.map((card) => card.section ?? "Section 1"),
+  ).size;
   useEffect(() => {
     void getSpectraArtifactLinks(artifact._id)
       .then((result) => setDurableLinks(result.links))
@@ -14980,9 +15293,31 @@ function StudioDetails({
           {artifact.blueprintKey === "flashcard_deck" ? (
             <SideCard title="Deck metrics">
               <div className="grid grid-cols-3 divide-x divide-[var(--border-subtle)] text-center">
-                <div><strong className="block font-display text-[14px] text-[var(--text-primary)]">{detailDeckCards.length}</strong><span className="text-[9px] text-[var(--text-tertiary)]">Cards</span></div>
-                <div><strong className="block font-display text-[14px] text-[var(--text-primary)]">{detailDeckSections}</strong><span className="text-[9px] text-[var(--text-tertiary)]">Sections</span></div>
-                <div><strong className="block font-display text-[14px] text-[var(--text-primary)]">~{Math.max(1, Math.round(detailDeckCards.length * 0.75))} min</strong><span className="text-[9px] text-[var(--text-tertiary)]">Study time</span></div>
+                <div>
+                  <strong className="block font-display text-[14px] text-[var(--text-primary)]">
+                    {detailDeckCards.length}
+                  </strong>
+                  <span className="text-[9px] text-[var(--text-tertiary)]">
+                    Cards
+                  </span>
+                </div>
+                <div>
+                  <strong className="block font-display text-[14px] text-[var(--text-primary)]">
+                    {detailDeckSections}
+                  </strong>
+                  <span className="text-[9px] text-[var(--text-tertiary)]">
+                    Sections
+                  </span>
+                </div>
+                <div>
+                  <strong className="block font-display text-[14px] text-[var(--text-primary)]">
+                    ~{Math.max(1, Math.round(detailDeckCards.length * 0.75))}{" "}
+                    min
+                  </strong>
+                  <span className="text-[9px] text-[var(--text-tertiary)]">
+                    Study time
+                  </span>
+                </div>
               </div>
             </SideCard>
           ) : null}
@@ -15050,9 +15385,21 @@ function StudioDetails({
               {linkPickerOpen ? (
                 <div className="space-y-1 border-t border-[var(--border-subtle)] pt-2">
                   {suggestions.map(({ candidate }) => (
-                    <div key={candidate._id} className="flex items-center gap-2 rounded-[5px] px-1 py-1 text-[10px]">
-                      <span className="min-w-0 flex-1 truncate text-[var(--text-secondary)]">{candidate.title}</span>
-                      <button type="button" disabled={linkingId === candidate._id} className="text-[var(--accent-cyan)]" onClick={() => void confirmLink(candidate)}>{linkingId === candidate._id ? "Linking…" : "Add"}</button>
+                    <div
+                      key={candidate._id}
+                      className="flex items-center gap-2 rounded-[5px] px-1 py-1 text-[10px]"
+                    >
+                      <span className="min-w-0 flex-1 truncate text-[var(--text-secondary)]">
+                        {candidate.title}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={linkingId === candidate._id}
+                        className="text-[var(--accent-cyan)]"
+                        onClick={() => void confirmLink(candidate)}
+                      >
+                        {linkingId === candidate._id ? "Linking…" : "Add"}
+                      </button>
                     </div>
                   ))}
                 </div>
@@ -15060,8 +15407,13 @@ function StudioDetails({
             </div>
           </SideCard>
           {suggestions.length > 0 ? (
-            <details open className="spectra-related-artifacts rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
-              <summary className="text-[10px] font-semibold uppercase tracking-[.08em] text-[var(--text-tertiary)]">Related suggestions · {suggestions.length}</summary>
+            <details
+              open
+              className="spectra-related-artifacts rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3"
+            >
+              <summary className="text-[10px] font-semibold uppercase tracking-[.08em] text-[var(--text-tertiary)]">
+                Related suggestions · {suggestions.length}
+              </summary>
               <div className="space-y-1.5">
                 {suggestions.map(({ candidate }) => (
                   <div
@@ -15149,59 +15501,130 @@ function StudioDetails({
                 <Plus className="h-3.5 w-3.5" />
               </button>
             </div>
-            {tagEditorOpen ? <div className="mt-2 flex gap-1.5">
-              <input
-                value={newTag}
-                onChange={(event) => setNewTag(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && newTag.trim()) {
-                    event.preventDefault();
+            {tagEditorOpen ? (
+              <div className="mt-2 flex gap-1.5">
+                <input
+                  value={newTag}
+                  onChange={(event) => setNewTag(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && newTag.trim()) {
+                      event.preventDefault();
+                      onTagDraftChange(
+                        Array.from(
+                          new Set([...visibleTags, newTag.trim()]),
+                        ).join(", "),
+                      );
+                      setNewTag("");
+                    }
+                  }}
+                  className="h-8 min-w-0 flex-1 bg-transparent text-[11px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
+                  placeholder="Add a tag"
+                />
+                <button
+                  type="button"
+                  className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--accent-cyan)] hover:bg-[var(--bg-hover)]"
+                  onClick={() => {
+                    if (!newTag.trim()) return;
                     onTagDraftChange(
                       Array.from(new Set([...visibleTags, newTag.trim()])).join(
                         ", ",
                       ),
                     );
                     setNewTag("");
-                  }
-                }}
-                className="h-8 min-w-0 flex-1 bg-transparent text-[11px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
-                placeholder="Add a tag"
-              />
-              <button
-                type="button"
-                className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--accent-cyan)] hover:bg-[var(--bg-hover)]"
-                onClick={() => {
-                  if (!newTag.trim()) return;
-                  onTagDraftChange(
-                    Array.from(new Set([...visibleTags, newTag.trim()])).join(
-                      ", ",
-                    ),
-                  );
-                  setNewTag("");
-                }}
-                aria-label="Add tag"
-              >
-                <Plus className="h-3.5 w-3.5" />
-              </button>
-            </div> : null}
+                  }}
+                  aria-label="Add tag"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ) : null}
           </SideCard>
-          <SideCard title={artifact.blueprintKey === "flashcard_deck" ? "Metadata" : "Activity"}>
+          <SideCard
+            title={
+              artifact.blueprintKey === "flashcard_deck"
+                ? "Metadata"
+                : "Activity"
+            }
+          >
             <div className="space-y-2 text-[10px] text-[var(--text-secondary)]">
-              <div className="flex items-center justify-between"><span>Last edited</span><strong className="font-medium text-[var(--text-primary)]">{formatRelativeTime(artifact.updatedAt)}</strong></div>
-              <div className="flex items-center justify-between"><span>Created</span><strong className="font-medium text-[var(--text-primary)]">{formatShortDate(artifact.createdAt)}</strong></div>
+              <div className="flex items-center justify-between">
+                <span>Last edited</span>
+                <strong className="font-medium text-[var(--text-primary)]">
+                  {formatRelativeTime(artifact.updatedAt)}
+                </strong>
+              </div>
+              <div className="flex items-center justify-between">
+                <span>Created</span>
+                <strong className="font-medium text-[var(--text-primary)]">
+                  {formatShortDate(artifact.createdAt)}
+                </strong>
+              </div>
             </div>
           </SideCard>
-          {artifact.blueprintKey === "flashcard_deck" || artifact.blueprintKey === "quiz" ? (
+          {artifact.blueprintKey === "flashcard_deck" ||
+          artifact.blueprintKey === "quiz" ? (
             <SideCard title="Quick actions">
               <div className="space-y-0.5">
                 {artifact.blueprintKey === "flashcard_deck" ? (
-                  <button type="button" className="spectra-inspector-action" onClick={() => window.dispatchEvent(new CustomEvent("spectra:study-deck", { detail: { artifactId: artifact._id } }))}><BookOpen className="h-3.5 w-3.5" />Study this deck</button>
+                  <button
+                    type="button"
+                    className="spectra-inspector-action"
+                    onClick={() =>
+                      window.dispatchEvent(
+                        new CustomEvent("spectra:study-deck", {
+                          detail: { artifactId: artifact._id },
+                        }),
+                      )
+                    }
+                  >
+                    <BookOpen className="h-3.5 w-3.5" />
+                    Study this deck
+                  </button>
                 ) : (
-                  <button type="button" className="spectra-inspector-action" onClick={() => window.dispatchEvent(new CustomEvent("spectra:preview-quiz", { detail: { artifactId: artifact._id } }))}><Eye className="h-3.5 w-3.5" />Preview quiz</button>
+                  <button
+                    type="button"
+                    className="spectra-inspector-action"
+                    onClick={() =>
+                      window.dispatchEvent(
+                        new CustomEvent("spectra:preview-quiz", {
+                          detail: { artifactId: artifact._id },
+                        }),
+                      )
+                    }
+                  >
+                    <Eye className="h-3.5 w-3.5" />
+                    Preview quiz
+                  </button>
                 )}
-                <button type="button" className="spectra-inspector-action" disabled={duplicating} onClick={() => void duplicateCurrentArtifact()}><Copy className="h-3.5 w-3.5" />{duplicating ? "Duplicating…" : `Duplicate ${artifact.blueprintKey === "quiz" ? "quiz" : "deck"}`}</button>
-                <button type="button" className="spectra-inspector-action" onClick={() => window.print()}><FileDown className="h-3.5 w-3.5" />Export / print</button>
-                {onArchive ? <button type="button" className="spectra-inspector-action" onClick={() => void onArchive()}><Archive className="h-3.5 w-3.5" />Archive {artifact.blueprintKey === "quiz" ? "quiz" : "deck"}</button> : null}
+                <button
+                  type="button"
+                  className="spectra-inspector-action"
+                  disabled={duplicating}
+                  onClick={() => void duplicateCurrentArtifact()}
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                  {duplicating
+                    ? "Duplicating…"
+                    : `Duplicate ${artifact.blueprintKey === "quiz" ? "quiz" : "deck"}`}
+                </button>
+                <button
+                  type="button"
+                  className="spectra-inspector-action"
+                  onClick={() => window.print()}
+                >
+                  <FileDown className="h-3.5 w-3.5" />
+                  Export / print
+                </button>
+                {onArchive ? (
+                  <button
+                    type="button"
+                    className="spectra-inspector-action"
+                    onClick={() => void onArchive()}
+                  >
+                    <Archive className="h-3.5 w-3.5" />
+                    Archive {artifact.blueprintKey === "quiz" ? "quiz" : "deck"}
+                  </button>
+                ) : null}
               </div>
             </SideCard>
           ) : null}
@@ -15343,7 +15766,11 @@ function CardFace({
 
 function SideCard({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section data-spectra-card="side" data-side-card-title={title.toLowerCase().replaceAll(" ", "-")} className="p-4">
+    <section
+      data-spectra-card="side"
+      data-side-card-title={title.toLowerCase().replaceAll(" ", "-")}
+      className="p-4"
+    >
       <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
         {title}
       </h3>
@@ -15383,10 +15810,9 @@ function Field({
         AI_FORM_CONTROL_TAGS.has(only.type)
       ) {
         markedControl = true;
-        control = cloneElement(
-          only as ReactElement<Record<string, unknown>>,
-          { "data-ai-region": true },
-        );
+        control = cloneElement(only as ReactElement<Record<string, unknown>>, {
+          "data-ai-region": true,
+        });
       }
     }
   }

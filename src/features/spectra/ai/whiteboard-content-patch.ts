@@ -53,7 +53,14 @@ function nodeLabel(node: WhiteboardNode) {
     content && typeof content === "object" && !Array.isArray(content)
       ? (content as Record<string, unknown>)
       : {};
-  const parts = [row.text, row.title, row.label, node.semanticLabel]
+  const parts = [
+    row.text,
+    row.title,
+    row.label,
+    row.header,
+    row.body,
+    node.semanticLabel,
+  ]
     .filter((value): value is string => typeof value === "string")
     .map((value) => value.trim())
     .filter(Boolean);

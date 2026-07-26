@@ -8,6 +8,11 @@ import {
   selectionIsActive,
 } from "../collaboration/presence-anchor";
 import type { CollaborationPresence } from "../collaboration/types";
+import {
+  actorLabel,
+  describeState,
+  stateIsVisible,
+} from "../collaboration/interaction-model";
 import type { ArtifactCommentRegion } from "./artifact-comments-panel";
 
 function initials(name?: string) {
@@ -566,6 +571,8 @@ export function CollaborationPresenceIndicator({
         // Idle AI peers after a run must not linger as permanent avatars —
         // only show them while they are actively streaming or pointing.
         if (person.actorKind === "ai") {
+          if (person.interactionState)
+            return stateIsVisible(person.interactionState);
           return (
             person.previewPhase === "streaming" ||
             (person.previewPatches?.length ?? 0) > 0
@@ -588,8 +595,10 @@ export function CollaborationPresenceIndicator({
   const activeAi = collaborators.find(
     (person) =>
       person.actorKind === "ai" &&
-      (person.previewPhase === "streaming" ||
-        (person.previewPatches?.length ?? 0) > 0),
+      (person.interactionState
+        ? stateIsVisible(person.interactionState)
+        : person.previewPhase === "streaming" ||
+          (person.previewPatches?.length ?? 0) > 0),
   );
   const activeAiName = activeAi
     ? presenceName(activeAi, presence, currentAccountId, currentDisplayName)
@@ -603,8 +612,11 @@ export function CollaborationPresenceIndicator({
   const activeAiRegion = activeAi?.activeRegionId
     ? (regionNames.get(activeAi.activeRegionId) ?? null)
     : null;
-  const activeAiPlace =
-    activeAiLine != null
+  // A semantic frame names the control and the act; the line/region fallback is
+  // only for peers still on the coarse protocol.
+  const activeAiPlace = activeAi?.interactionState
+    ? describeState(activeAi.interactionState)
+    : activeAiLine != null
       ? activeAiRegion
         ? `${activeAiRegion} · line ${activeAiLine}`
         : `Line ${activeAiLine}`
@@ -663,12 +675,14 @@ export function CollaborationPresenceIndicator({
           </div>
           <ul className="max-h-64 overflow-auto py-1">
             {collaborators.map((person) => {
-              const label = presenceName(
-                person,
-                presence,
-                currentAccountId,
-                currentDisplayName,
-              );
+              const label = person.interactionState
+                ? actorLabel(person.interactionState.actor)
+                : presenceName(
+                    person,
+                    presence,
+                    currentAccountId,
+                    currentDisplayName,
+                  );
               const lineIndex =
                 person.cursor?.anchor?.lineIndex ??
                 person.selection?.ranges[0]?.lineIndex;
@@ -706,13 +720,15 @@ export function CollaborationPresenceIndicator({
                         {label}
                       </span>
                       <span className="block truncate text-[10px] text-[var(--text-tertiary)]">
-                        {place
-                          ? `At ${place}`
-                          : selectionIsActive(person.selection)
-                            ? "Selecting text"
-                            : validCursor(person.cursor)
-                              ? "Viewing"
-                              : "Present"}
+                        {person.interactionState
+                          ? describeState(person.interactionState)
+                          : place
+                            ? `At ${place}`
+                            : selectionIsActive(person.selection)
+                              ? "Selecting text"
+                              : validCursor(person.cursor)
+                                ? "Viewing"
+                                : "Present"}
                       </span>
                     </span>
                   </button>

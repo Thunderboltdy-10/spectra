@@ -29,6 +29,11 @@ import {
 } from "@/features/spectra/artifacts/types";
 import { validateArtifactContent } from "@/features/spectra/artifacts/registry";
 import { normalizeArtifactContent } from "@/features/spectra/ai/content-normalization";
+import {
+  aiInteractionFrame,
+  aiSettleFrame,
+} from "@/features/spectra/ai/ai-interaction-frames";
+import type { ActorIdentity as FabricActor } from "@/features/spectra/collaboration/interaction-model";
 
 type ArtifactRecord = {
   _id: string;
@@ -341,6 +346,22 @@ async function synchronizeMutation(params: {
     presence && typeof presence === "object"
       ? (presence as Record<string, unknown>)
       : {};
+  /**
+   * The AI's fabric identity. Owner attribution travels with every frame so a
+   * peer never has to guess whose AI is editing, and so the AI inherits its
+   * owner's presence colour instead of a separate "robot" palette.
+   */
+  const ownerName = params.session.actor.name.trim();
+  const fabricActor: FabricActor = {
+    clientId: params.session.clientId,
+    kind: "ai",
+    name: ownerName ? `${ownerName}'s AI` : "Spectra AI",
+    ownerAccountId: params.session.actor.accountId,
+    ...(ownerName ? { ownerName } : {}),
+    runId: params.runId,
+    operationId: params.operationId,
+  };
+  const fabricTypeKey = requireArtifactType(params.session.artifact.blueprintKey);
   const startingRegionId = params.plan.regions[0]?.regionId;
   params.provider.setAwarenessField("user", {
     ...presenceRecord,
@@ -363,6 +384,9 @@ async function synchronizeMutation(params: {
     baseSnapshot: params.baseSnapshot,
     proposedSnapshot: params.proposedSnapshot,
   });
+  /** Last control the AI touched, so the settle frame lands on it. */
+  let lastFramePath: string | undefined;
+  let settleSequence = 0;
   let renewing = true;
   const renewal = setInterval(() => {
     if (!renewing) return;
@@ -394,6 +418,7 @@ async function synchronizeMutation(params: {
     delete idlePresence.selection;
     delete idlePresence.interaction;
     delete idlePresence.menu;
+    delete idlePresence.interactionState;
     params.provider.setAwarenessField("user", idlePresence);
   };
   try {
@@ -408,6 +433,7 @@ async function synchronizeMutation(params: {
           }));
     let previousStream = params.streamBase;
     for (const [sequence, beat] of beats.entries()) {
+      settleSequence = sequence + 1;
       const aborted = abortError(params.signal);
       if (aborted) throw aborted;
       if (!params.streamBase) continue;
@@ -419,10 +445,8 @@ async function synchronizeMutation(params: {
         params.streamBase,
         streamValue,
       );
-      const deltaPatches = artifactLivePreviewPatches(
-        previousStream ?? params.streamBase,
-        streamValue,
-      );
+      const priorStream = previousStream ?? params.streamBase;
+      const deltaPatches = artifactLivePreviewPatches(priorStream, streamValue);
       previousStream = streamValue;
       const focusPatch =
         (beat.focusPath
@@ -500,8 +524,46 @@ async function synchronizeMutation(params: {
         previewGesture === "selecting" &&
         typeof selectionEnd === "number" &&
         selectionEnd > 0;
+      // Protocol v2 frame. The act is derived from the values themselves, so
+      // presence can only claim an edit that genuinely happened between beats.
+      const framePath = focusPath.startsWith("/content/")
+        ? focusPath.slice("/content".length)
+        : focusPath;
+      lastFramePath = framePath;
+      const interactionState = aiInteractionFrame({
+        artifactId: params.session.artifact._id,
+        typeKey: fabricTypeKey,
+        actor: fabricActor,
+        path: framePath,
+        ...(activeRegionId ? { regionId: activeRegionId } : {}),
+        before: valueAtPath(priorStream, focusPath),
+        after: focusValue,
+        ...(selectingLine ? { selectionEnd } : {}),
+        ...(beat.menu?.open && beat.menu.label
+          ? {
+              menu: {
+                label: beat.menu.label,
+                options: (beat.menu.options ?? []).map((option) =>
+                  typeof option === "string"
+                    ? { value: option, label: option }
+                    : option,
+                ),
+                ...(beat.menu.highlighted
+                  ? { highlighted: beat.menu.highlighted }
+                  : {}),
+              },
+            }
+          : {}),
+        sequence,
+        patches: previewPatches.map((patch) => ({
+          path: patch.path,
+          value: patch.value,
+        })),
+        ...(activeRegionId ? { heldRegionIds: [activeRegionId] } : {}),
+      });
       params.provider.setAwarenessField("user", {
         ...livePresenceRecord,
+        interactionState,
         ...(activeRegionId
           ? {
               activeRegionId,
@@ -588,7 +650,7 @@ async function synchronizeMutation(params: {
             ),
           ),
         ].slice(0, 16);
-        let stagedPaths = (
+        const stagedPaths = (
           focusPaths.length
             ? focusPaths
             : beat.focusPath
@@ -653,7 +715,24 @@ async function synchronizeMutation(params: {
       delete held.previewPatches;
       delete held.previewPhase;
       delete held.previewGesture;
-      params.provider.setAwarenessField("user", held);
+      // Settle on the control that was just edited. Speculation is dropped here
+      // because the value is durable now: peers stop previewing and read Yjs.
+      const settledPath = lastFramePath ?? "/";
+      params.provider.setAwarenessField("user", {
+        ...held,
+        interactionState: aiSettleFrame({
+          artifactId: params.session.artifact._id,
+          typeKey: fabricTypeKey,
+          actor: fabricActor,
+          path: settledPath,
+          ...(params.plan.regions[0]?.regionId
+            ? { regionId: params.plan.regions[0].regionId }
+            : {}),
+          before: undefined,
+          after: undefined,
+          sequence: settleSequence,
+        }),
+      });
       await new Promise<void>((resolve) => setTimeout(resolve, 420));
     }
     return {
@@ -830,6 +909,9 @@ export async function applyAiArtifactMutation(params: {
     const presenceName = session.actor.name.trim()
       ? `${session.actor.name.trim()}'s AI`
       : "Spectra AI";
+    // Arrive as present-but-idle. No cursor coordinate is published: before the
+    // first operation envelope there is no control to point at, and inventing a
+    // position is exactly how a decorative cursor ends up parked mid-canvas.
     provider.setAwarenessField("user", {
       clientId,
       accountId: session.actor.accountId,
@@ -838,7 +920,24 @@ export async function applyAiArtifactMutation(params: {
       actorKind: "ai",
       runId: params.runId,
       operationId: params.operationId,
-      cursor: { x: 0.72, y: 0.28, updatedAt: Date.now() },
+      interactionState: {
+        v: 2 as const,
+        actor: {
+          clientId,
+          kind: "ai" as const,
+          name: presenceName,
+          ownerAccountId: session.actor.accountId,
+          ...(session.actor.name.trim()
+            ? { ownerName: session.actor.name.trim() }
+            : {}),
+          runId: params.runId,
+          operationId: params.operationId,
+        },
+        act: { kind: "idle" as const },
+        lifecycle: "queued" as const,
+        target: null,
+        at: Date.now(),
+      },
     });
     presenceStartedAt = Date.now();
     // Awareness is a visible part of the operation, not disposable metadata.

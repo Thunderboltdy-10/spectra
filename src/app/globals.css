@@ -6487,6 +6487,86 @@ button:not(:disabled),
   }
 }
 
+/* Contextual AI activity on an artifact card.
+   One quiet line that names the actor and the operation. It reads as part of
+   the card's own metadata column rather than as a badge stuck on top of it. */
+.spectra-card-activity {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  margin-top: 9px;
+  padding-top: 7px;
+  border-top: 1px solid
+    color-mix(in oklab, var(--accent-cyan) 16%, var(--card-border-soft));
+  font-size: 10.5px;
+  line-height: 1.35;
+  color: var(--text-secondary);
+  animation: spectra-card-activity-in 240ms var(--ease-standard) both;
+}
+
+.spectra-card-activity-spark {
+  width: 10px;
+  height: 10px;
+  flex-shrink: 0;
+  translate: 0 1.5px;
+  color: var(--accent-cyan);
+  /* Breathes rather than flashes: presence, not an alarm. */
+  animation: spectra-card-activity-spark 2.4s var(--ease-standard) infinite;
+}
+
+.spectra-card-activity-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spectra-card-activity-text strong {
+  margin-right: 5px;
+  font-weight: 550;
+  color: var(--text-primary);
+}
+
+/* Structural work reads as a step forward; text work reads as a steady hand. */
+.spectra-card-activity[data-act="create"] .spectra-card-activity-spark,
+.spectra-card-activity[data-act="remove"] .spectra-card-activity-spark,
+.spectra-card-activity[data-act="reorder"] .spectra-card-activity-spark {
+  animation-duration: 1.6s;
+}
+
+@keyframes spectra-card-activity-in {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes spectra-card-activity-spark {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(0.94);
+  }
+  45% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spectra-card-activity,
+  .spectra-card-activity-spark {
+    animation: none;
+  }
+  .spectra-card-activity-spark {
+    opacity: 0.9;
+  }
+}
+
 @keyframes spectra-workspace-flow {
   0% {
     transform: translateX(-120%);
@@ -15167,4 +15247,545 @@ body {
   font-family:
     var(--font-manrope), var(--font-sans), Arial, sans-serif !important;
   font-weight: 400 !important;
+}
+
+/* ==================================================================
+   Spectra interaction fabric
+   ------------------------------------------------------------------
+   Presence and AI chrome for every artifact editor. One accent colour
+   per actor (an AI shares its owner's), hairline geometry, and motion
+   that resolves rather than loops. Nothing here pulses indefinitely:
+   every animation has a finite iteration count, so a finished run can
+   never leave a live-looking artifact behind.
+   ================================================================== */
+
+.spectra-presence-layer {
+  position: sticky;
+  top: 0;
+  left: 0;
+  z-index: 64;
+  height: 0;
+  pointer-events: none;
+  contain: layout style;
+  font-family: var(--font-sans);
+}
+
+.spectra-presence-actor {
+  position: absolute;
+  inset: 0;
+  height: 0;
+}
+
+.spectra-presence-actor > * {
+  position: absolute;
+}
+
+/* --- selection ---------------------------------------------------- */
+
+.spectra-presence-selection {
+  border-radius: 2px;
+  background: color-mix(in oklab, var(--presence-color) 20%, transparent);
+  animation: spectra-presence-fade 140ms var(--ease-standard) both;
+}
+
+/* --- control frames ----------------------------------------------- */
+/* Drawn only for acts that concern a control as a whole. A caret inside
+   a field must never light up the card around it. */
+
+.spectra-presence-frame {
+  border-radius: 5px;
+  box-shadow: inset 0 0 0 1px
+    color-mix(in oklab, var(--presence-color) 46%, transparent);
+  animation: spectra-presence-fade 160ms var(--ease-standard) both;
+}
+
+.spectra-presence-frame[data-variant="drag"] {
+  background: color-mix(in oklab, var(--presence-color) 5%, transparent);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in oklab, var(--presence-color) 34%, transparent);
+}
+
+.spectra-presence-frame[data-variant="resize"] {
+  box-shadow: inset 0 0 0 1px
+    color-mix(in oklab, var(--presence-color) 58%, transparent);
+}
+
+.spectra-presence-frame[data-variant="structural"] {
+  background: color-mix(in oklab, var(--presence-color) 7%, transparent);
+}
+
+/* Contention is stated in the interface, not left to be inferred. */
+.spectra-presence-frame[data-variant="blocked"] {
+  background: color-mix(in oklab, var(--presence-color) 4%, transparent);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in oklab, var(--presence-color) 30%, transparent);
+  background-image: repeating-linear-gradient(
+    135deg,
+    transparent 0 5px,
+    color-mix(in oklab, var(--presence-color) 9%, transparent) 5px 10px
+  );
+}
+
+.spectra-presence-handles {
+  pointer-events: none;
+}
+
+.spectra-presence-handle {
+  position: absolute;
+  width: 5px;
+  height: 5px;
+  border-radius: 1px;
+  background: var(--bg-elevated);
+  box-shadow: 0 0 0 1px var(--presence-color);
+}
+
+.spectra-presence-handle[data-active="true"] {
+  background: var(--presence-color);
+  box-shadow: 0 0 0 2px
+    color-mix(in oklab, var(--presence-color) 26%, transparent);
+}
+
+.spectra-presence-handle[data-corner="nw"] { left: -3px; top: -3px; }
+.spectra-presence-handle[data-corner="ne"] { right: -3px; top: -3px; }
+.spectra-presence-handle[data-corner="se"] { right: -3px; bottom: -3px; }
+.spectra-presence-handle[data-corner="sw"] { left: -3px; bottom: -3px; }
+
+/* --- press ------------------------------------------------------- */
+
+.spectra-presence-press {
+  width: 26px;
+  height: 26px;
+  margin: -13px 0 0 -13px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--presence-color) 24%, transparent);
+  animation: spectra-presence-press 420ms var(--ease-standard) 1 both;
+}
+
+/* --- drop target -------------------------------------------------- */
+
+.spectra-presence-drop-anchor {
+  inset: 0;
+  height: 0;
+}
+
+.spectra-presence-drop {
+  position: absolute;
+  border-radius: 5px;
+  border: 1px dashed color-mix(in oklab, var(--presence-color) 55%, transparent);
+  background: color-mix(in oklab, var(--presence-color) 6%, transparent);
+}
+
+/* --- caret -------------------------------------------------------- */
+
+.spectra-presence-caret {
+  width: 2px;
+  border-radius: 1px;
+  background: var(--presence-color);
+  /* A caret is a live position, so it settles rather than fading in. */
+  transition:
+    left 90ms var(--ease-standard),
+    top 90ms var(--ease-standard),
+    height 90ms var(--ease-standard);
+}
+
+.spectra-presence-caret::before {
+  content: "";
+  position: absolute;
+  left: -1px;
+  top: -3px;
+  width: 4px;
+  height: 4px;
+  border-radius: 1px;
+  background: var(--presence-color);
+}
+
+/* Blinks only while characters are actually being entered. */
+.spectra-presence-caret[data-typing="true"] {
+  animation: spectra-presence-caret 1.05s steps(2, jump-none) infinite;
+}
+
+/* --- observed menu ----------------------------------------------- */
+/* A read-only mirror of a peer's open menu. It explains their action and
+   never takes focus or opens the local control. */
+
+.spectra-presence-menu {
+  min-width: 156px;
+  max-width: 240px;
+  padding: 3px;
+  border-radius: 8px;
+  border: 1px solid var(--border-default);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-lg);
+  animation: spectra-presence-menu 160ms var(--ease-standard) both;
+  transform-origin: top left;
+}
+
+.spectra-presence-menu-head {
+  padding: 4px 7px 5px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--presence-color);
+}
+
+.spectra-presence-menu-option {
+  padding: 4px 7px;
+  border-radius: 5px;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.spectra-presence-menu-option[data-highlighted="true"] {
+  background: color-mix(in oklab, var(--presence-color) 12%, transparent);
+  color: var(--text-primary);
+  font-weight: 600;
+  box-shadow: inset 0 0 0 1px
+    color-mix(in oklab, var(--presence-color) 24%, transparent);
+}
+
+/* --- cursor and flag --------------------------------------------- */
+
+.spectra-presence-cursor {
+  color: var(--presence-color);
+  transition:
+    left 110ms cubic-bezier(0.22, 1, 0.36, 1),
+    top 110ms cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: left, top;
+}
+
+.spectra-presence-layer[data-quiet="true"] .spectra-presence-cursor {
+  transition: none;
+}
+
+.spectra-presence-glyph {
+  position: absolute;
+  left: -2px;
+  top: -1px;
+  display: block;
+  filter: drop-shadow(0 1px 1.5px rgba(26, 20, 14, 0.16));
+}
+
+.spectra-presence-flag {
+  position: absolute;
+  left: 11px;
+  top: 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 260px;
+  height: 17px;
+  padding: 0 6px;
+  /* Square top-left corner reads as attached to the cursor tip. */
+  border-radius: 2px 7px 7px 7px;
+  background: var(--presence-color);
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.005em;
+  white-space: nowrap;
+  box-shadow: 0 1px 2px rgba(26, 20, 14, 0.16);
+  animation: spectra-presence-flag 180ms var(--ease-standard) both;
+}
+
+/* A caret carries its own identity label above the text line, so the flag
+   does not sit in the middle of the sentence being edited. */
+.spectra-presence-cursor[data-mode="caret"] .spectra-presence-flag,
+.spectra-presence-cursor[data-mode="selection"] .spectra-presence-flag {
+  left: -1px;
+  top: -19px;
+  border-radius: 7px 7px 7px 2px;
+}
+
+/* AI keeps its owner's colour and is distinguished by one sparkle and a
+   fine top highlight, not by a different hue or a glow. */
+.spectra-presence-flag[data-ai="true"] {
+  box-shadow:
+    0 1px 2px rgba(26, 20, 14, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.28);
+}
+
+.spectra-presence-flag-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.spectra-presence-flag-rule {
+  width: 1px;
+  height: 9px;
+  background: rgba(255, 255, 255, 0.4);
+}
+
+.spectra-presence-flag-action {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 500;
+  opacity: 0.86;
+}
+
+.spectra-presence-spark {
+  flex: none;
+  animation: spectra-presence-spark 2.4s var(--ease-standard) infinite;
+}
+
+/* --- off-surface marker ------------------------------------------ */
+/* A collaborator working outside the visible area gets an honest edge
+   marker rather than a cursor clamped to the border. */
+
+.spectra-presence-edge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 180px;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--presence-color);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+  box-shadow: 0 2px 6px rgba(26, 20, 14, 0.2);
+  animation: spectra-presence-fade 200ms var(--ease-standard) both;
+}
+
+.spectra-presence-edge[data-edge="top"] {
+  top: 8px;
+  transform: translateX(-50%);
+}
+.spectra-presence-edge[data-edge="bottom"] {
+  bottom: 8px;
+  transform: translateX(-50%);
+}
+.spectra-presence-edge[data-edge="left"] {
+  left: 8px;
+  transform: translateY(-50%);
+}
+.spectra-presence-edge[data-edge="right"] {
+  right: 8px;
+  transform: translateY(-50%);
+}
+
+.spectra-presence-edge-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* --- keyframes --------------------------------------------------- */
+
+@keyframes spectra-presence-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes spectra-presence-flag {
+  from { opacity: 0; transform: translate(-2px, -2px) scale(0.94); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes spectra-presence-menu {
+  from { opacity: 0; transform: translateY(-3px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes spectra-presence-caret {
+  from { opacity: 1; }
+  to { opacity: 0.25; }
+}
+
+@keyframes spectra-presence-press {
+  from { opacity: 0.75; transform: scale(0.35); }
+  to { opacity: 0; transform: scale(1.15); }
+}
+
+@keyframes spectra-presence-spark {
+  0%, 68%, 100% { opacity: 0.9; transform: none; }
+  78% { opacity: 1; transform: scale(1.22) rotate(14deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spectra-presence-cursor,
+  .spectra-presence-caret {
+    transition: none;
+  }
+  .spectra-presence-caret[data-typing="true"],
+  .spectra-presence-spark,
+  .spectra-presence-press {
+    animation: none;
+  }
+}
+
+/* --- AI change traces --------------------------------------------- *
+   A completed AI change leaves a precise, quiet mark on the exact field
+   it touched. Quality comes from placement and timing, not from opacity,
+   size or glow. The mark animates in once and then stops. */
+
+.spectra-trace-layer {
+  position: sticky;
+  top: 0;
+  left: 0;
+  z-index: 62;
+  height: 0;
+  pointer-events: none;
+}
+
+.spectra-trace {
+  position: absolute;
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--presence-color) 4.5%, transparent);
+}
+
+.spectra-trace[data-status="fresh"] {
+  animation: spectra-trace-arrive 620ms var(--ease-standard) 1 both;
+}
+
+.spectra-trace-rule {
+  position: absolute;
+  left: -5px;
+  top: 1px;
+  bottom: 1px;
+  width: 2px;
+  border-radius: 1px;
+  background: color-mix(in oklab, var(--presence-color) 55%, transparent);
+}
+
+.spectra-trace-chip {
+  position: absolute;
+  right: -6px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 4px;
+  border: 1px solid color-mix(in oklab, var(--presence-color) 28%, var(--border-default));
+  background: var(--bg-elevated);
+  color: var(--presence-color);
+  pointer-events: auto;
+  cursor: pointer;
+  opacity: 0.62;
+  transition:
+    opacity var(--motion-fast) var(--ease-standard),
+    border-color var(--motion-fast) var(--ease-standard);
+}
+
+.spectra-trace:hover .spectra-trace-chip,
+.spectra-trace-chip:focus-visible {
+  opacity: 1;
+  border-color: color-mix(in oklab, var(--presence-color) 52%, transparent);
+}
+
+.spectra-trace-card {
+  position: absolute;
+  right: -6px;
+  top: calc(100% + 7px);
+  z-index: 2;
+  width: 258px;
+  padding: 9px 10px 8px;
+  border-radius: 9px;
+  border: 1px solid var(--border-default);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-lg);
+  pointer-events: auto;
+  animation: spectra-presence-menu 160ms var(--ease-standard) both;
+}
+
+.spectra-trace-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.spectra-trace-card-actor {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  font-weight: 650;
+  color: var(--presence-color);
+}
+
+.spectra-trace-card-time {
+  font-size: 10px;
+  color: var(--text-tertiary);
+}
+
+.spectra-trace-card-summary {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-primary);
+}
+
+.spectra-trace-card-previous {
+  margin: 6px 0 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-tertiary);
+}
+
+.spectra-trace-card-previous-label {
+  display: block;
+  margin-bottom: 1px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-placeholder);
+}
+
+.spectra-trace-card-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 9px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.spectra-trace-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border-default);
+  background: transparent;
+  font-size: 11px;
+  font-weight: 550;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--ease-standard);
+}
+
+.spectra-trace-action:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.spectra-trace-action[data-primary="true"] {
+  border-color: color-mix(in oklab, var(--presence-color) 34%, var(--border-default));
+  color: var(--presence-color);
+}
+
+@keyframes spectra-trace-arrive {
+  0% {
+    background: color-mix(in oklab, var(--presence-color) 15%, transparent);
+  }
+  100% {
+    background: color-mix(in oklab, var(--presence-color) 4.5%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spectra-trace[data-status="fresh"] {
+    animation: none;
+  }
 }

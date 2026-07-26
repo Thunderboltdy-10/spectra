@@ -1,10 +1,24 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
+import type { InteractionActKind } from "./interaction-model";
 
+/**
+ * What a card, workspace row or compact surface should say about live AI work.
+ *
+ * `label` and `detail` come from the same semantic frame the editor renders, so
+ * a card describes the actual operation — "adding a slide", "moving Biology" —
+ * instead of showing one generic pulse for everything.
+ */
 export type ArtifactAiActivity = {
   phase: "preparing" | "editing";
   sequence?: number;
+  /** Owner-attributed actor name, e.g. "Maya's AI". */
+  label?: string;
+  /** Short description of the act and its target. */
+  detail?: string;
+  /** Act kind, for surfaces that pick an icon or motion per operation. */
+  kind?: InteractionActKind;
 };
 
 const activityByArtifact = new Map<string, Map<string, ArtifactAiActivity>>();

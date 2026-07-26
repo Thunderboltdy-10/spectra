@@ -63,6 +63,7 @@ import {
   type TimetableImportReport,
 } from "../timetable/io";
 import { aiRegionAttr, pathTouches } from "./ai-region-path";
+import { targetAttrs } from "../collaboration/target-attributes";
 
 const HOUR_HEIGHT = 68;
 const DAY_MS = 86_400_000;
@@ -229,6 +230,7 @@ function EventCard({
   conflict,
   onSelect,
   onDragStart,
+  path,
 }: {
   event: TimetableEvent;
   color: string;
@@ -238,6 +240,8 @@ function EventCard({
   conflict?: boolean;
   onSelect: () => void;
   onDragStart?: (event: DragEvent<HTMLElement>) => void;
+  /** Canonical pointer for this event, e.g. `/events/4`. */
+  path?: string;
 }) {
   const start = new Date(event.overlay?.alternativeStart || event.start);
   const end = new Date(event.overlay?.alternativeEnd || event.end);
@@ -250,6 +254,7 @@ function EventCard({
       data-status={event.sourceStatus}
       data-conflict={conflict || undefined}
       data-ai-region={aiRegionAttr(changed)}
+      {...(path ? targetAttrs(path) : {})}
       draggable={
         !readOnly && !event.locked && !event.sourceRef && !event.recurrence
       }
@@ -483,7 +488,7 @@ export function TimetableStudio({
       timetable.timezone,
     );
   }, [anchor, baseVisibleEvents, days, timetable.timezone, view.kind]);
-  const aiRevealKeyRef = useRef<string>();
+  const aiRevealKeyRef = useRef<string | undefined>(undefined);
 
   // Do not steal the user's calendar viewport for AI edits — cyan ink on the
   // event card is enough. Peers may be reading a different week on purpose.
@@ -812,6 +817,22 @@ export function TimetableStudio({
     .sort((a, b) => Date.parse(a.start) - Date.parse(b.start))
     .slice(0, 4);
   const studyMinutes = timetableFocusMinutes(visibleEvents, timetable.layers);
+  /**
+   * Canonical pointer for an event, resolved against the shared content so the
+   * pointer matches the one the AI pipeline and history use. Falls back to the
+   * merged list for events that exist only in a personal overlay.
+   */
+  const eventPath = (eventId: string) => {
+    const sharedIndex = sharedTimetable.events.findIndex(
+      (item) => item.id === eventId,
+    );
+    if (sharedIndex >= 0) return `/events/${sharedIndex}`;
+    const mergedIndex = timetable.events.findIndex(
+      (item) => item.id === eventId,
+    );
+    return mergedIndex >= 0 ? `/events/${mergedIndex}` : `/events/${eventId}`;
+  };
+
   const eventAiChanged = (eventId: string) => {
     if (!aiChangedPaths.length) return false;
     // Whole-create / catch-up shells use "/" (and occasionally bare "/events").
@@ -884,7 +905,9 @@ export function TimetableStudio({
                     color={layerMap.get(event.layerId)?.color ?? "#7865ea"}
                     compact
                     readOnly={readOnly && !privateLayerIds.has(event.layerId)}
-                    changed={eventAiChanged(event.id)}
+changed={eventAiChanged(event.id)}
+
+path={eventPath(event.id)}
                     onSelect={() => selectEvent(event)}
                   />
                 ))}
@@ -962,7 +985,9 @@ export function TimetableStudio({
                         readOnly={
                           readOnly && !privateLayerIds.has(event.layerId)
                         }
-                        changed={eventAiChanged(event.id)}
+changed={eventAiChanged(event.id)}
+
+path={eventPath(event.id)}
                         conflict={collision.conflict}
                         onSelect={() => selectEvent(event)}
                         onDragStart={(interaction) => {
@@ -1039,7 +1064,9 @@ export function TimetableStudio({
                   color={layerMap.get(event.layerId)?.color ?? "#7865ea"}
                   compact
                   readOnly={readOnly && !privateLayerIds.has(event.layerId)}
-                  changed={eventAiChanged(event.id)}
+changed={eventAiChanged(event.id)}
+
+path={eventPath(event.id)}
                   conflict={
                     eventCollisionLayout.get(event.occurrenceKey)?.conflict
                   }
@@ -1092,6 +1119,7 @@ export function TimetableStudio({
                 role="listitem"
                 onClick={() => selectEvent(event)}
                 data-ai-region={aiRegionAttr(eventAiChanged(event.id))}
+                {...targetAttrs(eventPath(event.id))}
               >
                 <i
                   style={{

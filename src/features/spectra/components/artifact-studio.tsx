@@ -1,5 +1,6 @@
 "use client";
 
+import { toast } from "sonner";
 import {
   AlertCircle,
   Archive,
@@ -163,6 +164,17 @@ import {
   CollaborationCursorLayer,
   CollaborationPresenceIndicator,
 } from "./collaboration-presence";
+import { InteractionLayer } from "./presence/interaction-layer";
+import { AiTraceLayer } from "./presence/ai-trace-layer";
+import { useInteractionPresence } from "../collaboration/use-interaction-presence";
+import { targetAttrs } from "../collaboration/target-attributes";
+import {
+  actorLabel,
+  describeAct,
+  type ActorIdentity,
+  type InteractionState,
+} from "../collaboration/interaction-model";
+import type { ArtifactTypeKey } from "../artifacts/types";
 import { changedArtifactRegionIds } from "../collaboration/artifact-yjs-model";
 import { isArtifactTypeKey } from "../artifacts/registry";
 import { SheetsStudio } from "./sheets-studio";
@@ -3994,6 +4006,20 @@ function ArtifactStudioEditor({
             ...(activeAiCollaborator.previewSequence !== undefined
               ? { sequence: activeAiCollaborator.previewSequence }
               : {}),
+            // Prefer the semantic frame so every surface describes the same
+            // operation the editor is performing.
+            ...(activeAiCollaborator.interactionState
+              ? {
+                  label: actorLabel(
+                    activeAiCollaborator.interactionState.actor,
+                  ),
+                  detail: describeAct(
+                    activeAiCollaborator.interactionState.act,
+                    activeAiCollaborator.interactionState.target,
+                  ),
+                  kind: activeAiCollaborator.interactionState.act.kind,
+                }
+              : {}),
           }
         : null,
     );
@@ -4372,18 +4398,119 @@ function ArtifactStudioEditor({
     previewClock,
     visibleAiWorking,
   ]);
-  const displayPresence = syntheticAiPresence
-    ? [...live.presence, syntheticAiPresence]
-    : live.presence;
+  const displayPresence = useMemo(
+    () =>
+      syntheticAiPresence
+        ? [...live.presence, syntheticAiPresence]
+        : live.presence,
+    [live.presence, syntheticAiPresence],
+  );
+  /** Peers that have not adopted the semantic protocol yet. */
+  const legacyPresence = useMemo(
+    () => displayPresence.filter((person) => !person.interactionState),
+    [displayPresence],
+  );
   // During create/update, prefer the richer of live Yjs vs Convex preview so
   // mid-open never sticks on empty placeholders while AI writes through Yjs.
-  const editorContent = presencePreview
+  const durableEditorContent = presencePreview
     ? presencePreview.content
     : aiPreviewActive && artifact.aiPreview?.content !== undefined
       ? streamingSource === "local"
         ? content
         : mergeAiRegions(content, artifact.aiPreview.content, aiChangedPaths)
       : content;
+  /* ---------------------------------------------------------------- *
+   * Interaction fabric
+   * ---------------------------------------------------------------- */
+
+  /**
+   * The editor's scroll container. Presence and AI traces are painted over this
+   * box and resolved against it, so they stay correct in split and full layouts.
+   */
+  const presenceSurfaceRef = useRef<HTMLElement | null>(null);
+
+  /** Semantic identity of this client, used for every published frame. */
+  const localActor = useMemo<ActorIdentity | null>(() => {
+    const clientId = live.transport?.clientId;
+    if (!clientId) return null;
+    return {
+      clientId,
+      kind: "human",
+      name: live.displayName ?? "Collaborator",
+      ...(live.accountId ? { accountId: live.accountId } : {}),
+    };
+  }, [live.accountId, live.displayName, live.transport?.clientId]);
+
+  /** Remote v2 frames. Peers still on the old shape are handled by the legacy layer. */
+  const remoteInteractionStates = useMemo<InteractionState[]>(
+    () =>
+      live.presence
+        .filter((person) => person.clientId !== live.transport?.clientId)
+        .map((person) => person.interactionState)
+        .filter((state): state is InteractionState => Boolean(state)),
+    [live.presence, live.transport?.clientId],
+  );
+
+  const publishInteraction = useCallback(
+    (state: InteractionState | null) => {
+      try {
+        live.transport?.setPresence({ interactionState: state });
+      } catch {
+        // Presence is supportive metadata, never a prerequisite for editing.
+      }
+    },
+    [live.transport],
+  );
+
+  useInteractionPresence({
+    artifactId: artifact._id,
+    typeKey: artifact.blueprintKey as ArtifactTypeKey,
+    actor: localActor,
+    surfaceRef: presenceSurfaceRef,
+    onPublish: publishInteraction,
+    enabled: !readOnly && isCollaborativeArtifact,
+  });
+
+  /**
+   * Values a peer or AI is provisionally showing. Merged over the durable content
+   * so a collaborator's in-progress typing is visible before it commits, and
+   * disappears cleanly if their operation is reversed.
+   */
+  const remoteSpeculation = useMemo(() => {
+    const patches = new Map<string, unknown>();
+    for (const state of remoteInteractionStates) {
+      if (!state.speculation) continue;
+      // A settled or failed frame is no longer speculative: its value either
+      // became durable or was reversed, and continuing to overlay it is how a
+      // preview gets stuck on screen after the work ended.
+      if (state.lifecycle === "settled" || state.lifecycle === "failed")
+        continue;
+      for (const patch of state.speculation.patches) {
+        patches.set(patch.path, patch.value);
+      }
+    }
+    return patches;
+  }, [remoteInteractionStates]);
+
+  /**
+   * Durable content with peers' in-flight values layered on top. This is what
+   * makes remote work feel live rather than arriving as one late commit: the
+   * provisional value is visible while the peer is still typing, and vanishes
+   * on its own if their operation never lands.
+   */
+  const editorContent = useMemo(() => {
+    if (remoteSpeculation.size === 0) return durableEditorContent;
+    let next: unknown = durableEditorContent;
+    for (const [pointer, value] of remoteSpeculation) {
+      if (!pointer.startsWith("/content")) continue;
+      const contentPath = pointer.slice("/content".length);
+      next = contentPath
+        ? setAtPointer(next, contentPath, value)
+        : (value ?? next);
+    }
+    return next;
+  }, [durableEditorContent, remoteSpeculation]);
+
   const editorChange =
     aiPreviewActive && artifact.aiPreview?.content !== undefined
       ? (next: unknown) =>
@@ -5267,8 +5394,11 @@ function ArtifactStudioEditor({
       }
       style={{ "--studio-accent": meta.color } as CSSProperties}
     >
+      {/* Legacy coarse cursors are only for peers on the pre-v2 protocol.
+          Anyone publishing a semantic frame is rendered by InteractionLayer,
+          which is what keeps a peer from appearing twice. */}
       <CollaborationCursorLayer
-        presence={displayPresence}
+        presence={legacyPresence}
         currentClientId={live.transport?.clientId}
         currentAccountId={live.accountId}
         currentDisplayName={live.displayName}
@@ -5608,7 +5738,9 @@ function ArtifactStudioEditor({
         </div>
       ) : null}
       <main
+        ref={presenceSurfaceRef}
         className={`spectra-artifact-main ${mainClass}`}
+        data-spectra-surface="artifact"
         data-ai-preview={visibleAiWorking || undefined}
         data-ai-effect-count={activeAiEffects.length || undefined}
         data-ai-activity={
@@ -5620,6 +5752,14 @@ function ArtifactStudioEditor({
           (artifact.aiState === "creating" || artifact.aiState === "updating")
         }
       >
+        {/* Both layers are sticky zero-height nodes, so they pin to the scroll
+            viewport instead of scrolling away with the content. They must stay
+            the first children of the scroll container. */}
+        <AiTraceLayer artifactId={artifact._id} />
+        <InteractionLayer
+          states={remoteInteractionStates}
+          localClientId={live.transport?.clientId}
+        />
         <div className={`spectra-editor-layout ${editorLayoutClass}`}>
           <section className="min-w-0">
             {artifact.blueprintKey === "document" ? (
@@ -6345,7 +6485,9 @@ function DocumentStudio({
     const incomingKey = JSON.stringify(incomingEditorJson);
     const contentChanged = incomingKey !== editorJsonKeyRef.current;
     if (contentChanged) editorJsonKeyRef.current = incomingKey;
-    const lineTargets = aiChangedPaths.flatMap((path) => {
+    const lineTargets = aiChangedPaths.flatMap<
+      NonNullable<AiRegionDecorationTarget["lines"]>[number]
+    >((path) => {
       const lineMatch = path.match(
         /^\/(?:content\/)?blocks\/(?:id:|byId\/)?([^/]+)\/lines\/(\d+)/i,
       );
@@ -9665,6 +9807,7 @@ function FlashcardStudio({
                 aiChangedPaths,
                 `/cards/${cards.findIndex((card) => card.id === activeCard.id)}/front`,
               )}
+              path={`/cards/${cards.findIndex((card) => card.id === activeCard.id)}/front`}
             />
             {activeCard.variant !== "image_occlusion" &&
             activeCard.media?.placement !== "back" &&
@@ -9918,6 +10061,8 @@ function FlashcardStudio({
                 aiChangedPaths,
                 `/cards/${cards.findIndex((card) => card.id === activeCard.id)}/hint`,
               )}
+              path={`/cards/${cards.findIndex((card) => card.id === activeCard.id)}/back`}
+              notePath={`/cards/${cards.findIndex((card) => card.id === activeCard.id)}/hint`}
             />
             {activeCard.variant !== "image_occlusion" &&
             activeCard.media?.placement === "back" &&
@@ -13430,6 +13575,8 @@ function PlannerStudio({
           <Field
             label="Description"
             aiActive={pathTouches(aiChangedPaths, "/description")}
+
+            path="/description"
           >
             <PlannerDescriptionEditor
               value={task.description ?? ""}
@@ -13443,6 +13590,8 @@ function PlannerStudio({
             <Field
               label="Status"
               aiActive={pathTouches(aiChangedPaths, "/status")}
+
+              path="/status"
             >
               <select
                 value={task.status}
@@ -13465,6 +13614,8 @@ function PlannerStudio({
             <Field
               label="Priority"
               aiActive={pathTouches(aiChangedPaths, "/priority")}
+
+              path="/priority"
             >
               <select
                 value={task.priority}
@@ -13487,6 +13638,8 @@ function PlannerStudio({
             <Field
               label="Due date"
               aiActive={pathTouches(aiChangedPaths, "/dueAt")}
+
+              path="/dueAt"
             >
               <div className="grid grid-cols-[minmax(0,1fr)_92px] gap-1.5">
                 <input
@@ -13513,6 +13666,8 @@ function PlannerStudio({
             <Field
               label="Time estimate"
               aiActive={pathTouches(aiChangedPaths, "/estimateMinutes")}
+
+              path="/estimateMinutes"
             >
               <select
                 value={task.estimateMinutes ?? ""}
@@ -13638,6 +13793,8 @@ function PlannerStudio({
                 <Field
                   label="Progress note"
                   aiActive={pathTouches(aiChangedPaths, "/progressNote")}
+
+                  path="/progressNote"
                 >
                   <input
                     value={task.progressNote ?? ""}
@@ -13957,6 +14114,8 @@ function PlannerStudio({
                   <Field
                     label="Starts"
                     aiActive={pathTouches(aiChangedPaths, "/startAt")}
+
+                    path="/startAt"
                   >
                     <div className="grid grid-cols-[minmax(0,1fr)_88px] gap-1.5">
                       <input
@@ -13988,6 +14147,8 @@ function PlannerStudio({
                     <Field
                       label="Ends"
                       aiActive={pathTouches(aiChangedPaths, "/endAt")}
+
+                      path="/endAt"
                     >
                       <div className="grid grid-cols-[minmax(0,1fr)_88px] gap-1.5">
                         <input
@@ -14728,7 +14889,7 @@ function QuestionEditor({
         <div className="mt-4">
           <Field
             label="Formative rubric / review guidance"
-            aiActive={aiField("rubric")}
+            aiActive={aiField("rubric")} path={`${qPath}/rubric`}
           >
             <textarea
               value={question.rubric ?? ""}
@@ -14744,7 +14905,7 @@ function QuestionEditor({
         </div>
       ) : question.type === "numeric" ? (
         <div className="mt-4 grid gap-3 md:grid-cols-2">
-          <Field label="Expected number" aiActive={aiField("correctAnswer")}>
+          <Field label="Expected number" aiActive={aiField("correctAnswer")} path={`${qPath}/correctAnswer`}>
             <input
               type="number"
               value={question.correctAnswer ?? ""}
@@ -14757,7 +14918,7 @@ function QuestionEditor({
           </Field>
           <Field
             label="Accepted tolerance (±)"
-            aiActive={aiField("numericTolerance")}
+            aiActive={aiField("numericTolerance")} path={`${qPath}/numericTolerance`}
           >
             <input
               type="number"
@@ -14785,7 +14946,7 @@ function QuestionEditor({
                 ? "Primary accepted answer"
                 : "Expected answer"
             }
-            aiActive={aiField("correctAnswer")}
+            aiActive={aiField("correctAnswer")} path={`${qPath}/correctAnswer`}
           >
             <input
               value={question.correctAnswer ?? ""}
@@ -14804,7 +14965,7 @@ function QuestionEditor({
             <div className="mt-3">
               <Field
                 label="Other accepted answers"
-                aiActive={aiField("correctAnswers")}
+                aiActive={aiField("correctAnswers")} path={`${qPath}/correctAnswers`}
               >
                 <input
                   value={(question.correctAnswers ?? []).join("; ")}
@@ -14825,7 +14986,7 @@ function QuestionEditor({
         </div>
       )}
       <div className="mt-4">
-        <Field label="Explanation" aiActive={aiField("explanation")}>
+        <Field label="Explanation" aiActive={aiField("explanation")} path={`${qPath}/explanation`}>
           <textarea
             value={question.explanation ?? ""}
             onChange={(event) => onChange({ explanation: event.target.value })}
@@ -14835,7 +14996,7 @@ function QuestionEditor({
         </Field>
       </div>
       <div className="mt-4">
-        <Field label="Tags / topics" aiActive={aiField("tags")}>
+        <Field label="Tags / topics" aiActive={aiField("tags")} path={`${qPath}/tags`}>
           <div className="spectra-quiz-tag-editor">
             {(question.tags ?? []).map((tag) => (
               <span key={tag}>
@@ -14879,7 +15040,7 @@ function QuestionEditor({
         <div className="grid gap-4 pt-3">
           <Field
             label="Formative feedback / next step"
-            aiActive={aiField("feedback")}
+            aiActive={aiField("feedback")} path={`${qPath}/feedback`}
           >
             <textarea
               value={question.feedback ?? ""}
@@ -14888,7 +15049,7 @@ function QuestionEditor({
               placeholder="Offer a useful next step without turning practice into a grade."
             />
           </Field>
-          <Field label="Sources / provenance" aiActive={aiField("sourceRefs")}>
+          <Field label="Sources / provenance" aiActive={aiField("sourceRefs")} path={`${qPath}/sourceRefs`}>
             <input
               value={(question.sourceRefs ?? []).join(", ")}
               onChange={(event) =>
@@ -16121,6 +16282,8 @@ function CardFace({
   onNoteChange,
   aiActive = false,
   aiNoteActive = false,
+  path,
+  notePath,
 }: {
   label: string;
   value: string;
@@ -16132,6 +16295,10 @@ function CardFace({
   onNoteChange?: (value: string) => void;
   aiActive?: boolean;
   aiNoteActive?: boolean;
+  /** Canonical pointer for the face, e.g. `/cards/2/front`. */
+  path?: string;
+  /** Canonical pointer for the hint field. */
+  notePath?: string;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -16184,6 +16351,7 @@ function CardFace({
           onChange={(event) => onChange(event.target.value)}
           onFocus={() => onFocus?.()}
           data-ai-region={aiRegionAttr(aiActive)}
+          {...(path ? targetAttrs(path) : {})}
           className="min-h-[180px] w-full resize-none rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-6 py-8 text-center font-serif text-[24px] leading-snug text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[color-mix(in_oklab,#8b6ff0_55%,var(--border-default))]"
           placeholder={placeholder}
         />
@@ -16193,6 +16361,7 @@ function CardFace({
             onChange={(event) => onNoteChange(event.target.value)}
             onFocus={() => onFocus?.()}
             data-ai-region={aiRegionAttr(aiNoteActive)}
+            {...(notePath ? targetAttrs(notePath) : {})}
             className="spectra-card-face-note"
             placeholder="Add a note (optional)"
             aria-label="Note or hint"
@@ -16234,21 +16403,33 @@ function Field({
   label,
   children,
   aiActive = false,
+  path,
 }: {
   label: string;
   children: ReactNode;
   aiActive?: boolean;
+  /**
+   * Canonical content pointer for this field. Annotating the *control* rather
+   * than the wrapping label is what lets a peer's caret land on real text
+   * instead of the label's padding box.
+   */
+  path?: string;
 }) {
   let markedControl = false;
   let control: ReactNode = children;
-  if (aiActive && isValidElement(children)) {
+
+  const decorate = (element: ReactElement): ReactElement => {
+    markedControl = true;
+    return cloneElement(element as ReactElement<Record<string, unknown>>, {
+      ...(aiActive ? { "data-ai-region": true } : {}),
+      ...(path ? targetAttrs(path) : {}),
+    });
+  };
+
+  if ((aiActive || path) && isValidElement(children)) {
     const type = children.type;
     if (typeof type === "string" && AI_FORM_CONTROL_TAGS.has(type)) {
-      markedControl = true;
-      control = cloneElement(
-        children as ReactElement<Record<string, unknown>>,
-        { "data-ai-region": true },
-      );
+      control = decorate(children);
     } else if (
       Children.count(children) === 1 &&
       isValidElement(Children.only(children))
@@ -16258,10 +16439,7 @@ function Field({
         typeof only.type === "string" &&
         AI_FORM_CONTROL_TAGS.has(only.type)
       ) {
-        markedControl = true;
-        control = cloneElement(only as ReactElement<Record<string, unknown>>, {
-          "data-ai-region": true,
-        });
+        control = decorate(only);
       }
     }
   }
@@ -16269,6 +16447,9 @@ function Field({
     <label
       className="block rounded-[8px]"
       data-ai-region={aiRegionAttr(aiActive && !markedControl)}
+      // Fall back to the label only when the control itself could not be
+      // annotated, so a target always resolves to something honest.
+      {...(path && !markedControl ? targetAttrs(path) : {})}
     >
       <span className="mb-1.5 block text-[12px] font-semibold text-[var(--text-secondary)]">
         {label}

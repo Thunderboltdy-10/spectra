@@ -1,4 +1,5 @@
 import type * as Y from "yjs";
+import type { InteractionState } from "./interaction-model";
 
 export type CollaborationSyncState =
   | "connecting"
@@ -46,6 +47,16 @@ export type CollaborationPresence = {
     highlighted?: string;
   } | null;
   viewport?: unknown;
+  /**
+   * Semantic interaction frame (protocol v2). This is the authoritative presence
+   * payload: it names the artifact, control, character offset and action rather
+   * than shipping viewport coordinates, so peers resolve geometry locally and
+   * stay accurate across pane sizes, scroll positions and zoom levels.
+   *
+   * The fields above are the superseded v1 shape, retained so a client that has
+   * not been updated still renders coarse presence instead of nothing.
+   */
+  interactionState?: InteractionState | null;
 };
 
 export type CollaborationInteraction = {

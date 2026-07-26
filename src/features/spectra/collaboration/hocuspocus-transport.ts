@@ -8,6 +8,7 @@ import type {
   CollaborationSyncState,
   CollaborationTransportSnapshot,
 } from "./types";
+import { readInteractionState } from "./interaction-model";
 
 function authenticationActuallyRevoked(reason?: string) {
   const value = (reason ?? "").toUpperCase();
@@ -393,11 +394,22 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
                 entry.user && typeof entry.user === "object"
                   ? (entry.user as Record<string, unknown>)
                   : {};
+              const clientId =
+                typeof user.clientId === "string"
+                  ? user.clientId
+                  : String(entry.clientId);
               return {
-                clientId:
-                  typeof user.clientId === "string"
-                    ? user.clientId
-                    : String(entry.clientId),
+                clientId,
+                // Protocol v2 frame, when the peer publishes one. Everything
+                // below is the superseded v1 shape kept for older peers.
+                ...(readInteractionState(user.interactionState, clientId)
+                  ? {
+                      interactionState: readInteractionState(
+                        user.interactionState,
+                        clientId,
+                      ),
+                    }
+                  : {}),
                 ...(typeof user.accountId === "string"
                   ? { accountId: user.accountId }
                   : {}),

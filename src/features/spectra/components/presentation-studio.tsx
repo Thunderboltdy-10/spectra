@@ -83,6 +83,7 @@ import {
   importPresentationFile,
 } from "../presentation/io";
 import { aiRegionAttr, pathTouches } from "./ai-region-path";
+import { targetAttrs } from "../collaboration/target-attributes";
 import {
   calculateWorkbook,
   coordinateToAddress,
@@ -316,6 +317,7 @@ function PresentationObjectView({
   onTextChange,
   onTextFocus,
   onTextBlur,
+  path,
 }: {
   object: PresentationObject;
   asset?: SpectraArtifactAsset;
@@ -335,6 +337,8 @@ function PresentationObjectView({
   onTextChange: (value: string) => void;
   onTextFocus: () => void;
   onTextBlur: () => void;
+  /** Canonical pointer for this object, e.g. `/slides/2/objects/1`. */
+  path?: string;
 }) {
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
   const [textOverflow, setTextOverflow] = useState(false);
@@ -384,6 +388,7 @@ function PresentationObjectView({
   return (
     <div
       className="presentation-object"
+      {...(path ? targetAttrs(path) : {})}
       data-selected={selected || undefined}
       data-locked={object.locked || undefined}
       data-overflow={textOverflow || undefined}
@@ -413,6 +418,7 @@ function PresentationObjectView({
           ref={textAreaRef}
           data-text-preset={textPreset}
           data-ai-region={aiRegionAttr(aiActive)}
+          {...(path ? targetAttrs(`${path}/text`) : {})}
           value={objectText}
           readOnly={readOnly || object.locked || compact}
           onFocus={onTextFocus}
@@ -564,6 +570,7 @@ function PresentationObjectView({
               key={handle}
               type="button"
               className={`presentation-object-handle is-${handle}`}
+              data-spectra-part={`handle:${handle}`}
               aria-label={`Resize from ${handle.toUpperCase()} corner`}
               onPointerDown={(event) => onResizePointerDown(handle, event)}
             />
@@ -719,6 +726,7 @@ function SlideCanvas({
               onTextChange={(value) => onTextChange(object.id, value)}
               onTextFocus={() => onTextFocus(object.id)}
               onTextBlur={onTextBlur}
+              path={`/slides/${slideIndex}/objects/${objectIndex}`}
             />
           </div>
         );
@@ -2647,6 +2655,7 @@ export function PresentationStudio({
                   data-ai-region={aiRegionAttr(
                     pathTouches(aiChangedPaths, `/slides/${index}`),
                   )}
+                  {...targetAttrs(`/slides/${index}`)}
                   draggable={!readOnly}
                   onDragStart={(event) => {
                     setDraggingSlideId(slide.id);

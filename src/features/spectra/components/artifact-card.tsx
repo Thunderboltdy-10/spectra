@@ -287,9 +287,13 @@ export function ArtifactCard({
             <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
               {meta.label}
             </span>
-            {liveAiActivity ||
-            liveAiState === "creating" ||
-            liveAiState === "updating" ? (
+            {/* The generic chip is only for work we cannot yet describe. Once a
+                semantic frame arrives, the activity line below says what is
+                actually happening and this would just repeat it less precisely. */}
+            {!liveAiActivity?.detail &&
+            (liveAiActivity ||
+              liveAiState === "creating" ||
+              liveAiState === "updating") ? (
               <span className="spectra-card-ai-activity inline-flex shrink-0 items-center gap-1 rounded-full border border-[color-mix(in_oklab,var(--accent-cyan)_28%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-elevated))] px-1.5 py-0.5 text-[8px] font-semibold text-[var(--accent-cyan)]">
                 <Sparkles className="h-2.5 w-2.5" aria-hidden="true" />
                 AI {liveAiState === "creating" ? "building" : "editing"}
@@ -358,6 +362,22 @@ export function ArtifactCard({
             <div className="mt-2 flex min-w-0 items-center gap-1.5 text-[10px] text-[var(--text-tertiary)]">
               <Building2 className="h-3 w-3 shrink-0" />
               <span className="truncate">{artifact.accessExplanation}</span>
+            </div>
+          ) : null}
+          {liveAiActivity?.detail ? (
+            <div
+              className="spectra-card-activity"
+              data-act={liveAiActivity.kind}
+              role="status"
+              aria-live="polite"
+            >
+              <Sparkles className="spectra-card-activity-spark" />
+              <span className="spectra-card-activity-text">
+                {liveAiActivity.label ? (
+                  <strong>{liveAiActivity.label}</strong>
+                ) : null}
+                {liveAiActivity.detail}
+              </span>
             </div>
           ) : null}
           {artifact.aiState === "creating" &&

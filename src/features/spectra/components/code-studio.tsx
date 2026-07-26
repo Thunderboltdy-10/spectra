@@ -117,6 +117,7 @@ import {
   type SpectraRuntimeStatus,
 } from "./sandboxed-artifact-runtime";
 import { aiRegionAttr, pathTouches } from "./ai-region-path";
+import { targetAttrs } from "../collaboration/target-attributes";
 
 type CodeProblem = {
   id: string;
@@ -2820,6 +2821,7 @@ export function CodeStudio({
                             <div
                               key={file.id}
                               data-ai-region={aiRegionAttr(fileHasAiEffect)}
+                              {...targetAttrs(`/files/${fileIndex}`)}
                               className={`group flex min-h-7 items-center gap-1.5 rounded-[6px] px-1.5 text-[9px] ${selected ? "bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-[0_1px_4px_rgba(30,25,20,.06)]" : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}
                             >
                               <button
@@ -2928,6 +2930,9 @@ export function CodeStudio({
                   <div
                     className="relative min-h-[520px] min-w-0 overflow-hidden bg-[var(--bg-primary)]"
                     data-ai-region={aiRegionAttr(activeAiEffect)}
+                    {...(activeIndex >= 0
+                      ? targetAttrs(`/files/${activeIndex}/source`)
+                      : {})}
                   >
                     <CodeMirror
                       value={activeFile.source}
@@ -3269,6 +3274,7 @@ function CodeParameterPanel({
               <section
                 key={parameter.id}
                 data-ai-region={aiRegionAttr(activeEffect)}
+                {...targetAttrs(`/parameters/${index}`)}
                 className="rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3"
                 onFocusCapture={() => onActiveRegionChange?.(parameter.id)}
               >

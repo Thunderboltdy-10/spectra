@@ -76,6 +76,7 @@ import {
 } from "../whiteboard/io";
 import { uniqueToken } from "@/lib/unique-token";
 import { aiRegionAttr, pathTouches } from "./ai-region-path";
+import { targetAttrs } from "../collaboration/target-attributes";
 
 type Tool = "select" | "hand" | "connector" | WhiteboardNodeType;
 type Drag = {
@@ -130,6 +131,7 @@ function BoardNode({
   onResizePointerDown,
   onTextChange,
   onContentChange,
+  path,
 }: {
   node: WhiteboardNode;
   artifact?: SpectraArtifact;
@@ -143,6 +145,8 @@ function BoardNode({
   onResizePointerDown: (event: ReactPointerEvent<HTMLButtonElement>) => void;
   onTextChange: (value: string) => void;
   onContentChange: (change: Record<string, unknown>) => void;
+  /** Canonical pointer for this node, e.g. `/nodes/3`. */
+  path?: string;
 }) {
   if (node.hidden) return null;
   const content =
@@ -155,6 +159,7 @@ function BoardNode({
     <div
       className="whiteboard-node"
       data-ai-region={aiRegionAttr(aiActive)}
+      {...(path ? targetAttrs(path) : {})}
       data-type={node.type}
       data-selected={selected || undefined}
       data-locked={node.locked || undefined}
@@ -367,6 +372,7 @@ function BoardNode({
           type="button"
           className="whiteboard-node-resize"
           aria-label="Resize object"
+          data-spectra-part="handle:se"
           onPointerDown={onResizePointerDown}
         />
       ) : null}
@@ -1644,6 +1650,7 @@ export function WhiteboardStudio({
                       })
                     }
                     aiActive={nodeAiActive}
+                    path={index >= 0 ? `/nodes/${index}` : undefined}
                     onContentChange={(change) =>
                       mutate((draft) => {
                         const candidate = draft.nodes.find(

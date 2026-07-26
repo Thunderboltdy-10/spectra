@@ -274,7 +274,7 @@ export function buildArtifactLivePreviewFrames(
   }
 
   const frames: ArtifactLiveValue[] = [];
-  let current = structuredClone(before) as ArtifactLiveValue;
+  const current = structuredClone(before) as ArtifactLiveValue;
   let previousKey = JSON.stringify(current);
 
   const pushFrame = (value: ArtifactLiveValue) => {

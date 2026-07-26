@@ -53,6 +53,7 @@ import {
   type SpectraArtifact,
 } from "../data/api";
 import { aiRegionAttr, pathTouches } from "./ai-region-path";
+import { targetAttrs } from "../collaboration/target-attributes";
 
 const STEPS = [
   { title: "Purpose", detail: "Goal, scope and outcomes", icon: Sparkles },
@@ -81,6 +82,16 @@ const STEPS = [
     detail: "Evals, release and recovery",
     icon: Rocket,
   },
+] as const;
+
+/** Content pointer per wizard step, parallel to STEPS. */
+const STEP_PATHS = [
+  "/profile",
+  "/routing",
+  "/resources",
+  "/skills",
+  "/behavior",
+  "/evals",
 ] as const;
 
 const TOOL_CATALOG: Array<{
@@ -684,6 +695,8 @@ export function AgentStudio({
   }
 
   const currentStep = STEPS[step]!;
+  /** Content pointer for the step the wizard is showing, in STEPS order. */
+  const stepPath = STEP_PATHS[step]!;
   const latestRelease = releases[0];
 
   return (
@@ -775,19 +788,8 @@ export function AgentStudio({
           })}
         </nav>
         <main
-          data-ai-region={aiRegionAttr(
-            pathTouches(
-              aiChangedPaths,
-              [
-                "/profile",
-                "/routing",
-                "/resources",
-                "/skills",
-                "/behavior",
-                "/evals",
-              ][step]!,
-            ),
-          )}
+          data-ai-region={aiRegionAttr(pathTouches(aiChangedPaths, stepPath))}
+          {...targetAttrs(stepPath)}
         >
           <header>
             <span>{step + 1}</span>
@@ -809,6 +811,7 @@ export function AgentStudio({
                     data-ai-region={aiRegionAttr(
                       pathTouches(aiChangedPaths, "/profile/purpose"),
                     )}
+                    {...targetAttrs("/profile/purpose")}
                     onChange={(event) =>
                       updateProfile({ purpose: event.target.value })
                     }
@@ -902,6 +905,7 @@ export function AgentStudio({
                     data-ai-region={aiRegionAttr(
                       pathTouches(aiChangedPaths, "/profile/audienceIntent"),
                     )}
+                    {...targetAttrs("/profile/audienceIntent")}
                     onChange={(event) =>
                       updateProfile({ audienceIntent: event.target.value })
                     }

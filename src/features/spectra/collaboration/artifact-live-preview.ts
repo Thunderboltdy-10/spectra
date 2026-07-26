@@ -101,116 +101,208 @@ function setAtPath(
   (current as Record<string | number, unknown>)[path.at(-1)!] = next;
 }
 
-function interpolateString(before: string, after: string, progress: number) {
-  const wordCharacter = (value: string | undefined) =>
-    Boolean(value && /[\p{L}\p{N}_]/u.test(value));
-  let prefixLength = 0;
-  const sharedLimit = Math.min(before.length, after.length);
-  while (
-    prefixLength < sharedLimit &&
-    before[prefixLength] === after[prefixLength]
+/**
+ * Select-then-replace rewrite: after the line is selected, frames are prefixes
+ * of the new text only. Never keep an old-tail overlap (that reads as garbled
+ * double-writing). Height stays stable because selection already reserved the
+ * line; the first typed chunk replaces it wholesale.
+ */
+function buildSelectReplaceFrames(before: string, after: string): string[] {
+  if (before === after) return [];
+  if (!after) return [after];
+  const frames: string[] = [];
+  // Human-paced: a short burst of characters per frame, capped so long lines
+  // finish in about a second rather than feeling glacial.
+  const targetFrames = Math.min(22, Math.max(6, Math.ceil(after.length / 6)));
+  const stepChars = Math.max(2, Math.ceil(after.length / targetFrames));
+  for (let typed = stepChars; typed < after.length; typed += stepChars) {
+    frames.push(after.slice(0, typed));
+  }
+  frames.push(after);
+  return frames;
+}
+
+/**
+ * List / outline fields store several visual lines in one string. Rewrite each
+ * changed line via select→replace so earlier bullets stay still.
+ */
+function buildLineAwareRewriteFrames(before: string, after: string): string[] {
+  if (before === after) return [];
+  if (!before.includes("\n") && !after.includes("\n"))
+    return buildSelectReplaceFrames(before, after);
+  const beforeLines = before.split("\n");
+  const afterLines = after.split("\n");
+  if (beforeLines.length !== afterLines.length)
+    return buildSelectReplaceFrames(before, after);
+  const changed: number[] = [];
+  for (let index = 0; index < afterLines.length; index += 1) {
+    if (beforeLines[index] !== afterLines[index]) changed.push(index);
+  }
+  if (changed.length === 0) return [];
+  const frames: string[] = [];
+  const lines = [...beforeLines];
+  for (const lineIndex of changed) {
+    const lineFrames = buildSelectReplaceFrames(
+      beforeLines[lineIndex]!,
+      afterLines[lineIndex]!,
+    );
+    for (const nextLine of lineFrames) {
+      lines[lineIndex] = nextLine;
+      frames.push(lines.join("\n"));
+    }
+    lines[lineIndex] = afterLines[lineIndex]!;
+  }
+  return frames;
+}
+
+/** Caret sits at the typed boundary of an in-place full-line rewrite. */
+export function caretOffsetForRewrite(
+  before: string,
+  after: string,
+  current: string,
+): number {
+  const anchor = lineAnchorForRewrite(before, after, current);
+  return anchor.contentOffset;
+}
+
+/**
+ * Map a rewrite frame onto the visual line peers should paint. Offsets inside
+ * the line ignore leading newlines so list-item DOM ranges stay exact.
+ */
+export function lineAnchorForRewrite(
+  before: string,
+  after: string,
+  current: string,
+): { lineIndex: number; offsetInLine: number; contentOffset: number } {
+  const beforeLines = before.split("\n");
+  const afterLines = after.split("\n");
+  if (
+    beforeLines.length === afterLines.length &&
+    beforeLines.length > 1 &&
+    before.includes("\n")
   ) {
-    prefixLength += 1;
+    let lineIndex = 0;
+    for (; lineIndex < afterLines.length; lineIndex += 1) {
+      if (beforeLines[lineIndex] !== afterLines[lineIndex]) break;
+    }
+    if (lineIndex >= afterLines.length) lineIndex = afterLines.length - 1;
+    const prefix = afterLines.slice(0, lineIndex).join("\n");
+    const prefixLength = lineIndex === 0 ? 0 : prefix.length + 1;
+    const currentLine = current.slice(prefixLength).split("\n")[0] ?? "";
+    const targetLine = afterLines[lineIndex] ?? "";
+    let typed = 0;
+    const limit = Math.min(targetLine.length, currentLine.length);
+    while (typed < limit && currentLine[typed] === targetLine[typed]) typed += 1;
+    if (
+      typed === 0 &&
+      (beforeLines[lineIndex] ?? "").length > 0 &&
+      currentLine === (beforeLines[lineIndex] ?? "")
+    ) {
+      return { lineIndex, offsetInLine: 0, contentOffset: prefixLength };
+    }
+    return {
+      lineIndex,
+      offsetInLine: typed,
+      contentOffset: prefixLength + typed,
+    };
   }
-  // A human replaces the whole token. Do not leave a shared word fragment
-  // selected on either side (for example, preserving "ing" while replacing
-  // "analysing" with "interpreting").
-  while (
-    prefixLength > 0 &&
-    ((wordCharacter(before[prefixLength - 1]) &&
-      wordCharacter(before[prefixLength])) ||
-      (wordCharacter(after[prefixLength - 1]) &&
-        wordCharacter(after[prefixLength])))
-  ) {
-    prefixLength -= 1;
+  let typed = 0;
+  const limit = Math.min(after.length, current.length);
+  while (typed < limit && current[typed] === after[typed]) typed += 1;
+  if (typed === 0 && before.length > 0 && current === before) {
+    return { lineIndex: 0, offsetInLine: 0, contentOffset: 0 };
   }
-  let suffixLength = 0;
-  while (
-    suffixLength < sharedLimit - prefixLength &&
-    before[before.length - 1 - suffixLength] ===
-      after[after.length - 1 - suffixLength]
-  ) {
-    suffixLength += 1;
+  return { lineIndex: 0, offsetInLine: typed, contentOffset: typed };
+}
+
+/** First visual line that differs between before/after (for select → type). */
+export function primaryChangedLine(
+  before: string,
+  after: string,
+): { lineIndex: number; beforeLine: string; afterLine: string } {
+  const beforeLines = before.split("\n");
+  const afterLines = after.split("\n");
+  if (beforeLines.length === afterLines.length && beforeLines.length > 0) {
+    for (let index = 0; index < afterLines.length; index += 1) {
+      if (beforeLines[index] !== afterLines[index]) {
+        return {
+          lineIndex: index,
+          beforeLine: beforeLines[index] ?? "",
+          afterLine: afterLines[index] ?? "",
+        };
+      }
+    }
   }
-  while (suffixLength > 0) {
-    const beforeStart = before.length - suffixLength;
-    const afterStart = after.length - suffixLength;
-    const cutsBeforeWord =
-      wordCharacter(before[beforeStart]) &&
-      wordCharacter(before[beforeStart - 1]);
-    const cutsAfterWord =
-      wordCharacter(after[afterStart]) && wordCharacter(after[afterStart - 1]);
-    if (!cutsBeforeWord && !cutsAfterWord) break;
-    suffixLength -= 1;
+  return { lineIndex: 0, beforeLine: before, afterLine: after };
+}
+
+export function valueAtPath(
+  value: unknown,
+  path: string,
+): unknown {
+  if (!path || path === "/") return value;
+  const segments = path
+    .replace(/^\//, "")
+    .split("/")
+    .map((segment) => segment.replaceAll("~1", "/").replaceAll("~0", "~"));
+  let current: unknown = value;
+  for (const segment of segments) {
+    if (current == null || typeof current !== "object") return undefined;
+    current = (current as Record<string, unknown>)[segment];
   }
-  const prefix = after.slice(0, prefixLength);
-  const sharedSuffix = suffixLength > 0 ? after.slice(-suffixLength) : "";
-  // A shared final full stop/closing punctuation belongs to the completed
-  // sentence, not every partial frame. Painting it throughout produces
-  // machine-like fragments such as "accelerat." and "lowering a.".
-  const suffix =
-    sharedSuffix.trim() &&
-    /^[\p{P}\p{S}]+$/u.test(sharedSuffix.trim()) &&
-    progress < 1
-      ? ""
-      : sharedSuffix;
-  const replacement = after.slice(
-    prefixLength,
-    suffixLength > 0 ? after.length - suffixLength : after.length,
-  );
-  const typedReplacement = replacement.slice(
-    0,
-    Math.ceil(replacement.length * progress),
-  );
-  // When a word is inserted immediately before a preserved word suffix, keep
-  // a temporary visual separator until the inserted word's real trailing
-  // whitespace arrives. This avoids machine-like frames such as `dwith` and
-  // `directlywith` while preserving the same final durable string.
-  const previewSeparator =
-    progress < 1 &&
-    /\s$/u.test(replacement) &&
-    wordCharacter(typedReplacement.at(-1)) &&
-    wordCharacter(suffix[0])
-      ? " "
-      : "";
-  return `${prefix}${typedReplacement}${previewSeparator}${suffix}`;
+  return current;
 }
 
 /**
  * Produces transient, non-durable visual frames for every artifact type.
  * Semantic-region snapshots carry these frames through awareness; the final
  * value is still committed once through Yjs and remains the only durable fact.
+ *
+ * Edits animate one field/region at a time with a select→replace rewrite
+ * at a human-readable pace. Parallel multi-field typing reads as machine noise
+ * and lights every touched control at once.
  */
 export function buildArtifactLivePreviewFrames(
   before: ArtifactLiveValue,
   after: ArtifactLiveValue,
 ): ArtifactLiveValue[] {
   const changes = collectStringChanges(before, after);
-  const longest = Math.max(
-    0,
-    ...changes.map((change) =>
-      Math.max(change.before.length, change.after.length),
-    ),
-  );
-  const frameCount =
-    changes.length > 0 ? Math.max(5, Math.min(12, Math.ceil(longest / 8))) : 0;
-  const frames: ArtifactLiveValue[] = [];
-  let previousKey = JSON.stringify(before);
+  if (changes.length === 0) {
+    return JSON.stringify(before) === JSON.stringify(after)
+      ? []
+      : [structuredClone(after)];
+  }
 
-  for (let frame = 0; frame < frameCount; frame += 1) {
-    const value = structuredClone(before);
-    const progress = frame / frameCount;
-    for (const change of changes) {
-      setAtPath(
-        value,
-        change.path,
-        interpolateString(change.before, change.after, progress),
-      );
-    }
+  const frames: ArtifactLiveValue[] = [];
+  let current = structuredClone(before) as ArtifactLiveValue;
+  let previousKey = JSON.stringify(current);
+
+  const pushFrame = (value: ArtifactLiveValue) => {
     const key = JSON.stringify(value);
-    if (key === previousKey) continue;
+    if (key === previousKey) return;
     frames.push(value);
     previousKey = key;
+  };
+
+  for (const change of changes) {
+    // Select-then-replace: after approach/select beats, stream prefixes of the
+    // new line only — never leave old glyphs overlapping the typed head.
+    const rewriteFrames = buildLineAwareRewriteFrames(
+      change.before,
+      change.after,
+    );
+    if (rewriteFrames.length === 0) {
+      setAtPath(current, change.path, change.after);
+      pushFrame(structuredClone(current) as ArtifactLiveValue);
+      continue;
+    }
+    for (const nextText of rewriteFrames) {
+      const value = structuredClone(current) as ArtifactLiveValue;
+      setAtPath(value, change.path, nextText);
+      pushFrame(value);
+    }
+    setAtPath(current, change.path, change.after);
+    pushFrame(structuredClone(current) as ArtifactLiveValue);
   }
 
   const finalKey = JSON.stringify(after);

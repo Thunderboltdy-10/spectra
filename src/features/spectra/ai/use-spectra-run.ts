@@ -413,12 +413,31 @@ export function useSpectraRun({
       setActiveRequestCount((count) => count + 1);
       setLiveExchange({ id: exchangeId, prompt: clean, content: "", steps: [], status: "starting", startedAt: Date.now() });
       upsert({ id: optimisticCardId, runId: `pending:${exchangeId}`, status: "running", title: "Spectra", summary: clean, variant: "status", actions: [], updatedAt: Date.now() });
+      // If the route never acknowledges the run (gateway hang / stuck worker),
+      // fail closed so QC is not glued on "Starting…" forever.
+      const beginTimeout = window.setTimeout(() => {
+        if (beginSettled) return;
+        for (const [controller, requestRunId] of activeRequests.current) {
+          if (!requestRunId || requestRunId.startsWith("pending:")) {
+            controller.abort();
+            activeRequests.current.delete(controller);
+          }
+        }
+        setCards((current) => current.filter((card) => card.id !== optimisticCardId));
+        setLiveExchange((current) => current?.id === exchangeId ? null : current);
+        toast.error("Spectra could not start that run. Check the collaboration gateway and try again.");
+        settleBegin(false);
+      }, 20_000);
       void consume(
         { action: "run", submissionKey: exchangeId, prompt: clean, surface, workspaceId, artifactId, threadId: durableThreadId.current, focusMode, selectedArtifactIds, explicitContextObjects, currentView, attachments },
         optimisticCardId,
         exchangeId,
-        () => settleBegin(true),
+        () => {
+          window.clearTimeout(beginTimeout);
+          settleBegin(true);
+        },
       ).catch((error) => {
+        window.clearTimeout(beginTimeout);
         setCards((current) => current.filter((card) => card.id !== optimisticCardId));
         if (!(error instanceof DOMException && error.name === "AbortError")) {
           const message = error instanceof Error ? error.message : "Could not start Spectra run.";
@@ -427,6 +446,7 @@ export function useSpectraRun({
         }
         settleBegin(false);
       }).finally(() => {
+        window.clearTimeout(beginTimeout);
         settleBegin(false);
         setActiveRequestCount((count) => Math.max(0, count - 1));
         setLiveExchange((current) => current?.id === exchangeId ? null : current);

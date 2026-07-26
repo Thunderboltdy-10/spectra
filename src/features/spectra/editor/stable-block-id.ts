@@ -30,6 +30,7 @@ function createBlockId() {
  * Gives every addressable document region a durable identity. IDs are stored in
  * the native ProseMirror JSON and rendered to the DOM for presence/effects; they
  * are never derived from array position, text, or a collaborator's session.
+ * Duplicate ids (paste, AI short ids) are rewritten so Yjs region maps stay unique.
  */
 export const StableBlockId = Extension.create({
   name: "spectraStableBlockId",
@@ -62,13 +63,22 @@ export const StableBlockId = Extension.create({
             return null;
           const transaction = newState.tr;
           let changed = false;
+          const seen = new Set<string>();
           newState.doc.descendants((node, position) => {
-            if (!addressable.has(node.type.name) || node.attrs.blockId) return;
-            transaction.setNodeMarkup(position, undefined, {
-              ...node.attrs,
-              blockId: createBlockId(),
-            });
-            changed = true;
+            if (!addressable.has(node.type.name)) return;
+            let blockId =
+              typeof node.attrs.blockId === "string" && node.attrs.blockId
+                ? node.attrs.blockId
+                : null;
+            if (!blockId || seen.has(blockId)) {
+              blockId = createBlockId();
+              transaction.setNodeMarkup(position, undefined, {
+                ...node.attrs,
+                blockId,
+              });
+              changed = true;
+            }
+            seen.add(blockId);
           });
           return changed ? transaction : null;
         },

@@ -48,7 +48,8 @@ function contentForArtifactStorage(typeKey: string, content: unknown) {
     : content;
 }
 
-const AI_EDITED_FLASH_MS = 12_000;
+// Keep editorial ink visible long enough for peers to notice (15 minutes).
+const AI_EDITED_FLASH_MS = 90_000;
 
 function currentAiEffects(artifact: Doc<"spectraArtifacts">, now = Date.now()) {
   return (artifact.aiEffects ?? []).filter(
@@ -80,17 +81,63 @@ function effectsExcludingRun(
   );
 }
 
+function preferLineScopedPaths(next: string[], previous?: string[]) {
+  const prior = (previous ?? []).filter(Boolean);
+  const incoming = next.filter(Boolean);
+  if (incoming.length === 0) return prior.slice(0, 256);
+  const incomingHasLines = incoming.some((path) => path.includes("/lines/"));
+  const priorHasLines = prior.some((path) => path.includes("/lines/"));
+  const stripCoarseBlockPaths = (paths: string[]) => {
+    const hasLines = paths.some((path) => path.includes("/lines/"));
+    if (!hasLines) return paths.filter((path) => path !== "/");
+    return paths.filter((path) => {
+      if (path === "/") return false;
+      if (path.includes("/lines/")) return true;
+      // Drop coarse block text pointers once a line-scoped path exists.
+      return !/^\/(?:content\/)?blocks\/[^/]+(?:\/text)?$/i.test(path);
+    });
+  };
+  if (!incomingHasLines && priorHasLines) {
+    return stripCoarseBlockPaths([
+      ...new Set([
+        ...prior.filter((path) => path.includes("/lines/")),
+        ...incoming,
+      ]),
+    ]).slice(0, 256);
+  }
+  return stripCoarseBlockPaths(incoming).slice(0, 256);
+}
+
 function toSettlingEffects(
   effects: NonNullable<Doc<"spectraArtifacts">["aiEffects"]>,
   now: number,
   expiresAt: number,
+  fallbackPaths?: string[],
 ) {
-  return effects.map((effect) => ({
-    ...effect,
-    state: "settling" as const,
-    expiresAt,
-    updatedAt: now,
-  }));
+  const fallback = (fallbackPaths ?? [])
+    .map((path) => path.trim().slice(0, 500))
+    .filter(Boolean)
+    .slice(0, 256);
+  const fallbackHasLines = fallback.some((path) => path.includes("/lines/"));
+  return effects.map((effect) => {
+    const current = effect.changedPaths ?? [];
+    const currentHasLines = current.some((path) => path.includes("/lines/"));
+    const changedPaths =
+      fallbackHasLines && !currentHasLines && fallback.length > 0
+        ? fallback
+        : current.length > 0
+          ? current
+          : fallback.length > 0
+            ? fallback
+            : current;
+    return {
+      ...effect,
+      changedPaths,
+      state: "settling" as const,
+      expiresAt,
+      updatedAt: now,
+    };
+  });
 }
 
 function previewChangedPathsOnly(
@@ -1768,6 +1815,7 @@ export const finalizePendingLive = mutation({
       currentAiEffects(artifact, now),
       now,
       expiresAt,
+      artifact.aiPreview?.changedPaths,
     );
     await ctx.db.patch(version._id, { summary: "Created with Spectra" });
     await ctx.db.patch(args.artifactId, {
@@ -2068,6 +2116,8 @@ export const stageAiPatch = mutation({
     tags: v.optional(v.array(v.string())),
     changedPaths: v.optional(v.array(v.string())),
     operationIndex: v.optional(v.number()),
+    /** When true, also write durable artifact fields so verify cannot race a lagging gateway projection. */
+    commit: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const { actor, artifact } = await requireArtifactCapability(
@@ -2092,25 +2142,60 @@ export const stageAiPatch = mutation({
       .map((path) => path.trim().slice(0, 500))
       .filter(Boolean)
       .slice(0, 256);
-    const effects = currentAiEffects(artifact, now).map((effect) =>
-      effect.runId === args.runId &&
-      effect.executionId === args.executionId &&
-      (args.operationIndex === undefined ||
-        effect.operationIndex === args.operationIndex)
-        ? { ...effect, changedPaths, updatedAt: now }
-        : effect,
+    const effects = currentAiEffects(artifact, now).map((effect) => {
+      if (
+        effect.runId !== args.runId ||
+        effect.executionId !== args.executionId ||
+        (args.operationIndex !== undefined &&
+          effect.operationIndex !== args.operationIndex)
+      ) {
+        return effect;
+      }
+      // Never wipe a concrete region list with an empty mid-stream frame
+      // (approach / select gestures have no content delta yet).
+      const nextPaths = preferLineScopedPaths(
+        changedPaths.length > 0
+          ? changedPaths
+          : (effect.changedPaths ?? []).filter(Boolean).slice(0, 256),
+        effect.changedPaths,
+      );
+      return { ...effect, changedPaths: nextPaths, updatedAt: now };
+    });
+    const nextTitle = args.title?.trim() || artifact.title;
+    const nextSummary =
+      args.summary !== undefined ? args.summary : artifact.summary;
+    const nextTags = args.tags ?? artifact.tags;
+    const previewPaths = preferLineScopedPaths(
+      changedPaths.length > 0
+        ? changedPaths
+        : (artifact.aiPreview?.changedPaths ?? [])
+            .map((path) => path.trim().slice(0, 500))
+            .filter(Boolean)
+            .slice(0, 256),
+      artifact.aiPreview?.changedPaths,
     );
     await ctx.db.patch(args.artifactId, {
       aiState: "updating",
       aiRunId: args.runId,
       aiExecutionId: args.executionId,
+      ...(args.commit && content !== undefined
+        ? {
+            title: nextTitle,
+            summary: nextSummary,
+            tags: nextTags,
+            content,
+            textIndex: `${nextTitle} ${nextSummary ?? ""} ${nextTags.join(" ")}`,
+            syncState: "synchronized",
+            lastSynchronizedAt: now,
+          }
+        : {}),
       aiPreview: {
         ...(artifact.aiPreview ?? {}),
         title: args.title,
         summary: args.summary,
         content,
         tags: args.tags,
-        changedPaths,
+        changedPaths: previewPaths,
         startedAt: artifact.aiPreview?.startedAt ?? now,
       },
       aiEffects: effects,
@@ -2421,6 +2506,7 @@ export const settleStagedForRun = mutation({
           effectsForRun(artifact, args.runId, args.executionId, now),
           now,
           expiresAt,
+          artifact.aiPreview?.changedPaths,
         );
         return ctx.db.patch(artifact._id, {
           aiState: "edited",
@@ -2491,6 +2577,7 @@ export const markAiState = mutation({
         effectsForRun(artifact, args.runId, args.executionId, now),
         now,
         expiresAt,
+        artifact.aiPreview?.changedPaths,
       );
       const latest = remainingEffects.at(-1);
       const nextEffects = [...remainingEffects, ...settlingEffects];
@@ -2514,20 +2601,49 @@ export const markAiState = mutation({
         args.executionId,
         now,
       );
-      const latest = remainingEffects.at(-1);
+      const activeRemaining = remainingEffects.filter(
+        (effect) => effect.state === "active",
+      );
+      const latest = activeRemaining.at(-1) ?? remainingEffects.at(-1);
       await ctx.db.patch(args.artifactId, {
-        aiState: remainingEffects.length ? "updating" : undefined,
+        aiState: activeRemaining.length
+          ? "updating"
+          : remainingEffects.length
+            ? "edited"
+            : undefined,
         aiRunId: latest?.runId,
         aiExecutionId: latest?.executionId,
-        aiStateExpiresAt: undefined,
-        aiProgress: remainingEffects.length ? artifact.aiProgress : undefined,
+        aiStateExpiresAt: remainingEffects.length
+          ? now + AI_EDITED_FLASH_MS
+          : undefined,
+        aiProgress: activeRemaining.length ? artifact.aiProgress : undefined,
         aiPreview:
           artifact.aiRunId === args.runId ? undefined : artifact.aiPreview,
+        // Failed attempts must not leave settling sweeps pulsing on cards.
         aiEffects: remainingEffects.length ? remainingEffects : undefined,
         updatedAt: now,
       });
     }
     return { artifactId: args.artifactId };
+  },
+});
+
+export const dismissAiEdit = mutation({
+  args: { artifactId: v.id("spectraArtifacts") },
+  handler: async (ctx, args) => {
+    await requireArtifactCapability(ctx, args.artifactId, "modify");
+    const now = Date.now();
+    await ctx.db.patch(args.artifactId, {
+      aiState: undefined,
+      aiRunId: undefined,
+      aiExecutionId: undefined,
+      aiStateExpiresAt: undefined,
+      aiProgress: undefined,
+      aiPreview: undefined,
+      aiEffects: undefined,
+      updatedAt: now,
+    });
+    return { artifactId: args.artifactId, dismissed: true as const };
   },
 });
 

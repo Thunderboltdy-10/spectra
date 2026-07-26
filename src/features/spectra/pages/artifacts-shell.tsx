@@ -868,7 +868,26 @@ export function ArtifactsShell() {
                 workspaceId={selectedWorkspaceId || undefined}
                 optimistic={runEngine.liveExchange}
                 openThreadId={liveThread?.id}
-                onOpen={(_runId, threadId, title) => { setActiveRunPanelId(null); setLiveThread({ id: threadId, title }); }}
+                onOpen={(_runId, threadId, title, artifactId) => {
+                  setActiveRunPanelId(null);
+                  setLiveThread({ id: threadId, title });
+                  setComposerThread({
+                    id: threadId,
+                    title,
+                    runId: _runId,
+                    workspaceId: selectedWorkspaceId || undefined,
+                  });
+                  if (artifactId) {
+                    const artifact = allArtifacts.find(
+                      (item) => item._id === artifactId,
+                    );
+                    if (artifact) openArtifactSurface(artifact);
+                  }
+                }}
+                onDeselect={() => {
+                  setComposerThread(null);
+                  setLiveThread(null);
+                }}
                 onStop={(runId) => runEngine.stop(runId)}
                 onRetry={(runId) => void runEngine.retry(runId)}
                 onAction={(card, action) => void runEngine.onCardAction(card, action, card.runId)}
@@ -939,6 +958,19 @@ export function ArtifactsShell() {
             continuing={composerThread?.id === liveThread.id}
             onContinue={() => {
               void (async () => {
+                if (composerThread?.id === liveThread.id) {
+                  setComposerThread(null);
+                  try {
+                    await postSpectra({
+                      action: "selectRunTab",
+                      runId: undefined,
+                    });
+                    window.dispatchEvent(new Event("spectra:threads-changed"));
+                  } catch {
+                    // Local deselect already applied.
+                  }
+                  return;
+                }
                 try {
                   const result = await postSpectra<{
                     runId?: string;
@@ -948,9 +980,8 @@ export function ArtifactsShell() {
                     threadId: liveThread.id,
                   });
                   if (!result.selected || !result.runId) {
-                    throw new Error(
-                      "This conversation has no run to continue yet.",
-                    );
+                    setComposerThread(null);
+                    return;
                   }
                   setComposerThread({
                     id: liveThread.id,

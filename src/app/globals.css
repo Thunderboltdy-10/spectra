@@ -861,6 +861,46 @@ body {
   z-index: 2;
 }
 
+/* Side-panel deck: absolute desktop coordinates (588px Templates, centered
+   pagination) fall off a ~720px rail. Re-anchor to the toolbar itself. */
+.spectra-artifact-studio[data-studio-mode="split"][data-blueprint="flashcard_deck"]
+  .spectra-deck-menu-trigger {
+  position: static !important;
+  top: auto;
+  left: auto;
+}
+
+.spectra-artifact-studio[data-studio-mode="split"][data-blueprint="flashcard_deck"]
+  .spectra-deck-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding-right: 0;
+}
+
+.spectra-artifact-studio[data-studio-mode="split"][data-blueprint="flashcard_deck"]
+  .spectra-deck-pagination {
+  position: static;
+  left: auto;
+  transform: none;
+  margin-left: auto;
+}
+
+.spectra-artifact-studio[data-studio-mode="split"][data-blueprint="flashcard_deck"]
+  .spectra-deck-view-switch {
+  position: static;
+  right: auto;
+  top: auto;
+}
+
+.spectra-artifact-studio[data-studio-mode="split"][data-blueprint="flashcard_deck"]
+  .spectra-flashcard-studio {
+  column-gap: 16px !important;
+  padding-right: 8px;
+}
+
 .spectra-deck-pagination {
   position: absolute;
   left: calc(376px + (100% - 394px) / 2);
@@ -1045,8 +1085,24 @@ body {
   flex-wrap: wrap;
 }
 
-.spectra-artifact-studio[data-studio-mode="split"] .spectra-artifact-identity {
-  padding-inline: 12px !important;
+.spectra-artifact-studio[data-studio-mode="split"] .spectra-artifact-main {
+  /* Clear the floating command bar + run pills so the last fields remain
+     reachable after scrolling — pb-5 left Tags/Attachments under chrome. */
+  padding-bottom: 148px !important;
+  scrollbar-width: thin;
+}
+
+.spectra-artifact-studio[data-studio-mode="split"]
+  .spectra-artifact-main::-webkit-scrollbar {
+  width: 10px;
+}
+
+.spectra-artifact-studio[data-studio-mode="split"]
+  .spectra-artifact-main::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--text-tertiary) 42%, transparent);
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 
 .spectra-artifact-studio[data-studio-mode="split"]
@@ -6260,46 +6316,77 @@ button:not(:disabled),
 .spectra-artifact-main [data-ai-region="true"] {
   position: relative;
   isolation: isolate;
-  border-color: color-mix(
-    in oklab,
-    var(--accent-cyan) 28%,
-    var(--border-default)
-  );
-  background-color: color-mix(in oklab, var(--accent-cyan) 2.2%, transparent);
+  border-radius: 4px;
+  border-color: transparent;
+  /* Editorial ink wash — the line itself is the signal, not a chrome banner. */
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in oklab, var(--accent-cyan) 16%, transparent) 0,
+      color-mix(in oklab, var(--accent-cyan) 16%, transparent) 3px,
+      color-mix(in oklab, var(--accent-cyan) 5.5%, transparent) 3px,
+      color-mix(in oklab, var(--accent-cyan) 2.2%, transparent) 100%
+    );
   box-shadow:
-    0 0 0 1px color-mix(in oklab, var(--accent-cyan) 9%, transparent),
-    0 0 16px -9px color-mix(in oklab, #4f8dff 38%, transparent),
-    0 8px 22px -20px color-mix(in oklab, var(--accent-cyan) 48%, transparent);
+    inset 3px 0 0 color-mix(in oklab, var(--accent-cyan) 72%, #2a6fb8),
+    0 0 0 1px color-mix(in oklab, var(--accent-cyan) 12%, transparent);
+  animation: spectra-content-settle 520ms cubic-bezier(0.22, 0.72, 0.2, 1) both;
+}
+
+/* Infinite breathe only while a run is actively creating/updating — never after
+   settle/failure, or cards and side panels keep pulsing forever. */
+.spectra-artifact-studio[data-ai-state="creating"]
+  .spectra-artifact-main
+  [data-ai-region="true"],
+.spectra-artifact-studio[data-ai-state="updating"]
+  .spectra-artifact-main
+  [data-ai-region="true"] {
   animation:
     spectra-content-settle 520ms cubic-bezier(0.22, 0.72, 0.2, 1) both,
-    spectra-ai-target-breathe 1.8s ease-in-out 520ms infinite alternate;
+    spectra-ai-target-breathe 2.4s ease-in-out 520ms infinite alternate;
 }
 
 .spectra-artifact-main [data-ai-region="true"]::after {
-  content: "✦";
-  position: absolute;
-  z-index: 8;
-  inset: 0;
-  pointer-events: none;
-  border-radius: inherit;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  padding-right: 10px;
-  color: color-mix(in oklab, #4f8dff 84%, #335f9d);
-  font-size: 12px;
-  line-height: 1;
-  text-shadow: 0 0 10px color-mix(in oklab, #4f8dff 46%, transparent);
-  background: linear-gradient(
-    98deg,
-    transparent 8%,
-    color-mix(in oklab, var(--accent-cyan) 4%, transparent) 38%,
-    color-mix(in oklab, white 13%, transparent) 50%,
-    transparent 72%
-  );
-  background-size: 230% 100%;
-  animation: spectra-region-materialize 1.55s cubic-bezier(0.4, 0, 0.2, 1)
-    infinite;
+  content: none;
+}
+
+/* Document prose: quiet glyph-level ink, no floating badge over the line. */
+.spectra-artifact-studio[data-blueprint="document"]
+  .spectra-artifact-main
+  .ProseMirror
+  [data-ai-region="true"] {
+  margin-inline: -0.35rem;
+  padding-inline: 0.35rem;
+  padding-block: 0.1rem;
+}
+
+.spectra-artifact-studio[data-blueprint="document"]
+  .spectra-artifact-main
+  .ProseMirror
+  [data-ai-region="true"]::after {
+  content: none;
+}
+
+.spectra-artifact-studio[data-ai-gesture="erasing"]
+  .spectra-artifact-main
+  [data-ai-region="true"],
+.spectra-artifact-studio[data-ai-gesture="selecting"]
+  .spectra-artifact-main
+  [data-ai-region="true"] {
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in oklab, var(--accent-cyan) 22%, transparent) 0,
+      color-mix(in oklab, var(--accent-cyan) 22%, transparent) 3px,
+      color-mix(in oklab, var(--accent-cyan) 12%, transparent) 3px,
+      color-mix(in oklab, var(--accent-cyan) 7%, transparent) 100%
+    );
+}
+
+.spectra-artifact-studio[data-ai-gesture="typing"]
+  .spectra-artifact-main
+  [data-ai-region="true"] {
+  caret-color: var(--accent-cyan);
 }
 
 /* Catch-up after AI finished: one-shot materialize, not endless breathe */
@@ -6317,8 +6404,7 @@ button:not(:disabled),
 .spectra-artifact-studio[data-ai-catchup="true"]
   .spectra-artifact-main
   [data-ai-region="true"]::after {
-  animation: spectra-region-materialize 1.15s cubic-bezier(0.4, 0, 0.2, 1) 1
-    both;
+  content: none;
 }
 
 /* Form controls feel collaborator-written while AI streams */
@@ -11765,7 +11851,7 @@ button[data-spectra-context-trigger="true"]::after {
 .spectra-artifact-studio[data-blueprint="flashcard_deck"]
   .spectra-flashcard-studio {
   gap: 0;
-  overflow: hidden;
+  overflow: visible;
   border: 1px solid var(--wave-hairline, var(--border-default));
   border-radius: 12px;
   background: color-mix(in oklab, var(--bg-elevated) 96%, transparent);
@@ -14555,13 +14641,26 @@ body {
 }
 
 @media (min-width: 1280px) {
-  .spectra-artifact-studio[data-blueprint="sheets"] .spectra-editor-layout {
+  .spectra-artifact-studio[data-blueprint="sheets"]:not(
+      [data-studio-mode="split"]
+    )
+    .spectra-editor-layout {
     grid-template-columns: minmax(0, 1fr) 250px !important;
   }
 
-  .spectra-artifact-studio[data-blueprint="code"] .spectra-editor-layout {
+  .spectra-artifact-studio[data-blueprint="code"]:not(
+      [data-studio-mode="split"]
+    )
+    .spectra-editor-layout {
     grid-template-columns: minmax(0, 1fr) 272px !important;
   }
+}
+
+.spectra-artifact-studio[data-blueprint="sheets"][data-studio-mode="split"]
+  .spectra-editor-layout,
+.spectra-artifact-studio[data-blueprint="code"][data-studio-mode="split"]
+  .spectra-editor-layout {
+  grid-template-columns: minmax(0, 1fr) !important;
 }
 
 .spectra-artifact-studio[data-blueprint="sheets"] .spectra-artifact-identity {
@@ -14740,12 +14839,20 @@ body {
 }
 
 .spectra-artifact-main {
-  overflow: hidden !important;
+  /* The main pane is the scrollport for every non-document editor. Forcing
+     overflow:hidden here made planner/deck/quiz/agent content unreachable in
+     the workspace side panel — content clipped with no scrollbar at all. */
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   padding: 0 0 0 15px !important;
 }
 
 .spectra-artifact-studio[data-blueprint="document"] .spectra-artifact-main {
   padding-left: 0 !important;
+  /* Documents keep their own inner scrollport on .spectra-document-studio. */
+  overflow: hidden !important;
 }
 
 .spectra-artifact-studio[data-blueprint="document"] .spectra-document-studio {
@@ -14753,6 +14860,32 @@ body {
   overflow-y: auto !important;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
+}
+
+/* Form-style editors must grow with content so .spectra-artifact-main can
+   scroll. height:100% trapped them at the panel height and clipped the rest. */
+.spectra-artifact-studio:is(
+    [data-blueprint="planner_task"],
+    [data-blueprint="flashcard_deck"],
+    [data-blueprint="quiz"],
+    [data-blueprint="agent"]
+  )
+  .spectra-editor-layout,
+.spectra-artifact-studio:is(
+    [data-blueprint="planner_task"],
+    [data-blueprint="flashcard_deck"],
+    [data-blueprint="quiz"],
+    [data-blueprint="agent"]
+  )
+  .spectra-editor-layout
+  > section {
+  height: auto;
+  min-height: 100%;
+}
+
+.spectra-artifact-studio[data-blueprint="flashcard_deck"]
+  .spectra-flashcard-studio {
+  overflow: visible;
 }
 
 .spectra-editor-layout,
@@ -14944,19 +15077,80 @@ body {
   margin-top: 0 !important;
 }
 
+/* Planner two-rail layout must not apply inside the workspace side panel.
+   Viewport ≥1024px used to force a 332px aside + 4-up property row into a
+   ~700px split, crushing status/priority to ~60px selects. */
 @media (min-width: 1024px) {
-  .spectra-artifact-studio[data-blueprint="planner_task"]
+  .spectra-artifact-studio[data-blueprint="planner_task"]:not(
+      [data-studio-mode="split"]
+    )
     .spectra-planner-studio {
     grid-template-columns: minmax(0, 1fr) 332px !important;
   }
 
-  .spectra-artifact-studio[data-blueprint="planner_task"]
+  .spectra-artifact-studio[data-blueprint="planner_task"]:not(
+      [data-studio-mode="split"]
+    )
     .spectra-planner-studio
     > fieldset
     > section
     > .mt-4.grid {
     grid-template-columns: 0.9fr 0.95fr 1.35fr 1fr !important;
   }
+}
+
+.spectra-artifact-studio[data-blueprint="planner_task"][data-studio-mode="split"]
+  .spectra-planner-studio {
+  grid-template-columns: minmax(0, 1fr) !important;
+  margin-left: 0 !important;
+}
+
+.spectra-artifact-studio[data-blueprint="planner_task"][data-studio-mode="split"]
+  .spectra-planner-studio
+  > aside {
+  display: none !important;
+}
+
+.spectra-artifact-studio[data-blueprint="planner_task"][data-studio-mode="split"]
+  .spectra-planner-studio
+  > fieldset
+  > section {
+  width: 100%;
+  max-width: none;
+}
+
+.spectra-artifact-studio[data-blueprint="planner_task"][data-studio-mode="split"]
+  .spectra-planner-studio
+  > fieldset
+  > section
+  > .mt-4.grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+}
+
+@container spectra-studio-split (min-width: 640px) {
+  .spectra-artifact-studio[data-blueprint="planner_task"][data-studio-mode="split"]
+    .spectra-planner-studio
+    > fieldset
+    > section
+    > .mt-4.grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  }
+}
+
+.spectra-artifact-studio[data-blueprint="planner_task"][data-studio-mode="split"]
+  .spectra-planner-description {
+  width: 100%;
+  max-width: none;
+}
+
+.spectra-artifact-studio[data-blueprint="planner_task"][data-studio-mode="split"]
+  .spectra-planner-studio
+  select,
+.spectra-artifact-studio[data-blueprint="planner_task"][data-studio-mode="split"]
+  .spectra-planner-studio
+  input:not([type="checkbox"]):not([type="radio"]) {
+  min-width: 0;
+  width: 100%;
 }
 
 .spectra-artifact-studio[data-blueprint="planner_task"]

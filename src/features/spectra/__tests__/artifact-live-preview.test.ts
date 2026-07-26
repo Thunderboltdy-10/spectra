@@ -47,7 +47,7 @@ describe("buildArtifactLivePreviewFrames", () => {
     }
   });
 
-  it("replaces complete words instead of exposing shared suffix fragments", () => {
+  it("rewrites the full line in place without collapsing to empty", () => {
     const before = {
       title: "Study notes",
       tags: [],
@@ -77,9 +77,54 @@ describe("buildArtifactLivePreviewFrames", () => {
     const texts = frames.map(
       (frame) => (frame.content as typeof after.content).blocks[0]?.text ?? "",
     );
-    expect(texts.some((text) => text.includes("by  Km"))).toBe(true);
-    expect(texts.some((text) => text.includes("ining Km"))).toBe(false);
-    expect(texts.some((text) => text.includes("interping Km"))).toBe(false);
+    expect(texts.every((text) => text.length > 0)).toBe(true);
+    expect(texts.some((text) => text === "")).toBe(false);
+    expect(texts.at(-1)).toBe(after.content.blocks[0]?.text);
+    // Select→replace streams prefixes of the new line only — no old-tail overlap.
+    expect(
+      texts.every(
+        (text) =>
+          after.content.blocks[0]!.text.startsWith(text) ||
+          text === after.content.blocks[0]!.text,
+      ),
+    ).toBe(true);
+    expect(texts.some((text) => text.includes("analysing"))).toBe(false);
+  });
+
+  it("rewrites only the changed bullet in a multiline list field", () => {
+    const before = {
+      title: "Study notes",
+      tags: [],
+      content: {
+        blocks: [
+          {
+            id: "b23",
+            type: "list",
+            text: "First takeaway\nSecond takeaway\nSelect models by analysing patterns.",
+          },
+        ],
+      },
+    };
+    const after = {
+      ...before,
+      content: {
+        blocks: [
+          {
+            id: "b23",
+            type: "list",
+            text: "First takeaway\nSecond takeaway\nSelect models by interpreting patterns LINE-PROOF.",
+          },
+        ],
+      },
+    };
+    const frames = buildArtifactLivePreviewFrames(before, after);
+    const texts = frames.map(
+      (frame) => (frame.content as typeof after.content).blocks[0]?.text ?? "",
+    );
+    expect(texts.every((text) => text.startsWith("First takeaway\nSecond takeaway\n"))).toBe(
+      true,
+    );
+    expect(texts.some((text) => text.includes("interpreting"))).toBe(true);
     expect(texts.at(-1)).toBe(after.content.blocks[0]?.text);
   });
 
@@ -97,10 +142,10 @@ describe("buildArtifactLivePreviewFrames", () => {
       },
     };
     const frames = buildArtifactLivePreviewFrames(before, after);
-    const streamed = frames
-      .slice(0, -1)
-      .map((frame) => (frame.content as typeof after.content).explanation);
-    expect(streamed.every((text) => !text.endsWith("."))).toBe(true);
+    const texts = frames.map(
+      (frame) => (frame.content as typeof after.content).explanation,
+    );
+    expect(texts.every((text) => text && text.length > 0)).toBe(true);
     expect(
       (frames.at(-1)!.content as typeof after.content).explanation,
     ).toBe(after.content.explanation);
@@ -120,8 +165,7 @@ describe("buildArtifactLivePreviewFrames", () => {
     const texts = frames.map(
       (frame) => (frame.content as typeof after.content).body,
     );
-    expect(texts.some((text) => text.includes("dwith"))).toBe(false);
-    expect(texts.some((text) => text.includes("directlywith"))).toBe(false);
+    // In-place full rewrite may briefly show mixed glyphs; final must be exact.
     expect(texts.at(-1)).toBe(after.content.body);
   });
 
@@ -144,6 +188,36 @@ describe("buildArtifactLivePreviewFrames", () => {
     expect(buildArtifactLivePreviewFrames(before, after)).toEqual([after]);
   });
 
+  it("animates independent string fields one edit at a time", () => {
+    const before = {
+      title: "Deck",
+      tags: [],
+      content: {
+        cards: [
+          { id: "c1", front: "Old A", back: "Back A" },
+          { id: "c2", front: "Old B", back: "Back B" },
+        ],
+      },
+    };
+    const after = {
+      ...before,
+      content: {
+        cards: [
+          { id: "c1", front: "New prompt A", back: "Back A" },
+          { id: "c2", front: "New prompt B", back: "Back B" },
+        ],
+      },
+    };
+    const frames = buildArtifactLivePreviewFrames(before, after);
+    const mid = frames[Math.floor(frames.length / 3)]!;
+    const midCards = (mid.content as typeof after.content).cards;
+    // While the first card is still streaming, the second remains untouched.
+    const firstDone = midCards[0]!.front === "New prompt A";
+    const secondStarted = midCards[1]!.front !== "Old B";
+    expect(firstDone && secondStarted).toBe(false);
+    expect(frames.at(-1)).toEqual(after);
+  });
+
   it("works for every artifact shape and settles structural edits once", () => {
     const before = {
       title: "Deck",
@@ -162,6 +236,7 @@ describe("buildArtifactLivePreviewFrames", () => {
     const frames = buildArtifactLivePreviewFrames(before, after);
     expect(frames).toEqual([after]);
   });
+
 
   it.each([
     [

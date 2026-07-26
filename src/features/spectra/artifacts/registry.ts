@@ -52,11 +52,30 @@ const regionAdapters: Record<
       ),
       ...rows(root.blocks).flatMap((block, index) => {
         const blockId = stringValue(block.id, `block-${index + 1}`);
+        const blockType = stringValue(block.type, "block");
+        const rawText =
+          typeof block.text === "string" ? block.text.trim() : "";
+        const firstLine = rawText.split("\n")[0]?.trim() ?? "";
+        const excerpt =
+          firstLine.length > 48 ? `${firstLine.slice(0, 45)}…` : firstLine;
+        const typeLabel =
+          blockType === "heading"
+            ? "Heading"
+            : blockType === "list" ||
+                blockType === "bulletList" ||
+                blockType === "orderedList"
+              ? "List"
+              : blockType === "table"
+                ? "Table"
+                : blockType === "paragraph"
+                  ? "Paragraph"
+                  : "Block";
+        const label = excerpt ? `${typeLabel}: ${excerpt}` : `${typeLabel} ${index + 1}`;
         return [
           region(
             blockId,
-            stringValue(block.type, "block"),
-            `Block ${index + 1}`,
+            blockType,
+            label,
             ["blocks", index],
             undefined,
             typeof block.text === "string" ? block.text : undefined,
@@ -65,10 +84,9 @@ const regionAdapters: Record<
             ? rows(block.rows).flatMap((row, rowIndex) =>
                 rows(row.cells).map((cell, cellIndex) =>
                   region(
-                    stringValue(
-                      cell.id,
-                      `${blockId}:cell:${rowIndex + 1}:${cellIndex + 1}`,
-                    ),
+                    // Always namespace cells under the block so a short AI
+                    // cell.id like "b6" cannot collide with another block id.
+                    `${blockId}:cell:${rowIndex + 1}:${cellIndex + 1}`,
                     "document_table_cell",
                     `Table ${index + 1} cell ${rowIndex + 1}, ${cellIndex + 1}`,
                     ["blocks", index, "rows", rowIndex, "cells", cellIndex],

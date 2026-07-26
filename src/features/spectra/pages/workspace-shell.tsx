@@ -133,7 +133,7 @@ type WorkspaceEntry = {
 type WorkspaceHubTab = { id: string; label: string; workspaceId?: string };
 const EMPTY_ARTIFACTS: SpectraArtifact[] = [];
 
-const AI_EDITED_FLASH_FALLBACK_MS = 12_000;
+const AI_EDITED_FLASH_FALLBACK_MS = 90_000;
 
 function liveAiIsActive(
   artifact?: Pick<SpectraArtifact, "aiState" | "aiEffects"> | Pick<
@@ -169,6 +169,39 @@ function expireLiveAiChrome<T extends SpectraArtifact>(
   const effects = (artifact.aiEffects ?? []).filter(
     (effect) => !effect.expiresAt || effect.expiresAt > now,
   );
+  const activeEffects = effects.filter((effect) => effect.state === "active");
+  const working =
+    artifact.aiState === "creating" || artifact.aiState === "updating";
+  // Failed / abandoned runs must not leave cards and studios pulsing forever.
+  // Promote leftover settling ink to a quiet edited flash, or clear entirely.
+  // Stuck creating/updating with an orphan aiRunId (no live effects) also clears —
+  // otherwise list cards keep the infinite cyan sweep after the run already stopped.
+  if (working && activeEffects.length === 0) {
+    if (effects.length > 0) {
+      const expiresAt =
+        effects
+          .map((effect) => effect.expiresAt)
+          .filter((value): value is number => typeof value === "number")
+          .sort((left, right) => left - right)[0] ?? now + AI_EDITED_FLASH_FALLBACK_MS;
+      return {
+        ...artifact,
+        aiState: "edited",
+        aiProgress: undefined,
+        aiStateExpiresAt: expiresAt,
+        aiEffects: effects,
+      };
+    }
+    return {
+      ...artifact,
+      aiState: undefined,
+      aiRunId: undefined,
+      aiExecutionId: undefined,
+      aiProgress: undefined,
+      aiPreview: undefined,
+      aiStateExpiresAt: undefined,
+      aiEffects: undefined,
+    };
+  }
   const editedExpiry = aiEditedExpiresAt(artifact);
   const editedExpired =
     artifact.aiState === "edited" &&
@@ -193,17 +226,19 @@ function visibleArtifactCardAiState(
   artifact:
     | Pick<
         SpectraArtifact,
-        "aiState" | "aiStateExpiresAt" | "updatedAt"
+        "aiState" | "aiStateExpiresAt" | "updatedAt" | "aiEffects" | "aiRunId"
       >
     | null
     | undefined,
   now: number,
 ): "creating" | "updating" | "edited" | "failed" | "normal" {
-  const state = artifact?.aiState;
+  if (!artifact) return "normal";
+  const expired = expireLiveAiChrome(artifact as SpectraArtifact, now);
+  const state = expired.aiState;
   if (state === "creating" || state === "updating") return state;
   if (state === "failed") return "failed";
   if (state === "edited") {
-    const expires = aiEditedExpiresAt(artifact);
+    const expires = aiEditedExpiresAt(expired);
     return expires && expires > now ? "edited" : "normal";
   }
   return "normal";
@@ -5540,7 +5575,7 @@ export function WorkspaceShell() {
                   : undefined
               }
               onDirtyChange={studio.setDirty}
-              compact={Boolean(liveThread)}
+              compact={false}
             />
           ) : !selectedWorkspaceId && loading && !overview ? (
             <section className="flex min-w-0 flex-1">
@@ -5609,7 +5644,7 @@ export function WorkspaceShell() {
                       : undefined
                   }
                   onDirtyChange={studio.setDirty}
-                  compact={Boolean(liveThread)}
+                  compact={false}
                 />
               ) : null}
               {!workSetIsolated && tiledArtifacts.length > 0 ? (
@@ -5903,7 +5938,7 @@ export function WorkspaceShell() {
                         : undefined
                     }
                     onDirtyChange={studio.setDirty}
-                    compact={Boolean(liveThread)}
+                    compact={false}
                   />
                 ) : null}
                 {studio.mode === "split" && studio.activeArtifact ? (
@@ -5933,7 +5968,7 @@ export function WorkspaceShell() {
                         : undefined
                     }
                     onDirtyChange={studio.setDirty}
-                    compact={Boolean(liveThread)}
+                    compact={false}
                   />
                 ) : null}
                 {!workSetIsolated && tiledArtifacts.length > 0 ? (
@@ -5970,9 +6005,21 @@ export function WorkspaceShell() {
                 workspaceId={selectedWorkspaceId}
                 optimistic={runEngine.liveExchange}
                 openThreadId={liveThread?.id}
-                onOpen={(_runId, threadId, title) => {
+                onOpen={(_runId, threadId, title, artifactId) => {
                   setActiveRunPanelId(null);
                   setLiveThread({ id: threadId, title });
+                  setComposerThread({
+                    id: threadId,
+                    title,
+                    runId: _runId,
+                    workspaceId: selectedWorkspaceId,
+                  });
+                  if (artifactId) {
+                    const artifact = allArtifacts.find(
+                      (item) => item._id === artifactId,
+                    );
+                    if (artifact) openArtifactPanel(artifact);
+                  }
                 }}
                 onDeselect={() => {
                   setComposerThread(null);
@@ -6110,6 +6157,22 @@ export function WorkspaceShell() {
               continuing={composerThread?.id === liveThread.id}
               onContinue={() => {
                 void (async () => {
+                  // Blue/active icon toggles off so the next message starts fresh.
+                  if (composerThread?.id === liveThread.id) {
+                    setComposerThread(null);
+                    try {
+                      await postSpectra({
+                        action: "selectRunTab",
+                        runId: undefined,
+                      });
+                      window.dispatchEvent(
+                        new Event("spectra:threads-changed"),
+                      );
+                    } catch {
+                      // Local deselect already applied.
+                    }
+                    return;
+                  }
                   try {
                     const result = await postSpectra<{
                       runId?: string;
@@ -6119,9 +6182,8 @@ export function WorkspaceShell() {
                       threadId: liveThread.id,
                     });
                     if (!result.selected || !result.runId) {
-                      throw new Error(
-                        "This conversation has no run to continue yet.",
-                      );
+                      setComposerThread(null);
+                      return;
                     }
                     setComposerThread({
                       id: liveThread.id,
@@ -6141,7 +6203,8 @@ export function WorkspaceShell() {
               }}
               onClose={() => {
                 setLiveThread(null);
-                setComposerThread(null);
+                // Closing the side panel does not force-deselect continuation;
+                // the run-tab icon remains the source of truth for QC.
               }}
               onOpenArtifact={(artifactId) => {
                 const artifact = allArtifacts.find(

@@ -20,6 +20,27 @@ function stableId(value: unknown, prefix: string, index: number) {
     : `${prefix}-${index + 1}`;
 }
 
+/** Rewrite colliding ids so Yjs region maps never throw ARTIFACT_REGION_DUPLICATE. */
+export function ensureUniqueRecordIds<T extends Record<string, unknown>>(
+  rows: T[],
+  idKey: string,
+  prefix: string,
+): T[] {
+  const seen = new Set<string>();
+  return rows.map((entry, index) => {
+    const raw = entry[idKey];
+    let id = stableId(raw, prefix, index);
+    if (seen.has(id)) {
+      const base = id;
+      let n = 2;
+      while (seen.has(`${base}~${n}`)) n += 1;
+      id = `${base}~${n}`;
+    }
+    seen.add(id);
+    return id === raw ? entry : { ...entry, [idKey]: id };
+  });
+}
+
 function stringValue(...values: unknown[]) {
   return (
     values.find((value): value is string => typeof value === "string") ?? ""
@@ -52,77 +73,85 @@ export function normalizeDocumentContent(value: unknown) {
     details: "callout",
     highlight: "paragraph",
   };
-  content.blocks = content.blocks.map((value, index) => {
-    const block = row(value);
-    if (Object.keys(block).length === 0)
-      return {
-        id: `block-${index + 1}`,
-        type: "paragraph",
-        text: String(value ?? ""),
-      };
-    const rawType = stringValue(block.type, "paragraph")
-      .trim()
-      .toLowerCase()
-      .replace(/[\s.-]+/g, "_");
-    block.id = stableId(block.id, "block", index);
-    block.type = aliases[rawType] ?? rawType;
-    if (typeof block.text !== "string") {
-      if (Array.isArray(block.rows))
-        block.text = block.rows
-          .map((item) =>
-            Array.isArray(item) ? item.join(" | ") : String(item),
-          )
-          .join("\n");
-      else {
-        const title = stringValue(block.title, block.label);
-        const body = stringValue(block.content, block.body, block.description);
-        block.text = title && body ? `${title}: ${body}` : title || body;
+  content.blocks = ensureUniqueRecordIds(
+    content.blocks.map((value, index) => {
+      const block = row(value);
+      if (Object.keys(block).length === 0)
+        return {
+          id: `block-${index + 1}`,
+          type: "paragraph",
+          text: String(value ?? ""),
+        };
+      const rawType = stringValue(block.type, "paragraph")
+        .trim()
+        .toLowerCase()
+        .replace(/[\s.-]+/g, "_");
+      block.id = stableId(block.id, "block", index);
+      block.type = aliases[rawType] ?? rawType;
+      if (typeof block.text !== "string") {
+        if (Array.isArray(block.rows))
+          block.text = block.rows
+            .map((item) =>
+              Array.isArray(item) ? item.join(" | ") : String(item),
+            )
+            .join("\n");
+        else {
+          const title = stringValue(block.title, block.label);
+          const body = stringValue(block.content, block.body, block.description);
+          block.text = title && body ? `${title}: ${body}` : title || body;
+        }
       }
-    }
-    if (block.type === "heading") {
-      const attrs = row(block.attrs);
-      if (typeof attrs.level !== "number") {
-        const inferred =
-          rawType === "h1"
-            ? 1
-            : rawType === "h3"
-              ? 3
-              : typeof block.level === "number"
-                ? block.level
-                : 2;
-        attrs.level = Math.max(1, Math.min(3, inferred));
+      if (block.type === "heading") {
+        const attrs = row(block.attrs);
+        if (typeof attrs.level !== "number") {
+          const inferred =
+            rawType === "h1"
+              ? 1
+              : rawType === "h3"
+                ? 3
+                : typeof block.level === "number"
+                  ? block.level
+                  : 2;
+          attrs.level = Math.max(1, Math.min(3, inferred));
+        }
+        block.attrs = attrs;
       }
-      block.attrs = attrs;
-    }
-    return block;
-  });
+      return block;
+    }),
+    "id",
+    "block",
+  );
   return content;
 }
 
 export function normalizeFlashcardDeckContent(value: unknown) {
   const content = row(value);
   if (!Array.isArray(content.cards)) return content;
-  content.cards = content.cards.map((value, index) => {
-    const card = row(value);
-    card.id = stableId(card.id, "card", index);
-    card.front = stringValue(
-      card.front,
-      card.question,
-      card.term,
-      card.title,
-    ).trim();
-    card.back = stringValue(
-      card.back,
-      card.answer,
-      card.definition,
-      card.explanation,
-    ).trim();
-    if (typeof card.hint !== "string" && typeof card.cue === "string")
-      card.hint = card.cue;
-    if (typeof card.section !== "string" && typeof card.group === "string")
-      card.section = card.group;
-    return card;
-  });
+  content.cards = ensureUniqueRecordIds(
+    content.cards.map((value, index) => {
+      const card = row(value);
+      card.id = stableId(card.id, "card", index);
+      card.front = stringValue(
+        card.front,
+        card.question,
+        card.term,
+        card.title,
+      ).trim();
+      card.back = stringValue(
+        card.back,
+        card.answer,
+        card.definition,
+        card.explanation,
+      ).trim();
+      if (typeof card.hint !== "string" && typeof card.cue === "string")
+        card.hint = card.cue;
+      if (typeof card.section !== "string" && typeof card.group === "string")
+        card.section = card.group;
+      return card;
+    }),
+    "id",
+    "card",
+  );
   return content;
 }
 
@@ -313,6 +342,11 @@ export function normalizeQuizContent(value: unknown) {
       question.timeLimitSeconds = 90;
     return question;
   });
+  content.questions = ensureUniqueRecordIds(
+    content.questions as Row[],
+    "id",
+    "question",
+  );
   return content;
 }
 

@@ -152,6 +152,7 @@ import { ThreadConversation } from "./conversation-surface";
 import { Tooltip } from "@/components/ui/tooltip";
 import { useArtifactLiveModel } from "../collaboration/use-artifact-live-model";
 import { publishArtifactAiActivity } from "../collaboration/artifact-ai-activity";
+import { resolvePresenceAnchorFromPoint } from "../collaboration/presence-anchor";
 import type { CollaborationPresence } from "../collaboration/types";
 import {
   ArtifactCommentsPanel,
@@ -2304,12 +2305,20 @@ function documentJsonFromContent(content: unknown, title: string): JSONContent {
 
 function blocksFromJson(json: JSONContent) {
   const nodes = Array.isArray(json.content) ? json.content : [];
+  const seenIds = new Set<string>();
   return nodes
     .map((node, index) => {
-      const stableId =
+      let stableId =
         typeof node.attrs?.blockId === "string" && node.attrs.blockId
           ? node.attrs.blockId
           : `block-${index + 1}`;
+      if (seenIds.has(stableId)) {
+        const base = stableId;
+        let n = 2;
+        while (seenIds.has(`${base}~${n}`)) n += 1;
+        stableId = `${base}~${n}`;
+      }
+      seenIds.add(stableId);
       if (node.type === "equation")
         return {
           id: stableId,
@@ -3240,8 +3249,8 @@ export function StudioSplitShell({
   onWidthChange,
   ariaLabel,
   cssWidthVariable,
-  minWidth = 320,
-  contentReserve = 280,
+  minWidth = 360,
+  contentReserve = 420,
   children,
 }: {
   width: number;
@@ -3285,18 +3294,20 @@ export function StudioSplitShell({
         );
       const siblingCount = peers.length - 1;
       const reserve =
-        siblingCount > 0 ? Math.min(contentReserve, 240) : contentReserve;
-      const floor = siblingCount > 0 ? Math.min(minWidth, 300) : minWidth;
+        siblingCount > 0
+          ? Math.max(320, Math.min(contentReserve, Math.floor(host.clientWidth * 0.28)))
+          : contentReserve;
+      const floor = siblingCount > 0 ? Math.min(minWidth, 480) : minWidth;
       const hostWidth = host.clientWidth;
       const maximum = Math.max(
         floor,
-        Math.min(960, hostWidth - siblingWidth - reserve),
+        Math.min(880, hostWidth - siblingWidth - reserve),
       );
       // Fair share when multiple panels compete: never let one lane take more
-      // than ~52% of the host while another panel is open.
+      // than ~46% of the host while another panel is open.
       const fairCap =
         siblingCount > 0
-          ? Math.max(floor, Math.floor(hostWidth * 0.52))
+          ? Math.max(floor, Math.floor(hostWidth * 0.46))
           : maximum;
       const next = Math.max(floor, Math.min(width, maximum, fairCap));
       if (Math.abs(next - width) >= 8) updateWidth(next);
@@ -3935,22 +3946,35 @@ function ArtifactStudioEditor({
             (effect) =>
               (!effect.expiresAt || effect.expiresAt > previewClock) &&
               (artifact.aiState === "creating" ||
-                artifact.aiState === "updating"),
+                artifact.aiState === "updating" ||
+                artifact.aiState === "edited"),
           ),
     [artifact.aiEffects, artifact.aiState, live.state, previewClock],
+  );
+  const liveWorkingAiEffects = useMemo(
+    () =>
+      activeAiEffects.filter(
+        (effect) =>
+          effect.state !== "settling" &&
+          (artifact.aiState === "creating" || artifact.aiState === "updating"),
+      ),
+    [activeAiEffects, artifact.aiState],
   );
   const activeAiCollaborator = useMemo(() => {
     const aiCollaborators = live.presence.filter(
       (person) => person.actorKind === "ai",
     );
-    // Awareness is the lifecycle of a real collaborator, not merely a carrier
-    // for preview frames. Keep the AI visible while it prepares and during its
-    // brief post-edit pause; prefer the currently streaming AI when two runs
-    // overlap so the native preview follows live work.
+    // Only treat an AI peer as the active collaborator while it is actually
+    // streaming or holding preview patches. Falling back to any idle AI peer
+    // left cards and regions pulsing forever after the run stopped.
     return (
       aiCollaborators.find(
         (person) => person.previewPhase === "streaming",
-      ) ?? aiCollaborators[0]
+      ) ??
+      aiCollaborators.find(
+        (person) => (person.previewPatches?.length ?? 0) > 0,
+      ) ??
+      null
     );
   }, [live.presence]);
   const activeAiPresence = activeAiCollaborator?.previewPatches?.length
@@ -3962,7 +3986,9 @@ function ArtifactStudioEditor({
     publishArtifactAiActivity(
       artifact._id,
       sourceId,
-      activeAiCollaborator
+      activeAiCollaborator &&
+        (activeAiCollaborator.previewPhase === "streaming" ||
+          (activeAiCollaborator.previewPatches?.length ?? 0) > 0)
         ? {
             phase: activeAiPresence ? "editing" : "preparing",
             ...(activeAiCollaborator.previewSequence !== undefined
@@ -4014,13 +4040,36 @@ function ArtifactStudioEditor({
   } else if (!activeAiCollaborator) {
     presencePathMemoryRef.current = null;
   }
-  const presenceHighlightPaths =
-    presencePreview?.paths.length && presencePreview.paths.length > 0
-      ? presencePreview.paths
-      : activeAiCollaborator &&
-          presencePathMemoryRef.current?.operationKey === activeAiOperationKey
-        ? presencePathMemoryRef.current.paths
-        : [];
+  const presenceHighlightPaths = (() => {
+    const base =
+      presencePreview?.paths.length && presencePreview.paths.length > 0
+        ? presencePreview.paths
+        : activeAiCollaborator &&
+            presencePathMemoryRef.current?.operationKey === activeAiOperationKey
+          ? presencePathMemoryRef.current.paths
+          : [];
+    const lineIndex = activeAiCollaborator?.cursor?.anchor?.lineIndex;
+    const blockId =
+      activeAiCollaborator?.cursor?.anchor?.kind === "block"
+        ? activeAiCollaborator.cursor.anchor.id
+        : undefined;
+    if (
+      typeof lineIndex !== "number" ||
+      lineIndex < 0 ||
+      !blockId ||
+      base.length === 0
+    )
+      return base;
+    const linePath = `/blocks/${blockId}/lines/${lineIndex}`;
+    const withoutCoarse = base.filter((path) => {
+      if (path.includes("/lines/")) return true;
+      const match = path.match(/^\/(?:content\/)?blocks\/([^/]+)/i);
+      if (!match) return true;
+      const id = decodeURIComponent(match[1]!);
+      return id !== blockId && !/^\d+$/.test(id);
+    });
+    return [...new Set([...withoutCoarse, linePath])];
+  })();
   const aiPreviewActive =
     Boolean(artifact.aiPreview) &&
     (artifact.aiState === "creating" || artifact.aiState === "updating");
@@ -4079,13 +4128,38 @@ function ArtifactStudioEditor({
     ],
   );
   const effectHighlightPaths = useMemo(
-    () =>
-      materializeAiChangedPaths(
-        activeAiEffects.flatMap((effect) => effect.changedPaths),
+    () => {
+      const effectPaths = activeAiEffects.flatMap(
+        (effect) => effect.changedPaths,
+      );
+      const previewPaths =
+        artifact.aiState === "creating" ||
+        artifact.aiState === "updating" ||
+        artifact.aiState === "edited"
+          ? (artifact.aiPreview?.changedPaths ?? [])
+          : [];
+      const merged = [...effectPaths, ...previewPaths];
+      const hasLineScope = merged.some((path) => path.includes("/lines/"));
+      const preferred = hasLineScope
+        ? merged.filter(
+            (path) =>
+              path.includes("/lines/") ||
+              (path !== "/" && !/^\/(?:content\/)?blocks\//i.test(path)),
+          )
+        : merged;
+      return materializeAiChangedPaths(
+        preferred,
         streamingContent,
         artifact.blueprintKey,
-      ),
-    [activeAiEffects, artifact.blueprintKey, streamingContent],
+      );
+    },
+    [
+      activeAiEffects,
+      artifact.aiPreview?.changedPaths,
+      artifact.aiState,
+      artifact.blueprintKey,
+      streamingContent,
+    ],
   );
   const effectRegionHighlightPaths = useMemo(
     () =>
@@ -4104,29 +4178,35 @@ function ArtifactStudioEditor({
   const presenceRegionHighlightPaths = useMemo(
     () =>
       materializeAiChangedPaths(
-        activeAiCollaborator
-          ? [
-              activeAiCollaborator.activeRegionId,
-              ...(activeAiCollaborator.activeRegionIds ?? []),
-            ].flatMap((regionId) => {
-              if (!regionId) return [];
-              const descriptor = live.model?.descriptor(regionId);
+        activeAiCollaborator?.activeRegionId
+          ? (() => {
+              const descriptor = live.model?.descriptor(
+                activeAiCollaborator.activeRegionId,
+              );
               return descriptor
                 ? [semanticPathToPointer(descriptor.path)]
                 : [];
-            })
+            })()
           : [],
         streamingContent,
         artifact.blueprintKey,
       ),
     [
-      activeAiCollaborator,
+      activeAiCollaborator?.activeRegionId,
       artifact.blueprintKey,
       live.model,
       streamingContent,
     ],
   );
   const presenceTargetPaths = useMemo(() => {
+    // During live streaming, light only the active region — completed fields
+    // stay visible via content patches without stacking blue traces on every
+    // previously touched control.
+    if (activeAiCollaborator?.previewPhase === "streaming") {
+      if (presenceRegionHighlightPaths.length > 0)
+        return presenceRegionHighlightPaths;
+      return presenceHighlightPaths.slice(-1);
+    }
     const combined = [
       ...presenceRegionHighlightPaths,
       ...presenceHighlightPaths,
@@ -4142,7 +4222,11 @@ function ArtifactStudioEditor({
         ),
       ),
     ];
-  }, [presenceHighlightPaths, presenceRegionHighlightPaths]);
+  }, [
+    activeAiCollaborator?.previewPhase,
+    presenceHighlightPaths,
+    presenceRegionHighlightPaths,
+  ]);
   const hasConcreteHighlightPaths =
     presenceTargetPaths.length > 0 ||
     previewHighlightPaths.length > 0 ||
@@ -4158,55 +4242,87 @@ function ArtifactStudioEditor({
     [artifact.aiState, artifact.blueprintKey, hasConcreteHighlightPaths],
   );
   const aiChangedPaths = resolveAiHighlightPaths({
-    previewPaths: [
-      ...presenceTargetPaths,
-      ...previewHighlightPaths,
-    ],
-    effectChangedPaths: effectHighlightPaths,
-    effectRegionPointers: effectRegionHighlightPaths,
+    previewPaths:
+      activeAiCollaborator?.previewPhase === "streaming"
+        ? presenceTargetPaths.length > 0
+          ? presenceTargetPaths
+          : previewHighlightPaths.slice(-1)
+        : [...presenceTargetPaths, ...previewHighlightPaths],
+    effectChangedPaths:
+      activeAiCollaborator?.previewPhase === "streaming"
+        ? []
+        : effectHighlightPaths,
+    effectRegionPointers:
+      activeAiCollaborator?.previewPhase === "streaming"
+        ? []
+        : effectRegionHighlightPaths,
     creationFallbackPaths:
       liveCreationPaths.length > 0
         ? liveCreationPaths
         : liveUpdatingPaths.length > 0
           ? liveUpdatingPaths
           : catchUpFallbackPaths,
-    contentDerivedPaths,
+    contentDerivedPaths:
+      activeAiCollaborator?.previewPhase === "streaming"
+        ? []
+        : contentDerivedPaths,
   });
+  const liveStreamingAi = Boolean(
+    activeAiCollaborator &&
+      (activeAiCollaborator.previewPhase === "streaming" ||
+        (activeAiCollaborator.previewPatches?.length ?? 0) > 0),
+  );
   const aiEffectTitles = [
     ...new Set([
-      ...activeAiEffects.map((effect) => effect.title),
+      ...liveWorkingAiEffects.map((effect) => effect.title),
       ...(aiPreviewActive && artifact.aiPreview?.effectTitle
         ? [artifact.aiPreview.effectTitle]
         : []),
     ]),
   ];
   const aiWorkingActive =
-    Boolean(activeAiCollaborator) ||
+    liveStreamingAi ||
     aiPreviewActive ||
-    activeAiEffects.length > 0 ||
+    liveWorkingAiEffects.length > 0 ||
     (catchUpActive && aiChangedPaths.length > 0) ||
     ((artifact.aiState === "creating" || artifact.aiState === "updating") &&
-      aiChangedPaths.length > 0);
+      aiChangedPaths.length > 0 &&
+      (aiPreviewActive || liveWorkingAiEffects.length > 0 || liveStreamingAi));
   const visibleAiWorking =
-    aiWorkingActive && (Boolean(activeAiCollaborator) || !aiHighlightDismissed);
-  const highlightPaths = activeAiCollaborator
-    ? aiChangedPaths
-    : aiHighlightDismissed
-      ? []
-      : aiChangedPaths;
+    aiWorkingActive && (liveStreamingAi || !aiHighlightDismissed);
+  const highlightPaths =
+    activeAiCollaborator?.previewPhase === "streaming"
+      ? presenceTargetPaths.length > 0
+        ? presenceTargetPaths
+        : aiChangedPaths.slice(0, 1)
+      : activeAiCollaborator
+        ? aiChangedPaths
+        : aiHighlightDismissed
+          ? []
+          : aiChangedPaths;
   // Short edits can finish before the separate AI Yjs connection has time to
   // publish awareness. Keep presence truthful and immediate by projecting the
   // artifact's durable AI state into the same collaboration UI until remote
   // awareness arrives. The synthetic actor disappears as soon as the run
   // settles, and is replaced—not duplicated—when the real AI peer connects.
   const syntheticAiPresence = useMemo<CollaborationPresence | null>(() => {
+    // Only mirror a live AI while work is in flight. After settle, cyan ink +
+    // the accept/reject chip remain — not a permanent floating AI name.
     if (activeAiCollaborator || !visibleAiWorking) return null;
+    if (artifact.aiState === "edited") return null;
     const activeRegionId =
       activeAiEffects.flatMap((effect) => effect.regionIds)[0] ??
       (highlightPaths[0] ? `pointer:${highlightPaths[0]}` : undefined);
+    const focusPath = highlightPaths[0];
+    const blockMatch = focusPath?.match(
+      /\/(?:content\/)?blocks\/(?:id:)?([^/]+)/i,
+    );
+    const ownerName = live.displayName?.trim();
+    const aiName = ownerName ? `${ownerName}'s AI` : "Spectra AI";
     return {
       clientId: `local-ai:${artifact.aiRunId ?? artifact._id}`,
       accountId: live.accountId,
+      name: aiName,
       actorKind: "ai",
       runId: artifact.aiRunId,
       ...(activeRegionId ? { activeRegionId } : {}),
@@ -4214,17 +4330,34 @@ function ArtifactStudioEditor({
         ? {
             cursor: {
               x: 0.5,
-              y: 0.5,
-              updatedAt: previewClock,
+              y: 0.42,
+              updatedAt: artifact.aiPreview?.startedAt ?? previewClock,
+              mode: "typing" as const,
+              ...(blockMatch
+                ? {
+                    anchor: {
+                      kind: "block" as const,
+                      id: decodeURIComponent(blockMatch[1]!),
+                      offset: 0.18,
+                      offsetX: 0.18,
+                      offsetY: 0.32,
+                    },
+                  }
+                : focusPath
+                  ? {
+                      anchor: {
+                        kind: "path" as const,
+                        id: focusPath,
+                        offset: 0.18,
+                        offsetX: 0.18,
+                        offsetY: 0.32,
+                      },
+                    }
+                  : {}),
             },
           }
         : {}),
-      previewSequence: artifact.aiPreview?.startedAt
-        ? Math.max(
-            0,
-            Math.floor((previewClock - artifact.aiPreview.startedAt) / 140),
-          )
-        : 0,
+      previewSequence: 0,
     };
   }, [
     activeAiCollaborator,
@@ -4232,8 +4365,10 @@ function ArtifactStudioEditor({
     artifact._id,
     artifact.aiPreview?.startedAt,
     artifact.aiRunId,
+    artifact.aiState,
     highlightPaths,
     live.accountId,
+    live.displayName,
     previewClock,
     visibleAiWorking,
   ]);
@@ -4301,89 +4436,80 @@ function ArtifactStudioEditor({
   }, [activeAiPresence]);
 
   const setActivePresence = useCallback(
-    (regionId: string) => {
+    (regionId: string, options?: { mode?: "typing" | "focus" | "selecting" }) => {
       try {
-        live.transport?.setPresence({ activeRegionId: regionId });
+        const mode = options?.mode ?? "focus";
+        live.transport?.setPresence({
+          activeRegionId: regionId,
+          interaction: {
+            kind: mode === "selecting" ? "selecting" : mode === "typing" ? "typing" : "focus",
+            targetId: regionId,
+          },
+          cursor: {
+            x: pendingCursorRef.current?.x ?? 0.5,
+            y: pendingCursorRef.current?.y ?? 0.42,
+            updatedAt: Date.now(),
+            mode: mode === "selecting" ? "selecting" : "typing",
+            anchor: regionId.startsWith("metadata:")
+              ? {
+                  kind: "path" as const,
+                  id: `/${regionId.slice("metadata:".length)}`,
+                  offsetX: 0.08,
+                  offsetY: 0.45,
+                  offset: 0.08,
+                }
+              : {
+                  kind: "block" as const,
+                  id: regionId,
+                  offsetX: 0.08,
+                  offsetY: 0.35,
+                  offset: 0.08,
+                },
+          },
+        });
       } catch {
         // Presence is supportive metadata, never a prerequisite for editing.
-        // A transport may be replaced while React still delivers a queued
-        // focus/change event; local authoring must remain available.
       }
     },
     [live.transport],
   );
   const presenceFrameRef = useRef<number | null>(null);
-  const pendingCursorRef = useRef<{ x: number; y: number } | null>(null);
+  const pendingCursorRef = useRef<{
+    x: number;
+    y: number;
+    mode?: NonNullable<CollaborationPresence["cursor"]>["mode"];
+    anchor?: NonNullable<CollaborationPresence["cursor"]>["anchor"];
+  } | null>(null);
   const studioSurfaceRef = useRef<HTMLDivElement>(null);
   const lastStudioInteractionAtRef = useRef(0);
-  const lastAutoRevealKeyRef = useRef("");
   const noteStudioInteraction = useCallback(() => {
     lastStudioInteractionAtRef.current = Date.now();
   }, []);
-  useEffect(() => {
-    if (!visibleAiWorking || highlightPaths.length === 0) {
-      lastAutoRevealKeyRef.current = "";
-      return;
-    }
-    const revealKey = highlightPaths.join("|");
-    if (lastAutoRevealKeyRef.current === revealKey) return;
-    let frame = 0;
-    let attempts = 0;
-    const reveal = () => {
-      const root = studioSurfaceRef.current;
-      if (!root) return;
-      const regions = [...root.querySelectorAll<HTMLElement>(
-        '[data-ai-region="true"]',
-      )].filter((region) => {
-        const style = window.getComputedStyle(region);
-        return style.display !== "none" && style.visibility !== "hidden";
-      });
-      const target =
-        regions.find((region) =>
-          region.matches(
-            "input, textarea, select, [contenteditable=true], [data-address]",
-          ),
-        ) ??
-        regions
-          .filter((region) => region.getClientRects().length > 0)
-          .sort((left, right) => {
-            const leftRect = left.getBoundingClientRect();
-            const rightRect = right.getBoundingClientRect();
-            return (
-              leftRect.width * leftRect.height -
-              rightRect.width * rightRect.height
-            );
-          })[0];
-      if (!target) {
-        attempts += 1;
-        if (attempts < 8) frame = window.requestAnimationFrame(reveal);
-        return;
-      }
-      lastAutoRevealKeyRef.current = revealKey;
-      if (Date.now() - lastStudioInteractionAtRef.current < 1_800) return;
-      const rect = target.getBoundingClientRect();
-      const headerBottom =
-        root
-          .querySelector<HTMLElement>(".spectra-artifact-header")
-          ?.getBoundingClientRect().bottom ?? 0;
-      const visible =
-        rect.top >= headerBottom + 12 &&
-        rect.bottom <= window.innerHeight - 72;
-      if (!visible)
-        target.scrollIntoView({
-          behavior: "smooth",
-          block: "center",
-          inline: "nearest",
-        });
-    };
-    frame = window.requestAnimationFrame(reveal);
-    return () => window.cancelAnimationFrame(frame);
-  }, [highlightPaths, visibleAiWorking]);
+  // Never steal the peer's viewport for AI edits — they may be reading or
+  // typing elsewhere. Cyan ink and the AI caret are the only locators.
   const handlePresencePointerMove = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
       if (!live.transport || live.state !== "synchronized") return;
       const bounds = event.currentTarget.getBoundingClientRect();
       if (!bounds.width || !bounds.height) return;
+      const active = document.activeElement;
+      if (
+        active instanceof HTMLElement &&
+        event.currentTarget.contains(active) &&
+        (active.isContentEditable ||
+          active.tagName === "INPUT" ||
+          active.tagName === "TEXTAREA" ||
+          active.tagName === "SELECT")
+      ) {
+        // While typing/focusing a control, never overwrite the caret with a
+        // hover pointer — peers should only see the action cursor.
+        return;
+      }
+      const anchor = resolvePresenceAnchorFromPoint(
+        event.currentTarget,
+        event.clientX,
+        event.clientY,
+      );
       pendingCursorRef.current = {
         x: Math.max(
           0,
@@ -4393,6 +4519,8 @@ function ArtifactStudioEditor({
           0,
           Math.min(1, (event.clientY - bounds.top) / bounds.height),
         ),
+        mode: "pointer" as const,
+        ...(anchor ? { anchor } : {}),
       };
       if (presenceFrameRef.current !== null) return;
       presenceFrameRef.current = window.requestAnimationFrame(() => {
@@ -4401,7 +4529,9 @@ function ArtifactStudioEditor({
         if (!cursor) return;
         live.transport?.setPresence({
           actorKind: "human",
-          cursor: { ...cursor, updatedAt: Date.now() },
+          interaction: { kind: "pointer" },
+          selection: null,
+          cursor: { ...cursor, updatedAt: Date.now(), mode: "pointer" },
         });
       });
     },
@@ -4409,8 +4539,77 @@ function ArtifactStudioEditor({
   );
   const clearPresenceCursor = useCallback(() => {
     pendingCursorRef.current = null;
-    live.transport?.setPresence({ cursor: null });
+    live.transport?.setPresence({ cursor: null, selection: null });
   }, [live.transport]);
+  useEffect(() => {
+    if (!live.transport || live.state !== "synchronized") return;
+    const onPresenceSelection = (event: Event) => {
+      const root = studioSurfaceRef.current;
+      if (
+        !root ||
+        !(event.target instanceof Node) ||
+        !root.contains(event.target)
+      )
+        return;
+      const detail = (
+        event as CustomEvent<
+          CollaborationPresence["selection"] & {
+            caretOffset?: number;
+            primaryBlockId?: string;
+          }
+        >
+      ).detail;
+      if (!detail || typeof detail !== "object") return;
+      const collapsed = Boolean(detail.collapsed);
+      const primary =
+        detail.primaryBlockId ?? detail.ranges?.[0]?.blockId ?? undefined;
+      const caretOffset =
+        typeof detail.caretOffset === "number" && Number.isFinite(detail.caretOffset)
+          ? Math.max(0, Math.floor(detail.caretOffset))
+          : (detail.ranges?.[0]?.startOffset ?? 0);
+      live.transport?.setPresence({
+        actorKind: "human",
+        selection: {
+          kind: "text",
+          collapsed,
+          ...(typeof detail.text === "string"
+            ? { text: detail.text.slice(0, 280) }
+            : {}),
+          ranges: Array.isArray(detail.ranges) ? detail.ranges : [],
+        },
+        interaction: {
+          kind: collapsed ? "typing" : "selecting",
+          ...(primary ? { targetId: primary, targetKind: "block" as const } : {}),
+        },
+        cursor: {
+          x: pendingCursorRef.current?.x ?? 0.5,
+          y: pendingCursorRef.current?.y ?? 0.4,
+          updatedAt: Date.now(),
+          mode: collapsed ? "typing" : "selecting",
+          ...(primary
+            ? {
+                anchor: {
+                  kind: "block" as const,
+                  id: primary,
+                  charOffset: caretOffset,
+                },
+              }
+            : pendingCursorRef.current?.anchor
+              ? { anchor: pendingCursorRef.current.anchor }
+              : {}),
+        },
+      });
+    };
+    document.addEventListener(
+      "spectra-presence-selection",
+      onPresenceSelection,
+    );
+    return () =>
+      document.removeEventListener(
+        "spectra-presence-selection",
+        onPresenceSelection,
+      );
+  }, [live.state, live.transport]);
   useEffect(
     () => () => {
       if (presenceFrameRef.current !== null)
@@ -4564,18 +4763,19 @@ function ArtifactStudioEditor({
       !dirty ||
       readOnly ||
       busy ||
-      aiPreviewActive ||
-      liveConflict ||
+      // Speculative AI previews must never freeze human region sync. Peers
+      // render AI frames via awareness; durable Yjs writes remain region-
+      // scoped and only claim the blocks the human actually changed.
+      liveConflict?.claimId ||
       syncBusy
     )
       return;
     const timer = window.setTimeout(
       () => void synchronizeDraft(currentSnapshotRef.current),
-      650,
+      liveConflict ? 420 : 140,
     );
     return () => window.clearTimeout(timer);
   }, [
-    aiPreviewActive,
     busy,
     dirty,
     liveConflict,
@@ -4642,9 +4842,19 @@ function ArtifactStudioEditor({
           content,
           next,
         );
-        setActivePresence(regions[0] ?? "artifact:structure");
+        setActivePresence(regions[0] ?? "artifact:structure", {
+          mode: "typing",
+        });
+        // Editing an AI-touched region accepts that trace for the local view.
+        if (
+          !aiHighlightDismissed &&
+          activeAiEffects.some((effect) =>
+            effect.regionIds.some((regionId) => regions.includes(regionId)),
+          )
+        )
+          setAiHighlightDismissed(true);
       } catch {
-        setActivePresence("artifact:structure");
+        setActivePresence("artifact:structure", { mode: "typing" });
       }
     }
     setContent(next);
@@ -4855,7 +5065,7 @@ function ArtifactStudioEditor({
   const handleActiveRegionChange = useCallback(
     (regionId: string) => {
       setActiveCommentRegionId(regionId);
-      setActivePresence(regionId);
+      setActivePresence(regionId, { mode: "typing" });
     },
     [setActivePresence],
   );
@@ -4929,7 +5139,7 @@ function ArtifactStudioEditor({
             rows={1}
             onFocus={() => {
               setActiveCommentRegionId("metadata:title");
-              setActivePresence("metadata:title");
+              setActivePresence("metadata:title", { mode: "typing" });
             }}
             data-ai-region={aiRegionAttr(
               !aiHighlightDismissed &&
@@ -4950,7 +5160,7 @@ function ArtifactStudioEditor({
             readOnly={readOnly}
             onFocus={() => {
               setActiveCommentRegionId("metadata:summary");
-              setActivePresence("metadata:summary");
+              setActivePresence("metadata:summary", { mode: "typing" });
             }}
             onChange={(event) => changeBase({ summary: event.target.value })}
             data-ai-region={aiRegionAttr(
@@ -5035,15 +5245,26 @@ function ArtifactStudioEditor({
       onTouchStartCapture={noteStudioInteraction}
       data-studio-mode={mode}
       data-ai-state={
-        visibleAiWorking && artifact.aiState === "creating"
+        artifact.aiState === "creating" && visibleAiWorking
           ? "creating"
-          : undefined
+          : (artifact.aiState === "edited" || catchUpActive) &&
+              (visibleAiWorking || activeAiEffects.length > 0)
+            ? "edited"
+            : visibleAiWorking
+              ? "updating"
+              : undefined
       }
       data-ai-catchup={
         catchUpActive && highlightPaths.length > 0 ? "true" : undefined
       }
       data-blueprint={artifact.blueprintKey}
       data-ai-highlight-paths={highlightPaths.join("|") || undefined}
+      data-ai-gesture={
+        activeAiCollaborator?.previewGesture ??
+        (activeAiCollaborator?.previewPhase === "streaming"
+          ? "typing"
+          : undefined)
+      }
       style={{ "--studio-accent": meta.color } as CSSProperties}
     >
       <CollaborationCursorLayer
@@ -5100,7 +5321,135 @@ function ArtifactStudioEditor({
                 currentAccountId={live.accountId}
                 currentDisplayName={live.displayName}
                 regions={commentRegions}
+                onFocusPresence={(person) => {
+                  const studio = studioSurfaceRef.current;
+                  if (!studio) return;
+                  const blockId =
+                    person.cursor?.anchor?.kind === "block"
+                      ? person.cursor.anchor.id
+                      : person.selection?.ranges[0]?.blockId;
+                  const lineIndex =
+                    person.cursor?.anchor?.lineIndex ??
+                    person.selection?.ranges[0]?.lineIndex;
+                  const regionId = person.activeRegionId;
+                  const target =
+                    (blockId
+                      ? studio.querySelector<HTMLElement>(
+                          `[data-block-id="${
+                            typeof CSS !== "undefined" && CSS.escape
+                              ? CSS.escape(blockId)
+                              : blockId.replace(/["\\]/g, "\\$&")
+                          }"]`,
+                        )
+                      : null) ??
+                    (regionId
+                      ? studio.querySelector<HTMLElement>(
+                          `[data-region-id="${
+                            typeof CSS !== "undefined" && CSS.escape
+                              ? CSS.escape(regionId)
+                              : regionId.replace(/["\\]/g, "\\$&")
+                          }"], [data-ai-path="${
+                            typeof CSS !== "undefined" && CSS.escape
+                              ? CSS.escape(regionId)
+                              : regionId.replace(/["\\]/g, "\\$&")
+                          }"]`,
+                        )
+                      : null) ??
+                    studio.querySelector<HTMLElement>('[data-ai-region="true"]');
+                  if (!target) return;
+                  let focus: HTMLElement = target;
+                  if (
+                    typeof lineIndex === "number" &&
+                    lineIndex >= 0 &&
+                    (target.matches("ul,ol") ||
+                      target.querySelector(":scope > li"))
+                  ) {
+                    const items = target.querySelectorAll<HTMLElement>(
+                      ":scope > li",
+                    );
+                    focus =
+                      items[Math.min(lineIndex, Math.max(0, items.length - 1))] ??
+                      target;
+                  }
+                  focus.scrollIntoView({
+                    block: "nearest",
+                    inline: "nearest",
+                    behavior: "smooth",
+                  });
+                }}
               />
+            ) : null}
+            {artifact.aiState === "edited" &&
+            activeAiEffects.length > 0 &&
+            !aiHighlightDismissed ? (
+              <div className="flex h-9 items-center gap-1 rounded-[8px] border border-[color-mix(in_oklab,var(--accent-cyan)_34%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-primary))] px-1.5">
+                <button
+                  type="button"
+                  className="rounded-[6px] px-2 py-1 text-[10px] font-semibold text-[var(--accent-cyan)] hover:bg-[color-mix(in_oklab,var(--accent-cyan)_12%,transparent)]"
+                  onClick={() => {
+                    setAiHighlightDismissed(true);
+                    void postSpectra({
+                      action: "dismissAiEdit",
+                      artifactId: artifact._id,
+                    }).catch(() => undefined);
+                  }}
+                  title="Accept AI edit and clear the highlight"
+                >
+                  Accept
+                </button>
+                <button
+                  type="button"
+                  className="rounded-[6px] px-2 py-1 text-[10px] font-semibold text-[var(--danger)] hover:bg-[color-mix(in_oklab,var(--danger)_8%,transparent)]"
+                  onClick={() => {
+                    void (async () => {
+                      try {
+                        const result = await getSpectraArtifactVersions(
+                          artifact._id,
+                          20,
+                        );
+                        const versions = result.versions;
+                        const aiVersion = versions.find(
+                          (version) =>
+                            version.source === "ai" && version.before,
+                        );
+                        const checkpoint = versions.find(
+                          (version) =>
+                            version.source === "checkpoint" && version.after,
+                        );
+                        const restoreTarget = checkpoint
+                          ? {
+                              ...checkpoint,
+                              after: checkpoint.after,
+                            }
+                          : aiVersion && aiVersion.before
+                            ? {
+                                ...aiVersion,
+                                after: aiVersion.before,
+                              }
+                            : null;
+                        if (!restoreTarget?.after) {
+                          toast.message(
+                            "No earlier snapshot is available to reject this edit.",
+                          );
+                          return;
+                        }
+                        await restoreVersion(restoreTarget);
+                        setAiHighlightDismissed(true);
+                        toast.message("Reverted the AI edit.");
+                      } catch (error) {
+                        toast.error(
+                          error instanceof Error
+                            ? error.message
+                            : "Could not reject the AI edit.",
+                        );
+                      }
+                    })();
+                  }}
+                  title="Reject AI edit and restore the previous snapshot"
+                >
+                  Reject
+                </button>
+              </div>
             ) : null}
             {onShare && mode === "split" ? (
               <IconButton
@@ -5203,20 +5552,21 @@ function ArtifactStudioEditor({
             {liveConflict.queuePosition
               ? ` · Queue position ${liveConflict.queuePosition}`
               : ""}
+            {liveConflict.regionId ? ` · Region ${liveConflict.regionId}` : ""}
           </span>
           <button
             type="button"
+            className="shrink-0 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 py-1 text-[10px] font-medium"
             onClick={() => void synchronizeDraft(currentSnapshotRef.current)}
-            className="font-semibold text-[var(--text-primary)]"
           >
-            Try now
+            Retry sync
           </button>
           <button
             type="button"
+            className="shrink-0 rounded-[6px] px-2 py-1 text-[10px] font-medium text-[var(--text-tertiary)]"
             onClick={() => void discardQueuedDraft()}
-            className="font-semibold text-[var(--text-secondary)]"
           >
-            Keep current
+            Keep their version
           </button>
         </div>
       ) : null}
@@ -5293,6 +5643,7 @@ function ArtifactStudioEditor({
                 onChange={editorChange}
                 aiChangedPaths={highlightPaths}
                 readOnly={readOnly}
+                onActiveRegionChange={handleActiveRegionChange}
               />
             ) : null}
             {artifact.blueprintKey === "quiz" ? (
@@ -5321,6 +5672,7 @@ function ArtifactStudioEditor({
                 onArchive={onArchive}
                 onOpenArtifact={onOpenArtifact}
                 readOnly={readOnly}
+                onActiveRegionChange={handleActiveRegionChange}
               />
             ) : null}
             {artifact.blueprintKey === "sheets" ? (
@@ -5902,7 +6254,7 @@ function DocumentStudio({
     editorProps: {
       attributes: {
         class:
-          "min-h-[620px] px-2 pb-24 pt-2 outline-none font-serif text-[17px] leading-8 text-[var(--text-primary)]",
+          "min-h-[620px] px-2 pb-24 pt-2 outline-none font-serif text-[19px] leading-8 text-[var(--text-primary)]",
       },
     },
     onUpdate: ({ editor }) => {
@@ -5915,7 +6267,51 @@ function DocumentStudio({
       if (!editorReadyForUserChanges.current || readOnly) return;
       onChange(documentContentFromJson(nextJson, content));
     },
-    onSelectionUpdate: () => refreshToolbar((value) => value + 1),
+    onSelectionUpdate: ({ editor }) => {
+      refreshToolbar((value) => value + 1);
+      const { from, to, empty } = editor.state.selection;
+      const ranges: Array<{
+        blockId: string;
+        startOffset: number;
+        endOffset: number;
+      }> = [];
+      let primaryBlockId: string | undefined;
+      let caretOffset = 0;
+      editor.state.doc.nodesBetween(from, Math.max(from, to), (node, pos) => {
+        if (typeof node.attrs?.blockId !== "string" || !node.attrs.blockId)
+          return;
+        const blockStart = pos + 1;
+        const blockEnd = pos + node.nodeSize - 1;
+        const startOffset = Math.max(0, Math.min(from, to) - blockStart);
+        const endOffset = Math.max(
+          startOffset,
+          Math.min(blockEnd, Math.max(from, to)) - blockStart,
+        );
+        if (!primaryBlockId) {
+          primaryBlockId = node.attrs.blockId;
+          caretOffset = startOffset;
+        }
+        ranges.push({
+          blockId: node.attrs.blockId,
+          startOffset,
+          endOffset,
+        });
+      });
+      const text = empty ? "" : editor.state.doc.textBetween(from, to, "\n");
+      editor.view.dom.dispatchEvent(
+        new CustomEvent("spectra-presence-selection", {
+          bubbles: true,
+          detail: {
+            kind: "text",
+            collapsed: empty,
+            ...(text ? { text: text.slice(0, 280) } : {}),
+            ranges,
+            caretOffset,
+            primaryBlockId,
+          },
+        }),
+      );
+    },
   });
 
   useEffect(() => {
@@ -5949,21 +6345,56 @@ function DocumentStudio({
     const incomingKey = JSON.stringify(incomingEditorJson);
     const contentChanged = incomingKey !== editorJsonKeyRef.current;
     if (contentChanged) editorJsonKeyRef.current = incomingKey;
+    const lineTargets = aiChangedPaths.flatMap((path) => {
+      const lineMatch = path.match(
+        /^\/(?:content\/)?blocks\/(?:id:|byId\/)?([^/]+)\/lines\/(\d+)/i,
+      );
+      if (!lineMatch) return [];
+      const raw = decodeURIComponent(
+        lineMatch[1]!.replaceAll("~1", "/").replaceAll("~0", "~"),
+      );
+      const line = Number(lineMatch[2]);
+      if (!Number.isFinite(line)) return [];
+      if (/^\d+$/.test(raw)) return [{ index: Number(raw), line }];
+      return [{ blockId: raw, line }];
+    });
+    // Line-scoped paths must never also paint the whole block / whole doc —
+    // that is the mid-stream cyan wash that fails G-01/G-02 Excellent.
+    const hasLineScope = lineTargets.length > 0;
     const target: AiRegionDecorationTarget | null = aiChangedPaths.length
       ? {
-          all: aiChangedPaths.includes("/"),
-          indices: aiChangedPaths.flatMap((path) => {
-            const match = path.match(/^\/(?:content\/)?blocks\/(\d+)/);
-            return match ? [Number(match[1])] : [];
-          }),
-          blockIds: aiChangedPaths.flatMap((path) => {
-            const match = path.match(
-              /^\/(?:content\/)?blocks\/(?:id:|byId\/)([^/]+)/i,
-            );
-            return match
-              ? [match[1]!.replaceAll("~1", "/").replaceAll("~0", "~")]
-              : [];
-          }),
+          all: !hasLineScope && aiChangedPaths.includes("/"),
+          indices: hasLineScope
+            ? []
+            : aiChangedPaths.flatMap((path) => {
+                const match = path.match(
+                  /^\/(?:content\/)?blocks\/(\d+)(?:\/|$)/,
+                );
+                return match ? [Number(match[1])] : [];
+              }),
+          blockIds: hasLineScope
+            ? []
+            : aiChangedPaths.flatMap((path) => {
+                const byId = path.match(
+                  /^\/(?:content\/)?blocks\/(?:id:|byId\/)([^/]+)/i,
+                );
+                if (byId)
+                  return [
+                    byId[1]!.replaceAll("~1", "/").replaceAll("~0", "~"),
+                  ];
+                // TipTap StableBlockId may be referenced without the id: prefix.
+                const bare = path.match(
+                  /^\/(?:content\/)?blocks\/([^/]+)(?:\/|$)/i,
+                );
+                if (bare && !/^\d+$/.test(bare[1]!))
+                  return [
+                    decodeURIComponent(
+                      bare[1]!.replaceAll("~1", "/").replaceAll("~0", "~"),
+                    ),
+                  ];
+                return [];
+              }),
+          lines: lineTargets,
         }
       : null;
     // Reconcile after React's commit. The target is a ProseMirror decoration,
@@ -7057,6 +7488,7 @@ function FlashcardStudio({
   onChange,
   aiChangedPaths = [],
   readOnly: _readOnly = false,
+  onActiveRegionChange,
 }: {
   artifactId: string;
   mode: "split" | "tab";
@@ -7064,6 +7496,7 @@ function FlashcardStudio({
   onChange: (content: unknown) => void;
   aiChangedPaths?: string[];
   readOnly?: boolean;
+  onActiveRegionChange?: (regionId: string) => void;
 }) {
   const [cards, setCards] = useState(() => deckCards(content));
   const [activeCardId, setActiveCardId] = useState(cards[0]?.id ?? "");
@@ -9224,6 +9657,9 @@ function FlashcardStudio({
               value={activeCard.front}
               placeholder="Question or prompt"
               onChange={(value) => updateCard(activeCard.id, { front: value })}
+              onFocus={() =>
+                onActiveRegionChange?.(`${activeCard.id}:front`)
+              }
               clozeMode={activeCard.variant === "cloze"}
               aiActive={pathTouches(
                 aiChangedPaths,
@@ -9469,6 +9905,7 @@ function FlashcardStudio({
               value={activeCard.back}
               placeholder="Answer"
               onChange={(value) => updateCard(activeCard.id, { back: value })}
+              onFocus={() => onActiveRegionChange?.(`${activeCard.id}:back`)}
               noteValue={activeCard.hint ?? ""}
               onNoteChange={(value) =>
                 updateCard(activeCard.id, { hint: value })
@@ -12546,6 +12983,7 @@ function PlannerStudio({
   onArchive,
   onOpenArtifact,
   readOnly,
+  onActiveRegionChange,
 }: {
   mode: "split" | "tab";
   artifact: SpectraArtifact;
@@ -12558,6 +12996,7 @@ function PlannerStudio({
   onArchive?: () => Promise<void> | void;
   onOpenArtifact: (artifactId: string) => void;
   readOnly: boolean;
+  onActiveRegionChange?: (regionId: string) => void;
 }) {
   const [task, setTask] = useState(() => plannerTask(content));
   const [dueDate, setDueDate] = useState(dateInputValue(task.dueAt));
@@ -13007,6 +13446,9 @@ function PlannerStudio({
             >
               <select
                 value={task.status}
+                data-ai-path="/status"
+                onFocus={() => onActiveRegionChange?.("task:status")}
+                onMouseDown={() => onActiveRegionChange?.("task:status")}
                 onChange={(event) =>
                   commit({
                     ...task,
@@ -13026,6 +13468,9 @@ function PlannerStudio({
             >
               <select
                 value={task.priority}
+                data-ai-path="/priority"
+                onFocus={() => onActiveRegionChange?.("task:priority")}
+                onMouseDown={() => onActiveRegionChange?.("task:priority")}
                 onChange={(event) =>
                   commit({
                     ...task,
@@ -15670,6 +16115,7 @@ function CardFace({
   value,
   placeholder,
   onChange,
+  onFocus,
   clozeMode = false,
   noteValue,
   onNoteChange,
@@ -15680,6 +16126,7 @@ function CardFace({
   value: string;
   placeholder: string;
   onChange: (value: string) => void;
+  onFocus?: () => void;
   clozeMode?: boolean;
   noteValue?: string;
   onNoteChange?: (value: string) => void;
@@ -15735,6 +16182,7 @@ function CardFace({
           ref={textareaRef}
           value={value}
           onChange={(event) => onChange(event.target.value)}
+          onFocus={() => onFocus?.()}
           data-ai-region={aiRegionAttr(aiActive)}
           className="min-h-[180px] w-full resize-none rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-6 py-8 text-center font-serif text-[24px] leading-snug text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[color-mix(in_oklab,#8b6ff0_55%,var(--border-default))]"
           placeholder={placeholder}
@@ -15743,6 +16191,7 @@ function CardFace({
           <input
             value={noteValue ?? ""}
             onChange={(event) => onNoteChange(event.target.value)}
+            onFocus={() => onFocus?.()}
             data-ai-region={aiRegionAttr(aiNoteActive)}
             className="spectra-card-face-note"
             placeholder="Add a note (optional)"

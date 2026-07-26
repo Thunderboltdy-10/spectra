@@ -1130,8 +1130,20 @@ export const selectTab = mutation({
       targetThreadId = run.threadId;
     }
 
+    // Explicit deselect: clear selected flags without requiring a target run.
+    if (!args.runId && !args.threadId) {
+      for (const tab of schoolTabs) {
+        if (tab.selected)
+          await ctx.db.patch(tab._id, {
+            selected: false,
+            updatedAt: now,
+          });
+      }
+      return { selected: false };
+    }
+
     if (!targetRunId || !targetThreadId)
-      throw new Error("This conversation has no run to continue yet.");
+      return { selected: false, reason: "no_run" as const };
 
     let selected = false;
     const threadTabs = schoolTabs

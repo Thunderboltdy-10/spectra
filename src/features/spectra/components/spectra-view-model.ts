@@ -114,7 +114,16 @@ export function artifactToCard(artifact: SpectraArtifact, placement?: "inbox" | 
       : undefined,
     updatedAt: artifact.updatedAt,
     metrics: meta.metrics,
-    aiState: artifact.aiState === "edited" && artifact.aiStateExpiresAt && artifact.aiStateExpiresAt <= Date.now() ? undefined : artifact.aiState,
+    aiState:
+      artifact.aiState === "edited" &&
+      artifact.aiStateExpiresAt &&
+      artifact.aiStateExpiresAt <= Date.now()
+        ? undefined
+        : (artifact.aiState === "creating" || artifact.aiState === "updating") &&
+            (!artifact.aiRunId ||
+              (artifact.updatedAt && Date.now() - artifact.updatedAt > 45_000))
+          ? undefined
+          : artifact.aiState,
     aiProgress: artifact.aiProgress,
   };
 }
@@ -141,7 +150,17 @@ export function workspaceItemToCard(item: SpectraWorkspaceItem): ArtifactCardVie
     pinned: item.viewData.pinned,
     variant: item.viewData.cardVariant,
     metrics: meta.metrics,
-    aiState: item.artifact.aiState === "edited" && item.artifact.aiStateExpiresAt && item.artifact.aiStateExpiresAt <= Date.now() ? undefined : item.artifact.aiState,
+    aiState:
+      item.artifact.aiState === "edited" &&
+      item.artifact.aiStateExpiresAt &&
+      item.artifact.aiStateExpiresAt <= Date.now()
+        ? undefined
+        : (item.artifact.aiState === "creating" ||
+              item.artifact.aiState === "updating") &&
+            (!item.artifact.aiRunId ||
+              Date.now() - item.updatedAt > 45_000)
+          ? undefined
+          : item.artifact.aiState,
     aiProgress: item.artifact.aiProgress,
   };
 }

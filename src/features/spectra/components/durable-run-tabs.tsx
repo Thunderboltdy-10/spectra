@@ -84,7 +84,12 @@ export function DurableRunTabs({
     status: string;
     steps?: Array<{ title: string; status: string }>;
   } | null;
-  onOpen?: (runId: string, threadId: string, title: string) => void;
+  onOpen?: (
+    runId: string,
+    threadId: string,
+    title: string,
+    artifactId?: string,
+  ) => void;
   onDeselect?: () => void;
   onStop?: (runId: string) => void | Promise<void>;
   onRetry?: (runId: string) => void;
@@ -145,7 +150,12 @@ export function DurableRunTabs({
     );
     if (!tab) return;
     autoOpenedLiveRuns.current.add(optimistic.runId);
-    onOpen(tab.runId, tab.threadId, tab.thread.title);
+    onOpen(
+      tab.runId,
+      tab.threadId,
+      tab.thread.title,
+      tab.run.artifactId ?? tab.card?.provenance?.artifactIds?.[0],
+    );
   }, [onOpen, openThreadId, optimistic?.runId, tabs, workspaceId]);
   useEffect(() => {
     if (hydratedSelection.current || tabs.length === 0) return;
@@ -380,17 +390,24 @@ export function DurableRunTabs({
                       runId: tab.runId,
                       workspaceId: tab.workspaceId,
                     };
-                    if (!active) {
-                      setContinuation(next);
-                      void postSpectra({
-                        action: "selectRunTab",
-                        runId: next.runId,
-                      }).then(() => refresh());
-                    }
-                    onOpen?.(tab.runId, tab.threadId, tab.thread.title);
+                    // Tab body always opens the thread and pins it as QC context.
+                    setContinuation(next);
+                    void postSpectra({
+                      action: "selectRunTab",
+                      runId: next.runId,
+                    }).then(() => refresh());
+                    const artifactId =
+                      tab.run.artifactId ??
+                      tab.card?.provenance?.artifactIds?.[0];
+                    onOpen?.(
+                      tab.runId,
+                      tab.threadId,
+                      tab.thread.title,
+                      artifactId,
+                    );
                   }}
                   className="min-w-0 flex-1 py-1.5 text-left"
-                  title={`Open ${tab.thread.title || "thread"} in the sidebar`}
+                  title={`Open ${tab.thread.title || "thread"} and continue it`}
                 >
                   <span className="block truncate text-[11px] font-semibold text-[var(--text-primary)]">
                     {tab.thread.title || "New thread"}

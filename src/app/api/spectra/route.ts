@@ -1463,6 +1463,13 @@ export async function POST(request: NextRequest) {
       return ok({ versions: result });
     }
 
+    if (action === "dismissAiEdit") {
+      const result = await spectraMutation("spectraArtifacts:dismissAiEdit", {
+        artifactId: requireString(body.artifactId, "artifactId"),
+      });
+      return ok(result);
+    }
+
     if (action === "archiveArtifact") {
       const result = await spectraMutation("spectraArtifacts:archive", {
         artifactId: requireString(body.artifactId, "artifactId"),

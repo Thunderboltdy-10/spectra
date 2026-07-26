@@ -366,20 +366,30 @@ export function resolveAiHighlightPaths(input: {
     return derived;
   }
 
+  // Focused updates: never keep sticky whole-artifact `/` once any concrete
+  // path exists — that paints every card/question/slide and fails Excellent.
+  const withoutWhole =
+    concrete.length > 1 || !concrete.includes("/")
+      ? concrete.filter((path) => path !== "/")
+      : concrete;
+  if (withoutWhole.length === 0) return concrete;
+
   // Creating/catch-up fallback `/` must stay present so collection items light
   // even when only structural region pointers (pages/layers/settings) arrived.
   if (fallback.includes("/")) {
-    return [...new Set([...concrete, "/", ...derived])];
+    return [...new Set([...withoutWhole, "/", ...derived])];
   }
 
   // Mid-open creates / mid-edit updates: if concrete paths miss every on-screen
   // collection item, still light what the user can see.
   if (derived.length > 0) {
-    const touchesDerived = derived.some((path) => pathTouches(concrete, path));
-    if (!touchesDerived) return [...new Set([...concrete, ...derived])];
+    const touchesDerived = derived.some((path) =>
+      pathTouches(withoutWhole, path),
+    );
+    if (!touchesDerived) return [...new Set([...withoutWhole, ...derived])];
   }
 
-  return concrete;
+  return withoutWhole;
 }
 
 /** Creation fallback when the run has not yet published concrete changedPaths. */

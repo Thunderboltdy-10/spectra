@@ -364,14 +364,23 @@ export function CommandBar({
       return;
     sendingRef.current = true;
     setSending(true);
+    // Clear immediately so a hung/slow run cannot leave the draft glued in QC.
+    // Restore only when the run surface rejects the start.
+    const draft = next;
+    const draftAttachments = attachments;
+    setValue("");
+    setAttachments([]);
+    setMenuOpen(false);
+    setBlockedAttempt(false);
     try {
-      const accepted = await onSubmit?.(next, attachments);
-      if (accepted === false) return;
-      setValue("");
-      setAttachments([]);
-      setMenuOpen(false);
+      const accepted = await onSubmit?.(draft, draftAttachments);
+      if (accepted === false) {
+        setValue(draft);
+        setAttachments(draftAttachments);
+      }
     } catch {
-      // The owning run surface reports the failure. Keep the draft intact for recovery.
+      setValue(draft);
+      setAttachments(draftAttachments);
     } finally {
       sendingRef.current = false;
       setSending(false);

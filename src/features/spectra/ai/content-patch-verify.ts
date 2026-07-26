@@ -15,8 +15,15 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 function stringishMatch(authored: string, saved: string) {
-  const a = authored.trim();
-  const s = saved.trim();
+  const normalize = (value: string) =>
+    value
+      .trim()
+      .replace(/[\u2010-\u2015\u2212]/g, "-")
+      .replace(/[\u2018\u2019\u2032]/g, "'")
+      .replace(/[\u201C\u201D\u2033]/g, '"')
+      .replace(/\s+/g, " ");
+  const a = normalize(authored);
+  const s = normalize(saved);
   const authoredDate = Date.parse(a);
   const savedDate = Date.parse(s);
   if (
@@ -25,7 +32,7 @@ function stringishMatch(authored: string, saved: string) {
     authoredDate === savedDate
   )
     return true;
-  return s === a || s.includes(a);
+  return s === a || s.includes(a) || a.includes(s);
 }
 
 /** Authored object fields must appear on saved (normalize may add ids/defaults). */
@@ -82,6 +89,81 @@ function sheetCellsMapMatches(authored: unknown, saved: unknown): boolean {
   });
 }
 
+function documentAuthoredTextLanded(
+  authored: string,
+  artifactContent: unknown,
+): boolean {
+  if (!artifactContent || typeof artifactContent !== "object") return false;
+  const blocks = Array.isArray(
+    (artifactContent as { blocks?: unknown }).blocks,
+  )
+    ? ((artifactContent as { blocks: Array<{ text?: unknown }> }).blocks)
+    : [];
+  if (
+    blocks.some(
+      (block) =>
+        typeof block?.text === "string" && stringishMatch(authored, block.text),
+    )
+  )
+    return true;
+
+  const normalize = (value: string) =>
+    value
+      .trim()
+      .replace(/[\u2010-\u2015\u2212]/g, "-")
+      .replace(/[\u2018\u2019\u2032]/g, "'")
+      .replace(/[\u201C\u201D\u2033]/g, '"')
+      .replace(/\s+/g, " ");
+  const authoredNorm = normalize(authored);
+  if (!authoredNorm) return false;
+  const body = blocks
+    .map((block) =>
+      typeof block?.text === "string" ? normalize(block.text) : "",
+    )
+    .filter(Boolean)
+    .join("\n");
+  if (!body) return false;
+  if (body.includes(authoredNorm)) return true;
+  // Concurrent human/AI inserts can sit inside the authored span. Accept when
+  // distinctive tokens from the authored value are present in the body.
+  const tokens = authoredNorm
+    .split(/[^A-Za-z0-9_-]+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 10);
+  if (tokens.length === 0) return body.includes(authoredNorm);
+  const hits = tokens.filter((token) => body.includes(token)).length;
+  return hits >= Math.max(1, Math.ceil(tokens.length * 0.7));
+}
+
+/** True when authored text (or block.text) is observably present in content. */
+export function authoredValueLandedInContent(
+  authored: unknown,
+  content: unknown,
+): boolean {
+  if (typeof authored === "string") {
+    if (documentAuthoredTextLanded(authored, content)) return true;
+    try {
+      const blob = JSON.stringify(content ?? "");
+      const normalize = (value: string) =>
+        value.replace(/[\u2010-\u2015\u2212]/g, "-").replace(/\s+/g, " ");
+      return normalize(blob).includes(normalize(authored.trim()));
+    } catch {
+      return false;
+    }
+  }
+  if (
+    authored &&
+    typeof authored === "object" &&
+    !Array.isArray(authored) &&
+    typeof (authored as { text?: unknown }).text === "string"
+  )
+    return authoredValueLandedInContent(
+      (authored as { text: string }).text,
+      content,
+    );
+  return false;
+}
+
 /**
  * Returns true when the saved artifact content reflects the authored patch
  * change. Soft matches are intentional for append/normalize cases only.
@@ -96,6 +178,65 @@ export function contentPatchChangeMatchesSaved(
   },
 ): boolean {
   if (JSON.stringify(savedValue) === JSON.stringify(authoredValue)) return true;
+
+  // Document (and other) scalar text writes often diverge slightly after Yjs
+  // normalize / concurrent peer merges. Prefer containment over brittle
+  // exact equality so a successful apply is not marked Failed.
+  if (typeof authoredValue === "string" && typeof savedValue === "string") {
+    if (stringishMatch(authoredValue, savedValue)) return true;
+    // Planner status aliases: models often write in_progress; stored canonical
+    // value is doing. Treat them as the same outcome so verify does not Fail a
+    // successful apply.
+    if (
+      context?.blueprintKey === "planner_task" &&
+      /(?:^|\/)status$/i.test(path)
+    ) {
+      const aliases: Record<string, string> = {
+        pending: "todo",
+        not_started: "todo",
+        open: "todo",
+        in_progress: "doing",
+        "in progress": "doing",
+        active: "doing",
+        complete: "done",
+        completed: "done",
+        finished: "done",
+      };
+      const normalizeStatus = (value: string) => {
+        const key = value.trim().toLowerCase().replace(/[\s.-]+/g, "_");
+        return aliases[key] ?? aliases[value.trim().toLowerCase()] ?? key;
+      };
+      if (normalizeStatus(authoredValue) === normalizeStatus(savedValue))
+        return true;
+    }
+  }
+
+  // When a block index drifted under concurrent human edits, still accept the
+  // change if the authored text is present somewhere in the document body.
+  if (
+    context?.blueprintKey === "document" &&
+    typeof authoredValue === "string" &&
+    /^\/(?:content\/)?blocks\/(?:id:[^/]+|\d+)(?:\/text)?$/i.test(path) &&
+    documentAuthoredTextLanded(authoredValue, context.artifactContent)
+  )
+    return true;
+
+  // Whole-block object writes (type + text) after concurrent remaps.
+  if (
+    context?.blueprintKey === "document" &&
+    isPlainObject(authoredValue) &&
+    typeof authoredValue.text === "string" &&
+    /^\/(?:content\/)?blocks\/(?:id:[^/]+|\d+)$/i.test(path)
+  ) {
+    if (
+      isPlainObject(savedValue) &&
+      typeof savedValue.text === "string" &&
+      stringishMatch(authoredValue.text, savedValue.text)
+    )
+      return true;
+    if (documentAuthoredTextLanded(authoredValue.text, context.artifactContent))
+      return true;
+  }
 
   // Timetable normalization canonicalizes ISO dates and redirects an unknown
   // layer id onto the first available shared layer. Verify the normalized

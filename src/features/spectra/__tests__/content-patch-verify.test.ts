@@ -2,6 +2,39 @@ import { describe, expect, it } from "vitest";
 import { contentPatchChangeMatchesSaved } from "../ai/content-patch-verify";
 
 describe("content patch verification", () => {
+  it("accepts unicode dash and whitespace soft matches for document text", () => {
+    expect(
+      contentPatchChangeMatchesSaved(
+        "/blocks/3/text",
+        "Reversible inhibitors bind non-covalently to the enzyme-inhibitor complex.",
+        "Reversible inhibitors bind non-covalently to the enzyme–inhibitor complex.",
+        { blueprintKey: "document" },
+      ),
+    ).toBe(true);
+  });
+
+  it("accepts document text when a concurrent marker sits inside the authored span", () => {
+    expect(
+      contentPatchChangeMatchesSaved(
+        "/blocks/3/text",
+        "Reversible inhibitors bind non-covalently to the enzyme-inhibitor complex. Enzyme activity is restored when the inhibitor is removed by dialysis or dilution. G03-OK-final9",
+        "other",
+        {
+          blueprintKey: "document",
+          artifactContent: {
+            blocks: [
+              {
+                id: "b3",
+                type: "paragraph",
+                text: "Reversible inhibitors bind non-covalently to the enzyme–inhibitor complex. Enzyme activity is restored when the inhibitor is removed by dialysis or dilution. G03-VERIFY-ms1ok9 G03-OK-final9",
+              },
+            ],
+          },
+        },
+      ),
+    ).toBe(true);
+  });
+
   it("accepts a normalized first-item write at a numeric array slot", () => {
     expect(
       contentPatchChangeMatchesSaved(
@@ -66,6 +99,24 @@ describe("content patch verification", () => {
             ],
             events: [saved],
           },
+        },
+      ),
+    ).toBe(true);
+  });
+
+  it("accepts planner status aliases between in_progress and doing", () => {
+    expect(
+      contentPatchChangeMatchesSaved("/status", "in_progress", "doing", {
+        blueprintKey: "planner_task",
+      }),
+    ).toBe(true);
+    expect(
+      contentPatchChangeMatchesSaved(
+        "/content/status",
+        "In Progress",
+        "doing",
+        {
+          blueprintKey: "planner_task",
         },
       ),
     ).toBe(true);

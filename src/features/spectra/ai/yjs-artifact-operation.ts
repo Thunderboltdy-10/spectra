@@ -16,8 +16,13 @@ import {
 } from "@/features/spectra/collaboration/artifact-yjs-model";
 import {
   artifactLivePreviewPatches,
-  buildArtifactLivePreviewFrames,
+  lineAnchorForRewrite,
+  valueAtPath,
 } from "@/features/spectra/collaboration/artifact-live-preview";
+import {
+  buildArtifactLivePreviewBeats,
+  type AiStreamBeat,
+} from "@/features/spectra/collaboration/interaction-choreography";
 import {
   ARTIFACT_TYPE_KEYS,
   type ArtifactTypeKey,
@@ -213,6 +218,33 @@ function abortError(signal?: AbortSignal) {
     : new DOMException("The AI run was stopped.", "AbortError");
 }
 
+/** Prefer stable block ids + line scopes so TipTap can ink the live bullet. */
+function normalizeStagedDocumentPath(
+  path: string,
+  streamValue: ArtifactLiveValue,
+  lineIndex: number,
+) {
+  const match = path.match(/^(\/blocks\/)([^/]+)(\/.*)?$/i);
+  if (!match) return path;
+  const [, prefix, rawId, rest = ""] = match;
+  let blockId = decodeURIComponent(rawId!);
+  if (/^\d+$/.test(blockId)) {
+    const blocks = (
+      streamValue.content as { blocks?: Array<{ id?: unknown }> } | undefined
+    )?.blocks;
+    const indexed = Array.isArray(blocks) ? blocks[Number(blockId)] : undefined;
+    if (indexed && typeof indexed.id === "string") blockId = indexed.id;
+  }
+  const lineSuffix =
+    Number.isFinite(lineIndex) && lineIndex >= 0
+      ? `/lines/${Math.floor(lineIndex)}`
+      : "";
+  if (rest.startsWith("/lines/")) return `${prefix}${blockId}${rest}`;
+  if (rest === "/text" || rest.startsWith("/text"))
+    return `${prefix}${blockId}${lineSuffix}`;
+  return `${prefix}${blockId}${rest || lineSuffix}`;
+}
+
 async function acquirePlanClaims(params: {
   artifactId: string;
   clientId: string;
@@ -286,10 +318,12 @@ async function synchronizeMutation(params: {
   provider: HocuspocusProvider;
   session: CollaborationSession;
   runId: string;
+  executionId: string;
   operationId: string;
   plan: ArtifactYjsMutationPlan;
   streamBase?: ArtifactLiveValue;
   streamValues?: readonly ArtifactLiveValue[];
+  streamBeats?: readonly AiStreamBeat[];
   getConnectionError: () => Error | null;
   signal?: AbortSignal;
   onConflict?: (conflict: {
@@ -307,10 +341,15 @@ async function synchronizeMutation(params: {
     presence && typeof presence === "object"
       ? (presence as Record<string, unknown>)
       : {};
+  const startingRegionId = params.plan.regions[0]?.regionId;
   params.provider.setAwarenessField("user", {
     ...presenceRecord,
-    activeRegionId: params.plan.regions[0]?.regionId,
-    activeRegionIds: params.plan.regions.map((region) => region.regionId),
+    ...(startingRegionId
+      ? {
+          activeRegionId: startingRegionId,
+          activeRegionIds: [startingRegionId],
+        }
+      : {}),
   });
   const claims = await acquirePlanClaims({
     artifactId: params.session.artifact._id,
@@ -338,35 +377,259 @@ async function synchronizeMutation(params: {
       }).catch(() => undefined);
     }
   }, 12_000);
+  const clearStreamingPresence = () => {
+    const settledPresence = params.provider.awareness?.getLocalState()?.user;
+    const settledRecord =
+      settledPresence && typeof settledPresence === "object"
+        ? (settledPresence as Record<string, unknown>)
+        : {};
+    const idlePresence = { ...settledRecord };
+    delete idlePresence.previewPatches;
+    delete idlePresence.previewSequence;
+    delete idlePresence.previewPhase;
+    delete idlePresence.previewGesture;
+    delete idlePresence.activeRegionId;
+    delete idlePresence.activeRegionIds;
+    delete idlePresence.cursor;
+    delete idlePresence.selection;
+    delete idlePresence.interaction;
+    delete idlePresence.menu;
+    params.provider.setAwarenessField("user", idlePresence);
+  };
   try {
-    for (const [sequence, streamValue] of (
-      params.streamValues ?? []
-    ).entries()) {
+    const beats: AiStreamBeat[] =
+      params.streamBeats && params.streamBeats.length > 0
+        ? [...params.streamBeats]
+        : (params.streamValues ?? []).map((value) => ({
+            delayMs: 560,
+            value,
+            previewGesture: "typing" as const,
+            cursorMode: "typing" as const,
+          }));
+    let previousStream = params.streamBase;
+    for (const [sequence, beat] of beats.entries()) {
       const aborted = abortError(params.signal);
       if (aborted) throw aborted;
       if (!params.streamBase) continue;
+      const streamValue = beat.value;
+      // Cumulative from the pre-edit baseline so peers can reconstruct the full
+      // speculative document. Focus/highlight use the delta against the prior
+      // frame so only the live edit lights up.
       const previewPatches = artifactLivePreviewPatches(
         params.streamBase,
         streamValue,
       );
-      if (previewPatches.length === 0) continue;
+      const deltaPatches = artifactLivePreviewPatches(
+        previousStream ?? params.streamBase,
+        streamValue,
+      );
+      previousStream = streamValue;
+      const focusPatch =
+        (beat.focusPath
+          ? previewPatches.find((patch) => patch.path === beat.focusPath)
+          : undefined) ??
+        deltaPatches[0] ??
+        previewPatches[0];
+      const focusPath = beat.focusPath ?? focusPatch?.path ?? "/";
+      const blockMatch = focusPath.match(
+        /\/(?:content\/)?blocks\/(?:id:)?([^/]+)/i,
+      );
+      let blockId = blockMatch
+        ? decodeURIComponent(blockMatch[1]!)
+        : undefined;
+      if (blockId && /^\d+$/.test(blockId)) {
+        const blocks = (
+          streamValue.content as { blocks?: Array<{ id?: unknown }> } | undefined
+        )?.blocks;
+        const indexed = Array.isArray(blocks)
+          ? blocks[Number(blockId)]
+          : undefined;
+        blockId =
+          indexed && typeof indexed.id === "string" ? indexed.id : undefined;
+      }
+      const matchedRegion =
+        (blockId
+          ? params.plan.regions.find(
+              (region) =>
+                region.regionId === blockId ||
+                region.regionId.endsWith(`:${blockId}`) ||
+                region.regionId.includes(blockId),
+            )
+          : undefined) ??
+        params.plan.regions.find((region) =>
+          focusPath.includes(region.regionId.replace(/^.*:/, "")),
+        ) ??
+        params.plan.regions[0];
+      const activeRegionId = matchedRegion?.regionId;
+      const focusValue = focusPatch?.value;
+      const finalAtPath = valueAtPath(
+        beats[beats.length - 1]?.value ?? streamValue,
+        focusPath,
+      );
+      const beforeAtPath = valueAtPath(params.streamBase, focusPath);
+      const caretAnchor =
+        typeof beat.caretOffset === "number"
+          ? {
+              offsetInLine: beat.caretOffset,
+              lineIndex:
+                typeof beat.lineIndex === "number" ? beat.lineIndex : 0,
+            }
+          : typeof focusValue === "string" &&
+              typeof beforeAtPath === "string" &&
+              typeof finalAtPath === "string"
+            ? lineAnchorForRewrite(beforeAtPath, finalAtPath, focusValue)
+            : {
+                offsetInLine:
+                  typeof focusValue === "string" ? focusValue.length : 0,
+                lineIndex:
+                  typeof beat.lineIndex === "number" ? beat.lineIndex : 0,
+              };
+      const caretOffset = caretAnchor.offsetInLine;
+      const lineIndex = caretAnchor.lineIndex;
+      const selectionEnd =
+        typeof beat.selectionEnd === "number" ? beat.selectionEnd : undefined;
       const livePresence = params.provider.awareness?.getLocalState()?.user;
       const livePresenceRecord =
         livePresence && typeof livePresence === "object"
           ? (livePresence as Record<string, unknown>)
           : {};
+      const previewGesture =
+        beat.previewGesture ??
+        (beat.menu?.open ? ("selecting" as const) : ("typing" as const));
+      const selectingLine =
+        previewGesture === "selecting" &&
+        typeof selectionEnd === "number" &&
+        selectionEnd > 0;
       params.provider.setAwarenessField("user", {
         ...livePresenceRecord,
-        activeRegionId: params.plan.regions[0]?.regionId,
-        activeRegionIds: params.plan.regions.map((region) => region.regionId),
-        previewPatches,
+        ...(activeRegionId
+          ? {
+              activeRegionId,
+              activeRegionIds: [activeRegionId],
+            }
+          : {}),
+        ...(previewPatches.length ? { previewPatches } : {}),
         previewSequence: sequence,
         previewPhase: "streaming",
-        cursor: { x: 0.72, y: 0.28, updatedAt: Date.now() },
+        previewGesture,
+        ...(beat.interaction !== undefined
+          ? { interaction: beat.interaction }
+          : {}),
+        ...(beat.menu !== undefined ? { menu: beat.menu } : { menu: null }),
+        ...(blockId && (typeof focusValue === "string" || selectingLine)
+          ? {
+              selection: selectingLine
+                ? {
+                    kind: "text" as const,
+                    collapsed: false,
+                    ranges: [
+                      {
+                        blockId,
+                        startOffset: 0,
+                        endOffset: selectionEnd,
+                        lineIndex,
+                      },
+                    ],
+                  }
+                : {
+                    kind: "text" as const,
+                    collapsed: true,
+                    ranges: [
+                      {
+                        blockId,
+                        startOffset: caretOffset,
+                        endOffset: caretOffset,
+                        lineIndex,
+                      },
+                    ],
+                  },
+            }
+          : { selection: null }),
+        cursor: {
+          x: 0.5,
+          y: 0.42,
+          updatedAt: Date.now(),
+          mode:
+            beat.cursorMode ??
+            (selectingLine || beat.menu?.open ? "selecting" : "typing"),
+          anchor: blockId
+            ? {
+                kind: "block" as const,
+                id: blockId,
+                charOffset: selectingLine ? 0 : caretOffset,
+                lineIndex,
+              }
+            : {
+                kind: "path" as const,
+                id: focusPath,
+                charOffset: selectingLine ? 0 : caretOffset,
+                lineIndex,
+              },
+        },
       });
-      // Keep the collaboration readable: each preview is a visible editing
-      // gesture, not a burst of transport frames that collapses into a refresh.
-      await new Promise<void>((resolve) => setTimeout(resolve, 140));
+      await new Promise<void>((resolve) =>
+        setTimeout(resolve, Math.max(48, beat.delayMs)),
+      );
+      if (
+        (sequence === 0 ||
+          sequence % 2 === 0 ||
+          sequence === beats.length - 1) &&
+        (deltaPatches.length > 0 ||
+          previewPatches.length > 0 ||
+          Boolean(beat.focusPath))
+      ) {
+        const focusPaths = [
+          ...new Set(
+            (deltaPatches.length ? deltaPatches : previewPatches).map(
+              (patch) =>
+                patch.path.startsWith("/content/")
+                  ? patch.path.slice("/content".length)
+                  : patch.path,
+            ),
+          ),
+        ].slice(0, 16);
+        let stagedPaths = (
+          focusPaths.length
+            ? focusPaths
+            : beat.focusPath
+              ? [
+                  beat.focusPath.startsWith("/content/")
+                    ? beat.focusPath.slice("/content".length)
+                    : beat.focusPath,
+                ]
+              : []
+        ).map((path) =>
+          normalizeStagedDocumentPath(path, streamValue, lineIndex),
+        );
+        // Always keep a line-scoped pointer so settle ink lands on the bullet,
+        // not the whole list container.
+        if (
+          blockId &&
+          Number.isFinite(lineIndex) &&
+          !stagedPaths.some((path) => path.includes("/lines/"))
+        ) {
+          stagedPaths.push(`/blocks/${blockId}/lines/${Math.floor(lineIndex)}`);
+        }
+        if (
+          (sequence === beats.length - 1 ||
+            beat.previewGesture === "typing" ||
+            sequence % 3 === 0) &&
+          stagedPaths.length > 0
+        ) {
+          void convexMutation("spectraArtifacts:stageAiPatch", {
+            artifactId: params.session.artifact._id,
+            runId: params.runId,
+            executionId: params.executionId,
+            title: streamValue.title,
+            ...(streamValue.summary !== undefined
+              ? { summary: streamValue.summary }
+              : {}),
+            content: streamValue.content,
+            tags: streamValue.tags,
+            changedPaths: stagedPaths,
+          }).catch(() => undefined);
+        }
+      }
     }
     params.document.transact(params.plan.apply, {
       kind: "spectra-ai-operation",
@@ -381,6 +644,18 @@ async function synchronizeMutation(params: {
       "AI_ARTIFACT_SYNC_TIMEOUT: The live edit was not durably acknowledged.",
     );
     await releaseClaims(claims, params.session.clientId, "apply");
+    // Brief post-edit pause so peers can see the finished caret — then clear
+    // streaming chrome. Do not keep previewPhase="streaming" or the owner UI
+    // stays stuck in "updating" with a permanent AI badge.
+    const holdPresence = params.provider.awareness?.getLocalState()?.user;
+    if (holdPresence && typeof holdPresence === "object") {
+      const held = { ...(holdPresence as Record<string, unknown>) };
+      delete held.previewPatches;
+      delete held.previewPhase;
+      delete held.previewGesture;
+      params.provider.setAwarenessField("user", held);
+      await new Promise<void>((resolve) => setTimeout(resolve, 420));
+    }
     return {
       changedRegionIds: params.plan.regions.map((region) => region.regionId),
     };
@@ -390,16 +665,7 @@ async function synchronizeMutation(params: {
   } finally {
     renewing = false;
     clearInterval(renewal);
-    const settledPresence = params.provider.awareness?.getLocalState()?.user;
-    const settledRecord =
-      settledPresence && typeof settledPresence === "object"
-        ? (settledPresence as Record<string, unknown>)
-        : {};
-    const idlePresence = { ...settledRecord };
-    delete idlePresence.previewPatches;
-    delete idlePresence.previewSequence;
-    delete idlePresence.previewPhase;
-    params.provider.setAwarenessField("user", idlePresence);
+    clearStreamingPresence();
   }
 }
 
@@ -614,6 +880,7 @@ export async function applyAiArtifactMutation(params: {
         provider,
         session,
         runId: params.runId,
+        executionId: params.executionId,
         operationId: params.operationId,
         plan: baselinePlan,
         getConnectionError: () => connectionError,
@@ -679,6 +946,12 @@ export async function applyAiArtifactMutation(params: {
         executionId: params.executionId,
       });
     }
+    await convexMutation("spectraArtifacts:markAiState", {
+      artifactId: params.artifactId,
+      runId: params.runId,
+      executionId: params.executionId,
+      state: "updating",
+    }).catch(() => undefined);
 
     // Claims are acquired inside synchronizeMutation. Re-resolve once against
     // the synchronized Y.Doc so a just-finished non-overlapping human edit is
@@ -725,7 +998,7 @@ export async function applyAiArtifactMutation(params: {
     const changedRegionIds = refreshedPlan.regions.map(
       (region) => region.regionId,
     );
-    const streamValues = buildArtifactLivePreviewFrames(
+    const streamBeats = buildArtifactLivePreviewBeats(
       refreshed,
       refreshedValue,
     );
@@ -734,10 +1007,11 @@ export async function applyAiArtifactMutation(params: {
       provider,
       session,
       runId: params.runId,
+      executionId: params.executionId,
       operationId: params.operationId,
       plan: refreshedPlan,
       streamBase: refreshed,
-      streamValues,
+      streamBeats,
       getConnectionError: () => connectionError,
       signal: params.signal,
       onConflict: params.onConflict,
@@ -756,21 +1030,18 @@ export async function applyAiArtifactMutation(params: {
   } finally {
     const lastPresence = provider.awareness?.getLocalState()?.user;
     if (lastPresence && typeof lastPresence === "object") {
-      provider.setAwarenessField("user", {
-        ...(lastPresence as Record<string, unknown>),
-        cursor: { x: 0.76, y: 0.34, updatedAt: Date.now() },
-      });
-      // A sub-second operation should still be perceivable as collaboration.
-      // Hold the same presence (never a fake second run) for one short visual
-      // beat, while longer operations incur no extra delay.
-      const remainingPresenceMs = Math.max(
-        0,
-        1_600 - (presenceStartedAt ? Date.now() - presenceStartedAt : 0),
-      );
-      if (remainingPresenceMs > 0)
-        await new Promise<void>((resolve) =>
-          setTimeout(resolve, remainingPresenceMs),
-        );
+      const idle = { ...(lastPresence as Record<string, unknown>) };
+      delete idle.previewPatches;
+      delete idle.previewSequence;
+      delete idle.previewPhase;
+      delete idle.previewGesture;
+      delete idle.activeRegionId;
+      delete idle.activeRegionIds;
+      delete idle.selection;
+      delete idle.interaction;
+      delete idle.menu;
+      delete idle.cursor;
+      provider.setAwarenessField("user", idle);
     }
     provider.destroy();
     document.destroy();

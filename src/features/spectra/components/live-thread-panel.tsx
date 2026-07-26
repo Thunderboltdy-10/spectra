@@ -48,16 +48,18 @@ export function LiveThreadPanel({
               className={`spectra-icon-action ${continuing ? "text-[var(--accent-cyan)]" : "text-[var(--text-secondary)] hover:text-[var(--accent-cyan)]"}`}
               aria-label={
                 continuing
-                  ? "This thread is selected for continuation"
+                  ? "Stop continuing this thread; next message starts a new chat"
                   : "Continue this thread"
               }
               aria-pressed={continuing}
               data-tooltip={
-                continuing ? "Continuing this thread" : "Continue thread"
+                continuing
+                  ? "Stop continuing — start a new chat"
+                  : "Continue thread"
               }
               title={
                 continuing
-                  ? "This thread is selected — send from quick chat to continue"
+                  ? "Deselect this thread so the next message starts a new conversation"
                   : "Select this thread and pin it to the run tabs"
               }
             >

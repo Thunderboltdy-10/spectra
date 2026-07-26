@@ -50,13 +50,109 @@ function collaborationCursor(
     !Number.isFinite(candidate.y)
   )
     return undefined;
-  return {
+  const rawAnchor =
+    candidate.anchor && typeof candidate.anchor === "object"
+      ? (candidate.anchor as Record<string, unknown>)
+      : null;
+  const anchorKind = rawAnchor?.kind;
+  const anchorId = rawAnchor?.id;
+  const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
+  const offsetX =
+    typeof rawAnchor?.offsetX === "number" && Number.isFinite(rawAnchor.offsetX)
+      ? clamp01(rawAnchor.offsetX)
+      : typeof rawAnchor?.offset === "number" && Number.isFinite(rawAnchor.offset)
+        ? clamp01(rawAnchor.offset)
+        : undefined;
+  const offsetY =
+    typeof rawAnchor?.offsetY === "number" && Number.isFinite(rawAnchor.offsetY)
+      ? clamp01(rawAnchor.offsetY)
+      : undefined;
+  const charOffset =
+    typeof rawAnchor?.charOffset === "number" &&
+    Number.isFinite(rawAnchor.charOffset)
+      ? Math.max(0, Math.floor(rawAnchor.charOffset))
+      : undefined;
+  const lineIndex =
+    typeof rawAnchor?.lineIndex === "number" &&
+    Number.isFinite(rawAnchor.lineIndex)
+      ? Math.max(0, Math.floor(rawAnchor.lineIndex))
+      : undefined;
+  const anchor =
+    (anchorKind === "block" ||
+      anchorKind === "address" ||
+      anchorKind === "region" ||
+      anchorKind === "path" ||
+      anchorKind === "selector") &&
+    typeof anchorId === "string" &&
+    anchorId.trim()
+      ? ({
+          kind: anchorKind,
+          id: anchorId.trim(),
+          ...(offsetX !== undefined ? { offset: offsetX, offsetX } : {}),
+          ...(offsetY !== undefined ? { offsetY } : {}),
+          ...(charOffset !== undefined ? { charOffset } : {}),
+          ...(lineIndex !== undefined ? { lineIndex } : {}),
+        } satisfies NonNullable<CollaborationPresence["cursor"]>["anchor"])
+      : undefined;
+  const mode =
+    candidate.mode === "pointer" ||
+    candidate.mode === "typing" ||
+    candidate.mode === "selecting"
+      ? candidate.mode
+      : undefined;
+  const cursor: NonNullable<CollaborationPresence["cursor"]> = {
     x: candidate.x,
     y: candidate.y,
     ...(typeof candidate.updatedAt === "number" &&
     Number.isFinite(candidate.updatedAt)
       ? { updatedAt: candidate.updatedAt }
       : {}),
+    ...(mode ? { mode } : {}),
+    ...(anchor ? { anchor } : {}),
+  };
+  return cursor;
+}
+
+function collaborationSelection(
+  value: unknown,
+): CollaborationPresence["selection"] | undefined {
+  if (value === null) return null;
+  if (!value || typeof value !== "object") return undefined;
+  const candidate = value as Record<string, unknown>;
+  if (candidate.kind !== "text") return undefined;
+  if (!Array.isArray(candidate.ranges)) return undefined;
+  const ranges = candidate.ranges.flatMap((entry) => {
+    if (!entry || typeof entry !== "object") return [];
+    const range = entry as Record<string, unknown>;
+    if (
+      typeof range.blockId !== "string" ||
+      !range.blockId.trim() ||
+      typeof range.startOffset !== "number" ||
+      typeof range.endOffset !== "number"
+    )
+      return [];
+    const lineIndex =
+      typeof range.lineIndex === "number" && Number.isFinite(range.lineIndex)
+        ? Math.max(0, Math.floor(range.lineIndex))
+        : undefined;
+    return [
+      {
+        blockId: range.blockId.trim(),
+        startOffset: Math.max(0, Math.floor(range.startOffset)),
+        endOffset: Math.max(0, Math.floor(range.endOffset)),
+        ...(lineIndex !== undefined ? { lineIndex } : {}),
+      },
+    ];
+  });
+  return {
+    kind: "text",
+    collapsed: Boolean(candidate.collapsed) || ranges.every(
+      (range) => range.startOffset === range.endOffset,
+    ),
+    ...(typeof candidate.text === "string"
+      ? { text: candidate.text.slice(0, 280) }
+      : {}),
+    ranges,
   };
 }
 
@@ -348,12 +444,65 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
                 ...(user.previewPhase === "streaming"
                   ? { previewPhase: "streaming" as const }
                   : {}),
+                ...(user.previewGesture === "erasing" ||
+                user.previewGesture === "typing" ||
+                user.previewGesture === "selecting"
+                  ? { previewGesture: user.previewGesture }
+                  : {}),
+                ...(user.interaction &&
+                typeof user.interaction === "object" &&
+                typeof (user.interaction as { kind?: unknown }).kind ===
+                  "string"
+                  ? {
+                      interaction: user.interaction as CollaborationPresence["interaction"],
+                    }
+                  : {}),
                 ...(collaborationCursor(user.cursor)
                   ? { cursor: collaborationCursor(user.cursor) }
                   : {}),
-                ...(user.selection !== undefined
-                  ? { selection: user.selection }
+                ...(collaborationSelection(user.selection) !== undefined
+                  ? { selection: collaborationSelection(user.selection) }
                   : {}),
+                ...(user.menu &&
+                typeof user.menu === "object" &&
+                (user.menu as { open?: unknown }).open === true &&
+                typeof (user.menu as { label?: unknown }).label === "string" &&
+                Array.isArray((user.menu as { options?: unknown }).options)
+                  ? {
+                      menu: {
+                        open: true as const,
+                        label: String((user.menu as { label: string }).label),
+                        options: (
+                          (user.menu as { options: unknown[] }).options ?? []
+                        ).flatMap((option) => {
+                          if (!option || typeof option !== "object") return [];
+                          const entry = option as Record<string, unknown>;
+                          if (
+                            typeof entry.value !== "string" ||
+                            typeof entry.label !== "string"
+                          )
+                            return [];
+                          return [
+                            {
+                              value: entry.value,
+                              label: entry.label,
+                            },
+                          ];
+                        }),
+                        ...(typeof (user.menu as { highlighted?: unknown })
+                          .highlighted === "string"
+                          ? {
+                              highlighted: String(
+                                (user.menu as { highlighted: string })
+                                  .highlighted,
+                              ),
+                            }
+                          : {}),
+                      },
+                    }
+                  : user.menu === null
+                    ? { menu: null }
+                    : {}),
                 ...(user.viewport !== undefined
                   ? { viewport: user.viewport }
                   : {}),

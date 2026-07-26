@@ -26,7 +26,7 @@ import {
   type SpectraCardState,
 } from "./card-system";
 
-const AI_EDITED_FLASH_FALLBACK_MS = 12_000;
+const AI_EDITED_FLASH_FALLBACK_MS = 90_000;
 
 function resolveCardAiState(
   aiState: ArtifactCardView["aiState"] | undefined,
@@ -34,8 +34,13 @@ function resolveCardAiState(
   now: number,
   expiresAt?: number,
 ): ArtifactCardView["aiState"] | undefined {
-  if (aiState === "creating" || aiState === "updating" || aiState === "failed")
-    return aiState;
+  if (aiState === "failed") return aiState;
+  if (aiState === "creating" || aiState === "updating") {
+    // Convex can leave working states after a failed/settled run. Without a
+    // fresh update window the card must stop the infinite working sweep.
+    const fresh = typeof updatedAt === "number" && now - updatedAt < 45_000;
+    return fresh ? aiState : undefined;
+  }
   if (aiState === "edited" || aiState === "generated") {
     const expiry =
       expiresAt ??
@@ -175,12 +180,20 @@ export function ArtifactCard({
       aiClock,
       artifact.aiStateExpiresAt,
     );
-    if (resolved !== "edited" && resolved !== "generated") return;
+    if (
+      resolved !== "edited" &&
+      resolved !== "generated" &&
+      resolved !== "creating" &&
+      resolved !== "updating"
+    )
+      return;
     const expiry =
-      artifact.aiStateExpiresAt ??
-      (artifact.updatedAt
-        ? artifact.updatedAt + AI_EDITED_FLASH_FALLBACK_MS
-        : undefined);
+      resolved === "creating" || resolved === "updating"
+        ? (artifact.updatedAt ?? aiClock) + 45_000
+        : (artifact.aiStateExpiresAt ??
+          (artifact.updatedAt
+            ? artifact.updatedAt + AI_EDITED_FLASH_FALLBACK_MS
+            : undefined));
     if (!expiry || expiry <= aiClock) return;
     const timer = window.setTimeout(
       () => setAiClock(Date.now()),
@@ -206,13 +219,15 @@ export function ArtifactCard({
       : "context"
     : selected
       ? "focused"
-      : liveAiActivity || liveAiState === "updating"
+      : liveAiActivity
         ? "updating"
-        : liveAiState === "creating"
-          ? "creating"
-          : liveAiState === "edited" || liveAiState === "generated"
-            ? "edited"
-            : "normal";
+        : liveAiState === "updating"
+          ? "updating"
+          : liveAiState === "creating"
+            ? "creating"
+            : liveAiState === "edited" || liveAiState === "generated"
+              ? "edited"
+              : "normal";
 
   return (
     <SpectraCard

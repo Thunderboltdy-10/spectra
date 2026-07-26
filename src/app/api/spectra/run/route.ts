@@ -36,7 +36,7 @@ import {
 } from "@/features/spectra/ai/context-builder";
 import { activeToolContractPrompt } from "@/features/spectra/ai/tool-contract";
 import { normalizeArtifactContent } from "@/features/spectra/ai/content-normalization";
-import { contentPatchChangeMatchesSaved } from "@/features/spectra/ai/content-patch-verify";
+import { contentPatchChangeMatchesSaved, authoredValueLandedInContent } from "@/features/spectra/ai/content-patch-verify";
 import {
   applyResolvedContentPatch,
   readResolvedContentPointer,
@@ -8368,13 +8368,16 @@ async function verifyCommittedOutcomes(
         : outcome.affected.find((item) => item.type === "artifact")?.id;
     if (!artifactId)
       throw new Error("The requested artifact was not present after saving.");
-    const saved = await query<unknown & object, unknown>(
-      "spectraArtifacts:get",
-      { actorClerkId, artifactId },
-    );
-    if (!saved || typeof saved !== "object")
-      throw new Error("The saved artifact could not be verified.");
-    const artifact = saved as Record<string, unknown>;
+    const loadSaved = async () => {
+      const saved = await query<unknown & object, unknown>(
+        "spectraArtifacts:get",
+        { actorClerkId, artifactId },
+      );
+      if (!saved || typeof saved !== "object")
+        throw new Error("The saved artifact could not be verified.");
+      return saved as Record<string, unknown>;
+    };
+    let artifact = await loadSaved();
     if (operation.type === "artifact.archive") {
       if (artifact.status !== "archived")
         throw new Error("The artifact was not archived after confirmation.");
@@ -8432,29 +8435,81 @@ async function verifyCommittedOutcomes(
         throw new Error(
           "The saved artifact topics did not match the requested change.",
         );
-      for (const change of operation.input.contentPatch?.changes ?? []) {
-        const sheetsCanonical = canonicalizeSheetsPatchChange(change);
-        const canonical = canonicalizeWhiteboardPatchChange(
-          artifact.content,
-          sheetsCanonical,
-        );
-        const savedValue = readContentPointer(artifact.content, canonical.path);
-        if (
-          contentPatchChangeMatchesSaved(
-            canonical.path,
-            canonical.value,
-            savedValue,
-            {
-              blueprintKey: operation.input.blueprintKey,
-              artifactContent: artifact.content,
-            },
-          )
-        )
-          continue;
-        throw new Error(
-          "The saved artifact did not contain the requested content change.",
-        );
+      const matchesPatch = (content: unknown) => {
+        const changes = operation.input.contentPatch?.changes ?? [];
+        if (changes.length === 0) return true;
+        let matched = 0;
+        for (const change of changes) {
+          const sheetsCanonical = canonicalizeSheetsPatchChange(change);
+          const canonical = canonicalizeWhiteboardPatchChange(
+            content,
+            sheetsCanonical,
+          );
+          const savedValue = readContentPointer(content, canonical.path);
+          if (
+            contentPatchChangeMatchesSaved(
+              canonical.path,
+              canonical.value,
+              savedValue,
+              {
+                blueprintKey: operation.input.blueprintKey,
+                artifactContent: content,
+              },
+            ) ||
+            (operation.input.blueprintKey === "document" &&
+              authoredValueLandedInContent(canonical.value, content))
+          ) {
+            matched += 1;
+            continue;
+          }
+          return false;
+        }
+        return matched === changes.length;
+      };
+      if (matchesPatch(artifact.content)) continue;
+      // Convex projection can lag the acknowledged Yjs commit. Prefer the live
+      // collaborative document, then briefly re-poll Convex before failing a
+      // successful apply.
+      const live = await readLiveArtifactValue({
+        artifactId,
+        timeoutMs: 4_000,
+      }).catch((error) => {
+        console.warn("[spectra.verify.live_read_failed]", {
+          artifactId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return null;
+      });
+      if (live && matchesPatch(live.content)) continue;
+      if (live) {
+        console.warn("[spectra.verify.live_mismatch]", {
+          artifactId,
+          changes: (operation.input.contentPatch?.changes ?? []).map(
+            (change) => ({
+              path: change.path,
+              authoredType: typeof change.value,
+              authored:
+                typeof change.value === "string"
+                  ? change.value.slice(0, 160)
+                  : undefined,
+            }),
+          ),
+        });
       }
+      const projectionDeadline = Date.now() + 3_500;
+      let matched = false;
+      while (Date.now() < projectionDeadline) {
+        await new Promise((resolve) => setTimeout(resolve, 350));
+        artifact = await loadSaved();
+        if (matchesPatch(artifact.content)) {
+          matched = true;
+          break;
+        }
+      }
+      if (matched) continue;
+      throw new Error(
+        "The saved artifact did not contain the requested content change.",
+      );
     }
   }
 }
@@ -8677,6 +8732,31 @@ async function executeOperation(
     });
     output = mutationResult as Record<string, unknown>;
     const changedRegionIds = mutationResult.changedRegionIds ?? [];
+    // Durable Convex content can lag the Yjs ack. Commit the live document
+    // explicitly so verify (and collaborators) never race a false miss.
+    {
+      const live = await readLiveArtifactValue({
+        artifactId: input.artifactId,
+        timeoutMs: 5_000,
+      }).catch(() => null);
+      if (live) {
+        await mutate("spectraArtifacts:stageAiPatch", {
+          actorClerkId,
+          artifactId: input.artifactId,
+          runId,
+          executionId: context.executionId,
+          title: live.title,
+          ...(live.summary !== undefined ? { summary: live.summary } : {}),
+          content: live.content,
+          tags: live.tags,
+          changedPaths: effectChangedPathsForUpdate(operation),
+          ...(context.operationIndex !== undefined
+            ? { operationIndex: context.operationIndex }
+            : {}),
+          commit: true,
+        }).catch(() => null);
+      }
+    }
     const effectProgress = operationEffectProgress(
       operation,
       context.operationIndex ?? 0,
@@ -11569,13 +11649,13 @@ async function resumeOperationsAttempt(params: {
         actorClerkId: params.actorClerkId,
         runId: params.runId,
         executionId: params.executionId,
-        outcome: "clear",
+        outcome: "failed",
       }).catch(() => null),
       mutate("spectraWorkspaces:settleForRun", {
         actorClerkId: params.actorClerkId,
         runId: params.runId,
         executionId: params.executionId,
-        outcome: "clear",
+        outcome: "failed",
       }).catch(() => null),
     ]);
     const partial = allAffected.length > 0;

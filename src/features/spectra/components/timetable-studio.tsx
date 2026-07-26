@@ -485,43 +485,13 @@ export function TimetableStudio({
   }, [anchor, baseVisibleEvents, days, timetable.timezone, view.kind]);
   const aiRevealKeyRef = useRef<string>();
 
-  // A collaborator editing an event outside the current week should not look
-  // like a detached badge in the header. Follow the exact event once for each
-  // active AI target so its native card can stream, pulse, and receive the
-  // collaborator cursor in view.
+  // Do not steal the user's calendar viewport for AI edits — cyan ink on the
+  // event card is enough. Peers may be reading a different week on purpose.
   useEffect(() => {
-    const target = aiChangedPaths
-      .map((path) => path.match(/^\/events\/([^/]+)/)?.[1])
-      .find((segment): segment is string => Boolean(segment));
-    if (!target) {
+    if (!aiChangedPaths.length) {
       aiRevealKeyRef.current = undefined;
-      return;
     }
-    const event = /^\d+$/.test(target)
-      ? sharedTimetable.events[Number(target)]
-      : sharedTimetable.events.find((item) => item.id === target);
-    if (!event) return;
-    const revealKey = `${event.id}:${event.start}`;
-    if (aiRevealKeyRef.current === revealKey) return;
-    aiRevealKeyRef.current = revealKey;
-    if (visibleEvents.some((item) => item.id === event.id)) return;
-    const nextAnchor = localDateInput(
-      event.overlay?.alternativeStart || event.start,
-      event.timezone || timetable.timezone,
-    ).slice(0, 10);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(nextAnchor)) return;
-    savePersonalState({
-      ...personalState,
-      view: { ...view, anchorDate: nextAnchor },
-    });
-  }, [
-    aiChangedPaths,
-    personalState,
-    sharedTimetable.events,
-    timetable.timezone,
-    view,
-    visibleEvents,
-  ]);
+  }, [aiChangedPaths]);
 
   // After AI create (or any load) where personal view still defaults to "today"
   // but events live in another week, jump once to the earliest upcoming event.

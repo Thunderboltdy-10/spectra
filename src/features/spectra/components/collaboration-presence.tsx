@@ -11,6 +11,7 @@ import type { CollaborationPresence } from "../collaboration/types";
 import {
   actorLabel,
   describeState,
+  presenceColor as actorPresenceColor,
   stateIsVisible,
 } from "../collaboration/interaction-model";
 import type { ArtifactCommentRegion } from "./artifact-comments-panel";
@@ -61,9 +62,20 @@ function validCursor(
 }
 
 function presenceColor(person: CollaborationPresence) {
-  return person.actorKind === "ai"
-    ? "var(--accent-cyan)"
-    : person.color || "#6f7b72";
+  // An AI wears its owner's colour everywhere: "Nadia" and "Nadia's AI" are
+  // visibly the same participant, never a generic cyan guest.
+  if (person.interactionState) {
+    return actorPresenceColor(person.interactionState.actor);
+  }
+  if (person.actorKind === "ai") {
+    return actorPresenceColor({
+      clientId: person.clientId,
+      kind: "ai",
+      name: person.name ?? "AI",
+      ...(person.accountId ? { ownerAccountId: person.accountId } : {}),
+    });
+  }
+  return person.color || "#6f7b72";
 }
 
 function positionsEqual(
@@ -147,9 +159,15 @@ function resolveAiTarget(
       if (region) return region;
     }
     if (kind === "path") {
-      const byPath = studio.querySelector<HTMLElement>(
-        `[data-ai-path="${cssEscape(id)}"]`,
-      );
+      // Prefer the canonical annotation, so a migrated editor needs no legacy
+      // duplicate; `data-ai-path` remains only for editors not yet converted.
+      const byPath =
+        studio.querySelector<HTMLElement>(
+          `[data-spectra-target="${cssEscape(id)}"]`,
+        ) ??
+        studio.querySelector<HTMLElement>(
+          `[data-ai-path="${cssEscape(id)}"]`,
+        );
       if (byPath) return byPath;
       const blockMatch = id.match(/\/(?:content\/)?blocks\/(?:id:)?([^/]+)/i);
       if (blockMatch) {
@@ -218,30 +236,29 @@ export function CollaborationCursorLayer({
   const presenceKey = useMemo(
     () =>
       collaborators
-        .map(
-          (person) =>
-            [
-              person.clientId,
-              person.activeRegionId ?? "",
-              person.previewSequence ?? "",
-              person.previewGesture ?? "",
-              person.cursor?.mode ?? "",
-              person.cursor?.anchor?.kind ?? "",
-              person.cursor?.anchor?.id ?? "",
-              person.cursor?.anchor?.offsetX ??
-                person.cursor?.anchor?.offset ??
-                "",
-              person.cursor?.anchor?.offsetY ?? "",
-              person.cursor?.anchor?.charOffset ?? "",
-              person.cursor?.anchor?.lineIndex ?? "",
-              person.cursor?.updatedAt ?? "",
-              person.cursor?.x ?? "",
-              person.cursor?.y ?? "",
-              JSON.stringify(person.selection?.ranges ?? []),
-              person.menu?.open ? "1" : "0",
-              person.menu?.highlighted ?? "",
-              person.interaction?.kind ?? "",
-            ].join(":"),
+        .map((person) =>
+          [
+            person.clientId,
+            person.activeRegionId ?? "",
+            person.previewSequence ?? "",
+            person.previewGesture ?? "",
+            person.cursor?.mode ?? "",
+            person.cursor?.anchor?.kind ?? "",
+            person.cursor?.anchor?.id ?? "",
+            person.cursor?.anchor?.offsetX ??
+              person.cursor?.anchor?.offset ??
+              "",
+            person.cursor?.anchor?.offsetY ?? "",
+            person.cursor?.anchor?.charOffset ?? "",
+            person.cursor?.anchor?.lineIndex ?? "",
+            person.cursor?.updatedAt ?? "",
+            person.cursor?.x ?? "",
+            person.cursor?.y ?? "",
+            JSON.stringify(person.selection?.ranges ?? []),
+            person.menu?.open ? "1" : "0",
+            person.menu?.highlighted ?? "",
+            person.interaction?.kind ?? "",
+          ].join(":"),
         )
         .join("|"),
     [collaborators],
@@ -525,7 +542,7 @@ export function CollaborationCursorLayer({
               />
             ) : showPointer ? (
               <MousePointer2
-                className={`h-5 w-5 -translate-x-1 -translate-y-1 fill-current ${person.actorKind === "ai" ? "drop-shadow-[0_0_8px_color-mix(in_oklab,var(--accent-cyan)_70%,transparent)]" : "drop-shadow-[0_2px_3px_rgba(20,18,15,.18)]"}`}
+                className="h-5 w-5 -translate-x-1 -translate-y-1 fill-current drop-shadow-[0_2px_3px_rgba(20,18,15,.18)]"
                 style={{ color }}
               />
             ) : null}
@@ -536,7 +553,7 @@ export function CollaborationCursorLayer({
                 style={{ backgroundColor: color }}
               >
                 {person.actorKind === "ai" ? (
-                  <Sparkles className="h-3 w-3 animate-pulse motion-reduce:animate-none" />
+                  <Sparkles className="h-3 w-3" />
                 ) : null}
                 {name}
               </span>
@@ -621,6 +638,7 @@ export function CollaborationPresenceIndicator({
         ? `${activeAiRegion} · line ${activeAiLine}`
         : `Line ${activeAiLine}`
       : activeAiRegion;
+  const activeAiColor = activeAi ? presenceColor(activeAi) : null;
   return (
     <div className="relative">
       <button
@@ -628,7 +646,15 @@ export function CollaborationPresenceIndicator({
         onClick={() => setOpen((value) => !value)}
         aria-expanded={open}
         aria-label={`${collaborators.length} collaborator${collaborators.length === 1 ? "" : "s"} present`}
-        className={`group flex h-9 items-center gap-2 rounded-[8px] border px-2 shadow-[0_2px_8px_rgba(27,20,12,.04)] transition ${activeAi ? "border-[color-mix(in_oklab,var(--accent-cyan)_42%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_8%,var(--bg-primary))] hover:bg-[color-mix(in_oklab,var(--accent-cyan)_12%,var(--bg-primary))]" : "border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--bg-primary)_84%,transparent)] hover:border-[var(--border-default)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"}`}
+        className={`group flex h-9 items-center gap-2 rounded-[8px] border px-2 shadow-[0_2px_8px_rgba(27,20,12,.04)] transition ${activeAi ? "" : "border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--bg-primary)_84%,transparent)] hover:border-[var(--border-default)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"}`}
+        style={
+          activeAiColor
+            ? {
+                borderColor: `color-mix(in oklab, ${activeAiColor} 38%, var(--border-default))`,
+                backgroundColor: `color-mix(in oklab, ${activeAiColor} 6%, var(--bg-primary))`,
+              }
+            : undefined
+        }
       >
         <span className="flex -space-x-1.5">
           {collaborators.slice(0, 3).map((person) => (

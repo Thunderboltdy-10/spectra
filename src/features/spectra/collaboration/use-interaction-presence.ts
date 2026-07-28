@@ -16,13 +16,11 @@
 
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { buildTarget } from "./control-descriptors";
-import { noteHumanEdit } from "./ai-trace";
 import {
   canonicalPath,
   idleState,
   normalizeInteractionState,
   primitiveHoldsText,
-  sameTarget,
   targetKey,
   type ActorIdentity,
   type InteractionAct,
@@ -225,9 +223,8 @@ export function useInteractionPresence(options: {
 
     let frame = 0;
     /** Target currently being dragged or resized, so movement stays attributed. */
-    let gesture:
-      | { kind: "drag" | "resize"; target: SemanticTarget }
-      | null = null;
+    let gesture: { kind: "drag" | "resize"; target: SemanticTarget } | null =
+      null;
 
     const controlFor = (node: EventTarget | null): SemanticTarget | null => {
       if (!(node instanceof Element)) return null;
@@ -274,7 +271,10 @@ export function useInteractionPresence(options: {
 
         // Do not overwrite an active caret with a hover frame: a user whose
         // pointer drifts while typing is still typing.
-        if (document.activeElement && surface.contains(document.activeElement)) {
+        if (
+          document.activeElement &&
+          surface.contains(document.activeElement)
+        ) {
           const focused = controlFor(document.activeElement);
           if (focused && primitiveHoldsText(focused.primitive)) return;
         }
@@ -332,7 +332,10 @@ export function useInteractionPresence(options: {
         return;
       }
       publish({
-        act: { kind: "select", span: { anchor: points.anchor, head: points.head } },
+        act: {
+          kind: "select",
+          span: { anchor: points.anchor, head: points.head },
+        },
         target,
       });
     };
@@ -349,15 +352,10 @@ export function useInteractionPresence(options: {
       const node = event.target;
       const target = controlFor(node);
       if (!target) return;
-      // Editing a field is the most complete form of reviewing an AI change to
-      // it, so any trace on that exact control clears itself here.
-      noteHumanEdit(artifactId, target.path);
       const value = readValue(node);
       const points = readTextPoints(node);
       publish({
-        act: points
-          ? { kind: "type", point: points.head }
-          : { kind: "focus" },
+        act: points ? { kind: "type", point: points.head } : { kind: "focus" },
         target,
         // The provisional value travels with the frame: a peer sees the text as
         // it is typed and knows it is not durable yet.
@@ -382,10 +380,17 @@ export function useInteractionPresence(options: {
         publish({ act: { kind: "dragStart" }, target });
         return;
       }
-      if (target.primitive === "dropdown" || target.primitive === "viewSwitch") {
+      if (
+        target.primitive === "dropdown" ||
+        target.primitive === "viewSwitch"
+      ) {
         // A native select cannot report its open state, so the honest frame is
         // "this control is being operated", with the menu mirrored on change.
-        publish({ act: { kind: "menuOpen" }, target, menu: menuFor(event.target, target) });
+        publish({
+          act: { kind: "menuOpen" },
+          target,
+          menu: menuFor(event.target, target),
+        });
         return;
       }
       if (target.primitive === "button") {
@@ -416,7 +421,6 @@ export function useInteractionPresence(options: {
       const node = event.target;
       const target = controlFor(node);
       if (!target) return;
-      noteHumanEdit(artifactId, target.path);
       if (node instanceof HTMLSelectElement) {
         publish({
           act: { kind: "menuSelect", option: node.value },
@@ -548,7 +552,10 @@ function menuFor(
   if (!(node instanceof HTMLSelectElement)) return null;
   const options = Array.from(node.options)
     .slice(0, 24)
-    .map((option) => ({ value: option.value, label: option.label || option.value }));
+    .map((option) => ({
+      value: option.value,
+      label: option.label || option.value,
+    }));
   if (!options.length) return null;
   return {
     label: target.label ?? node.getAttribute("aria-label") ?? "Options",
@@ -572,7 +579,10 @@ function readTextPoints(
     const point = (offset: number): TextPoint => {
       if (!value.includes("\n")) return { offset };
       const before = value.slice(0, offset).split("\n");
-      return { offset: before[before.length - 1]!.length, line: before.length - 1 };
+      return {
+        offset: before[before.length - 1]!.length,
+        line: before.length - 1,
+      };
     };
     return {
       anchor: point(start),
@@ -606,12 +616,4 @@ function readTextPoints(
     head: { offset: head },
     collapsed: range.collapsed,
   };
-}
-
-/** Ignore-list guard used by callers that also render local chrome. */
-export function isSameInteractionTarget(
-  left: SemanticTarget | null | undefined,
-  right: SemanticTarget | null | undefined,
-): boolean {
-  return sameTarget(left, right);
 }

@@ -5,14 +5,15 @@
  *
  * Turns validated operation envelopes into a *performance*: owner-attributed
  * presence arrives, moves to the real control, operates it through the native
- * choreography for that control primitive, then settles into a reviewable trace.
+ * choreography for that control primitive, then releases it. Committed work
+ * leaves no mark; it is ordinary content the moment it is durable.
  *
  * The contract deliberately starts from the earliest safe point. A performance
  * needs only one small envelope — artifact, semantic target, action, identity —
  * so visible work can begin as soon as the model has produced enough validated
  * information for one operation, rather than after an entire response parses.
  *
- * Three properties are structural rather than incidental:
+ * Four properties are structural rather than incidental:
  *
  *  1. Nothing untrusted is ever animated. An envelope that fails validation is
  *     rejected before it can affect the screen.
@@ -21,6 +22,10 @@
  *  3. Failure reverses one operation. A malformed later envelope discards that
  *     operation's unfinished preview and leaves every completed operation alone,
  *     so recovery never replays work that already succeeded.
+ *  4. **One actor has one body.** However fast the model returns operations,
+ *     exactly one is ever being performed. The rest wait, and they wait in
+ *     route order rather than arrival order, so the visible pass through an
+ *     artifact reads as methodical instead of scattered.
  */
 
 import {
@@ -29,6 +34,7 @@ import {
   type ChoreographyPlan,
 } from "./choreography";
 import { buildTarget } from "./control-descriptors";
+import { orderPathsByRoute } from "./presentation-lane";
 import {
   canonicalPath,
   normalizeInteractionState,
@@ -37,17 +43,11 @@ import {
   type InteractionState,
   type SemanticTarget,
 } from "./interaction-model";
-import { recordAiTrace } from "./ai-trace";
 import { describeAct } from "./interaction-model";
 import type { ArtifactTypeKey } from "../artifacts/types";
 
 export type AiOperationAction =
-  | "set"
-  | "create"
-  | "remove"
-  | "reorder"
-  | "group"
-  | "switchView";
+  "set" | "create" | "remove" | "reorder" | "group" | "switchView";
 
 /**
  * The minimum an operation needs to become visible. Everything optional is a
@@ -133,9 +133,16 @@ type Performance = {
 export function validateEnvelope(value: unknown): AiOperationEnvelope | null {
   if (!value || typeof value !== "object") return null;
   const record = value as Record<string, unknown>;
-  const strings = ["runId", "operationId", "artifactId", "typeKey", "path"] as const;
+  const strings = [
+    "runId",
+    "operationId",
+    "artifactId",
+    "typeKey",
+    "path",
+  ] as const;
   for (const key of strings) {
-    if (typeof record[key] !== "string" || !(record[key] as string)) return null;
+    if (typeof record[key] !== "string" || !(record[key] as string))
+      return null;
   }
   const action = record.action;
   const allowed: AiOperationAction[] = [
@@ -146,7 +153,10 @@ export function validateEnvelope(value: unknown): AiOperationEnvelope | null {
     "group",
     "switchView",
   ];
-  if (typeof action !== "string" || !allowed.includes(action as AiOperationAction))
+  if (
+    typeof action !== "string" ||
+    !allowed.includes(action as AiOperationAction)
+  )
     return null;
 
   // A `set` with no intended value cannot be performed; performing it anyway is
@@ -171,7 +181,9 @@ export function validateEnvelope(value: unknown): AiOperationEnvelope | null {
     action: action as AiOperationAction,
     ...("before" in record ? { before: record.before } : {}),
     ...("after" in record ? { after: record.after } : {}),
-    ...(typeof record.regionId === "string" ? { regionId: record.regionId } : {}),
+    ...(typeof record.regionId === "string"
+      ? { regionId: record.regionId }
+      : {}),
     ...(Array.isArray(record.menuOptions)
       ? {
           menuOptions: record.menuOptions.flatMap((option) => {
@@ -234,14 +246,14 @@ export class AiPerformer {
   }
 
   /**
-   * Begin performing an operation. Independent paths proceed simultaneously;
-   * a second operation on the same path waits for the first, so provisional
-   * values on one control can never interleave into an invalid state.
+   * Accept an operation. It begins immediately if the body is free, and
+   * otherwise joins the queue — including when it targets an entirely
+   * unrelated control, because a second simultaneous performance would put one
+   * actor in two places at once.
    */
   start(input: AiOperationEnvelope | unknown): boolean {
     if (this.disposed) return false;
-    const envelope =
-      isEnvelope(input) ? input : validateEnvelope(input);
+    const envelope = isEnvelope(input) ? input : validateEnvelope(input);
     if (!envelope) return false;
     if (this.performances.has(envelope.operationId)) return true;
 
@@ -264,7 +276,7 @@ export class AiPerformer {
       envelope,
       plan,
       target,
-      status: this.pathBusy(envelope.path) ? "queued" : "performing",
+      status: this.bodyBusy() ? "queued" : "performing",
       frameIndex: 0,
       note: `Preparing ${target.label ?? "the change"}`,
       timer: null,
@@ -272,8 +284,9 @@ export class AiPerformer {
     };
     this.performances.set(envelope.operationId, performance);
 
+    // A queued operation is recorded so activity surfaces can report it, but it
+    // publishes nothing: presence follows the body, and the body is elsewhere.
     if (performance.status === "performing") this.advance(performance);
-    else this.emitPresence(performance, "queued");
     this.refresh();
     return true;
   }
@@ -291,24 +304,30 @@ export class AiPerformer {
       : null;
     return planChoreography({
       target,
-      ...(("before" in envelope) ? { before: envelope.before } : {}),
-      ...(("after" in envelope) ? { after: envelope.after } : {}),
+      ...("before" in envelope ? { before: envelope.before } : {}),
+      ...("after" in envelope ? { after: envelope.after } : {}),
       ...(envelope.menuOptions ? { menuOptions: envelope.menuOptions } : {}),
       ...(dropTarget ? { dropTarget } : {}),
       ...(envelope.reorder ? { reorder: envelope.reorder } : {}),
       ...(envelope.members ? { members: envelope.members } : {}),
       ...(envelope.action !== "set"
-        ? { intent: envelope.action as "create" | "remove" | "reorder" | "group" | "switchView" }
+        ? {
+            intent: envelope.action as
+              "create" | "remove" | "reorder" | "group" | "switchView",
+          }
         : {}),
     });
   }
 
-  private pathBusy(path: string): boolean {
-    const canonical = canonicalPath(path);
+  /**
+   * True while the body is mid-gesture. A performance that has finished its
+   * choreography and is only waiting for its durable write does *not* hold the
+   * body: the value stays provisionally on screen while the AI moves on, which
+   * is what keeps a fast run fast.
+   */
+  private bodyBusy(): boolean {
     for (const performance of this.performances.values()) {
-      if (performance.status !== "performing" && performance.status !== "committing")
-        continue;
-      if (canonicalPath(performance.envelope.path) === canonical) return true;
+      if (performance.status === "performing") return true;
     }
     return false;
   }
@@ -316,7 +335,8 @@ export class AiPerformer {
   /** Play the next frame of a performance. */
   private advance(performance: Performance): void {
     if (this.disposed) return;
-    if (performance.status === "blocked" || performance.status === "paused") return;
+    if (performance.status === "blocked" || performance.status === "paused")
+      return;
 
     const frame = performance.plan.frames[performance.frameIndex];
     if (!frame) {
@@ -326,21 +346,24 @@ export class AiPerformer {
     performance.frameIndex += 1;
 
     if (frame.value !== undefined) performance.provisional = frame.value;
-    performance.note =
-      frame.note ?? describeAct(frame.act, performance.target);
+    performance.note = frame.note ?? describeAct(frame.act, performance.target);
 
     this.emitFrame(performance, frame);
     this.refresh();
 
-    performance.timer = window.setTimeout(() => {
-      performance.timer = null;
-      this.advance(performance);
-    }, Math.max(24, frame.hold));
+    performance.timer = window.setTimeout(
+      () => {
+        performance.timer = null;
+        this.advance(performance);
+      },
+      Math.max(24, frame.hold),
+    );
   }
 
   private emitFrame(performance: Performance, frame: ChoreographyFrame): void {
     const lifecycle: InteractionLifecycle =
-      frame.lifecycle ?? (performance.status === "queued" ? "queued" : "active");
+      frame.lifecycle ??
+      (performance.status === "queued" ? "queued" : "active");
     this.publish(
       normalizeInteractionState({
         v: 2,
@@ -401,41 +424,19 @@ export class AiPerformer {
       // than presenting a speculative one indefinitely.
       this.commit(performance.envelope);
     }, DURABLE_GRACE_MS);
-    this.startNextQueued(performance.envelope.path);
+    this.startNextQueued();
     this.refresh();
   }
 
   /**
-   * The durable value for an operation has landed. Records the trace, clears the
-   * speculation, and releases presence.
+   * The durable value for an operation has landed. Clears the speculation and
+   * releases presence; committed work is ordinary content and leaves no mark.
    */
   commit(envelope: AiOperationEnvelope): void {
     const performance = this.performances.get(envelope.operationId);
     if (performance) this.teardown(performance, "completed");
 
-    if (envelope.action !== "remove" || "after" in envelope) {
-      recordAiTrace({
-        target: buildTarget({
-          typeKey: envelope.typeKey,
-          artifactId: envelope.artifactId,
-          path: envelope.path,
-          ...(envelope.regionId ? { regionId: envelope.regionId } : {}),
-        }),
-        runId: envelope.runId,
-        operationId: envelope.operationId,
-        actorLabel: aiLabel(this.actor),
-        ...(this.actor.ownerAccountId
-          ? { ownerAccountId: this.actor.ownerAccountId }
-          : {}),
-        previousValue: envelope.before,
-        nextValue: envelope.after,
-        summary: envelope.summary ?? defaultSummary(envelope),
-        ...(envelope.restoreVersionId
-          ? { restoreVersionId: envelope.restoreVersionId }
-          : {}),
-      });
-    }
-    this.startNextQueued(envelope.path);
+    this.startNextQueued();
     this.refresh();
   }
 
@@ -458,7 +459,7 @@ export class AiPerformer {
     if (!performance) return;
     performance.note = reason ?? "Could not finish this change";
     this.teardown(performance, "failed");
-    this.startNextQueued(performance.envelope.path);
+    this.startNextQueued();
     this.refresh();
   }
 
@@ -497,7 +498,8 @@ export class AiPerformer {
   resume(operationId: string): void {
     const performance = this.performances.get(operationId);
     if (!performance) return;
-    if (performance.status !== "blocked" && performance.status !== "paused") return;
+    if (performance.status !== "blocked" && performance.status !== "paused")
+      return;
     performance.status = "performing";
     this.advance(performance);
     this.refresh();
@@ -512,16 +514,36 @@ export class AiPerformer {
     for (const envelope of envelopes) this.commit(envelope);
   }
 
-  private startNextQueued(path: string): void {
-    if (this.pathBusy(path)) return;
-    const canonical = canonicalPath(path);
-    for (const performance of this.performances.values()) {
-      if (performance.status !== "queued") continue;
-      if (canonicalPath(performance.envelope.path) !== canonical) continue;
-      performance.status = "performing";
-      this.advance(performance);
-      return;
+  /**
+   * Hand the body to the next waiting operation.
+   *
+   * The choice is the route's, not the model's: whichever queued control comes
+   * next in the artifact's own reading order goes next, so a burst of
+   * operations returned in any order still plays as one coherent pass. Where
+   * several operations target the same control, the earliest accepted wins, so
+   * provisional values on one control can never interleave into an invalid
+   * state.
+   */
+  private startNextQueued(): void {
+    if (this.bodyBusy()) return;
+    const queued = [...this.performances.values()].filter(
+      (performance) => performance.status === "queued",
+    );
+    if (!queued.length) return;
+    const route = orderPathsByRoute(
+      queued.map((performance) => performance.envelope.path),
+    );
+    let next = queued[0]!;
+    let bestRank = Number.POSITIVE_INFINITY;
+    for (const performance of queued) {
+      const rank = route.indexOf(canonicalPath(performance.envelope.path));
+      if (rank !== -1 && rank < bestRank) {
+        bestRank = rank;
+        next = performance;
+      }
     }
+    next.status = "performing";
+    this.advance(next);
   }
 
   private clearTimers(performance: Performance): void {
@@ -595,35 +617,4 @@ function isEnvelope(value: unknown): value is AiOperationEnvelope {
     typeof (value as AiOperationEnvelope).path === "string" &&
     typeof (value as AiOperationEnvelope).action === "string"
   );
-}
-
-function aiLabel(actor: ActorIdentity): string {
-  const owner = actor.ownerName?.trim();
-  if (owner) return `${owner}'s AI`;
-  return actor.name.trim() || "Spectra AI";
-}
-
-function defaultSummary(envelope: AiOperationEnvelope): string {
-  const target = buildTarget({
-    typeKey: envelope.typeKey,
-    artifactId: envelope.artifactId,
-    path: envelope.path,
-  });
-  const where = target.label ?? "this field";
-  switch (envelope.action) {
-    case "create":
-      return `Added ${where}`;
-    case "remove":
-      return `Removed ${where}`;
-    case "reorder":
-      return `Reordered ${where}`;
-    case "group":
-      return `Grouped ${where}`;
-    case "switchView":
-      return `Opened ${where}`;
-    default:
-      return typeof envelope.before === "string" && envelope.before.trim()
-        ? `Rewrote ${where}`
-        : `Filled in ${where}`;
-  }
 }

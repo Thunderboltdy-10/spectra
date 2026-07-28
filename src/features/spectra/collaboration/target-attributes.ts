@@ -3,8 +3,8 @@
  *
  * An editor marks each control with its canonical content path. That single
  * annotation is what lets cursors, carets, selections, drag ghosts, resize
- * frames, lock affordances and AI traces all resolve to the *exact* control —
- * and it is why none of those features need per-artifact code.
+ * frames and held-control affordances all resolve to the *exact* control — and
+ * it is why none of those features need per-artifact code.
  *
  * Spread the result onto the element that visually *is* the control (the input,
  * the select, the cell, the node), not onto a wrapper, so caret geometry lands on

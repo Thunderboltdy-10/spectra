@@ -55,7 +55,13 @@ export function useArtifactAiActivity(artifactId: string) {
     () => {
       const sources = activityByArtifact.get(artifactId);
       if (!sources?.size) return null;
-      return [...sources.values()].at(-1) ?? null;
+      const all = [...sources.values()];
+      // A source that can name the actor (the open studio's semantic frame)
+      // always wins over a coarser feed that only knows the operation.
+      for (let index = all.length - 1; index >= 0; index -= 1) {
+        if (all[index]!.label) return all[index]!;
+      }
+      return all.at(-1) ?? null;
     },
     () => null,
   );

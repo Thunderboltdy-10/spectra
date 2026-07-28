@@ -1,8 +1,9 @@
 "use client";
 
-import { MessageSquare, X } from "lucide-react";
+import { Crosshair, MessageSquare, X } from "lucide-react";
 import type { CSSProperties } from "react";
 import type { SpectraLiveExchange } from "../ai/use-spectra-run";
+import { useFollowAi } from "../collaboration/follow-ai";
 import { ThreadConversation } from "./conversation-surface";
 import { StudioSplitShell } from "./artifact-studio";
 
@@ -30,17 +31,51 @@ export function LiveThreadPanel({
   onOpenArtifact?: (artifactId: string) => void;
   onOpenWorkspace?: (workspaceId: string) => void;
 }) {
+  const follow = useFollowAi();
   return (
-    <StudioSplitShell width={width} onWidthChange={onWidthChange} ariaLabel="Live thread">
+    <StudioSplitShell
+      width={width}
+      onWidthChange={onWidthChange}
+      ariaLabel="Live thread"
+    >
       <div className="flex h-full min-h-0 flex-col bg-[var(--bg-primary)]">
         <header className="flex h-14 shrink-0 items-center gap-3 border-b border-[var(--border-default)] px-4">
-          <span className="spectra-card-type-icon !h-8 !w-8 text-[var(--brand-primary)]" style={{ "--card-accent": "var(--brand-primary)" } as CSSProperties}>
+          <span
+            className="spectra-card-type-icon !h-8 !w-8 text-[var(--brand-primary)]"
+            style={{ "--card-accent": "var(--brand-primary)" } as CSSProperties}
+          >
             <MessageSquare className="h-4 w-4" />
           </span>
           <div className="min-w-0 flex-1">
-            <div className="truncate font-display text-[16px] font-semibold text-[var(--text-primary)]">{title || "Live thread"}</div>
-            <div className="text-[9px] font-semibold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">Live conversation</div>
+            <div className="truncate font-display text-[16px] font-semibold text-[var(--text-primary)]">
+              {title || "Live thread"}
+            </div>
+            <div className="text-[9px] font-semibold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
+              Live conversation
+            </div>
           </div>
+          {/* Follow AI is a mode, not a command, so it reads as a pill that
+              stays lit rather than as another icon in the row. */}
+          <button
+            type="button"
+            onClick={() => follow.setFollowing(!follow.following)}
+            className="spectra-follow-toggle"
+            data-following={follow.following ? "true" : undefined}
+            aria-label={
+              follow.following
+                ? "Stop following the AI"
+                : "Follow the AI as it works"
+            }
+            aria-pressed={follow.following}
+            title={
+              follow.following
+                ? "Stop spectating and keep your own view"
+                : "Spectate the AI: open and reveal whatever it is working on"
+            }
+          >
+            <Crosshair className="h-3.5 w-3.5" />
+            <span>{follow.following ? "Following" : "Follow AI"}</span>
+          </button>
           {onContinue ? (
             <button
               type="button"
@@ -66,10 +101,36 @@ export function LiveThreadPanel({
               <MessageSquare className="h-4 w-4" />
             </button>
           ) : null}
-          <button type="button" onClick={onClose} className="spectra-icon-action" aria-label="Close live thread" data-tooltip="Close thread">
+          <button
+            type="button"
+            onClick={onClose}
+            className="spectra-icon-action"
+            aria-label="Close live thread"
+            data-tooltip="Close thread"
+          >
             <X className="h-4 w-4" />
           </button>
         </header>
+        {/* Spectating is a state the user is in, so it says so — and says what
+            it is watching. Any direct interaction elsewhere disengages it. */}
+        {follow.following ? (
+          <div className="spectra-follow-strip" role="status">
+            <span className="spectra-follow-strip-pip" aria-hidden="true" />
+            <span className="spectra-follow-strip-text">
+              {follow.location?.note ??
+                (follow.location
+                  ? "Following the AI"
+                  : "Waiting for the AI to start")}
+            </span>
+            <button
+              type="button"
+              onClick={() => follow.setFollowing(false)}
+              className="spectra-follow-strip-stop"
+            >
+              Stop
+            </button>
+          </div>
+        ) : null}
         <div className="min-h-0 flex-1">
           <ThreadConversation
             threadId={threadId}

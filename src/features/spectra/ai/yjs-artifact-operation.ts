@@ -849,7 +849,7 @@ export async function applyAiArtifactMutation(params: {
   let opened = false;
   let authenticated = false;
   let syncEventReceived = false;
-  let presenceStartedAt = 0;
+
   const provider = new HocuspocusProvider({
     url: session.url,
     WebSocketPolyfill: WebSocket,
@@ -939,7 +939,7 @@ export async function applyAiArtifactMutation(params: {
         at: Date.now(),
       },
     });
-    presenceStartedAt = Date.now();
+
     // Awareness is a visible part of the operation, not disposable metadata.
     // Give the gateway one bounded paint window to fan out the AI collaborator
     // before a fast Yjs transaction can finish and tear down the provider.

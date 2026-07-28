@@ -1118,6 +1118,23 @@ export function PresentationStudio({
       setLayerSelection([]);
     }
   }, [activeSlideId, deck.slides]);
+
+  // Follow AI: a reveal request names a slide path; switch to that slide so
+  // the studio's own scroll-reveal can find the exact target afterwards.
+  useEffect(() => {
+    function onReveal(event: Event) {
+      const detail = (
+        event as CustomEvent<{ artifactId?: string; path?: string }>
+      ).detail;
+      if (detail?.artifactId !== artifactId || !detail.path) return;
+      const match = /^\/slides\/(\d+)/.exec(detail.path);
+      if (!match) return;
+      const slide = deck.slides[Number(match[1])];
+      if (slide && slide.id !== activeSlideId) setActiveSlideId(slide.id);
+    }
+    window.addEventListener("spectra:reveal-target", onReveal);
+    return () => window.removeEventListener("spectra:reveal-target", onReveal);
+  }, [artifactId, activeSlideId, deck.slides]);
   useEffect(() => {
     let active = true;
     void getArtifactAssets(artifactId)
@@ -1395,9 +1412,7 @@ export function PresentationStudio({
     setLayerSelection([object.id]);
     onActiveRegionChange?.(object.id);
   }
-  function applyTextPreset(
-    preset: "title" | "subtitle" | "body" | "caption",
-  ) {
+  function applyTextPreset(preset: "title" | "subtitle" | "body" | "caption") {
     const tokens = {
       title: { fontSize: 54, fontWeight: 700, color: "#143d34" },
       subtitle: { fontSize: 27, fontWeight: 520, color: "#168767" },
@@ -2294,7 +2309,8 @@ export function PresentationStudio({
           >
             {syncMessage === "Auto-saved" ? (
               <CheckCircle2 className="h-3.5 w-3.5 text-[var(--success)]" />
-            ) : syncMessage === "Synchronizing" || syncMessage === "Reconnecting" ? (
+            ) : syncMessage === "Synchronizing" ||
+              syncMessage === "Reconnecting" ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-cyan)]" />
             ) : (
               <Circle className="h-3 w-3 fill-[#d88922] text-[#d88922]" />
@@ -2313,7 +2329,8 @@ export function PresentationStudio({
             className="presentation-present-action"
             onClick={() => startPresenting(false)}
           >
-            <Play className="h-3.5 w-3.5 fill-current" /> Present ({deck.slides.length})
+            <Play className="h-3.5 w-3.5 fill-current" /> Present (
+            {deck.slides.length})
           </button>
           <button
             type="button"
@@ -2383,22 +2400,15 @@ export function PresentationStudio({
             </button>
             <select
               value={
-                selectedTextPreset ??
-                activeSlide.layoutId ??
-                "title-content"
+                selectedTextPreset ?? activeSlide.layoutId ?? "title-content"
               }
               disabled={readOnly}
-              aria-label={
-                selectedTextPreset ? "Text style" : "Slide layout"
-              }
+              aria-label={selectedTextPreset ? "Text style" : "Slide layout"}
               onChange={(event) => {
                 if (selectedTextPreset)
                   applyTextPreset(
                     event.target.value as
-                      | "title"
-                      | "subtitle"
-                      | "body"
-                      | "caption",
+                      "title" | "subtitle" | "body" | "caption",
                   );
                 else applySlideLayout(event.target.value);
               }}

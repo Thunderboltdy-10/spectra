@@ -5,14 +5,6 @@ import {
   validateEnvelope,
   type AiOperationEnvelope,
 } from "../collaboration/ai-performer";
-import {
-  __resetAiTraces,
-  dismissAiTrace,
-  listAiTraces,
-  noteHumanEdit,
-  recordAiTrace,
-  tracesAtPath,
-} from "../collaboration/ai-trace";
 import type {
   ActorIdentity,
   InteractionState,
@@ -50,7 +42,9 @@ describe("validateEnvelope", () => {
 
   it("rejects missing identity so untrusted output cannot reach the screen", () => {
     expect(validateEnvelope({ ...envelope(), artifactId: "" })).toBeNull();
-    expect(validateEnvelope({ ...envelope(), operationId: undefined })).toBeNull();
+    expect(
+      validateEnvelope({ ...envelope(), operationId: undefined }),
+    ).toBeNull();
     expect(validateEnvelope("not an object")).toBeNull();
     expect(validateEnvelope(null)).toBeNull();
   });
@@ -67,7 +61,11 @@ describe("validateEnvelope", () => {
 
   it("rejects a reorder without indices", () => {
     expect(
-      validateEnvelope({ ...envelope(), action: "reorder", reorder: { from: 1 } }),
+      validateEnvelope({
+        ...envelope(),
+        action: "reorder",
+        reorder: { from: 1 },
+      }),
     ).toBeNull();
   });
 
@@ -92,7 +90,6 @@ describe("AiPerformer", () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
-    __resetAiTraces();
     frames = [];
     performer = new AiPerformer(actor, (state) => frames.push(state));
   });
@@ -103,9 +100,9 @@ describe("AiPerformer", () => {
   });
 
   const kinds = () =>
-    frames.filter((frame): frame is InteractionState => Boolean(frame)).map(
-      (frame) => frame.act.kind,
-    );
+    frames
+      .filter((frame): frame is InteractionState => Boolean(frame))
+      .map((frame) => frame.act.kind);
 
   it("rejects an invalid envelope without publishing presence", () => {
     expect(performer.start({ bogus: true })).toBe(false);
@@ -114,7 +111,9 @@ describe("AiPerformer", () => {
 
   it("publishes an owner-attributed frame as soon as it starts", () => {
     performer.start(envelope());
-    const first = frames.find((frame): frame is InteractionState => Boolean(frame))!;
+    const first = frames.find((frame): frame is InteractionState =>
+      Boolean(frame),
+    )!;
     expect(first.actor.kind).toBe("ai");
     expect(first.actor.ownerName).toBe("Nadia M.");
     expect(first.target?.path).toBe("/description");
@@ -133,35 +132,61 @@ describe("AiPerformer", () => {
   it("carries provisional values as speculation, not durable writes", () => {
     performer.start(envelope());
     vi.advanceTimersByTime(600);
-    const speculative = frames.filter(
-      (frame): frame is InteractionState => Boolean(frame?.speculation),
+    const speculative = frames.filter((frame): frame is InteractionState =>
+      Boolean(frame?.speculation),
     );
     expect(speculative.length).toBeGreaterThan(0);
     expect(speculative[0]!.speculation!.patches[0]!.path).toBe("/description");
     expect(performer.getSnapshot().speculation.size).toBe(1);
   });
 
-  it("records an attributed trace on commit and clears presence", () => {
+  it("clears presence on commit so finished work leaves no mark", () => {
     performer.start(envelope());
     vi.advanceTimersByTime(4000);
     performer.commit(envelope());
-    const traces = listAiTraces("art-1");
-    expect(traces).toHaveLength(1);
-    expect(traces[0]!.actorLabel).toBe("Nadia M.'s AI");
-    expect(traces[0]!.previousValue).toBe("Old description here");
-    expect(traces[0]!.target.path).toBe("/description");
     // Presence must not outlive the work.
     expect(frames[frames.length - 1]).toBeNull();
     expect(performer.getSnapshot().operations).toHaveLength(0);
   });
 
-  it("runs independent paths at the same time", () => {
-    performer.start(envelope({ operationId: "op-a", path: "/subtasks/0/title", before: "a", after: "b" }));
-    performer.start(envelope({ operationId: "op-b", path: "/subtasks/1/title", before: "c", after: "d" }));
+  it("performs one control at a time, even for unrelated paths", () => {
+    performer.start(
+      envelope({
+        operationId: "op-a",
+        path: "/subtasks/0/title",
+        before: "a",
+        after: "b",
+      }),
+    );
+    performer.start(
+      envelope({
+        operationId: "op-b",
+        path: "/subtasks/1/title",
+        before: "c",
+        after: "d",
+      }),
+    );
+    // One actor, one body: the second operation waits its turn.
     expect(performer.getSnapshot().operations.map((op) => op.status)).toEqual([
       "performing",
-      "performing",
+      "queued",
     ]);
+  });
+
+  it("publishes nothing for a queued operation, so the body cannot split", () => {
+    performer.start(
+      envelope({ operationId: "op-a", path: "/description", after: "b" }),
+    );
+    const before = frames.length;
+    performer.start(
+      envelope({ operationId: "op-b", path: "/status", after: "done" }),
+    );
+    // Accepting more work must not move presence to a control nobody is on.
+    expect(frames.length).toBe(before);
+    expect(
+      performer.getSnapshot().operations.find((op) => op.status === "queued")
+        ?.operationId,
+    ).toBe("op-b");
   });
 
   it("queues a second operation on the same path so values cannot interleave", () => {
@@ -172,27 +197,84 @@ describe("AiPerformer", () => {
     expect(statuses).toContain("queued");
   });
 
-  it("starts the queued operation once the first path frees up", () => {
+  it("hands the body on as soon as a gesture ends, without waiting to commit", () => {
     performer.start(envelope({ operationId: "op-a", before: "a", after: "b" }));
-    performer.start(envelope({ operationId: "op-b", before: "b", after: "c" }));
+    performer.start(
+      envelope({
+        operationId: "op-b",
+        path: "/status",
+        before: "todo",
+        after: "done",
+      }),
+    );
     vi.advanceTimersByTime(4000);
-    performer.commit(envelope({ operationId: "op-a", before: "a", after: "b" }));
-    const queued = performer
-      .getSnapshot()
-      .operations.find((op) => op.operationId === "op-b");
-    expect(queued?.status).toBe("performing");
+    const operations = performer.getSnapshot().operations;
+    // The first value stays provisionally on screen awaiting its durable write
+    // while the AI has already moved on. That is what keeps a fast run fast.
+    expect(
+      operations.find((op) => op.operationId === "op-a")?.status,
+    ).toBe("committing");
+    expect(
+      operations.find((op) => op.operationId === "op-b")?.status,
+    ).not.toBe("queued");
+  });
+
+  it("plays a burst of operations in route order, not arrival order", () => {
+    for (const index of [7, 1, 4]) {
+      performer.start(
+        envelope({
+          operationId: `op-${index}`,
+          path: `/subtasks/${index}/title`,
+          before: "before",
+          after: `after ${index}`,
+        }),
+      );
+    }
+    vi.advanceTimersByTime(20_000);
+
+    // The visible order is the order the body actually travelled: the first
+    // accepted operation starts immediately, and the queue behind it follows
+    // the artifact's own reading order rather than the model's.
+    const visited: string[] = [];
+    for (const frame of frames) {
+      const path = frame?.target?.path;
+      if (path && visited[visited.length - 1] !== path) visited.push(path);
+    }
+    expect(visited).toEqual([
+      "/subtasks/7/title",
+      "/subtasks/1/title",
+      "/subtasks/4/title",
+    ]);
   });
 
   it("reverses only the failed operation and leaves completed work alone", () => {
-    performer.start(envelope({ operationId: "op-a", path: "/status", before: "todo", after: "done" }));
-    performer.start(envelope({ operationId: "op-b", path: "/priority", before: "low", after: "high" }));
+    performer.start(
+      envelope({
+        operationId: "op-a",
+        path: "/status",
+        before: "todo",
+        after: "done",
+      }),
+    );
+    performer.start(
+      envelope({
+        operationId: "op-b",
+        path: "/priority",
+        before: "low",
+        after: "high",
+      }),
+    );
     vi.advanceTimersByTime(4000);
-    performer.commit(envelope({ operationId: "op-a", path: "/status", before: "todo", after: "done" }));
+    performer.commit(
+      envelope({
+        operationId: "op-a",
+        path: "/status",
+        before: "todo",
+        after: "done",
+      }),
+    );
     performer.fail("op-b", "The model returned invalid output");
 
-    expect(listAiTraces("art-1").map((trace) => trace.target.path)).toEqual([
-      "/status",
-    ]);
     expect(performer.getSnapshot().speculation.size).toBe(0);
     expect(performer.getSnapshot().operations).toHaveLength(0);
   });
@@ -237,7 +319,6 @@ describe("AiPerformer", () => {
     performer.cancel();
     expect(performer.getSnapshot().operations).toHaveLength(0);
     expect(frames[frames.length - 1]).toBeNull();
-    expect(listAiTraces("art-1")).toHaveLength(0);
   });
 
   it("releases a provisional value if the durable write never confirms", () => {
@@ -251,22 +332,30 @@ describe("AiPerformer", () => {
     performer.start(envelope());
     vi.advanceTimersByTime(4000);
     performer.confirmDurable("/content/description");
-    expect(listAiTraces("art-1")).toHaveLength(1);
+    expect(performer.getSnapshot().operations).toHaveLength(0);
   });
 
   it("does not animate a no-op but still leaves no working state", () => {
     const noop = envelope({ before: "same", after: "same" });
     expect(performer.start(noop)).toBe(false);
     expect(performer.getSnapshot().operations).toHaveLength(0);
-    expect(listAiTraces("art-1")).toHaveLength(0);
   });
 
   it("materialises completed work for an artifact opened after the run", () => {
     performer.materialize([
-      envelope({ operationId: "op-a", path: "/status", before: "todo", after: "done" }),
-      envelope({ operationId: "op-b", path: "/priority", before: "low", after: "high" }),
+      envelope({
+        operationId: "op-a",
+        path: "/status",
+        before: "todo",
+        after: "done",
+      }),
+      envelope({
+        operationId: "op-b",
+        path: "/priority",
+        before: "low",
+        after: "high",
+      }),
     ]);
-    expect(listAiTraces("art-1")).toHaveLength(2);
     expect(performer.getSnapshot().operations).toHaveLength(0);
   });
 
@@ -315,95 +404,5 @@ describe("AiPerformer", () => {
     performer.start(envelope());
     performer.dispose();
     expect(frames[frames.length - 1]).toBeNull();
-  });
-});
-
-describe("AI traces", () => {
-  beforeEach(() => {
-    __resetAiTraces();
-  });
-
-  const trace = (path: string, overrides = {}) =>
-    recordAiTrace({
-      target: {
-        artifactId: "art-1",
-        path,
-        primitive: "text",
-      },
-      runId: "run-1",
-      actorLabel: "Nadia M.'s AI",
-      previousValue: "before",
-      nextValue: "after",
-      summary: `Rewrote ${path}`,
-      ...overrides,
-    });
-
-  it("does not record a trace for an unchanged value", () => {
-    expect(
-      recordAiTrace({
-        target: { artifactId: "art-1", path: "/title", primitive: "text" },
-        runId: "run-1",
-        actorLabel: "AI",
-        previousValue: "same",
-        nextValue: "same",
-        summary: "no change",
-      }),
-    ).toBeNull();
-    expect(listAiTraces("art-1")).toHaveLength(0);
-  });
-
-  it("replaces rather than stacks a second edit to the same field", () => {
-    trace("/title");
-    trace("/title", { previousValue: "after", nextValue: "final" });
-    const traces = listAiTraces("art-1");
-    expect(traces).toHaveLength(1);
-    // Revert must go back to the original pre-AI value, not an intermediate one.
-    expect(traces[0]!.previousValue).toBe("before");
-  });
-
-  it("finds traces by intersecting path so parents and children both match", () => {
-    trace("/cards/0/front");
-    expect(tracesAtPath("art-1", "/cards/0/front")).toHaveLength(1);
-    expect(tracesAtPath("art-1", "/cards/0")).toHaveLength(1);
-    expect(tracesAtPath("art-1", "/cards/1")).toHaveLength(0);
-  });
-
-  it("clears automatically when a human edits that exact region", () => {
-    trace("/cards/0/front");
-    trace("/cards/1/front");
-    noteHumanEdit("art-1", "/cards/0/front");
-    expect(listAiTraces("art-1").map((entry) => entry.target.path)).toEqual([
-      "/cards/1/front",
-    ]);
-  });
-
-  it("clears a child trace when the human edits the parent", () => {
-    trace("/cards/0/front");
-    noteHumanEdit("art-1", "/cards/0");
-    expect(listAiTraces("art-1")).toHaveLength(0);
-  });
-
-  it("leaves sibling traces untouched", () => {
-    trace("/questions/0/prompt");
-    trace("/questions/2/prompt");
-    noteHumanEdit("art-1", "/questions/1/prompt");
-    expect(listAiTraces("art-1")).toHaveLength(2);
-  });
-
-  it("dismisses one trace without touching the rest", () => {
-    const first = trace("/title")!;
-    trace("/summary");
-    dismissAiTrace("art-1", first.id);
-    expect(listAiTraces("art-1").map((entry) => entry.target.path)).toEqual([
-      "/summary",
-    ]);
-  });
-
-  it("survives a reopen by rehydrating from persistence", () => {
-    trace("/title");
-    // Simulate closing and reopening the artifact: the in-memory bucket is gone
-    // but the persisted trace remains, so the story is still told.
-    const persisted = window.localStorage.getItem("spectra.ai-traces.art-1");
-    expect(persisted).toBeTruthy();
   });
 });

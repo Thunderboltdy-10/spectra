@@ -1,6 +1,5 @@
 "use client";
 
-import { toast } from "sonner";
 import {
   AlertCircle,
   Archive,
@@ -165,15 +164,29 @@ import {
   CollaborationPresenceIndicator,
 } from "./collaboration-presence";
 import { InteractionLayer } from "./presence/interaction-layer";
-import { AiTraceLayer } from "./presence/ai-trace-layer";
 import { useInteractionPresence } from "../collaboration/use-interaction-presence";
 import { targetAttrs } from "../collaboration/target-attributes";
 import {
   actorLabel,
   describeAct,
+  describeState,
   type ActorIdentity,
   type InteractionState,
 } from "../collaboration/interaction-model";
+import { buildTarget } from "../collaboration/control-descriptors";
+import {
+  clearAiLocation,
+  disengageFollowAi,
+  noteAiLocation,
+  useFollowAi,
+} from "../collaboration/follow-ai";
+import { revealTarget } from "../collaboration/interaction-geometry";
+import { useJoinLateArrival } from "../collaboration/presentation-lane";
+import {
+  HELD_DECLINED_EVENT,
+  useHeldControlGuard,
+  type HeldDeclinedDetail,
+} from "../collaboration/held-controls";
 import type { ArtifactTypeKey } from "../artifacts/types";
 import { changedArtifactRegionIds } from "../collaboration/artifact-yjs-model";
 import { isArtifactTypeKey } from "../artifacts/registry";
@@ -3307,7 +3320,10 @@ export function StudioSplitShell({
       const siblingCount = peers.length - 1;
       const reserve =
         siblingCount > 0
-          ? Math.max(320, Math.min(contentReserve, Math.floor(host.clientWidth * 0.28)))
+          ? Math.max(
+              320,
+              Math.min(contentReserve, Math.floor(host.clientWidth * 0.28)),
+            )
           : contentReserve;
       const floor = siblingCount > 0 ? Math.min(minWidth, 480) : minWidth;
       const hostWidth = host.clientWidth;
@@ -3980,9 +3996,7 @@ function ArtifactStudioEditor({
     // streaming or holding preview patches. Falling back to any idle AI peer
     // left cards and regions pulsing forever after the run stopped.
     return (
-      aiCollaborators.find(
-        (person) => person.previewPhase === "streaming",
-      ) ??
+      aiCollaborators.find((person) => person.previewPhase === "streaming") ??
       aiCollaborators.find(
         (person) => (person.previewPatches?.length ?? 0) > 0,
       ) ??
@@ -4099,7 +4113,28 @@ function ArtifactStudioEditor({
   const aiPreviewActive =
     Boolean(artifact.aiPreview) &&
     (artifact.aiState === "creating" || artifact.aiState === "updating");
-  const catchUpActive = false;
+  /**
+   * Work this run changed here that this client may never have watched, because
+   * the artifact was closed while it happened. The arrival walks it in route
+   * order; a run that has already finished is history and plays nothing.
+   */
+  const runChangedPaths = useMemo(
+    () => [
+      ...new Set([
+        ...(artifact.aiPreview?.changedPaths ?? []),
+        ...activeAiEffects.flatMap((effect) => effect.changedPaths),
+      ]),
+    ],
+    [artifact.aiPreview?.changedPaths, activeAiEffects],
+  );
+  const joinLateArrival = useJoinLateArrival({
+    runId: artifact.aiRunId ?? null,
+    changedPaths: runChangedPaths,
+    // While the AI is publishing frames here, the live performance *is* the
+    // arrival. Playing both would put one actor in two places at once.
+    enabled: !activeAiCollaborator,
+  });
+  const catchUpActive = joinLateArrival.active;
   // Pending creates often attach an empty aiPreview / aiEffects shell for
   // progress chrome before any concrete changedPaths arrive. Do not let that
   // empty shell suppress the create fallback — otherwise mid-open whiteboard
@@ -4111,7 +4146,7 @@ function ArtifactStudioEditor({
       creationHighlightFallbackPaths(artifact.aiState, artifact.blueprintKey),
     [artifact.aiState, artifact.blueprintKey],
   );
-  const catchUpFallbackPaths: string[] = [];
+  const catchUpFallbackPaths = joinLateArrival.paths;
   const streamingSource = presencePreview
     ? "presence"
     : aiPreviewActive && artifact.aiPreview?.content !== undefined
@@ -4153,40 +4188,37 @@ function ArtifactStudioEditor({
       streamingContent,
     ],
   );
-  const effectHighlightPaths = useMemo(
-    () => {
-      const effectPaths = activeAiEffects.flatMap(
-        (effect) => effect.changedPaths,
-      );
-      const previewPaths =
-        artifact.aiState === "creating" ||
-        artifact.aiState === "updating" ||
-        artifact.aiState === "edited"
-          ? (artifact.aiPreview?.changedPaths ?? [])
-          : [];
-      const merged = [...effectPaths, ...previewPaths];
-      const hasLineScope = merged.some((path) => path.includes("/lines/"));
-      const preferred = hasLineScope
-        ? merged.filter(
-            (path) =>
-              path.includes("/lines/") ||
-              (path !== "/" && !/^\/(?:content\/)?blocks\//i.test(path)),
-          )
-        : merged;
-      return materializeAiChangedPaths(
-        preferred,
-        streamingContent,
-        artifact.blueprintKey,
-      );
-    },
-    [
-      activeAiEffects,
-      artifact.aiPreview?.changedPaths,
-      artifact.aiState,
-      artifact.blueprintKey,
+  const effectHighlightPaths = useMemo(() => {
+    const effectPaths = activeAiEffects.flatMap(
+      (effect) => effect.changedPaths,
+    );
+    const previewPaths =
+      artifact.aiState === "creating" ||
+      artifact.aiState === "updating" ||
+      artifact.aiState === "edited"
+        ? (artifact.aiPreview?.changedPaths ?? [])
+        : [];
+    const merged = [...effectPaths, ...previewPaths];
+    const hasLineScope = merged.some((path) => path.includes("/lines/"));
+    const preferred = hasLineScope
+      ? merged.filter(
+          (path) =>
+            path.includes("/lines/") ||
+            (path !== "/" && !/^\/(?:content\/)?blocks\//i.test(path)),
+        )
+      : merged;
+    return materializeAiChangedPaths(
+      preferred,
       streamingContent,
-    ],
-  );
+      artifact.blueprintKey,
+    );
+  }, [
+    activeAiEffects,
+    artifact.aiPreview?.changedPaths,
+    artifact.aiState,
+    artifact.blueprintKey,
+    streamingContent,
+  ]);
   const effectRegionHighlightPaths = useMemo(
     () =>
       materializeAiChangedPaths(
@@ -4209,9 +4241,7 @@ function ArtifactStudioEditor({
               const descriptor = live.model?.descriptor(
                 activeAiCollaborator.activeRegionId,
               );
-              return descriptor
-                ? [semanticPathToPointer(descriptor.path)]
-                : [];
+              return descriptor ? [semanticPathToPointer(descriptor.path)] : [];
             })()
           : [],
         streamingContent,
@@ -4295,8 +4325,8 @@ function ArtifactStudioEditor({
   });
   const liveStreamingAi = Boolean(
     activeAiCollaborator &&
-      (activeAiCollaborator.previewPhase === "streaming" ||
-        (activeAiCollaborator.previewPatches?.length ?? 0) > 0),
+    (activeAiCollaborator.previewPhase === "streaming" ||
+      (activeAiCollaborator.previewPatches?.length ?? 0) > 0),
   );
   const aiEffectTitles = [
     ...new Set([
@@ -4316,86 +4346,83 @@ function ArtifactStudioEditor({
       (aiPreviewActive || liveWorkingAiEffects.length > 0 || liveStreamingAi));
   const visibleAiWorking =
     aiWorkingActive && (liveStreamingAi || !aiHighlightDismissed);
-  const highlightPaths =
-    activeAiCollaborator?.previewPhase === "streaming"
-      ? presenceTargetPaths.length > 0
-        ? presenceTargetPaths
-        : aiChangedPaths.slice(0, 1)
-      : activeAiCollaborator
-        ? aiChangedPaths
-        : aiHighlightDismissed
-          ? []
-          : aiChangedPaths;
+  const highlightPaths = useMemo(
+    () =>
+      activeAiCollaborator?.previewPhase === "streaming"
+        ? presenceTargetPaths.length > 0
+          ? presenceTargetPaths
+          : aiChangedPaths.slice(0, 1)
+        : activeAiCollaborator
+          ? aiChangedPaths
+          : aiHighlightDismissed
+            ? []
+            : aiChangedPaths,
+    [
+      activeAiCollaborator,
+      presenceTargetPaths,
+      aiChangedPaths,
+      aiHighlightDismissed,
+    ],
+  );
   // Short edits can finish before the separate AI Yjs connection has time to
   // publish awareness. Keep presence truthful and immediate by projecting the
   // artifact's durable AI state into the same collaboration UI until remote
-  // awareness arrives. The synthetic actor disappears as soon as the run
-  // settles, and is replaced—not duplicated—when the real AI peer connects.
+  // awareness arrives. The synthetic actor speaks protocol v2, so it renders
+  // through the same interaction layer, in the owner's colour, as the real AI
+  // peer it stands in for.
   const syntheticAiPresence = useMemo<CollaborationPresence | null>(() => {
-    // Only mirror a live AI while work is in flight. After settle, cyan ink +
-    // the accept/reject chip remain — not a permanent floating AI name.
     if (activeAiCollaborator || !visibleAiWorking) return null;
     if (artifact.aiState === "edited") return null;
     const activeRegionId =
       activeAiEffects.flatMap((effect) => effect.regionIds)[0] ??
       (highlightPaths[0] ? `pointer:${highlightPaths[0]}` : undefined);
     const focusPath = highlightPaths[0];
-    const blockMatch = focusPath?.match(
-      /\/(?:content\/)?blocks\/(?:id:)?([^/]+)/i,
-    );
     const ownerName = live.displayName?.trim();
     const aiName = ownerName ? `${ownerName}'s AI` : "Spectra AI";
+    const syntheticClientId = `local-ai:${artifact.aiRunId ?? artifact._id}`;
+    const interactionState: InteractionState = {
+      v: 2,
+      actor: {
+        clientId: syntheticClientId,
+        kind: "ai",
+        name: aiName,
+        ...(live.accountId ? { accountId: live.accountId } : {}),
+        ...(live.accountId ? { ownerAccountId: live.accountId } : {}),
+        ...(ownerName ? { ownerName } : {}),
+        ...(artifact.aiRunId ? { runId: artifact.aiRunId } : {}),
+      },
+      act: { kind: "focus" },
+      lifecycle: "active",
+      target: focusPath
+        ? buildTarget({
+            typeKey: artifact.blueprintKey as ArtifactTypeKey,
+            artifactId: artifact._id,
+            path: focusPath,
+          })
+        : null,
+      note: activeAiEffects.at(-1)?.title ?? "Working",
+      at: Date.now(),
+    };
     return {
-      clientId: `local-ai:${artifact.aiRunId ?? artifact._id}`,
+      clientId: syntheticClientId,
       accountId: live.accountId,
       name: aiName,
       actorKind: "ai",
       runId: artifact.aiRunId,
+      interactionState,
       ...(activeRegionId ? { activeRegionId } : {}),
-      ...(activeRegionId
-        ? {
-            cursor: {
-              x: 0.5,
-              y: 0.42,
-              updatedAt: artifact.aiPreview?.startedAt ?? previewClock,
-              mode: "typing" as const,
-              ...(blockMatch
-                ? {
-                    anchor: {
-                      kind: "block" as const,
-                      id: decodeURIComponent(blockMatch[1]!),
-                      offset: 0.18,
-                      offsetX: 0.18,
-                      offsetY: 0.32,
-                    },
-                  }
-                : focusPath
-                  ? {
-                      anchor: {
-                        kind: "path" as const,
-                        id: focusPath,
-                        offset: 0.18,
-                        offsetX: 0.18,
-                        offsetY: 0.32,
-                      },
-                    }
-                  : {}),
-            },
-          }
-        : {}),
       previewSequence: 0,
     };
   }, [
     activeAiCollaborator,
     activeAiEffects,
     artifact._id,
-    artifact.aiPreview?.startedAt,
+    artifact.blueprintKey,
     artifact.aiRunId,
     artifact.aiState,
     highlightPaths,
     live.accountId,
     live.displayName,
-    previewClock,
     visibleAiWorking,
   ]);
   const displayPresence = useMemo(
@@ -4441,14 +4468,14 @@ function ArtifactStudioEditor({
     };
   }, [live.accountId, live.displayName, live.transport?.clientId]);
 
-  /** Remote v2 frames. Peers still on the old shape are handled by the legacy layer. */
+  /** Remote v2 frames, including the synthetic stand-in for a just-started run. */
   const remoteInteractionStates = useMemo<InteractionState[]>(
     () =>
-      live.presence
+      displayPresence
         .filter((person) => person.clientId !== live.transport?.clientId)
         .map((person) => person.interactionState)
         .filter((state): state is InteractionState => Boolean(state)),
-    [live.presence, live.transport?.clientId],
+    [displayPresence, live.transport?.clientId],
   );
 
   const publishInteraction = useCallback(
@@ -4462,14 +4489,94 @@ function ArtifactStudioEditor({
     [live.transport],
   );
 
+  /* ---------------------------------------------------------------- *
+   * Follow AI (spectator mode)
+   * ---------------------------------------------------------------- */
+
+  const followAi = useFollowAi();
+
+  /** The AI's own frame, when it is operating in this artifact. */
+  const aiInteractionState = useMemo(
+    () =>
+      remoteInteractionStates.find((state) => state.actor.kind === "ai") ??
+      null,
+    [remoteInteractionStates],
+  );
+
+  // Publish where the AI is so Follow AI can find it from the thread panel.
+  useEffect(() => {
+    if (!aiInteractionState?.target) return;
+    noteAiLocation({
+      artifactId: artifact._id,
+      path: aiInteractionState.target.path,
+      note: describeState(aiInteractionState),
+    });
+  }, [artifact._id, aiInteractionState]);
+
+  useEffect(() => () => clearAiLocation(artifact._id), [artifact._id]);
+
+  // While spectating, keep the exact working target on screen: give the studio
+  // a beat to switch to the right view, then scroll the control into view.
+  const lastRevealedPathRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!followAi.following) {
+      lastRevealedPathRef.current = null;
+      return;
+    }
+    const target = aiInteractionState?.target;
+    if (!target || lastRevealedPathRef.current === target.path) return;
+    lastRevealedPathRef.current = target.path;
+    window.dispatchEvent(
+      new CustomEvent("spectra:reveal-target", {
+        detail: { artifactId: artifact._id, path: target.path },
+      }),
+    );
+    const timer = window.setTimeout(() => {
+      const surface = presenceSurfaceRef.current;
+      if (surface) revealTarget(surface, target);
+    }, 120);
+    return () => window.clearTimeout(timer);
+  }, [followAi.following, aiInteractionState, artifact._id]);
+
   useInteractionPresence({
     artifactId: artifact._id,
     typeKey: artifact.blueprintKey as ArtifactTypeKey,
     actor: localActor,
     surfaceRef: presenceSurfaceRef,
     onPublish: publishInteraction,
+    // The region this client is working is published with its frames, so the
+    // same ownership rules apply to it as to any AI operation.
+    ...(activeCommentRegionId ? { heldRegionIds: [activeCommentRegionId] } : {}),
     enabled: !readOnly && isCollaborativeArtifact,
   });
+
+  /**
+   * Smallest-scope contention. A control another actor is actively operating
+   * declines the local user's keystrokes and says why; every other control in
+   * the artifact stays fully editable.
+   */
+  useHeldControlGuard({
+    states: remoteInteractionStates,
+    localClientId: live.transport?.clientId,
+    surfaceRef: presenceSurfaceRef,
+    enabled: !readOnly,
+  });
+
+  const [heldNotice, setHeldNotice] = useState<HeldDeclinedDetail | null>(null);
+  useEffect(() => {
+    const onDeclined = (event: Event) => {
+      const detail = (event as CustomEvent<HeldDeclinedDetail>).detail;
+      if (detail) setHeldNotice(detail);
+    };
+    window.addEventListener(HELD_DECLINED_EVENT, onDeclined);
+    return () => window.removeEventListener(HELD_DECLINED_EVENT, onDeclined);
+  }, []);
+  useEffect(() => {
+    if (!heldNotice) return;
+    // State the reason once, then leave. This is not a persistent banner.
+    const timer = window.setTimeout(() => setHeldNotice(null), 2_600);
+    return () => window.clearTimeout(timer);
+  }, [heldNotice]);
 
   /**
    * Values a peer or AI is provisionally showing. Merged over the durable content
@@ -4563,13 +4670,21 @@ function ArtifactStudioEditor({
   }, [activeAiPresence]);
 
   const setActivePresence = useCallback(
-    (regionId: string, options?: { mode?: "typing" | "focus" | "selecting" }) => {
+    (
+      regionId: string,
+      options?: { mode?: "typing" | "focus" | "selecting" },
+    ) => {
       try {
         const mode = options?.mode ?? "focus";
         live.transport?.setPresence({
           activeRegionId: regionId,
           interaction: {
-            kind: mode === "selecting" ? "selecting" : mode === "typing" ? "typing" : "focus",
+            kind:
+              mode === "selecting"
+                ? "selecting"
+                : mode === "typing"
+                  ? "typing"
+                  : "focus",
             targetId: regionId,
           },
           cursor: {
@@ -4611,6 +4726,8 @@ function ArtifactStudioEditor({
   const lastStudioInteractionAtRef = useRef(0);
   const noteStudioInteraction = useCallback(() => {
     lastStudioInteractionAtRef.current = Date.now();
+    // Any direct input returns control of the viewport to the user instantly.
+    disengageFollowAi();
   }, []);
   // Never steal the peer's viewport for AI edits — they may be reading or
   // typing elsewhere. Cyan ink and the AI caret are the only locators.
@@ -4691,7 +4808,8 @@ function ArtifactStudioEditor({
       const primary =
         detail.primaryBlockId ?? detail.ranges?.[0]?.blockId ?? undefined;
       const caretOffset =
-        typeof detail.caretOffset === "number" && Number.isFinite(detail.caretOffset)
+        typeof detail.caretOffset === "number" &&
+        Number.isFinite(detail.caretOffset)
           ? Math.max(0, Math.floor(detail.caretOffset))
           : (detail.ranges?.[0]?.startOffset ?? 0);
       live.transport?.setPresence({
@@ -4706,7 +4824,9 @@ function ArtifactStudioEditor({
         },
         interaction: {
           kind: collapsed ? "typing" : "selecting",
-          ...(primary ? { targetId: primary, targetKind: "block" as const } : {}),
+          ...(primary
+            ? { targetId: primary, targetKind: "block" as const }
+            : {}),
         },
         cursor: {
           x: pendingCursorRef.current?.x ?? 0.5,
@@ -4902,14 +5022,7 @@ function ArtifactStudioEditor({
       liveConflict ? 420 : 140,
     );
     return () => window.clearTimeout(timer);
-  }, [
-    busy,
-    dirty,
-    liveConflict,
-    readOnly,
-    syncBusy,
-    synchronizeDraft,
-  ]);
+  }, [busy, dirty, liveConflict, readOnly, syncBusy, synchronizeDraft]);
 
   useEffect(() => {
     if (!liveConflict?.claimId || !live.transport) return;
@@ -5485,7 +5598,9 @@ function ArtifactStudioEditor({
                           }"]`,
                         )
                       : null) ??
-                    studio.querySelector<HTMLElement>('[data-ai-region="true"]');
+                    studio.querySelector<HTMLElement>(
+                      '[data-ai-region="true"]',
+                    );
                   if (!target) return;
                   let focus: HTMLElement = target;
                   if (
@@ -5494,12 +5609,12 @@ function ArtifactStudioEditor({
                     (target.matches("ul,ol") ||
                       target.querySelector(":scope > li"))
                   ) {
-                    const items = target.querySelectorAll<HTMLElement>(
-                      ":scope > li",
-                    );
+                    const items =
+                      target.querySelectorAll<HTMLElement>(":scope > li");
                     focus =
-                      items[Math.min(lineIndex, Math.max(0, items.length - 1))] ??
-                      target;
+                      items[
+                        Math.min(lineIndex, Math.max(0, items.length - 1))
+                      ] ?? target;
                   }
                   focus.scrollIntoView({
                     block: "nearest",
@@ -5508,78 +5623,6 @@ function ArtifactStudioEditor({
                   });
                 }}
               />
-            ) : null}
-            {artifact.aiState === "edited" &&
-            activeAiEffects.length > 0 &&
-            !aiHighlightDismissed ? (
-              <div className="flex h-9 items-center gap-1 rounded-[8px] border border-[color-mix(in_oklab,var(--accent-cyan)_34%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-primary))] px-1.5">
-                <button
-                  type="button"
-                  className="rounded-[6px] px-2 py-1 text-[10px] font-semibold text-[var(--accent-cyan)] hover:bg-[color-mix(in_oklab,var(--accent-cyan)_12%,transparent)]"
-                  onClick={() => {
-                    setAiHighlightDismissed(true);
-                    void postSpectra({
-                      action: "dismissAiEdit",
-                      artifactId: artifact._id,
-                    }).catch(() => undefined);
-                  }}
-                  title="Accept AI edit and clear the highlight"
-                >
-                  Accept
-                </button>
-                <button
-                  type="button"
-                  className="rounded-[6px] px-2 py-1 text-[10px] font-semibold text-[var(--danger)] hover:bg-[color-mix(in_oklab,var(--danger)_8%,transparent)]"
-                  onClick={() => {
-                    void (async () => {
-                      try {
-                        const result = await getSpectraArtifactVersions(
-                          artifact._id,
-                          20,
-                        );
-                        const versions = result.versions;
-                        const aiVersion = versions.find(
-                          (version) =>
-                            version.source === "ai" && version.before,
-                        );
-                        const checkpoint = versions.find(
-                          (version) =>
-                            version.source === "checkpoint" && version.after,
-                        );
-                        const restoreTarget = checkpoint
-                          ? {
-                              ...checkpoint,
-                              after: checkpoint.after,
-                            }
-                          : aiVersion && aiVersion.before
-                            ? {
-                                ...aiVersion,
-                                after: aiVersion.before,
-                              }
-                            : null;
-                        if (!restoreTarget?.after) {
-                          toast.message(
-                            "No earlier snapshot is available to reject this edit.",
-                          );
-                          return;
-                        }
-                        await restoreVersion(restoreTarget);
-                        setAiHighlightDismissed(true);
-                        toast.message("Reverted the AI edit.");
-                      } catch (error) {
-                        toast.error(
-                          error instanceof Error
-                            ? error.message
-                            : "Could not reject the AI edit.",
-                        );
-                      }
-                    })();
-                  }}
-                  title="Reject AI edit and restore the previous snapshot"
-                >
-                  Reject
-                </button>
-              </div>
             ) : null}
             {onShare && mode === "split" ? (
               <IconButton
@@ -5752,10 +5795,9 @@ function ArtifactStudioEditor({
           (artifact.aiState === "creating" || artifact.aiState === "updating")
         }
       >
-        {/* Both layers are sticky zero-height nodes, so they pin to the scroll
-            viewport instead of scrolling away with the content. They must stay
-            the first children of the scroll container. */}
-        <AiTraceLayer artifactId={artifact._id} />
+        {/* The presence layer is a sticky zero-height node, so it pins to the
+            scroll viewport instead of scrolling away with the content. It must
+            stay the first child of the scroll container. */}
         <InteractionLayer
           states={remoteInteractionStates}
           localClientId={live.transport?.clientId}
@@ -5918,6 +5960,14 @@ function ArtifactStudioEditor({
           ) : null}
         </div>
       </main>
+      {/* Pinned to the pane, not to the scrolling content: the reason an edit
+          was declined must not scroll away from the user who triggered it. */}
+      {heldNotice ? (
+        <div className="spectra-held-notice" role="status">
+          <span className="spectra-held-notice-dot" aria-hidden="true" />
+          <span>{heldNotice.message}</span>
+        </div>
+      ) : null}
       <ArtifactCommentsPanel
         open={commentsOpen}
         artifactId={artifact._id}
@@ -6521,9 +6571,7 @@ function DocumentStudio({
                   /^\/(?:content\/)?blocks\/(?:id:|byId\/)([^/]+)/i,
                 );
                 if (byId)
-                  return [
-                    byId[1]!.replaceAll("~1", "/").replaceAll("~0", "~"),
-                  ];
+                  return [byId[1]!.replaceAll("~1", "/").replaceAll("~0", "~")];
                 // TipTap StableBlockId may be referenced without the id: prefix.
                 const bare = path.match(
                   /^\/(?:content\/)?blocks\/([^/]+)(?:\/|$)/i,
@@ -9799,9 +9847,7 @@ function FlashcardStudio({
               value={activeCard.front}
               placeholder="Question or prompt"
               onChange={(value) => updateCard(activeCard.id, { front: value })}
-              onFocus={() =>
-                onActiveRegionChange?.(`${activeCard.id}:front`)
-              }
+              onFocus={() => onActiveRegionChange?.(`${activeCard.id}:front`)}
               clozeMode={activeCard.variant === "cloze"}
               aiActive={pathTouches(
                 aiChangedPaths,
@@ -13595,7 +13641,6 @@ function PlannerStudio({
             >
               <select
                 value={task.status}
-                data-ai-path="/status"
                 onFocus={() => onActiveRegionChange?.("task:status")}
                 onMouseDown={() => onActiveRegionChange?.("task:status")}
                 onChange={(event) =>
@@ -13619,7 +13664,6 @@ function PlannerStudio({
             >
               <select
                 value={task.priority}
-                data-ai-path="/priority"
                 onFocus={() => onActiveRegionChange?.("task:priority")}
                 onMouseDown={() => onActiveRegionChange?.("task:priority")}
                 onChange={(event) =>
@@ -14889,7 +14933,8 @@ function QuestionEditor({
         <div className="mt-4">
           <Field
             label="Formative rubric / review guidance"
-            aiActive={aiField("rubric")} path={`${qPath}/rubric`}
+            aiActive={aiField("rubric")}
+            path={`${qPath}/rubric`}
           >
             <textarea
               value={question.rubric ?? ""}
@@ -14905,7 +14950,11 @@ function QuestionEditor({
         </div>
       ) : question.type === "numeric" ? (
         <div className="mt-4 grid gap-3 md:grid-cols-2">
-          <Field label="Expected number" aiActive={aiField("correctAnswer")} path={`${qPath}/correctAnswer`}>
+          <Field
+            label="Expected number"
+            aiActive={aiField("correctAnswer")}
+            path={`${qPath}/correctAnswer`}
+          >
             <input
               type="number"
               value={question.correctAnswer ?? ""}
@@ -14918,7 +14967,8 @@ function QuestionEditor({
           </Field>
           <Field
             label="Accepted tolerance (±)"
-            aiActive={aiField("numericTolerance")} path={`${qPath}/numericTolerance`}
+            aiActive={aiField("numericTolerance")}
+            path={`${qPath}/numericTolerance`}
           >
             <input
               type="number"
@@ -14946,7 +14996,8 @@ function QuestionEditor({
                 ? "Primary accepted answer"
                 : "Expected answer"
             }
-            aiActive={aiField("correctAnswer")} path={`${qPath}/correctAnswer`}
+            aiActive={aiField("correctAnswer")}
+            path={`${qPath}/correctAnswer`}
           >
             <input
               value={question.correctAnswer ?? ""}
@@ -14965,7 +15016,8 @@ function QuestionEditor({
             <div className="mt-3">
               <Field
                 label="Other accepted answers"
-                aiActive={aiField("correctAnswers")} path={`${qPath}/correctAnswers`}
+                aiActive={aiField("correctAnswers")}
+                path={`${qPath}/correctAnswers`}
               >
                 <input
                   value={(question.correctAnswers ?? []).join("; ")}
@@ -14986,7 +15038,11 @@ function QuestionEditor({
         </div>
       )}
       <div className="mt-4">
-        <Field label="Explanation" aiActive={aiField("explanation")} path={`${qPath}/explanation`}>
+        <Field
+          label="Explanation"
+          aiActive={aiField("explanation")}
+          path={`${qPath}/explanation`}
+        >
           <textarea
             value={question.explanation ?? ""}
             onChange={(event) => onChange({ explanation: event.target.value })}
@@ -14996,7 +15052,11 @@ function QuestionEditor({
         </Field>
       </div>
       <div className="mt-4">
-        <Field label="Tags / topics" aiActive={aiField("tags")} path={`${qPath}/tags`}>
+        <Field
+          label="Tags / topics"
+          aiActive={aiField("tags")}
+          path={`${qPath}/tags`}
+        >
           <div className="spectra-quiz-tag-editor">
             {(question.tags ?? []).map((tag) => (
               <span key={tag}>
@@ -15040,7 +15100,8 @@ function QuestionEditor({
         <div className="grid gap-4 pt-3">
           <Field
             label="Formative feedback / next step"
-            aiActive={aiField("feedback")} path={`${qPath}/feedback`}
+            aiActive={aiField("feedback")}
+            path={`${qPath}/feedback`}
           >
             <textarea
               value={question.feedback ?? ""}
@@ -15049,7 +15110,11 @@ function QuestionEditor({
               placeholder="Offer a useful next step without turning practice into a grade."
             />
           </Field>
-          <Field label="Sources / provenance" aiActive={aiField("sourceRefs")} path={`${qPath}/sourceRefs`}>
+          <Field
+            label="Sources / provenance"
+            aiActive={aiField("sourceRefs")}
+            path={`${qPath}/sourceRefs`}
+          >
             <input
               value={(question.sourceRefs ?? []).join(", ")}
               onChange={(event) =>

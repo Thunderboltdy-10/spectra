@@ -33,6 +33,7 @@ import { toast } from "sonner";
 import { RichText } from "@/components/chat/rich-text";
 import { cn } from "@/lib/utils";
 import { useSpectraRun, type SpectraLiveExchange } from "../ai/use-spectra-run";
+import { operationCounts, useRunLedger } from "../collaboration/run-ledger";
 import { pastTenseProgressTitle } from "./progress-title";
 import {
   clearSpectraRunAgent,
@@ -774,6 +775,125 @@ function OperationalTrace({ trace }: { trace: SpectraThreadTrace }) {
   );
 }
 
+/**
+ * The compact partial-failure note. A run is a ledger, not an all-or-nothing
+ * request: when one part cannot be finished, everything completed stays saved
+ * and ordinary. The note says exactly that, in one calm row — bronze, not red,
+ * because nothing the user made is at risk — and offers to continue only the
+ * unfinished part.
+ */
+function RunOutcomeNote({
+  savedCount,
+  failedCount,
+  retrying = false,
+  onRetry,
+}: {
+  savedCount: number;
+  failedCount: number;
+  retrying?: boolean;
+  onRetry?: () => void;
+}) {
+  return (
+    <div className="mt-3 flex items-start gap-2.5 rounded-[9px] border border-[color-mix(in_oklab,#d88922_24%,var(--border-subtle))] bg-[color-mix(in_oklab,#d88922_4%,var(--bg-primary))] px-3 py-2.5">
+      <AlertCircle className="mt-px h-3.5 w-3.5 shrink-0 text-[#a86616]" />
+      <div className="min-w-0 flex-1">
+        <p className="text-[11px] font-semibold text-[var(--text-primary)]">
+          {savedCount > 0
+            ? `${savedCount} ${savedCount === 1 ? "change" : "changes"} saved`
+            : "Partly completed"}
+          {" · "}
+          {failedCount === 1
+            ? "one part could not be finished"
+            : `${failedCount} parts could not be finished`}
+        </p>
+        <p className="mt-0.5 text-[10px] leading-4 text-[var(--text-tertiary)]">
+          Completed work stays saved. Retry continues only the unfinished part.
+        </p>
+      </div>
+      {onRetry ? (
+        <button
+          type="button"
+          onClick={onRetry}
+          disabled={retrying}
+          className="flex shrink-0 items-center gap-1.5 rounded-[6px] border border-[color-mix(in_oklab,#d88922_32%,var(--border-default))] px-2 py-1 text-[10px] font-semibold text-[#a86616] transition hover:bg-[color-mix(in_oklab,#d88922_8%,var(--bg-primary))] disabled:opacity-50"
+        >
+          {retrying ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+          Retry unfinished part
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+/** The live variant, driven by the client ledger for the active run. */
+function LiveRunOutcomeNote({
+  runId,
+  onRetryRun,
+}: {
+  runId: string;
+  onRetryRun?: (runId: string) => Promise<unknown> | unknown;
+}) {
+  const entry = useRunLedger(runId);
+  const [retrying, setRetrying] = useState(false);
+  if (!entry || entry.phase !== "partial") return null;
+  const counts = operationCounts(entry);
+  return (
+    <RunOutcomeNote
+      savedCount={counts.committed}
+      failedCount={Math.max(1, counts.failed)}
+      retrying={retrying}
+      onRetry={
+        onRetryRun
+          ? () => {
+              setRetrying(true);
+              void Promise.resolve(onRetryRun(runId)).finally(() =>
+                setRetrying(false),
+              );
+            }
+          : undefined
+      }
+    />
+  );
+}
+
+/** The persisted variant, driven by the server's own operation records. */
+function PersistedRunOutcomeNote({
+  trace,
+  onRetryRun,
+}: {
+  trace: SpectraThreadTrace;
+  onRetryRun?: (runId: string) => Promise<unknown> | unknown;
+}) {
+  const [retrying, setRetrying] = useState(false);
+  if (trace.run.status !== "failed") return null;
+  const savedCount = trace.operations.filter(
+    (operation) => operation.status === "executed",
+  ).length;
+  if (savedCount === 0) return null;
+  const failedCount = Math.max(
+    1,
+    trace.operations.filter((operation) => operation.status === "failed")
+      .length,
+  );
+  return (
+    <RunOutcomeNote
+      savedCount={savedCount}
+      failedCount={failedCount}
+      retrying={retrying}
+      onRetry={
+        onRetryRun
+          ? () => {
+              setRetrying(true);
+              void Promise.resolve(onRetryRun(trace.run._id)).finally(() =>
+                setRetrying(false),
+              );
+            }
+          : undefined
+      }
+    />
+  );
+}
+
 function ProgressTrace({
   steps,
   active,
@@ -813,10 +933,7 @@ function ProgressTrace({
                 <Check className="h-3.5 w-3.5 text-[var(--success)]" />
               )}
               <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-[var(--text-secondary)]">
-                {pastTenseProgressTitle(
-                  step.title,
-                  step.status !== "running",
-                )}
+                {pastTenseProgressTitle(step.title, step.status !== "running")}
               </span>
               <ChevronDown
                 className={`h-3.5 w-3.5 text-[var(--text-tertiary)] transition ${open ? "rotate-180" : ""}`}
@@ -1036,11 +1153,11 @@ function AgentRoutingControl({ trace }: { trace: SpectraThreadTrace }) {
         <Bot className="h-3 w-3 shrink-0 text-[var(--accent-cyan)]" />
         <span className="truncate font-semibold">{title}</span>
         <span className="shrink-0 text-[9px] text-[var(--text-tertiary)]">
-        {source === "continued"
-          ? "retained"
-          : source === "explicit"
-            ? "selected"
-            : "auto-routed"}
+          {source === "continued"
+            ? "retained"
+            : source === "explicit"
+              ? "selected"
+              : "auto-routed"}
         </span>
         {trace.run.status === "completed" && agentId && agentVersionId ? (
           <button
@@ -1049,50 +1166,108 @@ function AgentRoutingControl({ trace }: { trace: SpectraThreadTrace }) {
             onClick={() => setFeedbackOpen((value) => !value)}
             className="ml-1 inline-flex shrink-0 items-center gap-1 rounded-[5px] px-1.5 py-0.5 font-semibold hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)] disabled:opacity-65"
           >
-            {feedbackSent ? <Check className="h-2.5 w-2.5" /> : <MessageSquare className="h-2.5 w-2.5" />}
+            {feedbackSent ? (
+              <Check className="h-2.5 w-2.5" />
+            ) : (
+              <MessageSquare className="h-2.5 w-2.5" />
+            )}
             {feedbackSent ? "Feedback sent" : "Rate"}
           </button>
         ) : null}
         <button
-        type="button"
-        disabled={busy || ordinaryNext}
-        onClick={() => void clearAgent()}
-        className="ml-1 inline-flex shrink-0 items-center gap-1 rounded-[5px] px-1.5 py-0.5 font-semibold hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)] disabled:opacity-65"
-      >
-        {busy ? (
-          <Loader2 className="h-2.5 w-2.5 animate-spin" />
-        ) : ordinaryNext ? (
-          <Check className="h-2.5 w-2.5" />
-        ) : (
-          <Undo2 className="h-2.5 w-2.5" />
-        )}
-        {ordinaryNext ? "Ordinary next" : "Use ordinary Spectra"}
+          type="button"
+          disabled={busy || ordinaryNext}
+          onClick={() => void clearAgent()}
+          className="ml-1 inline-flex shrink-0 items-center gap-1 rounded-[5px] px-1.5 py-0.5 font-semibold hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)] disabled:opacity-65"
+        >
+          {busy ? (
+            <Loader2 className="h-2.5 w-2.5 animate-spin" />
+          ) : ordinaryNext ? (
+            <Check className="h-2.5 w-2.5" />
+          ) : (
+            <Undo2 className="h-2.5 w-2.5" />
+          )}
+          {ordinaryNext ? "Ordinary next" : "Use ordinary Spectra"}
         </button>
       </div>
       {feedbackOpen ? (
         <div className="mt-1.5 grid gap-2 rounded-[8px] border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-2.5 text-[10px] shadow-[var(--shadow-sm)]">
           <div className="grid grid-cols-[auto_1fr] gap-2">
             <label className="grid gap-1">
-              <span className="font-semibold text-[var(--text-secondary)]">Rating</span>
-              <select value={feedbackRating} onChange={(event) => setFeedbackRating(Number(event.target.value))} className="h-8 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2">
-                {[5, 4, 3, 2, 1].map((rating) => <option key={rating} value={rating}>{rating} / 5</option>)}
+              <span className="font-semibold text-[var(--text-secondary)]">
+                Rating
+              </span>
+              <select
+                value={feedbackRating}
+                onChange={(event) =>
+                  setFeedbackRating(Number(event.target.value))
+                }
+                className="h-8 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2"
+              >
+                {[5, 4, 3, 2, 1].map((rating) => (
+                  <option key={rating} value={rating}>
+                    {rating} / 5
+                  </option>
+                ))}
               </select>
             </label>
             <label className="grid gap-1">
-              <span className="font-semibold text-[var(--text-secondary)]">Category</span>
-              <select value={feedbackCategory} onChange={(event) => setFeedbackCategory(event.target.value as typeof feedbackCategory)} className="h-8 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2">
-                <option value="helpful">Helpfulness</option><option value="accuracy">Accuracy</option><option value="clarity">Clarity</option><option value="safety">Safety</option><option value="resource_quality">Source quality</option><option value="other">Other</option>
+              <span className="font-semibold text-[var(--text-secondary)]">
+                Category
+              </span>
+              <select
+                value={feedbackCategory}
+                onChange={(event) =>
+                  setFeedbackCategory(
+                    event.target.value as typeof feedbackCategory,
+                  )
+                }
+                className="h-8 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2"
+              >
+                <option value="helpful">Helpfulness</option>
+                <option value="accuracy">Accuracy</option>
+                <option value="clarity">Clarity</option>
+                <option value="safety">Safety</option>
+                <option value="resource_quality">Source quality</option>
+                <option value="other">Other</option>
               </select>
             </label>
           </div>
-          <textarea value={feedbackComment} onChange={(event) => setFeedbackComment(event.target.value)} placeholder="Optional detail — never include private information" className="min-h-16 resize-y rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-2 outline-none" />
+          <textarea
+            value={feedbackComment}
+            onChange={(event) => setFeedbackComment(event.target.value)}
+            placeholder="Optional detail — never include private information"
+            className="min-h-16 resize-y rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-2 outline-none"
+          />
           <label className="flex items-start gap-2 text-[9px] text-[var(--text-tertiary)]">
-            <input type="checkbox" checked={shareComment} onChange={(event) => setShareComment(event.target.checked)} />
-            Share this comment with the agent creator. The rating and category are aggregated; your prompt, thread, memory, and artifacts are never shared.
+            <input
+              type="checkbox"
+              checked={shareComment}
+              onChange={(event) => setShareComment(event.target.checked)}
+            />
+            Share this comment with the agent creator. The rating and category
+            are aggregated; your prompt, thread, memory, and artifacts are never
+            shared.
           </label>
           <div className="flex justify-end gap-1.5">
-            <button type="button" onClick={() => setFeedbackOpen(false)} className="h-8 rounded-[6px] px-2.5 text-[var(--text-secondary)]">Cancel</button>
-            <button type="button" disabled={feedbackBusy} onClick={() => void submitFeedback()} className="inline-flex h-8 items-center gap-1 rounded-[6px] bg-[var(--accent-cyan)] px-2.5 font-semibold text-white disabled:opacity-60">{feedbackBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : null} Share feedback</button>
+            <button
+              type="button"
+              onClick={() => setFeedbackOpen(false)}
+              className="h-8 rounded-[6px] px-2.5 text-[var(--text-secondary)]"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={feedbackBusy}
+              onClick={() => void submitFeedback()}
+              className="inline-flex h-8 items-center gap-1 rounded-[6px] bg-[var(--accent-cyan)] px-2.5 font-semibold text-white disabled:opacity-60"
+            >
+              {feedbackBusy ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : null}{" "}
+              Share feedback
+            </button>
           </div>
         </div>
       ) : null}
@@ -1264,6 +1439,7 @@ export function ConversationSurface({
   compact = false,
   liveExchange,
   onChoice,
+  onRetryRun,
 }: {
   detail: SpectraThreadDetail | null;
   loading?: boolean;
@@ -1279,6 +1455,7 @@ export function ConversationSurface({
   compact?: boolean;
   liveExchange?: SpectraLiveExchange | null;
   onChoice?: (choice: ConversationChoice) => Promise<void> | void;
+  onRetryRun?: (runId: string) => Promise<unknown> | unknown;
 }) {
   const traceByRun = useMemo(
     () =>
@@ -1454,7 +1631,7 @@ export function ConversationSurface({
                       </div>
                     </div>
                   ) : (
-                      <div className="relative pl-7">
+                    <div className="relative pl-7">
                       <span className="absolute left-0 top-1.5 h-2 w-2 rounded-full bg-[var(--accent-cyan)] shadow-[0_0_0_4px_color-mix(in_oklab,var(--accent-cyan)_12%,transparent)]" />
                       {trace && trace.run.providerUsed !== "Spectra" ? (
                         <PersistedProgressTrace trace={trace} />
@@ -1497,6 +1674,12 @@ export function ConversationSurface({
                         ].includes(trace.run.status)) ? (
                         <OperationalTrace trace={trace} />
                       ) : null}
+                      {trace ? (
+                        <PersistedRunOutcomeNote
+                          trace={trace}
+                          onRetryRun={onRetryRun}
+                        />
+                      ) : null}
                       {trace?.cards.some((card) =>
                         card.actions.some(
                           (action) =>
@@ -1516,16 +1699,16 @@ export function ConversationSurface({
                               ),
                             )
                             .map((card) => ({
-                            id: card._id,
-                            runId: card.runId,
-                            status: card.status,
-                            title: card.title,
-                            summary: card.summary,
-                            variant: card.variant,
-                            actions: card.actions,
-                            provenance: card.provenance,
-                            updatedAt: card.updatedAt,
-                          }))}
+                              id: card._id,
+                              runId: card.runId,
+                              status: card.status,
+                              title: card.title,
+                              summary: card.summary,
+                              variant: card.variant,
+                              actions: card.actions,
+                              provenance: card.provenance,
+                              updatedAt: card.updatedAt,
+                            }))}
                           className="mt-4 !max-h-none"
                           onOpen={onCardOpen}
                           onAction={onCardAction}
@@ -1591,6 +1774,12 @@ export function ConversationSurface({
                         Getting started
                       </div>
                     ) : null}
+                    {liveExchange.runId ? (
+                      <LiveRunOutcomeNote
+                        runId={liveExchange.runId}
+                        onRetryRun={onRetryRun}
+                      />
+                    ) : null}
                   </div>
                 </article>
               ) : null}
@@ -1605,42 +1794,46 @@ export function ConversationSurface({
                     ) === index,
                 )
                 .map((trace) => (
-                <div
-                  key={`unresolved:${trace.run._id}`}
-                  className="mb-7 ml-7 rounded-[9px] bg-[var(--bg-secondary)] px-3.5 py-3"
-                >
-                  <div className="flex items-center gap-2 text-[11px] font-semibold text-[var(--text-secondary)]">
-                    {trace.run.status === "running" ||
-                    trace.run.status === "queued" ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-cyan)]" />
-                    ) : trace.run.status === "awaiting_resolution" ? (
-                      <GitCompareArrows className="h-3.5 w-3.5 text-[#b46d15]" />
-                    ) : (
-                      <AlertCircle className="h-3.5 w-3.5 text-[var(--danger)]" />
-                    )}
-                    <span className="capitalize">
-                      {trace.run.status.replaceAll("_", " ")}
-                    </span>
+                  <div
+                    key={`unresolved:${trace.run._id}`}
+                    className="mb-7 ml-7 rounded-[9px] bg-[var(--bg-secondary)] px-3.5 py-3"
+                  >
+                    <div className="flex items-center gap-2 text-[11px] font-semibold text-[var(--text-secondary)]">
+                      {trace.run.status === "running" ||
+                      trace.run.status === "queued" ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-cyan)]" />
+                      ) : trace.run.status === "awaiting_resolution" ? (
+                        <GitCompareArrows className="h-3.5 w-3.5 text-[#b46d15]" />
+                      ) : (
+                        <AlertCircle className="h-3.5 w-3.5 text-[var(--danger)]" />
+                      )}
+                      <span className="capitalize">
+                        {trace.run.status.replaceAll("_", " ")}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-[10px] leading-4 text-[var(--text-tertiary)]">
+                      {trace.run.status === "running"
+                        ? "This response is still in progress. Saved text and progress will catch up here automatically."
+                        : trace.run.status === "awaiting_resolution"
+                          ? "The same semantic region changed concurrently. Review the preserved proposal below."
+                          : (trace.run.error ??
+                            "No incomplete assistant message was saved.")}
+                    </p>
+                    {trace.operations.length > 0 ||
+                    [
+                      "failed",
+                      "cancelled",
+                      "awaiting_confirmation",
+                      "awaiting_resolution",
+                    ].includes(trace.run.status) ? (
+                      <OperationalTrace trace={trace} />
+                    ) : null}
+                    <PersistedRunOutcomeNote
+                      trace={trace}
+                      onRetryRun={onRetryRun}
+                    />
                   </div>
-                  <p className="mt-1 text-[10px] leading-4 text-[var(--text-tertiary)]">
-                    {trace.run.status === "running"
-                      ? "This response is still in progress. Saved text and progress will catch up here automatically."
-                      : trace.run.status === "awaiting_resolution"
-                        ? "The same semantic region changed concurrently. Review the preserved proposal below."
-                        : (trace.run.error ??
-                          "No incomplete assistant message was saved.")}
-                  </p>
-                  {trace.operations.length > 0 ||
-                  [
-                    "failed",
-                    "cancelled",
-                    "awaiting_confirmation",
-                    "awaiting_resolution",
-                  ].includes(trace.run.status) ? (
-                    <OperationalTrace trace={trace} />
-                  ) : null}
-                </div>
-              ))
+                ))
             : null}
           {activeCards?.some((card) =>
             card.actions.some(
@@ -1800,6 +1993,7 @@ export function ThreadConversation({
       onCardAction={(card, action, target) =>
         void runEngine.onCardAction(card, action, target)
       }
+      onRetryRun={runEngine.retry}
       composer={
         showComposer ? (
           <CommandBar

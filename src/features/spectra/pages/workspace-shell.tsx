@@ -83,6 +83,10 @@ import {
 import { DurableRunTabs } from "../components/durable-run-tabs";
 import { RunDetailPanel } from "../components/run-detail-panel";
 import { LiveThreadPanel } from "../components/live-thread-panel";
+import {
+  disengageFollowAi,
+  isProgrammaticOpen,
+} from "../collaboration/follow-ai";
 import { ShareDialog } from "../components/share-dialog";
 import { ObjectLibrary, type LibraryMode } from "../components/object-library";
 import { parseWorkspaceHubTabs } from "../components/workspace-tab-state";
@@ -136,10 +140,10 @@ const EMPTY_ARTIFACTS: SpectraArtifact[] = [];
 const AI_EDITED_FLASH_FALLBACK_MS = 90_000;
 
 function liveAiIsActive(
-  artifact?: Pick<SpectraArtifact, "aiState" | "aiEffects"> | Pick<
-    SpectraWorkspace,
-    "aiState"
-  > | null,
+  artifact?:
+    | Pick<SpectraArtifact, "aiState" | "aiEffects">
+    | Pick<SpectraWorkspace, "aiState">
+    | null,
 ) {
   if (!artifact) return false;
   if (artifact.aiState === "creating" || artifact.aiState === "updating")
@@ -158,7 +162,8 @@ function aiEditedExpiresAt(
 ) {
   if (!artifact || artifact.aiState !== "edited") return undefined;
   if (artifact.aiStateExpiresAt) return artifact.aiStateExpiresAt;
-  if (artifact.updatedAt) return artifact.updatedAt + AI_EDITED_FLASH_FALLBACK_MS;
+  if (artifact.updatedAt)
+    return artifact.updatedAt + AI_EDITED_FLASH_FALLBACK_MS;
   return undefined;
 }
 
@@ -182,7 +187,8 @@ function expireLiveAiChrome<T extends SpectraArtifact>(
         effects
           .map((effect) => effect.expiresAt)
           .filter((value): value is number => typeof value === "number")
-          .sort((left, right) => left - right)[0] ?? now + AI_EDITED_FLASH_FALLBACK_MS;
+          .sort((left, right) => left - right)[0] ??
+        now + AI_EDITED_FLASH_FALLBACK_MS;
       return {
         ...artifact,
         aiState: "edited",
@@ -204,8 +210,7 @@ function expireLiveAiChrome<T extends SpectraArtifact>(
   }
   const editedExpiry = aiEditedExpiresAt(artifact);
   const editedExpired =
-    artifact.aiState === "edited" &&
-    (!editedExpiry || editedExpiry <= now);
+    artifact.aiState === "edited" && (!editedExpiry || editedExpiry <= now);
   if (!editedExpired && effects.length === (artifact.aiEffects ?? []).length)
     return artifact;
   return {
@@ -246,7 +251,12 @@ function visibleArtifactCardAiState(
 
 function useLiveAiExpiryClock(
   artifacts: Array<
-    Pick<SpectraArtifact, "aiState" | "aiStateExpiresAt" | "updatedAt" | "aiEffects"> | null | undefined
+    | Pick<
+        SpectraArtifact,
+        "aiState" | "aiStateExpiresAt" | "updatedAt" | "aiEffects"
+      >
+    | null
+    | undefined
   >,
 ) {
   const [now, setNow] = useState(() => Date.now());
@@ -335,7 +345,9 @@ function mergeLiveAiArtifacts(
   next: SpectraArtifact[],
 ) {
   if (!previous?.length) return next;
-  const previousById = new Map(previous.map((artifact) => [artifact._id, artifact]));
+  const previousById = new Map(
+    previous.map((artifact) => [artifact._id, artifact]),
+  );
   return next.map((artifact) =>
     mergeLiveAiArtifact(previousById.get(artifact._id), artifact),
   );
@@ -950,86 +962,139 @@ function WorkspaceHome({
           </button>
         </div>
       ) : (
-      <aside className="spectra-mission-control-rail w-full shrink-0 space-y-6 border-t border-[var(--border-default)] bg-[var(--mission-rail)] px-5 py-6 xl:h-full xl:w-[320px] xl:overflow-y-auto xl:border-l xl:border-t-0">
-        <section>
-          <div className="flex items-center justify-between px-1">
-            <h2 className="text-[13px] font-semibold text-[var(--text-primary)]">
-              Recent activity
-            </h2>
-            <div className="flex items-center gap-2">
-            <button
-              type="button"
-              className="text-[12px] font-medium text-[var(--text-tertiary)] transition hover:text-[var(--text-primary)]"
-              onClick={() => {
-                document
-                  .getElementById("spectra-mission-all-work")
-                  ?.scrollIntoView({ behavior: "smooth", block: "start" });
-              }}
-            >
-              View all
-            </button>
-            {onToggleActivityRail ? (
-              <button
-                type="button"
-                aria-label="Hide recent activity"
-                title="Hide recent activity"
-                onClick={onToggleActivityRail}
-                className="flex h-7 w-7 items-center justify-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-              >
-                <PanelRightClose className="h-3.5 w-3.5" />
-              </button>
-            ) : null}
-            </div>
-          </div>
-          <div className="mt-2 grid gap-0.5">
-            {activity.map((entry) => {
-              const meta = blueprintMeta[entry.artifact.blueprintKey];
-              const ActivityIcon = meta.icon;
-              return (
-                <button
-                  key={entry.id}
-                  type="button"
-                  className="flex min-h-10 w-full items-start gap-2.5 rounded-[7px] px-1.5 py-1.5 text-left hover:bg-[var(--bg-hover)]"
-                  onClick={() => onOpenArtifact(entry.artifact)}
-                >
-                  <span
-                    className="mt-0.5 grid size-5.5 shrink-0 place-items-center rounded-[6px]"
-                    style={{
-                      background: `color-mix(in oklab, ${meta.color} 10%, var(--bg-elevated))`,
-                      color: meta.color,
-                    }}
-                  >
-                    <ActivityIcon size={12} />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-[12px] font-semibold text-[var(--text-primary)]">
-                      {entry.title}
-                    </div>
-                    <div className="mt-px text-[11px] text-[var(--text-secondary)]">
-                      You {entry.detail.toLowerCase()}{" "}
-                      {meta.label
-                        ? `a ${meta.label.toLowerCase()}`
-                        : "an artifact"}
-                    </div>
-                  </div>
-                  <span className="mt-0.5 shrink-0 text-[11px] tabular-nums text-[var(--text-tertiary)]">
-                    {formatRelativeTime(entry.time)}
-                  </span>
-                </button>
-              );
-            })}
-            {activity.length === 0 ? (
-              <div className="px-1.5 text-[10px] text-[var(--text-secondary)]">
-                No activity yet.
-              </div>
-            ) : null}
-          </div>
-        </section>
-        {pinnedArtifacts.length ? (
+        <aside className="spectra-mission-control-rail w-full shrink-0 space-y-6 border-t border-[var(--border-default)] bg-[var(--mission-rail)] px-5 py-6 xl:h-full xl:w-[320px] xl:overflow-y-auto xl:border-l xl:border-t-0">
           <section>
             <div className="flex items-center justify-between px-1">
               <h2 className="text-[13px] font-semibold text-[var(--text-primary)]">
-                Pinned
+                Recent activity
+              </h2>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  className="text-[12px] font-medium text-[var(--text-tertiary)] transition hover:text-[var(--text-primary)]"
+                  onClick={() => {
+                    document
+                      .getElementById("spectra-mission-all-work")
+                      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  }}
+                >
+                  View all
+                </button>
+                {onToggleActivityRail ? (
+                  <button
+                    type="button"
+                    aria-label="Hide recent activity"
+                    title="Hide recent activity"
+                    onClick={onToggleActivityRail}
+                    className="flex h-7 w-7 items-center justify-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                  >
+                    <PanelRightClose className="h-3.5 w-3.5" />
+                  </button>
+                ) : null}
+              </div>
+            </div>
+            <div className="mt-2 grid gap-0.5">
+              {activity.map((entry) => {
+                const meta = blueprintMeta[entry.artifact.blueprintKey];
+                const ActivityIcon = meta.icon;
+                return (
+                  <button
+                    key={entry.id}
+                    type="button"
+                    className="flex min-h-10 w-full items-start gap-2.5 rounded-[7px] px-1.5 py-1.5 text-left hover:bg-[var(--bg-hover)]"
+                    onClick={() => onOpenArtifact(entry.artifact)}
+                  >
+                    <span
+                      className="mt-0.5 grid size-5.5 shrink-0 place-items-center rounded-[6px]"
+                      style={{
+                        background: `color-mix(in oklab, ${meta.color} 10%, var(--bg-elevated))`,
+                        color: meta.color,
+                      }}
+                    >
+                      <ActivityIcon size={12} />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-[12px] font-semibold text-[var(--text-primary)]">
+                        {entry.title}
+                      </div>
+                      <div className="mt-px text-[11px] text-[var(--text-secondary)]">
+                        You {entry.detail.toLowerCase()}{" "}
+                        {meta.label
+                          ? `a ${meta.label.toLowerCase()}`
+                          : "an artifact"}
+                      </div>
+                    </div>
+                    <span className="mt-0.5 shrink-0 text-[11px] tabular-nums text-[var(--text-tertiary)]">
+                      {formatRelativeTime(entry.time)}
+                    </span>
+                  </button>
+                );
+              })}
+              {activity.length === 0 ? (
+                <div className="px-1.5 text-[10px] text-[var(--text-secondary)]">
+                  No activity yet.
+                </div>
+              ) : null}
+            </div>
+          </section>
+          {pinnedArtifacts.length ? (
+            <section>
+              <div className="flex items-center justify-between px-1">
+                <h2 className="text-[13px] font-semibold text-[var(--text-primary)]">
+                  Pinned
+                </h2>
+                <button
+                  type="button"
+                  className="text-[12px] font-medium text-[var(--text-tertiary)] transition hover:text-[var(--text-primary)]"
+                  onClick={() => {
+                    document
+                      .getElementById("spectra-mission-all-work")
+                      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                    const firstPinned = pinnedArtifacts[0];
+                    if (firstPinned) onOpenArtifact(firstPinned);
+                  }}
+                >
+                  Manage
+                </button>
+              </div>
+              <div className="mt-2 space-y-0.5">
+                {pinnedArtifacts.slice(0, 4).map((artifact) => {
+                  const meta = blueprintMeta[artifact.blueprintKey];
+                  const ArtifactIcon = meta.icon;
+                  return (
+                    <button
+                      type="button"
+                      key={artifact._id}
+                      onClick={() => onOpenArtifact(artifact)}
+                      className="flex w-full items-center gap-2.5 rounded-[7px] px-1.5 py-1.5 text-left hover:bg-[var(--bg-hover)]"
+                    >
+                      <span
+                        className="grid size-5.5 shrink-0 place-items-center rounded-[6px]"
+                        style={{
+                          background: `color-mix(in oklab, ${meta.color} 10%, var(--bg-elevated))`,
+                          color: meta.color,
+                        }}
+                      >
+                        <ArtifactIcon size={12} />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[12px] font-semibold text-[var(--text-primary)]">
+                          {artifact.title}
+                        </span>
+                        <span className="block text-[11px] text-[var(--text-tertiary)]">
+                          {meta.label}
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          ) : null}
+          <section>
+            <div className="flex items-center justify-between px-1">
+              <h2 className="text-[13px] font-semibold text-[var(--text-primary)]">
+                Tags
               </h2>
               <button
                 type="button"
@@ -1038,100 +1103,50 @@ function WorkspaceHome({
                   document
                     .getElementById("spectra-mission-all-work")
                     ?.scrollIntoView({ behavior: "smooth", block: "start" });
-                  const firstPinned = pinnedArtifacts[0];
-                  if (firstPinned) onOpenArtifact(firstPinned);
                 }}
               >
                 Manage
               </button>
             </div>
-            <div className="mt-2 space-y-0.5">
-              {pinnedArtifacts.slice(0, 4).map((artifact) => {
-                const meta = blueprintMeta[artifact.blueprintKey];
-                const ArtifactIcon = meta.icon;
-                return (
-                  <button
-                    type="button"
-                    key={artifact._id}
-                    onClick={() => onOpenArtifact(artifact)}
-                    className="flex w-full items-center gap-2.5 rounded-[7px] px-1.5 py-1.5 text-left hover:bg-[var(--bg-hover)]"
+            <div className="mt-2 flex flex-wrap gap-1.5 px-1">
+              {visibleTags.length ? (
+                visibleTags.map((tag) => (
+                  <span
+                    key={tag}
+                    className="rounded-[6px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-2 py-1 text-[11px] font-medium text-[var(--text-secondary)]"
                   >
-                    <span
-                      className="grid size-5.5 shrink-0 place-items-center rounded-[6px]"
-                      style={{
-                        background: `color-mix(in oklab, ${meta.color} 10%, var(--bg-elevated))`,
-                        color: meta.color,
-                      }}
-                    >
-                      <ArtifactIcon size={12} />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[12px] font-semibold text-[var(--text-primary)]">
-                        {artifact.title}
-                      </span>
-                      <span className="block text-[11px] text-[var(--text-tertiary)]">
-                        {meta.label}
-                      </span>
-                    </span>
-                  </button>
-                );
-              })}
+                    {tag}
+                  </span>
+                ))
+              ) : (
+                <span className="text-[12px] text-[var(--text-tertiary)]">
+                  Tags appear as you organise work.
+                </span>
+              )}
             </div>
           </section>
-        ) : null}
-        <section>
-          <div className="flex items-center justify-between px-1">
-            <h2 className="text-[13px] font-semibold text-[var(--text-primary)]">
-              Tags
+          <section>
+            <h2 className="px-1 text-[13px] font-semibold text-[var(--text-primary)]">
+              Quick actions
             </h2>
-            <button
-              type="button"
-              className="text-[12px] font-medium text-[var(--text-tertiary)] transition hover:text-[var(--text-primary)]"
-              onClick={() => {
-                document
-                  .getElementById("spectra-mission-all-work")
-                  ?.scrollIntoView({ behavior: "smooth", block: "start" });
-              }}
-            >
-              Manage
-            </button>
-          </div>
-          <div className="mt-2 flex flex-wrap gap-1.5 px-1">
-            {visibleTags.length ? (
-              visibleTags.map((tag) => (
-                <span
-                  key={tag}
-                  className="rounded-[6px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-2 py-1 text-[11px] font-medium text-[var(--text-secondary)]"
+            <div className="mt-2 space-y-0.5">
+              {createTypes.map(({ key, label, icon: QuickIcon }) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => onCreateArtifact(key)}
+                  className="flex h-9 w-full items-center gap-2.5 rounded-[8px] px-1.5 text-[13px] font-medium text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                 >
-                  {tag}
-                </span>
-              ))
-            ) : (
-              <span className="text-[12px] text-[var(--text-tertiary)]">
-                Tags appear as you organise work.
-              </span>
-            )}
-          </div>
-        </section>
-        <section>
-          <h2 className="px-1 text-[13px] font-semibold text-[var(--text-primary)]">
-            Quick actions
-          </h2>
-          <div className="mt-2 space-y-0.5">
-            {createTypes.map(({ key, label, icon: QuickIcon }) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => onCreateArtifact(key)}
-                className="flex h-9 w-full items-center gap-2.5 rounded-[8px] px-1.5 text-[13px] font-medium text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-              >
-                <QuickIcon size={14} className="text-[var(--text-tertiary)]" />
-                New {label.toLowerCase()}
-              </button>
-            ))}
-          </div>
-        </section>
-      </aside>
+                  <QuickIcon
+                    size={14}
+                    className="text-[var(--text-tertiary)]"
+                  />
+                  New {label.toLowerCase()}
+                </button>
+              ))}
+            </div>
+          </section>
+        </aside>
       )}
     </main>
   );
@@ -1187,11 +1202,7 @@ function WorkspaceHeader({
       ? 1
       : 0);
   const primaryLabel =
-    viewMode === "list"
-      ? "Library"
-      : viewMode === "board"
-        ? "Board"
-        : "Canvas";
+    viewMode === "list" ? "Library" : viewMode === "board" ? "Board" : "Canvas";
 
   return (
     <header
@@ -1374,77 +1385,81 @@ function WorkspaceLibraryToolbar({
       className="spectra-workspace-toolbar flex flex-wrap items-center gap-2"
       aria-label="Workspace library controls"
     >
-      {!compact ? <div className="ml-auto flex items-center gap-2">
-        {searchControl}
-        <div className="relative" ref={typeRef}>
-          <button
-            type="button"
-            onClick={() => setTypeOpen((open) => !open)}
-            className="flex h-9 items-center gap-2 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-          >
-            <Rows3 className="size-3.5" />
-            {type === "all"
-              ? "Filter"
-              : types.find((option) => option.key === type)?.label}
-          </button>
-          {typeOpen ? (
-            <div className="absolute left-0 top-[calc(100%+7px)] z-40 w-[180px] rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 shadow-[0_14px_32px_rgba(27,20,12,0.13)]">
-              {types.map((option) => (
+      {!compact ? (
+        <div className="ml-auto flex items-center gap-2">
+          {searchControl}
+          <div className="relative" ref={typeRef}>
+            <button
+              type="button"
+              onClick={() => setTypeOpen((open) => !open)}
+              className="flex h-9 items-center gap-2 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+            >
+              <Rows3 className="size-3.5" />
+              {type === "all"
+                ? "Filter"
+                : types.find((option) => option.key === type)?.label}
+            </button>
+            {typeOpen ? (
+              <div className="absolute left-0 top-[calc(100%+7px)] z-40 w-[180px] rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 shadow-[0_14px_32px_rgba(27,20,12,0.13)]">
+                {types.map((option) => (
+                  <button
+                    key={option.key}
+                    type="button"
+                    className={menuItemClass()}
+                    onClick={() => {
+                      onTypeChange(option.key);
+                      setTypeOpen(false);
+                    }}
+                  >
+                    {option.label}
+                    {type === option.key ? (
+                      <CheckCircle2 className="ml-auto size-3.5 text-[var(--success)]" />
+                    ) : null}
+                  </button>
+                ))}
+                <div className="my-1 border-t border-[var(--border-default)]" />
                 <button
-                  key={option.key}
                   type="button"
                   className={menuItemClass()}
                   onClick={() => {
-                    onTypeChange(option.key);
+                    onToggleSelection();
                     setTypeOpen(false);
                   }}
                 >
-                  {option.label}
-                  {type === option.key ? (
-                    <CheckCircle2 className="ml-auto size-3.5 text-[var(--success)]" />
-                  ) : null}
+                  <Files className="size-3.5" />
+                  {selectionMode ? "Done selecting" : "Select objects"}
                 </button>
-              ))}
-              <div className="my-1 border-t border-[var(--border-default)]" />
-              <button
-                type="button"
-                className={menuItemClass()}
-                onClick={() => {
-                  onToggleSelection();
-                  setTypeOpen(false);
-                }}
-              >
-                <Files className="size-3.5" />
-                {selectionMode ? "Done selecting" : "Select objects"}
-              </button>
-            </div>
-          ) : null}
+              </div>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            onClick={onToggleSelection}
+            className={`flex h-9 items-center gap-2 rounded-[8px] border px-3 text-[12px] font-medium transition ${selectionMode ? "border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-primary)]" : "border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"}`}
+            aria-pressed={selectionMode}
+          >
+            <Files className="h-4 w-4" />
+            {selectionMode ? "Done selecting" : "Select objects"}
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={onToggleSelection}
-          className={`flex h-9 items-center gap-2 rounded-[8px] border px-3 text-[12px] font-medium transition ${selectionMode ? "border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-primary)]" : "border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"}`}
-          aria-pressed={selectionMode}
-        >
-          <Files className="h-4 w-4" />
-          {selectionMode ? "Done selecting" : "Select objects"}
-        </button>
-      </div> : null}
-      {!compact ? <div className="relative" ref={ref}>
-        <button
-          type="button"
-          className="flex h-9 min-w-[164px] items-center justify-between gap-3 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-primary)] shadow-[0_1px_4px_rgba(27,20,12,0.04)] hover:bg-[var(--bg-hover)]"
-          onClick={() => setSortOpen((open) => !open)}
-        >
-          {sortLabels[sort]}
-          <ChevronDown
-            className={`h-3.5 w-3.5 text-[var(--text-tertiary)] transition ${sortOpen ? "rotate-180" : ""}`}
-          />
-        </button>
-        {sortOpen ? (
-          <div className="absolute right-0 top-[calc(100%+7px)] z-40 w-[190px] rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 shadow-[0_14px_32px_rgba(27,20,12,0.13)]">
-            {(Object.entries(sortLabels) as Array<[WorkspaceSort, string]>).map(
-              ([key, label]) => (
+      ) : null}
+      {!compact ? (
+        <div className="relative" ref={ref}>
+          <button
+            type="button"
+            className="flex h-9 min-w-[164px] items-center justify-between gap-3 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-primary)] shadow-[0_1px_4px_rgba(27,20,12,0.04)] hover:bg-[var(--bg-hover)]"
+            onClick={() => setSortOpen((open) => !open)}
+          >
+            {sortLabels[sort]}
+            <ChevronDown
+              className={`h-3.5 w-3.5 text-[var(--text-tertiary)] transition ${sortOpen ? "rotate-180" : ""}`}
+            />
+          </button>
+          {sortOpen ? (
+            <div className="absolute right-0 top-[calc(100%+7px)] z-40 w-[190px] rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 shadow-[0_14px_32px_rgba(27,20,12,0.13)]">
+              {(
+                Object.entries(sortLabels) as Array<[WorkspaceSort, string]>
+              ).map(([key, label]) => (
                 <button
                   key={key}
                   type="button"
@@ -1459,11 +1474,11 @@ function WorkspaceLibraryToolbar({
                     <CheckCircle2 className="ml-auto h-4 w-4 text-[var(--success)]" />
                   ) : null}
                 </button>
-              ),
-            )}
-          </div>
-        ) : null}
-      </div> : null}
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       <nav className="flex items-center gap-1 rounded-[10px] bg-[color-mix(in_oklab,var(--bg-elevated)_72%,transparent)] p-1">
         {viewModes.map((view) => {
           const Icon = view.icon;
@@ -2283,9 +2298,7 @@ function LibraryView({
                       key={entry.item._id}
                       type="button"
                       onClick={() =>
-                        selectionMode
-                          ? onToggleContext(entry)
-                          : onSelect(entry)
+                        selectionMode ? onToggleContext(entry) : onSelect(entry)
                       }
                       className="flex min-h-[72px] w-full flex-col rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2.5 text-left"
                     >
@@ -2339,7 +2352,8 @@ function WorkspaceTypeGroupRow({
     const objectKey = `${entry.thread ? "thread" : "artifact"}:${entry.thread?._id ?? entry.artifact?._id ?? ""}`;
     const contextSelected = Boolean(
       selectedObjectKeys?.has(objectKey) ||
-        (entry.artifact && selectedObjectKeys?.has(`artifact:${entry.artifact._id}`)),
+      (entry.artifact &&
+        selectedObjectKeys?.has(`artifact:${entry.artifact._id}`)),
     );
     const aiState = visibleArtifactCardAiState(entry.artifact, aiClock);
     return (
@@ -2360,7 +2374,10 @@ function WorkspaceTypeGroupRow({
             : "border-[var(--border-default)] bg-[var(--bg-primary)]"
         }`}
       >
-        <GroupIcon className="size-3.5 shrink-0" style={{ color: meta.color }} />
+        <GroupIcon
+          className="size-3.5 shrink-0"
+          style={{ color: meta.color }}
+        />
         <span className="truncate">{workspaceEntryTitle(entry)}</span>
       </button>
     );
@@ -2925,7 +2942,8 @@ function Inspector({
                     {artifact.title}
                   </span>
                   <span className="block text-[11px] text-[var(--text-tertiary)]">
-                    {meta.label} · updated {formatRelativeTime(artifact.updatedAt)}
+                    {meta.label} · updated{" "}
+                    {formatRelativeTime(artifact.updatedAt)}
                   </span>
                 </span>
               </button>
@@ -3176,9 +3194,8 @@ export function WorkspaceShell() {
     "workspace-home-default",
   );
   const [hubTabsRestored, setHubTabsRestored] = useState(false);
-  const [homeActivityRailCollapsed, setHomeActivityRailCollapsed] = useState(
-    false,
-  );
+  const [homeActivityRailCollapsed, setHomeActivityRailCollapsed] =
+    useState(false);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
   const [navCursor, setNavCursor] = useState(-1);
   const navStackRef = useRef<
@@ -3771,14 +3788,14 @@ export function WorkspaceShell() {
     focusModeOverride !== "thread"
       ? "artifact"
       : focusModeOverride === "selection" && contextualArtifactIds.length === 0
-      ? naturalFocusMode
-      : focusModeOverride === "artifact" && !commandFocusArtifact
         ? naturalFocusMode
-        : focusModeOverride === "workspace" && !workspace
+        : focusModeOverride === "artifact" && !commandFocusArtifact
           ? naturalFocusMode
-          : focusModeOverride === "thread" && !composerThread
+          : focusModeOverride === "workspace" && !workspace
             ? naturalFocusMode
-            : (focusModeOverride ?? naturalFocusMode);
+            : focusModeOverride === "thread" && !composerThread
+              ? naturalFocusMode
+              : (focusModeOverride ?? naturalFocusMode);
   const initialResultCards = useMemo(
     () =>
       (overview?.resultCards ?? []).filter(
@@ -4195,7 +4212,9 @@ export function WorkspaceShell() {
         if (
           artifact.aiState !== "creating" &&
           artifact.aiState !== "updating" &&
-          !(artifact.aiEffects ?? []).some((effect) => effect.state === "active")
+          !(artifact.aiEffects ?? []).some(
+            (effect) => effect.state === "active",
+          )
         )
           return artifact;
         return {
@@ -4431,6 +4450,8 @@ export function WorkspaceShell() {
   }
 
   function openArtifactPanel(artifact: SpectraArtifact) {
+    // A user-chosen open ends spectating; a follow-dispatched open does not.
+    if (!isProgrammaticOpen()) disengageFollowAi();
     if (artifact.blueprintKey === "thread_reference") {
       const content =
         artifact.content && typeof artifact.content === "object"
@@ -5627,7 +5648,7 @@ export function WorkspaceShell() {
                   busy={
                     busyKey === `artifact:update:${studio.activeArtifact._id}`
                   }
-                      panelWidth={studioPanelWidth}
+                  panelWidth={studioPanelWidth}
                   sourceLabel="Workspace Home"
                   onPanelWidthChange={setStudioPanelWidth}
                   onClose={() => {
@@ -5951,7 +5972,7 @@ export function WorkspaceShell() {
                     busy={
                       busyKey === `artifact:update:${studio.activeArtifact._id}`
                     }
-                      panelWidth={studioPanelWidth}
+                    panelWidth={studioPanelWidth}
                     sourceLabel={workspace?.title ?? "Workspace"}
                     onPanelWidthChange={setStudioPanelWidth}
                     onClose={() => {

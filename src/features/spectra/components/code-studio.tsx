@@ -545,10 +545,7 @@ export function CodeStudio({
   const activeIndex = workbook.files.findIndex(
     (file) => file.id === activeFile.id,
   );
-  const activeAiEffect = pathTouches(
-    aiChangedPaths,
-    `/files/${activeIndex}`,
-  );
+  const activeAiEffect = pathTouches(aiChangedPaths, `/files/${activeIndex}`);
   const activeAiLineIndexes = useMemo(() => {
     const prefix = `/files/${activeIndex}/source/`;
     return [
@@ -748,6 +745,23 @@ export function CodeStudio({
   }, [incoming, workbook]);
 
   useEffect(() => () => pythonRunRef.current?.cancel(), []);
+
+  // Follow AI: a reveal request names a file path; open that file so the
+  // scroll-reveal that follows lands on the exact line.
+  useEffect(() => {
+    function onReveal(event: Event) {
+      const detail = (
+        event as CustomEvent<{ artifactId?: string; path?: string }>
+      ).detail;
+      if (detail?.artifactId !== artifactId || !detail.path) return;
+      const match = /^\/files\/(\d+)/.exec(detail.path);
+      if (!match) return;
+      const file = workbook.files[Number(match[1])];
+      if (file && file.id !== activeFileId) setActiveFileId(file.id);
+    }
+    window.addEventListener("spectra:reveal-target", onReveal);
+    return () => window.removeEventListener("spectra:reveal-target", onReveal);
+  }, [artifactId, activeFileId, workbook.files]);
 
   useEffect(() => {
     let current = true;
@@ -2260,7 +2274,8 @@ export function CodeStudio({
           >
             {syncMessage === "Auto-saved" ? (
               <CheckCircle2 className="h-3.5 w-3.5 text-[var(--success)]" />
-            ) : syncMessage === "Synchronizing" || syncMessage === "Reconnecting" ? (
+            ) : syncMessage === "Synchronizing" ||
+              syncMessage === "Reconnecting" ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-cyan)]" />
             ) : (
               <Circle className="h-3 w-3 fill-[#d88922] text-[#d88922]" />
@@ -4042,9 +4057,7 @@ function CodeSettings({
                 onChange={(event) =>
                   onChange((draft) => {
                     draft.visualisation.openMode = event.target.value as
-                      | "source"
-                      | "preview"
-                      | "split";
+                      "source" | "preview" | "split";
                   })
                 }
               >

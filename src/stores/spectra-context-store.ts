@@ -16,7 +16,14 @@ export type SpectraContextObject = {
   stale?: boolean;
 };
 
-export type SpectraContinuation = { id: string; title: string; runId?: string; workspaceId?: string };
+export type SpectraContinuation = {
+  id: string;
+  title: string;
+  runId?: string;
+  workspaceId?: string;
+  /** Artifact the conversation was started from, when artifact-scoped. */
+  artifactId?: string;
+};
 
 export type SpectraOpenObjectType = SpectraContextObjectType | "run";
 export type SpectraOpenPresentation = "rail" | "split" | "tab" | "tile" | "thread-panel" | "run-panel" | "full";
@@ -164,7 +171,17 @@ export const useSpectraContextStore = create<SpectraContextState>()(persist((set
       return next ? [{ ...row, label: next.label ?? row.label, workspaceId: next.workspaceId ?? row.workspaceId, stale: false }] : row.source === "explicit" ? [{ ...row, stale: true }] : [];
     });
     const reconcileOpenObjects = state.openObjects.flatMap((row) => {
-      if (row.type === "run" || !providedTypes.has(row.type)) return [row];
+      // Live QC panels can open on thread_ready / run_created before the
+      // independently refreshed thread index includes that id. Dropping them
+      // here blanks the workspace live UI (no traces, no collaborator panel).
+      if (
+        row.type === "run" ||
+        row.presentation === "thread-panel" ||
+        row.presentation === "run-panel" ||
+        !providedTypes.has(row.type)
+      ) {
+        return [row];
+      }
       const next = byKey.get(`${row.type}:${row.id}`);
       return next ? [{ ...row, label: next.label ?? row.label, workspaceId: next.workspaceId ?? row.workspaceId }] : [];
     });
@@ -218,9 +235,12 @@ export const useSpectraContextStore = create<SpectraContextState>()(persist((set
   openObject: (object) => set((state) => {
     const key = spectraObjectKey(object);
     const movesOutOfTiles = object.type === "artifact" && object.presentation !== "tile" && state.tileArtifactIds.includes(object.id);
+    const isAuxiliaryPanel = object.presentation === "thread-panel" || object.presentation === "run-panel";
     return {
       openObjects: upsertOpenObject(state.openObjects, object),
-      activeOpenObjectKey: key,
+      // A side panel is additive working context. Opening it must not steal the
+      // primary rail/tab identity from the artifact or workspace beneath it.
+      activeOpenObjectKey: isAuxiliaryPanel ? state.activeOpenObjectKey : key,
       tileArtifactIds: movesOutOfTiles ? state.tileArtifactIds.filter((id) => id !== object.id) : state.tileArtifactIds,
       tileSizes: movesOutOfTiles ? Object.fromEntries(Object.entries(state.tileSizes).filter(([id]) => id !== object.id)) : state.tileSizes,
       tilesIsolated: movesOutOfTiles && state.tileArtifactIds.length === 1 ? false : state.tilesIsolated,

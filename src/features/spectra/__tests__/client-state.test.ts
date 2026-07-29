@@ -50,6 +50,15 @@ describe("canonical Spectra client state", () => {
     expect(contextStore.getState().explicit.map((row) => row.id)).toEqual(["explicit-a"]);
   });
 
+  it("opens thread and run panels without stealing the active artifact surface", () => {
+    const state = contextStore.getState();
+    state.openObject({ type: "artifact", id: "doc-a", label: "Document", presentation: "tab" });
+    state.openObject({ type: "thread", id: "thread-a", label: "Conversation", presentation: "thread-panel" });
+    expect(contextStore.getState().activeOpenObjectKey).toBe("artifact:doc-a");
+    state.openObject({ type: "run", id: "run-a", label: "Run", presentation: "run-panel" });
+    expect(contextStore.getState().activeOpenObjectKey).toBe("artifact:doc-a");
+  });
+
   it("prunes inaccessible open objects and orphaned tiles while retaining explicit context as stale", () => {
     contextStore.setState({
       explicit: [{ type: "artifact", id: "gone", label: "Gone artifact", source: "explicit" }],
@@ -72,6 +81,28 @@ describe("canonical Spectra client state", () => {
     expect(next.tileSizes).toEqual({});
     expect(next.tilesIsolated).toBe(false);
     expect(next.explicit).toEqual([{ type: "artifact", id: "gone", label: "Gone artifact", source: "explicit", stale: true }]);
+  });
+
+  it("keeps a just-opened live thread panel while the thread index is still catching up", () => {
+    const state = contextStore.getState();
+    state.openObject({
+      type: "thread",
+      id: "brand-new-thread",
+      label: "Current conversation",
+      presentation: "thread-panel",
+    });
+    state.reconcile([
+      { type: "artifact", id: "doc-a", label: "Document" },
+      { type: "thread", id: "older-thread", label: "Older chat" },
+    ]);
+    expect(contextStore.getState().openObjects).toEqual([
+      {
+        type: "thread",
+        id: "brand-new-thread",
+        label: "Current conversation",
+        presentation: "thread-panel",
+      },
+    ]);
   });
 
   it("closes tile presentation atomically without leaving layout state behind", () => {

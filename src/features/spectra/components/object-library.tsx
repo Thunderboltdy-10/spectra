@@ -41,6 +41,7 @@ import type {
   SpectraWorkspace,
   SpectraWorkspaceItem,
 } from "../data/api";
+import type { ArtifactTypeKey } from "../artifacts/types";
 
 export type ObjectLibraryEntry = {
   artifact?: SpectraArtifact;
@@ -62,21 +63,84 @@ type SortMode =
 const types: Array<{ key: "all" | ObjectType; label: string }> = [
   { key: "all", label: "All" },
   { key: "document", label: "Documents" },
-  { key: "flashcard_deck", label: "Decks" },
+  { key: "flashcard_deck", label: "Flashcards" },
   { key: "quiz", label: "Quizzes" },
   { key: "planner_task", label: "Tasks" },
+  { key: "presentation", label: "Presentations" },
+  { key: "agent", label: "Agents" },
+  { key: "timetable", label: "Timetables" },
+  { key: "sheets", label: "Sheets" },
+  { key: "code", label: "Code & visualisations" },
+  { key: "whiteboard", label: "Whiteboards" },
   { key: "thread", label: "Threads" },
 ];
 
-const threadMeta = { label: "Conversation", icon: MessageSquare, color: "#8b6ff0" };
+const threadMeta = {
+  label: "Conversation",
+  icon: MessageSquare,
+  color: "#8b6ff0",
+};
 
-function objectId(entry: ObjectLibraryEntry) { return entry.artifact?._id ?? entry.thread?._id ?? entry.item?._id ?? "unknown"; }
-function objectTitle(entry: ObjectLibraryEntry) { return entry.artifact?.title ?? entry.thread?.title ?? "Untitled object"; }
-function objectSummary(entry: ObjectLibraryEntry) { return entry.artifact?.summary ?? entry.thread?.summaryShort ?? "Continue this conversation."; }
-function objectUpdatedAt(entry: ObjectLibraryEntry) { return entry.artifact?.updatedAt ?? entry.thread?.lastMessageAt ?? entry.thread?.updatedAt ?? entry.item?.updatedAt ?? 0; }
-function objectCreatedAt(entry: ObjectLibraryEntry) { return entry.artifact?.createdAt ?? entry.thread?.createdAt ?? entry.item?.createdAt ?? 0; }
-function objectType(entry: ObjectLibraryEntry): ObjectType { return entry.thread ? "thread" : entry.artifact?.blueprintKey ?? "document"; }
-function objectMeta(entry: ObjectLibraryEntry) { return entry.thread ? threadMeta : blueprintMeta[entry.artifact?.blueprintKey ?? "document"]; }
+function objectId(entry: ObjectLibraryEntry) {
+  return (
+    entry.artifact?._id ?? entry.thread?._id ?? entry.item?._id ?? "unknown"
+  );
+}
+function objectTitle(entry: ObjectLibraryEntry) {
+  return entry.artifact?.title ?? entry.thread?.title ?? "Untitled object";
+}
+function objectSummary(entry: ObjectLibraryEntry) {
+  const effectTitle = entry.artifact?.aiPreview?.effectTitle;
+  if (effectTitle) return effectTitle;
+  if (entry.artifact?.aiState === "creating")
+    return `Building ${objectTitle(entry)}`;
+  if (entry.artifact?.aiState === "updating")
+    return `Updating ${objectTitle(entry)}`;
+  return (
+    entry.artifact?.summary ??
+    entry.thread?.summaryShort ??
+    "Continue this conversation."
+  );
+}
+function objectUpdatedAt(entry: ObjectLibraryEntry) {
+  return (
+    entry.artifact?.updatedAt ??
+    entry.thread?.lastMessageAt ??
+    entry.thread?.updatedAt ??
+    entry.item?.updatedAt ??
+    0
+  );
+}
+function objectCreatedAt(entry: ObjectLibraryEntry) {
+  return (
+    entry.artifact?.createdAt ??
+    entry.thread?.createdAt ??
+    entry.item?.createdAt ??
+    0
+  );
+}
+function objectType(entry: ObjectLibraryEntry): ObjectType {
+  return entry.thread ? "thread" : (entry.artifact?.blueprintKey ?? "document");
+}
+function objectMeta(entry: ObjectLibraryEntry) {
+  return entry.thread
+    ? threadMeta
+    : blueprintMeta[entry.artifact?.blueprintKey ?? "document"];
+}
+function objectAiState(entry: ObjectLibraryEntry, now: number) {
+  const state = entry.artifact?.aiState;
+  if (
+    state === "edited" &&
+    entry.artifact?.aiStateExpiresAt &&
+    entry.artifact.aiStateExpiresAt <= now
+  )
+    return "normal";
+  return state === "creating" || state === "updating"
+    ? state
+    : state === "edited"
+      ? "edited"
+      : "normal";
+}
 
 export function ObjectLibrary({
   entries,
@@ -101,6 +165,7 @@ export function ObjectLibrary({
   showGroups = true,
   showHeader = true,
   showToolbar = true,
+  flatTable = false,
   selectionMode = false,
   selectedContextIds,
   selectedObjectKeys,
@@ -121,7 +186,7 @@ export function ObjectLibrary({
   onMoveToWorkspace?: (entry: ObjectLibraryEntry, workspaceId: string) => void;
   onMoveToInbox?: (entry: ObjectLibraryEntry) => void;
   onCreateArtifact?: (
-    blueprintKey: SpectraBlueprintKey,
+    blueprintKey: ArtifactTypeKey,
     workspaceId?: string,
   ) => void;
   mode?: LibraryMode;
@@ -131,11 +196,13 @@ export function ObjectLibrary({
   showGroups?: boolean;
   showHeader?: boolean;
   showToolbar?: boolean;
+  flatTable?: boolean;
   selectionMode?: boolean;
   selectedContextIds?: Set<string>;
   selectedObjectKeys?: Set<string>;
   onToggleContext?: (entry: ObjectLibraryEntry) => void;
 }) {
+  const [aiClock, setAiClock] = useState(0);
   const [internalMode, setInternalMode] = useState<LibraryMode>("list");
   const mode = controlledMode ?? internalMode;
   const setMode = (next: LibraryMode) => {
@@ -143,15 +210,13 @@ export function ObjectLibrary({
     onModeChange?.(next);
   };
   const [search, setSearch] = useState("");
-  const [activeType, setActiveType] = useState<"all" | ObjectType>(
-    "all",
-  );
+  const [activeType, setActiveType] = useState<"all" | ObjectType>("all");
   const [sort, setSort] = useState<SortMode>("updated");
   const [sortOpen, setSortOpen] = useState(false);
   const [placementMenuId, setPlacementMenuId] = useState<string | null>(null);
   const [placementAnchor, setPlacementAnchor] = useState<DOMRect | null>(null);
   const [createMenuKey, setCreateMenuKey] = useState<string | null>(null);
-  const [unplacedOpen, setUnplacedOpen] = useState(false);
+  const [generalOpen, setGeneralOpen] = useState(false);
   const [draggingArtifactId, setDraggingArtifactId] = useState<string | null>(
     null,
   );
@@ -164,6 +229,28 @@ export function ObjectLibrary({
     selectionMode && onToggleContext ? onToggleContext(entry) : onOpen(entry);
 
   useEffect(() => {
+    setAiClock(Date.now());
+  }, []);
+
+  useEffect(() => {
+    if (!aiClock) return;
+    const nextExpiry = entries.reduce<number | null>((nearest, entry) => {
+      const expiry =
+        entry.artifact?.aiState === "edited"
+          ? entry.artifact.aiStateExpiresAt
+          : undefined;
+      if (!expiry || expiry <= aiClock) return nearest;
+      return nearest === null ? expiry : Math.min(nearest, expiry);
+    }, null);
+    if (nextExpiry === null) return;
+    const timer = window.setTimeout(
+      () => setAiClock(Date.now()),
+      Math.max(16, nextExpiry - aiClock + 24),
+    );
+    return () => window.clearTimeout(timer);
+  }, [aiClock, entries]);
+
+  useEffect(() => {
     if (!sortOpen) return;
     function close(event: PointerEvent) {
       if (!sortRef.current?.contains(event.target as Node)) setSortOpen(false);
@@ -174,7 +261,7 @@ export function ObjectLibrary({
 
   useEffect(() => {
     if (groupBy !== "workspace") return;
-    setUnplacedOpen(
+    setGeneralOpen(
       window.localStorage.getItem("spectra.library.unplaced.open") === "true",
     );
   }, [groupBy]);
@@ -183,16 +270,15 @@ export function ObjectLibrary({
     if (groupBy === "workspace")
       window.localStorage.setItem(
         "spectra.library.unplaced.open",
-        String(unplacedOpen),
+        String(generalOpen),
       );
-  }, [groupBy, unplacedOpen]);
+  }, [groupBy, generalOpen]);
 
   const visible = useMemo(() => {
     const needle = search.trim().toLowerCase();
     return entries
       .filter(
-        (entry) =>
-          activeType === "all" || objectType(entry) === activeType,
+        (entry) => activeType === "all" || objectType(entry) === activeType,
       )
       .filter(
         (entry) =>
@@ -210,9 +296,17 @@ export function ObjectLibrary({
           );
         if (sort === "workspace")
           return (
-            (a.artifact ? artifactPlacements(a.artifact)[0]?.workspaceTitle : workspaces.find((workspace) => workspace._id === a.thread?.workspaceId)?.title) ?? "Unplaced"
+            (a.artifact
+              ? artifactPlacements(a.artifact)[0]?.workspaceTitle
+              : workspaces.find(
+                  (workspace) => workspace._id === a.thread?.workspaceId,
+                )?.title) ?? "General"
           ).localeCompare(
-            (b.artifact ? artifactPlacements(b.artifact)[0]?.workspaceTitle : workspaces.find((workspace) => workspace._id === b.thread?.workspaceId)?.title) ?? "Unplaced",
+            (b.artifact
+              ? artifactPlacements(b.artifact)[0]?.workspaceTitle
+              : workspaces.find(
+                  (workspace) => workspace._id === b.thread?.workspaceId,
+                )?.title) ?? "General",
           );
         if (sort === "activity")
           return (
@@ -221,8 +315,7 @@ export function ObjectLibrary({
           );
         if (sort === "alphabetical")
           return objectTitle(a).localeCompare(objectTitle(b));
-        if (sort === "created")
-          return objectCreatedAt(b) - objectCreatedAt(a);
+        if (sort === "created") return objectCreatedAt(b) - objectCreatedAt(a);
         if (sort === "type")
           return (
             objectType(a).localeCompare(objectType(b)) ||
@@ -232,10 +325,12 @@ export function ObjectLibrary({
       });
   }, [activeType, entries, search, sort, workspaces]);
 
-  const unplaced =
+  const generalEntries =
     groupBy === "workspace"
-      ? visible.filter(
-          (entry) => entry.artifact ? artifactPlacements(entry.artifact).length === 0 : !entry.thread?.workspaceId,
+      ? visible.filter((entry) =>
+          entry.artifact
+            ? artifactPlacements(entry.artifact).length === 0
+            : !entry.thread?.workspaceId,
         )
       : [];
   const groups =
@@ -247,14 +342,21 @@ export function ObjectLibrary({
           soft: workspaceAccent(workspace, index).soft,
           border: workspaceAccent(workspace, index).border,
           workspace,
-          entries: visible.filter((entry) => entry.thread ? entry.thread.workspaceId === workspace._id : entry.artifact ?
-            artifactPlacements(entry.artifact).some(
-              (placement) => placement.workspaceId === workspace._id,
-            ) : false,
+          entries: visible.filter((entry) =>
+            entry.thread
+              ? entry.thread.workspaceId === workspace._id
+              : entry.artifact
+                ? artifactPlacements(entry.artifact).some(
+                    (placement) => placement.workspaceId === workspace._id,
+                  )
+                : false,
           ),
         }))
       : types.slice(1).map((type) => {
-          const meta = type.key === "thread" ? threadMeta : blueprintMeta[type.key as SpectraBlueprintKey];
+          const meta =
+            type.key === "thread"
+              ? threadMeta
+              : blueprintMeta[type.key as SpectraBlueprintKey];
           return {
             key: type.key,
             label: type.label,
@@ -262,25 +364,23 @@ export function ObjectLibrary({
             soft: `color-mix(in oklab, ${meta.color} 7%, var(--bg-elevated))`,
             border: `color-mix(in oklab, ${meta.color} 18%, var(--border-default))`,
             workspace: undefined,
-            entries: visible.filter(
-              (entry) => objectType(entry) === type.key,
-            ),
+            entries: visible.filter((entry) => objectType(entry) === type.key),
           };
         });
   const populatedGroups = groups.filter((group) => group.entries.length > 0);
   const canDragMove = Boolean(onMoveToWorkspace || onMoveToInbox);
 
-  function beginDrag(
-    event: DragEvent<HTMLElement>,
-    entry: ObjectLibraryEntry,
-  ) {
+  function beginDrag(event: DragEvent<HTMLElement>, entry: ObjectLibraryEntry) {
     if (selectionMode || !canDragMove || !entry.artifact) {
       event.preventDefault();
       return;
     }
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData("text/plain", entry.artifact._id);
-    event.dataTransfer.setData("application/x-spectra-artifact", entry.artifact._id);
+    event.dataTransfer.setData(
+      "application/x-spectra-artifact",
+      entry.artifact._id,
+    );
     setDraggingArtifactId(entry.artifact._id);
   }
 
@@ -368,7 +468,9 @@ export function ObjectLibrary({
             danger
             disabled={busyKey === `hide:${entry.item._id}`}
             onClick={() => onRemove(entry)}
-            className={busyKey === `hide:${entry.item._id}` ? "animate-spin" : undefined}
+            className={
+              busyKey === `hide:${entry.item._id}` ? "animate-spin" : undefined
+            }
           />
         ) : null}
         {onDelete && entry.artifact ? (
@@ -378,7 +480,11 @@ export function ObjectLibrary({
             danger
             disabled={busyKey === `delete:${entry.artifact._id}`}
             onClick={() => onDelete(entry)}
-            className={busyKey === `delete:${entry.artifact._id}` ? "animate-spin" : undefined}
+            className={
+              busyKey === `delete:${entry.artifact._id}`
+                ? "animate-spin"
+                : undefined
+            }
           />
         ) : null}
       </div>
@@ -386,7 +492,8 @@ export function ObjectLibrary({
   }
 
   function placementAction(entry: ObjectLibraryEntry) {
-    if (!entry.artifact || !onAddToWorkspace || workspaces.length === 0) return actions(entry);
+    if (!entry.artifact || !onAddToWorkspace || workspaces.length === 0)
+      return actions(entry);
     const artifact = entry.artifact;
     const open = placementMenuId === artifact._id;
     const placements = artifactPlacements(artifact);
@@ -417,14 +524,16 @@ export function ObjectLibrary({
                   onMoveToInbox(entry);
                 }}
               >
-                <span className="min-w-0 flex-1 truncate">Move to Inbox</span>
+                <span className="min-w-0 flex-1 truncate">Move to General</span>
               </button>
             ) : null}
             {workspaces.map((workspace) => {
               const alreadyPlaced = placements.some(
                 (placement) => placement.workspaceId === workspace._id,
               );
-              const moveAvailable = Boolean(onMoveToWorkspace && hasVisiblePlacement && !alreadyPlaced);
+              const moveAvailable = Boolean(
+                onMoveToWorkspace && hasVisiblePlacement && !alreadyPlaced,
+              );
               return (
                 <button
                   key={workspace._id}
@@ -433,12 +542,15 @@ export function ObjectLibrary({
                   disabled={alreadyPlaced}
                   onClick={() => {
                     setPlacementMenuId(null);
-                    if (moveAvailable) onMoveToWorkspace?.(entry, workspace._id);
+                    if (moveAvailable)
+                      onMoveToWorkspace?.(entry, workspace._id);
                     else onAddToWorkspace(entry, workspace._id);
                   }}
                 >
                   <span className="min-w-0 flex-1 truncate">
-                    {moveAvailable ? `Move to ${workspace.title}` : workspace.title}
+                    {moveAvailable
+                      ? `Move to ${workspace.title}`
+                      : workspace.title}
                   </span>
                   {alreadyPlaced ? (
                     <CheckCircle2 className="h-4 w-4 text-[var(--success)]" />
@@ -467,43 +579,62 @@ export function ObjectLibrary({
         </button>
         {open ? (
           <div className="absolute bottom-[calc(100%+7px)] left-0 z-30 w-[210px] rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 shadow-[0_14px_32px_rgba(27,20,12,0.13)]">
-            {types.slice(1).filter((type) => type.key !== "thread").map((type) => {
-              const meta = blueprintMeta[type.key as SpectraBlueprintKey];
-              const Icon = meta.icon;
-              return (
-                <button
-                  key={type.key}
-                  type="button"
-                  className="flex w-full items-center gap-2 rounded-[7px] px-2.5 py-2 text-left text-[12px] text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
-                  onClick={() => {
-                    setCreateMenuKey(null);
-                    onCreateArtifact(
-                      type.key as SpectraBlueprintKey,
-                      workspaceId,
-                    );
-                  }}
-                >
-                  <Icon className="h-3.5 w-3.5" style={{ color: meta.color }} />
-                  {type.label}
-                </button>
-              );
-            })}
+            {types
+              .slice(1)
+              .filter(
+                (type) => type.key !== "thread" && type.key !== "timetable",
+              )
+              .map((type) => {
+                const meta = blueprintMeta[type.key as SpectraBlueprintKey];
+                const Icon = meta.icon;
+                return (
+                  <button
+                    key={type.key}
+                    type="button"
+                    className="flex w-full items-center gap-2 rounded-[7px] px-2.5 py-2 text-left text-[12px] text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
+                    onClick={() => {
+                      setCreateMenuKey(null);
+                      onCreateArtifact(
+                        type.key as ArtifactTypeKey,
+                        workspaceId,
+                      );
+                    }}
+                  >
+                    <Icon
+                      className="h-3.5 w-3.5"
+                      style={{ color: meta.color }}
+                    />
+                    {type.label}
+                  </button>
+                );
+              })}
           </div>
         ) : null}
       </div>
     );
   }
 
-  function unplacedCard(entry: ObjectLibraryEntry) {
+  function renderGeneralCard(entry: ObjectLibraryEntry) {
     const meta = objectMeta(entry);
     const Icon = meta.icon;
     const id = objectId(entry);
-    const selected = selectedObjectKeys?.has(`${entry.thread ? "thread" : "artifact"}:${id}`) ?? selectedContextIds?.has(id);
+    const selected =
+      selectedObjectKeys?.has(
+        `${entry.thread ? "thread" : "artifact"}:${id}`,
+      ) ?? selectedContextIds?.has(id);
     return (
       <article
         key={id}
         data-spectra-card="inbox"
-        data-card-state={dropTargetKey === "inbox" ? "drop-target" : draggingArtifactId === entry.artifact?._id ? "drag-preview" : selected ? "multi-selected" : "normal"}
+        data-card-state={
+          dropTargetKey === "inbox"
+            ? "drop-target"
+            : draggingArtifactId === entry.artifact?._id
+              ? "drag-preview"
+              : selected
+                ? "multi-selected"
+                : objectAiState(entry, aiClock)
+        }
         data-interactive="true"
         draggable={Boolean(entry.artifact) && canDragMove && !selectionMode}
         className="relative min-h-[118px] overflow-hidden p-3"
@@ -567,16 +698,19 @@ export function ObjectLibrary({
       ) : null}
 
       {showToolbar ? (
-        <div className="mt-5 flex flex-wrap items-center gap-2 pb-1">
+        <div
+          className={`mt-5 flex flex-wrap items-center gap-2 pb-1 ${flatTable ? "spectra-object-flat-toolbar" : ""}`}
+        >
           <div className="flex shrink-0 gap-1 overflow-x-auto">
             {types.map((type) => (
               <button
                 key={type.key}
                 type="button"
+                data-active={activeType === type.key}
                 onClick={() => setActiveType(type.key)}
-                className={`inline-flex h-9 items-center rounded-[8px] px-3 text-[13px] font-medium transition-all ${activeType === type.key ? "bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[0_1px_7px_rgba(27,20,12,0.08)]" : "text-[var(--text-secondary)] hover:bg-[color-mix(in_oklab,var(--bg-elevated)_68%,transparent)]"}`}
+                className={`inline-flex h-9 shrink-0 items-center rounded-[8px] px-3 text-[13px] font-medium transition-all ${activeType === type.key ? "bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[0_1px_7px_rgba(27,20,12,0.08)]" : "text-[var(--text-secondary)] hover:bg-[color-mix(in_oklab,var(--bg-elevated)_68%,transparent)]"}`}
               >
-                {type.label}
+                {flatTable && type.key === "all" ? "All work" : type.label}
               </button>
             ))}
           </div>
@@ -647,24 +781,38 @@ export function ObjectLibrary({
               ) : null}
             </div>
             {showModeSwitcher ? (
-              <div className="flex shrink-0 rounded-[10px] bg-[color-mix(in_oklab,var(--bg-elevated)_74%,transparent)] p-1 shadow-[inset_0_0_0_1px_var(--border-default)]">
-                {[
-                  { key: "list" as const, label: "List", icon: List },
-                  { key: "board" as const, label: "Board", icon: PanelTop },
-                ].map((option) => {
-                  const Icon = option.icon;
-                  return (
-                    <button
-                      key={option.key}
-                      type="button"
-                      className={`inline-flex h-8 items-center gap-2 rounded-[7px] px-3 text-[12px] font-medium transition-all duration-200 ${mode === option.key ? "bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-[0_1px_6px_rgba(27,20,12,0.08)]" : "text-[var(--text-secondary)] hover:bg-[color-mix(in_oklab,var(--bg-primary)_52%,transparent)] hover:text-[var(--text-primary)]"}`}
-                      onClick={() => setMode(option.key)}
-                    >
-                      <Icon className="h-4 w-4" />
-                      {option.label}
-                    </button>
-                  );
-                })}
+              <div className="flex shrink-0 items-center gap-1.5">
+                {flatTable ? (
+                  <span className="mr-0.5 text-[11px] text-[var(--text-tertiary)]">
+                    View
+                  </span>
+                ) : null}
+                <div className="flex items-center gap-1">
+                  {[
+                    {
+                      key: "board" as const,
+                      label: "Board view",
+                      icon: PanelTop,
+                    },
+                    { key: "list" as const, label: "List view", icon: List },
+                  ].map((option) => {
+                    const Icon = option.icon;
+                    const active = mode === option.key;
+                    return (
+                      <button
+                        key={option.key}
+                        type="button"
+                        aria-label={option.label}
+                        aria-pressed={active}
+                        title={option.label}
+                        className={`grid size-8 place-items-center rounded-[7px] transition ${active ? "border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[0_1px_4px_rgba(27,20,12,0.06)]" : "text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"}`}
+                        onClick={() => setMode(option.key)}
+                      >
+                        <Icon className="h-3.5 w-3.5" />
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             ) : null}
           </div>
@@ -675,36 +823,43 @@ export function ObjectLibrary({
         <section className="mt-7">
           <button
             type="button"
-            onClick={() => setUnplacedOpen((open) => !open)}
+            onClick={() => setGeneralOpen((open) => !open)}
             className="mb-4 flex w-full items-center gap-2 text-left"
           >
             <ChevronDown
-              className={`h-4 w-4 text-[var(--text-tertiary)] transition ${unplacedOpen ? "" : "-rotate-90"}`}
+              className={`h-4 w-4 text-[var(--text-tertiary)] transition ${generalOpen ? "" : "-rotate-90"}`}
             />
             <h3 className="font-display text-[20px] font-semibold text-[var(--text-primary)]">
-              Inbox
+              General
             </h3>
             <span className="rounded-[6px] bg-[var(--bg-secondary)] px-1.5 text-[12px] text-[var(--text-secondary)]">
-              {unplaced.length}
+              {generalEntries.length}
             </span>
             <span className="ml-1 text-[12px] text-[var(--text-tertiary)]">
               Not placed in a workspace
             </span>
           </button>
-          {unplacedOpen ? (
+          {generalOpen ? (
             <div
               className="grid gap-3 xl:grid-cols-3"
-              data-card-state={dropTargetKey === "inbox" ? "drop-target" : undefined}
+              data-card-state={
+                dropTargetKey === "inbox" ? "drop-target" : undefined
+              }
               onDragOver={(event) => allowDrop(event, "inbox")}
               onDragLeave={(event) => {
-                if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropTargetKey(null);
+                if (
+                  !event.currentTarget.contains(
+                    event.relatedTarget as Node | null,
+                  )
+                )
+                  setDropTargetKey(null);
               }}
               onDrop={(event) => finishDrop(event, { inbox: true })}
             >
-              {unplaced.slice(0, 6).map(unplacedCard)}
-              {unplaced.length === 0 ? (
+              {generalEntries.slice(0, 6).map(renderGeneralCard)}
+              {generalEntries.length === 0 ? (
                 <div className="rounded-[8px] border border-dashed border-[var(--border-default)] px-4 py-7 text-[13px] text-[var(--text-secondary)]">
-                  Inbox is clear.
+                  General is clear.
                 </div>
               ) : null}
             </div>
@@ -712,7 +867,109 @@ export function ObjectLibrary({
         </section>
       ) : null}
 
-      {showGroups && mode === "list" ? (
+      {showGroups && mode === "list" && flatTable ? (
+        <div className="spectra-object-flat-table mt-4 overflow-hidden rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)]">
+          <div className="grid h-11 grid-cols-[28px_minmax(250px,1.45fr)_140px_130px_105px_92px_28px] items-center gap-3 border-b border-[var(--border-default)] px-3 text-[12px] font-medium text-[var(--text-secondary)]">
+            <span className="size-3.5 rounded-[3px] border border-[var(--border-default)]" />
+            <span>Name</span>
+            <span>Type</span>
+            <span>Workspace</span>
+            <span>Last edited</span>
+            <span>Owner</span>
+            <span />
+          </div>
+          {visible.map((entry) => {
+            const meta = objectMeta(entry);
+            const Icon = meta.icon;
+            const id = objectId(entry);
+            const placement = entry.artifact
+              ? artifactPlacements(entry.artifact)[0]
+              : undefined;
+            const workspaceName =
+              placement?.workspaceTitle ??
+              workspaces.find(
+                (workspace) => workspace._id === entry.thread?.workspaceId,
+              )?.title ??
+              "General";
+            const selected =
+              selectedObjectKeys?.has(
+                `${entry.thread ? "thread" : "artifact"}:${id}`,
+              ) ?? selectedContextIds?.has(id);
+            return (
+              <button
+                key={id}
+                type="button"
+                className="grid min-h-[52px] w-full grid-cols-[28px_minmax(250px,1.45fr)_140px_130px_105px_92px_28px] items-center gap-3 border-b border-[var(--card-border-soft)] px-3 text-left transition last:border-0 hover:bg-[var(--bg-hover)]"
+                onClick={() => activateEntry(entry)}
+              >
+                <span
+                  className={`grid size-3.5 place-items-center rounded-[3px] border ${selected ? "border-[var(--text-primary)] bg-[var(--text-primary)] text-white" : "border-[var(--border-default)]"}`}
+                >
+                  {selected ? <Check className="size-2.5" /> : null}
+                </span>
+                <span className="flex min-w-0 items-center gap-2.5">
+                  <span
+                    className="grid size-7 shrink-0 place-items-center rounded-[7px]"
+                    style={{
+                      background: `color-mix(in oklab, ${meta.color} 10%, white)`,
+                      color: meta.color,
+                    }}
+                  >
+                    <Icon className="size-3.5" />
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-[var(--text-primary)]">
+                    {objectTitle(entry)}
+                  </span>
+                  {entry.artifact?.tags?.length ? (
+                    <span className="flex shrink-0 gap-1">
+                      {entry.artifact.tags.slice(0, 2).map((tag) => (
+                        <span
+                          key={tag}
+                          className="rounded-[5px] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[11px] text-[var(--text-secondary)]"
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                    </span>
+                  ) : null}
+                </span>
+                <span className="flex items-center gap-2 truncate text-[13px] text-[var(--text-primary)]">
+                  <span
+                    className="grid size-5 shrink-0 place-items-center rounded-[5px]"
+                    style={{
+                      background: `color-mix(in oklab, ${meta.color} 10%, white)`,
+                      color: meta.color,
+                    }}
+                  >
+                    <Icon className="size-3" />
+                  </span>
+                  {meta.label}
+                </span>
+                <span className="truncate text-[13px] text-[var(--text-secondary)]">
+                  {workspaceName}
+                </span>
+                <span className="text-[13px] text-[var(--text-secondary)]">
+                  {formatRelativeTime(objectUpdatedAt(entry))}
+                </span>
+                <span className="flex items-center gap-1.5 text-[13px] text-[var(--text-primary)]">
+                  <span className="grid size-6 place-items-center rounded-full bg-[color-mix(in_oklab,var(--brand-primary)_18%,var(--bg-secondary))] text-[10px] font-semibold text-[var(--brand-primary)]">
+                    You
+                  </span>
+                  You
+                </span>
+                <span />
+              </button>
+            );
+          })}
+          {visible.length === 0 ? (
+            <div className="px-4 py-10 text-center text-[11px] text-[var(--text-secondary)]">
+              No work matches these filters.
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {showGroups && mode === "list" && !flatTable ? (
         <main className="mt-8">
           <section>
             <div className="mb-4">
@@ -729,14 +986,23 @@ export function ObjectLibrary({
               {populatedGroups.map((group) => (
                 <section
                   key={group.key}
-                  data-spectra-card="side"
-                  data-card-state={dropTargetKey === group.key ? "drop-target" : "normal"}
+                  data-spectra-group="true"
+                  data-card-state={
+                    dropTargetKey === group.key ? "drop-target" : "normal"
+                  }
                   className="overflow-hidden rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)]"
                   onDragOver={(event) => allowDrop(event, group.key)}
                   onDragLeave={(event) => {
-                    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropTargetKey(null);
+                    if (
+                      !event.currentTarget.contains(
+                        event.relatedTarget as Node | null,
+                      )
+                    )
+                      setDropTargetKey(null);
                   }}
-                  onDrop={(event) => finishDrop(event, { workspaceId: group.workspace?._id })}
+                  onDrop={(event) =>
+                    finishDrop(event, { workspaceId: group.workspace?._id })
+                  }
                 >
                   <div
                     className="flex h-11 items-center justify-between border-b border-[var(--border-default)] px-4"
@@ -768,17 +1034,38 @@ export function ObjectLibrary({
                       const Icon = meta.icon;
                       const workspaceName =
                         group.workspace?.title ??
-                        (entry.artifact ? artifactPlacements(entry.artifact)[0]?.workspaceTitle : workspaces.find((workspace) => workspace._id === entry.thread?.workspaceId)?.title) ??
-                        "Unplaced";
+                        (entry.artifact
+                          ? artifactPlacements(entry.artifact)[0]
+                              ?.workspaceTitle
+                          : workspaces.find(
+                              (workspace) =>
+                                workspace._id === entry.thread?.workspaceId,
+                            )?.title) ??
+                        "General";
                       const id = objectId(entry);
-                      const contextSelected = selectedObjectKeys?.has(`${entry.thread ? "thread" : "artifact"}:${id}`) ?? selectedContextIds?.has(id);
+                      const contextSelected =
+                        selectedObjectKeys?.has(
+                          `${entry.thread ? "thread" : "artifact"}:${id}`,
+                        ) ?? selectedContextIds?.has(id);
                       return (
                         <div
                           key={`${group.key}:${entry.item?._id ?? id}`}
                           data-object-row="true"
-                          data-card-state={draggingArtifactId === entry.artifact?._id ? "drag-preview" : selectedArtifactId === id ? "focused" : contextSelected ? "multi-selected" : "normal"}
+                          data-card-state={
+                            draggingArtifactId === entry.artifact?._id
+                              ? "drag-preview"
+                              : selectedArtifactId === id
+                                ? "focused"
+                                : contextSelected
+                                  ? "multi-selected"
+                                  : objectAiState(entry, aiClock)
+                          }
                           data-interactive="true"
-                          draggable={Boolean(entry.artifact) && canDragMove && !selectionMode}
+                          draggable={
+                            Boolean(entry.artifact) &&
+                            canDragMove &&
+                            !selectionMode
+                          }
                           className="grid min-h-[58px] cursor-pointer grid-cols-[minmax(260px,1.2fr)_minmax(130px,0.6fr)_minmax(130px,0.5fr)_auto] items-center gap-4 border-b border-[var(--card-border-soft)] px-4 py-2.5 transition-colors last:border-b-0 hover:bg-[color-mix(in_oklab,var(--bg-hover)_58%,transparent)] data-[card-state=context]:bg-[color-mix(in_oklab,var(--card-focus)_5%,transparent)] data-[card-state=focused]:bg-[color-mix(in_oklab,var(--card-focus)_5%,transparent)]"
                           role="button"
                           tabIndex={0}
@@ -794,7 +1081,13 @@ export function ObjectLibrary({
                           }}
                         >
                           <div className="flex min-w-0 items-center gap-3">
-                            {selectionMode ? <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-[5px] border transition ${contextSelected ? "border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-primary)]" : "border-[var(--border-default)] text-transparent"}`}><Check className="h-3 w-3" /></span> : null}
+                            {selectionMode ? (
+                              <span
+                                className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-[5px] border transition ${contextSelected ? "border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-primary)]" : "border-[var(--border-default)] text-transparent"}`}
+                              >
+                                <Check className="h-3 w-3" />
+                              </span>
+                            ) : null}
                             <Icon
                               className="h-5 w-5 shrink-0"
                               style={{ color: meta.color }}
@@ -809,15 +1102,22 @@ export function ObjectLibrary({
                             </div>
                           </div>
                           <div className="flex items-center gap-2 text-[12px] text-[var(--text-secondary)]">
-                            <span
-                              className="h-1.5 w-1.5 rounded-full"
-                              style={{ background: group.color }}
-                            />
-                            {workspaceName}
+                            {groupBy === "workspace" ? (
+                              <>
+                                <span
+                                  className="h-1.5 w-1.5 rounded-full"
+                                  style={{ background: group.color }}
+                                />
+                                {workspaceName}
+                              </>
+                            ) : (
+                              <span className="truncate">
+                                {objectSummary(entry)}
+                              </span>
+                            )}
                           </div>
                           <div className="text-[12px] text-[var(--text-secondary)]">
-                            Updated{" "}
-                            {formatRelativeTime(objectUpdatedAt(entry))}
+                            Updated {formatRelativeTime(objectUpdatedAt(entry))}
                           </div>
                           <div onClick={(event) => event.stopPropagation()}>
                             {selectionMode ? null : actions(entry)}
@@ -859,12 +1159,12 @@ export function ObjectLibrary({
       ) : null}
 
       {showGroups && mode === "board" ? (
-        <div className="mt-8 overflow-x-auto pb-6">
+        <div className="mt-3 overflow-x-auto pb-6">
           <main
-            className="grid gap-3 pr-2"
+            className="grid w-full gap-3 pr-2"
             style={{
-              gridTemplateColumns: `repeat(${Math.max(populatedGroups.length, 1)}, clamp(300px, 27vw, 360px))`,
-              width: "max-content",
+              gridTemplateColumns: `repeat(${Math.max(populatedGroups.length, 1)}, minmax(150px, 1fr))`,
+              minWidth: `${Math.max(populatedGroups.length, 1) * 162}px`,
             }}
           >
             {populatedGroups.map((group) => {
@@ -874,7 +1174,13 @@ export function ObjectLibrary({
                   key={group.key}
                   className="self-start rounded-[10px] border p-2.5 shadow-[0_10px_28px_rgba(27,20,12,0.04)]"
                   data-board-column={group.key}
-                  style={{ "--card-accent": group.color, borderColor: group.border, background: group.soft } as CSSProperties}
+                  style={
+                    {
+                      "--card-accent": group.color,
+                      borderColor: group.border,
+                      background: group.soft,
+                    } as CSSProperties
+                  }
                 >
                   <div className="mb-2 flex h-8 items-center justify-between px-1">
                     <div className="flex items-center gap-2 text-[13px] font-semibold text-[var(--text-primary)]">
@@ -895,19 +1201,36 @@ export function ObjectLibrary({
                         const meta = objectMeta(entry);
                         const Icon = meta.icon;
                         const id = objectId(entry);
-                        const contextSelected = selectedObjectKeys?.has(`${entry.thread ? "thread" : "artifact"}:${id}`) ?? selectedContextIds?.has(id);
+                        const contextSelected =
+                          selectedObjectKeys?.has(
+                            `${entry.thread ? "thread" : "artifact"}:${id}`,
+                          ) ?? selectedContextIds?.has(id);
                         return (
                           <button
                             key={`${group.key}:${entry.item?._id ?? id}`}
                             type="button"
                             data-spectra-card="board"
-                            data-card-state={contextSelected ? "context" : selectedArtifactId === id ? "focused" : "normal"}
+                            data-card-state={
+                              contextSelected
+                                ? "context"
+                                : selectedArtifactId === id
+                                  ? "focused"
+                                  : objectAiState(entry, aiClock)
+                            }
                             data-interactive="true"
-                            className="flex min-h-[66px] w-full items-center gap-3 px-3 py-2 text-left"
-                            style={{ "--card-accent": meta.color } as CSSProperties}
+                            className="flex min-h-[82px] w-full items-start gap-3 px-3 py-3 text-left"
+                            style={
+                              { "--card-accent": meta.color } as CSSProperties
+                            }
                             onClick={() => activateEntry(entry)}
                           >
-                            {selectionMode ? <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-[5px] border transition ${contextSelected ? "border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-primary)]" : "border-[var(--border-default)] text-transparent"}`}><Check className="h-3 w-3" /></span> : null}
+                            {selectionMode ? (
+                              <span
+                                className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-[5px] border transition ${contextSelected ? "border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-primary)]" : "border-[var(--border-default)] text-transparent"}`}
+                              >
+                                <Check className="h-3 w-3" />
+                              </span>
+                            ) : null}
                             <Icon
                               className="h-4 w-4 shrink-0"
                               style={{ color: meta.color }}

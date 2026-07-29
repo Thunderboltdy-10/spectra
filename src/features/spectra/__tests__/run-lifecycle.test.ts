@@ -16,7 +16,7 @@ describe("Spectra AIRun lifecycle", () => {
   it("transitions queued runs through running and completed", () => {
     const queued = createQueuedRun({
       id: runId,
-      ownerUserId: "user_1",
+      ownerAccountId: "account_1",
       sourceSurface: "workspace",
       userPrompt: "Make flashcards",
       now: 1,
@@ -33,7 +33,7 @@ describe("Spectra AIRun lifecycle", () => {
     const failed = failRun(
       createQueuedRun({
         id: runId,
-        ownerUserId: "user_1",
+        ownerAccountId: "account_1",
         sourceSurface: "artifact",
         userPrompt: "Shorten this",
         now: 1,
@@ -57,7 +57,7 @@ describe("Spectra AIRun lifecycle", () => {
     const cancelled = cancelRun(
       createQueuedRun({
         id: runId,
-        ownerUserId: "user_1",
+        ownerAccountId: "account_1",
         sourceSurface: "chat",
         userPrompt: "Stop",
       }),
@@ -66,4 +66,6 @@ describe("Spectra AIRun lifecycle", () => {
     expect(() => markRunRunning(cancelled)).toThrow("Cannot mark cancelled run as running.");
   });
 });
+
+
 

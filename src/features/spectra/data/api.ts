@@ -1,6 +1,262 @@
+import type { ArtifactTypeKey } from "../artifacts/types";
 import type { ArtifactCardView } from "../components/artifact-card";
+import type { PublishedCodeBuildProjection } from "../code/published-build";
+import type { TimetablePersonalState } from "../timetable/model";
 
-export type SpectraBlueprintKey = ArtifactCardView["blueprintKey"];
+export type SpectraBlueprintKey = ArtifactTypeKey | "thread_reference";
+
+export type SpectraAiEffect = {
+  effectId: string;
+  runId: string;
+  executionId: string;
+  operationIndex?: number;
+  title: string;
+  detail?: string;
+  activity: "create" | "edit" | "verify" | "other";
+  regionHint?: string;
+  regionIds: string[];
+  changedPaths: string[];
+  state: "active" | "settling";
+  startedAt: number;
+  updatedAt: number;
+  expiresAt?: number;
+};
+
+export type SpectraMemoryScope =
+  | "private_global"
+  | "private_school"
+  | "workspace"
+  | "shared_artifact"
+  | "system";
+
+export type SpectraMemoryClaimType =
+  | "declared_fact"
+  | "inferred_preference"
+  | "correction"
+  | "decision"
+  | "recurring_workflow"
+  | "commitment"
+  | "mistake_avoidance"
+  | "learning_signal"
+  | "relationship"
+  | "workspace_convention";
+
+export type SpectraMemoryCategories = {
+  declaredFacts: boolean;
+  preferences: boolean;
+  decisions: boolean;
+  workflows: boolean;
+  commitments: boolean;
+  learningSignals: boolean;
+  relationships: boolean;
+  workspaceConventions: boolean;
+};
+
+export type SpectraMemoryPreferences = {
+  enabled: boolean;
+  capturePaused: boolean;
+  categoryControls: SpectraMemoryCategories;
+  capsuleTargetTokens: number;
+  updatedAt: number;
+};
+
+export type SpectraMemoryEvidence = {
+  _id: string;
+  sourceType:
+    | "user_statement"
+    | "thread"
+    | "artifact"
+    | "workspace"
+    | "managebac"
+    | "product_event"
+    | "correction";
+  sourceId?: string;
+  sourceVersionId?: string;
+  sourceRegionId?: string;
+  excerptPreview?: string;
+  captureReason: string;
+  accessStatus: "available" | "revoked" | "deleted" | "school_changed";
+  observedAt: number;
+};
+
+export type SpectraMemoryClaim = {
+  _id: string;
+  scope: SpectraMemoryScope;
+  workspaceId?: string;
+  artifactId?: string;
+  subjectKind: "user" | "workspace" | "artifact" | "workflow" | "relationship";
+  subjectId?: string;
+  claimType: SpectraMemoryClaimType;
+  proposition: string;
+  assertion: "asserted" | "inferred";
+  confidence: number;
+  status: "proposed" | "active" | "disputed" | "superseded" | "expired";
+  createdBy: "user" | "policy" | "model";
+  validFrom: number;
+  expiresAt?: number;
+  lastConfirmedAt?: number;
+  supersedesId?: string;
+  createdAt: number;
+  updatedAt: number;
+  evidence: SpectraMemoryEvidence[];
+};
+
+export type SpectraManageBacIntegration = {
+  _id: string;
+  provider: "managebac";
+  baseUrl: string;
+  referenceUrl?: string;
+  authHeaderName: string;
+  authScheme: "raw" | "bearer";
+  status:
+    "draft" | "validating" | "connected" | "degraded" | "blocked" | "revoked";
+  tokenMode: "read_only";
+  credentialFingerprint?: string;
+  providerVersion?: string;
+  manifestVersion: number;
+  capabilityCoverage: {
+    discovered: number;
+    verifiedReadable: number;
+    unverified: number;
+    failed: number;
+    quarantined: number;
+  };
+  syncPolicy: {
+    frequencyMinutes: number;
+    autoCreateClasses: boolean;
+    autoImportTasks: boolean;
+    autoApplySafeUpdates: boolean;
+    conflictMode: "review" | "ask_me";
+  };
+  freshnessSlaMinutes: number;
+  requestBudgetPerMinute: number;
+  bootstrapVersion: number;
+  lastValidatedAt?: number;
+  lastSyncAt?: number;
+  nextSyncAt?: number;
+  blockedReason?: string;
+  rotationDueAt?: number;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type SpectraManageBacCapability = {
+  _id: string;
+  category: string;
+  name: string;
+  recordType: string;
+  method?: "GET";
+  path?: string;
+  purpose: string;
+  scope: "personal" | "class" | "school";
+  minimumRole?: "student" | "teacher" | "school_admin";
+  permissionState: "read_only" | "not_enabled" | "unverified";
+  verificationStatus: "verified" | "failed" | "quarantined" | "unverified";
+  freshnessSlaMinutes: number;
+  contractVersion?: string;
+  responseSchemaHash?: string;
+  routeSource?: "tenant_reference" | "api_manager" | "manual_verified";
+  normalization?: unknown;
+  lastVerifiedAt?: number;
+  lastErrorCode?: string;
+};
+
+export type SpectraManageBacRecord = {
+  _id: string;
+  recordType: string;
+  classification?: "personal" | "class" | "school" | "public_resource";
+  audienceScope?:
+    "mapped_user" | "class_members" | "authorized_staff" | "school";
+  providerClassId?: string;
+  academicPeriodKey?: string;
+  normalized: Record<string, unknown>;
+  sourceModifiedAt?: number;
+  fetchedAt: number;
+  tombstone: boolean;
+  provenanceUrl?: string;
+};
+
+export type SpectraManageBacSyncRun = {
+  _id: string;
+  kind: "identity" | "bootstrap" | "manual" | "scheduled" | "reconciliation";
+  status:
+    | "queued"
+    | "running"
+    | "awaiting_review"
+    | "completed"
+    | "partial"
+    | "failed"
+    | "cancelled";
+  stage: string;
+  counts: {
+    fetched: number;
+    created: number;
+    updated: number;
+    unchanged: number;
+    tombstoned: number;
+    projected: number;
+    skipped: number;
+    quarantined: number;
+    conflicts: number;
+    errors: number;
+  };
+  createdAt: number;
+  startedAt?: number;
+  completedAt?: number;
+  errorCode?: string;
+  errorSummary?: string;
+};
+
+export type SpectraManageBacConflict = {
+  _id: string;
+  kind: string;
+  projectionType: string;
+  oldSource: unknown;
+  newSource: unknown;
+  overlay?: unknown;
+  affectedLinks: string[];
+  suggestedActions: string[];
+  status: "open" | "resolved" | "dismissed";
+  createdAt: number;
+};
+
+export type SpectraManageBacOverview = {
+  admin: boolean;
+  data: {
+    integration: SpectraManageBacIntegration | null;
+    /** Non-secret admin hint from MANAGEBAC_BASE_URL when no integration exists. */
+    envBaseUrlHint?: string;
+    /** True when MANAGEBAC_API_KEY is present server-side for temporary testing. */
+    envTokenAvailable?: boolean;
+    school?: { _id: string; name: string } | null;
+    mapping?: {
+      status: "pending" | "verified" | "no_match" | "ambiguous" | "revoked";
+      matchCount?: number;
+      resolvedAt?: number;
+      updatedAt: number;
+    } | null;
+    capabilities: SpectraManageBacCapability[];
+    syncRuns: SpectraManageBacSyncRun[];
+    conflicts: SpectraManageBacConflict[];
+    records?: SpectraManageBacRecord[];
+    previews?: SpectraManageBacRecord[];
+    quarantine?: Array<{
+      _id: string;
+      capabilityId: string;
+      reasonCode: string;
+      contractVersion: string;
+      status: "open" | "reprocessed" | "dismissed";
+      createdAt: number;
+    }>;
+    identityQueue?: Array<{
+      mappingId: string;
+      account: { name: string; email: string } | null;
+      status: string;
+      matchCount: number;
+      updatedAt: number;
+    }>;
+  };
+};
 
 export type SpectraWorkspace = {
   _id: string;
@@ -13,10 +269,61 @@ export type SpectraWorkspace = {
   aiState?: "creating" | "updating" | "edited" | "failed";
   aiRunId?: string;
   aiStateExpiresAt?: number;
-  aiPreview?: { title?: string; description?: string; icon?: string; color?: string; startedAt: number };
+  aiPreview?: {
+    title?: string;
+    description?: string;
+    icon?: string;
+    color?: string;
+    startedAt: number;
+  };
   createdAt: number;
   updatedAt: number;
+  currentVersionId?: string;
   lastActivityAt: number;
+  ownership?: "owned" | "shared";
+  accessLevel?: "read" | "modify" | null;
+  capabilities?: Array<
+    | "read"
+    | "modify"
+    | "share"
+    | "delete"
+    | "restore"
+    | "use"
+    | "comment"
+    | "publish"
+  >;
+  accessReason?: string;
+  isShared?: boolean;
+  sharedWithCount?: number;
+};
+
+export type SpectraWorkspacePortableManifest = {
+  format: "spectra-workspace";
+  version: 1;
+  exportedAt: number;
+  workspace: {
+    title: string;
+    description?: string;
+    icon?: string;
+    color?: string;
+    defaultView: "cards" | "canvas" | "timeline" | "library";
+  };
+  placements: Array<{
+    artifactId: string;
+    title: string;
+    blueprintKey: SpectraBlueprintKey;
+    viewData: Record<string, unknown>;
+    layout: Record<string, unknown>;
+  }>;
+};
+
+export type SpectraWorkspaceManifestReport = {
+  exported?: number;
+  omitted?: number;
+  placed?: number;
+  skipped?: number;
+  unsupported: string[];
+  warnings: string[];
 };
 
 export type SpectraArtifact = {
@@ -31,16 +338,51 @@ export type SpectraArtifact = {
   aiRunId?: string;
   aiProgress?: number;
   aiStateExpiresAt?: number;
-  aiPreview?: { title?: string; summary?: string; content?: unknown; startedAt: number };
+  aiPreview?: {
+    title?: string;
+    summary?: string;
+    content?: unknown;
+    tags?: string[];
+    changedPaths?: string[];
+    effectTitle?: string;
+    effectDetail?: string;
+    effectActivity?: "create" | "edit" | "verify" | "other";
+    effectRegionHint?: string;
+    effectOperationIndex?: number;
+    startedAt: number;
+  };
+  aiEffects?: SpectraAiEffect[];
   createdAt: number;
   updatedAt: number;
+  currentVersionId?: string;
   placements?: Array<{
     workspaceId: string;
     workspaceTitle: string;
     workspaceItemId: string;
     pinned?: boolean;
   }>;
-  placementStatus?: "inbox" | "workspace";
+  placementStatus?: "inbox" | "shared" | "workspace";
+  ownership?: "owned" | "shared";
+  accessLevel?: "read" | "modify" | null;
+  capabilities?: Array<
+    | "read"
+    | "modify"
+    | "share"
+    | "delete"
+    | "restore"
+    | "use"
+    | "comment"
+    | "publish"
+  >;
+  accessReason?: string;
+  isShared?: boolean;
+  sharedWithCount?: number;
+  owner?: { name: string; avatarUrl?: string };
+  agentRelease?: {
+    versionId: string;
+    releaseNumber: number;
+    publishedAt: number;
+  } | null;
   createdFrom?: {
     source: "chat" | "workspace" | "artifact" | "manual" | "ai";
     threadId?: string;
@@ -57,13 +399,26 @@ export type SpectraArtifactLink = {
   _id: string;
   sourceArtifactId: string;
   targetArtifactId: string;
-  relationType: "related" | "supports" | "contradicts" | "source_for" | "generated_from" | "follow_up" | "belongs_with";
+  relationType:
+    | "related"
+    | "supports"
+    | "contradicts"
+    | "source_for"
+    | "generated_from"
+    | "follow_up"
+    | "belongs_with";
   label?: string;
   explanation?: string;
   createdBy: "user" | "ai" | "system";
   workspaceId?: string;
   direction: "incoming" | "outgoing";
-  artifact: { id: string; title: string; summary?: string; blueprintKey: SpectraBlueprintKey; updatedAt: number } | null;
+  artifact: {
+    id: string;
+    title: string;
+    summary?: string;
+    blueprintKey: SpectraBlueprintKey;
+    updatedAt: number;
+  } | null;
   createdAt: number;
   updatedAt: number;
 };
@@ -71,11 +426,34 @@ export type SpectraArtifactLink = {
 export type SpectraArtifactVersion = {
   _id: string;
   artifactId: string;
-  source: "manual" | "ai" | "revert";
+  source:
+    | "manual"
+    | "ai"
+    | "revert"
+    | "import"
+    | "restore"
+    | "migration"
+    | "checkpoint";
   runId?: string;
-  before: { title: string; summary?: string; content: unknown; tags: string[] };
-  after: { title: string; summary?: string; content: unknown; tags: string[] };
+  before?: {
+    title: string;
+    summary?: string;
+    content: unknown;
+    tags: string[];
+  };
+  after?: { title: string; summary?: string; content: unknown; tags: string[] };
+  snapshotState?: "ready" | "corrupt" | "unavailable";
+  snapshotError?: string;
   summary?: string;
+  name?: string;
+  stateVectorHash?: string;
+  integrityHash?: string;
+  changeGroupIds?: string[];
+  creatorAccountIds?: string[];
+  provenance?: { regionIds?: string[]; clientId?: string; source?: string };
+  versionNumber?: number;
+  creators?: Array<{ accountId: string; name: string; avatarUrl?: string }>;
+  run?: { runId: string; finalSummary?: string };
   createdAt: number;
 };
 
@@ -107,8 +485,32 @@ export type SpectraWorkspaceItem = {
 export type SpectraRun = {
   _id: string;
   executionId?: string;
-  status: "queued" | "running" | "awaiting_confirmation" | "completed" | "failed" | "cancelled";
-  phase?: "created" | "planning" | "reading" | "retrieving" | "applying" | "streaming" | "approval" | "completed" | "stopped" | "failed";
+  status:
+    | "queued"
+    | "running"
+    | "awaiting_confirmation"
+    | "awaiting_resolution"
+    | "completed"
+    | "failed"
+    | "cancelled";
+  phase?:
+    | "created"
+    | "preparing"
+    | "planning"
+    | "reading"
+    | "retrieving"
+    | "creating"
+    | "updating"
+    | "applying"
+    | "streaming"
+    | "checking"
+    | "approval"
+    | "conflict"
+    | "completed"
+    | "stopped"
+    | "interrupted"
+    | "partial"
+    | "failed";
   sourceSurface: "chat" | "workspace" | "artifact";
   threadId?: string;
   workspaceId?: string;
@@ -128,7 +530,11 @@ export type SpectraRun = {
     elapsedMs?: number;
   };
   attemptCount?: number;
+  recoveryState?: "interrupted" | "partial";
+  retryable?: boolean;
   traceDegraded?: boolean;
+  selectedAgentId?: string;
+  selectedAgentVersionId?: string;
   createdAt: number;
   updatedAt: number;
 };
@@ -212,6 +618,11 @@ export type SpectraResultCard = {
     workspaceTitle?: string;
     attachmentNames?: string[];
     focusMode?: "global" | "workspace" | "artifact" | "selection" | "thread";
+    agentId?: string;
+    agentVersionId?: string;
+    agentTitle?: string;
+    agentRoutingReason?: string;
+    agentRoutingSource?: "automatic" | "continued" | "explicit";
   };
 };
 
@@ -219,13 +630,25 @@ export type SpectraOperation = {
   _id: string;
   runId?: string;
   type: string;
-  status: "proposed" | "executing" | "executed" | "failed" | "cancelled";
+  status:
+    "proposed" | "executing" | "waiting" | "executed" | "failed" | "cancelled";
   input: unknown;
   output?: unknown;
   affected: Array<{ type: string; id: string }>;
   requiresConfirmation?: boolean;
   pendingArtifactId?: string;
   pendingWorkspaceId?: string;
+  conflict?: {
+    claimId: string;
+    artifactId: string;
+    clientId: string;
+    regionId: string;
+    blockerActorKind: "human" | "ai";
+    queuePosition: number;
+    baseSnapshot: unknown;
+    proposedSnapshot?: unknown;
+    createdAt: number;
+  };
   createdAt: number;
   executedAt?: number;
 };
@@ -248,6 +671,141 @@ export type SpectraRunTab = {
   updatedAt: number;
   run: SpectraRun;
   thread: SpectraThread;
+  card?: SpectraResultCard | null;
+};
+
+export type SpectraArtifactComment = {
+  _id: string;
+  artifactId: string;
+  parentCommentId?: string;
+  authorAccountId: string;
+  author: { accountId: string; name: string; avatarUrl?: string } | null;
+  body: string;
+  anchor: {
+    regionId: string;
+    fallbackExcerpt?: string;
+    geometry?: unknown;
+  };
+  mentionedAccountIds: string[];
+  mentions: Array<{ accountId: string; name: string; avatarUrl?: string }>;
+  status: "open" | "resolved" | "orphaned" | "deleted";
+  createdAt: number;
+  updatedAt: number;
+  resolvedAt?: number;
+  resolvedByAccountId?: string;
+};
+
+export type SpectraArtifactCommentNotification = {
+  _id: string;
+  artifactId: string;
+  commentId: string;
+  kind: "mention" | "reply" | "all_comments";
+  createdAt: number;
+  readAt?: number;
+  artifact: {
+    artifactId: string;
+    title: string;
+    blueprintKey: SpectraBlueprintKey;
+  };
+  comment: { body: string; regionId: string };
+  author: { accountId: string; name: string; avatarUrl?: string } | null;
+};
+
+export type SpectraPlannerReminderNotification = {
+  _id: string;
+  artifactId: string;
+  recipientAccountId: string;
+  reminderId: string;
+  taskTitle: string;
+  dueAt: number;
+  scheduledFor: number;
+  status: "pending" | "delivered" | "failed" | "cancelled";
+  attempts: number;
+  createdAt: number;
+  deliveredAt?: number;
+  readAt?: number;
+};
+
+export type SpectraTimetableReminderNotification = {
+  _id: string;
+  artifactId: string;
+  recipientAccountId: string;
+  eventId: string;
+  reminderKey: string;
+  eventTitle: string;
+  artifactTitle: string;
+  occurrenceStart: number;
+  scheduledFor: number;
+  createdAt: number;
+  deliveredAt: number;
+  readAt?: number;
+};
+
+export type SpectraArtifactEmbed = {
+  embedId: string;
+  containerType: "artifact" | "thread";
+  containerId: string;
+  containerRegionId: string;
+  mode: "compact" | "expanded";
+  interaction: "read" | "interact" | "edit";
+  effectiveInteraction?: "read" | "interact" | "edit";
+  versionPolicy: "live" | "pinned";
+  contextPolicy: "none" | "summary" | "visible_region";
+  displayPreferences?: Record<string, unknown>;
+  canConfigure?: boolean;
+  state: "ready" | "no_access" | "deleted" | "archived" | "version_unavailable";
+  canRequestAccess?: boolean;
+  accessRequest?: { requestId: string; status: "pending"; createdAt: number };
+  source?: {
+    artifactId: string;
+    title: string;
+    summary?: string;
+    blueprintKey: SpectraBlueprintKey;
+    tags?: string[];
+    updatedAt?: number;
+    snapshot?: {
+      title?: string;
+      summary?: string;
+      tags?: string[];
+      content?: unknown;
+    };
+  };
+  version?: {
+    versionId: string;
+    createdAt: number;
+    summary?: string;
+    name?: string;
+  };
+  runtimeBuild?: {
+    buildId: string;
+    artifactVersionId: string;
+    runtime: "browser" | "react" | "python";
+    sourceHash: string;
+    payloadHash?: string;
+    sdkVersion: string;
+    sourceBytes: number;
+    outputBytes: number;
+    payloadBytes?: number;
+    publishedAt?: number;
+    storageUrl: string;
+  };
+  runtimeResources?: Record<string, unknown>;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type SpectraArtifactAccessRequest = {
+  requestId: string;
+  requestedLevel: "read" | "modify";
+  message?: string;
+  createdAt: number;
+  requester: {
+    accountId: string;
+    name: string;
+    email: string;
+    avatarUrl?: string;
+  } | null;
+  context: { containerType: "artifact" | "thread"; containerId: string } | null;
 };
 
 export type SpectraOverview = {
@@ -262,16 +820,97 @@ export type SpectraOverview = {
   resultCards: SpectraResultCard[];
 };
 
+export type SpectraShareInvitation = {
+  invitationId: string;
+  resourceType: "workspace" | "artifact" | "agent";
+  resourceId: string;
+  level: "read" | "modify";
+  message?: string;
+  expiresAt?: number;
+  createdAt: number;
+  inviter: { accountId: string; name: string; avatarUrl?: string } | null;
+  resource: { title: string; typeKey: SpectraBlueprintKey | "workspace" };
+};
+
+export type SpectraSchoolMember = {
+  accountId: string;
+  name: string;
+  email: string;
+  avatarUrl?: string;
+  role: "student" | "teacher" | "school_admin";
+};
+
+export type SpectraShareEntry = {
+  invitationId: string;
+  status: "pending" | "accepted";
+  level: "read" | "modify";
+  expiresAt?: number;
+  acceptedAt?: number;
+  grantId?: string;
+  account: {
+    accountId: string;
+    name: string;
+    email: string;
+    avatarUrl?: string;
+  } | null;
+};
+
+export type SpectraPublicLinkEntry = {
+  linkId: string;
+  level: "read";
+  expiresAt?: number;
+  createdAt: number;
+};
+
+export type SpectraInheritedAccessEntry = {
+  account: {
+    accountId: string;
+    name: string;
+    email: string;
+    avatarUrl?: string;
+  };
+  inheritedLevel: "read" | "modify";
+  directLevel: "read" | "modify" | null;
+  effectiveLevel: "read" | "modify" | null;
+  sources: Array<{
+    workspaceId: string;
+    workspaceTitle: string;
+    level: "read" | "modify";
+  }>;
+  exception: {
+    overrideId: string;
+    effect: "deny" | "restrict";
+    maxLevel?: "read" | "modify";
+  } | null;
+};
+
 type JsonRecord = Record<string, unknown>;
 
-const overviewCache = new Map<string, { value: SpectraOverview; cachedAt: number }>();
-const workspaceCache = new Map<string, { value: SpectraOverview["workspace"]; cachedAt: number }>();
-let workspacesCache: { value: SpectraWorkspace[]; cachedAt: number } | null = null;
+const overviewCache = new Map<
+  string,
+  { value: SpectraOverview; cachedAt: number }
+>();
+const workspaceCache = new Map<
+  string,
+  { value: SpectraOverview["workspace"]; cachedAt: number }
+>();
+let workspacesCache: { value: SpectraWorkspace[]; cachedAt: number } | null =
+  null;
 const CACHE_TTL = 5 * 60_000;
+const CACHE_LOCAL_ACTIONS = new Set([
+  "acquireRegionClaim",
+  "renewRegionClaim",
+  "releaseRegionClaim",
+  "resolveRegionConflict",
+  "hideResultCard",
+  "keepResultCard",
+]);
 
 export function peekSpectraWorkspace(workspaceId: string) {
   const cached = workspaceCache.get(workspaceId);
-  return cached && Date.now() - cached.cachedAt < CACHE_TTL ? cached.value : null;
+  return cached && Date.now() - cached.cachedAt < CACHE_TTL
+    ? cached.value
+    : null;
 }
 
 export function invalidateSpectraCache(scope?: { workspaceId?: string }) {
@@ -282,7 +921,8 @@ export function invalidateSpectraCache(scope?: { workspaceId?: string }) {
 }
 
 async function readJson<T>(response: Response): Promise<T> {
-  const payload = await response.json().catch(() => null) as T | { error?: { message?: string } } | { error?: string } | null;
+  const payload = (await response.json().catch(() => null)) as
+    T | { error?: { message?: string } } | { error?: string } | null;
   if (!response.ok) {
     const message =
       payload && typeof payload === "object" && "error" in payload
@@ -298,50 +938,438 @@ async function readJson<T>(response: Response): Promise<T> {
 export async function getSpectraOverview(workspaceId?: string, force = false) {
   const key = workspaceId ?? "home";
   const cached = overviewCache.get(key);
-  if (!force && cached && Date.now() - cached.cachedAt < CACHE_TTL) return cached.value;
+  if (!force && cached && Date.now() - cached.cachedAt < CACHE_TTL)
+    return cached.value;
   const params = new URLSearchParams({ action: "overview" });
   if (workspaceId) params.set("workspaceId", workspaceId);
-  const value = await readJson<SpectraOverview>(await fetch(`/api/spectra?${params.toString()}`, { cache: "no-store" }));
+  const value = await readJson<SpectraOverview>(
+    await fetch(`/api/spectra?${params.toString()}`, { cache: "no-store" }),
+  );
   overviewCache.set(key, { value, cachedAt: Date.now() });
-  if (workspaceId && value.workspace) workspaceCache.set(workspaceId, { value: value.workspace, cachedAt: Date.now() });
+  if (workspaceId && value.workspace)
+    workspaceCache.set(workspaceId, {
+      value: value.workspace,
+      cachedAt: Date.now(),
+    });
   return value;
 }
 
 export async function getSpectraWorkspace(workspaceId: string, force = false) {
   const cached = workspaceCache.get(workspaceId);
-  if (!force && cached && Date.now() - cached.cachedAt < CACHE_TTL) return { workspace: cached.value };
+  if (!force && cached && Date.now() - cached.cachedAt < CACHE_TTL)
+    return { workspace: cached.value };
   const qs = new URLSearchParams({ action: "workspace", workspaceId });
-  const value = await readJson<{ workspace: SpectraOverview["workspace"] }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
-  workspaceCache.set(workspaceId, { value: value.workspace, cachedAt: Date.now() });
+  const value = await readJson<{ workspace: SpectraOverview["workspace"] }>(
+    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+  );
+  workspaceCache.set(workspaceId, {
+    value: value.workspace,
+    cachedAt: Date.now(),
+  });
   return value;
 }
 
 export async function getSpectraWorkspaces(force = false) {
-  if (!force && workspacesCache && Date.now() - workspacesCache.cachedAt < CACHE_TTL) return workspacesCache.value;
-  const value = await readJson<{ workspaces: SpectraWorkspace[] }>(await fetch("/api/spectra?action=workspaces", { cache: "no-store" }));
+  if (
+    !force &&
+    workspacesCache &&
+    Date.now() - workspacesCache.cachedAt < CACHE_TTL
+  )
+    return workspacesCache.value;
+  const value = await readJson<{ workspaces: SpectraWorkspace[] }>(
+    await fetch("/api/spectra?action=workspaces", { cache: "no-store" }),
+  );
   workspacesCache = { value: value.workspaces, cachedAt: Date.now() };
   return value.workspaces;
 }
 
+export async function exportSpectraWorkspaceManifest(workspaceId: string) {
+  const qs = new URLSearchParams({
+    action: "exportWorkspaceManifest",
+    workspaceId,
+  });
+  return readJson<{
+    manifest: SpectraWorkspacePortableManifest;
+    report: SpectraWorkspaceManifestReport;
+  }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+}
+
 export async function getSpectraArtifacts(params?: {
-  placement?: "all" | "inbox" | "workspace";
+  placement?: "all" | "inbox" | "shared" | "workspace";
   blueprintKey?: SpectraBlueprintKey | "all";
   search?: string;
 }) {
-  const qs = new URLSearchParams({ action: "artifacts", placement: params?.placement ?? "all" });
-  if (params?.blueprintKey && params.blueprintKey !== "all") qs.set("blueprintKey", params.blueprintKey);
+  const qs = new URLSearchParams({
+    action: "artifacts",
+    placement: params?.placement ?? "all",
+  });
+  if (params?.blueprintKey && params.blueprintKey !== "all")
+    qs.set("blueprintKey", params.blueprintKey);
   if (params?.search?.trim()) qs.set("search", params.search.trim());
-  return readJson<{ artifacts: SpectraArtifact[] }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+  return readJson<{ artifacts: SpectraArtifact[] }>(
+    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+  );
 }
 
 export async function getSpectraArtifact(artifactId: string) {
   const qs = new URLSearchParams({ action: "artifact", artifactId });
-  return readJson<{ artifact: SpectraArtifact }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+  return readJson<{ artifact: SpectraArtifact }>(
+    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+  );
+}
+
+export async function getSpectraArtifactUserState(artifactId: string) {
+  const qs = new URLSearchParams({
+    action: "artifactUserState",
+    artifactId,
+  });
+  return readJson<{
+    state: TimetablePersonalState | null;
+    revision: number;
+    updatedAt: number | null;
+  }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+}
+
+export async function saveSpectraArtifactUserState(input: {
+  artifactId: string;
+  state: TimetablePersonalState;
+}) {
+  return postSpectra<{
+    state: TimetablePersonalState;
+    revision: number;
+    updatedAt: number;
+  }>({
+    action: "saveArtifactUserState",
+    artifactId: input.artifactId,
+    state: input.state,
+  });
+}
+
+export async function getSpectraMemory(params?: {
+  search?: string;
+  status?: SpectraMemoryClaim["status"];
+  scope?: SpectraMemoryScope;
+  claimType?: SpectraMemoryClaimType;
+  limit?: number;
+}) {
+  const query = new URLSearchParams({ action: "memory" });
+  if (params?.search?.trim()) query.set("search", params.search.trim());
+  if (params?.status) query.set("status", params.status);
+  if (params?.scope) query.set("scope", params.scope);
+  if (params?.claimType) query.set("claimType", params.claimType);
+  if (params?.limit) query.set("limit", String(params.limit));
+  return readJson<{
+    preferences: SpectraMemoryPreferences;
+    claims: SpectraMemoryClaim[];
+  }>(await fetch(`/api/spectra?${query.toString()}`, { cache: "no-store" }));
+}
+
+export async function updateSpectraMemoryPreferences(
+  input: Partial<
+    Pick<
+      SpectraMemoryPreferences,
+      "enabled" | "capturePaused" | "categoryControls" | "capsuleTargetTokens"
+    >
+  >,
+) {
+  return postSpectra<SpectraMemoryPreferences>({
+    action: "updateMemoryPreferences",
+    ...input,
+  });
+}
+
+export async function rememberSpectraMemory(input: {
+  proposition: string;
+  scope: SpectraMemoryScope;
+  claimType: SpectraMemoryClaimType;
+  workspaceId?: string;
+  artifactId?: string;
+  captureReason?: string;
+}) {
+  return postSpectra<{ claimId: string; merged: boolean }>({
+    action: "rememberMemory",
+    ...input,
+  });
+}
+
+export async function correctSpectraMemory(
+  claimId: string,
+  proposition: string,
+) {
+  return postSpectra<{ claimId: string; merged: boolean }>({
+    action: "correctMemory",
+    claimId,
+    proposition,
+  });
+}
+
+export async function disputeSpectraMemory(claimId: string, disputed = true) {
+  return postSpectra<{ claimId: string; status: "disputed" | "active" }>({
+    action: "disputeMemory",
+    claimId,
+    disputed,
+  });
+}
+
+export async function forgetSpectraMemory(claimId: string) {
+  return postSpectra<{ forgotten: boolean }>({
+    action: "forgetMemory",
+    claimId,
+  });
+}
+
+export async function clearSpectraMemory(confirmation: string) {
+  return postSpectra<{ forgottenCount: number }>({
+    action: "clearMemory",
+    confirmation,
+  });
+}
+
+export async function exportSpectraMemory() {
+  return readJson<Record<string, unknown>>(
+    await fetch("/api/spectra?action=memoryExport", { cache: "no-store" }),
+  );
+}
+
+async function postManageBac<T>(body: Record<string, unknown>) {
+  return readJson<T>(
+    await fetch("/api/spectra/managebac", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  );
+}
+
+export async function getSpectraManageBacOverview() {
+  return readJson<SpectraManageBacOverview>(
+    await fetch("/api/spectra/managebac?action=overview", {
+      cache: "no-store",
+    }),
+  );
+}
+
+export async function configureSpectraManageBac(input: {
+  baseUrl: string;
+  token: string;
+}) {
+  return postManageBac<{ integrationId: string }>({
+    action: "configure",
+    ...input,
+  });
+}
+
+export async function replaceSpectraManageBacManifest(input: {
+  integrationId: string;
+  providerVersion?: string;
+  capabilities: Array<Record<string, unknown>>;
+}) {
+  return postManageBac<{
+    integrationId: string;
+    manifestVersion: number;
+    coverage: SpectraManageBacIntegration["capabilityCoverage"];
+  }>({ action: "replaceManifest", ...input });
+}
+
+export async function importSpectraManageBacReference(input: {
+  integrationId: string;
+  document: Record<string, unknown>;
+}) {
+  return postManageBac<{
+    integrationId: string;
+    manifestVersion: number;
+    discovered: number;
+    warning: string;
+  }>({ action: "importReference", ...input });
+}
+
+export async function resolveSpectraManageBacIdentity() {
+  return postManageBac<Record<string, unknown>>({
+    action: "resolveIdentity",
+    bootstrap: true,
+  });
+}
+
+export async function syncSpectraManageBac(
+  kind: "manual" | "bootstrap" | "reconciliation" = "manual",
+) {
+  return postManageBac<Record<string, unknown>>({ action: "sync", kind });
+}
+
+export async function resolveSpectraManageBacConflict(input: {
+  conflictId: string;
+  resolution:
+    | "rebase"
+    | "keep_overlay"
+    | "detach"
+    | "archive_projection"
+    | "link_existing";
+  linkProjectionId?: string;
+}) {
+  return postManageBac<{ conflictId: string; resolution: string }>({
+    action: "resolveConflict",
+    ...input,
+  });
+}
+
+export async function disconnectSpectraManageBac() {
+  return postManageBac<{ disconnected: boolean }>({
+    action: "disconnect",
+  });
+}
+
+export type SpectraFlashcardRating = "again" | "hard" | "good" | "easy";
+
+export type SpectraFlashcardStudyState = {
+  stateId: string;
+  cardId: string;
+  direction: "forward" | "reverse";
+  cardVersionId?: string;
+  algorithm: string;
+  algorithmVersion: number;
+  attempts: number;
+  ease: number;
+  stabilityDays: number;
+  difficulty: number;
+  lapses: number;
+  nextDueAt: number;
+  lastReviewedAt?: number;
+  previews: Record<
+    SpectraFlashcardRating,
+    { nextDueAt: number; label: string }
+  >;
+};
+
+export async function getSpectraFlashcardStudy(artifactId: string) {
+  const qs = new URLSearchParams({ action: "flashcardStudy", artifactId });
+  return readJson<{
+    states: SpectraFlashcardStudyState[];
+    dueCount: number;
+  }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+}
+
+export async function reviewSpectraFlashcard(input: {
+  artifactId: string;
+  cardId: string;
+  direction: "forward" | "reverse";
+  rating: SpectraFlashcardRating;
+  clientReviewId: string;
+  elapsedMs?: number;
+}) {
+  return postSpectra<{
+    state: SpectraFlashcardStudyState;
+    reused: boolean;
+  }>({ action: "reviewFlashcard", ...input });
+}
+
+export type SpectraQuizPracticeQuestion = {
+  id: string;
+  prompt: string;
+  type:
+    | "multiple_choice"
+    | "short_answer"
+    | "true_false"
+    | "select_all"
+    | "ordering"
+    | "numeric"
+    | "fill_blank"
+    | "long_response"
+    | "matching";
+  options: string[];
+  matchingPairs?: Array<{ id: string; left: string }>;
+  matchingChoices?: string[];
+  points: number;
+  difficulty?: string;
+  timeLimitSeconds?: number;
+  media?: unknown;
+};
+
+export type SpectraQuizPracticeResult = {
+  questionId: string;
+  correct: boolean | null;
+  awardedPoints: number;
+  maxPoints: number;
+  response: string | string[];
+  expected: string | string[];
+  explanation?: string;
+  advisoryFeedback?: string;
+};
+
+export type SpectraQuizPracticeAttempt = {
+  attemptId: string;
+  artifactId: string;
+  artifactVersionId?: string;
+  contentHash: string;
+  status: "in_progress" | "submitted";
+  questions: SpectraQuizPracticeQuestion[];
+  responses: Record<string, string | string[]>;
+  score?: number;
+  maxScore?: number;
+  percentage?: number;
+  startedAt: number;
+  submittedAt?: number;
+  elapsedMs?: number;
+  results?: SpectraQuizPracticeResult[];
+  instructions?: string;
+  settings?: Record<string, unknown>;
+};
+
+export async function getSpectraQuizPracticeAttempts(
+  artifactId: string,
+  limit = 20,
+) {
+  const qs = new URLSearchParams({
+    action: "quizPracticeAttempts",
+    artifactId,
+    limit: String(limit),
+  });
+  return readJson<{ attempts: SpectraQuizPracticeAttempt[] }>(
+    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+  );
+}
+
+export async function startSpectraQuizPractice(input: {
+  artifactId: string;
+  clientAttemptId: string;
+}) {
+  return postSpectra<SpectraQuizPracticeAttempt>({
+    action: "startQuizPractice",
+    ...input,
+  });
+}
+
+export async function saveSpectraQuizPracticeResponse(input: {
+  attemptId: string;
+  questionId: string;
+  response: string | string[];
+  clientMutationId: string;
+}) {
+  return postSpectra<{
+    responseId: string;
+    reused: boolean;
+    result?: SpectraQuizPracticeResult;
+  }>({
+    action: "saveQuizPracticeResponse",
+    ...input,
+  });
+}
+
+export async function submitSpectraQuizPractice(input: {
+  attemptId: string;
+  clientSubmissionId: string;
+}) {
+  return postSpectra<SpectraQuizPracticeAttempt>({
+    action: "submitQuizPractice",
+    ...input,
+  });
 }
 
 export async function searchSpectra(query: string) {
   const qs = new URLSearchParams({ action: "search", search: query });
-  return readJson<{ artifacts: SpectraArtifact[]; workspaces: SpectraWorkspace[] }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+  return readJson<{
+    artifacts: SpectraArtifact[];
+    workspaces: SpectraWorkspace[];
+  }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
 }
 
 export async function getSpectraResultCards(params?: {
@@ -357,84 +1385,935 @@ export async function getSpectraResultCards(params?: {
   if (params?.artifactId) qs.set("artifactId", params.artifactId);
   if (params?.includeHidden) qs.set("includeHidden", "true");
   if (params?.limit) qs.set("limit", String(params.limit));
-  return readJson<{ resultCards: SpectraResultCard[] }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+  return readJson<{ resultCards: SpectraResultCard[] }>(
+    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+  );
 }
 
 export async function getSpectraRunDetail(runId: string) {
   const qs = new URLSearchParams({ action: "runDetail", runId });
-  return readJson<SpectraRunDetail>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+  return readJson<SpectraRunDetail>(
+    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+  );
 }
 
-export async function getSpectraRunTabs(options: { includeHidden?: boolean; limit?: number } = {}) {
+const runTabsRequests = new Map<
+  string,
+  { at: number; promise: Promise<{ runTabs: SpectraRunTab[] }> }
+>();
+const runEventRequests = new Map<
+  string,
+  { at: number; promise: Promise<{ events: SpectraRunEvent[] }> }
+>();
+
+export function invalidateSpectraRunTabsCache() {
+  runTabsRequests.clear();
+}
+
+export async function getSpectraRunTabs(
+  options: { includeHidden?: boolean; limit?: number; force?: boolean } = {},
+) {
   const qs = new URLSearchParams({ action: "runTabs" });
   if (options.includeHidden) qs.set("includeHidden", "true");
   if (options.limit) qs.set("limit", String(options.limit));
-  return readJson<{ runTabs: SpectraRunTab[] }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+  const key = qs.toString();
+  if (options.force) runTabsRequests.delete(key);
+  const existing = runTabsRequests.get(key);
+  if (existing && Date.now() - existing.at < 1_100) return existing.promise;
+  const promise = fetch(`/api/spectra?${key}`, { cache: "no-store" }).then(
+    (response) => readJson<{ runTabs: SpectraRunTab[] }>(response),
+  );
+  runTabsRequests.set(key, { at: Date.now(), promise });
+  void promise.catch(() => {
+    if (runTabsRequests.get(key)?.promise === promise)
+      runTabsRequests.delete(key);
+  });
+  return promise;
+}
+
+export async function getSpectraShareInvitations() {
+  return readJson<{ invitations: SpectraShareInvitation[] }>(
+    await fetch("/api/spectra?action=shareInvitations", { cache: "no-store" }),
+  );
+}
+
+export async function searchSpectraSchoolMembers(search: string, limit = 20) {
+  const qs = new URLSearchParams({
+    action: "schoolMembers",
+    search,
+    limit: String(limit),
+  });
+  return readJson<{ members: SpectraSchoolMember[] }>(
+    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+  );
+}
+
+export async function getSpectraShareState(
+  resourceType: "workspace" | "artifact" | "agent",
+  resourceId: string,
+) {
+  const qs = new URLSearchParams({
+    action: "shareState",
+    resourceType,
+    resourceId,
+  });
+  return readJson<{ shares: SpectraShareEntry[] }>(
+    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+  );
+}
+
+export async function getSpectraPublicLinks(
+  resourceType: "workspace" | "artifact" | "agent",
+  resourceId: string,
+) {
+  const qs = new URLSearchParams({
+    action: "publicLinks",
+    resourceType,
+    resourceId,
+  });
+  return readJson<{ publicLinks: SpectraPublicLinkEntry[] }>(
+    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+  );
+}
+
+export async function getSpectraInheritedAudience(artifactId: string) {
+  const qs = new URLSearchParams({
+    action: "artifactInheritedAudience",
+    artifactId,
+  });
+  return readJson<{ audience: SpectraInheritedAccessEntry[] }>(
+    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+  );
+}
+
+export async function getSpectraArtifactAccessRequests(artifactId: string) {
+  const qs = new URLSearchParams({
+    action: "artifactAccessRequests",
+    artifactId,
+  });
+  return readJson<{ requests: SpectraArtifactAccessRequest[] }>(
+    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+  );
 }
 
 export async function getSpectraRunEvents(runId: string, after = 0) {
-  const qs = new URLSearchParams({ action: "runEvents", runId, after: String(after) });
-  return readJson<{ events: SpectraRunEvent[] }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+  const qs = new URLSearchParams({
+    action: "runEvents",
+    runId,
+    after: String(after),
+  });
+  const key = qs.toString();
+  const existing = runEventRequests.get(key);
+  if (existing && Date.now() - existing.at < 850) return existing.promise;
+  const promise = fetch(`/api/spectra?${key}`, { cache: "no-store" }).then(
+    (response) => readJson<{ events: SpectraRunEvent[] }>(response),
+  );
+  runEventRequests.set(key, { at: Date.now(), promise });
+  void promise.catch(() => {
+    if (runEventRequests.get(key)?.promise === promise)
+      runEventRequests.delete(key);
+  });
+  return promise;
 }
 
-export async function getSpectraArtifactVersions(artifactId: string, limit = 20) {
-  const qs = new URLSearchParams({ action: "artifactVersions", artifactId, limit: String(limit) });
-  return readJson<{ versions: SpectraArtifactVersion[] }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+export async function getSpectraOperationConflict(operationId: string) {
+  const qs = new URLSearchParams({ action: "operationConflict", operationId });
+  return readJson<{
+    conflict: {
+      runId: string;
+      executionId?: string;
+      operationId: string;
+      operationType: string;
+      input: unknown;
+      conflict: NonNullable<SpectraOperation["conflict"]>;
+      claimStatus: "active" | "queued" | "paused" | "released" | "rejected";
+      currentStateVectorHash: string;
+      currentSnapshot: unknown;
+    };
+  }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+}
+
+export async function resolveSpectraOperationConflict(
+  operationId: string,
+  resolution: "apply" | "keep_current" | "merge" | "cancel",
+  mergedInput?: unknown,
+) {
+  return postSpectra<{ runId: string; operationId: string; queued: boolean }>({
+    action: "resolveAiArtifactConflict",
+    operationId,
+    resolution,
+    ...(mergedInput !== undefined ? { mergedInput } : {}),
+  });
+}
+
+export async function getSpectraArtifactVersions(
+  artifactId: string,
+  limit = 20,
+) {
+  const qs = new URLSearchParams({
+    action: "artifactVersions",
+    artifactId,
+    limit: String(limit),
+  });
+  return readJson<{ versions: SpectraArtifactVersion[] }>(
+    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+  );
+}
+
+export type SpectraAgentRelease = {
+  releaseId: string;
+  versionId: string;
+  releaseNumber: number;
+  status: "published" | "suspended" | "deprecated";
+  rollout?: "internal_test" | "limited" | "published";
+  evalRunId?: string;
+  releaseNotes?: string;
+  publishedAt: number;
+};
+
+export type SpectraAgentEvalResult = {
+  caseId: string;
+  category: string;
+  required: boolean;
+  score: number;
+  passed: boolean;
+  reason: string;
+  responseExcerpt: string;
+  latencyMs: number;
+  inputTokens?: number;
+  outputTokens?: number;
+};
+
+export type SpectraAgentEvalRun = {
+  _id: string;
+  contentHash: string;
+  status: "running" | "passed" | "failed";
+  modelId: string;
+  provider: string;
+  threshold: number;
+  caseCount: number;
+  passedCount: number;
+  averageScore: number;
+  results: SpectraAgentEvalResult[];
+  startedAt: number;
+  completedAt?: number;
+};
+
+export type SpectraAgentAnalytics = {
+  invocations: number;
+  completionRate: number | null;
+  averageLatencyMs: number | null;
+  feedback: {
+    count: number;
+    averageRating: number | null;
+    categories: Array<[string, number]>;
+    comments: Array<{
+      rating: number;
+      category: string;
+      comment?: string;
+      createdAt: number;
+    }>;
+  };
+  evals: SpectraAgentEvalRun[];
+  proposals: Array<{
+    _id: string;
+    evidence: string;
+    expectedImpact: string;
+    proposedPatch: {
+      instructionsText?: string;
+      routingDescription?: string;
+      routingExamples?: string[];
+      boundaries?: string[];
+    };
+    evalRunId?: string;
+    status: "proposed" | "accepted" | "rejected";
+    createdAt: number;
+  }>;
+  privacy: string;
+};
+
+export type SpectraAgentResourceHealth = {
+  id?: string;
+  artifactId: string;
+  health:
+    "available" | "missing" | "version_unavailable" | "permission_revoked";
+  versionId?: string;
+  title?: string;
+  blueprintKey?: string;
+};
+
+export async function getSpectraAgentReleases(agentId: string) {
+  const qs = new URLSearchParams({ action: "agentReleases", agentId });
+  return readJson<{ releases: SpectraAgentRelease[] }>(
+    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+  );
+}
+
+export async function publishSpectraAgent(
+  agentId: string,
+  releaseNotes?: string,
+  rollout: "internal_test" | "limited" | "published" = "published",
+) {
+  return postSpectra<{
+    releaseId: string;
+    versionId: string;
+    releaseNumber: number;
+    publishedAt: number;
+  }>({
+    action: "publishAgent",
+    agentId,
+    releaseNotes,
+    rollout,
+  });
+}
+
+export async function getSpectraAgentEvalRuns(agentId: string) {
+  const qs = new URLSearchParams({ action: "agentEvalRuns", agentId });
+  return readJson<{
+    currentContentHash: string;
+    runs: SpectraAgentEvalRun[];
+  }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+}
+
+export async function getSpectraAgentResourceHealth(agentId: string) {
+  const qs = new URLSearchParams({ action: "agentResourceHealth", agentId });
+  return readJson<{ resources: SpectraAgentResourceHealth[] }>(
+    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+  );
+}
+
+export async function evaluateSpectraAgent(agentId: string, threshold = 0.8) {
+  return readJson<{
+    evalRunId: string;
+    status: "passed" | "failed";
+    contentHash: string;
+    passedCount: number;
+    caseCount: number;
+    averageScore: number;
+    results: SpectraAgentEvalResult[];
+  }>(
+    await fetch("/api/spectra/agents/evaluate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ agentId, threshold }),
+    }),
+  );
+}
+
+export async function generateSpectraAgentEvalSuite(agentId: string) {
+  return readJson<{
+    cases: Array<{
+      id: string;
+      prompt: string;
+      expected: string;
+      category: string;
+      required: boolean;
+    }>;
+  }>(
+    await fetch("/api/spectra/agents/evaluate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "generate", agentId }),
+    }),
+  );
+}
+
+export async function getSpectraAgentAnalytics(agentId: string) {
+  const qs = new URLSearchParams({ action: "agentAnalytics", agentId });
+  return readJson<{ analytics: SpectraAgentAnalytics }>(
+    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+  );
+}
+
+export async function manageSpectraAgentRelease(
+  releaseId: string,
+  releaseAction: "promote" | "rollback" | "suspend" | "deprecate",
+) {
+  return postSpectra<{ releaseId: string; action: string; updatedAt: number }>({
+    action: "manageAgentRelease",
+    releaseId,
+    releaseAction,
+  });
+}
+
+export async function submitSpectraAgentFeedback(input: {
+  agentId: string;
+  agentVersionId: string;
+  runId?: string;
+  rating: number;
+  category:
+    | "helpful"
+    | "accuracy"
+    | "clarity"
+    | "safety"
+    | "resource_quality"
+    | "other";
+  comment?: string;
+  consentToShareComment: boolean;
+}) {
+  return postSpectra<{ feedbackId: string }>({
+    action: "submitAgentFeedback",
+    ...input,
+  });
+}
+
+export async function proposeSpectraAgentImprovement(input: {
+  agentId: string;
+  evidence: string;
+  proposedPatch: {
+    instructionsText?: string;
+    routingDescription?: string;
+    routingExamples?: string[];
+    boundaries?: string[];
+  };
+  expectedImpact: string;
+  evalRunId?: string;
+}) {
+  return postSpectra<{ proposalId: string }>({
+    action: "proposeAgentImprovement",
+    ...input,
+  });
+}
+
+export async function decideSpectraAgentImprovement(
+  proposalId: string,
+  decision: "accepted" | "rejected",
+  note?: string,
+) {
+  return postSpectra<{ proposalId: string; status: string }>({
+    action: "decideAgentImprovement",
+    proposalId,
+    decision,
+    note,
+  });
+}
+
+export type SpectraPublicAgent = {
+  agentId: string;
+  title: string;
+  summary?: string;
+  tags: string[];
+  purpose: string;
+  audienceIntent: string;
+  routingDescription: string;
+  skills: string[];
+  owner: { name: string; avatarUrl?: string };
+  releaseNumber: number;
+  publishedAt: number;
+  rating: number | null;
+  ratingCount: number;
+};
+
+export async function getSpectraPublicAgents(params?: {
+  search?: string;
+  limit?: number;
+}) {
+  const qs = new URLSearchParams({ action: "publicAgents" });
+  if (params?.search?.trim()) qs.set("search", params.search.trim());
+  if (params?.limit) qs.set("limit", String(params.limit));
+  return readJson<{ agents: SpectraPublicAgent[] }>(
+    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+  );
+}
+
+export async function addSpectraPublicAgent(agentId: string) {
+  return postSpectra<{ grantId: string; added: boolean }>({
+    action: "addPublicAgent",
+    agentId,
+  });
+}
+
+export type SpectraSignedAgentManifest = Record<string, unknown> & {
+  format: "spectra.agent";
+  version: 1;
+  content: unknown;
+  integrity: {
+    algorithm: "HMAC-SHA256";
+    keyId: string;
+    signature: string;
+  };
+};
+
+export async function signSpectraAgentManifest(
+  manifest: Record<string, unknown>,
+) {
+  return readJson<{ ok: true; manifest: SpectraSignedAgentManifest }>(
+    await fetch("/api/spectra/agents/manifest", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "sign", manifest }),
+    }),
+  );
+}
+
+export async function verifySpectraAgentManifest(manifest: unknown) {
+  return readJson<{
+    ok: true;
+    manifest: Record<string, unknown> & {
+      format: "spectra.agent";
+      version: 1;
+      content: unknown;
+    };
+  }>(
+    await fetch("/api/spectra/agents/manifest", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "verify", manifest }),
+    }),
+  );
+}
+
+export async function getSpectraArtifactComments(
+  artifactId: string,
+  includeResolved = false,
+  limit = 200,
+) {
+  const qs = new URLSearchParams({
+    action: "artifactComments",
+    artifactId,
+    includeResolved: String(includeResolved),
+    limit: String(limit),
+  });
+  return readJson<{ comments: SpectraArtifactComment[] }>(
+    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+  );
+}
+
+export async function getSpectraArtifactCommentPreference(artifactId: string) {
+  const qs = new URLSearchParams({
+    action: "artifactCommentPreference",
+    artifactId,
+  });
+  return readJson<{ mode: "all" | "mentions_replies" | "off" }>(
+    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+  );
+}
+
+export async function getSpectraArtifactCommentNotifications(
+  unreadOnly = false,
+  limit = 50,
+) {
+  const qs = new URLSearchParams({
+    action: "artifactCommentNotifications",
+    unreadOnly: String(unreadOnly),
+    limit: String(limit),
+  });
+  return readJson<{ notifications: SpectraArtifactCommentNotification[] }>(
+    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+  );
+}
+
+export async function markSpectraArtifactCommentNotificationsRead(
+  notificationIds: string[],
+) {
+  return postSpectra<{ updated: number }>({
+    action: "markArtifactCommentNotificationsRead",
+    notificationIds,
+  });
+}
+
+export async function getSpectraPlannerReminderNotifications(
+  unreadOnly = false,
+  limit = 50,
+) {
+  const qs = new URLSearchParams({
+    action: "plannerReminderNotifications",
+    unreadOnly: String(unreadOnly),
+    limit: String(limit),
+  });
+  return readJson<{ notifications: SpectraPlannerReminderNotification[] }>(
+    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+  );
+}
+
+export async function markSpectraPlannerReminderNotificationsRead(
+  deliveryIds: string[],
+) {
+  return postSpectra<{ updated: number }>({
+    action: "markPlannerReminderNotificationsRead",
+    deliveryIds,
+  });
+}
+
+export async function getSpectraTimetableReminderNotifications(
+  unreadOnly = false,
+  limit = 50,
+) {
+  const qs = new URLSearchParams({
+    action: "timetableReminderNotifications",
+    unreadOnly: String(unreadOnly),
+    limit: String(limit),
+  });
+  return readJson<{ notifications: SpectraTimetableReminderNotification[] }>(
+    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+  );
+}
+
+export async function markSpectraTimetableReminderNotificationsRead(
+  deliveryIds: string[],
+) {
+  return postSpectra<{ updated: number }>({
+    action: "markTimetableReminderNotificationsRead",
+    deliveryIds,
+  });
 }
 
 export async function getSpectraArtifactLinks(artifactId: string) {
   const qs = new URLSearchParams({ action: "artifactLinks", artifactId });
-  return readJson<{ links: SpectraArtifactLink[] }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+  return readJson<{ links: SpectraArtifactLink[] }>(
+    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+  );
 }
 
-export async function getSpectraThreads(params?: { includeArchived?: boolean; limit?: number }) {
+export async function getSpectraArtifactEmbeds(
+  containerType: "artifact" | "thread",
+  containerId: string,
+) {
+  const qs = new URLSearchParams({
+    action: "artifactEmbeds",
+    containerType,
+    containerId,
+  });
+  return readJson<{ embeds: SpectraArtifactEmbed[]; canConfigure: boolean }>(
+    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+  );
+}
+
+export async function getSpectraArtifactEmbed(embedId: string) {
+  const qs = new URLSearchParams({ action: "artifactEmbed", embedId });
+  return readJson<{ embed: SpectraArtifactEmbed }>(
+    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+  );
+}
+
+export async function getSpectraThreads(params?: {
+  includeArchived?: boolean;
+  limit?: number;
+}) {
   const qs = new URLSearchParams({ action: "threads" });
   if (params?.includeArchived) qs.set("includeArchived", "true");
   if (params?.limit) qs.set("limit", String(params.limit));
-  return readJson<{ threads: SpectraThread[] }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+  return readJson<{ threads: SpectraThread[] }>(
+    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+  );
 }
 
 export async function getSpectraThread(threadId: string) {
   const qs = new URLSearchParams({ action: "thread", threadId });
-  return readJson<SpectraThreadDetail>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+  return readJson<SpectraThreadDetail>(
+    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+  );
+}
+
+export async function clearSpectraRunAgent(runId: string) {
+  return readJson<{ cleared: boolean; threadId?: string }>(
+    await fetch("/api/spectra/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "clear_agent", runId }),
+    }),
+  );
 }
 
 export async function postSpectra<T>(body: JsonRecord) {
-  const value = await readJson<T>(await fetch("/api/spectra", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  }));
-  if (body.action !== "hideResultCard" && body.action !== "keepResultCard") {
-    invalidateSpectraCache({ workspaceId: typeof body.workspaceId === "string" ? body.workspaceId : undefined });
+  const value = await readJson<T>(
+    await fetch("/api/spectra", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  );
+  if (
+    typeof body.action !== "string" ||
+    !CACHE_LOCAL_ACTIONS.has(body.action)
+  ) {
+    invalidateSpectraCache({
+      workspaceId:
+        typeof body.workspaceId === "string" ? body.workspaceId : undefined,
+    });
+  }
+  if (
+    typeof window !== "undefined" &&
+    typeof body.action === "string" &&
+    [
+      "createWorkspace",
+      "importWorkspaceManifest",
+      "updateWorkspace",
+      "deleteWorkspace",
+    ].includes(body.action)
+  ) {
+    window.dispatchEvent(new Event("spectra:workspaces-changed"));
   }
   return value;
 }
 
-export function toArtifactCardView(artifact: SpectraArtifact): ArtifactCardView {
+export async function getPublishedCodeBuild(artifactId: string) {
+  const params = new URLSearchParams({ artifactId });
+  return readJson<{
+    ok: true;
+    build: PublishedCodeBuildProjection | null;
+    sourceMatchesCurrent: boolean;
+  }>(
+    await fetch(`/api/spectra/runtime/publish?${params.toString()}`, {
+      cache: "no-store",
+    }),
+  );
+}
+
+export async function publishCodeBuild(
+  artifactId: string,
+  expectedSourceHash: string,
+) {
+  return readJson<{
+    ok: true;
+    build: PublishedCodeBuildProjection;
+    reused: boolean;
+  }>(
+    await fetch("/api/spectra/runtime/publish", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "publish",
+        artifactId,
+        expectedSourceHash,
+      }),
+    }),
+  );
+}
+
+export async function unpublishCodeBuild(artifactId: string) {
+  return readJson<{ ok: true; unpublished: boolean }>(
+    await fetch("/api/spectra/runtime/publish", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "unpublish", artifactId }),
+    }),
+  );
+}
+
+export type SpectraArtifactImport = {
+  jobId: string;
+  artifactVersionId?: string;
+  format: string;
+  name?: string;
+  bytes?: number;
+  status:
+    | "uploading"
+    | "uploaded"
+    | "parsing"
+    | "preview"
+    | "imported"
+    | "quarantined"
+    | "failed";
+  fidelityReport?: Array<{
+    scope: string;
+    level: "exact" | "adapted" | "unsupported";
+    message: string;
+  }>;
+  unsupportedFeatures: string[];
+  quarantineReason?: string;
+  downloadUrl?: string | null;
+  createdAt: number;
+  completedAt?: number;
+};
+
+export async function beginArtifactImportOriginal(input: {
+  artifactId: string;
+  typeKey: string;
+  format: string;
+  name: string;
+  mimeType: string;
+  bytes: number;
+  sha256: string;
+}) {
+  return readJson<{ ok: true; jobId: string }>(
+    await fetch("/api/spectra/imports", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "begin", ...input }),
+    }),
+  );
+}
+
+export async function uploadArtifactImportOriginal(jobId: string, blob: Blob) {
+  const query = new URLSearchParams({ jobId });
+  return readJson<{ ok: true; jobId: string; status: string }>(
+    await fetch(`/api/spectra/imports?${query.toString()}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/octet-stream" },
+      body: blob,
+    }),
+  );
+}
+
+export async function completeArtifactImport(input: {
+  jobId: string;
+  typeKey: SpectraBlueprintKey;
+  status: "imported" | "quarantined" | "failed";
+  fidelityReport: Array<{
+    scope: string;
+    level: "exact" | "adapted" | "unsupported";
+    message: string;
+  }>;
+  unsupportedFeatures: string[];
+  quarantineReason?: string;
+  importedContent?: unknown;
+}) {
+  return readJson<{ ok: true; jobId: string; status: string }>(
+    await fetch("/api/spectra/imports", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "complete", ...input }),
+    }),
+  );
+}
+
+export async function abortArtifactImportUpload(jobId: string, reason: string) {
+  return readJson<{ ok: true; aborted: boolean }>(
+    await fetch("/api/spectra/imports", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "abort", jobId, reason }),
+    }),
+  );
+}
+
+export async function getArtifactImports(artifactId: string) {
+  const query = new URLSearchParams({ artifactId });
+  return readJson<{ ok: true; imports: SpectraArtifactImport[] }>(
+    await fetch(`/api/spectra/imports?${query.toString()}`, {
+      cache: "no-store",
+    }),
+  );
+}
+
+export type SpectraArtifactAsset = {
+  assetId: string;
+  path?: string;
+  name?: string;
+  mediaType?: string;
+  bytes?: number;
+  sha256?: string;
+  status: "active" | "quarantined" | "revoked" | "missing";
+  quarantineReason?: string;
+  downloadUrl?: string | null;
+  createdAt?: number;
+  revokedAt?: number;
+};
+
+export async function getArtifactAssets(
+  artifactId: string,
+  assetIds?: string[],
+) {
+  const query = new URLSearchParams({ artifactId });
+  assetIds?.forEach((assetId) => query.append("assetId", assetId));
+  return readJson<{ ok: true; assets: SpectraArtifactAsset[] }>(
+    await fetch(`/api/spectra/assets?${query.toString()}`, {
+      cache: "no-store",
+    }),
+  );
+}
+
+export async function uploadArtifactAsset(input: {
+  artifactId: string;
+  path: string;
+  name: string;
+  mediaType: string;
+  sha256: string;
+  blob: Blob;
+}) {
+  const query = new URLSearchParams({
+    artifactId: input.artifactId,
+    path: input.path,
+    name: input.name,
+  });
+  return readJson<{ ok: true; assetId: string; reused: boolean }>(
+    await fetch(`/api/spectra/assets?${query.toString()}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": input.mediaType,
+        "X-Spectra-Sha256": input.sha256,
+      },
+      body: input.blob,
+    }),
+  );
+}
+
+export async function revokeArtifactAsset(assetId: string) {
+  const query = new URLSearchParams({ assetId });
+  return readJson<{ ok: true; revoked: boolean }>(
+    await fetch(`/api/spectra/assets?${query.toString()}`, {
+      method: "DELETE",
+    }),
+  );
+}
+
+export function toArtifactCardView(
+  artifact: SpectraArtifact,
+): ArtifactCardView {
   const placements = artifact.placements ?? [];
   return {
     id: artifact._id,
     title: artifact.title,
     blueprintKey: artifact.blueprintKey,
     summary: artifact.summary ?? "No summary yet.",
-    meta: placements.length > 0
-      ? placements.map((placement) => placement.workspaceTitle).join(", ")
-      : "Unplaced",
-    placement: artifact.placementStatus ?? (placements.length > 0 ? "workspace" : "inbox"),
-    aiState: artifact.aiState === "edited" && artifact.aiStateExpiresAt && artifact.aiStateExpiresAt <= Date.now() ? undefined : artifact.aiState,
+    meta:
+      placements.length > 0
+        ? placements.map((placement) => placement.workspaceTitle).join(", ")
+        : "General",
+    placement:
+      artifact.placementStatus ??
+      (placements.length > 0 ? "workspace" : "inbox"),
+    updatedAt: artifact.updatedAt,
+    aiStateExpiresAt: artifact.aiStateExpiresAt,
+    shared: artifact.isShared,
+    accessLevel: artifact.accessLevel ?? undefined,
+    accessExplanation:
+      artifact.ownership === "shared"
+        ? artifact.accessReason === "workspace_inheritance"
+          ? `Access through ${placements.map((placement) => placement.workspaceTitle).join(", ") || "a workspace"}`
+          : "Shared directly with you"
+        : undefined,
+    aiState:
+      artifact.aiState === "edited" &&
+      artifact.aiStateExpiresAt &&
+      artifact.aiStateExpiresAt <= Date.now()
+        ? undefined
+        : artifact.aiState,
     aiProgress: artifact.aiProgress,
   };
 }
 
-export function workspaceItemToArtifactCardView(item: SpectraWorkspaceItem): ArtifactCardView | null {
+export function workspaceItemToArtifactCardView(
+  item: SpectraWorkspaceItem,
+): ArtifactCardView | null {
   if (!item.artifact) return null;
   return {
     id: item.artifact._id,
     title: item.viewData.titleOverride ?? item.artifact.title,
     blueprintKey: item.artifact.blueprintKey,
-    summary: item.viewData.compactSummary ?? item.artifact.summary ?? "No summary yet.",
+    summary:
+      item.viewData.compactSummary ??
+      item.artifact.summary ??
+      "No summary yet.",
     meta: "Workspace card",
     placement: "workspace",
+    updatedAt: item.artifact.updatedAt,
+    aiStateExpiresAt: item.artifact.aiStateExpiresAt,
+    shared: item.artifact.isShared,
+    accessLevel: item.artifact.accessLevel ?? undefined,
+    accessExplanation:
+      item.artifact.ownership === "shared"
+        ? item.artifact.accessReason === "workspace_inheritance"
+          ? "Access through this workspace"
+          : "Shared directly with you"
+        : undefined,
+    aiState:
+      item.artifact.aiState === "edited" &&
+      item.artifact.aiStateExpiresAt &&
+      item.artifact.aiStateExpiresAt <= Date.now()
+        ? undefined
+        : item.artifact.aiState,
+    aiProgress: item.artifact.aiProgress,
   };
 }

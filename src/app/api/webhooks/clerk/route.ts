@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Webhook } from "svix";
-import { convexMutation } from "@/lib/convex-server";
 
 type ClerkWebhookEvent = {
   type: string;
@@ -9,7 +8,13 @@ type ClerkWebhookEvent = {
     first_name?: string | null;
     last_name?: string | null;
     username?: string | null;
-    email_addresses?: Array<{ email_address?: string | null }>;
+    primary_email_address_id?: string | null;
+    image_url?: string | null;
+    email_addresses?: Array<{
+      id?: string;
+      email_address?: string | null;
+      verification?: { status?: string | null } | null;
+    }>;
   };
 };
 
@@ -29,16 +34,13 @@ function getSvixHeaders(request: NextRequest) {
   };
 }
 
-function getUserName(event: ClerkWebhookEvent["data"]) {
-  const first = event?.first_name?.trim();
-  const last = event?.last_name?.trim();
-  const full = [first, last].filter(Boolean).join(" ").trim();
-  return full || event?.username?.trim() || "Student";
-}
-
-function getUserEmail(event: ClerkWebhookEvent["data"]) {
-  const email = event?.email_addresses?.[0]?.email_address?.trim();
-  return email || "unknown@example.com";
+function getVerifiedEmail(event: ClerkWebhookEvent["data"]) {
+  const candidates = event?.email_addresses ?? [];
+  const primary = candidates.find((entry) => entry.id === event?.primary_email_address_id);
+  const verified = [primary, ...candidates]
+    .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
+    .find((entry) => entry.verification?.status === "verified" && Boolean(entry.email_address?.trim()));
+  return verified?.email_address?.trim().toLowerCase() ?? null;
 }
 
 export async function POST(request: NextRequest) {
@@ -66,11 +68,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Missing Clerk user id in webhook payload." }, { status: 400 });
   }
 
-  const result = await convexMutation("users:syncFromWebhook", {
-    clerkId,
-    email: getUserEmail(event.data),
-    name: getUserName(event.data),
-  });
+  const email = getVerifiedEmail(event.data);
+  if (!email) {
+    return NextResponse.json({ ok: true, skipped: true, reason: "verified_email_required" });
+  }
 
-  return NextResponse.json({ ok: true, type: event.type, result });
+  // Account provisioning is deliberately session-bound. The signed Clerk JWT
+  // is the only authority accepted by Convex; webhook payload fields never
+  // create or mutate product identity directly.
+  return NextResponse.json({ ok: true, type: event.type, deferredToAuthenticatedSession: true });
 }

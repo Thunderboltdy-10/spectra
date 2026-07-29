@@ -32,9 +32,12 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { blueprintMeta, type ArtifactCardView } from "./artifact-card";
-import type { SpectraArtifact, SpectraBlueprintKey } from "../data/api";
+import type { SpectraArtifact} from "../data/api";
+import { requireBlueprint, requireArtifactTypeManifest } from "../blueprints/registry";
+import type { ArtifactTypeKey } from "../artifacts/types";
+import { normalizeWhiteboardContent } from "../whiteboard/model";
 
-type EditableBlueprintKey = SpectraBlueprintKey;
+type EditableBlueprintKey = ArtifactTypeKey;
 type SheetMode = "create" | "edit";
 
 export type ArtifactPayload = {
@@ -94,12 +97,7 @@ type PlannerTaskContent = {
   progressNote?: string;
   sourceRefs?: string[];
 };
-type ThreadReferenceContent = {
-  threadId?: string | null;
-  summary?: string;
-  linkedArtifactIds?: string[];
-};
-
+type ThreadReferenceContent = { threadId?: string | null; summary?: string; linkedArtifactIds?: string[] };
 export const blueprintChoices: Array<{ key: EditableBlueprintKey; label: string; icon: LucideIcon; description: string }> = [
   { key: "document", label: "Document", icon: FileText, description: "Notes, essay plans, and structured writing." },
   { key: "flashcard_deck", label: "Flashcard deck", icon: BookOpen, description: "A real deck with editable cards." },
@@ -120,18 +118,7 @@ function id(prefix: string) {
 }
 
 export function defaultArtifactSummary(blueprintKey: EditableBlueprintKey) {
-  switch (blueprintKey) {
-    case "document":
-      return "A structured document for notes, explanations, or drafts.";
-    case "flashcard_deck":
-      return "A study deck with editable prompts, answers, and hints.";
-    case "quiz":
-      return "A quiz with safe answer review basics.";
-    case "planner_task":
-      return "A task with status, priority, and a due date.";
-    case "thread_reference":
-      return "A reference to a useful Spectra conversation.";
-  }
+  return requireArtifactTypeManifest(blueprintKey).identity.description;
 }
 
 export function defaultArtifactTitle(blueprintKey: EditableBlueprintKey) {
@@ -139,18 +126,15 @@ export function defaultArtifactTitle(blueprintKey: EditableBlueprintKey) {
 }
 
 export function createDefaultArtifactPayload(blueprintKey: EditableBlueprintKey): ArtifactPayload {
-  const content: Record<EditableBlueprintKey, unknown> = {
-    document: { blocks: [{ id: "intro", type: "paragraph", text: "" }], outline: [] },
-    flashcard_deck: { cards: [{ id: "card-1", front: "", back: "", hint: "", confidence: "unknown", section: "Section 1" }], settings: { shuffle: true, revealMode: "click" } },
-    quiz: { questions: [{ id: "question-1", prompt: "", type: "multiple_choice", options: ["", "", "", ""], correctAnswer: "", explanation: "", difficulty: "medium", points: 1, timeLimitSeconds: 90 }], settings: { showAnswersImmediately: true, timed: false } },
-    planner_task: { description: "", status: "todo", priority: "medium", subtasks: [], attachments: [], linkedArtifactIds: [], linkedThreadIds: [], reminders: [], allDay: false, progressNote: "" },
-    thread_reference: { threadId: null, summary: "", linkedArtifactIds: [] },
-  };
+  const content = structuredClone(requireBlueprint(blueprintKey).defaultContent);
   return {
     blueprintKey,
     title: defaultArtifactTitle(blueprintKey),
     summary: defaultArtifactSummary(blueprintKey),
-    content: content[blueprintKey],
+    content:
+      blueprintKey === "whiteboard"
+        ? normalizeWhiteboardContent(content)
+        : content,
     tags: [],
   };
 }
@@ -299,7 +283,8 @@ export function ArtifactBlueprintSheet({
   onClose: () => void;
   onSubmit: (payload: ArtifactPayload) => Promise<void> | void;
 }) {
-  const [blueprintKey, setBlueprintKey] = useState<EditableBlueprintKey>(artifact?.blueprintKey ?? initialBlueprintKey);
+  const artifactBlueprintKey = artifact?.blueprintKey === "thread_reference" ? initialBlueprintKey : artifact?.blueprintKey;
+  const [blueprintKey, setBlueprintKey] = useState<EditableBlueprintKey>(artifactBlueprintKey ?? initialBlueprintKey);
   const [title, setTitle] = useState(artifact?.title ?? defaultArtifactTitle(initialBlueprintKey));
   const [summary, setSummary] = useState(artifact?.summary ?? defaultArtifactSummary(initialBlueprintKey));
   const [documentDraft, setDocumentDraft] = useState(documentText(artifact?.content) || "");
@@ -410,7 +395,7 @@ export function ArtifactBlueprintSheet({
               {blueprintKey === "flashcard_deck" ? <DeckEditor cards={cards} setCards={setCards} /> : null}
               {blueprintKey === "quiz" ? <QuizEditor questions={questions} setQuestions={setQuestions} /> : null}
               {blueprintKey === "planner_task" ? <TaskEditor task={task} setTask={setTask} /> : null}
-              {blueprintKey === "thread_reference" ? <div className="flex min-h-[220px] items-center justify-center rounded-[9px] bg-[var(--bg-elevated)] p-6 text-center"><div><MessageSquare className="mx-auto h-8 w-8 text-[#8b6ff0]" /><p className="mt-3 text-[13px] leading-6 text-[var(--text-secondary)]">Thread artifacts are created from real conversations and continue in the shared conversation view.</p></div></div> : null}
+              {artifact?.blueprintKey === "thread_reference" ? <div className="flex min-h-[220px] items-center justify-center rounded-[9px] bg-[var(--bg-elevated)] p-6 text-center"><div><MessageSquare className="mx-auto h-8 w-8 text-[#8b6ff0]" /><p className="mt-3 text-[13px] leading-6 text-[var(--text-secondary)]">Thread artifacts continue in the shared conversation view.</p></div></div> : null}
             </section>
             <aside className="space-y-4">
               <div className="rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
@@ -620,7 +605,7 @@ function DeckEditor({ cards, setCards }: { cards: DeckCard[]; setCards: (cards: 
         <aside className="max-h-[560px] overflow-y-auto border-b border-[var(--border-default)] p-2 md:border-b-0 md:border-r">
           {cards.map((card, index) => (
             <button key={card.id} type="button" onClick={() => { setActiveId(card.id); setRevealed(false); }} className={`mb-1 flex w-full items-start gap-2 rounded-[7px] border px-2.5 py-2 text-left ${card.id === activeCard?.id ? "border-[color-mix(in_oklab,#8b6ff0_42%,var(--border-default))] bg-[color-mix(in_oklab,#8b6ff0_6%,var(--bg-primary))]" : "border-transparent hover:bg-[var(--bg-hover)]"}`} aria-current={card.id === activeCard?.id ? "true" : undefined}>
-              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-[5px] bg-[var(--bg-secondary)] text-[10px] font-semibold text-[var(--text-secondary)]">{index + 1}</span>
+              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-[5px] bg-[var(--bg-secondary)] font-sans text-[10px] font-normal text-[var(--text-secondary)]">{index + 1}</span>
               <span className="min-w-0 flex-1"><span className="block truncate text-[11px] font-medium text-[var(--text-primary)]">{card.front || "Untitled card"}</span><span className="mt-0.5 block truncate text-[9px] text-[var(--text-tertiary)]">{card.section || "Section 1"}</span></span>
               {card.confidence && card.confidence !== "unknown" ? <span className={`mt-1 h-1.5 w-1.5 rounded-full ${card.confidence === "strong" ? "bg-[var(--success)]" : card.confidence === "weak" ? "bg-[var(--warning)]" : "bg-[#8b6ff0]"}`} /> : null}
             </button>
@@ -711,7 +696,7 @@ function QuizEditor({ questions, setQuestions }: { questions: QuizQuestion[]; se
       </div>
       {view === "builder" ? <div className="grid min-h-[540px] lg:grid-cols-[240px_minmax(0,1fr)]">
         <aside className="max-h-[620px] overflow-y-auto border-b border-[var(--border-default)] p-2 lg:border-b-0 lg:border-r">
-          {questions.map((question, index) => <button key={question.id} type="button" onClick={() => setActiveId(question.id)} className={`mb-1 flex w-full items-start gap-2 rounded-[7px] border px-2.5 py-2 text-left ${question.id === activeQuestion?.id ? "border-[color-mix(in_oklab,var(--mode-quiz)_42%,var(--border-default))] bg-[color-mix(in_oklab,var(--mode-quiz)_6%,var(--bg-primary))]" : "border-transparent hover:bg-[var(--bg-hover)]"}`} aria-current={question.id === activeQuestion?.id ? "true" : undefined}><span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-[5px] bg-[var(--bg-secondary)] text-[10px] font-semibold text-[var(--text-secondary)]">{index + 1}</span><span className="min-w-0 flex-1"><span className="block truncate text-[11px] font-medium text-[var(--text-primary)]">{question.prompt || "Untitled question"}</span><span className="mt-0.5 block text-[9px] capitalize text-[var(--text-tertiary)]">{(question.type ?? "short_answer").replace("_", " ")}</span></span>{questionIsComplete(question) ? <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 text-[var(--success)]" /> : <Circle className="mt-0.5 h-3.5 w-3.5 text-[var(--text-tertiary)]" />}</button>)}
+          {questions.map((question, index) => <button key={question.id} type="button" onClick={() => setActiveId(question.id)} className={`mb-1 flex w-full items-start gap-2 rounded-[7px] border px-2.5 py-2 text-left ${question.id === activeQuestion?.id ? "border-[color-mix(in_oklab,var(--mode-quiz)_42%,var(--border-default))] bg-[color-mix(in_oklab,var(--mode-quiz)_6%,var(--bg-primary))]" : "border-transparent hover:bg-[var(--bg-hover)]"}`} aria-current={question.id === activeQuestion?.id ? "true" : undefined}><span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-[5px] bg-[var(--bg-secondary)] font-sans text-[10px] font-normal text-[var(--text-secondary)]">{index + 1}</span><span className="min-w-0 flex-1"><span className="block truncate text-[11px] font-medium text-[var(--text-primary)]">{question.prompt || "Untitled question"}</span><span className="mt-0.5 block text-[9px] capitalize text-[var(--text-tertiary)]">{(question.type ?? "short_answer").replace("_", " ")}</span></span>{questionIsComplete(question) ? <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 text-[var(--success)]" /> : <Circle className="mt-0.5 h-3.5 w-3.5 text-[var(--text-tertiary)]" />}</button>)}
         </aside>
         {activeQuestion ? <div className="min-w-0 space-y-4 p-3 sm:p-5">
           <div className="flex flex-wrap items-center gap-2">
@@ -854,5 +839,6 @@ function primaryButtonClass() {
 }
 
 export function blueprintKeyForCard(card: ArtifactCardView): EditableBlueprintKey {
+  if (card.blueprintKey === "thread_reference") throw new Error("Thread artifacts use their conversation surface.");
   return card.blueprintKey;
 }

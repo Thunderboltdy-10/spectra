@@ -59,7 +59,7 @@ export function RunDetailPanel({ runId, card, onClose, onAction, onUseThread, on
   }, [detail]);
   const persistedCard = detail?.cards[0];
   const isPermanent = Boolean(detail?.run.threadId);
-  const displayCard: ResultCardStreamView | undefined = card ?? (persistedCard ? { id: persistedCard._id, runId: persistedCard.runId, status: persistedCard.status, title: persistedCard.title, summary: persistedCard.summary, variant: persistedCard.variant, actions: persistedCard.actions, updatedAt: persistedCard.updatedAt } : undefined);
+  const displayCard: ResultCardStreamView | undefined = card ?? (persistedCard ? { id: persistedCard._id, runId: persistedCard.runId, status: persistedCard.status, title: persistedCard.title, summary: persistedCard.summary, variant: persistedCard.variant, actions: persistedCard.actions, provenance: persistedCard.provenance, updatedAt: persistedCard.updatedAt } : undefined);
 
   async function keep(placeInWorkspace: boolean, navigate: boolean, createReference = true) {
     setBusy(navigate ? "continue" : "keep");
@@ -121,7 +121,7 @@ export function RunDetailPanel({ runId, card, onClose, onAction, onUseThread, on
         </div>
       ) : null}
       <div className="flex items-center justify-end gap-2">
-        {displayCard?.actions.map((action) => { const Icon = runActionIcon(action.key); return <IconAction key={action.key} icon={Icon} label={action.label} active={action.key === "confirm"} danger={action.key === "cancel" || action.key === "reject"} onClick={() => onAction?.(displayCard, action.key, action.targetId)} />; })}
+        {displayCard?.actions.map((action, index) => { const Icon = runActionIcon(action.key); return <IconAction key={`${action.key}:${action.targetId ?? index}`} icon={Icon} label={action.label} active={action.key === "confirm"} danger={action.key === "cancel" || action.key === "reject"} onClick={() => onAction?.(displayCard, action.key, action.targetId)} />; })}
         {!isPermanent ? <button type="button" disabled={busy !== null} onClick={() => { const place = Boolean(detail?.run.workspaceId); void keep(place, false, place); }} className="flex h-9 items-center gap-2 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[11px] font-semibold text-[var(--text-primary)] hover:bg-[var(--bg-secondary)] disabled:opacity-50" aria-label={detail?.run.workspaceId ? "Save conversation to workspace" : "Save conversation"}>{busy === "keep" ? <Loader2 className="h-4 w-4 animate-spin" /> : <BookmarkPlus className="h-4 w-4" />}{detail?.run.workspaceId ? "Save to workspace" : "Save conversation"}</button> : null}
         {!isPermanent && onUseThread ? <IconAction icon={busy === "keep" ? Loader2 : MessageSquarePlus} label="Continue chat" active disabled={busy !== null} className={busy === "keep" ? "animate-spin" : undefined} onClick={() => void keep(false, false, false).then((threadId) => { if (!threadId) return; onUseThread(threadId, conversation?.thread.title ?? "Conversation"); onClose(); })} /> : null}
       </div>

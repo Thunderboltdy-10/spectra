@@ -1,0 +1,865 @@
+import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
+import {
+  normalizePresentationContent,
+  presentationObjectText,
+  type PresentationContent,
+  type PresentationObject,
+  type PresentationSlide,
+} from "./model";
+import type { SpectraArtifactAsset } from "../data/api";
+
+export type PresentationFidelityEntry = {
+  scope: string;
+  level: "exact" | "adapted" | "unsupported";
+  message: string;
+};
+
+export type PresentationImportedMedia = {
+  archivePath: string;
+  name: string;
+  mediaType: string;
+  bytes: Uint8Array;
+};
+
+export type PresentationImportResult = {
+  format: "pptx" | "odp";
+  content: PresentationContent;
+  fidelityReport: PresentationFidelityEntry[];
+  unsupportedFeatures: string[];
+  media: PresentationImportedMedia[];
+};
+
+const MAX_ARCHIVE_FILES = 5_000;
+const MAX_ARCHIVE_BYTES = 240_000_000;
+
+function arrayBuffer(bytes: Uint8Array) {
+  return bytes.buffer.slice(
+    bytes.byteOffset,
+    bytes.byteOffset + bytes.byteLength,
+  ) as ArrayBuffer;
+}
+
+function parseXml(bytes: Uint8Array, label: string) {
+  const source = strFromU8(bytes);
+  if (/<!DOCTYPE|<!ENTITY/i.test(source))
+    throw new Error(`${label} contains unsafe XML declarations.`);
+  const document = new DOMParser().parseFromString(source, "application/xml");
+  if (document.getElementsByTagName("parsererror").length)
+    throw new Error(`${label} is not valid XML.`);
+  return document;
+}
+
+function archiveFrom(buffer: ArrayBuffer) {
+  const files = unzipSync(new Uint8Array(buffer), {
+    filter: (entry) => !entry.name.endsWith("/"),
+  });
+  const entries = Object.entries(files);
+  if (entries.length > MAX_ARCHIVE_FILES)
+    throw new Error("The presentation archive contains too many files.");
+  const bytes = entries.reduce(
+    (total, [, value]) => total + value.byteLength,
+    0,
+  );
+  if (bytes > MAX_ARCHIVE_BYTES)
+    throw new Error("The expanded presentation exceeds the safe import limit.");
+  return files;
+}
+
+function archivePath(base: string, target: string) {
+  const directory = base.split("/").slice(0, -1);
+  const parts = target.replaceAll("\\", "/").split("/");
+  for (const part of parts) {
+    if (!part || part === ".") continue;
+    if (part === "..") directory.pop();
+    else directory.push(part);
+  }
+  return directory.join("/");
+}
+
+function relationshipMap(files: Record<string, Uint8Array>, ownerPath: string) {
+  const name = ownerPath.split("/").at(-1)!;
+  const relationshipPath = `${ownerPath.split("/").slice(0, -1).join("/")}/_rels/${name}.rels`;
+  const bytes = files[relationshipPath];
+  const relationships = new Map<
+    string,
+    { path: string; type: string; external: boolean }
+  >();
+  if (!bytes) return relationships;
+  const document = parseXml(bytes, relationshipPath);
+  for (const node of Array.from(
+    document.getElementsByTagName("Relationship"),
+  )) {
+    const id = node.getAttribute("Id");
+    const target = node.getAttribute("Target");
+    if (!id || !target) continue;
+    relationships.set(id, {
+      path: archivePath(ownerPath, target),
+      type: node.getAttribute("Type") ?? "",
+      external: node.getAttribute("TargetMode") === "External",
+    });
+  }
+  return relationships;
+}
+
+function elements(parent: ParentNode, name: string) {
+  return Array.from((parent as Document | Element).getElementsByTagName(name));
+}
+
+function numberAttribute(
+  element: Element | undefined,
+  name: string,
+  fallback: number,
+) {
+  const value = Number(element?.getAttribute(name));
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function slideText(element: Element) {
+  const paragraphs = elements(element, "a:p").map((paragraph) =>
+    elements(paragraph, "a:t")
+      .map((text) => text.textContent ?? "")
+      .join(""),
+  );
+  return paragraphs.filter(Boolean).join("\n");
+}
+
+function sceneBounds(
+  element: Element,
+  slideWidth: number,
+  slideHeight: number,
+  canvasHeight: number,
+) {
+  const transform = elements(element, "a:xfrm")[0];
+  const offset = transform ? elements(transform, "a:off")[0] : undefined;
+  const extent = transform ? elements(transform, "a:ext")[0] : undefined;
+  const x =
+    (numberAttribute(offset, "x", slideWidth * 0.1) / slideWidth) * 1_000;
+  const y =
+    (numberAttribute(offset, "y", slideHeight * 0.12) / slideHeight) *
+    canvasHeight;
+  const width =
+    (numberAttribute(extent, "cx", slideWidth * 0.4) / slideWidth) * 1_000;
+  const height =
+    (numberAttribute(extent, "cy", slideHeight * 0.18) / slideHeight) *
+    canvasHeight;
+  return {
+    x: Math.max(0, Math.min(990, x)),
+    y: Math.max(0, Math.min(canvasHeight - 10, y)),
+    width: Math.max(10, Math.min(1_000 - x, width)),
+    height: Math.max(10, Math.min(canvasHeight - y, height)),
+    rotation: numberAttribute(transform, "rot", 0) / 60_000,
+  };
+}
+
+function mediaType(path: string) {
+  const extension = path.split(".").at(-1)?.toLowerCase();
+  return (
+    {
+      png: "image/png",
+      jpg: "image/jpeg",
+      jpeg: "image/jpeg",
+      gif: "image/gif",
+      webp: "image/webp",
+      svg: "image/svg+xml",
+      mp4: "video/mp4",
+      webm: "video/webm",
+      mov: "video/quicktime",
+    }[extension ?? ""] ?? "application/octet-stream"
+  );
+}
+
+function pptxMediaObject(
+  picture: Element,
+  slideIndex: number,
+  objectIndex: number,
+  relationships: ReturnType<typeof relationshipMap>,
+  slideWidth: number,
+  slideHeight: number,
+  canvasHeight: number,
+) {
+  const blip = elements(picture, "a:blip")[0];
+  const relationshipId =
+    blip?.getAttribute("r:embed") ?? blip?.getAttribute("r:link");
+  const relation = relationshipId
+    ? relationships.get(relationshipId)
+    : undefined;
+  const type = relation?.path.match(/\.(?:mp4|webm|mov)$/i) ? "video" : "image";
+  return {
+    id: `slide-${slideIndex + 1}:media-${objectIndex + 1}`,
+    type,
+    ...sceneBounds(picture, slideWidth, slideHeight, canvasHeight),
+    content: relation?.external
+      ? { unavailableExternalMedia: relation.path }
+      : { importMediaPath: relation?.path },
+    altText: elements(picture, "p:cNvPr")[0]?.getAttribute("descr") ?? "",
+    readingOrder: objectIndex,
+  } satisfies PresentationObject;
+}
+
+function parsePptx(
+  files: Record<string, Uint8Array>,
+): PresentationImportResult {
+  const presentationBytes = files["ppt/presentation.xml"];
+  if (!presentationBytes)
+    throw new Error(
+      "This file does not contain a valid PowerPoint presentation.",
+    );
+  const presentation = parseXml(presentationBytes, "ppt/presentation.xml");
+  const slideSize = elements(presentation, "p:sldSz")[0];
+  const slideWidth = numberAttribute(slideSize, "cx", 12_192_000);
+  const slideHeight = numberAttribute(slideSize, "cy", 6_858_000);
+  const ratio = slideWidth / slideHeight;
+  const aspectRatio = ratio < 1.55 ? "4:3" : "16:9";
+  const canvasHeight = aspectRatio === "4:3" ? 750 : 562.5;
+  const slidePaths = Object.keys(files)
+    .filter((path) => /^ppt\/slides\/slide\d+\.xml$/i.test(path))
+    .sort((left, right) => {
+      const a = Number(/slide(\d+)/i.exec(left)?.[1]);
+      const b = Number(/slide(\d+)/i.exec(right)?.[1]);
+      return a - b;
+    });
+  if (!slidePaths.length)
+    throw new Error("The PowerPoint file contains no slides.");
+
+  const importedMedia = new Map<string, PresentationImportedMedia>();
+  const unsupported = new Set<string>();
+  const fidelity: PresentationFidelityEntry[] = [
+    {
+      scope: "slides",
+      level: "adapted",
+      message: `${slidePaths.length} slides were converted into editable Spectra scene objects.`,
+    },
+  ];
+  const slides: PresentationSlide[] = slidePaths.map((path, slideIndex) => {
+    const document = parseXml(files[path]!, path);
+    const relationships = relationshipMap(files, path);
+    const objects: PresentationObject[] = [];
+    for (const shape of elements(document, "p:sp")) {
+      const objectIndex = objects.length;
+      const content = slideText(shape);
+      const preset = elements(shape, "a:prstGeom")[0]?.getAttribute("prst");
+      const isText = Boolean(content);
+      objects.push({
+        id: `slide-${slideIndex + 1}:object-${objectIndex + 1}`,
+        type: isText ? "text" : "shape",
+        ...sceneBounds(shape, slideWidth, slideHeight, canvasHeight),
+        content: isText
+          ? { text: content }
+          : { shape: preset || "rectangle", text: "" },
+        style: isText
+          ? {
+              fontSize: Math.max(
+                12,
+                numberAttribute(elements(shape, "a:defRPr")[0], "sz", 2_600) /
+                  100,
+              ),
+              fontWeight: elements(shape, "a:rPr").some(
+                (node) => node.getAttribute("b") === "1",
+              )
+                ? 700
+                : 400,
+              color: "#23322d",
+              align: "left",
+            }
+          : { fill: "#e6ece8", stroke: "#9aaba2", radius: 8 },
+        readingOrder: objectIndex,
+      });
+    }
+    for (const picture of elements(document, "p:pic")) {
+      const object = pptxMediaObject(
+        picture,
+        slideIndex,
+        objects.length,
+        relationships,
+        slideWidth,
+        slideHeight,
+        canvasHeight,
+      );
+      objects.push(object);
+      const source = object.content as { importMediaPath?: string };
+      if (source.importMediaPath && files[source.importMediaPath]) {
+        importedMedia.set(source.importMediaPath, {
+          archivePath: source.importMediaPath,
+          name: source.importMediaPath.split("/").at(-1) ?? "media",
+          mediaType: mediaType(source.importMediaPath),
+          bytes: files[source.importMediaPath]!,
+        });
+      }
+    }
+    const graphicFrames = elements(document, "p:graphicFrame");
+    if (graphicFrames.length) {
+      unsupported.add("PowerPoint charts, SmartArt, and complex tables");
+      graphicFrames.forEach((frame, index) =>
+        objects.push({
+          id: `slide-${slideIndex + 1}:graphic-${index + 1}`,
+          type: "shape",
+          ...sceneBounds(frame, slideWidth, slideHeight, canvasHeight),
+          content: { text: "Imported graphic — replace or rebuild in Spectra" },
+          style: { fill: "#f1eee7", stroke: "#c9c2b4", radius: 10 },
+          altText: "Unsupported PowerPoint graphic placeholder",
+          readingOrder: objects.length,
+        }),
+      );
+    }
+    const externalLinks = [...relationships.values()].filter(
+      (relation) => relation.external,
+    );
+    if (externalLinks.length) unsupported.add("Externally linked media");
+    const notesRelation = [...relationships.values()].find((relation) =>
+      relation.type.endsWith("/notesSlide"),
+    );
+    const notesBytes = notesRelation ? files[notesRelation.path] : undefined;
+    const notes = notesBytes
+      ? elements(parseXml(notesBytes, notesRelation!.path), "a:t")
+          .map((node) => node.textContent ?? "")
+          .filter((value) => value && !/^\d+$/.test(value))
+          .join("\n")
+      : "";
+    const title =
+      objects
+        .filter((object) => object.type === "text")
+        .map(presentationObjectText)
+        .find(Boolean)
+        ?.split("\n")[0]
+        ?.slice(0, 300) ?? `Slide ${slideIndex + 1}`;
+    return {
+      id: `slide-${slideIndex + 1}`,
+      title,
+      objects,
+      speakerNotes: notes,
+      layoutId: "imported",
+      transition: { kind: "none" },
+      accessibility: {
+        readingOrder: objects.map((object) => object.id),
+      },
+    };
+  });
+  if (importedMedia.size)
+    fidelity.push({
+      scope: "media",
+      level: "exact",
+      message: `${importedMedia.size} embedded media files were retained for native asset conversion.`,
+    });
+  const unsupportedFeatures = [...unsupported];
+  unsupportedFeatures.forEach((feature) =>
+    fidelity.push({
+      scope: feature,
+      level: "unsupported",
+      message: `${feature} is retained in the original file and represented safely where possible.`,
+    }),
+  );
+  return {
+    format: "pptx",
+    content: normalizePresentationContent({
+      theme: { id: "pptx-import", name: "Imported PowerPoint" },
+      slides,
+      settings: { aspectRatio, showSlideNumbers: true },
+    }),
+    fidelityReport: fidelity,
+    unsupportedFeatures,
+    media: [...importedMedia.values()],
+  };
+}
+
+function unit(value: string | null, fallback: number) {
+  if (!value) return fallback;
+  const amount = Number.parseFloat(value);
+  if (!Number.isFinite(amount)) return fallback;
+  if (value.endsWith("cm")) return amount / 2.54;
+  if (value.endsWith("mm")) return amount / 25.4;
+  if (value.endsWith("pt")) return amount / 72;
+  if (value.endsWith("px")) return amount / 96;
+  return amount;
+}
+
+function parseOdp(files: Record<string, Uint8Array>): PresentationImportResult {
+  const contentBytes = files["content.xml"];
+  if (!contentBytes)
+    throw new Error(
+      "This file does not contain a valid OpenDocument presentation.",
+    );
+  const document = parseXml(contentBytes, "content.xml");
+  const pages = elements(document, "draw:page");
+  if (!pages.length)
+    throw new Error("The OpenDocument file contains no slides.");
+  const media = new Map<string, PresentationImportedMedia>();
+  const slides = pages.map((page, slideIndex) => {
+    const objects: PresentationObject[] = [];
+    for (const frame of elements(page, "draw:frame")) {
+      const x = (unit(frame.getAttribute("svg:x"), 1) / 13.333) * 1_000;
+      const y = (unit(frame.getAttribute("svg:y"), 1) / 7.5) * 562.5;
+      const width = (unit(frame.getAttribute("svg:width"), 4) / 13.333) * 1_000;
+      const height = (unit(frame.getAttribute("svg:height"), 2) / 7.5) * 562.5;
+      const image = elements(frame, "draw:image")[0];
+      const textBox = elements(frame, "draw:text-box")[0];
+      const sourcePath = image
+        ?.getAttribute("xlink:href")
+        ?.replace(/^\.\//, "");
+      const objectIndex = objects.length;
+      if (image && sourcePath) {
+        objects.push({
+          id: `slide-${slideIndex + 1}:media-${objectIndex + 1}`,
+          type: "image",
+          x,
+          y,
+          width,
+          height,
+          rotation: 0,
+          content: { importMediaPath: sourcePath },
+          altText: frame.getAttribute("draw:name") ?? "",
+          readingOrder: objectIndex,
+        });
+        if (files[sourcePath])
+          media.set(sourcePath, {
+            archivePath: sourcePath,
+            name: sourcePath.split("/").at(-1) ?? "media",
+            mediaType: mediaType(sourcePath),
+            bytes: files[sourcePath]!,
+          });
+      } else if (textBox) {
+        const content = elements(textBox, "text:p")
+          .map((node) => node.textContent ?? "")
+          .filter(Boolean)
+          .join("\n");
+        objects.push({
+          id: `slide-${slideIndex + 1}:object-${objectIndex + 1}`,
+          type: "text",
+          x,
+          y,
+          width,
+          height,
+          rotation: 0,
+          content: { text: content || "Imported text" },
+          style: {
+            fontSize: 28,
+            fontWeight: objectIndex === 0 ? 650 : 400,
+            color: "#23322d",
+            align: "left",
+          },
+          readingOrder: objectIndex,
+        });
+      }
+    }
+    const title =
+      objects.map(presentationObjectText).find(Boolean)?.split("\n")[0] ??
+      page.getAttribute("draw:name") ??
+      `Slide ${slideIndex + 1}`;
+    return {
+      id: `slide-${slideIndex + 1}`,
+      title: title.slice(0, 300),
+      objects,
+      speakerNotes: "",
+      layoutId: "imported",
+      transition: { kind: "none" as const },
+      accessibility: { readingOrder: objects.map((object) => object.id) },
+    };
+  });
+  return {
+    format: "odp",
+    content: normalizePresentationContent({
+      theme: { id: "odp-import", name: "Imported OpenDocument" },
+      slides,
+      settings: { aspectRatio: "16:9", showSlideNumbers: true },
+    }),
+    fidelityReport: [
+      {
+        scope: "slides and text",
+        level: "adapted",
+        message: `${slides.length} OpenDocument slides were converted into editable Spectra objects.`,
+      },
+      ...(media.size
+        ? [
+            {
+              scope: "media",
+              level: "exact" as const,
+              message: `${media.size} embedded images were retained for native asset conversion.`,
+            },
+          ]
+        : []),
+      {
+        scope: "advanced ODP effects",
+        level: "unsupported",
+        message:
+          "Advanced master styling, transitions, and animations remain recoverable from the retained original.",
+      },
+    ],
+    unsupportedFeatures: [
+      "Advanced OpenDocument masters, transitions, and animations",
+    ],
+    media: [...media.values()],
+  };
+}
+
+export async function importPresentationFile(
+  file: File,
+): Promise<PresentationImportResult> {
+  const extension = file.name.split(".").at(-1)?.toLowerCase();
+  if (extension === "pptm" || extension === "ppsm")
+    throw new Error(
+      "Macro-enabled presentations are quarantined and cannot be converted in the browser.",
+    );
+  if (extension !== "pptx" && extension !== "odp")
+    throw new Error("Choose a .pptx or .odp presentation export.");
+  if (file.size > 80_000_000)
+    throw new Error("Presentation imports cannot exceed 80 MB.");
+  const files = archiveFrom(await file.arrayBuffer());
+  if (
+    Object.keys(files).some((path) =>
+      /(?:vbaProject\.bin|activeX|embeddings\/.+\.(?:exe|dll|js|vbs|cmd|bat))$/i.test(
+        path,
+      ),
+    )
+  )
+    throw new Error(
+      "The presentation contains executable or macro content and has been quarantined.",
+    );
+  return extension === "pptx" ? parsePptx(files) : parseOdp(files);
+}
+
+function hex(value: unknown, fallback: string) {
+  return typeof value === "string"
+    ? value.replace(/^#/, "").slice(0, 6)
+    : fallback;
+}
+
+async function dataUrl(url: string) {
+  const response = await fetch(url);
+  if (!response.ok)
+    throw new Error("A presentation asset could not be loaded.");
+  const blob = await response.blob();
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () =>
+      reject(new Error("A presentation asset could not be read."));
+    reader.onload = () => resolve(String(reader.result));
+    reader.readAsDataURL(blob);
+  });
+}
+
+function assetMap(assets: SpectraArtifactAsset[]) {
+  return new Map(assets.map((asset) => [asset.assetId, asset]));
+}
+
+export async function buildPresentationPptx(
+  content: PresentationContent,
+  assets: SpectraArtifactAsset[],
+) {
+  const { default: PptxGenJS } = await import("pptxgenjs");
+  const pptx = new PptxGenJS();
+  pptx.layout =
+    content.settings?.aspectRatio === "4:3" ? "LAYOUT_4X3" : "LAYOUT_WIDE";
+  pptx.author = "Spectra";
+  pptx.subject = "Spectra-native presentation export";
+  const widthInches = content.settings?.aspectRatio === "4:3" ? 10 : 13.333;
+  const heightInches = 7.5;
+  const canvasHeight = content.settings?.aspectRatio === "4:3" ? 750 : 562.5;
+  const byId = assetMap(assets);
+  for (const slide of content.slides) {
+    const page = pptx.addSlide();
+    page.background = {
+      color: hex(
+        slide.background ?? content.theme.tokens?.background,
+        "FBFAF5",
+      ),
+    };
+    for (const object of [...slide.objects].sort(
+      (left, right) => (left.readingOrder ?? 0) - (right.readingOrder ?? 0),
+    )) {
+      if (object.hidden) continue;
+      const x = (object.x / 1_000) * widthInches;
+      const y = (object.y / canvasHeight) * heightInches;
+      const w = (object.width / 1_000) * widthInches;
+      const h = (object.height / canvasHeight) * heightInches;
+      const options = { x, y, w, h, rotate: object.rotation };
+      if (object.type === "text") {
+        page.addText(presentationObjectText(object), {
+          ...options,
+          fontFace: content.theme.fonts?.body ?? "Aptos",
+          fontSize: Number(object.style?.fontSize ?? 28),
+          bold: Number(object.style?.fontWeight ?? 400) >= 600,
+          italic: Boolean(object.style?.italic),
+          underline: object.style?.underline ? { style: "sng" } : undefined,
+          color: hex(object.style?.color, "23322D"),
+          align:
+            object.style?.align === "center" || object.style?.align === "right"
+              ? object.style.align
+              : "left",
+          breakLine: false,
+          valign: "mid",
+          margin: 0,
+          fit: "shrink",
+        });
+      } else if (object.type === "shape") {
+        page.addShape(pptx.ShapeType.roundRect, {
+          ...options,
+          fill: { color: hex(object.style?.fill, "E4EEE8") },
+          line: { color: hex(object.style?.stroke, "8DA99A"), pt: 1 },
+          rectRadius: Number(object.style?.radius ?? 8) / 100,
+        });
+        if (presentationObjectText(object))
+          page.addText(presentationObjectText(object), {
+            ...options,
+            color: hex(object.style?.color, "23322D"),
+            fontSize: Number(object.style?.fontSize ?? 18),
+            align: "center",
+            valign: "mid",
+            margin: 0.05,
+          });
+      } else if (object.type === "image") {
+        const source = object.content as { assetId?: string };
+        const asset = source.assetId ? byId.get(source.assetId) : undefined;
+        if (asset?.downloadUrl)
+          page.addImage({ data: await dataUrl(asset.downloadUrl), ...options });
+      } else if (object.type === "table") {
+        const rows = (object.content as { rows?: unknown[][] }).rows ?? [];
+        page.addTable(
+          rows.map((row) => row.map((cell) => String(cell ?? ""))),
+          {
+            ...options,
+            border: { color: "BAC5BF", pt: 0.7 },
+            color: "23322D",
+            fontSize: 12,
+            fill: "F7F8F5",
+            margin: 0.05,
+          },
+        );
+      } else if (object.type === "chart") {
+        const values = Array.isArray(
+          (object.content as { values?: unknown[] }).values,
+        )
+          ? (object.content as { values: unknown[] }).values.map(Number)
+          : [62, 84, 48];
+        const maximum = Math.max(1, ...values);
+        values.forEach((value, index) => {
+          const barWidth = w / Math.max(values.length * 1.6, 1);
+          const barHeight = (Math.max(0, value) / maximum) * h;
+          page.addShape(pptx.ShapeType.rect, {
+            x: x + (index + 0.3) * (w / values.length),
+            y: y + h - barHeight,
+            w: barWidth,
+            h: barHeight,
+            fill: { color: hex(content.theme.tokens?.accent, "2F9A72") },
+            line: { color: hex(content.theme.tokens?.accent, "2F9A72"), pt: 0 },
+          });
+        });
+      }
+    }
+    if (slide.speakerNotes) page.addNotes(slide.speakerNotes);
+  }
+  const bytes = (await pptx.write({
+    outputType: "arraybuffer",
+  })) as ArrayBuffer;
+  return new Blob([bytes], {
+    type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  });
+}
+
+function xmlEscape(value: unknown) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;");
+}
+
+export function buildPresentationOdp(content: PresentationContent) {
+  const canvasHeight = content.settings?.aspectRatio === "4:3" ? 750 : 562.5;
+  const width = content.settings?.aspectRatio === "4:3" ? 10 : 13.333;
+  const pages = content.slides
+    .map(
+      (slide) =>
+        `<draw:page draw:name="${xmlEscape(slide.title)}">${slide.objects
+          .filter((object) => !object.hidden)
+          .map((object) => {
+            const x = (object.x / 1_000) * width;
+            const y = (object.y / canvasHeight) * 7.5;
+            const w = (object.width / 1_000) * width;
+            const h = (object.height / canvasHeight) * 7.5;
+            return `<draw:frame draw:name="${xmlEscape(object.id)}" svg:x="${x}in" svg:y="${y}in" svg:width="${w}in" svg:height="${h}in"><draw:text-box><text:p>${xmlEscape(presentationObjectText(object) || `[${object.type}]`)}</text:p></draw:text-box></draw:frame>`;
+          })
+          .join("")}</draw:page>`,
+    )
+    .join("");
+  const contentXml = `<?xml version="1.0" encoding="UTF-8"?><office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0" xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" xmlns:svg="urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0" office:version="1.3"><office:body><office:presentation>${pages}</office:presentation></office:body></office:document-content>`;
+  const manifest = `<?xml version="1.0" encoding="UTF-8"?><manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.3"><manifest:file-entry manifest:full-path="/" manifest:media-type="application/vnd.oasis.opendocument.presentation"/><manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/></manifest:manifest>`;
+  const bytes = zipSync(
+    {
+      mimetype: [
+        strToU8("application/vnd.oasis.opendocument.presentation"),
+        { level: 0 },
+      ],
+      "content.xml": strToU8(contentXml),
+      "META-INF/manifest.xml": strToU8(manifest),
+    },
+    { level: 6 },
+  );
+  return new Blob([arrayBuffer(bytes)], {
+    type: "application/vnd.oasis.opendocument.presentation",
+  });
+}
+
+async function loadImage(url: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    image.crossOrigin = "anonymous";
+    image.onload = () => resolve(image);
+    image.onerror = () =>
+      reject(new Error("A presentation image could not be rendered."));
+    image.src = url;
+  });
+}
+
+export async function renderPresentationSlide(
+  slide: PresentationSlide,
+  content: PresentationContent,
+  assets: SpectraArtifactAsset[],
+  scale = 1.6,
+) {
+  const canvasHeight = content.settings?.aspectRatio === "4:3" ? 750 : 562.5;
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(1_000 * scale);
+  canvas.height = Math.round(canvasHeight * scale);
+  const context = canvas.getContext("2d");
+  if (!context)
+    throw new Error("Canvas export is unavailable in this browser.");
+  context.scale(scale, scale);
+  context.fillStyle =
+    slide.background ?? content.theme.tokens?.background ?? "#fbfaf5";
+  context.fillRect(0, 0, 1_000, canvasHeight);
+  const byId = assetMap(assets);
+  for (const object of [...slide.objects].sort(
+    (left, right) => (left.readingOrder ?? 0) - (right.readingOrder ?? 0),
+  )) {
+    if (object.hidden) continue;
+    context.save();
+    context.translate(
+      object.x + object.width / 2,
+      object.y + object.height / 2,
+    );
+    context.rotate((object.rotation * Math.PI) / 180);
+    context.translate(-object.width / 2, -object.height / 2);
+    if (object.type === "text") {
+      const fontSize = Number(object.style?.fontSize ?? 32);
+      const weight = Number(object.style?.fontWeight ?? 400);
+      context.fillStyle = String(object.style?.color ?? "#23322d");
+      context.font = `${object.style?.italic ? "italic " : ""}${weight} ${fontSize}px Georgia`;
+      context.textBaseline = "top";
+      const lines = presentationObjectText(object).split("\n");
+      lines.forEach((line, index) =>
+        context.fillText(line, 0, index * fontSize * 1.15, object.width),
+      );
+    } else if (object.type === "shape") {
+      context.fillStyle = String(object.style?.fill ?? "#e4eee8");
+      context.strokeStyle = String(object.style?.stroke ?? "#8da99a");
+      context.lineWidth = 1;
+      context.beginPath();
+      context.roundRect(
+        0,
+        0,
+        object.width,
+        object.height,
+        Number(object.style?.radius ?? 8),
+      );
+      context.fill();
+      context.stroke();
+    } else if (object.type === "image") {
+      const source = object.content as { assetId?: string };
+      const asset = source.assetId ? byId.get(source.assetId) : undefined;
+      if (asset?.downloadUrl) {
+        const image = await loadImage(asset.downloadUrl);
+        context.drawImage(image, 0, 0, object.width, object.height);
+      }
+    } else if (object.type === "chart") {
+      const values = Array.isArray(
+        (object.content as { values?: unknown[] }).values,
+      )
+        ? (object.content as { values: unknown[] }).values.map(Number)
+        : [62, 84, 48];
+      const maximum = Math.max(1, ...values);
+      context.fillStyle = content.theme.tokens?.accent ?? "#2f9a72";
+      values.forEach((value, index) => {
+        const barWidth = object.width / Math.max(values.length * 1.7, 1);
+        const barHeight = (Math.max(0, value) / maximum) * object.height;
+        context.fillRect(
+          (index + 0.35) * (object.width / values.length),
+          object.height - barHeight,
+          barWidth,
+          barHeight,
+        );
+      });
+    } else {
+      context.strokeStyle = "#a8ada8";
+      context.strokeRect(0, 0, object.width, object.height);
+      context.fillStyle = "#59615c";
+      context.font = "16px sans-serif";
+      context.fillText(`[${object.type}]`, 12, 12);
+    }
+    context.restore();
+  }
+  return canvas;
+}
+
+export async function buildPresentationPdf(
+  content: PresentationContent,
+  assets: SpectraArtifactAsset[],
+) {
+  const { jsPDF } = await import("jspdf");
+  const canvasHeight = content.settings?.aspectRatio === "4:3" ? 750 : 562.5;
+  const pdf = new jsPDF({
+    orientation: "landscape",
+    unit: "pt",
+    format: [1_000, canvasHeight],
+    compress: true,
+  });
+  for (let index = 0; index < content.slides.length; index += 1) {
+    if (index) pdf.addPage([1_000, canvasHeight], "landscape");
+    const canvas = await renderPresentationSlide(
+      content.slides[index]!,
+      content,
+      assets,
+      1.5,
+    );
+    pdf.addImage(
+      canvas.toDataURL("image/jpeg", 0.94),
+      "JPEG",
+      0,
+      0,
+      1_000,
+      canvasHeight,
+      undefined,
+      "FAST",
+    );
+  }
+  return pdf.output("blob");
+}
+
+export async function buildPresentationPngArchive(
+  content: PresentationContent,
+  assets: SpectraArtifactAsset[],
+) {
+  const files: Record<string, Uint8Array> = {};
+  for (let index = 0; index < content.slides.length; index += 1) {
+    const canvas = await renderPresentationSlide(
+      content.slides[index]!,
+      content,
+      assets,
+      2,
+    );
+    const blob = await new Promise<Blob>((resolve, reject) =>
+      canvas.toBlob(
+        (value) =>
+          value
+            ? resolve(value)
+            : reject(new Error("Slide image export failed.")),
+        "image/png",
+      ),
+    );
+    files[`slide-${String(index + 1).padStart(3, "0")}.png`] = new Uint8Array(
+      await blob.arrayBuffer(),
+    );
+  }
+  return new Blob([arrayBuffer(zipSync(files, { level: 3 }))], {
+    type: "application/zip",
+  });
+}

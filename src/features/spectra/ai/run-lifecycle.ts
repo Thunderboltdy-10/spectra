@@ -3,8 +3,8 @@ import { getSpectraModelId } from "./model-config";
 
 type CreateRunInput = {
   id: SpectraId<"aiRuns">;
-  ownerUserId: string;
-  orgId?: string;
+  ownerAccountId: string;
+  schoolId?: string;
   sourceSurface: AIRun["sourceSurface"];
   userPrompt: string;
   threadId?: SpectraId<"threads">;
@@ -17,8 +17,8 @@ export function createQueuedRun(input: CreateRunInput): AIRun {
   const now = input.now ?? Date.now();
   return {
     id: input.id,
-    ownerUserId: input.ownerUserId,
-    orgId: input.orgId,
+    ownerAccountId: input.ownerAccountId,
+    schoolId: input.schoolId,
     sourceSurface: input.sourceSurface,
     threadId: input.threadId,
     workspaceId: input.workspaceId,
@@ -40,7 +40,7 @@ export function markRunRunning(run: AIRun, now = Date.now()): AIRun {
 }
 
 export function completeRun(run: AIRun, finalSummary: string, now = Date.now()): AIRun {
-  if (run.status !== "queued" && run.status !== "running" && run.status !== "awaiting_confirmation") {
+  if (run.status !== "queued" && run.status !== "running" && run.status !== "awaiting_confirmation" && run.status !== "awaiting_resolution") {
     throw new Error(`Cannot complete ${run.status} run.`);
   }
   return {
@@ -100,3 +100,4 @@ export function createResultCardForRun(params: {
     updatedAt: now,
   };
 }
+

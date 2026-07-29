@@ -1,714 +1,780 @@
-import { mutation, query } from "./_generated/server";
+import { mutation, query, type MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
-import { getUserByClerkId } from "./helpers";
-import { vStudyMode } from "./shared";
+import type { Doc, Id } from "./_generated/dataModel";
+import {
+  requireArtifactCapability,
+  requireSpectraActor,
+} from "./spectraShared";
+import { writeAuditEvent } from "./auditShared";
+import { commitDirectHumanChange, commitHumanCheckpoint } from "./changeGroups";
 
-type AgentDoc = {
-  orgId: string;
-  creatorUserId: string;
-  visibility: "public" | "private" | "shared";
-  moderationStatus?: "approved" | "pending";
-  collaborators?: string[];
-};
+const vEvalResult = v.object({
+  caseId: v.string(),
+  category: v.string(),
+  required: v.boolean(),
+  score: v.number(),
+  passed: v.boolean(),
+  reason: v.string(),
+  responseExcerpt: v.string(),
+  latencyMs: v.number(),
+  inputTokens: v.optional(v.number()),
+  outputTokens: v.optional(v.number()),
+});
 
-type ActorDoc = {
-  _id: string;
-  role: "student" | "teacher" | "admin";
-};
-
-function defaultIconForCategory(category: string) {
-  const value = category.trim().toLowerCase();
-  if (/math|calculus|algebra|statistics/.test(value)) return "Calculator";
-  if (/science|chemistry|biology|physics/.test(value)) return "FlaskConical";
-  if (/writing|english|language arts|essay/.test(value)) return "PenTool";
-  if (/history|politics|social studies/.test(value)) return "Landmark";
-  if (/coding|programming|cs|computer/.test(value)) return "Code2";
-  if (/language|linguistics/.test(value)) return "Languages";
-  if (/art|music|design/.test(value)) return "Palette";
-  if (/philosophy|logic/.test(value)) return "Sigma";
-  if (/geography|global|world/.test(value)) return "Globe2";
-  return "Bot";
+function canonical(value: unknown): string {
+  if (value === null || typeof value !== "object")
+    return JSON.stringify(value) ?? "null";
+  if (Array.isArray(value))
+    return `[${value.map((item) => canonical(item)).join(",")}]`;
+  return `{${Object.entries(value as Record<string, unknown>)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`)
+    .join(",")}}`;
 }
 
-function isAgentCollaborator(agent: AgentDoc, userId: string) {
-  return (agent.collaborators ?? []).includes(userId);
+function base64Url(bytes: Uint8Array) {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary)
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replace(/=+$/, "");
 }
 
-function canEditAgent(agent: AgentDoc, actor: ActorDoc) {
-  return actor.role === "admin" || agent.creatorUserId === actor._id || isAgentCollaborator(agent, actor._id);
+function decodeBase64Url(value: string) {
+  const padded = value
+    .replaceAll("-", "+")
+    .replaceAll("_", "/")
+    .padEnd(Math.ceil(value.length / 4) * 4, "=");
+  const binary = atob(padded);
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }
 
-function canManageCollaborators(agent: AgentDoc, actor: ActorDoc) {
-  return actor.role === "admin" || agent.creatorUserId === actor._id;
-}
-
-function canChangeVisibility(agent: AgentDoc, actor: ActorDoc) {
-  return agent.creatorUserId === actor._id;
-}
-
-function canViewAgent(agent: AgentDoc, actor: ActorDoc) {
-  if (agent.moderationStatus === "pending" && !canEditAgent(agent, actor) && actor.role !== "admin") {
-    return false;
-  }
-  return agent.visibility === "public" || canEditAgent(agent, actor);
-}
-
-function normalizeList(values: string[] | undefined, max = 24) {
-  return Array.from(
-    new Set(
-      (values ?? [])
-        .map((value) => value.trim())
-        .filter((value) => value.length > 0),
+async function digest(value: unknown) {
+  return base64Url(
+    new Uint8Array(
+      await crypto.subtle.digest(
+        "SHA-256",
+        new TextEncoder().encode(canonical(value)),
+      ),
     ),
-  ).slice(0, max);
+  );
 }
 
-function resolveVisibilityFromAccess(
-  accessLevel: "private" | "class" | "school" | undefined,
-  fallback: "public" | "private" | "shared",
+export async function agentDraftHash(artifact: Doc<"spectraArtifacts">) {
+  return digest({
+    title: artifact.title,
+    summary: artifact.summary,
+    tags: artifact.tags,
+    content: artifact.content,
+    schemaVersion: artifact.schemaVersion,
+  });
+}
+
+async function verifyEvalBridge(
+  ctx: MutationCtx,
+  actor: Awaited<ReturnType<typeof requireSpectraActor>>,
+  input: {
+    evalRunId: Id<"agentEvalRuns">;
+    payloadDigest: string;
+    timestamp: number;
+    nonce: string;
+    signature: string;
+  },
 ) {
-  if (accessLevel === "private") return "private" as const;
-  if (accessLevel === "class") return "shared" as const;
-  if (accessLevel === "school") return "public" as const;
-  return fallback;
+  const key =
+    process.env.SPECTRA_AGENT_EVAL_BRIDGE_KEY ??
+    process.env.SPECTRA_SECRET_BRIDGE_KEY;
+  if (!key || key.length < 32)
+    throw new Error(
+      "AGENT_EVAL_BRIDGE_CONFIG_MISSING: Configure a strong evaluation bridge key.",
+    );
+  if (Math.abs(Date.now() - input.timestamp) > 60_000)
+    throw new Error("AGENT_EVAL_BRIDGE_EXPIRED: Evaluation result expired.");
+  const replay = await ctx.db
+    .query("secretBridgeNonces")
+    .withIndex("by_nonce", (q) => q.eq("nonce", input.nonce))
+    .unique();
+  if (replay)
+    throw new Error(
+      "AGENT_EVAL_BRIDGE_REPLAYED: Evaluation result was already used.",
+    );
+  const canonicalInput = [
+    "agent-eval-settle",
+    actor.clerkId,
+    input.evalRunId,
+    input.timestamp,
+    input.nonce,
+    input.payloadDigest,
+  ].join("|");
+  const imported = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(key),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["verify"],
+  );
+  const valid = await crypto.subtle.verify(
+    "HMAC",
+    imported,
+    decodeBase64Url(input.signature),
+    new TextEncoder().encode(canonicalInput),
+  );
+  if (!valid)
+    throw new Error(
+      "AGENT_EVAL_BRIDGE_INVALID: Evaluation authorization failed.",
+    );
+  await ctx.db.insert("secretBridgeNonces", {
+    nonce: input.nonce,
+    operation: "agent-eval-settle",
+    accountId: actor.accountId,
+    expiresAt: input.timestamp + 60_000,
+    createdAt: Date.now(),
+  });
 }
 
-export const createAgent = mutation({
+export const beginEvalRun = mutation({
   args: {
-    actorClerkId: v.string(),
-    name: v.string(),
-    description: v.string(),
-    subjectArea: v.optional(v.string()),
-    gradeLevel: v.optional(v.string()),
-    systemPrompt: v.string(),
-    avatarEmoji: v.optional(v.string()),
-    avatarIcon: v.optional(v.string()),
-    category: v.string(),
-    preferredModel: v.optional(v.string()),
-    preferredMode: v.optional(vStudyMode),
-    temperature: v.optional(v.number()),
-    maxTokens: v.optional(v.number()),
-    originalDescription: v.optional(v.string()),
-    allowedTools: v.optional(v.array(v.string())),
-    modelAllowlist: v.optional(v.array(v.string())),
-    modelDenylist: v.optional(v.array(v.string())),
-    attachmentPolicy: v.optional(v.string()),
-    accessLevel: v.optional(v.union(v.literal("private"), v.literal("class"), v.literal("school"))),
-    moderationStatus: v.optional(v.union(v.literal("approved"), v.literal("pending"))),
-    guidelinesSummary: v.optional(v.string()),
-    guidelinesTopicMap: v.optional(v.array(v.string())),
-    guidelinesRubricHints: v.optional(v.array(v.string())),
-    guidelinesMisconceptions: v.optional(v.array(v.string())),
-    guidelinesVocabulary: v.optional(v.array(v.string())),
-    guidelinesExamStructure: v.optional(v.array(v.string())),
-    visibility: v.union(v.literal("public"), v.literal("private"), v.literal("shared")),
+    agentId: v.id("spectraArtifacts"),
+    modelId: v.string(),
+    provider: v.string(),
+    threshold: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    const actor = await getUserByClerkId(ctx, args.actorClerkId);
-    if (!actor) {
-      throw new Error("Unauthorized");
-    }
-
+    const { actor, artifact } = await requireArtifactCapability(
+      ctx,
+      args.agentId,
+      "modify",
+    );
+    if (artifact.blueprintKey !== "agent" || !artifact.schoolId)
+      throw new Error("AGENT_EVAL_INVALID: This artifact is not an agent.");
+    const content =
+      artifact.content &&
+      typeof artifact.content === "object" &&
+      !Array.isArray(artifact.content)
+        ? (artifact.content as Record<string, unknown>)
+        : {};
+    const cases = Array.isArray(content.evals) ? content.evals : [];
+    if (cases.length === 0)
+      throw new Error(
+        "AGENT_EVAL_CASE_REQUIRED: Add at least one synthetic evaluation case.",
+      );
     const now = Date.now();
-    const accessLevel = args.accessLevel
-      ?? (args.visibility === "private" ? "private" : args.visibility === "shared" ? "class" : "school");
-    const visibility = resolveVisibilityFromAccess(accessLevel, args.visibility);
-    const requestedModeration = args.moderationStatus;
-    const needsStudentModeration = actor.role === "student" && visibility === "public";
-    const moderationStatus = requestedModeration ?? (needsStudentModeration ? "pending" : "approved");
-    const agentId = await ctx.db.insert("agents", {
-      orgId: actor.orgId,
-      creatorUserId: actor._id,
-      name: args.name,
-      description: args.description,
-      subjectArea: args.subjectArea,
-      gradeLevel: args.gradeLevel,
-      systemPrompt: args.systemPrompt,
-      avatarEmoji: args.avatarEmoji || "🎓",
-      avatarIcon: args.avatarIcon ?? defaultIconForCategory(args.category),
-      category: args.category,
-      preferredModel: args.preferredModel,
-      preferredMode: args.preferredMode,
-      temperature: args.temperature,
-      maxTokens: args.maxTokens,
-      originalDescription: args.originalDescription,
-      allowedTools: args.allowedTools,
-      modelAllowlist: args.modelAllowlist,
-      modelDenylist: args.modelDenylist,
-      collaborators: [],
-      attachmentPolicy: args.attachmentPolicy,
-      accessLevel,
-      moderationStatus,
-      isStudentCreated: actor.role === "student",
-      visibility,
-      usageCount: 0,
-      lastUsedAt: undefined,
-      guidelinesSummary: args.guidelinesSummary,
-      guidelinesTopicMap: normalizeList(args.guidelinesTopicMap),
-      guidelinesRubricHints: normalizeList(args.guidelinesRubricHints),
-      guidelinesMisconceptions: normalizeList(args.guidelinesMisconceptions),
-      guidelinesVocabulary: normalizeList(args.guidelinesVocabulary),
-      guidelinesExamStructure: normalizeList(args.guidelinesExamStructure),
-      resourceCount: 0,
+    const staleRuns = await ctx.db
+      .query("agentEvalRuns")
+      .withIndex("by_agent_created", (q) => q.eq("agentId", artifact._id))
+      .filter((q) => q.eq(q.field("status"), "running"))
+      .collect();
+    await Promise.all(
+      staleRuns
+        .filter((run) => run.startedAt < now - 10 * 60_000)
+        .map((run) =>
+          ctx.db.patch(run._id, {
+            status: "failed",
+            completedAt: now,
+            updatedAt: now,
+          }),
+        ),
+    );
+    const contentHash = await agentDraftHash(artifact);
+    const evalRunId = await ctx.db.insert("agentEvalRuns", {
+      agentId: artifact._id,
+      schoolId: artifact.schoolId,
+      creatorAccountId: actor.accountId,
+      contentHash,
+      status: "running",
+      modelId: args.modelId.slice(0, 200),
+      provider: args.provider.slice(0, 100),
+      threshold: Math.max(0.5, Math.min(1, args.threshold ?? 0.8)),
+      caseCount: Math.min(50, cases.length),
+      passedCount: 0,
+      averageScore: 0,
+      results: [],
+      startedAt: now,
       createdAt: now,
       updatedAt: now,
     });
-
-    return { agentId };
-  },
-});
-
-export const updateAgent = mutation({
-  args: {
-    actorClerkId: v.string(),
-    agentId: v.id("agents"),
-    name: v.optional(v.string()),
-    description: v.optional(v.string()),
-    subjectArea: v.optional(v.string()),
-    gradeLevel: v.optional(v.string()),
-    systemPrompt: v.optional(v.string()),
-    avatarEmoji: v.optional(v.string()),
-    avatarIcon: v.optional(v.string()),
-    category: v.optional(v.string()),
-    preferredModel: v.optional(v.string()),
-    preferredMode: v.optional(vStudyMode),
-    temperature: v.optional(v.number()),
-    maxTokens: v.optional(v.number()),
-    originalDescription: v.optional(v.string()),
-    allowedTools: v.optional(v.array(v.string())),
-    modelAllowlist: v.optional(v.array(v.string())),
-    modelDenylist: v.optional(v.array(v.string())),
-    attachmentPolicy: v.optional(v.string()),
-    accessLevel: v.optional(v.union(v.literal("private"), v.literal("class"), v.literal("school"))),
-    moderationStatus: v.optional(v.union(v.literal("approved"), v.literal("pending"))),
-    guidelinesSummary: v.optional(v.string()),
-    guidelinesTopicMap: v.optional(v.array(v.string())),
-    guidelinesRubricHints: v.optional(v.array(v.string())),
-    guidelinesMisconceptions: v.optional(v.array(v.string())),
-    guidelinesVocabulary: v.optional(v.array(v.string())),
-    guidelinesExamStructure: v.optional(v.array(v.string())),
-    visibility: v.optional(v.union(v.literal("public"), v.literal("private"), v.literal("shared"))),
-  },
-  handler: async (ctx, args) => {
-    const actor = await getUserByClerkId(ctx, args.actorClerkId);
-    if (!actor) {
-      throw new Error("Unauthorized");
-    }
-
-    const agent = await ctx.db.get(args.agentId);
-    if (!agent || agent.orgId !== actor.orgId) {
-      throw new Error("Agent not found");
-    }
-
-    if (!canEditAgent(agent, actor)) {
-      throw new Error("Only creator, collaborator, or admin can update this agent");
-    }
-
-    if (args.visibility !== undefined && !canChangeVisibility(agent, actor)) {
-      throw new Error("Only the agent creator can change visibility");
-    }
-    if (args.moderationStatus !== undefined && actor.role !== "admin") {
-      throw new Error("Only admin can change moderation status");
-    }
-
-    const nextAccessLevel = args.accessLevel ?? agent.accessLevel;
-    const requestedVisibility = args.visibility ?? agent.visibility;
-    const nextVisibility = resolveVisibilityFromAccess(nextAccessLevel, requestedVisibility);
-    const nextModerationStatus =
-      args.moderationStatus
-      ?? (actor.role === "student" && nextVisibility === "public" ? "pending" : agent.moderationStatus ?? "approved");
-
-    await ctx.db.patch(args.agentId, {
-      name: args.name ?? agent.name,
-      description: args.description ?? agent.description,
-      subjectArea: args.subjectArea ?? agent.subjectArea,
-      gradeLevel: args.gradeLevel ?? agent.gradeLevel,
-      systemPrompt: args.systemPrompt ?? agent.systemPrompt,
-      avatarEmoji: args.avatarEmoji ?? agent.avatarEmoji,
-      avatarIcon:
-        args.avatarIcon ??
-        agent.avatarIcon ??
-        defaultIconForCategory(args.category ?? agent.category),
-      category: args.category ?? agent.category,
-      preferredModel: args.preferredModel ?? agent.preferredModel,
-      preferredMode: args.preferredMode ?? agent.preferredMode,
-      temperature: args.temperature ?? agent.temperature,
-      maxTokens: args.maxTokens ?? agent.maxTokens,
-      originalDescription: args.originalDescription ?? agent.originalDescription,
-      allowedTools: args.allowedTools ?? agent.allowedTools,
-      modelAllowlist: args.modelAllowlist ?? agent.modelAllowlist,
-      modelDenylist: args.modelDenylist ?? agent.modelDenylist,
-      attachmentPolicy: args.attachmentPolicy ?? agent.attachmentPolicy,
-      accessLevel: nextAccessLevel ?? agent.accessLevel,
-      moderationStatus: nextModerationStatus,
-      visibility: nextVisibility,
-      guidelinesSummary: args.guidelinesSummary ?? agent.guidelinesSummary,
-      guidelinesTopicMap: args.guidelinesTopicMap ? normalizeList(args.guidelinesTopicMap) : agent.guidelinesTopicMap,
-      guidelinesRubricHints: args.guidelinesRubricHints ? normalizeList(args.guidelinesRubricHints) : agent.guidelinesRubricHints,
-      guidelinesMisconceptions: args.guidelinesMisconceptions ? normalizeList(args.guidelinesMisconceptions) : agent.guidelinesMisconceptions,
-      guidelinesVocabulary: args.guidelinesVocabulary ? normalizeList(args.guidelinesVocabulary) : agent.guidelinesVocabulary,
-      guidelinesExamStructure: args.guidelinesExamStructure ? normalizeList(args.guidelinesExamStructure) : agent.guidelinesExamStructure,
-      updatedAt: Date.now(),
-    });
-
-    return { ok: true };
-  },
-});
-
-export const updateAgentGuidelines = mutation({
-  args: {
-    actorClerkId: v.string(),
-    agentId: v.id("agents"),
-    guidelinesSummary: v.string(),
-    guidelinesTopicMap: v.array(v.string()),
-    guidelinesRubricHints: v.optional(v.array(v.string())),
-    guidelinesMisconceptions: v.optional(v.array(v.string())),
-    guidelinesVocabulary: v.optional(v.array(v.string())),
-    guidelinesExamStructure: v.optional(v.array(v.string())),
-  },
-  handler: async (ctx, args) => {
-    const actor = await getUserByClerkId(ctx, args.actorClerkId);
-    if (!actor) {
-      throw new Error("Unauthorized");
-    }
-
-    const agent = await ctx.db.get(args.agentId);
-    if (!agent || agent.orgId !== actor.orgId) {
-      throw new Error("Agent not found");
-    }
-
-    if (!canEditAgent(agent, actor)) {
-      throw new Error("Only creator, collaborator, or admin can update this agent");
-    }
-
-    await ctx.db.patch(args.agentId, {
-      guidelinesSummary: args.guidelinesSummary,
-      guidelinesTopicMap: normalizeList(args.guidelinesTopicMap),
-      guidelinesRubricHints: normalizeList(args.guidelinesRubricHints),
-      guidelinesMisconceptions: normalizeList(args.guidelinesMisconceptions),
-      guidelinesVocabulary: normalizeList(args.guidelinesVocabulary),
-      guidelinesExamStructure: normalizeList(args.guidelinesExamStructure),
-      updatedAt: Date.now(),
-    });
-
-    return { ok: true };
-  },
-});
-
-export const setAgentExtractedMetadata = mutation({
-  args: {
-    actorClerkId: v.string(),
-    agentId: v.id("agents"),
-    guidelinesSummary: v.optional(v.string()),
-    guidelinesTopicMap: v.optional(v.array(v.string())),
-    guidelinesRubricHints: v.optional(v.array(v.string())),
-    guidelinesMisconceptions: v.optional(v.array(v.string())),
-    guidelinesVocabulary: v.optional(v.array(v.string())),
-    guidelinesExamStructure: v.optional(v.array(v.string())),
-  },
-  handler: async (ctx, args) => {
-    const actor = await getUserByClerkId(ctx, args.actorClerkId);
-    if (!actor) {
-      throw new Error("Unauthorized");
-    }
-
-    const agent = await ctx.db.get(args.agentId);
-    if (!agent || agent.orgId !== actor.orgId) {
-      throw new Error("Agent not found");
-    }
-
-    if (!canEditAgent(agent, actor)) {
-      throw new Error("Only creator, collaborator, or admin can update this agent");
-    }
-
-    await ctx.db.patch(args.agentId, {
-      guidelinesSummary: args.guidelinesSummary ?? agent.guidelinesSummary,
-      guidelinesTopicMap: args.guidelinesTopicMap ? normalizeList(args.guidelinesTopicMap) : agent.guidelinesTopicMap,
-      guidelinesRubricHints: args.guidelinesRubricHints ? normalizeList(args.guidelinesRubricHints) : agent.guidelinesRubricHints,
-      guidelinesMisconceptions: args.guidelinesMisconceptions ? normalizeList(args.guidelinesMisconceptions) : agent.guidelinesMisconceptions,
-      guidelinesVocabulary: args.guidelinesVocabulary ? normalizeList(args.guidelinesVocabulary) : agent.guidelinesVocabulary,
-      guidelinesExamStructure: args.guidelinesExamStructure ? normalizeList(args.guidelinesExamStructure) : agent.guidelinesExamStructure,
-      updatedAt: Date.now(),
-    });
-
-    return { ok: true };
-  },
-});
-
-export const deleteAgent = mutation({
-  args: {
-    actorClerkId: v.string(),
-    agentId: v.id("agents"),
-  },
-  handler: async (ctx, args) => {
-    const actor = await getUserByClerkId(ctx, args.actorClerkId);
-    if (!actor) {
-      throw new Error("Unauthorized");
-    }
-
-    const agent = await ctx.db.get(args.agentId);
-    if (!agent || agent.orgId !== actor.orgId) {
-      throw new Error("Agent not found");
-    }
-
-    if (agent.creatorUserId !== actor._id && actor.role !== "admin") {
-      throw new Error("Only creator or admin can delete this agent");
-    }
-
-    await ctx.db.delete(args.agentId);
-    return { ok: true };
-  },
-});
-
-export const listAgents = query({
-  args: {
-    actorClerkId: v.string(),
-    category: v.optional(v.string()),
-  },
-  handler: async (ctx, args) => {
-    const actor = await getUserByClerkId(ctx, args.actorClerkId);
-    if (!actor) {
-      throw new Error("Unauthorized");
-    }
-
-    const base = args.category
-      ? await ctx.db
-          .query("agents")
-          .withIndex("by_org_category", (q) => q.eq("orgId", actor.orgId).eq("category", args.category!))
-          .collect()
-      : await ctx.db
-          .query("agents")
-          .withIndex("by_org", (q) => q.eq("orgId", actor.orgId))
-          .collect();
-
-    return base
-      .filter((agent) => canViewAgent(agent, actor))
-      .sort((a, b) => b.usageCount - a.usageCount || b.updatedAt - a.updatedAt);
-  },
-});
-
-export const getAgent = query({
-  args: {
-    actorClerkId: v.string(),
-    agentId: v.id("agents"),
-  },
-  handler: async (ctx, args) => {
-    const actor = await getUserByClerkId(ctx, args.actorClerkId);
-    if (!actor) {
-      throw new Error("Unauthorized");
-    }
-
-    const agent = await ctx.db.get(args.agentId);
-    if (!agent || agent.orgId !== actor.orgId) {
-      throw new Error("Agent not found");
-    }
-
-    if (!canViewAgent(agent, actor)) {
-      throw new Error("Not authorized for this agent");
-    }
-
-    return agent;
-  },
-});
-
-export const listCollaborators = query({
-  args: {
-    actorClerkId: v.string(),
-    agentId: v.id("agents"),
-    search: v.optional(v.string()),
-  },
-  handler: async (ctx, args) => {
-    const actor = await getUserByClerkId(ctx, args.actorClerkId);
-    if (!actor) {
-      throw new Error("Unauthorized");
-    }
-
-    const agent = await ctx.db.get(args.agentId);
-    if (!agent || agent.orgId !== actor.orgId) {
-      throw new Error("Agent not found");
-    }
-
-    if (!canViewAgent(agent, actor)) {
-      throw new Error("Not authorized for this agent");
-    }
-
-    const canManage = canManageCollaborators(agent, actor);
-    const searchQuery = args.search?.trim().toLowerCase() ?? "";
-    const collaboratorSet = new Set(agent.collaborators ?? []);
-
-    const users = await ctx.db
-      .query("users")
-      .withIndex("by_org", (q) => q.eq("orgId", actor.orgId))
-      .collect();
-
-    const collaborators = users
-      .filter((user) => collaboratorSet.has(user._id))
-      .sort((a, b) => a.name.localeCompare(b.name))
-      .map((user) => ({
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-      }));
-
-    const candidates = canManage
-      ? users
-          .filter((user) => user._id !== agent.creatorUserId && !collaboratorSet.has(user._id))
-          .filter((user) => {
-            if (!searchQuery) return true;
-            const haystack = `${user.name} ${user.email}`.toLowerCase();
-            return haystack.includes(searchQuery);
-          })
-          .sort((a, b) => a.name.localeCompare(b.name))
-          .slice(0, 30)
-          .map((user) => ({
-            _id: user._id,
-            name: user.name,
-            email: user.email,
-            role: user.role,
-          }))
-      : [];
-
     return {
-      canManage,
-      collaborators,
-      candidates,
+      evalRunId,
+      contentHash,
+      cases: cases.slice(0, 50),
+      agent: {
+        title: artifact.title,
+        summary: artifact.summary,
+        content: artifact.content,
+      },
     };
   },
 });
 
-export const inviteCollaborator = mutation({
-  args: {
-    actorClerkId: v.string(),
-    agentId: v.id("agents"),
-    userId: v.id("users"),
-  },
+export const draftForEvaluation = query({
+  args: { agentId: v.id("spectraArtifacts") },
   handler: async (ctx, args) => {
-    const actor = await getUserByClerkId(ctx, args.actorClerkId);
-    if (!actor) {
-      throw new Error("Unauthorized");
-    }
-
-    const agent = await ctx.db.get(args.agentId);
-    if (!agent || agent.orgId !== actor.orgId) {
-      throw new Error("Agent not found");
-    }
-
-    if (!canManageCollaborators(agent, actor)) {
-      throw new Error("Only creator or admin can invite collaborators");
-    }
-
-    const targetUser = await ctx.db.get(args.userId);
-    if (!targetUser || targetUser.orgId !== actor.orgId) {
-      throw new Error("Collaborator must be in the same school");
-    }
-
-    if (targetUser._id === agent.creatorUserId) {
-      throw new Error("Agent owner is already an editor");
-    }
-
-    const existing = agent.collaborators ?? [];
-    if (existing.includes(targetUser._id)) {
-      return { ok: true };
-    }
-
-    await ctx.db.patch(agent._id, {
-      collaborators: [...existing, targetUser._id],
-      updatedAt: Date.now(),
-    });
-
-    return { ok: true };
+    const { artifact } = await requireArtifactCapability(
+      ctx,
+      args.agentId,
+      "modify",
+    );
+    if (artifact.blueprintKey !== "agent")
+      throw new Error("AGENT_EVAL_INVALID");
+    return {
+      title: artifact.title,
+      summary: artifact.summary,
+      blueprintKey: artifact.blueprintKey,
+      content: artifact.content,
+    };
   },
 });
 
-export const removeCollaborator = mutation({
+export const settleEvalRun = mutation({
   args: {
-    actorClerkId: v.string(),
-    agentId: v.id("agents"),
-    userId: v.id("users"),
+    evalRunId: v.id("agentEvalRuns"),
+    results: v.array(vEvalResult),
+    payloadDigest: v.string(),
+    timestamp: v.number(),
+    nonce: v.string(),
+    signature: v.string(),
   },
   handler: async (ctx, args) => {
-    const actor = await getUserByClerkId(ctx, args.actorClerkId);
-    if (!actor) {
-      throw new Error("Unauthorized");
-    }
-
-    const agent = await ctx.db.get(args.agentId);
-    if (!agent || agent.orgId !== actor.orgId) {
-      throw new Error("Agent not found");
-    }
-
-    if (!canManageCollaborators(agent, actor)) {
-      throw new Error("Only creator or admin can remove collaborators");
-    }
-
-    const targetUser = await ctx.db.get(args.userId);
-    if (!targetUser || targetUser.orgId !== actor.orgId) {
-      throw new Error("Collaborator must be in the same school");
-    }
-
-    const existing = agent.collaborators ?? [];
-    if (!existing.includes(targetUser._id)) {
-      return { ok: true };
-    }
-
-    await ctx.db.patch(agent._id, {
-      collaborators: existing.filter((id) => id !== targetUser._id),
-      updatedAt: Date.now(),
-    });
-
-    return { ok: true };
-  },
-});
-
-export const searchAgents = query({
-  args: {
-    actorClerkId: v.string(),
-    query: v.string(),
-  },
-  handler: async (ctx, args) => {
-    const actor = await getUserByClerkId(ctx, args.actorClerkId);
-    if (!actor) {
-      throw new Error("Unauthorized");
-    }
-
-    const result = await ctx.db
-      .query("agents")
-      .withSearchIndex("search_name", (q) => q.search("name", args.query).eq("orgId", actor.orgId))
-      .take(30);
-
-    return result.filter((agent) => canViewAgent(agent, actor));
-  },
-});
-
-export const incrementUsageCount = mutation({
-  args: {
-    actorClerkId: v.string(),
-    agentId: v.id("agents"),
-  },
-  handler: async (ctx, args) => {
-    const actor = await getUserByClerkId(ctx, args.actorClerkId);
-    if (!actor) {
-      throw new Error("Unauthorized");
-    }
-
-    const agent = await ctx.db.get(args.agentId);
-    if (!agent || agent.orgId !== actor.orgId) {
-      throw new Error("Agent not found");
-    }
-
-    await ctx.db.patch(agent._id, {
-      usageCount: agent.usageCount + 1,
-      lastUsedAt: Date.now(),
-      updatedAt: Date.now(),
-    });
-
-    return { ok: true };
-  },
-});
-
-export const recordAgentModelUse = mutation({
-  args: {
-    actorClerkId: v.string(),
-    agentId: v.id("agents"),
-    modelId: v.string(),
-  },
-  handler: async (ctx, args) => {
-    const actor = await getUserByClerkId(ctx, args.actorClerkId);
-    if (!actor) throw new Error("Unauthorized");
-
-    const agent = await ctx.db.get(args.agentId);
-    if (!agent || agent.orgId !== actor.orgId) {
-      throw new Error("Agent not found");
-    }
-
-    const existing = await ctx.db
-      .query("agentModelStats")
-      .withIndex("by_agent_model", (q) => q.eq("agentId", args.agentId).eq("modelId", args.modelId))
-      .unique();
-
+    const actor = await requireSpectraActor(ctx);
+    const run = await ctx.db.get(args.evalRunId);
+    if (
+      !run ||
+      run.creatorAccountId !== actor.accountId ||
+      run.schoolId !== actor.schoolId ||
+      run.status !== "running"
+    )
+      throw new Error(
+        "AGENT_EVAL_RUN_UNAVAILABLE: This evaluation run cannot be settled.",
+      );
+    const expectedDigest = await digest({ results: args.results });
+    if (expectedDigest !== args.payloadDigest)
+      throw new Error(
+        "AGENT_EVAL_PAYLOAD_INVALID: Results changed in transit.",
+      );
+    await verifyEvalBridge(ctx, actor, args);
+    if (args.results.length !== run.caseCount)
+      throw new Error(
+        "AGENT_EVAL_RESULT_COUNT_INVALID: Every evaluation case must settle.",
+      );
+    const results = args.results.map((result) => ({
+      caseId: result.caseId.slice(0, 180),
+      category: result.category.slice(0, 100),
+      required: result.required,
+      score: Math.max(0, Math.min(1, result.score)),
+      passed: result.passed,
+      reason: result.reason.replace(/\s+/g, " ").trim().slice(0, 1_000),
+      responseExcerpt: result.responseExcerpt.slice(0, 1_500),
+      latencyMs: Math.max(0, Math.round(result.latencyMs)),
+      inputTokens: result.inputTokens,
+      outputTokens: result.outputTokens,
+    }));
+    const passedCount = results.filter((result) => result.passed).length;
+    const averageScore =
+      results.reduce((sum, result) => sum + result.score, 0) /
+      Math.max(1, results.length);
+    const passed =
+      averageScore >= run.threshold &&
+      results.every((result) => !result.required || result.passed);
     const now = Date.now();
-    if (!existing) {
-      await ctx.db.insert("agentModelStats", {
-        agentId: args.agentId,
-        modelId: args.modelId,
-        totalUses: 1,
-        positiveRatings: 0,
-        negativeRatings: 0,
-        avgResponseQuality: 0.5,
-        lastUsedAt: now,
-      });
-      return { ok: true };
+    await ctx.db.patch(run._id, {
+      status: passed ? "passed" : "failed",
+      passedCount,
+      averageScore,
+      results,
+      completedAt: now,
+      updatedAt: now,
+    });
+    await writeAuditEvent(ctx, {
+      actorAccountId: actor.accountId,
+      schoolId: actor.schoolId,
+      action: "agent.evaluation.completed",
+      targetType: "agent",
+      targetId: run.agentId,
+      metadata: {
+        evalRunId: run._id,
+        passed,
+        caseCount: results.length,
+        averageScore: Math.round(averageScore * 1_000) / 1_000,
+      },
+      retentionClass: "operational",
+    });
+    return {
+      evalRunId: run._id,
+      status: passed ? ("passed" as const) : ("failed" as const),
+      passedCount,
+      caseCount: results.length,
+      averageScore,
+      results,
+    };
+  },
+});
+
+export const evalRuns = query({
+  args: { agentId: v.id("spectraArtifacts"), limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const { artifact } = await requireArtifactCapability(
+      ctx,
+      args.agentId,
+      "modify",
+    );
+    const runs = await ctx.db
+      .query("agentEvalRuns")
+      .withIndex("by_agent_created", (q) => q.eq("agentId", args.agentId))
+      .order("desc")
+      .take(Math.max(1, Math.min(50, args.limit ?? 12)));
+    return {
+      currentContentHash: await agentDraftHash(artifact),
+      runs,
+    };
+  },
+});
+
+export const submitFeedback = mutation({
+  args: {
+    agentId: v.id("spectraArtifacts"),
+    agentVersionId: v.id("spectraArtifactVersions"),
+    runId: v.optional(v.id("spectraAiRuns")),
+    rating: v.number(),
+    category: v.union(
+      v.literal("helpful"),
+      v.literal("accuracy"),
+      v.literal("clarity"),
+      v.literal("safety"),
+      v.literal("resource_quality"),
+      v.literal("other"),
+    ),
+    comment: v.optional(v.string()),
+    consentToShareComment: v.boolean(),
+  },
+  handler: async (ctx, args) => {
+    const { actor, artifact } = await requireArtifactCapability(
+      ctx,
+      args.agentId,
+      "use",
+    );
+    if (artifact.blueprintKey !== "agent" || !artifact.schoolId)
+      throw new Error("AGENT_FEEDBACK_INVALID");
+    if (args.runId) {
+      const run = await ctx.db.get(args.runId);
+      if (
+        !run ||
+        run.ownerAccountId !== actor.accountId ||
+        run.selectedAgentId !== artifact._id ||
+        run.selectedAgentVersionId !== args.agentVersionId
+      )
+        throw new Error(
+          "AGENT_FEEDBACK_RUN_INVALID: Feedback must match your private invocation.",
+        );
+      const duplicate = await ctx.db
+        .query("agentFeedback")
+        .withIndex("by_reviewer_run", (q) =>
+          q.eq("reviewerAccountId", actor.accountId).eq("runId", run._id),
+        )
+        .unique();
+      if (duplicate)
+        throw new Error(
+          "AGENT_FEEDBACK_DUPLICATE: Feedback was already submitted for this run.",
+        );
     }
-
-    await ctx.db.patch(existing._id, {
-      totalUses: existing.totalUses + 1,
-      lastUsedAt: now,
+    const version = await ctx.db.get(args.agentVersionId);
+    if (!version || version.artifactId !== artifact._id)
+      throw new Error("AGENT_VERSION_INVALID");
+    const rating = Math.max(1, Math.min(5, Math.round(args.rating)));
+    const feedbackId = await ctx.db.insert("agentFeedback", {
+      agentId: artifact._id,
+      agentVersionId: version._id,
+      schoolId: artifact.schoolId,
+      reviewerAccountId: actor.accountId,
+      runId: args.runId,
+      rating,
+      category: args.category,
+      comment: args.consentToShareComment
+        ? args.comment?.trim().slice(0, 4_000)
+        : undefined,
+      consentToShareComment: args.consentToShareComment,
+      createdAt: Date.now(),
     });
-    return { ok: true };
+    return { feedbackId };
   },
 });
 
-export const recordAgentModelFeedback = mutation({
+export const analytics = query({
+  args: { agentId: v.id("spectraArtifacts") },
+  handler: async (ctx, args) => {
+    await requireArtifactCapability(ctx, args.agentId, "modify");
+    const [usage, feedback, evals, proposals] = await Promise.all([
+      ctx.db
+        .query("agentUsageAggregates")
+        .withIndex("by_agent_day", (q) => q.eq("agentId", args.agentId))
+        .collect(),
+      ctx.db
+        .query("agentFeedback")
+        .withIndex("by_agent_created", (q) => q.eq("agentId", args.agentId))
+        .collect(),
+      ctx.db
+        .query("agentEvalRuns")
+        .withIndex("by_agent_created", (q) => q.eq("agentId", args.agentId))
+        .order("desc")
+        .take(20),
+      ctx.db
+        .query("agentImprovementProposals")
+        .withIndex("by_agent_status", (q) =>
+          q.eq("agentId", args.agentId).eq("status", "proposed"),
+        )
+        .collect(),
+    ]);
+    const invocations = usage.reduce((sum, row) => sum + row.invocations, 0);
+    const completed = usage.reduce((sum, row) => sum + row.completed, 0);
+    const latency = usage.reduce((sum, row) => sum + row.totalLatencyMs, 0);
+    return {
+      invocations,
+      completionRate: invocations ? completed / invocations : null,
+      averageLatencyMs: completed ? latency / completed : null,
+      feedback: {
+        count: feedback.length,
+        averageRating: feedback.length
+          ? feedback.reduce((sum, row) => sum + row.rating, 0) / feedback.length
+          : null,
+        categories: Object.entries(
+          feedback.reduce<Record<string, number>>((result, row) => {
+            result[row.category] = (result[row.category] ?? 0) + 1;
+            return result;
+          }, {}),
+        ),
+        comments: feedback
+          .filter((row) => row.consentToShareComment && row.comment)
+          .slice(-30)
+          .map((row) => ({
+            rating: row.rating,
+            category: row.category,
+            comment: row.comment,
+            createdAt: row.createdAt,
+          })),
+      },
+      usage,
+      evals,
+      proposals,
+      privacy:
+        "Aggregates never include invocation prompts, thread titles or content, memory, or unrelated artifacts.",
+    };
+  },
+});
+
+export const proposeImprovement = mutation({
   args: {
-    actorClerkId: v.string(),
-    agentId: v.id("agents"),
-    modelId: v.string(),
-    positive: v.boolean(),
+    agentId: v.id("spectraArtifacts"),
+    evidence: v.string(),
+    proposedPatch: v.any(),
+    expectedImpact: v.string(),
+    evalRunId: v.optional(v.id("agentEvalRuns")),
   },
   handler: async (ctx, args) => {
-    const actor = await getUserByClerkId(ctx, args.actorClerkId);
-    if (!actor) throw new Error("Unauthorized");
+    const { actor, artifact } = await requireArtifactCapability(
+      ctx,
+      args.agentId,
+      "modify",
+    );
+    if (!artifact.schoolId || artifact.blueprintKey !== "agent")
+      throw new Error("AGENT_IMPROVEMENT_INVALID");
+    const proposalId = await ctx.db.insert("agentImprovementProposals", {
+      agentId: artifact._id,
+      schoolId: artifact.schoolId,
+      proposedByAccountId: actor.accountId,
+      evidence: args.evidence.trim().slice(0, 4_000),
+      proposedPatch: args.proposedPatch,
+      expectedImpact: args.expectedImpact.trim().slice(0, 2_000),
+      evalRunId: args.evalRunId,
+      status: "proposed",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    return { proposalId };
+  },
+});
 
-    const agent = await ctx.db.get(args.agentId);
-    if (!agent || agent.orgId !== actor.orgId) throw new Error("Unauthorized");
+export const decideImprovement = mutation({
+  args: {
+    proposalId: v.id("agentImprovementProposals"),
+    decision: v.union(v.literal("accepted"), v.literal("rejected")),
+    note: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const proposal = await ctx.db.get(args.proposalId);
+    if (!proposal || proposal.status !== "proposed")
+      throw new Error("AGENT_IMPROVEMENT_UNAVAILABLE");
+    const { actor } = await requireArtifactCapability(
+      ctx,
+      proposal.agentId,
+      "modify",
+    );
+    if (args.decision === "accepted") {
+      await commitHumanCheckpoint(
+        ctx,
+        proposal.agentId,
+        "Saved agent draft before applying an improvement",
+      );
+      const artifact = await ctx.db.get(proposal.agentId);
+      if (!artifact || artifact.blueprintKey !== "agent")
+        throw new Error("AGENT_IMPROVEMENT_ARTIFACT_UNAVAILABLE");
+      const patch =
+        proposal.proposedPatch &&
+        typeof proposal.proposedPatch === "object" &&
+        !Array.isArray(proposal.proposedPatch)
+          ? (proposal.proposedPatch as Record<string, unknown>)
+          : {};
+      const allowedKeys = new Set([
+        "instructionsText",
+        "routingDescription",
+        "routingExamples",
+        "boundaries",
+      ]);
+      if (
+        Object.keys(patch).length === 0 ||
+        Object.keys(patch).some((key) => !allowedKeys.has(key))
+      )
+        throw new Error(
+          "AGENT_IMPROVEMENT_PATCH_INVALID: The proposal contains unsupported changes.",
+        );
+      const content =
+        artifact.content &&
+        typeof artifact.content === "object" &&
+        !Array.isArray(artifact.content)
+          ? ({ ...artifact.content } as Record<string, unknown>)
+          : {};
+      const instructions =
+        content.instructions &&
+        typeof content.instructions === "object" &&
+        !Array.isArray(content.instructions)
+          ? ({ ...content.instructions } as Record<string, unknown>)
+          : {};
+      const routing =
+        content.routing &&
+        typeof content.routing === "object" &&
+        !Array.isArray(content.routing)
+          ? ({ ...content.routing } as Record<string, unknown>)
+          : {};
+      const behavior =
+        content.behavior &&
+        typeof content.behavior === "object" &&
+        !Array.isArray(content.behavior)
+          ? ({ ...content.behavior } as Record<string, unknown>)
+          : {};
+      if (typeof patch.instructionsText === "string")
+        instructions.text = patch.instructionsText.slice(0, 250_000);
+      if (typeof patch.routingDescription === "string")
+        routing.description = patch.routingDescription.slice(0, 4_000);
+      if (Array.isArray(patch.routingExamples))
+        routing.examples = patch.routingExamples
+          .filter((value): value is string => typeof value === "string")
+          .map((value) => value.trim().slice(0, 500))
+          .filter(Boolean)
+          .slice(0, 50);
+      if (Array.isArray(patch.boundaries))
+        behavior.boundaries = patch.boundaries
+          .filter((value): value is string => typeof value === "string")
+          .map((value) => value.trim().slice(0, 500))
+          .filter(Boolean)
+          .slice(0, 100);
+      const before = {
+        title: artifact.title,
+        summary: artifact.summary,
+        content: artifact.content,
+        tags: artifact.tags,
+      };
+      const nextContent = { ...content, instructions, routing, behavior };
+      const now = Date.now();
+      await ctx.db.patch(artifact._id, {
+        content: nextContent,
+        contentHash: await digest({
+          title: artifact.title,
+          summary: artifact.summary,
+          tags: artifact.tags,
+          content: nextContent,
+          schemaVersion: artifact.schemaVersion,
+        }),
+        textIndex: `${artifact.title}\n${artifact.summary ?? ""}\n${artifact.tags.join(" ")}\n${JSON.stringify(nextContent).slice(0, 80_000)}`,
+        validity: "valid",
+        validityIssues: [],
+        syncState: "synchronized",
+        lastSynchronizedAt: now,
+        updatedAt: now,
+      });
+      await commitDirectHumanChange(ctx, {
+        artifactId: artifact._id,
+        actorAccountId: actor.accountId,
+        before,
+        regionIds: [
+          ...(typeof patch.instructionsText === "string"
+            ? ["agent:instructions"]
+            : []),
+          ...(typeof patch.routingDescription === "string" ||
+          Array.isArray(patch.routingExamples)
+            ? ["agent:routing"]
+            : []),
+          ...(Array.isArray(patch.boundaries) ? ["agent:behavior"] : []),
+        ],
+        summary: "Applied an agent improvement proposal",
+      });
+    }
+    await ctx.db.patch(proposal._id, {
+      status: args.decision,
+      decidedByAccountId: actor.accountId,
+      decisionNote: args.note?.trim().slice(0, 2_000),
+      updatedAt: Date.now(),
+    });
+    await writeAuditEvent(ctx, {
+      actorAccountId: actor.accountId,
+      schoolId: actor.schoolId,
+      action: `agent.improvement.${args.decision}`,
+      targetType: "agent",
+      targetId: proposal.agentId,
+      metadata: { proposalId: proposal._id },
+      retentionClass: "operational",
+    });
+    return { proposalId: proposal._id, status: args.decision };
+  },
+});
 
-    const stat = await ctx.db
-      .query("agentModelStats")
-      .withIndex("by_agent_model", (q) => q.eq("agentId", args.agentId).eq("modelId", args.modelId))
+export const follow = mutation({
+  args: {
+    agentId: v.id("spectraArtifacts"),
+    following: v.boolean(),
+    pinnedReleaseId: v.optional(v.id("agentReleases")),
+  },
+  handler: async (ctx, args) => {
+    const { actor, artifact } = await requireArtifactCapability(
+      ctx,
+      args.agentId,
+      "use",
+    );
+    if (artifact.blueprintKey !== "agent" || !artifact.schoolId)
+      throw new Error("AGENT_FOLLOW_INVALID");
+    if (args.pinnedReleaseId) {
+      const release = await ctx.db.get(args.pinnedReleaseId);
+      if (
+        !release ||
+        release.agentId !== artifact._id ||
+        release.status !== "published" ||
+        !["limited", "published"].includes(release.rollout ?? "published")
+      )
+        throw new Error(
+          "AGENT_FOLLOW_RELEASE_INVALID: Choose an available release of this agent.",
+        );
+    }
+    const existing = await ctx.db
+      .query("agentFollows")
+      .withIndex("by_agent_account", (q) =>
+        q.eq("agentId", artifact._id).eq("accountId", actor.accountId),
+      )
       .unique();
-    if (!stat) return { ok: true };
-
-    const positiveRatings = stat.positiveRatings + (args.positive ? 1 : 0);
-    const negativeRatings = stat.negativeRatings + (args.positive ? 0 : 1);
-    const totalRatings = positiveRatings + negativeRatings;
-    const avgResponseQuality = totalRatings > 0 ? positiveRatings / totalRatings : stat.avgResponseQuality;
-
-    await ctx.db.patch(stat._id, {
-      positiveRatings,
-      negativeRatings,
-      avgResponseQuality,
-      lastUsedAt: Date.now(),
+    const now = Date.now();
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        status: args.following ? "following" : "unfollowed",
+        pinnedReleaseId: args.following ? args.pinnedReleaseId : undefined,
+        updatedAt: now,
+      });
+      return { followId: existing._id, following: args.following };
+    }
+    const followId = await ctx.db.insert("agentFollows", {
+      agentId: artifact._id,
+      schoolId: artifact.schoolId,
+      accountId: actor.accountId,
+      pinnedReleaseId: args.pinnedReleaseId,
+      status: args.following ? "following" : "unfollowed",
+      createdAt: now,
+      updatedAt: now,
     });
-    return { ok: true };
+    return { followId, following: args.following };
   },
 });
 
-export const getTopModelsForAgent = query({
-  args: {
-    actorClerkId: v.string(),
-    agentId: v.id("agents"),
-    limit: v.optional(v.number()),
-  },
-  handler: async (ctx, args) => {
-    const actor = await getUserByClerkId(ctx, args.actorClerkId);
-    if (!actor) throw new Error("Unauthorized");
+function utcDay(timestamp: number) {
+  return new Date(timestamp).toISOString().slice(0, 10);
+}
 
-    const agent = await ctx.db.get(args.agentId);
-    if (!agent || agent.orgId !== actor.orgId) throw new Error("Agent not found");
+export async function recordAgentInvocation(
+  ctx: MutationCtx,
+  run: Doc<"spectraAiRuns">,
+  agentId: Id<"spectraArtifacts">,
+  versionId: Id<"spectraArtifactVersions">,
+  now: number,
+) {
+  if (!run.schoolId) return;
+  const day = utcDay(now);
+  const existing = await ctx.db
+    .query("agentUsageAggregates")
+    .withIndex("by_agent_version_day", (q) =>
+      q.eq("agentId", agentId).eq("agentVersionId", versionId).eq("day", day),
+    )
+    .unique();
+  if (existing)
+    await ctx.db.patch(existing._id, {
+      invocations: existing.invocations + 1,
+      updatedAt: now,
+    });
+  else
+    await ctx.db.insert("agentUsageAggregates", {
+      agentId,
+      agentVersionId: versionId,
+      schoolId: run.schoolId,
+      day,
+      invocations: 1,
+      completed: 0,
+      failed: 0,
+      cancelled: 0,
+      totalLatencyMs: 0,
+      modelInputTokens: 0,
+      modelOutputTokens: 0,
+      updatedAt: now,
+    });
+}
 
-    const stats = await ctx.db
-      .query("agentModelStats")
-      .withIndex("by_agent", (q) => q.eq("agentId", args.agentId))
-      .collect();
-
-    return stats
-      .map((row) => ({
-        modelId: row.modelId,
-        score: Math.max(0, Math.min(1, row.avgResponseQuality)),
-        totalUses: row.totalUses,
-      }))
-      .sort((a, b) => b.score - a.score || b.totalUses - a.totalUses)
-      .slice(0, Math.min(10, Math.max(1, args.limit ?? 5)));
-  },
-});
+export async function settleAgentInvocation(
+  ctx: MutationCtx,
+  run: Doc<"spectraAiRuns">,
+  status: "completed" | "failed" | "cancelled",
+  usage: unknown,
+  now: number,
+) {
+  if (!run.selectedAgentId || !run.selectedAgentVersionId || !run.schoolId)
+    return;
+  const aggregate = await ctx.db
+    .query("agentUsageAggregates")
+    .withIndex("by_agent_version_day", (q) =>
+      q
+        .eq("agentId", run.selectedAgentId!)
+        .eq("agentVersionId", run.selectedAgentVersionId!)
+        .eq("day", utcDay(run.agentUsageStartedAt ?? run.createdAt)),
+    )
+    .unique();
+  if (!aggregate) return;
+  const usageRecord =
+    usage && typeof usage === "object" && !Array.isArray(usage)
+      ? (usage as Record<string, unknown>)
+      : {};
+  const inputTokens =
+    typeof usageRecord.promptTokens === "number"
+      ? usageRecord.promptTokens
+      : typeof usageRecord.input_tokens === "number"
+        ? usageRecord.input_tokens
+        : 0;
+  const outputTokens =
+    typeof usageRecord.completionTokens === "number"
+      ? usageRecord.completionTokens
+      : typeof usageRecord.output_tokens === "number"
+        ? usageRecord.output_tokens
+        : 0;
+  await ctx.db.patch(aggregate._id, {
+    completed: aggregate.completed + (status === "completed" ? 1 : 0),
+    failed: aggregate.failed + (status === "failed" ? 1 : 0),
+    cancelled: aggregate.cancelled + (status === "cancelled" ? 1 : 0),
+    totalLatencyMs:
+      aggregate.totalLatencyMs +
+      Math.max(0, now - (run.startedAt ?? run.createdAt)),
+    modelInputTokens: aggregate.modelInputTokens + inputTokens,
+    modelOutputTokens: aggregate.modelOutputTokens + outputTokens,
+    updatedAt: now,
+  });
+}

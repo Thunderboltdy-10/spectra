@@ -3,55 +3,58 @@ import { internal } from "./_generated/api";
 
 const crons = cronJobs();
 
-crons.daily("refresh-model-catalog", { hourUTC: 3, minuteUTC: 30 }, internal.catalogSync.refreshCatalogRuntime, {});
 crons.interval(
-  "refresh-model-catalog-runtime",
-  { hours: 12 },
-  internal.catalogSync.refreshCatalogRuntime,
+  "reconcile-stale-spectra-runs",
+  { minutes: 2 },
+  internal.spectraRuns.reconcileStaleRuns,
   {},
 );
-crons.daily("cleanup-expired-images", { hourUTC: 4, minuteUTC: 5 }, internal.images.cleanupExpiredImages, {});
-crons.daily(
-  "cleanup-expired-resources",
-  { hourUTC: 2, minuteUTC: 0 },
-  internal.resources.cleanupExpired,
-  { limit: 300 },
+crons.interval(
+  "deliver-planner-reminders",
+  { minutes: 1 },
+  internal.plannerReminders.dispatchDue,
+  {},
 );
-crons.daily(
-  "decay-memory-freshness",
-  { hourUTC: 1, minuteUTC: 20 },
-  internal.memory.runDailyMaintenance,
+crons.interval(
+  "deliver-timetable-reminders",
+  { minutes: 1 },
+  internal.timetableReminders.dispatchDue,
   {},
 );
 crons.daily(
-  "sync-managebac",
-  { hourUTC: 5, minuteUTC: 10 },
-  internal.managebacSync.runScheduledSync,
+  "maintain-artifact-snapshots",
+  { hourUTC: 2, minuteUTC: 20 },
+  internal.artifactSnapshots.maintain,
   {},
 );
 crons.interval(
-  "generate-study-reminders",
-  { hours: 1 },
-  internal.notifications.generateDailyStudyReminders,
+  "maintain-private-memory",
+  { minutes: 1 },
+  internal.memory.maintain,
+  {},
+);
+crons.daily(
+  "evaluate-private-memory-safety",
+  { hourUTC: 3, minuteUTC: 10 },
+  internal.memory.evaluateSafety,
   {},
 );
 crons.interval(
-  "refresh-platform-stats",
-  { hours: 1 },
-  internal.superAdmin.refreshPlatformStats,
+  "deliver-school-announcements",
+  { minutes: 1 },
+  internal.administration.processScheduledAnnouncements,
   {},
 );
 crons.interval(
-  "retry-stale-resource-ingestion",
-  { minutes: 15 },
-  internal.resources.retryStaleResourcesInternal,
-  { limit: 30 },
-);
-crons.interval(
-  "evaluate-challenger-lane",
-  { hours: 168 },
-  internal.models.evaluateChallengerLane,
+  "advance-school-lifecycle-jobs",
+  { minutes: 2 },
+  internal.administration.processLifecycleJobs,
   {},
 );
-crons.interval("reconcile-stale-spectra-runs", { minutes: 2 }, internal.spectraRuns.reconcileStaleRuns, {});
+crons.interval(
+  "build-school-lifecycle-exports",
+  { minutes: 2 },
+  internal.administration.processLifecycleExports,
+  {},
+);
 export default crons;

@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertCircle, Check, CheckCircle2, ChevronDown, Clock3, ExternalLink, FolderPlus, Loader2, MessageSquarePlus, RotateCcw, ShieldCheck, X } from "lucide-react";
+import { AlertCircle, Bot, Check, CheckCircle2, ChevronDown, Clock3, ExternalLink, FolderPlus, Loader2, MessageSquarePlus, RotateCcw, ShieldCheck, Undo2, X } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -8,12 +8,13 @@ import { RichText } from "@/components/chat/rich-text";
 import { cn } from "@/lib/utils";
 import { IconAction, type SpectraCardState } from "./card-system";
 import type { ResultCardStreamView } from "../ai/stream-events";
-import { postSpectra } from "../data/api";
+import { clearSpectraRunAgent, postSpectra } from "../data/api";
 
 export type ResultCardView = ResultCardStreamView;
 
 function tone(card: ResultCardView) {
-  if (card.status === "failed" || card.status === "cancelled") return "var(--danger)";
+  if (card.status === "failed") return "var(--danger)";
+  if (card.status === "cancelled") return "var(--warning)";
   if (card.status === "completed") return "var(--success)";
   if (card.actions.some((action) => action.key === "confirm")) return "#d88922";
   return "var(--accent-cyan)";
@@ -30,18 +31,47 @@ function actionIcon(key: string): LucideIcon {
 
 function ProvenanceLine({ card }: { card: ResultCardView }) {
   const [open, setOpen] = useState(false);
+  const [clearingAgent, setClearingAgent] = useState(false);
+  const [ordinaryNext, setOrdinaryNext] = useState(false);
   const provenance = card.provenance;
   if (!provenance) return null;
   const artifactCount = provenance.artifactIds?.length ?? 0;
   const threadCount = provenance.threadId ? 1 : 0;
   const attachmentCount = provenance.attachmentNames?.length ?? 0;
   const parts = [artifactCount ? `${artifactCount} artifact${artifactCount === 1 ? "" : "s"}` : "", threadCount ? "1 thread" : "", attachmentCount ? `${attachmentCount} attachment${attachmentCount === 1 ? "" : "s"}` : ""].filter(Boolean);
-  if (parts.length === 0 && !provenance.workspaceTitle) return null;
-  return <div className="col-start-2 col-end-[-1] -mt-1 mb-1 text-[10px] text-[var(--text-tertiary)]">
-    <button type="button" className="inline-flex items-center gap-1 rounded-[5px] px-1 py-0.5 hover:bg-[var(--bg-secondary)] hover:text-[var(--text-secondary)]" onClick={(event) => { event.stopPropagation(); setOpen((value) => !value); }}>
+  const hasSources = parts.length > 0 || Boolean(provenance.workspaceTitle);
+  const hasAgent = Boolean(provenance.agentId && provenance.agentTitle);
+  if (!hasSources && !hasAgent) return null;
+
+  async function switchToOrdinarySpectra() {
+    if (clearingAgent || ordinaryNext) return;
+    setClearingAgent(true);
+    try {
+      await clearSpectraRunAgent(card.runId);
+      setOrdinaryNext(true);
+      window.dispatchEvent(new Event("spectra:threads-changed"));
+      toast.success("This thread will use ordinary Spectra next.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not change the thread agent.");
+    } finally {
+      setClearingAgent(false);
+    }
+  }
+
+  return <div className="col-start-2 col-end-[-1] -mt-1 mb-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-[var(--text-tertiary)]">
+    {hasAgent ? <span className="inline-flex min-w-0 items-center gap-1 rounded-[6px] bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-secondary))] px-1.5 py-0.5 text-[var(--text-secondary)]" title={provenance.agentRoutingReason}>
+      <Bot className="h-3 w-3 shrink-0 text-[var(--accent-cyan)]" />
+      <span className="truncate">Using {provenance.agentTitle}</span>
+      <span className="text-[9px] text-[var(--text-tertiary)]">{provenance.agentRoutingSource === "continued" ? "retained" : provenance.agentRoutingSource === "explicit" ? "selected" : "auto"}</span>
+      <button type="button" disabled={clearingAgent || ordinaryNext} className="ml-0.5 inline-flex items-center gap-0.5 rounded-[4px] px-1 py-0.5 font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)] disabled:opacity-65" onClick={(event) => { event.stopPropagation(); void switchToOrdinarySpectra(); }} title="Stop retaining this agent for the thread">
+        {clearingAgent ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : ordinaryNext ? <Check className="h-2.5 w-2.5" /> : <Undo2 className="h-2.5 w-2.5" />}
+        {ordinaryNext ? "Ordinary next" : "Use ordinary Spectra"}
+      </button>
+    </span> : null}
+    {hasSources ? <button type="button" className="inline-flex items-center gap-1 rounded-[5px] px-1 py-0.5 hover:bg-[var(--bg-secondary)] hover:text-[var(--text-secondary)]" onClick={(event) => { event.stopPropagation(); setOpen((value) => !value); }}>
       Based on {parts.join(" and ") || provenance.workspaceTitle}
       <ChevronDown className={`h-3 w-3 transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
-    </button>
+    </button> : null}
     {open ? <div className="mt-1 flex flex-wrap gap-1.5 px-1 animate-[spectra-fade-up_180ms_ease-out]">
       {provenance.artifactTitles?.map((title) => <span key={title} className="rounded-[5px] bg-[var(--bg-secondary)] px-1.5 py-0.5">{title}</span>)}
       {provenance.workspaceTitle ? <span className="rounded-[5px] bg-[var(--bg-secondary)] px-1.5 py-0.5">{provenance.workspaceTitle}</span> : null}
@@ -55,6 +85,7 @@ export function ResultCardStack({
   cards,
   className,
   onAction,
+  onRevise,
   onOpen,
   activeThreadId,
   activeRunId,
@@ -63,11 +94,14 @@ export function ResultCardStack({
   cards?: ResultCardView[];
   className?: string;
   onAction?: (card: ResultCardView, actionKey: string, targetId?: string) => void;
+  onRevise?: (card: ResultCardView, revision: string) => Promise<boolean | void> | boolean | void;
   onOpen?: (card: ResultCardView) => void;
   activeThreadId?: string | null;
   activeRunId?: string | null;
   onContinue?: (thread: { threadId: string; title: string; runId: string } | null) => void;
 }) {
+  const [revisingCardId, setRevisingCardId] = useState<string | null>(null);
+  const [revision, setRevision] = useState("");
   const [busyRunId, setBusyRunId] = useState<string | null>(null);
   const [threadIds, setThreadIds] = useState<Record<string, string>>({});
   const visibleCards = cards?.slice(0, 12) ?? [];
@@ -137,7 +171,7 @@ export function ResultCardStack({
                   onClick={(event) => event.stopPropagation()}
                 >
                   <span className="mr-1 text-[10px] font-medium text-[var(--text-secondary)]">
-                    Review before Spectra mutates objects.
+                    Review these changes before they are saved.
                   </span>
                   <button
                     type="button"
@@ -146,13 +180,30 @@ export function ResultCardStack({
                   >
                     Apply changes
                   </button>
+                  {onRevise || onAction ? <button
+                    type="button"
+                    className="rounded-[6px] px-2 py-1 text-[10px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                    onClick={() => setRevisingCardId((current) => current === card.id ? null : card.id)}
+                  >
+                    Ask for changes
+                  </button> : null}
                   <button
                     type="button"
                     className="rounded-[6px] px-2 py-1 text-[10px] font-semibold text-[var(--danger)] hover:bg-[color-mix(in_oklab,var(--danger)_8%,transparent)]"
                     onClick={() => onAction?.(card, "cancel", card.runId)}
                   >
-                    Reject proposal
+                    Reject
                   </button>
+                  {(onRevise || onAction) && revisingCardId === card.id ? <form className="mt-1 flex w-full gap-1.5" onSubmit={(event) => {
+                    event.preventDefault();
+                    const clean = revision.trim();
+                    if (!clean) return;
+                    Promise.resolve(onRevise ? onRevise(card, clean) : onAction?.(card, "revise", clean)).then((accepted) => {
+                      if (accepted === false) return;
+                      setRevision("");
+                      setRevisingCardId(null);
+                    });
+                  }}><input autoFocus value={revision} onChange={(event) => setRevision(event.target.value)} placeholder="What should Spectra change?" className="h-8 min-w-0 flex-1 rounded-[6px] bg-[var(--bg-elevated)] px-2.5 text-[11px] text-[var(--text-primary)] outline-none" /><button type="submit" disabled={!revision.trim()} className="h-8 rounded-[6px] bg-[var(--text-primary)] px-2.5 text-[10px] font-semibold text-[var(--bg-primary)] disabled:opacity-35">Send</button></form> : null}
                 </div>
               ) : null}
             </div>

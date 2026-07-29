@@ -1,248 +1,158 @@
 import { auth, currentUser } from "@clerk/nextjs/server";
-import { cookies } from "next/headers";
 import { hasClerkServerConfig } from "@/lib/clerk-config";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
-import type { Role } from "@/types";
 
-const SUPER_ADMIN_EMAIL = "pablo.martinez.dovale@gmail.com";
+export type SchoolRole = "student" | "teacher" | "school_admin";
 
 export type SessionActor = {
   clerkId: string;
+  accountId: string;
   email: string;
   name: string;
-  role: Role;
-  orgId: string;
-  userId: string;
-  onboardingComplete: boolean;
+  schoolId: string;
+  schoolRole: SchoolRole;
+  membershipId: string;
 };
 
-export function isSuperAdminEmail(email: string) {
-  return email.trim().toLowerCase() === SUPER_ADMIN_EMAIL;
-}
-
-export function isAdminLikeActor(actor: Pick<SessionActor, "role" | "email"> | { role: Role; email: string }) {
-  return actor.role === "admin" || isSuperAdminEmail(actor.email);
-}
-
-async function bootstrapActor(params: {
+type IdentityContext = {
+  accountId: string;
   clerkId: string;
   email: string;
+  emailVerified: boolean;
   name: string;
-  bootstrapAdmin: boolean;
-  orgId?: string;
-}) {
-  await convexMutation("users:ensureUser", {
-    clerkId: params.clerkId,
-    email: params.email,
-    name: params.name,
-    requestedRole: "student",
-    bootstrapAdmin: params.bootstrapAdmin,
-    orgId: params.orgId,
-  });
+  avatarUrl?: string;
+  schoolId: string;
+  schoolRole: SchoolRole;
+  membershipId: string;
+};
 
-  const me = await convexQuery<
-    { clerkId: string; orgId?: string },
-    {
-      _id: string;
-      role: Role;
-      orgId: string;
-      email: string;
-      name: string;
-      onboardingComplete?: boolean;
-    } | null
-  >("users:me", {
-    clerkId: params.clerkId,
-    orgId: params.orgId,
-  });
+export type AccountIdentity = {
+  accountId: string;
+  email: string;
+  emailVerified: boolean;
+  name: string;
+  avatarUrl?: string;
+  status: "active" | "deactivated";
+  platformOperator: boolean;
+};
 
-  if (!me) {
-    throw new Error("AUTH_BOOTSTRAP_FAILED: Could not initialize user in database.");
+function operatorEmails() {
+  const values = (process.env.SUPER_ADMIN_EMAILS ?? "")
+    .split(",")
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
+  if (process.env.NODE_ENV === "production" && values.length === 0) {
+    throw new Error(
+      "AUTH_OPERATOR_CONFIG_MISSING: SUPER_ADMIN_EMAILS must contain at least one verified operator email in production.",
+    );
   }
-
-  return {
-    clerkId: params.clerkId,
-    email: me.email,
-    name: me.name,
-    role: me.role,
-    orgId: me.orgId,
-    userId: me._id,
-    onboardingComplete: Boolean(me.onboardingComplete),
-  };
+  return new Set(values);
 }
 
-async function assertActiveOrgAccess(clerkId: string, orgId: string) {
-  const access = await convexQuery<
-    { clerkId: string; orgId: string },
-    { hasUser: boolean; hasOrg: boolean; orgActive: boolean } | null
-  >("users:accessState", {
-    clerkId,
-    orgId,
-  });
+export function isPlatformOperatorEmail(email: string) {
+  return operatorEmails().has(email.trim().toLowerCase());
+}
 
-  if (!access?.hasUser || !access.hasOrg) {
-    throw new Error("AUTH_NO_ACCESS: Your account isn't linked to a school. Contact your school administrator.");
+async function readIdentity() {
+  return convexQuery<Record<string, never>, IdentityContext | null>(
+    "identity:me",
+    {},
+  );
+}
+
+async function ensureVerifiedClerkAccount() {
+  const profile = await currentUser();
+  if (!profile)
+    throw new Error(
+      "AUTH_PROFILE_UNAVAILABLE: The signed-in identity profile could not be loaded.",
+    );
+  const primary = profile.emailAddresses.find(
+    (entry) => entry.id === profile.primaryEmailAddressId,
+  );
+  const verified = [primary, ...profile.emailAddresses]
+    .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
+    .find(
+      (entry) =>
+        entry.verification?.status === "verified" &&
+        Boolean(entry.emailAddress),
+    );
+  if (!verified)
+    throw new Error(
+      "AUTH_EMAIL_UNVERIFIED: Verify your school email before using Spectra.",
+    );
+  await convexMutation("identity:registerSelf", {
+    name: profile.fullName ?? profile.firstName ?? "Spectra user",
+    avatarUrl: profile.imageUrl || undefined,
+  });
+}
+
+export async function requireAccount(): Promise<AccountIdentity> {
+  if (!hasClerkServerConfig())
+    throw new Error("AUTH_MISCONFIGURED: Clerk authentication is required.");
+  const authState = await auth();
+  if (!authState.userId)
+    throw new Error("AUTH_NOT_SIGNED_IN: Sign in to continue.");
+  let account = await convexQuery<
+    Record<string, never>,
+    AccountIdentity | null
+  >("identity:account", {});
+  if (!account) {
+    await ensureVerifiedClerkAccount();
+    account = await convexQuery<Record<string, never>, AccountIdentity | null>(
+      "identity:account",
+      {},
+    );
   }
-  if (!access.orgActive) {
-    throw new Error("AUTH_ORG_INACTIVE: Your school's workspace is currently inactive. Contact your administrator.");
-  }
+  if (!account || account.status !== "active")
+    throw new Error(
+      "AUTH_ACCOUNT_REQUIRED: An active verified account is required.",
+    );
+  return account;
 }
 
 export async function requireActor(): Promise<SessionActor> {
-  const cookieStore = await cookies();
-  const activeOrgId = cookieStore.get("spectra_active_org_id")?.value;
+  if (!hasClerkServerConfig())
+    throw new Error("AUTH_MISCONFIGURED: Clerk authentication is required.");
 
-  if (!hasClerkServerConfig()) {
-    return bootstrapActor({
-      clerkId: "local-demo-admin",
-      email: "local-admin@school.local",
-      name: "Local Demo Admin",
-      bootstrapAdmin: true,
-      orgId: activeOrgId,
-    });
-  }
-
-  let userId: string | null = null;
-
+  let clerkId: string | null = null;
   try {
-    const authData = await auth();
-    userId = authData.userId;
+    const authState = await auth();
+    clerkId = authState.userId;
   } catch {
+    throw new Error("AUTH_MISCONFIGURED: Clerk authentication failed.");
+  }
+  if (!clerkId) throw new Error("AUTH_NOT_SIGNED_IN: Sign in to continue.");
+
+  let identity = await readIdentity();
+  if (!identity) {
+    await ensureVerifiedClerkAccount();
+    identity = await readIdentity();
+  }
+  if (!identity) {
     throw new Error(
-      "AUTH_MISCONFIGURED: Clerk auth failed. Check CLERK_SECRET_KEY and your Clerk publishable key env.",
+      "AUTH_NO_SCHOOL: This account does not have an active school membership.",
     );
   }
-
-  if (!userId) {
-    throw new Error("AUTH_NOT_SIGNED_IN: Sign in to continue.");
-  }
-
-  const existing = await convexQuery<
-    { clerkId: string; orgId?: string },
-    {
-      _id: string;
-      role: Role;
-      orgId: string;
-      email: string;
-      name: string;
-      onboardingComplete?: boolean;
-    } | null
-  >("users:me", {
-    clerkId: userId,
-    orgId: activeOrgId,
-  });
-
-  if (existing) {
-    let current = existing;
-    let syncedEmail = existing.email;
-    let syncedName = existing.name;
-
-    // Clerk can update primary email after initial signup. When that happens,
-    // re-check super-admin eligibility against the live Clerk profile so
-    // super-admin routes do not fail due to stale email in Convex.
-    if (existing.role !== "admin" && !isSuperAdminEmail(existing.email)) {
-      const profile = await currentUser();
-      const emails = (profile?.emailAddresses ?? [])
-        .map((entry) => entry.emailAddress?.trim().toLowerCase())
-        .filter((value): value is string => Boolean(value));
-      const profileEmail = emails[0];
-      const profileName = profile?.fullName ?? profile?.firstName;
-      if (profileEmail) {
-        syncedEmail = profileEmail;
-      }
-      if (profileName) {
-        syncedName = profileName;
-      }
-    }
-
-    const superAdminByEmail = isSuperAdminEmail(syncedEmail);
-    const shouldBootstrapAdmin = existing.role !== "admin" && superAdminByEmail;
-    const access = (superAdminByEmail || activeOrgId)
-      ? await convexQuery<
-          { clerkId: string; orgId?: string },
-          { hasUser: boolean; hasOrg: boolean; orgActive: boolean } | null
-        >("users:accessState", {
-          clerkId: userId,
-          orgId: activeOrgId,
-        })
-      : null;
-    const shouldRecoverMissingOrg = superAdminByEmail && !access?.hasOrg;
-    const needsIdentitySync = syncedEmail !== existing.email || syncedName !== existing.name;
-
-    if (shouldBootstrapAdmin || shouldRecoverMissingOrg || needsIdentitySync) {
-      await convexMutation("users:ensureUser", {
-        clerkId: userId,
-        email: syncedEmail,
-        name: syncedName,
-        requestedRole: existing.role,
-        bootstrapAdmin: shouldBootstrapAdmin || shouldRecoverMissingOrg,
-        orgId: activeOrgId,
-      });
-
-      const refreshed = await convexQuery<
-        { clerkId: string; orgId?: string },
-        {
-          _id: string;
-          role: Role;
-          orgId: string;
-          email: string;
-          name: string;
-          onboardingComplete?: boolean;
-        } | null
-      >("users:me", {
-        clerkId: userId,
-        orgId: activeOrgId,
-      });
-      if (refreshed) {
-        current = refreshed;
-      }
-    }
-
-    if (!isSuperAdminEmail(current.email)) {
-      await assertActiveOrgAccess(userId, current.orgId);
-    }
-
-    return {
-      clerkId: userId,
-      email: current.email,
-      name: current.name,
-      role: current.role,
-      orgId: current.orgId,
-      userId: current._id,
-      onboardingComplete: Boolean(current.onboardingComplete),
-    };
-  }
-
-  const user = await currentUser();
-  if (!user) {
+  if (!identity.emailVerified)
     throw new Error(
-      "AUTH_PROFILE_UNAVAILABLE: Signed-in Clerk user profile could not be loaded. Retry sign-in.",
+      "AUTH_EMAIL_UNVERIFIED: Verify your school email before using Spectra.",
     );
-  }
-
-  const emails = user.emailAddresses
-    .map((entry) => entry.emailAddress?.trim().toLowerCase())
-    .filter((value): value is string => Boolean(value));
-  const email = emails[0] ?? "unknown@example.com";
-  const name = user.fullName ?? user.firstName ?? "Student";
-  const bootstrapAdmin = emails.some(isSuperAdminEmail);
-
-  if (bootstrapAdmin) {
-    return bootstrapActor({
-      clerkId: userId,
-      email,
-      name,
-      bootstrapAdmin,
-      orgId: activeOrgId,
-    });
-  }
-
-  throw new Error("AUTH_NO_ACCESS: Your account is not yet a member of a school.");
+  return {
+    clerkId,
+    accountId: identity.accountId,
+    email: identity.email,
+    name: identity.name,
+    schoolId: identity.schoolId,
+    schoolRole: identity.schoolRole,
+    membershipId: identity.membershipId,
+  };
 }
 
-export async function requireSuperAdmin(): Promise<SessionActor> {
+export async function requirePlatformOperator() {
   const actor = await requireActor();
-  if (!isSuperAdminEmail(actor.email)) {
-    throw new Error("Super admin access required");
-  }
+  if (!isPlatformOperatorEmail(actor.email))
+    throw new Error(
+      "AUTH_OPERATOR_REQUIRED: Platform operator access is required.",
+    );
   return actor;
 }

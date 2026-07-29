@@ -25,11 +25,16 @@ const SHORTCUTS: Shortcut[] = [
 ];
 
 function ShortcutKey({ children }: { children: string }) {
-  const isMac = typeof navigator !== "undefined" && navigator.platform.toUpperCase().indexOf("MAC") >= 0;
-  
-  let display = children;
-  if (children === "⌘" && !isMac) display = "Ctrl";
-  
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+  const isMac =
+    mounted &&
+    typeof navigator !== "undefined" &&
+    /mac|iphone|ipad|ipod/i.test(navigator.platform || navigator.userAgent);
+  const display = children === "⌘" && mounted && !isMac ? "Ctrl" : children;
+
   return (
     <kbd className="inline-flex h-6 min-w-[1.5rem] items-center justify-center rounded border border-[var(--border-default)] bg-[var(--bg-secondary)] px-1.5 text-[11px] font-medium text-[var(--text-secondary)] shadow-sm">
       {display}

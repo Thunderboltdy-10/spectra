@@ -337,26 +337,26 @@ Interrupted runs preserve valid partial response and mutation state, identify th
 
 ## 19. Conflict resolution and edge cases
 
-| Situation | Canonical behavior |
-|---|---|
-| Same object opened again | Focus or move the existing representation; never clone. |
-| Same thread chosen in a second surface | Subscribe/focus the same thread and run. |
-| Different visible thread and continuation | Keep current, replace continuation, or cancel; no silent retarget. |
-| Send while continuation is active | Prevent submission; offer Wait, Stop, or Start new thread. |
-| Several workspaces in request | Use the clearest owning workspace; otherwise ask a natural choice. |
-| Explicit context object navigated away from | Keep it until removed. |
-| Visible object closed | Remove inferred inclusion only; retain explicit inclusion. |
-| Context object moved | Preserve identity and update its location label. |
-| Context object deleted/inaccessible | Prune it and explain naturally. |
-| Workspace selected for Tile | Keep context action; disable artifact-only Tile. |
-| Two threads selected | Allow reference context if supported, but choose at most one continuation explicitly. |
-| Browser disconnects | Execution continues; views catch up from persisted events. |
-| Stop races with commit | Respect the claimed irreversible boundary and explain what completed. |
-| Retry after partial success | New attempt skips already committed idempotent steps and reports preserved work. |
-| Approval answered in two windows | First valid atomic claim wins; every view updates. |
-| Long/duplicate object names | Show type/workspace disambiguation; never expose IDs. |
-| Panel closes during run | Only presentation closes; run continues. |
-| Secondary metadata generation fails | Keep the successful response/object and use stable fallback metadata. |
+| Situation                                   | Canonical behavior                                                                    |
+| ------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Same object opened again                    | Focus or move the existing representation; never clone.                               |
+| Same thread chosen in a second surface      | Subscribe/focus the same thread and run.                                              |
+| Different visible thread and continuation   | Keep current, replace continuation, or cancel; no silent retarget.                    |
+| Send while continuation is active           | Prevent submission; offer Wait, Stop, or Start new thread.                            |
+| Several workspaces in request               | Use the clearest owning workspace; otherwise ask a natural choice.                    |
+| Explicit context object navigated away from | Keep it until removed.                                                                |
+| Visible object closed                       | Remove inferred inclusion only; retain explicit inclusion.                            |
+| Context object moved                        | Preserve identity and update its location label.                                      |
+| Context object deleted/inaccessible         | Prune it and explain naturally.                                                       |
+| Workspace selected for Tile                 | Keep context action; disable artifact-only Tile.                                      |
+| Two threads selected                        | Allow reference context if supported, but choose at most one continuation explicitly. |
+| Browser disconnects                         | Execution continues; views catch up from persisted events.                            |
+| Stop races with commit                      | Respect the claimed irreversible boundary and explain what completed.                 |
+| Retry after partial success                 | New attempt skips already committed idempotent steps and reports preserved work.      |
+| Approval answered in two windows            | First valid atomic claim wins; every view updates.                                    |
+| Long/duplicate object names                 | Show type/workspace disambiguation; never expose IDs.                                 |
+| Panel closes during run                     | Only presentation closes; run continues.                                              |
+| Secondary metadata generation fails         | Keep the successful response/object and use stable fallback metadata.                 |
 
 ## 20. State invariants
 
@@ -409,4 +409,4 @@ Interrupted runs preserve valid partial response and mutation state, identify th
 
 ## 22. Completion standard
 
-Wave Z is complete only when the canonical product behavior is implemented, every live Wave Z task has both Implemented and Independently verified checked, reviewer failures have been repaired and re-reviewed, code quality checks pass, and no known contradiction or obvious placeholder remains. A later live acceptance wave may discover additional issues; Wave Z must leave it a mature coherent product rather than a roadmap.
+Wave Z is complete only when the canonical product behavior is implemented, every live Wave Z task has both Implemented and Verified checked, reviewer failures have been repaired and re-reviewed, code quality checks pass, and no known contradiction or obvious placeholder remains. A later live acceptance wave may discover additional issues; Wave Z must leave it a mature coherent product rather than a roadmap.

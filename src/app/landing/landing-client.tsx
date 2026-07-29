@@ -3,11 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
-  ChevronRight,
   Sparkles,
   Network,
   ShieldCheck,
-  BarChart3,
   BookOpen,
   Users,
   GraduationCap,
@@ -17,7 +15,6 @@ import {
   MessageCircle,
   FileText,
   CircleHelp,
-  Lightbulb,
   ArrowRight,
   Bot,
   Zap,
@@ -25,28 +22,11 @@ import {
   FlaskConical,
   Pencil,
 } from "lucide-react";
-import { MODE_REGISTRY, COMING_SOON_MODES } from "@/lib/modes";
-import { SoulDiagram } from "./soul-diagram";
 import { PrismAnimation } from "./prism-section";
 import { PricingSection } from "./pricing-section";
 import { SpectraLogo } from "@/components/spectra-logo";
 
 // ── Data ─────────────────────────────────────────────────────────────────────
-
-const MODE_ICONS: Record<string, React.ComponentType<{ size?: number; strokeWidth?: number }>> = {
-  tutor: GraduationCap,
-  quiz: CircleHelp,
-  flashcard: Layers,
-  research: Search,
-  document: FileText,
-  general: MessageCircle,
-  marker: BarChart3,
-  exam: Brain,
-  draft_coach: Lightbulb,
-  explain: Lightbulb,
-};
-
-const SHOWN_MODES = ["tutor", "quiz", "flashcard", "research", "document", "general", "marker", "exam"] as const;
 
 const HOW_IT_WORKS = [
   {
@@ -58,8 +38,8 @@ const HOW_IT_WORKS = [
   {
     Icon: Network,
     num: 2,
-    title: "Routes to the right mode",
-    body: "The system reads intent and selects the pedagogical approach best suited to your goal.",
+    title: "Adapts to the work",
+    body: "Spectra selects the right model, specialist, tools, and artifact skill without making you choose a chat mode.",
   },
   {
     Icon: BookOpen,
@@ -71,7 +51,7 @@ const HOW_IT_WORKS = [
     Icon: Brain,
     num: 4,
     title: "Adapts to you over time",
-    body: "A personal memory layer learns your pace, gaps, and style across every session.",
+    body: "Permissioned context keeps work coherent across threads, workspaces, and artifacts.",
   },
 ];
 
@@ -102,7 +82,7 @@ const AGENTS = [
     symbol: "∑",
     name: "Maths Specialist",
     subject: "Algebra · Calculus · Statistics",
-    color: "var(--mode-tutor)",
+    color: "var(--brand-primary)",
     snippet: {
       user: "I keep getting the wrong answer for differentiation.",
       reply: "Show me your working for the last question. The error is likely in step 2 — let's find exactly where it breaks.",
@@ -113,7 +93,7 @@ const AGENTS = [
     symbol: "Ra",
     name: "Research Assistant",
     subject: "Cross-subject · Sourcing · Analysis",
-    color: "var(--mode-research)",
+    color: "var(--brand-accent)",
     snippet: {
       user: "Find sources on climate migration for my essay.",
       reply: "Here are 4 peer-reviewed sources. Source 3 contradicts your thesis — do you want to address it or refine your argument?",
@@ -122,28 +102,24 @@ const AGENTS = [
   },
 ];
 
-// Mode hover examples — shown in place of description on hover
-const MODE_EXAMPLES: Record<string, string> = {
-  tutor: "\"What do you think happens to the equation when you move the constant? Try it first.\"",
-  marker: "\"Paragraph 2 is strong, but needs a textual quote. See the rubric at Bloom's L5.\"",
-  exam: "\"Q: Name the three branches of the US government. 45 seconds — go.\"",
-  draft_coach: "\"Your intro grabs attention. What's your central claim before I dive deeper?\"",
-  quiz: "\"Front: What triggers an action potential? Flip to check.\"",
-  flashcard: "\"Card 1 of 12 — Mitosis stages: PMAT. Tap when ready for the next.\"",
-  research: "\"Source 1 supports your thesis. Source 3 contradicts it. How do you reconcile them?\"",
-  document: "\"Generating study guide: Causes → Events → Figures → Legacy. Export as PDF?\"",
-  general: "\"Sure — ask me anything. I'll follow your lead.\"",
-};
+const ADAPTIVE_CAPABILITIES = [
+  { Icon: MessageCircle, title: "Explain and explore", description: "Ask naturally and keep a coherent conversation without selecting a preset behavior.", example: "Walk me through the step where the sign changes.", color: "var(--brand-primary)" },
+  { Icon: Search, title: "Find and synthesize", description: "Retrieve evidence only when the request benefits from current or source-grounded information.", example: "Compare these sources and show where they disagree.", color: "var(--accent-mint)" },
+  { Icon: FileText, title: "Create artifacts", description: "Build documents, quizzes, decks, tasks, sheets, presentations, and visual work in place.", example: "Turn these notes into a concise revision document.", color: "var(--brand-accent)" },
+  { Icon: Pencil, title: "Edit live work", description: "Change the relevant region while preserving surrounding content, history, and collaborators.", example: "Rewrite this paragraph but preserve every citation.", color: "var(--accent-coral)" },
+  { Icon: CircleHelp, title: "Practice formatively", description: "Create low-stakes quizzes and flashcards as first-class artifacts, never hidden chat formats.", example: "Build five questions from this document.", color: "var(--accent-gold)" },
+  { Icon: Network, title: "Connect the work", description: "Link tasks, timetable entries, source material, charts, embeds, and related artifacts.", example: "Put these deadlines into my timetable and planner.", color: "var(--text-secondary)" },
+] as const;
 
 const STAKEHOLDERS = [
   {
     role: "For students",
     Icon: GraduationCap,
-    color: "var(--mode-tutor)",
+    color: "var(--brand-primary)",
     tagline: "Structured help, not shortcuts",
     points: [
-      "12 learning modes (8 live + 4 staged), with auto-routing",
-      "Two-layer memory fabric that builds across sessions",
+      "One adaptive collaborator with visible, reversible routing",
+      "Connected workspaces and artifacts that preserve context",
       "Every response anchored to your school's culture, values, and curriculum",
       "Guided discovery — builds AI literacy alongside subject knowledge",
     ],
@@ -151,7 +127,7 @@ const STAKEHOLDERS = [
   {
     role: "For teachers",
     Icon: Users,
-    color: "var(--mode-marker)",
+    color: "var(--accent-coral)",
     tagline: "Your materials. Your context.",
     points: [
       "Upload class notes, rubrics, and past papers",
@@ -269,7 +245,7 @@ function ChevronUp() {
 const HERO_SCENARIOS = [
   {
     user: "I need to understand Newton\u2019s laws for my exam tomorrow",
-    mode: { label: "Tutor mode", color: "var(--mode-tutor)" },
+    operation: { label: "Explaining with questions", color: "var(--brand-primary)" },
     model: { label: "DeepSeek R1", color: "var(--accent-mint)" },
     agent: { label: "Science Tutor", color: "var(--accent-coral)" },
     reply: "Let\u2019s work through this together. Newton\u2019s first law says an object at rest stays at rest unless a force acts. What do you already know about inertia?",
@@ -277,15 +253,15 @@ const HERO_SCENARIOS = [
   },
   {
     user: "Can you quiz me on the causes of World War I?",
-    mode: { label: "Practice mode", color: "var(--mode-exam)" },
+    operation: { label: "Building formative practice", color: "var(--brand-primary)" },
     model: { label: "Gemini", color: "var(--brand-accent)" },
-    agent: { label: "History agent", color: "var(--mode-research)" },
+    agent: { label: "History agent", color: "var(--brand-accent)" },
     reply: "Ready? Q1: What event in Sarajevo triggered the war \u2014 and which alliance did it activate first?",
     tag: "Active recall \u00b7 spaced retrieval",
   },
   {
     user: "Give me feedback on my essay introduction.",
-    mode: { label: "Coach mode", color: "var(--mode-draft_coach)" },
+    operation: { label: "Reviewing the introduction", color: "var(--brand-primary)" },
     model: { label: "Claude", color: "var(--accent-coral)" },
     agent: { label: "Essay Coach", color: "var(--accent-mint)" },
     reply: "Your opening line is strong. Before I go further \u2014 what\u2019s your central argument? I\u2019ll give you sharper feedback once I know your claim.",
@@ -411,7 +387,7 @@ function HeroDemo() {
 
           {/* Route pills */}
           <div className="flex flex-wrap gap-3">
-            {[scenario.mode, scenario.model, scenario.agent].map((tag, ti) => (
+            {[scenario.operation, scenario.model, scenario.agent].map((tag, ti) => (
               <div key={ti} style={anim(ti + 2)}>
                 <span
                   className="inline-flex items-center gap-2 rounded-xl border px-3.5 py-1.5 text-sm font-bold shadow-sm"
@@ -449,7 +425,7 @@ function HeroDemo() {
 // ── Stat strip ────────────────────────────────────────────────────────────────
 
 function StatStrip() {
-  const [modes, modesRef] = useCountUp(12);
+  const [artifactTypes, artifactTypesRef] = useCountUp(10);
   const [models, modelsRef] = useCountUp(260);
 
   return (
@@ -457,9 +433,9 @@ function StatStrip() {
       <div className="max-w-6xl mx-auto px-4">
         <div className="flex divide-x divide-[var(--border-default)]">
           {[
-            { ref: modesRef, display: String(modes), label: "learning modes", sub: "each with a distinct pedagogy" },
+            { ref: artifactTypesRef, display: String(artifactTypes), label: "artifact types", sub: "built to create, edit, connect, and share" },
             { ref: modelsRef, display: `${models}+`, label: "active AI models", sub: "continuously refreshed routing catalog" },
-            { ref: null, display: "2-layer", label: "personalisation", sub: "school context + personal memory" },
+            { ref: null, display: "Live", label: "collaboration", sub: "people and AI work in the same current state" },
           ].map((s, i) => (
             <div
               key={i}
@@ -803,58 +779,15 @@ export function LandingClient() {
           background: radial-gradient(ellipse 75% 70% at 50% 45%, transparent 30%, var(--bg-primary) 100%);
         }
 
-        /* Mode cards */
-        .mode-card {
-          --mode-color: transparent;
-          transition: box-shadow 0.3s ease, border-color 0.3s ease;
+        .capability-card {
+          --capability-color: transparent;
+          transition: transform 0.28s ease, box-shadow 0.28s ease, border-color 0.28s ease;
         }
-        .mode-card:hover {
-          border-color: color-mix(in oklab, var(--mode-color) 35%, var(--border-default)) !important;
-          box-shadow:
-            0 16px 40px -12px color-mix(in oklab, var(--mode-color) 18%, transparent),
-            0 0 0 1px color-mix(in oklab, var(--mode-color) 20%, transparent);
+        .capability-card:hover {
+          transform: translateY(-4px);
+          border-color: color-mix(in oklab, var(--capability-color) 34%, var(--border-default)) !important;
+          box-shadow: 0 18px 44px -18px color-mix(in oklab, var(--capability-color) 28%, transparent);
         }
-
-        .mode-card .mode-icon {
-          transition: all 0.5s cubic-bezier(0.22,1,0.36,1);
-          transform-origin: center;
-        }
-        .mode-card:hover .mode-icon {
-          transform: scale(8) translate(14px, 8px);
-          opacity: 0.05;
-          background: transparent !important;
-          border-color: transparent !important;
-        }
-
-        .mode-card .mode-label-container {
-          transition: all 0.5s cubic-bezier(0.22,1,0.36,1);
-          transform-origin: center center;
-        }
-        .mode-card:hover .mode-label-container {
-          transform: scale(1.0) translateY(-54px);
-          justify-content: center;
-          width: 100%;
-        }
-
-        .mode-card .mode-desc, .mode-card .mode-arrow {
-          transition: opacity 0.3s ease, transform 0.3s ease;
-        }
-        .mode-card:hover .mode-desc, .mode-card:hover .mode-arrow {
-          opacity: 0;
-          transform: translateY(10px);
-          pointer-events: none;
-        }
-
-        /* Mode card example text */
-        .mode-card .mode-example {
-          opacity: 0; transform: translateY(12px);
-          transition: opacity 0.4s ease 0.1s, transform 0.4s ease 0.1s;
-          position: absolute; inset: 0; padding: 28px;
-          display: flex; flex-direction: column; justify-content: center; align-items: center;
-          text-align: center;
-          pointer-events: none;
-        }
-        .mode-card:hover .mode-example { opacity: 1; transform: translateY(10px); pointer-events: auto; }
 
         /* Timeline line — animated via scaleY so it "draws" downward */
         .timeline-line-track {
@@ -904,7 +837,7 @@ export function LandingClient() {
           [data-reveal], .hero-in-1, .hero-in-2, .hero-in-3, .hero-in-4, .hero-in-5 {
             animation: none !important; transition: none !important; opacity: 1 !important; transform: none !important;
           }
-          .mode-card, .agent-card, .stakeholder-card { transition: none !important; }
+          .capability-card, .agent-card, .stakeholder-card { transition: none !important; }
           .timeline-line { transition: none !important; }
         }
       ` }} />
@@ -1015,8 +948,8 @@ export function LandingClient() {
                 className="hero-in-3 text-lg leading-relaxed mb-8"
                 style={{ color: "var(--text-secondary)", maxWidth: "32rem" }}
               >
-                Spectra is an AI School Studio platform for schools: mode-aware orchestration,
-                evidence-first responses, and memory grounded in your curriculum. Routing stays
+                Spectra is an AI School Studio platform for schools: adaptive orchestration,
+                evidence-first responses, and connected artifacts grounded in your curriculum. Routing stays
                 fresh from a live model catalog, reliability fallbacks prevent empty responses,
                 and every workflow remains budget-aware by design.
               </p>
@@ -1052,35 +985,6 @@ export function LandingClient() {
 
       {/* ── Stat strip ── */}
       <StatStrip />
-
-      {/* ── Soul diagram ── */}
-      <section
-        className="py-32"
-        style={{ background: "var(--bg-primary)" }}
-      >
-        <div className="max-w-7xl mx-auto px-6">
-          <div className="mb-16" data-reveal>
-            <p
-              className="text-[9px] font-bold uppercase tracking-[0.28em] mb-4"
-              style={{ color: "var(--text-tertiary)" }}
-            >
-              Context at every layer
-            </p>
-            <h2
-              className="font-display font-bold mb-4"
-              style={{ fontSize: "clamp(2rem, 4.5vw, 3rem)" }}
-            >
-              School-aware.{" "}
-              <span style={{ color: "var(--brand-primary)" }}>Student-aware.</span>
-            </h2>
-            <p className="text-lg leading-relaxed max-w-lg" style={{ color: "var(--text-secondary)" }}>
-              Two independent context layers shape every response — one anchored to your school,
-              one adapted to the individual student.
-            </p>
-          </div>
-          <SoulDiagram />
-        </div>
-      </section>
 
       {/* ── ChevronDown ── */}
       <ChevronDown />
@@ -1140,7 +1044,7 @@ export function LandingClient() {
               <span style={{ color: "var(--brand-primary)" }}>The right intelligence.</span>
             </h2>
             <p className="text-base max-w-lg mx-auto" style={{ color: "var(--text-secondary)" }}>
-              Spectra decomposes every request and routes it to a purpose-built agent — the right model, the right context, the right mode.
+              Spectra understands each request and loads the right model, context, tools, artifact skill, and specialist only when needed.
             </p>
           </div>
           <div data-reveal>
@@ -1267,9 +1171,9 @@ export function LandingClient() {
             {[
               { Icon: Bot, label: "260+ active models" },
               { Icon: Zap, label: "Sub-second routing" },
-              { Icon: Database, label: "2-layer memory fabric" },
+              { Icon: Database, label: "Permissioned connected context" },
               { Icon: ShieldCheck, label: "School guardrails" },
-              { Icon: Network, label: "Multi-agent" },
+              { Icon: Network, label: "Automatic specialist routing" },
               { Icon: Search, label: "Evidence-first citations" },
               { Icon: Layers, label: "Clarify + resume context" },
               { Icon: ArrowRight, label: "Branch + regenerate paths" },
@@ -1294,7 +1198,7 @@ export function LandingClient() {
       {/* ── DoubleWaveDown ── */}
       <DoubleWaveDown />
 
-      {/* ── Study modes ── */}
+      {/* ── Adaptive capabilities ── */}
       <section
         className="py-32"
         style={{ background: "var(--bg-primary)" }}
@@ -1305,102 +1209,69 @@ export function LandingClient() {
               className="text-[9px] font-bold uppercase tracking-[0.28em] mb-4"
               style={{ color: "var(--text-tertiary)" }}
             >
-              Pedagogical depth
+              One adaptive collaborator
             </p>
             <h2
               className="font-display font-bold mb-4"
               style={{ fontSize: "clamp(2rem, 4.5vw, 3rem)" }}
             >
-              12 modes to <span style={{ color: "var(--brand-primary)" }}>learn</span>
+              Ask once. Spectra chooses <span style={{ color: "var(--brand-primary)" }}>how to help</span>
             </h2>
             <p className="text-lg leading-relaxed max-w-lg" style={{ color: "var(--text-secondary)" }}>
-              Eight modes are live now, with four staged releases. Each has a distinct pedagogy and
-              can be auto-selected or manually locked.
+              Conversation, retrieval, artifact creation, editing, and practice are operations that
+              appear when useful—not separate chat products you must configure first.
             </p>
           </div>
 
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {SHOWN_MODES.map((key, i) => {
-              const mode = MODE_REGISTRY[key];
-              const isComingSoon = COMING_SOON_MODES.has(key);
-              const ModeIcon = MODE_ICONS[key] ?? Sparkles;
-
-              return (
+            {ADAPTIVE_CAPABILITIES.map(({ Icon, title, description, example, color }, i) => (
                 <div
-                  key={key}
-                  className="mode-card relative rounded-2xl border border-[var(--border-default)] overflow-hidden cursor-pointer h-[256px]"
+                  key={title}
+                  className="capability-card relative rounded-2xl border border-[var(--border-default)] overflow-hidden h-[256px]"
                   style={{
                     background: "var(--bg-elevated)",
-                    ["--mode-color" as string]: mode.cssVar,
+                    ["--capability-color" as string]: color,
                   }}
                   data-reveal
                   data-delay={String((i % 4) * 80)}
                 >
-                  {/* Color wash overlay */}
                   <div
-                    className="mode-wash absolute inset-0 pointer-events-none"
+                    className="absolute inset-0 pointer-events-none"
                     style={{
-                      background: `linear-gradient(145deg, ${mode.cssVar}10 0%, transparent 60%)`,
+                      background: `linear-gradient(145deg, color-mix(in oklab, ${color} 10%, transparent) 0%, transparent 60%)`,
                     }}
                   />
 
-                  <div className="mode-default relative z-10 p-7 h-full flex flex-col">
+                  <div className="relative z-10 p-7 h-full flex flex-col">
                     <div
-                      className="mode-icon w-11 h-11 rounded-xl flex items-center justify-center mb-5 border shrink-0"
+                      className="w-11 h-11 rounded-xl flex items-center justify-center mb-5 border shrink-0"
                       style={{
-                        color: mode.cssVar,
-                        borderColor: mode.cssVar + "30",
-                        background: mode.cssVar + "14",
+                        color,
+                        borderColor: `color-mix(in oklab, ${color} 30%, transparent)`,
+                        background: `color-mix(in oklab, ${color} 12%, var(--bg-elevated))`,
                       }}
                     >
-                      <ModeIcon size={18} strokeWidth={1.5} />
+                      <Icon size={18} strokeWidth={1.5} />
                     </div>
 
-                    <div className="mode-label-container flex items-center gap-2 mb-2 z-10 w-full">
-                      <h4 className="font-display text-base font-bold text-center">{mode.label}</h4>
-                      {isComingSoon && (
-                        <span
-                          className="text-[7px] font-black px-1.5 py-0.5 rounded border"
-                          style={{
-                            background: "var(--bg-secondary)",
-                            borderColor: "var(--border-default)",
-                            color: "var(--text-tertiary)",
-                          }}
-                        >
-                          SOON
-                        </span>
-                      )}
-                    </div>
+                    <h4 className="font-display text-base font-bold mb-2">{title}</h4>
 
                     <p
-                      className="mode-desc text-sm leading-relaxed flex-1 transition-opacity duration-250"
+                      className="text-sm leading-relaxed flex-1"
                       style={{ color: "var(--text-secondary)" }}
                     >
-                      {mode.description}
+                      {description}
                     </p>
 
                     <div
-                      className="mode-arrow flex items-center gap-1.5 text-xs font-bold mt-4"
-                      style={{ color: mode.cssVar }}
+                      className="text-xs leading-relaxed mt-4 rounded-lg px-3 py-2"
+                      style={{ color: "var(--text-secondary)", background: "var(--bg-secondary)" }}
                     >
-                      Try in chat <ChevronRight size={13} />
+                      “{example}”
                     </div>
                   </div>
-
-                  {/* Hover example overlay */}
-                  {MODE_EXAMPLES[key] && (
-                    <div className="mode-example rounded-2xl">
-                      <p className="text-[9px] font-bold uppercase tracking-widest mb-2" style={{ color: mode.cssVar }}>
-                        Example
-                      </p>
-                      <p className="text-sm leading-relaxed italic" style={{ color: "var(--text-primary)" }}>
-                        {MODE_EXAMPLES[key]}
-                      </p>
-                    </div>
-                  )}
                 </div>
-              );
-            })}
+              ))}
           </div>
         </div>
       </section>
@@ -1753,7 +1624,7 @@ export function LandingClient() {
             <span style={{ color: "var(--brand-primary)" }}>that actually teaches.</span>
           </h2>
           <p className="text-lg mb-10 leading-relaxed" style={{ color: "var(--text-secondary)" }}>
-            Mode orchestration. School context. Evidence layer. Memory fabric. Full oversight.
+            Adaptive orchestration. School context. Connected artifacts. Real-time collaboration.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <Link

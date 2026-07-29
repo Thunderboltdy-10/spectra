@@ -86,8 +86,18 @@ export function useSpectraContext(artifacts: SpectraArtifact[], workspaces: Spec
       ...threads.map((thread) => ({ type: "thread" as const, id: thread._id, label: thread.title, workspaceId: thread.workspaceId })),
     ]);
     if (continuation && threadsLoaded && !threads.some((thread) => thread._id === continuation.id)) {
-      setContinuation(null);
-      toast.message("That conversation is no longer available. Your next message will start a new thread.");
+      // The durable run tab can learn about a just-created thread before the
+      // independently refreshed thread index does. Confirm against the
+      // canonical endpoint before treating that short propagation window as
+      // deletion, otherwise a valid completed run is immediately deselected.
+      const expectedId = continuation.id;
+      void getSpectraThread(expectedId).then((value) => {
+        setThreads((current) => current.some((row) => row._id === value.thread._id) ? current : [value.thread, ...current]);
+      }).catch(() => {
+        if (useSpectraContextStore.getState().continuation?.id !== expectedId) return;
+        setContinuation(null);
+        toast.message("That conversation is no longer available. Your next message will start a new thread.");
+      });
     } else if (continuation) {
       const currentThread = threads.find((thread) => thread._id === continuation.id);
       if (currentThread && (currentThread.title !== continuation.title || currentThread.workspaceId !== continuation.workspaceId)) setContinuation({ ...continuation, title: currentThread.title, workspaceId: currentThread.workspaceId });
@@ -101,6 +111,10 @@ export function useSpectraContext(artifacts: SpectraArtifact[], workspaces: Spec
     const threadIds = new Set(threads.map((thread) => thread._id));
     const now = Date.now();
     const missing = explicit.filter((item) => {
+      // A confirmed-missing explicit item remains visible as stale context so
+      // the user can understand and remove it. Do not keep hammering the
+      // canonical endpoint after that determination has been made.
+      if (item.stale) return false;
       const absent = item.type === "artifact" ? !artifactIds.has(item.id) : item.type === "workspace" ? !workspaceIds.has(item.id) : !threadIds.has(item.id);
       return absent && now - (availabilityChecks.current.get(`${item.type}:${item.id}`) ?? 0) > 30_000;
     });

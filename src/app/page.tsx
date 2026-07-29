@@ -2,13 +2,11 @@ import type { Metadata } from "next";
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { LandingClient } from "./landing/landing-client";
-import { requireActor } from "@/lib/auth-server";
 import { hasClerkServerConfig } from "@/lib/clerk-config";
 
 export const metadata: Metadata = {
-  title: "Spectra — The right AI for the right task",
-  description:
-    "Spectra routes every question to the right AI — the right model, the right mode, the right context. 9 learning modes, school context, personal memory. Purpose-built for schools.",
+  title: "Spectra — Connected learning work",
+  description: "Create, connect, and collaborate across school workspaces and artifacts with an adaptive AI partner.",
 };
 
 function toQueryString(searchParams: Record<string, string | string[] | undefined>) {
@@ -40,15 +38,7 @@ export default async function HomePage({
   if (hasClerkServerConfig()) {
     const authData = await auth();
     if (authData.userId) {
-      try {
-        await requireActor();
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "";
-        if (message.startsWith("AUTH_NO_ACCESS") || message.startsWith("AUTH_ORG_INACTIVE")) {
-          redirect(message.startsWith("AUTH_ORG_INACTIVE") ? "/request-access?reason=inactive" : "/request-access");
-        }
-      }
-      redirect(`/chat${toQueryString(resolvedSearchParams)}`);
+      redirect(`/workspace${toQueryString(resolvedSearchParams)}`);
     }
   }
   return <LandingClient />;

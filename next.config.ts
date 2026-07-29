@@ -6,7 +6,7 @@ const projectRoot = dirname(fileURLToPath(import.meta.url));
 
 const nextConfig: NextConfig = {
   transpilePackages: ["@lobehub/icons", "@lobehub/ui", "es-toolkit"],
-  serverExternalPackages: ["pdfjs-dist", "@napi-rs/canvas"],
+  serverExternalPackages: ["pdfjs-dist", "@napi-rs/canvas", "esbuild"],
   turbopack: {
     root: projectRoot,
   },
@@ -17,14 +17,6 @@ const nextConfig: NextConfig = {
         hostname: "**",
       },
     ],
-  },
-  async redirects() {
-    return [
-      { source: "/flashcards", destination: "/artifacts?type=flashcard_deck", permanent: false },
-      { source: "/images", destination: "/artifacts?type=image", permanent: false },
-      { source: "/bookmarks", destination: "/artifacts?type=bookmark", permanent: false },
-      { source: "/achievements", destination: "/artifacts", permanent: false },
-    ];
   },
   async headers() {
     return [

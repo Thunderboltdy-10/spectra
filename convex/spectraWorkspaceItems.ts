@@ -1,50 +1,106 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import {
   normalizeArtifactId,
-  requireOwnedArtifact,
-  requireOwnedWorkspace,
+  requireArtifactCapability,
+  requireWorkspaceCapability,
   requireSpectraActor,
 } from "./spectraShared";
+import { evaluateAccess } from "./authorityShared";
+import { projectArtifactForAccess } from "./quizPrivacy";
 
-async function hydrateWorkspaceItem(ctx: Parameters<typeof requireSpectraActor>[0], item: {
-  _id: Id<"spectraWorkspaceItems">;
-  workspaceId: Id<"spectraWorkspaces">;
-  sourceType: "artifact" | "thread" | "task" | "widget" | "custom";
-  sourceId: string;
-  viewData: {
-    titleOverride?: string;
-    compactSummary?: string;
-    cardVariant?: string;
-    pinned?: boolean;
-    hidden?: boolean;
-  };
-  layout: {
-    view: "cards" | "canvas" | "timeline";
-    position?: { x: number; y: number };
-    size?: { w: number; h: number };
-    zIndex?: number;
-    collapsed?: boolean;
-  };
-  createdAt: number;
-  updatedAt: number;
-}, workspaceTitle?: string) {
+async function hydrateWorkspaceItem(
+  ctx: Parameters<typeof requireSpectraActor>[0],
+  item: {
+    _id: Id<"spectraWorkspaceItems">;
+    workspaceId: Id<"spectraWorkspaces">;
+    sourceType: "artifact" | "thread" | "task" | "widget" | "custom";
+    sourceId: string;
+    viewData: {
+      titleOverride?: string;
+      compactSummary?: string;
+      cardVariant?: string;
+      pinned?: boolean;
+      hidden?: boolean;
+    };
+    layout: {
+      view: "cards" | "canvas" | "timeline";
+      position?: { x: number; y: number };
+      size?: { w: number; h: number };
+      zIndex?: number;
+      collapsed?: boolean;
+    };
+    createdAt: number;
+    updatedAt: number;
+  },
+  workspaceTitle?: string,
+) {
   if (item.sourceType === "artifact") {
     const artifactId = normalizeArtifactId(ctx, item.sourceId);
-    const artifact = artifactId ? await ctx.db.get(artifactId) : null;
+    const candidate = artifactId ? await ctx.db.get(artifactId) : null;
+    const resourceType =
+      candidate?.blueprintKey === "agent"
+        ? ("agent" as const)
+        : ("artifact" as const);
+    const decision = artifactId
+      ? await evaluateAccess(ctx, resourceType, artifactId)
+      : null;
+    const artifact = decision?.allowed ? decision.loaded.resource : null;
+    const projectedArtifact =
+      artifact && decision?.allowed && decision.level
+        ? projectArtifactForAccess(
+            artifact as Doc<"spectraArtifacts">,
+            decision.level,
+          )
+        : artifact;
+    const actor = await requireSpectraActor(ctx);
+    const ownership =
+      artifact?.ownerAccountId === actor.accountId
+        ? ("owned" as const)
+        : ("shared" as const);
+    const invitations = artifact
+      ? await ctx.db
+          .query("shareInvitations")
+          .withIndex("by_resource", (q) =>
+            q.eq("resourceType", resourceType).eq("resourceId", artifact._id),
+          )
+          .collect()
+      : [];
+    const activeInvitations = invitations.filter(
+      (invitation) =>
+        (invitation.status === "pending" || invitation.status === "accepted") &&
+        (!invitation.expiresAt || invitation.expiresAt > Date.now()),
+    );
     return {
       ...item,
       thread: null,
-      artifact: artifact && artifact.status !== "deleted" ? {
-        ...artifact,
-        placements: [{
-          workspaceId: item.workspaceId,
-          workspaceTitle: workspaceTitle ?? "Workspace",
-          workspaceItemId: item._id,
-        }],
-        placementStatus: "workspace" as const,
-      } : null,
+      artifact:
+        projectedArtifact && artifact?.status !== "deleted"
+          ? {
+              ...projectedArtifact,
+              ownership,
+              accessLevel: decision?.level ?? null,
+              accessReason: decision?.reason,
+              isShared: ownership === "shared" || activeInvitations.length > 0,
+              sharedWithCount:
+                ownership === "owned"
+                  ? new Set(
+                      activeInvitations.map(
+                        (invitation) => invitation.inviteeAccountId,
+                      ),
+                    ).size
+                  : undefined,
+              placements: [
+                {
+                  workspaceId: item.workspaceId,
+                  workspaceTitle: workspaceTitle ?? "Workspace",
+                  workspaceItemId: item._id,
+                },
+              ],
+              placementStatus: "workspace" as const,
+            }
+          : null,
     };
   }
   if (item.sourceType === "thread") {
@@ -54,9 +110,12 @@ async function hydrateWorkspaceItem(ctx: Parameters<typeof requireSpectraActor>[
     return {
       ...item,
       artifact: null,
-      thread: thread && thread.status !== "deleted" && thread.workspaceId === item.workspaceId
-        ? { ...thread, run }
-        : null,
+      thread:
+        thread &&
+        thread.status !== "deleted" &&
+        thread.workspaceId === item.workspaceId
+          ? { ...thread, run }
+          : null,
     };
   }
   return {
@@ -66,13 +125,12 @@ async function hydrateWorkspaceItem(ctx: Parameters<typeof requireSpectraActor>[
   };
 }
 
-async function listOwnedWorkspaceItems(
+async function listAccessibleWorkspaceItems(
   ctx: Parameters<typeof requireSpectraActor>[0],
-  actorClerkId: string,
   workspaceId: Id<"spectraWorkspaces">,
   includeHidden?: boolean,
 ) {
-  const { workspace } = await requireOwnedWorkspace(ctx, actorClerkId, workspaceId);
+  const { workspace } = await requireWorkspaceCapability(ctx, workspaceId);
   const items = await ctx.db
     .query("spectraWorkspaceItems")
     .withIndex("by_workspace", (q) => q.eq("workspaceId", workspaceId))
@@ -83,23 +141,45 @@ async function listOwnedWorkspaceItems(
       .filter((item) => includeHidden || item.viewData.hidden !== true)
       .map((item) => hydrateWorkspaceItem(ctx, item, workspace.title)),
   );
-  const settledWorkspace = workspace.aiState === "edited" && workspace.aiStateExpiresAt && workspace.aiStateExpiresAt <= Date.now() ? { ...workspace, aiState: undefined } : workspace;
-  const visibleWorkspace = settledWorkspace.aiState === "updating" && settledWorkspace.aiPreview ? { ...settledWorkspace, title: settledWorkspace.aiPreview.title ?? settledWorkspace.title, description: settledWorkspace.aiPreview.description ?? settledWorkspace.description, icon: settledWorkspace.aiPreview.icon ?? settledWorkspace.icon, color: settledWorkspace.aiPreview.color ?? settledWorkspace.color } : settledWorkspace;
+  const settledWorkspace =
+    workspace.aiState === "edited" &&
+    workspace.aiStateExpiresAt &&
+    workspace.aiStateExpiresAt <= Date.now()
+      ? { ...workspace, aiState: undefined }
+      : workspace;
+  const visibleWorkspace =
+    settledWorkspace.aiState === "updating" && settledWorkspace.aiPreview
+      ? {
+          ...settledWorkspace,
+          title: settledWorkspace.aiPreview.title ?? settledWorkspace.title,
+          description:
+            settledWorkspace.aiPreview.description ??
+            settledWorkspace.description,
+          icon: settledWorkspace.aiPreview.icon ?? settledWorkspace.icon,
+          color: settledWorkspace.aiPreview.color ?? settledWorkspace.color,
+        }
+      : settledWorkspace;
   return {
     workspace: visibleWorkspace,
     items: hydrated
-      .filter((item) => item.sourceType === "artifact" ? item.artifact : item.sourceType === "thread" ? item.thread : true)
+      .filter((item) =>
+        item.sourceType === "artifact"
+          ? item.artifact
+          : item.sourceType === "thread"
+            ? item.thread
+            : true,
+      )
       .sort((a, b) => b.updatedAt - a.updatedAt),
   };
 }
 
 export const listForWorkspace = query({
   args: {
-    actorClerkId: v.string(),
     workspaceId: v.id("spectraWorkspaces"),
     includeHidden: v.optional(v.boolean()),
   },
-  handler: (ctx, args) => listOwnedWorkspaceItems(ctx, args.actorClerkId, args.workspaceId, args.includeHidden),
+  handler: (ctx, args) =>
+    listAccessibleWorkspaceItems(ctx, args.workspaceId, args.includeHidden),
 });
 
 // HTTP query-string ids are untrusted. Normalize before entering a table-typed
@@ -107,17 +187,27 @@ export const listForWorkspace = query({
 // ArgumentValidationError for spectraWorkspaces.
 export const listForWorkspacePublic = query({
   args: {
-    actorClerkId: v.string(),
     workspaceId: v.string(),
     includeHidden: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
-    const workspaceId = ctx.db.normalizeId("spectraWorkspaces", args.workspaceId);
+    const workspaceId = ctx.db.normalizeId(
+      "spectraWorkspaces",
+      args.workspaceId,
+    );
     if (!workspaceId) return null;
     try {
-      return await listOwnedWorkspaceItems(ctx, args.actorClerkId, workspaceId, args.includeHidden);
+      return await listAccessibleWorkspaceItems(
+        ctx,
+        workspaceId,
+        args.includeHidden,
+      );
     } catch (error) {
-      if (error instanceof Error && error.message.toLowerCase().includes("workspace not found")) return null;
+      if (
+        error instanceof Error &&
+        error.message.toLowerCase().includes("workspace not found")
+      )
+        return null;
       throw error;
     }
   },
@@ -125,24 +215,50 @@ export const listForWorkspacePublic = query({
 
 export const addArtifact = mutation({
   args: {
-    actorClerkId: v.string(),
     workspaceId: v.id("spectraWorkspaces"),
     artifactId: v.id("spectraArtifacts"),
   },
   handler: async (ctx, args) => {
-    await requireOwnedWorkspace(ctx, args.actorClerkId, args.workspaceId);
-    const { artifact } = await requireOwnedArtifact(ctx, args.actorClerkId, args.artifactId);
+    const { actor } = await requireWorkspaceCapability(
+      ctx,
+      args.workspaceId,
+      "modify",
+    );
+    const { artifact, capabilities } = await requireArtifactCapability(
+      ctx,
+      args.artifactId,
+    );
+    if (
+      artifact.blueprintKey === "timetable" &&
+      ((artifact.tags ?? []).includes("system-timetable") ||
+        (artifact.tags ?? []).includes("managebac") ||
+        artifact.createdFrom?.contextSummary === "Personal Spectra timetable" ||
+        artifact.createdFrom?.contextSummary ===
+          "Automatic ManageBac timetable bootstrap")
+    ) {
+      throw new Error(
+        "Your Timetable stays in General and cannot be moved into a workspace.",
+      );
+    }
+    const canProjectAccess = capabilities.includes("share");
     const now = Date.now();
     const existing = await ctx.db
       .query("spectraWorkspaceItems")
-      .withIndex("by_workspace_source", (q) => q
-        .eq("workspaceId", args.workspaceId)
-        .eq("sourceType", "artifact")
-        .eq("sourceId", args.artifactId))
+      .withIndex("by_workspace_source", (q) =>
+        q
+          .eq("workspaceId", args.workspaceId)
+          .eq("sourceType", "artifact")
+          .eq("sourceId", args.artifactId),
+      )
       .first();
 
     if (existing) {
       await ctx.db.patch(existing._id, {
+        placedByAccountId: existing.placedByAccountId ?? actor.accountId,
+        // Never downgrade a deliberate owner/sharer projection, and never let
+        // a recipient placement promote itself into an access grant.
+        accessProjection:
+          existing.accessProjection === true || canProjectAccess,
         viewData: {
           ...existing.viewData,
           compactSummary: existing.viewData.compactSummary ?? artifact.summary,
@@ -150,7 +266,10 @@ export const addArtifact = mutation({
         },
         updatedAt: now,
       });
-      await ctx.db.patch(args.workspaceId, { updatedAt: now, lastActivityAt: now });
+      await ctx.db.patch(args.workspaceId, {
+        updatedAt: now,
+        lastActivityAt: now,
+      });
       return { workspaceItemId: existing._id, created: false };
     }
 
@@ -158,6 +277,8 @@ export const addArtifact = mutation({
       workspaceId: args.workspaceId,
       sourceType: "artifact",
       sourceId: args.artifactId,
+      placedByAccountId: actor.accountId,
+      accessProjection: canProjectAccess,
       viewData: {
         compactSummary: artifact.summary,
         hidden: false,
@@ -168,24 +289,22 @@ export const addArtifact = mutation({
       createdAt: now,
       updatedAt: now,
     });
-    await ctx.db.patch(args.workspaceId, { updatedAt: now, lastActivityAt: now });
+    await ctx.db.patch(args.workspaceId, {
+      updatedAt: now,
+      lastActivityAt: now,
+    });
     return { workspaceItemId, created: true };
   },
 });
 
 export const hide = mutation({
   args: {
-    actorClerkId: v.string(),
     workspaceItemId: v.id("spectraWorkspaceItems"),
   },
   handler: async (ctx, args) => {
-    const actor = await requireSpectraActor(ctx, args.actorClerkId);
     const item = await ctx.db.get(args.workspaceItemId);
     if (!item) throw new Error("Workspace item not found");
-    const workspace = await ctx.db.get(item.workspaceId);
-    if (!workspace || workspace.ownerUserId !== actor._id || workspace.orgId !== actor.orgId) {
-      throw new Error("Workspace item not found");
-    }
+    await requireWorkspaceCapability(ctx, item.workspaceId, "modify");
     const now = Date.now();
     await ctx.db.patch(args.workspaceItemId, {
       viewData: {
@@ -194,7 +313,10 @@ export const hide = mutation({
       },
       updatedAt: now,
     });
-    await ctx.db.patch(item.workspaceId, { updatedAt: now, lastActivityAt: now });
+    await ctx.db.patch(item.workspaceId, {
+      updatedAt: now,
+      lastActivityAt: now,
+    });
 
     let artifactStillExists = true;
     if (item.sourceType === "artifact") {
@@ -215,24 +337,41 @@ export const hide = mutation({
 
 export const setPinned = mutation({
   args: {
-    actorClerkId: v.string(),
     workspaceItemId: v.id("spectraWorkspaceItems"),
     pinned: v.boolean(),
+    exclusive: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
-    const actor = await requireSpectraActor(ctx, args.actorClerkId);
     const item = await ctx.db.get(args.workspaceItemId);
     if (!item) throw new Error("Workspace item not found");
-    const workspace = await ctx.db.get(item.workspaceId);
-    if (!workspace || workspace.ownerUserId !== actor._id || workspace.orgId !== actor.orgId) {
-      throw new Error("Workspace item not found");
-    }
+    await requireWorkspaceCapability(ctx, item.workspaceId, "modify");
     const now = Date.now();
+    if (args.pinned && args.exclusive) {
+      const siblings = await ctx.db
+        .query("spectraWorkspaceItems")
+        .withIndex("by_workspace", (q) => q.eq("workspaceId", item.workspaceId))
+        .collect();
+      await Promise.all(
+        siblings
+          .filter(
+            (sibling) => sibling._id !== item._id && sibling.viewData.pinned,
+          )
+          .map((sibling) =>
+            ctx.db.patch(sibling._id, {
+              viewData: { ...sibling.viewData, pinned: false },
+              updatedAt: Date.now(),
+            }),
+          ),
+      );
+    }
     await ctx.db.patch(args.workspaceItemId, {
       viewData: { ...item.viewData, pinned: args.pinned },
       updatedAt: now,
     });
-    await ctx.db.patch(item.workspaceId, { updatedAt: now, lastActivityAt: now });
+    await ctx.db.patch(item.workspaceId, {
+      updatedAt: now,
+      lastActivityAt: now,
+    });
     return { workspaceItemId: args.workspaceItemId, pinned: args.pinned };
   },
 });

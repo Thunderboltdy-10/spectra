@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
-import { Manrope, IBM_Plex_Mono, Fraunces } from "next/font/google";
+import { Manrope, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
 import { Providers } from "@/components/providers";
 import { getClerkPublishableKey } from "@/lib/clerk-config";
@@ -14,12 +14,7 @@ const manrope = Manrope({
   variable: "--font-manrope",
   subsets: ["latin"],
   display: "swap",
-});
-
-const fraunces = Fraunces({
-  variable: "--font-fraunces",
-  subsets: ["latin"],
-  display: "swap",
+  adjustFontFallback: false,
 });
 
 const plexMono = IBM_Plex_Mono({
@@ -31,7 +26,7 @@ const plexMono = IBM_Plex_Mono({
 
 export const metadata: Metadata = {
   title: "Spectra — The AI School Platform",
-  description: "Spectra routes every question to the right AI — the right model, the right mode, the right context. Purpose-built for schools.",
+  description: "Spectra is a collaborative AI studio for connected school workspaces and artifacts.",
   icons: {
     icon: [
       { url: "/favicon.png", type: "image/png", sizes: "64x64" },
@@ -42,7 +37,7 @@ export const metadata: Metadata = {
   },
   openGraph: {
     title: "Spectra — The AI School Platform",
-    description: "Spectra routes every question to the right AI — the right model, the right mode, the right context. Purpose-built for schools.",
+    description: "Spectra is a collaborative AI studio for connected school workspaces and artifacts.",
     siteName: "Spectra",
   },
 };
@@ -55,7 +50,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       <head>
         <meta name="color-scheme" content="light dark" />
       </head>
-      <body className={`${manrope.variable} ${fraunces.variable} ${plexMono.variable} antialiased`}>
+      <body className={`${manrope.variable} ${plexMono.variable} antialiased`}>
         <a
           href="#main-content"
           className="skip-link sr-only focus:not-sr-only"

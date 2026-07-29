@@ -41,7 +41,20 @@ describe("Wave 4 controlled operation engine", () => {
     const policy = evaluatePlanPolicy(plan.operations, { intent });
     expect(policy.visibleObjectCreations).toBe(1);
     expect(policy.requiresConfirmation).toBe(false);
-    expect(plan.operations[0]?.type === "artifact.create" && plan.operations[0].input.content.cards).toHaveLength(6);
+    const operation = plan.operations[0];
+    expect(operation?.type === "artifact.create" && operation.input.blueprintKey === "flashcard_deck" ? operation.input.content.cards : []).toHaveLength(6);
+  });
+
+  it("allows one typed create when the model reports an inconsistent zero visible count", () => {
+    const intent = createIntent(0);
+    const plan = parseSpectraPlan({ decision: "operate", intent, finalResponse: "Created one deck.", operations: [deckOperation()] });
+    expect(() => validatePlanAgainstIntent(plan, references)).not.toThrow();
+  });
+
+  it("allows one repeated requested type when the model counted artifact types instead of objects", () => {
+    const intent = { ...createIntent(1), mode: "mixed" as const };
+    const plan = parseSpectraPlan({ decision: "operate", intent, finalResponse: "Created two requested decks.", operations: [deckOperation(), deckOperation("Second requested deck")] });
+    expect(() => validatePlanAgainstIntent(plan, references)).not.toThrow();
   });
 
   it("requires confirmation for workspace creation and multiple visible artifacts", () => {
@@ -62,6 +75,28 @@ describe("Wave 4 controlled operation engine", () => {
     expect(policy.reasons.join(" ")).toMatch(/2 visible artifacts/i);
   });
 
+  it("accepts an owned archive request but always requires confirmation", () => {
+    const intent = {
+      mode: "archive" as const,
+      requestedArtifactTypes: [] as Array<"document" | "flashcard_deck" | "quiz" | "planner_task">,
+      requestedVisibleArtifactCount: 0,
+      targetArtifactId: "artifact-real",
+      targetWorkspaceId: "workspace-real",
+    };
+    const plan = parseSpectraPlan({
+      decision: "operate",
+      intent,
+      finalResponse: "Archive the selected artifact after confirmation.",
+      operations: [
+        { type: "artifact.archive", input: { artifactId: "artifact-real" } },
+      ],
+    });
+    expect(() => validatePlanAgainstIntent(plan, references)).not.toThrow();
+    const policy = evaluatePlanPolicy(plan.operations, { intent });
+    expect(policy.requiresConfirmation).toBe(true);
+    expect(policy.reasons.join(" ")).toMatch(/archive/i);
+  });
+
   it("rejects malformed quiz content before execution", () => {
     expect(() => parseSpectraPlan({
       decision: "operate",
@@ -69,6 +104,101 @@ describe("Wave 4 controlled operation engine", () => {
       finalResponse: "Created.",
       operations: [{ type: "artifact.create", input: { blueprintKey: "quiz", title: "Broken", summary: null, content: { questions: [{ id: "q1", prompt: "Missing fields", type: "multiple_choice", options: [], correctAnswer: "", explanation: "", difficulty: "medium", sourceRefs: [] }], settings: { showAnswersImmediately: true, timed: false } }, tags: [], workspaceId: null, placement: "inbox" } }],
     })).toThrow(/questions|correctAnswer|options/);
+  });
+
+  it("does not require confirmation for a simple code sketch with empty dependency defaults", () => {
+    const intent = {
+      mode: "create" as const,
+      requestedArtifactTypes: ["code" as const],
+      requestedVisibleArtifactCount: 1,
+      targetArtifactId: null,
+      targetWorkspaceId: null,
+    };
+    const plan = parseSpectraPlan({
+      decision: "operate",
+      intent,
+      finalResponse: "Created a tiny carbon cycle sketch.",
+      operations: [
+        {
+          type: "artifact.create",
+          input: {
+            blueprintKey: "code",
+            title: "Tiny Carbon Cycle Sketch",
+            summary: "A compact SVG diagram of the carbon cycle.",
+            content: {
+              runtime: "browser",
+              entryFileId: "file-1",
+              files: [
+                {
+                  id: "file-1",
+                  path: "index.html",
+                  language: "html",
+                  source: "<main><svg viewBox='0 0 320 240'><circle cx='160' cy='120' r='40'/></svg></main>",
+                },
+              ],
+              visualisation: { enabled: true },
+              dependencies: {},
+              networkPolicy: { mode: "none" },
+              assets: [],
+              parameters: [],
+            },
+            tags: ["biology"],
+            workspaceId: null,
+            placement: "context",
+          },
+        },
+      ],
+    });
+    const policy = evaluatePlanPolicy(plan.operations, { intent });
+    expect(policy.requiresConfirmation).toBe(false);
+  });
+
+  it("requires confirmation when a code create declares curated dependencies", () => {
+    const intent = {
+      mode: "create" as const,
+      requestedArtifactTypes: ["code" as const],
+      requestedVisibleArtifactCount: 1,
+      targetArtifactId: null,
+      targetWorkspaceId: null,
+    };
+    const plan = parseSpectraPlan({
+      decision: "operate",
+      intent,
+      finalResponse: "Created a React chart.",
+      operations: [
+        {
+          type: "artifact.create",
+          input: {
+            blueprintKey: "code",
+            title: "Km Vmax Chart",
+            summary: "Interactive chart.",
+            content: {
+              runtime: "react",
+              entryFileId: "file-1",
+              files: [
+                {
+                  id: "file-1",
+                  path: "App.tsx",
+                  language: "tsx",
+                  source: "export default function App(){ return null }",
+                },
+              ],
+              visualisation: { enabled: true },
+              dependencies: { recharts: "2.15.4" },
+              networkPolicy: { mode: "none" },
+              assets: [],
+              parameters: [],
+            },
+            tags: [],
+            workspaceId: null,
+            placement: "context",
+          },
+        },
+      ],
+    });
+    const policy = evaluatePlanPolicy(plan.operations, { intent });
+    expect(policy.requiresConfirmation).toBe(true);
+    expect(policy.reasons.join(" ")).toMatch(/dependency/i);
   });
 
   it("rejects unrelated and synthetic placement removals before persistence", () => {

@@ -1487,6 +1487,14 @@ export async function POST(request: NextRequest) {
       return ok(result);
     }
 
+    if (action === "ensurePersonalTimetable") {
+      const result = await spectraMutation(
+        "spectraArtifacts:ensurePersonalTimetable",
+        {},
+      );
+      return ok(result);
+    }
+
     if (action === "addArtifactToWorkspace") {
       const result = await spectraMutation(
         "spectraWorkspaceItems:addArtifact",

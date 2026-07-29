@@ -20,7 +20,6 @@ import {
   Pencil,
   Pin,
   Plus,
-  Sparkles,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -77,9 +76,6 @@ export function ChatShell() {
   const [focusModeOverride, setFocusModeOverride] =
     useState<ComposerFocusMode | null>(null);
   const [welcome, setWelcome] = useState("Welcome back.");
-  const [welcomeKicker, setWelcomeKicker] = useState(
-    "A calm place to think clearly",
-  );
   const [studioPanelWidth, setStudioPanelWidth] = useState(700);
   const [liveThreadPanelWidth, setLiveThreadPanelWidth] = useState(560);
   const activeThreadRef = useRef<string | null>(requestedThreadId);
@@ -121,9 +117,6 @@ export function ChatShell() {
           : hour < 18
             ? "Good afternoon. Let’s make something click."
             : "Good evening. Let’s end on a satisfying note.",
-    );
-    setWelcomeKicker(
-      `${new Intl.DateTimeFormat(undefined, { weekday: "long" }).format(now)} · Your study room is ready`,
     );
   }, []);
 
@@ -239,11 +232,12 @@ export function ChatShell() {
             }
           : null,
       );
+      closePresentation("thread-panel");
       router.replace(
         id ? `/chat?threadId=${encodeURIComponent(id)}` : "/chat?new=1",
       );
     },
-    [router, setComposerThread, threads],
+    [closePresentation, router, setComposerThread, threads],
   );
 
   const selectWorkspaceContext = useCallback((workspaceId: string | null) => {
@@ -277,6 +271,10 @@ export function ChatShell() {
     },
     [chatWorkspaceId, closePresentation, openObject],
   );
+  useEffect(() => {
+    if (!liveThread) return;
+    if (liveThread.id === threadId) setLiveThread(null);
+  }, [liveThread, setLiveThread, threadId]);
   const openArtifact = useCallback(
     (artifactId: string) => {
       // A user-chosen open ends spectating; a follow-dispatched open does not.
@@ -733,15 +731,7 @@ export function ChatShell() {
           onRetryRun={runEngine.retry}
           empty={
             <div className="mx-auto flex min-h-[clamp(420px,50vh,620px)] w-full max-w-[820px] flex-col justify-center py-8 text-left">
-              <div className="flex items-center gap-3">
-                <span className="flex h-11 w-11 items-center justify-center rounded-[11px] bg-[color-mix(in_oklab,var(--accent-cyan)_9%,var(--bg-elevated))] text-[var(--accent-cyan)] shadow-[0_8px_28px_rgba(24,20,14,0.06)]">
-                  <Sparkles className="h-5 w-5" />
-                </span>
-                <span className="rounded-full border border-[color-mix(in_oklab,var(--accent-cyan)_16%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--accent-cyan)_4%,transparent)] px-3 py-1.5 text-[10px] font-medium tracking-[0.02em] text-[var(--text-secondary)]">
-                  {welcomeKicker}
-                </span>
-              </div>
-              <h1 className="mt-5 max-w-[820px] font-display text-[42px] font-semibold leading-[1.08] tracking-[-0.03em] text-[var(--text-primary)]">
+              <h1 className="max-w-[820px] font-display text-[42px] font-semibold leading-[1.08] tracking-[-0.03em] text-[var(--text-primary)]">
                 {welcome}
               </h1>
               <p className="mt-3 max-w-[640px] text-[15px] leading-7 text-[var(--text-secondary)]">

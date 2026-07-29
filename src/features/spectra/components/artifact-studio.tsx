@@ -3347,9 +3347,7 @@ export function ArtifactStudio({
   compact?: boolean;
 }) {
   const router = useRouter();
-  const width =
-    panelWidth ??
-    Math.round(typeof window === "undefined" ? 720 : window.innerWidth * 0.5);
+  const width = panelWidth ?? 720;
   const handleClose = useCallback(
     () => (mode === "tab" ? onCloseTab(artifact._id) : onClose()),
     [artifact._id, mode, onClose, onCloseTab],
@@ -3628,7 +3626,7 @@ export function StudioSplitShell({
     <aside
       ref={panelRef}
       data-studio-panel
-      className="fixed inset-y-0 right-0 z-[90] flex h-full min-w-[280px] max-w-[94vw] shrink-0 border-l border-[var(--border-default)] bg-[var(--bg-primary)] shadow-[-18px_0_40px_rgba(27,20,12,0.10)] min-[1920px]:relative min-[1920px]:inset-auto min-[1920px]:z-40 min-[1920px]:min-w-[300px]"
+      className="fixed inset-y-0 right-0 z-[90] flex h-full min-w-[280px] max-w-[94vw] shrink-0 border-l border-[color-mix(in_oklab,var(--border-default)_55%,transparent)] bg-[var(--bg-primary)] shadow-[-18px_0_40px_rgba(27,20,12,0.10)] min-[1920px]:relative min-[1920px]:inset-auto min-[1920px]:z-40 min-[1920px]:min-w-[300px]"
       style={{ width, containerType: "inline-size" }}
       aria-label={ariaLabel}
     >
@@ -3908,6 +3906,7 @@ function ArtifactStudioEditor({
     (isCollaborativeArtifact && live.supported && live.level === "read");
   const [title, setTitle] = useState(artifact.title);
   const [summary, setSummary] = useState(artifact.summary ?? "");
+  const [summaryExpanded, setSummaryExpanded] = useState(false);
   const [tagDraft, setTagDraft] = useState((artifact.tags ?? []).join(", "));
   const [content, setContent] = useState<unknown>(artifact.content);
   const [baseline, setBaseline] = useState(() =>
@@ -3937,7 +3936,7 @@ function ArtifactStudioEditor({
   const [dismissedRemoteKey, setDismissedRemoteKey] = useState<string | null>(
     null,
   );
-  const [previewClock, setPreviewClock] = useState(() => Date.now());
+  const [previewClock, setPreviewClock] = useState(0);
   const [syncBusy, setSyncBusy] = useState(false);
   const [liveConflict, setLiveConflict] = useState<{
     message: string;
@@ -4920,6 +4919,9 @@ function ArtifactStudioEditor({
     currentSnapshotRef.current = currentSnapshot;
   }, [currentSnapshot]);
   useEffect(() => {
+    setPreviewClock(Date.now());
+  }, []);
+  useEffect(() => {
     const nextExpiry = (artifact.aiEffects ?? [])
       .flatMap((effect) => (effect.expiresAt ? [effect.expiresAt] : []))
       .filter((expiresAt) => expiresAt > Date.now())
@@ -5685,26 +5687,47 @@ function ArtifactStudioEditor({
           />
         </div>
         <div className="mt-0.5 rounded-[7px]">
-          <input
-            value={presencePreview?.summary ?? summary}
-            readOnly={readOnly}
-            onFocus={() => {
-              setActiveCommentRegionId("metadata:summary");
-              setActivePresence("metadata:summary", { mode: "typing" });
-            }}
-            onChange={(event) => changeBase({ summary: event.target.value })}
-            data-ai-region={aiRegionAttr(
-              !aiHighlightDismissed &&
-                ((presencePreview?.paths.includes("/summary") ?? false) ||
-                  (aiPreviewActive &&
-                    artifact.aiPreview?.summary !== undefined) ||
-                  activeAiEffects.some((effect) =>
-                    effect.regionIds.includes("metadata:summary"),
-                  )),
-            )}
-            className="w-full bg-transparent text-[14px] leading-6 text-[var(--text-secondary)] outline-none placeholder:text-[var(--text-tertiary)]"
-            placeholder="Short useful summary"
-          />
+          <div className="relative">
+            <textarea
+              value={presencePreview?.summary ?? summary}
+              readOnly={readOnly}
+              rows={summaryExpanded ? 4 : 1}
+              onFocus={() => {
+                setSummaryExpanded(true);
+                setActiveCommentRegionId("metadata:summary");
+                setActivePresence("metadata:summary", { mode: "typing" });
+              }}
+              onBlur={() => {
+                if (!readOnly) setSummaryExpanded(false);
+              }}
+              onChange={(event) => changeBase({ summary: event.target.value })}
+              data-ai-region={aiRegionAttr(
+                !aiHighlightDismissed &&
+                  ((presencePreview?.paths.includes("/summary") ?? false) ||
+                    (aiPreviewActive &&
+                      artifact.aiPreview?.summary !== undefined) ||
+                    activeAiEffects.some((effect) =>
+                      effect.regionIds.includes("metadata:summary"),
+                    )),
+              )}
+              className={`w-full resize-none overflow-hidden bg-transparent text-[14px] leading-6 text-[var(--text-secondary)] outline-none placeholder:text-[var(--text-tertiary)] [field-sizing:content] ${summaryExpanded ? "" : "max-h-12"}`}
+              placeholder="Short useful summary"
+            />
+            {!summaryExpanded &&
+            (presencePreview?.summary ?? summary).length > 110 ? (
+              <button
+                type="button"
+                className="absolute bottom-0 right-0 bg-[var(--bg-primary)] pl-2 text-[13px] font-semibold tracking-wide text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  setSummaryExpanded(true);
+                }}
+                aria-label="Expand summary"
+              >
+                …
+              </button>
+            ) : null}
+          </div>
         </div>
         {artifact.blueprintKey === "quiz" && visibleIdentityTags.length ? (
           <div className="mt-2 flex flex-wrap items-center gap-1.5">
@@ -6720,7 +6743,9 @@ function DocumentStudio({
           render: createSlashCommandRenderer,
         },
       }),
-    ],
+      // TipTap packages resolve through mixed @tiptap/core versions in this
+      // workspace; cast keeps the editor API usable under production typecheck.
+    ] as never[],
     content: initialContent,
     editable: !readOnly,
     immediatelyRender: false,
@@ -7999,7 +8024,7 @@ function FlashcardStudio({
   const [studyQueue, setStudyQueue] = useState<DeckStudyItem[]>([]);
   const [studyComplete, setStudyComplete] = useState(false);
   const [studyCardStartedAt, setStudyCardStartedAt] = useState(0);
-  const [studyClock, setStudyClock] = useState(() => Date.now());
+  const [studyClock, setStudyClock] = useState(0);
   const [studyReviewBusy, setStudyReviewBusy] = useState(false);
   const [studyError, setStudyError] = useState<string>();
   const [studyTypedAnswer, setStudyTypedAnswer] = useState("");
@@ -13644,6 +13669,8 @@ function ArtifactRichTextEditor({
 }) {
   const onChangeRef = useRef(onChange);
   const contentKeyRef = useRef(plannerDescriptionHtml(value));
+  const focusedRef = useRef(false);
+  const debounceRef = useRef<number | null>(null);
   const [linkOpen, setLinkOpen] = useState(false);
   const [linkDraft, setLinkDraft] = useState("https://");
   const [initialContent] = useState(() => plannerDescriptionHtml(value));
@@ -13658,7 +13685,7 @@ function ArtifactRichTextEditor({
       Equation,
       InlineEquation,
       Placeholder.configure({ placeholder }),
-    ],
+    ] as never[],
     content: initialContent,
     editable: !disabled,
     immediatelyRender: false,
@@ -13669,14 +13696,31 @@ function ArtifactRichTextEditor({
             ? "min-h-[180px] px-6 py-8 text-center font-serif text-[24px] leading-snug text-[var(--text-primary)] outline-none"
             : variant === "planner"
               ? "min-h-[136px] px-4 py-3 text-[13px] leading-6 text-[var(--text-primary)] outline-none"
-              : "min-h-[62px] px-3 py-2 text-[12px] leading-5 text-[var(--text-primary)] outline-none",
+              : "min-h-[62px] px-3 py-2 text-[13px] leading-5 text-[var(--text-primary)] outline-none",
       },
     },
-    onFocus: () => onFocus?.(),
-    onUpdate: ({ editor: current }) => {
+    onFocus: () => {
+      focusedRef.current = true;
+      onFocus?.();
+    },
+    onBlur: ({ editor: current }) => {
+      focusedRef.current = false;
+      if (debounceRef.current) {
+        window.clearTimeout(debounceRef.current);
+        debounceRef.current = null;
+      }
       const html = current.getHTML();
       contentKeyRef.current = html;
       onChangeRef.current(html === "<p></p>" ? "" : html);
+    },
+    onUpdate: ({ editor: current }) => {
+      const html = current.getHTML();
+      contentKeyRef.current = html;
+      if (debounceRef.current) window.clearTimeout(debounceRef.current);
+      debounceRef.current = window.setTimeout(() => {
+        debounceRef.current = null;
+        onChangeRef.current(html === "<p></p>" ? "" : html);
+      }, 280);
     },
   });
 
@@ -13686,11 +13730,19 @@ function ArtifactRichTextEditor({
 
   useEffect(() => {
     if (!editor) return;
+    if (focusedRef.current) return;
     const incoming = plannerDescriptionHtml(value);
     if (incoming === contentKeyRef.current) return;
     contentKeyRef.current = incoming;
     editor.commands.setContent(incoming, { emitUpdate: false });
   }, [editor, value]);
+
+  useEffect(
+    () => () => {
+      if (debounceRef.current) window.clearTimeout(debounceRef.current);
+    },
+    [],
+  );
 
   function applyLink() {
     const href = linkDraft.trim();
@@ -14346,25 +14398,23 @@ function PlannerStudio({
             <Field
               label="Status"
               aiActive={pathTouches(aiChangedPaths, "/status")}
-
               path="/status"
             >
-              <select
-                value={task.status}
-                onFocus={() => onActiveRegionChange?.("task:status")}
-                onMouseDown={() => onActiveRegionChange?.("task:status")}
-                onChange={(event) =>
-                  commit({
-                    ...task,
-                    status: event.target.value as PlannerTask["status"],
-                  })
-                }
-                className={inputClass()}
-              >
-                <option value="todo">Todo</option>
-                <option value="doing">In progress</option>
-                <option value="done">Done</option>
-              </select>
+              <label className="flex h-10 cursor-pointer items-center gap-2.5 rounded-[8px] border border-[var(--border-default)] bg-transparent px-3 text-[13px] text-[var(--text-primary)]">
+                <input
+                  type="checkbox"
+                  checked={task.status === "done"}
+                  onFocus={() => onActiveRegionChange?.("task:status")}
+                  onChange={(event) =>
+                    commit({
+                      ...task,
+                      status: event.target.checked ? "done" : "todo",
+                    })
+                  }
+                  className="h-4 w-4 rounded border-[var(--border-default)] accent-[var(--success)]"
+                />
+                <span>{task.status === "done" ? "Done" : "Todo"}</span>
+              </label>
             </Field>
             <Field
               label="Priority"
@@ -14395,27 +14445,29 @@ function PlannerStudio({
 
               path="/dueAt"
             >
-              <div className="grid grid-cols-[minmax(0,1fr)_92px] gap-1.5">
-                <input
-                  type="date"
-                  value={dueDate}
-                  disabled={sourceLocked("dueAt")}
-                  onInput={(event) =>
-                    updateSchedule({ dueDate: event.currentTarget.value })
+              <input
+                type="datetime-local"
+                value={
+                  dueDate
+                    ? `${dueDate}T${dueTime || "12:00"}`
+                    : ""
+                }
+                disabled={sourceLocked("dueAt")}
+                onInput={(event) => {
+                  const raw = event.currentTarget.value;
+                  if (!raw) {
+                    updateSchedule({ dueDate: "", dueTime: "" });
+                    return;
                   }
-                  className={inputClass()}
-                />
-                <input
-                  type="time"
-                  value={dueTime}
-                  disabled={task.allDay || sourceLocked("dueAt")}
-                  onInput={(event) =>
-                    updateSchedule({ dueTime: event.currentTarget.value })
-                  }
-                  className={inputClass()}
-                  aria-label="Due time"
-                />
-              </div>
+                  const [nextDate = "", nextTime = "12:00"] = raw.split("T");
+                  updateSchedule({
+                    dueDate: nextDate,
+                    dueTime: nextTime.slice(0, 5),
+                  });
+                }}
+                className={inputClass()}
+                aria-label="Due date and time"
+              />
             </Field>
             <Field
               label="Time estimate"
@@ -17333,11 +17385,11 @@ function Divider() {
 }
 
 function inputClass() {
-  return "h-10 w-full rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[color-mix(in_oklab,#8b6ff0_55%,var(--border-default))]";
+  return "h-10 w-full rounded-[8px] border border-[var(--border-default)] bg-transparent px-3 text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[color-mix(in_oklab,#8b6ff0_55%,var(--border-default))]";
 }
 
 function textareaClass(extra = "") {
-  return `w-full resize-none rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-[13px] leading-6 text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[color-mix(in_oklab,#8b6ff0_55%,var(--border-default))] ${extra}`;
+  return `w-full resize-none rounded-[8px] border border-[var(--border-default)] bg-transparent px-3 py-2 text-[13px] leading-6 text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[color-mix(in_oklab,#8b6ff0_55%,var(--border-default))] ${extra}`;
 }
 
 function iconButtonClass() {

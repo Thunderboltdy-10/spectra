@@ -1555,6 +1555,37 @@ function parseStreamedPlanText(
     const raw = parsed as Record<string, unknown>;
     if (!raw || typeof raw !== "object" || Array.isArray(raw))
       return parseSpectraPlan(raw);
+    // Terminal envelopes `{ workSummary, plan }` must unwrap before any
+    // coerce/Zod path — otherwise both keys are stripped as unknown.
+    const envelopeWorkSummary =
+      typeof raw.workSummary === "string" ? raw.workSummary.trim() : "";
+    if (
+      raw.plan &&
+      typeof raw.plan === "object" &&
+      !Array.isArray(raw.plan) &&
+      !(typeof raw.decision === "string" && Array.isArray(raw.operations))
+    ) {
+      const nested = raw.plan as Record<string, unknown>;
+      for (const key of Object.keys(raw)) delete raw[key];
+      Object.assign(raw, nested);
+    }
+    delete raw.workSummary;
+    delete raw.plan;
+    if (
+      envelopeWorkSummary &&
+      (!Array.isArray(raw.progressUpdates) || raw.progressUpdates.length === 0)
+    ) {
+      raw.progressUpdates = [
+        {
+          title: envelopeWorkSummary.slice(0, 88),
+          detail: envelopeWorkSummary.slice(0, 160),
+          activity: "update",
+          operationIndex: null,
+          artifactType: null,
+          regionHint: null,
+        },
+      ];
+    }
     const rawIntent =
       raw.intent && typeof raw.intent === "object" && !Array.isArray(raw.intent)
         ? (raw.intent as Record<string, unknown>)
@@ -7104,23 +7135,34 @@ async function callModel(
       };
     }
     let planText = terminalArguments || agentResult.text.trim();
-    if (!terminalCreationBlueprint && terminalArguments) {
-      const balancedPlan = extractBalancedObjectProperty(
-        terminalArguments,
-        "plan",
-      );
-      if (balancedPlan) planText = balancedPlan;
+    if (!terminalCreationBlueprint && planText) {
+      const balancedPlan = extractBalancedObjectProperty(planText, "plan");
+      if (balancedPlan) {
+        const workSummary = extractPartialJsonStringField(
+          planText,
+          "workSummary",
+        ).value.trim();
+        if (workSummary) onProgressUpdate?.(workSummary.slice(0, 160));
+        planText = balancedPlan;
+      }
       try {
-        const wrapper = JSON.parse(terminalArguments) as Record<
-          string,
-          unknown
-        >;
+        const wrapper = JSON.parse(planText) as Record<string, unknown>;
         if (
           wrapper.plan &&
           typeof wrapper.plan === "object" &&
-          !Array.isArray(wrapper.plan)
-        )
+          !Array.isArray(wrapper.plan) &&
+          !(
+            typeof wrapper.decision === "string" &&
+            Array.isArray(wrapper.operations)
+          )
+        ) {
+          if (
+            typeof wrapper.workSummary === "string" &&
+            wrapper.workSummary.trim()
+          )
+            onProgressUpdate?.(wrapper.workSummary.trim().slice(0, 160));
           planText = JSON.stringify(wrapper.plan);
+        }
       } catch {
         // The repair ladder below handles malformed terminal arguments.
       }

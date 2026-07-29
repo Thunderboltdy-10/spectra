@@ -151,6 +151,26 @@ function text(value: unknown, maximum: number, fallback = "") {
     : fallback;
 }
 
+/** Strip ManageBac HTML so planner summaries/descriptions never show raw tags. */
+function plainText(value: unknown, maximum: number, fallback = "") {
+  if (typeof value !== "string") return fallback;
+  const stripped = value
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|li|h[1-6]|blockquote|tr)>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+  return (stripped || fallback).slice(0, maximum);
+}
+
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -1623,7 +1643,7 @@ async function ensurePlannerProjection(
   const content = {
     ...(defaultArtifactContent("planner_task") as Record<string, unknown>),
     taskTitle: text(normalized.title ?? normalized.name, 240, "ManageBac task"),
-    description: text(normalized.description, 20_000),
+    description: plainText(normalized.description, 20_000),
     status: "todo",
     priority:
       normalized.priority === "high" || normalized.priority === "low"
@@ -1658,11 +1678,15 @@ async function ensurePlannerProjection(
     blueprintKey: "planner_task",
     schemaVersion: defaultArtifactSchemaVersion("planner_task"),
     title,
-    summary: text(normalized.description, 600, "Source-linked ManageBac task"),
+    summary: plainText(
+      normalized.description,
+      600,
+      "Source-linked ManageBac task",
+    ),
     content,
     textIndex: buildArtifactTextIndex({
       title,
-      summary: text(normalized.description, 600),
+      summary: plainText(normalized.description, 600),
       content,
       tags: ["managebac", "source-linked"],
     }),
@@ -2055,7 +2079,7 @@ async function safelyRefreshProjection(
     const nextContent = {
       ...content,
       taskTitle: title,
-      description: text(normalized.description, 20_000),
+      description: plainText(normalized.description, 20_000),
       dueAt: timestampValue(normalized.dueAt) ?? null,
       source: {
         ...sourceState,
@@ -2069,11 +2093,11 @@ async function safelyRefreshProjection(
     const now = Date.now();
     await ctx.db.patch(artifact._id, {
       title,
-      summary: text(normalized.description, 600, artifact.summary ?? ""),
+      summary: plainText(normalized.description, 600, artifact.summary ?? ""),
       content: nextContent,
       textIndex: buildArtifactTextIndex({
         title,
-        summary: text(normalized.description, 600, artifact.summary ?? ""),
+        summary: plainText(normalized.description, 600, artifact.summary ?? ""),
         content: nextContent,
         tags: artifact.tags,
       }),
@@ -3363,7 +3387,7 @@ export const listMyClassCandidates = query({
           title: text(normalized.name ?? normalized.title, 180, "ManageBac class"),
           program: text(normalized.program ?? normalized.programme, 120),
           grade: text(normalized.grade, 80),
-          description: text(normalized.description, 400),
+          description: plainText(normalized.description, 400),
           archived,
           workspaceId: workspaceId ?? null,
           fetchedAt: item.fetchedAt,

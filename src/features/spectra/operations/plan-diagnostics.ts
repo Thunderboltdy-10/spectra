@@ -131,6 +131,19 @@ export function formatPlanApplicationPublicError(error: unknown) {
 /** Harmless envelope slips models emit that Zod would otherwise reject. */
 export function coerceCommonPlanSchemaSlips(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  let source = value as Record<string, unknown>;
+  // Terminal tool envelopes often look like `{ workSummary, plan }`. Unwrap
+  // before stripping unknown keys so nested decision/intent/operations survive.
+  if (
+    source.plan &&
+    typeof source.plan === "object" &&
+    !Array.isArray(source.plan)
+  ) {
+    const nested = source.plan as Record<string, unknown>;
+    const outerLooksLikePlan =
+      typeof source.decision === "string" && Array.isArray(source.operations);
+    if (!outerLooksLikePlan) source = nested;
+  }
   const allowed = new Set([
     "decision",
     "intent",
@@ -141,7 +154,7 @@ export function coerceCommonPlanSchemaSlips(value: unknown) {
     "operations",
   ]);
   const plan: Record<string, unknown> = {};
-  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+  for (const [key, entry] of Object.entries(source)) {
     if (allowed.has(key)) plan[key] = entry;
   }
   if (typeof plan.finalResponse === "number" || typeof plan.finalResponse === "boolean")

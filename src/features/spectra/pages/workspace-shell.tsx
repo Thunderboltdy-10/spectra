@@ -259,8 +259,12 @@ function useLiveAiExpiryClock(
     | undefined
   >,
 ) {
-  const [now, setNow] = useState(() => Date.now());
+  const [now, setNow] = useState(0);
   useEffect(() => {
+    setNow(Date.now());
+  }, []);
+  useEffect(() => {
+    if (!now) return;
     const expiryTimes = artifacts.flatMap((artifact) => {
       if (!artifact) return [] as number[];
       const times: number[] = [];
@@ -446,7 +450,7 @@ function workspaceHubTab(
   workspaceId?: string,
 ): WorkspaceHubTab {
   return {
-    id: `workspace-hub-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    id: `workspace-hub-${crypto.randomUUID()}`,
     label,
     workspaceId,
   };
@@ -466,7 +470,6 @@ const createTypes: Array<{
   { key: "sheets", label: "Sheet", icon: Table2 },
   { key: "code", label: "Code & visualisation", icon: Code2 },
   { key: "whiteboard", label: "Whiteboard", icon: Workflow },
-  { key: "timetable", label: "Timetable", icon: CalendarDays },
 ];
 
 const viewModes: Array<{ key: ViewMode; label: string; icon: LucideIcon }> = [
@@ -684,7 +687,7 @@ function WorkspaceHome({
   return (
     <main
       data-selection-count={selectedObjectKeys.size}
-      className="spectra-mission-control flex min-h-0 flex-1 flex-col overflow-y-auto xl:flex-row xl:overflow-hidden"
+      className="spectra-mission-control relative flex min-h-0 flex-1 flex-col overflow-y-auto xl:flex-row xl:overflow-hidden"
     >
       <div className="min-w-0 flex-1 px-6 pb-[170px] pt-6 sm:px-9 xl:h-full xl:overflow-y-auto">
         <div className="spectra-mission-control-primary">
@@ -950,17 +953,17 @@ function WorkspaceHome({
       </div>
 
       {hideActivityRail ? null : activityRailCollapsed ? (
-        <div className="hidden shrink-0 border-t border-[var(--border-default)] bg-[var(--mission-rail)] xl:flex xl:h-full xl:w-10 xl:flex-col xl:items-center xl:border-l xl:border-t-0 xl:pt-4">
+        onToggleActivityRail ? (
           <button
             type="button"
             aria-label="Show recent activity"
             title="Show recent activity"
             onClick={onToggleActivityRail}
-            className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+            className="absolute right-3 top-3 z-10 flex h-8 w-8 items-center justify-center rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-tertiary)] shadow-[0_1px_4px_rgba(27,20,12,0.06)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
           >
-            <PanelRight className="h-4 w-4" />
+            <PanelRight className="h-3.5 w-3.5" />
           </button>
-        </div>
+        ) : null
       ) : (
         <aside className="spectra-mission-control-rail w-full shrink-0 space-y-6 border-t border-[var(--border-default)] bg-[var(--mission-rail)] px-5 py-6 xl:h-full xl:w-[320px] xl:overflow-y-auto xl:border-l xl:border-t-0">
           <section>
@@ -2834,7 +2837,7 @@ function Inspector({
           <div className="rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 text-[13px] font-medium text-[var(--text-primary)]">
             {selectedPlacements[0]?.workspaceTitle ??
               workspace?.title ??
-              "Unplaced"}
+              "General"}
             <div className="mt-1 text-[11px] font-normal text-[var(--text-secondary)]">
               Workspace card
             </div>
@@ -4851,7 +4854,7 @@ export function WorkspaceShell() {
         toast.success(
           targetWorkspaceId
             ? `${label} created in workspace.`
-            : `${label} created as unplaced.`,
+            : `${label} created in General.`,
         );
       } else {
         toast.message(
@@ -5289,7 +5292,7 @@ export function WorkspaceShell() {
                   {blueprintMeta[pendingCreateType].label.toLowerCase()} live?
                 </h2>
                 <p className="mt-1 text-[12px] text-[var(--text-secondary)]">
-                  Choose a workspace or keep it unplaced.
+                  Choose a workspace or keep it in General.
                 </p>
                 <div className="mt-4 max-h-[300px] space-y-1 overflow-y-auto">
                   <button
@@ -5305,7 +5308,7 @@ export function WorkspaceShell() {
                     }}
                   >
                     <Home className="h-4 w-4" />
-                    Unplaced / inbox
+                    General
                   </button>
                   {workspaces.map((target) => (
                     <button

@@ -1,7 +1,8 @@
 import { internalMutation, mutation, query } from "./_generated/server";
+import type { MutationCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { getAuthenticatedActor } from "./identityShared";
 import {
   ensureThreadWorkspacePlacement,
@@ -17,6 +18,70 @@ import {
 import { releaseClaimsForRun } from "./regionClaims";
 import { incrementOperationalCounter } from "./operationalCounters";
 import { recordAgentInvocation, settleAgentInvocation } from "./agents";
+import { recordMeterEvent } from "./metering";
+
+function usageTokenCounts(usage: unknown) {
+  const usageRecord =
+    usage && typeof usage === "object" && !Array.isArray(usage)
+      ? (usage as Record<string, unknown>)
+      : {};
+  const inputTokens =
+    typeof usageRecord.promptTokens === "number"
+      ? usageRecord.promptTokens
+      : typeof usageRecord.input_tokens === "number"
+        ? usageRecord.input_tokens
+        : 0;
+  const outputTokens =
+    typeof usageRecord.completionTokens === "number"
+      ? usageRecord.completionTokens
+      : typeof usageRecord.output_tokens === "number"
+        ? usageRecord.output_tokens
+        : 0;
+  return {
+    inputTokens: Math.max(0, Math.round(inputTokens)),
+    outputTokens: Math.max(0, Math.round(outputTokens)),
+  };
+}
+
+async function recordRunModelMeters(
+  ctx: MutationCtx,
+  run: Doc<"spectraAiRuns">,
+  usage: unknown,
+  occurredAt: number,
+) {
+  const { inputTokens, outputTokens } = usageTokenCounts(usage);
+  if (inputTokens <= 0 && outputTokens <= 0) return;
+  const dimensions = {
+    surface: run.sourceSurface,
+    status: run.status,
+  };
+  if (inputTokens > 0) {
+    await recordMeterEvent(ctx, {
+      schoolId: run.schoolId,
+      accountId: run.ownerAccountId,
+      category: "model_input_tokens",
+      quantity: inputTokens,
+      sourceType: "spectra_run",
+      sourceId: String(run._id),
+      idempotencyKey: `spectra-run:${run._id}:model_input_tokens`,
+      dimensions,
+      occurredAt,
+    });
+  }
+  if (outputTokens > 0) {
+    await recordMeterEvent(ctx, {
+      schoolId: run.schoolId,
+      accountId: run.ownerAccountId,
+      category: "model_output_tokens",
+      quantity: outputTokens,
+      sourceType: "spectra_run",
+      sourceId: String(run._id),
+      idempotencyKey: `spectra-run:${run._id}:model_output_tokens`,
+      dimensions,
+      occurredAt,
+    });
+  }
+}
 
 const vSurface = v.union(
   v.literal("chat"),
@@ -540,6 +605,13 @@ export const updateStatus = mutation({
         ctx,
         run,
         args.status as "completed" | "failed" | "cancelled",
+        args.usage ?? run.usage,
+        now,
+      );
+    if (terminal && args.status === "completed")
+      await recordRunModelMeters(
+        ctx,
+        run,
         args.usage ?? run.usage,
         now,
       );

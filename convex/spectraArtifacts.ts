@@ -1557,6 +1557,11 @@ export const create = mutation({
   },
   handler: async (ctx, args) => {
     const actor = await requireSpectraActor(ctx);
+    if (args.blueprintKey === "timetable") {
+      throw new Error(
+        "Every account already has a Timetable. Open Timetable to edit it instead of creating another.",
+      );
+    }
     if (args.runId) {
       const run = await ctx.db.get(args.runId);
       if (
@@ -2712,6 +2717,18 @@ export const listVersions = query({
   },
 });
 
+function isProtectedTimetable(artifact: Doc<"spectraArtifacts">) {
+  if (artifact.blueprintKey !== "timetable") return false;
+  const tags = artifact.tags ?? [];
+  return (
+    tags.includes("system-timetable") ||
+    tags.includes("managebac") ||
+    artifact.createdFrom?.contextSummary ===
+      "Automatic ManageBac timetable bootstrap" ||
+    artifact.createdFrom?.contextSummary === "Personal Spectra timetable"
+  );
+}
+
 export const archive = mutation({
   args: {
     artifactId: v.id("spectraArtifacts"),
@@ -2722,6 +2739,10 @@ export const archive = mutation({
       args.artifactId,
       "delete",
     );
+    if (isProtectedTimetable(artifact))
+      throw new Error(
+        "Your Timetable stays in General and cannot be archived.",
+      );
     await ctx.db.patch(args.artifactId, {
       status: "archived",
       updatedAt: Date.now(),
@@ -2747,6 +2768,10 @@ export const permanentlyDelete = mutation({
       args.artifactId,
       "delete",
     );
+    if (isProtectedTimetable(artifact))
+      throw new Error(
+        "Your Timetable stays in General and cannot be deleted.",
+      );
     await bumpPolicyVersion(
       ctx,
       artifact.blueprintKey === "agent" ? "agent" : "artifact",
@@ -2980,5 +3005,67 @@ export const artifactStillExists = query({
     if (!normalized) return false;
     const { artifact } = await requireArtifactCapability(ctx, normalized);
     return artifact.status !== "deleted";
+  },
+});
+
+/** Every user has exactly one personal timetable in General (not workspace-placed). */
+export const ensurePersonalTimetable = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const actor = await requireSpectraActor(ctx);
+    const owned = await ctx.db
+      .query("spectraArtifacts")
+      .withIndex("by_account_blueprint", (q) =>
+        q.eq("ownerAccountId", actor._id).eq("blueprintKey", "timetable"),
+      )
+      .collect();
+    const active = owned
+      .filter((artifact) => artifact.status === "active")
+      .sort((left, right) => right.updatedAt - left.updatedAt);
+    const preferred =
+      active.find((artifact) =>
+        (artifact.tags ?? []).includes("system-timetable"),
+      ) ??
+      active.find((artifact) => isProtectedTimetable(artifact)) ??
+      active[0];
+    if (preferred) {
+      const tags = new Set(preferred.tags ?? []);
+      tags.add("system-timetable");
+      tags.add("general");
+      await ctx.db.patch(preferred._id, {
+        tags: [...tags],
+        updatedAt: Date.now(),
+      });
+      return { artifactId: preferred._id, created: false };
+    }
+    const now = Date.now();
+    const content = defaultArtifactContent("timetable");
+    const title = "Timetable";
+    const summary = "Your personal schedule for school, class, and tasks.";
+    const tags = ["system-timetable", "general"];
+    const artifactId = await ctx.db.insert("spectraArtifacts", {
+      ownerAccountId: actor._id,
+      schoolId: actor.schoolId,
+      blueprintKey: "timetable",
+      schemaVersion: defaultArtifactSchemaVersion("timetable"),
+      title,
+      summary,
+      content,
+      textIndex: buildArtifactTextIndex({
+        title,
+        summary,
+        content,
+        tags,
+      }),
+      tags,
+      status: "active",
+      createdFrom: {
+        source: "manual",
+        contextSummary: "Personal Spectra timetable",
+      },
+      createdAt: now,
+      updatedAt: now,
+    });
+    return { artifactId, created: true };
   },
 });

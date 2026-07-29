@@ -2260,7 +2260,7 @@ export function toArtifactCardView(
     meta:
       placements.length > 0
         ? placements.map((placement) => placement.workspaceTitle).join(", ")
-        : "Unplaced",
+        : "General",
     placement:
       artifact.placementStatus ??
       (placements.length > 0 ? "workspace" : "inbox"),

@@ -218,7 +218,14 @@ async function schoolUsage(
       q.eq("schoolId", schoolId).gte("day", fromDay).lte("day", toDay),
     )
     .collect();
-  const totals: Record<string, number> = {};
+  const totals: Record<string, number> = {
+    storage_bytes: 0,
+    bandwidth_bytes: 0,
+    model_input_tokens: 0,
+    model_output_tokens: 0,
+    render_milliseconds: 0,
+    collaboration_bytes: 0,
+  };
   const series: Record<string, Record<string, number>> = {};
   for (const meter of meters) {
     totals[meter.category] = (totals[meter.category] ?? 0) + meter.quantity;
@@ -1924,7 +1931,14 @@ export const platformOverview = mutation({
       selectedCounters
         .filter((counter) => counter.category === category)
         .reduce((sum, counter) => sum + counter.quantity, 0);
-    const totals: Record<string, number> = {};
+    const totals: Record<string, number> = {
+      storage_bytes: 0,
+      bandwidth_bytes: 0,
+      model_input_tokens: 0,
+      model_output_tokens: 0,
+      render_milliseconds: 0,
+      collaboration_bytes: 0,
+    };
     const usageByDay: Record<string, Record<string, number>> = {};
     const usageBySchool = new Map<string, number>();
     for (const meter of selectedMeters) {

@@ -30,8 +30,6 @@ import {
   CheckCheck,
   MessageSquareText,
   Search,
-  HelpCircle,
-  Moon,
   Plus,
   School,
   Settings2,
@@ -41,11 +39,11 @@ import {
   UsersRound,
   X,
   Share2,
-  Star,
   PanelLeftClose,
   PanelLeftOpen,
   type LucideIcon,
 } from "lucide-react";
+import { useClerk } from "@clerk/nextjs";
 import { SpectraLogo } from "@/components/spectra-logo";
 import { cn } from "@/lib/utils";
 import {
@@ -83,9 +81,9 @@ const ordinaryDestinations = [
   { href: "/chat", label: "Chat", icon: MessageSquareText },
   { href: "/workspace", label: "Home", icon: LayoutGrid },
   { href: "/artifacts", label: "Artifacts", icon: LibraryBig },
+  { href: "/timetable", label: "Timetable", icon: CalendarClock },
   { href: "/agents", label: "Agents", icon: Bot },
   { href: "/school-data", label: "School data", icon: School },
-  { href: "/models", label: "Models", icon: Brain },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
 ] as const;
 
@@ -152,6 +150,7 @@ function ActiveRailMarker() {
 function ShellNavigation() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const { openUserProfile } = useClerk();
   const selectedWorkspaceId = searchParams.get("workspaceId");
   const [workspaces, setWorkspaces] = useState<SpectraWorkspace[]>([]);
   const [workspacesLoading, setWorkspacesLoading] = useState(true);
@@ -223,12 +222,6 @@ function ShellNavigation() {
         href: "/superadmin",
         label: "Super Admin",
         icon: ShieldCheck,
-      });
-    if (administrationIdentity?.membership.role === "school_admin")
-      destinations.push({
-        href: "/admin?tab=feedback",
-        label: "Feedback",
-        icon: MessageSquareText,
       });
     return destinations;
   }, [administrationIdentity]);
@@ -361,7 +354,7 @@ function ShellNavigation() {
           kind: "planner" as const,
           artifactId: item.artifactId,
           title: item.taskTitle,
-          detail: `Due ${new Date(item.dueAt).toLocaleString()}`,
+          detail: `Due ${new Date(item.dueAt).toLocaleString("en-US")}`,
           createdAt: item.createdAt,
           readAt: item.readAt,
         })),
@@ -370,7 +363,7 @@ function ShellNavigation() {
           kind: "timetable" as const,
           artifactId: item.artifactId,
           title: item.eventTitle,
-          detail: `${item.artifactTitle} · ${new Date(item.occurrenceStart).toLocaleString()}`,
+          detail: `${item.artifactTitle} · ${new Date(item.occurrenceStart).toLocaleString("en-US")}`,
           createdAt: item.createdAt,
           readAt: item.readAt,
         })),
@@ -380,7 +373,7 @@ function ShellNavigation() {
           artifactId: item.resourceId,
           href: "/artifacts?collection=invitations",
           title: `${item.inviter?.name ?? "A collaborator"} shared ${item.resource.title}`,
-          detail: `${item.level === "modify" ? "Can modify" : "Read-only"} access Â· Review invitation`,
+          detail: `${item.level === "modify" ? "Can modify" : "Read-only"} access · Review invitation`,
           createdAt: item.createdAt,
           readAt: undefined,
         })),
@@ -608,16 +601,6 @@ function ShellNavigation() {
             </button>
             <button
               type="button"
-              aria-label="Favorite current page"
-              onClick={() =>
-                window.dispatchEvent(new CustomEvent("spectra:page-favorite"))
-              }
-              className="grid size-8 place-items-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
-            >
-              <Star size={15} />
-            </button>
-            <button
-              type="button"
               aria-label={`Notifications${unreadCount ? `, ${unreadCount} unread` : ""}`}
               onClick={() => {
                 setNotificationsOpen((open) => !open);
@@ -634,23 +617,6 @@ function ShellNavigation() {
             </button>
             <button
               type="button"
-              aria-label="Help"
-              className="grid size-8 place-items-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-secondary)]"
-            >
-              <HelpCircle size={15} />
-            </button>
-            <button
-              type="button"
-              aria-label="Toggle theme"
-              onClick={() =>
-                window.dispatchEvent(new Event("ai-school:toggle-theme"))
-              }
-              className="grid size-8 place-items-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-secondary)]"
-            >
-              <Moon size={15} />
-            </button>
-            <button
-              type="button"
               aria-label="Settings"
               onClick={() =>
                 window.dispatchEvent(new Event("ai-school:toggle-settings"))
@@ -661,7 +627,12 @@ function ShellNavigation() {
             </button>
           </div>
           {administrationIdentity ? (
-            <div className="mt-2 flex items-center gap-2 rounded-[7px] px-1 py-1">
+            <button
+              type="button"
+              onClick={() => openUserProfile()}
+              className="mt-2 flex w-full items-center gap-2 rounded-[7px] px-1 py-1 text-left hover:bg-[var(--bg-secondary)]"
+              aria-label="Manage account"
+            >
               <span className="grid size-8 shrink-0 place-items-center overflow-hidden rounded-[7px] bg-[#d8d0fa] text-[10px] font-semibold text-[#3e327f]">
                 {administrationIdentity.account.avatarUrl ? (
                   // External Clerk avatar URLs; next/image would need a broad remotePatterns allowlist.
@@ -688,7 +659,7 @@ function ShellNavigation() {
                   {administrationIdentity.membership.role.replace("_", " ")}
                 </span>
               </span>
-            </div>
+            </button>
           ) : null}
           {notificationsOpen ? (
             <section className="fixed right-4 top-4 z-[80] w-[340px] overflow-hidden rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[0_22px_70px_rgba(27,20,12,.18)]">
@@ -905,17 +876,6 @@ function ShellNavigation() {
           </button>
           <button
             type="button"
-            aria-label="Favorite current page"
-            onClick={() =>
-              window.dispatchEvent(new CustomEvent("spectra:page-favorite"))
-            }
-            className="group relative grid size-11 place-items-center rounded-[14px] text-[var(--text-tertiary)] outline-none transition-colors hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
-          >
-            <Star size={19} strokeWidth={1.7} />
-            <RailTooltip>Favorite</RailTooltip>
-          </button>
-          <button
-            type="button"
             aria-label={`Notifications${unreadCount ? `, ${unreadCount} unread` : ""}`}
             aria-expanded={notificationsOpen}
             onClick={() => {
@@ -991,8 +951,11 @@ function ShellNavigation() {
                         <span className="mt-0.5 block line-clamp-2 text-[10px] leading-4 text-[var(--text-secondary)]">
                           {item.detail}
                         </span>
-                        <time className="mt-1 block text-[9px] text-[var(--text-tertiary)]">
-                          {new Date(item.createdAt).toLocaleString()}
+                        <time
+                          className="mt-1 block text-[9px] text-[var(--text-tertiary)]"
+                          suppressHydrationWarning
+                        >
+                          {new Date(item.createdAt).toLocaleString("en-US")}
                         </time>
                       </span>
                     </Link>
@@ -1256,7 +1219,13 @@ export function AppShell({
   noScroll = false,
   contentClassName,
 }: AppShellProps) {
+  const pathname = usePathname();
   const [shellSidebarCollapsed, setShellSidebarCollapsed] = useState(false);
+  const showTabRail =
+    pathname === "/workspace" ||
+    pathname.startsWith("/workspace/") ||
+    pathname === "/artifacts" ||
+    pathname.startsWith("/artifacts/");
 
   useEffect(() => {
     setShellSidebarCollapsed(
@@ -1302,12 +1271,16 @@ export function AppShell({
           !fullBleed && "px-5 py-6 sm:px-8",
         )}
       >
-        <header className="hidden h-[44px] shrink-0 items-center gap-3 border-b border-[var(--border-default)] bg-[var(--bg-primary)] px-4 md:flex">
-          <div
-            className="flex min-w-0 flex-1 items-center overflow-hidden"
-            id="spectra-shell-tab-slot"
-          />
-        </header>
+        {showTabRail ? (
+          <header className="hidden h-[44px] shrink-0 items-center gap-3 border-b border-[var(--border-default)] bg-[var(--bg-primary)] px-4 md:flex">
+            <div
+              className="flex min-w-0 flex-1 items-center overflow-hidden"
+              id="spectra-shell-tab-slot"
+            />
+          </header>
+        ) : (
+          <div id="spectra-shell-tab-slot" className="hidden" />
+        )}
         <div
           className={cn(
             "spectra-global-stage min-h-0 flex-1 md:overflow-hidden",

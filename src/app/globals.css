@@ -476,8 +476,11 @@ body {
   > section {
   display: flex;
   flex-direction: column;
-  padding: 16px !important;
-  border-radius: 9px !important;
+  padding: 4px 0 !important;
+  border-radius: 0 !important;
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
 }
 
 .spectra-artifact-studio[data-blueprint="planner_task"]
@@ -7159,9 +7162,12 @@ button[data-spectra-context-trigger="true"]::after {
   background: color-mix(in oklab, #2f8fd2 1.5%, var(--bg-primary));
 }
 
+.spectra-artifact-studio[data-blueprint="presentation"] .spectra-artifact-main,
+.spectra-artifact-studio[data-blueprint="sheets"] .spectra-artifact-main,
+.spectra-artifact-studio[data-blueprint="code"] .spectra-artifact-main,
 .spectra-artifact-studio[data-blueprint="whiteboard"] .spectra-artifact-main,
 .spectra-artifact-studio[data-blueprint="timetable"] .spectra-artifact-main {
-  background: color-mix(in oklab, #7c3aed 1.2%, var(--bg-primary));
+  background: transparent;
 }
 
 .spectra-artifact-studio[data-blueprint="presentation"] .presentation-studio,
@@ -7174,9 +7180,14 @@ button[data-spectra-context-trigger="true"]::after {
 
 .spectra-artifact-studio[data-blueprint="whiteboard"] .whiteboard-studio,
 .spectra-artifact-studio[data-blueprint="timetable"] .timetable-studio {
-  border: 1px solid var(--border-default);
-  border-radius: 12px;
-  box-shadow: 0 20px 56px -46px rgba(44, 33, 86, 0.28);
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+}
+
+.spectra-artifact-studio[data-studio-mode="split"] .timetable-overview {
+  display: none !important;
 }
 
 .spectra-artifact-studio[data-blueprint="whiteboard"] .whiteboard-toolbar {
@@ -12040,23 +12051,22 @@ button[data-spectra-context-trigger="true"]::after {
 }
 
 .spectra-artifact-studio[data-blueprint="flashcard_deck"]
-  .spectra-artifact-main {
-  background-color: color-mix(in oklab, #8b6ff0 1.8%, var(--bg-primary));
-}
-
-.spectra-artifact-studio[data-blueprint="quiz"] .spectra-artifact-main {
-  background-color: color-mix(in oklab, #17a17a 1.5%, var(--bg-primary));
-}
-
+  .spectra-artifact-main,
+.spectra-artifact-studio[data-blueprint="quiz"] .spectra-artifact-main,
 .spectra-artifact-studio[data-blueprint="planner_task"] .spectra-artifact-main {
-  background-color: color-mix(in oklab, #d88922 1.7%, var(--bg-primary));
+  background-color: transparent;
+}
+
+.spectra-artifact-main {
+  scroll-padding-top: 72px;
+  scroll-padding-bottom: 120px;
 }
 
 .spectra-quiz-studio > div:first-child {
   position: sticky;
   top: 0;
   z-index: 12;
-  background: color-mix(in oklab, var(--bg-elevated) 92%, transparent);
+  background: color-mix(in oklab, var(--bg-primary) 94%, transparent);
   backdrop-filter: blur(14px);
 }
 
@@ -12076,32 +12086,31 @@ button[data-spectra-context-trigger="true"]::after {
   border-radius: 9px;
 }
 
-/* Artifact-detail references use quiet paper, compact controls and a dense
-   three-column working canvas. Keep the semantics in React; this layer makes
-   the real controls read as one premium studio rather than generic form rows. */
+/* Flat quiz studio — fields live on the panel surface, not nested paper. */
 .spectra-artifact-studio[data-blueprint="quiz"] .spectra-quiz-studio {
-  border-radius: 12px;
-  box-shadow: 0 20px 54px -44px rgba(38, 31, 71, 0.42);
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
 }
 
 .spectra-artifact-studio[data-blueprint="quiz"]
   .spectra-quiz-studio
   > div:first-child {
-  min-height: 58px;
-  padding-inline: 18px;
+  min-height: 48px;
+  padding-inline: 8px;
 }
 
 .spectra-artifact-studio[data-blueprint="quiz"]
   .spectra-quiz-studio
   aside:first-of-type {
-  background: color-mix(in oklab, #8b6ff0 1.8%, var(--bg-elevated));
+  background: transparent;
 }
 
 .spectra-artifact-studio[data-blueprint="quiz"]
   .spectra-quiz-studio
   aside:first-of-type
   button {
-  min-height: 47px;
+  min-height: 44px;
 }
 
 .spectra-artifact-studio[data-blueprint="quiz"]
@@ -12116,7 +12125,7 @@ button[data-spectra-context-trigger="true"]::after {
   .spectra-quiz-studio
   section
   select {
-  background: color-mix(in oklab, white 58%, var(--bg-primary));
+  background: transparent;
 }
 
 .spectra-quiz-media {

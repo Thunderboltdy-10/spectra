@@ -910,7 +910,7 @@ function ProgressTrace({
   if (steps.length === 0) return null;
   return (
     <div
-      className="sticky top-0 z-[5] mb-3 space-y-1.5 bg-[color-mix(in_oklab,var(--bg-primary)_88%,transparent)] py-1 backdrop-blur-[2px]"
+      className="mb-3 space-y-1.5 py-1"
       aria-label="Spectra progress"
     >
       {steps.map((step, index) => {

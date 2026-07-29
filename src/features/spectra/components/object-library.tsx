@@ -202,7 +202,7 @@ export function ObjectLibrary({
   selectedObjectKeys?: Set<string>;
   onToggleContext?: (entry: ObjectLibraryEntry) => void;
 }) {
-  const [aiClock, setAiClock] = useState(() => Date.now());
+  const [aiClock, setAiClock] = useState(0);
   const [internalMode, setInternalMode] = useState<LibraryMode>("list");
   const mode = controlledMode ?? internalMode;
   const setMode = (next: LibraryMode) => {
@@ -216,7 +216,7 @@ export function ObjectLibrary({
   const [placementMenuId, setPlacementMenuId] = useState<string | null>(null);
   const [placementAnchor, setPlacementAnchor] = useState<DOMRect | null>(null);
   const [createMenuKey, setCreateMenuKey] = useState<string | null>(null);
-  const [unplacedOpen, setUnplacedOpen] = useState(false);
+  const [generalOpen, setGeneralOpen] = useState(false);
   const [draggingArtifactId, setDraggingArtifactId] = useState<string | null>(
     null,
   );
@@ -229,6 +229,11 @@ export function ObjectLibrary({
     selectionMode && onToggleContext ? onToggleContext(entry) : onOpen(entry);
 
   useEffect(() => {
+    setAiClock(Date.now());
+  }, []);
+
+  useEffect(() => {
+    if (!aiClock) return;
     const nextExpiry = entries.reduce<number | null>((nearest, entry) => {
       const expiry =
         entry.artifact?.aiState === "edited"
@@ -256,7 +261,7 @@ export function ObjectLibrary({
 
   useEffect(() => {
     if (groupBy !== "workspace") return;
-    setUnplacedOpen(
+    setGeneralOpen(
       window.localStorage.getItem("spectra.library.unplaced.open") === "true",
     );
   }, [groupBy]);
@@ -265,9 +270,9 @@ export function ObjectLibrary({
     if (groupBy === "workspace")
       window.localStorage.setItem(
         "spectra.library.unplaced.open",
-        String(unplacedOpen),
+        String(generalOpen),
       );
-  }, [groupBy, unplacedOpen]);
+  }, [groupBy, generalOpen]);
 
   const visible = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -295,13 +300,13 @@ export function ObjectLibrary({
               ? artifactPlacements(a.artifact)[0]?.workspaceTitle
               : workspaces.find(
                   (workspace) => workspace._id === a.thread?.workspaceId,
-                )?.title) ?? "Unplaced"
+                )?.title) ?? "General"
           ).localeCompare(
             (b.artifact
               ? artifactPlacements(b.artifact)[0]?.workspaceTitle
               : workspaces.find(
                   (workspace) => workspace._id === b.thread?.workspaceId,
-                )?.title) ?? "Unplaced",
+                )?.title) ?? "General",
           );
         if (sort === "activity")
           return (
@@ -320,7 +325,7 @@ export function ObjectLibrary({
       });
   }, [activeType, entries, search, sort, workspaces]);
 
-  const unplaced =
+  const generalEntries =
     groupBy === "workspace"
       ? visible.filter((entry) =>
           entry.artifact
@@ -519,7 +524,7 @@ export function ObjectLibrary({
                   onMoveToInbox(entry);
                 }}
               >
-                <span className="min-w-0 flex-1 truncate">Move to Inbox</span>
+                <span className="min-w-0 flex-1 truncate">Move to General</span>
               </button>
             ) : null}
             {workspaces.map((workspace) => {
@@ -576,7 +581,9 @@ export function ObjectLibrary({
           <div className="absolute bottom-[calc(100%+7px)] left-0 z-30 w-[210px] rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 shadow-[0_14px_32px_rgba(27,20,12,0.13)]">
             {types
               .slice(1)
-              .filter((type) => type.key !== "thread")
+              .filter(
+                (type) => type.key !== "thread" && type.key !== "timetable",
+              )
               .map((type) => {
                 const meta = blueprintMeta[type.key as SpectraBlueprintKey];
                 const Icon = meta.icon;
@@ -607,7 +614,7 @@ export function ObjectLibrary({
     );
   }
 
-  function unplacedCard(entry: ObjectLibraryEntry) {
+  function renderGeneralCard(entry: ObjectLibraryEntry) {
     const meta = objectMeta(entry);
     const Icon = meta.icon;
     const id = objectId(entry);
@@ -816,23 +823,23 @@ export function ObjectLibrary({
         <section className="mt-7">
           <button
             type="button"
-            onClick={() => setUnplacedOpen((open) => !open)}
+            onClick={() => setGeneralOpen((open) => !open)}
             className="mb-4 flex w-full items-center gap-2 text-left"
           >
             <ChevronDown
-              className={`h-4 w-4 text-[var(--text-tertiary)] transition ${unplacedOpen ? "" : "-rotate-90"}`}
+              className={`h-4 w-4 text-[var(--text-tertiary)] transition ${generalOpen ? "" : "-rotate-90"}`}
             />
             <h3 className="font-display text-[20px] font-semibold text-[var(--text-primary)]">
-              Inbox
+              General
             </h3>
             <span className="rounded-[6px] bg-[var(--bg-secondary)] px-1.5 text-[12px] text-[var(--text-secondary)]">
-              {unplaced.length}
+              {generalEntries.length}
             </span>
             <span className="ml-1 text-[12px] text-[var(--text-tertiary)]">
               Not placed in a workspace
             </span>
           </button>
-          {unplacedOpen ? (
+          {generalOpen ? (
             <div
               className="grid gap-3 xl:grid-cols-3"
               data-card-state={
@@ -849,10 +856,10 @@ export function ObjectLibrary({
               }}
               onDrop={(event) => finishDrop(event, { inbox: true })}
             >
-              {unplaced.slice(0, 6).map(unplacedCard)}
-              {unplaced.length === 0 ? (
+              {generalEntries.slice(0, 6).map(renderGeneralCard)}
+              {generalEntries.length === 0 ? (
                 <div className="rounded-[8px] border border-dashed border-[var(--border-default)] px-4 py-7 text-[13px] text-[var(--text-secondary)]">
-                  Inbox is clear.
+                  General is clear.
                 </div>
               ) : null}
             </div>
@@ -883,7 +890,7 @@ export function ObjectLibrary({
               workspaces.find(
                 (workspace) => workspace._id === entry.thread?.workspaceId,
               )?.title ??
-              "Unplaced";
+              "General";
             const selected =
               selectedObjectKeys?.has(
                 `${entry.thread ? "thread" : "artifact"}:${id}`,
@@ -1034,7 +1041,7 @@ export function ObjectLibrary({
                               (workspace) =>
                                 workspace._id === entry.thread?.workspaceId,
                             )?.title) ??
-                        "Unplaced";
+                        "General";
                       const id = objectId(entry);
                       const contextSelected =
                         selectedObjectKeys?.has(

@@ -12,6 +12,62 @@ import { validatePlanAgainstIntent } from "../operations/validate-plan";
 import { normalizeArtifactContent } from "../ai/content-normalization";
 
 describe("plan diagnostics and schema slip recovery", () => {
+  it("unwraps { workSummary, plan } terminal envelopes before Zod", () => {
+    const plan = parseSpectraPlan({
+      workSummary: "Rewriting the third quiz stem",
+      plan: {
+        decision: "operate",
+        intent: {
+          mode: "update",
+          requestedArtifactTypes: ["quiz"],
+          requestedVisibleArtifactCount: 0,
+          targetArtifactId: "quiz-focused",
+          targetWorkspaceId: null,
+        },
+        conversationTitle: "Quiz edit",
+        conversationSummary: "Tighten stem 3",
+        choices: null,
+        operations: [
+          {
+            type: "artifact.archive",
+            input: { artifactId: "quiz-focused" },
+          },
+        ],
+        finalResponse: "Updated the third quiz question.",
+      },
+    });
+    expect(plan.decision).toBe("operate");
+    expect(plan.intent.targetArtifactId).toBe("quiz-focused");
+    expect(plan.operations).toHaveLength(1);
+    expect(plan.finalResponse).toContain("Updated");
+  });
+
+  it("preserves targetArtifactId when coercing focused quiz envelopes", () => {
+    const coerced = coerceCommonPlanSchemaSlips({
+      workSummary: "Softening distractor B",
+      plan: {
+        decision: "operate",
+        intent: {
+          mode: "update",
+          requestedArtifactTypes: ["quiz"],
+          requestedVisibleArtifactCount: 0,
+          targetArtifactId: "quiz-42",
+          targetWorkspaceId: null,
+        },
+        finalResponse: "Adjusted the distractor.",
+        operations: [
+          {
+            type: "artifact.update",
+            input: { artifactId: "quiz-42" },
+          },
+        ],
+      },
+    }) as {
+      intent: { targetArtifactId: string | null };
+    };
+    expect(coerced.intent.targetArtifactId).toBe("quiz-42");
+  });
+
   it("coerces common envelope slips so Zod does not dead-end", () => {
     const plan = parseSpectraPlan({
       decision: "answer",

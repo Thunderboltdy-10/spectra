@@ -34,7 +34,9 @@ export const Equation = Node.create({
   addAttributes() { return { latex: { default: "" }, display: { default: "block" }, alignment: { default: "center" } }; },
   parseHTML() { return [{ tag: "div[data-equation]" }, { tag: "span[data-equation]" }]; },
   renderHTML({ HTMLAttributes }) { return [HTMLAttributes.display === "inline" ? "span" : "div", mergeAttributes(HTMLAttributes, { "data-equation": "true" })]; },
-  addNodeView() { return ReactNodeViewRenderer(EquationView); },
+  addNodeView() {
+    return ReactNodeViewRenderer(EquationView) as never;
+  },
 });
 
 export const InlineEquation = Node.create({
@@ -42,5 +44,7 @@ export const InlineEquation = Node.create({
   addAttributes() { return { latex: { default: "" } }; },
   parseHTML() { return [{ tag: "span[data-inline-equation]" }]; },
   renderHTML({ HTMLAttributes }) { return ["span", mergeAttributes(HTMLAttributes, { "data-inline-equation": "true" })]; },
-  addNodeView() { return ReactNodeViewRenderer(InlineEquationView); },
+  addNodeView() {
+    return ReactNodeViewRenderer(InlineEquationView) as never;
+  },
 });

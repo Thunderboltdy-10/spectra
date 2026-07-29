@@ -1,13 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Check, LoaderCircle, School, ShieldCheck } from "lucide-react";
 import { SpectraLogo } from "@/components/spectra-logo";
 import { mutateAdministration } from "@/features/spectra/administration/api";
 
-export default function JoinSchoolPage() {
+function JoinSchoolContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const token = searchParams.get("token") ?? "";
@@ -99,5 +99,13 @@ export default function JoinSchoolPage() {
         </div>
       </section>
     </main>
+  );
+}
+
+export default function JoinSchoolPage() {
+  return (
+    <Suspense fallback={null}>
+      <JoinSchoolContent />
+    </Suspense>
   );
 }

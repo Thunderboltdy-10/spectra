@@ -32,6 +32,13 @@ import {
   type ReactNode,
 } from "react";
 import { toast } from "sonner";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { createDefaultArtifactPayload } from "../components/artifact-blueprint-sheet";
 import {
   ArtifactStudio,
@@ -541,7 +548,7 @@ export function AgentLibraryShell() {
       const created = next.find(
         (artifact) => artifact._id === result.artifactId,
       );
-      if (created) studio.openTab(created);
+      if (created) studio.openSplit(created);
       toast.success("Agent draft created.");
     } catch (error) {
       toast.error(
@@ -766,53 +773,54 @@ export function AgentLibraryShell() {
                 </button>
               ) : null}
             </label>
-            <label className="agent-library-filter">
+            <div className="agent-library-filter">
               <span className="sr-only">Subject</span>
-              <select
-                value={subject}
-                onChange={(event) => setSubject(event.target.value)}
-                className="w-full appearance-none bg-transparent pr-6 text-[13px] outline-none"
-              >
-                <option value="all">All subjects</option>
-                {subjects.map((value) => (
-                  <option key={value} value={value}>
-                    {value}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown className="pointer-events-none size-3.5 text-[var(--text-tertiary)]" />
-            </label>
-            <label className="agent-library-filter">
+              <Select value={subject} onValueChange={setSubject}>
+                <SelectTrigger className="h-9 border-0 bg-transparent px-0 shadow-none hover:bg-transparent focus:border-transparent">
+                  <SelectValue placeholder="All subjects" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All subjects</SelectItem>
+                  {subjects.map((value) => (
+                    <SelectItem key={value} value={value}>
+                      {value}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="agent-library-filter">
               <span className="sr-only">Capability</span>
-              <select
-                value={capability}
-                onChange={(event) => setCapability(event.target.value)}
-                className="w-full appearance-none bg-transparent pr-6 text-[13px] outline-none"
-              >
-                <option value="all">All capabilities</option>
-                {capabilities.map((value) => (
-                  <option key={value} value={value}>
-                    {value}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown className="pointer-events-none size-3.5 text-[var(--text-tertiary)]" />
-            </label>
-            <label className="agent-library-filter">
+              <Select value={capability} onValueChange={setCapability}>
+                <SelectTrigger className="h-9 border-0 bg-transparent px-0 shadow-none hover:bg-transparent focus:border-transparent">
+                  <SelectValue placeholder="All capabilities" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All capabilities</SelectItem>
+                  {capabilities.map((value) => (
+                    <SelectItem key={value} value={value}>
+                      {value}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="agent-library-filter">
               <span className="sr-only">Sort agents</span>
-              <select
+              <Select
                 value={sortMode}
-                onChange={(event) =>
-                  setSortMode(event.target.value as SortMode)
-                }
-                className="w-full appearance-none bg-transparent pr-6 text-[13px] outline-none"
+                onValueChange={(value) => setSortMode(value as SortMode)}
               >
-                <option value="relevance">Sort: Relevance</option>
-                <option value="recent">Sort: Recent</option>
-                <option value="title">Sort: Name</option>
-              </select>
-              <ChevronDown className="pointer-events-none size-3.5 text-[var(--text-tertiary)]" />
-            </label>
+                <SelectTrigger className="h-9 border-0 bg-transparent px-0 shadow-none hover:bg-transparent focus:border-transparent">
+                  <SelectValue placeholder="Sort" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="relevance">Sort: Relevance</SelectItem>
+                  <SelectItem value="recent">Sort: Recent</SelectItem>
+                  <SelectItem value="title">Sort: Name</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
           {loading ? (

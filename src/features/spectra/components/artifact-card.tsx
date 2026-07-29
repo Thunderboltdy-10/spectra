@@ -172,8 +172,12 @@ export function ArtifactCard({
     0,
     size === "compact" ? 0 : 4,
   );
-  const [aiClock, setAiClock] = useState(() => Date.now());
+  const [aiClock, setAiClock] = useState(0);
   useEffect(() => {
+    setAiClock(Date.now());
+  }, []);
+  useEffect(() => {
+    if (!aiClock) return;
     const resolved = resolveCardAiState(
       artifact.aiState,
       artifact.updatedAt,
@@ -415,7 +419,7 @@ export function ArtifactCard({
           ) : null}
           <div className="mt-3 flex min-h-7 items-end justify-between gap-2">
             <div className="min-w-0 truncate text-[11px] text-[var(--text-tertiary)]">
-              {artifact.placement === "workspace" ? "In workspace" : "Unplaced"}
+              {artifact.placement === "workspace" ? "In workspace" : "General"}
             </div>
             {actions ? (
               <div

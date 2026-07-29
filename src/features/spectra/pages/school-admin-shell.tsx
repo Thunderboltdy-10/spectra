@@ -1995,6 +1995,10 @@ function IntegrationsSurface({
 }: {
   overview: SchoolAdministrationOverview;
 }) {
+  const coverage = overview.integration?.coverage;
+  const coveragePercent = coverage?.discovered
+    ? Math.round((coverage.verifiedReadable / coverage.discovered) * 100)
+    : 0;
   return (
     <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_340px]">
       <AdminCard>
@@ -2012,10 +2016,22 @@ function IntegrationsSurface({
         <div className="p-4 pt-1">
           <div className="grid gap-3 sm:grid-cols-3">
             {[
-              ["Capability coverage", overview.integration?.coverage ?? 0],
-              ["Last sync", formatRelative(overview.integration?.lastSyncAt)],
-              ["Next sync", formatRelative(overview.integration?.nextSyncAt)],
-            ].map(([label, value]) => (
+              [
+                "Capability coverage",
+                `${coveragePercent}%`,
+                `${coverage?.verifiedReadable ?? 0} of ${coverage?.discovered ?? 0} routes`,
+              ],
+              [
+                "Last sync",
+                formatRelative(overview.integration?.lastSyncAt),
+                undefined,
+              ],
+              [
+                "Next sync",
+                formatRelative(overview.integration?.nextSyncAt),
+                undefined,
+              ],
+            ].map(([label, value, detail]) => (
               <div
                 key={String(label)}
                 className="rounded-[7px] border border-[var(--border-subtle)] p-3"
@@ -2024,6 +2040,11 @@ function IntegrationsSurface({
                   {label}
                 </span>
                 <strong className="mt-1 block text-[12px]">{value}</strong>
+                {detail ? (
+                  <span className="mt-0.5 block text-[9px] text-[var(--text-tertiary)]">
+                    {detail}
+                  </span>
+                ) : null}
               </div>
             ))}
           </div>

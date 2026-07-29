@@ -108,7 +108,7 @@ type ArtifactHubTab = { id: string; label: string };
 
 function artifactHubTab(): ArtifactHubTab {
   return {
-    id: `artifact-hub-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    id: `artifact-hub-${crypto.randomUUID()}`,
     label: "All",
   };
 }
@@ -809,9 +809,9 @@ export function ArtifactsShell() {
           );
         if (sortMode === "workspace")
           return (
-            artifactPlacements(a)[0]?.workspaceTitle ?? "Unplaced"
+            artifactPlacements(a)[0]?.workspaceTitle ?? "General"
           ).localeCompare(
-            artifactPlacements(b)[0]?.workspaceTitle ?? "Unplaced",
+            artifactPlacements(b)[0]?.workspaceTitle ?? "General",
           );
         return b.updatedAt - a.updatedAt;
       });
@@ -879,13 +879,13 @@ export function ArtifactsShell() {
       toast.success(
         targetWorkspaceId
           ? "Artifact created in workspace."
-          : "Artifact created as unplaced.",
+          : "Artifact created in General.",
       );
       const refreshed = await load(true);
       const created = refreshed.find(
         (artifact) => artifact._id === result.artifactId,
       );
-      if (created) studio.openTab(created);
+      if (created) studio.openSplit(created);
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Could not create artifact.",
@@ -1216,7 +1216,7 @@ export function ArtifactsShell() {
                 <p className="mt-1 text-[12px] text-[var(--text-secondary)]">
                   Create this{" "}
                   {blueprintMeta[pendingCreateType].label.toLowerCase()} in a
-                  workspace or keep it unplaced.
+                  workspace or keep it in General.
                 </p>
                 <div className="mt-4 max-h-[300px] space-y-1 overflow-y-auto">
                   <button
@@ -1229,7 +1229,7 @@ export function ArtifactsShell() {
                     }}
                   >
                     <LayoutGrid className="h-4 w-4" />
-                    Unplaced / inbox
+                    General
                   </button>
                   {workspaces.map((target) => (
                     <button
@@ -1420,7 +1420,11 @@ export function ArtifactsShell() {
                         {createMenuOpen ? (
                           <div className="absolute right-0 top-[calc(100%+8px)] z-30 w-[230px] rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[0_6px_18px_rgba(0,0,0,0.10)]">
                             {filters
-                              .filter((filter) => filter.key !== "all")
+                              .filter(
+                                (filter) =>
+                                  filter.key !== "all" &&
+                                  filter.key !== "timetable",
+                              )
                               .map((filter) => {
                                 const Icon = filter.icon;
                                 const key = filter.key as ArtifactTypeKey;
@@ -1701,7 +1705,7 @@ export function ArtifactsShell() {
                     rowActions={rowActions}
                     onOpen={openArtifactSurface}
                     landingTitle={
-                      collection === "shared" ? "Shared with you" : "Unplaced"
+                      collection === "shared" ? "Shared with you" : "General"
                     }
                     landingDescription={
                       collection === "shared"
@@ -1891,7 +1895,10 @@ export function ArtifactsShell() {
                     </CommandBarMenuItem>
                     <CommandBarSubmenu label="New artifact" icon={Plus}>
                       {filters
-                        .filter((filter) => filter.key !== "all")
+                        .filter(
+                          (filter) =>
+                            filter.key !== "all" && filter.key !== "timetable",
+                        )
                         .map((filter) => {
                           const Icon = filter.icon;
                           const key = filter.key as ArtifactTypeKey;
@@ -2247,7 +2254,7 @@ function GroupedList({
           ))}
           {inbox.length === 0 ? (
             <div className="rounded-[8px] border border-dashed border-[var(--border-default)] px-4 py-8 text-[13px] text-[var(--text-secondary)]">
-              No unplaced artifacts in this scope.
+              No General artifacts in this scope.
             </div>
           ) : null}
         </div>

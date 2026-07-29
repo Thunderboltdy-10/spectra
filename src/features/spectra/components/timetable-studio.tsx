@@ -16,7 +16,6 @@ import {
   Loader2,
   Lock,
   MapPin,
-  Printer,
   Plus,
   Repeat2,
   Trash2,
@@ -112,19 +111,19 @@ function startOfMonthGrid(date: Date, weekStartsOn: 0 | 1) {
   );
 }
 
-function sameDay(left: Date, right: Date) {
-  return dateKey(left) === dateKey(right);
+function sameDay(left: Date, right: Date | null | undefined) {
+  return Boolean(right) && dateKey(left) === dateKey(right!);
 }
 
 function formatDateRange(days: Date[], view: TimetableView) {
   if (view === "month") {
-    return days[Math.floor(days.length / 2)]!.toLocaleDateString(undefined, {
+    return days[Math.floor(days.length / 2)]!.toLocaleDateString("en-US", {
       month: "long",
       year: "numeric",
     });
   }
   if (days.length === 1) {
-    return days[0]!.toLocaleDateString(undefined, {
+    return days[0]!.toLocaleDateString("en-US", {
       weekday: "long",
       day: "numeric",
       month: "long",
@@ -133,7 +132,7 @@ function formatDateRange(days: Date[], view: TimetableView) {
   }
   const first = days[0]!;
   const last = days.at(-1)!;
-  return `${first.toLocaleDateString(undefined, { day: "numeric", month: "short" })} – ${last.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })}`;
+  return `${first.toLocaleDateString("en-US", { day: "numeric", month: "short" })} – ${last.toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" })}`;
 }
 
 function eventMinutes(event: TimetableEvent) {
@@ -278,15 +277,21 @@ function EventCard({
     >
       <strong>{event.title}</strong>
       {!event.allDay ? (
-        <time>
-          {start.toLocaleTimeString([], {
+        <time suppressHydrationWarning>
+          {start.toLocaleTimeString("en-GB", {
             hour: "2-digit",
             minute: "2-digit",
+            hour12: false,
             timeZone: event.timezone,
           })}
           {compact
             ? null
-            : `–${end.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", timeZone: event.timezone })}`}
+            : `–${end.toLocaleTimeString("en-GB", {
+                hour: "2-digit",
+                minute: "2-digit",
+                hour12: false,
+                timeZone: event.timezone,
+              })}`}
         </time>
       ) : null}
       {!compact && event.location ? <small>{event.location}</small> : null}
@@ -433,14 +438,24 @@ export function TimetableStudio({
     };
   }, [artifactId, personalDraft]);
 
-  const visibleLayers = timetable.layers.filter((layer) => layer.visible);
-  const visibleLayerIds = new Set(visibleLayers.map((layer) => layer.id));
+  const visibleLayers = useMemo(
+    () => timetable.layers.filter((layer) => layer.visible),
+    [timetable.layers],
+  );
+  const visibleLayerIds = useMemo(
+    () => new Set(visibleLayers.map((layer) => layer.id)),
+    [visibleLayers],
+  );
   const layerMap = new Map(timetable.layers.map((layer) => [layer.id, layer]));
   const artifactMap = new Map(
     artifacts.map((artifact) => [artifact._id, artifact]),
   );
-  const baseVisibleEvents = timetable.events.filter(
-    (event) => visibleLayerIds.has(event.layerId) && !event.overlay?.hidden,
+  const baseVisibleEvents = useMemo(
+    () =>
+      timetable.events.filter(
+        (event) => visibleLayerIds.has(event.layerId) && !event.overlay?.hidden,
+      ),
+    [timetable.events, visibleLayerIds],
   );
   const selectedEvent = timetable.events.find(
     (event) => event.id === selectedEventId,
@@ -503,6 +518,7 @@ export function TimetableStudio({
   useEffect(() => {
     if (!personalReady || autoAnchoredRef.current || userMovedAnchorRef.current)
       return;
+    if (!nowMs) return;
     if (!baseVisibleEvents.length) return;
     if (visibleEvents.length > 0) {
       autoAnchoredRef.current = true;
@@ -515,17 +531,22 @@ export function TimetableStudio({
     });
     autoAnchoredRef.current = true;
     if (!nextAnchor || nextAnchor === view.anchorDate) return;
-    savePersonalState({
-      ...personalState,
-      view: { ...view, anchorDate: nextAnchor },
+    setPersonalState((current) => {
+      const next = {
+        ...current,
+        view: { ...current.view!, anchorDate: nextAnchor },
+      };
+      setPersonalDraft(next);
+      setPersonalSaveState("saving");
+      setPersonalError(undefined);
+      return next;
     });
   }, [
     baseVisibleEvents,
     nowMs,
     personalReady,
-    personalState,
     timetable.timezone,
-    view,
+    view.anchorDate,
     visibleEvents.length,
   ]);
 
@@ -538,11 +559,18 @@ export function TimetableStudio({
       ),
     [visibleEvents],
   );
-  const now = new Date();
-  const timetableNow = localDateInput(now.toISOString(), timetable.timezone);
-  const timetableToday = parseDateKey(timetableNow.slice(0, 10));
-  const [, nowHour = "0", nowMinute = "0"] =
-    timetableNow.match(/T(\d{2}):(\d{2})$/) ?? [];
+  // Prefer the mounted clock so SSR and hydration share a stable "no now line"
+  // until the client is ready.
+  const now = nowMs > 0 ? new Date(nowMs) : null;
+  const timetableNow = now
+    ? localDateInput(now.toISOString(), timetable.timezone)
+    : null;
+  const timetableToday = timetableNow
+    ? parseDateKey(timetableNow.slice(0, 10))
+    : null;
+  const [, nowHour = "0", nowMinute = "0"] = timetableNow
+    ? (timetableNow.match(/T(\d{2}):(\d{2})$/) ?? [])
+    : [];
   const timetableNowMinutes = Number(nowHour) * 60 + Number(nowMinute);
 
   function emit(recipe: (draft: TimetableContent) => void) {
@@ -886,7 +914,7 @@ export function TimetableStudio({
               }}
             >
               <span>
-                {day.toLocaleDateString(undefined, { weekday: "short" })}
+                {day.toLocaleDateString("en-US", { weekday: "short" })}
               </span>
               <strong>{day.getDate()}</strong>
             </button>
@@ -1002,7 +1030,7 @@ path={eventPath(event.id)}
                     </div>
                   );
                 })}
-              {sameDay(day, timetableToday) ? (
+              {timetableToday && sameDay(day, timetableToday) ? (
                 <div
                   className="timetable-now"
                   style={{
@@ -1011,7 +1039,7 @@ path={eventPath(event.id)}
                       HOUR_HEIGHT,
                   }}
                 >
-                  <span>{`${nowHour}:${nowMinute}`}</span>
+                  <span suppressHydrationWarning>{`${nowHour}:${nowMinute}`}</span>
                 </div>
               ) : null}
             </div>
@@ -1029,7 +1057,7 @@ path={eventPath(event.id)}
             {addDays(
               startOfWeek(new Date(), view.weekStartsOn),
               index,
-            ).toLocaleDateString(undefined, { weekday: "short" })}
+            ).toLocaleDateString("en-US", { weekday: "short" })}
           </strong>
         ))}
         {days.map((day) => {
@@ -1104,7 +1132,7 @@ path={eventPath(event.id)}
           <section key={date}>
             <header>
               <strong>
-                {parseDateKey(date).toLocaleDateString(undefined, {
+                {parseDateKey(date).toLocaleDateString("en-US", {
                   weekday: "long",
                   day: "numeric",
                   month: "long",
@@ -1126,12 +1154,13 @@ path={eventPath(event.id)}
                     background: layerMap.get(event.layerId)?.color ?? "#7865ea",
                   }}
                 />
-                <time>
+                <time suppressHydrationWarning>
                   {event.allDay
                     ? "All day"
-                    : new Date(event.start).toLocaleTimeString([], {
+                    : new Date(event.start).toLocaleTimeString("en-GB", {
                         hour: "2-digit",
                         minute: "2-digit",
+                        hour12: false,
                         timeZone: event.timezone,
                       })}
                 </time>
@@ -1224,14 +1253,6 @@ path={eventPath(event.id)}
             onClick={() => setLayersOpen(!layersOpen)}
           >
             All calendars <ChevronDown className="h-3.5 w-3.5" />
-          </button>
-          <button
-            type="button"
-            aria-label="Print visible calendar"
-            title="Print the current calendar view"
-            onClick={() => window.print()}
-          >
-            <Printer className="h-3.5 w-3.5" />
           </button>
           <button
             type="button"
@@ -1510,7 +1531,7 @@ path={eventPath(event.id)}
                   <small>
                     {parseDateKey(
                       localDateInput(event.start, event.timezone).slice(0, 10),
-                    ).toLocaleDateString(undefined, {
+                    ).toLocaleDateString("en-US", {
                       weekday: "short",
                       day: "numeric",
                       month: "short",

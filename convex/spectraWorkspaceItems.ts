@@ -228,6 +228,18 @@ export const addArtifact = mutation({
       ctx,
       args.artifactId,
     );
+    if (
+      artifact.blueprintKey === "timetable" &&
+      ((artifact.tags ?? []).includes("system-timetable") ||
+        (artifact.tags ?? []).includes("managebac") ||
+        artifact.createdFrom?.contextSummary === "Personal Spectra timetable" ||
+        artifact.createdFrom?.contextSummary ===
+          "Automatic ManageBac timetable bootstrap")
+    ) {
+      throw new Error(
+        "Your Timetable stays in General and cannot be moved into a workspace.",
+      );
+    }
     const canProjectAccess = capabilities.includes("share");
     const now = Date.now();
     const existing = await ctx.db

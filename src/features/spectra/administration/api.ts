@@ -77,7 +77,13 @@ export type SchoolAdministrationOverview = {
     status: string;
     lastSyncAt?: number;
     nextSyncAt?: number;
-    coverage?: number;
+    coverage?: {
+      discovered: number;
+      verifiedReadable: number;
+      unverified: number;
+      failed: number;
+      quarantined: number;
+    };
   };
   groupWorkspaces: Array<{
     workspaceId: string;

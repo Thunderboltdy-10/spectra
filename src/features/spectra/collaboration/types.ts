@@ -68,7 +68,11 @@ export type CollaborationInteraction = {
     | "dragging"
     | "resizing"
     | "menu"
-    | "toggle";
+    | "toggle"
+    | "create"
+    | "remove"
+    | "reorder"
+    | "group";
   targetId?: string;
   targetKind?: "block" | "address" | "region" | "path" | "selector";
   label?: string;

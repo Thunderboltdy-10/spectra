@@ -32,7 +32,9 @@ describe("buildArtifactLivePreviewFrames", () => {
       },
     };
     const frames = buildArtifactLivePreviewFrames(before, after);
-    expect(frames.length).toBeGreaterThan(2);
+    // Even short replacements expose enough frames to survive awareness and
+    // rich-editor render coalescing as visible, readable typing.
+    expect(frames.length).toBeGreaterThanOrEqual(10);
     expect(frames.at(-1)).toEqual(after);
     expect(artifactLivePreviewPatches(before, frames[0]!)).toEqual([
       expect.objectContaining({ path: "/content/blocks/0/text" }),

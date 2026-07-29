@@ -27,6 +27,7 @@ import type * as collaborationGatewayBridge from "../collaborationGatewayBridge.
 import type * as collaborationGatewayStore from "../collaborationGatewayStore.js";
 import type * as crons from "../crons.js";
 import type * as env from "../env.js";
+import type * as executionScheduler from "../executionScheduler.js";
 import type * as flashcardStudy from "../flashcardStudy.js";
 import type * as identity from "../identity.js";
 import type * as identityShared from "../identityShared.js";
@@ -47,9 +48,7 @@ import type * as secretStore from "../secretStore.js";
 import type * as spectraArtifactLinks from "../spectraArtifactLinks.js";
 import type * as spectraArtifacts from "../spectraArtifacts.js";
 import type * as spectraOperations from "../spectraOperations.js";
-import type * as spectraRunJobs from "../spectraRunJobs.js";
 import type * as spectraRunLifecycle from "../spectraRunLifecycle.js";
-import type * as spectraRunWorkerBridge from "../spectraRunWorkerBridge.js";
 import type * as spectraRuns from "../spectraRuns.js";
 import type * as spectraRuntimeBuilds from "../spectraRuntimeBuilds.js";
 import type * as spectraShared from "../spectraShared.js";
@@ -84,6 +83,7 @@ declare const fullApi: ApiFromModules<{
   collaborationGatewayStore: typeof collaborationGatewayStore;
   crons: typeof crons;
   env: typeof env;
+  executionScheduler: typeof executionScheduler;
   flashcardStudy: typeof flashcardStudy;
   identity: typeof identity;
   identityShared: typeof identityShared;
@@ -104,9 +104,7 @@ declare const fullApi: ApiFromModules<{
   spectraArtifactLinks: typeof spectraArtifactLinks;
   spectraArtifacts: typeof spectraArtifacts;
   spectraOperations: typeof spectraOperations;
-  spectraRunJobs: typeof spectraRunJobs;
   spectraRunLifecycle: typeof spectraRunLifecycle;
-  spectraRunWorkerBridge: typeof spectraRunWorkerBridge;
   spectraRuns: typeof spectraRuns;
   spectraRuntimeBuilds: typeof spectraRuntimeBuilds;
   spectraShared: typeof spectraShared;

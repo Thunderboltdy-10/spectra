@@ -14,7 +14,7 @@ import {
   X,
 } from "lucide-react";
 import { createPortal } from "react-dom";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 
 type CommandBarProps = {
@@ -217,6 +217,9 @@ export function CommandBar({
   const [attachments, setAttachments] = useState<CommandAttachment[]>([]);
   const [sending, setSending] = useState(false);
   const [blockedAttempt, setBlockedAttempt] = useState(false);
+  const [queuedSubmissions, setQueuedSubmissions] = useState<
+    Array<{ value: string; attachments: CommandAttachment[] }>
+  >([]);
   const sendingRef = useRef(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const menuPanelRef = useRef<HTMLDivElement | null>(null);
@@ -353,38 +356,57 @@ export function CommandBar({
     setMenuOpen(false);
   }
 
+  const dispatchSubmission = useCallback(
+    async (draft: string, draftAttachments: CommandAttachment[]) => {
+      if (sendingRef.current) return;
+      sendingRef.current = true;
+      setSending(true);
+      try {
+        const accepted = await onSubmit?.(draft, draftAttachments);
+        if (accepted === false) {
+          setValue(draft);
+          setAttachments(draftAttachments);
+        }
+      } catch {
+        setValue(draft);
+        setAttachments(draftAttachments);
+      } finally {
+        sendingRef.current = false;
+        setSending(false);
+      }
+    },
+    [onSubmit],
+  );
+
   async function submit() {
-    const next = value.trim();
+    const draft = value.trim();
     if (
-      sendingRef.current ||
-      sending ||
-      !next ||
+      !draft ||
       attachments.some((attachment) => attachment.error)
     )
       return;
+    const draftAttachments = attachments;
+    if (busy && !allowConcurrent) {
+      setQueuedSubmissions((current) => [
+        ...current,
+        { value: draft, attachments: draftAttachments },
+      ]);
+      setValue("");
+      setAttachments([]);
+      setMenuOpen(false);
+      setBlockedAttempt(false);
+      return;
+    }
+    if (sendingRef.current || sending) return;
     sendingRef.current = true;
-    setSending(true);
     // Clear immediately so a hung/slow run cannot leave the draft glued in QC.
     // Restore only when the run surface rejects the start.
-    const draft = next;
-    const draftAttachments = attachments;
     setValue("");
     setAttachments([]);
     setMenuOpen(false);
     setBlockedAttempt(false);
-    try {
-      const accepted = await onSubmit?.(draft, draftAttachments);
-      if (accepted === false) {
-        setValue(draft);
-        setAttachments(draftAttachments);
-      }
-    } catch {
-      setValue(draft);
-      setAttachments(draftAttachments);
-    } finally {
-      sendingRef.current = false;
-      setSending(false);
-    }
+    sendingRef.current = false;
+    await dispatchSubmission(draft, draftAttachments);
   }
 
   useEffect(() => {
@@ -423,6 +445,14 @@ export function CommandBar({
   useEffect(() => {
     if (!busy) setBlockedAttempt(false);
   }, [busy]);
+
+  useEffect(() => {
+    if (busy || sending || sendingRef.current || queuedSubmissions.length === 0)
+      return;
+    const next = queuedSubmissions[0]!;
+    setQueuedSubmissions((current) => current.slice(1));
+    void dispatchSubmission(next.value, next.attachments);
+  }, [busy, dispatchSubmission, queuedSubmissions, sending]);
 
   const removeAttachment = (id: string) =>
     setAttachments((current) => current.filter((item) => item.id !== id));
@@ -516,7 +546,7 @@ export function CommandBar({
             {onStop ? (
               <button
                 type="button"
-                onClick={onStop}
+                onClick={() => onStop()}
                 className="rounded-[5px] px-1.5 py-1 font-semibold text-[var(--danger)] hover:bg-[color-mix(in_oklab,var(--danger)_8%,transparent)]"
               >
                 Stop current run
@@ -554,11 +584,6 @@ export function CommandBar({
                 event.keyCode !== 229
               ) {
                 event.preventDefault();
-                if (busy && !allowConcurrent) {
-                  setBlockedAttempt(true);
-                  return;
-                }
-                if (sending) return;
                 void submit();
               }
             }}
@@ -570,10 +595,10 @@ export function CommandBar({
               ⌘ K
             </span>
           ) : null}
-          {busy && allowConcurrent && onStop ? (
+          {busy && onStop ? (
             <button
               type="button"
-              onClick={onStop}
+              onClick={() => onStop()}
               className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] text-[var(--danger)] hover:bg-[color-mix(in_oklab,var(--danger)_8%,transparent)]"
               aria-label="Stop active response"
               title="Stop active response"
@@ -584,18 +609,17 @@ export function CommandBar({
           <button
             type="button"
             disabled={
-              sending ||
+              (sending && !(busy && !allowConcurrent)) ||
               !value.trim() ||
               attachments.some((attachment) => Boolean(attachment.error))
             }
             onClick={() => {
-              if (busy && !allowConcurrent) setBlockedAttempt(true);
-              else void submit();
+              void submit();
             }}
             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] bg-[var(--text-primary)] text-[var(--bg-primary)] disabled:bg-[var(--bg-secondary)] disabled:text-[var(--text-tertiary)]"
             aria-label="Send command"
           >
-            {sending ? (
+            {sending && !busy ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
               <ArrowUp className="h-4 w-4" />

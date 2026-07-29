@@ -25,6 +25,7 @@ export const whiteboardSkill = defineArtifactSkill({
   ],
   operations: [
     "Create, rewrite, place, connect, group, align, distribute, cluster, label, embed, and validate nodes.",
+    "Treat geometry as authored meaning: choose a spatial grammar (flow, hierarchy, comparison, timeline, matrix, cluster, or freeform map), calculate non-overlapping bounds, route connectors through clear channels, and keep labels readable at the default viewport.",
     "Convert selected text into a diagram or reorganize a bounded region through a ghost/bounding-box proposal.",
   ],
   preservationRules: [
@@ -33,6 +34,7 @@ export const whiteboardSkill = defineArtifactSkill({
   ],
   validation: [
     "Check orphan connectors, extreme/corrupt geometry, overlap, bounds, locked layers, semantic labels, reading order, missing assets, and embed permissions.",
+    "Inspect the rendered viewport after placement, not only the JSON: repair collisions, connector crossings, uneven spacing, tiny text, ambiguous direction, redundant decoration, and content stranded far from the main composition.",
     "Keep diagrams understandable in spatial, outline, exported, embedded, narrow, touch, and reduced-motion representations.",
   ],
   approvals: [

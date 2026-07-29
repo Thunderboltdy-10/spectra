@@ -141,8 +141,8 @@ export function SchoolDataShell() {
             onClick={() =>
               void run("refresh", async () => {
                 const payload = await postManageBac({
-                  action: "requestAiRefresh",
-                  reason: "school-data-manual",
+                  action: "resolveIdentity",
+                  bootstrap: true,
                 });
                 const result = payload?.data ?? payload;
                 if (result?.skipped) {

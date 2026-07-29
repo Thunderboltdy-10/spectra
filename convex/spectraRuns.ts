@@ -1,4 +1,5 @@
 import { internalMutation, mutation, query } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { getAuthenticatedActor } from "./identityShared";
@@ -422,6 +423,65 @@ export const beginRun = mutation({
       workspaceItemId,
       created: true,
     };
+  },
+});
+
+export const resolveBySubmissionKey = query({
+  args: { submissionKey: v.string() },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx);
+    const submissionKey = args.submissionKey.trim();
+    if (!submissionKey) return null;
+    const run = await ctx.db
+      .query("spectraAiRuns")
+      .withIndex("by_account_submission", (q) =>
+        q
+          .eq("ownerAccountId", actor._id)
+          .eq("submissionKey", submissionKey),
+      )
+      .first();
+    return run
+      ? {
+          runId: run._id,
+          executionId: run.executionId,
+          status: run.status,
+        }
+      : null;
+  },
+});
+
+export const scheduleExecution = mutation({
+  args: {
+    runId: v.id("spectraAiRuns"),
+    resultCardId: v.id("spectraResultCards"),
+    executionId: v.string(),
+    payload: v.any(),
+  },
+  handler: async (ctx, args) => {
+    const { actor, run } = await requireOwnedRun(ctx, args.runId);
+    requireCurrentExecution(run.executionId, args.executionId);
+    if (run.status !== "queued")
+      return { scheduled: false, status: run.status };
+    const card = await ctx.db.get(args.resultCardId);
+    if (!card || card.runId !== args.runId)
+      throw new Error("Result card not found");
+    await ctx.scheduler.runAfter(
+      0,
+      internal.executionScheduler.dispatchSpectraRun,
+      {
+        actorClerkId: actor.clerkId,
+        runId: args.runId,
+        resultCardId: args.resultCardId,
+        executionId: args.executionId,
+        payload: args.payload,
+      },
+    );
+    const now = Date.now();
+    await ctx.db.patch(args.runId, {
+      heartbeatAt: now,
+      updatedAt: now,
+    });
+    return { scheduled: true, status: run.status };
   },
 });
 
@@ -1239,16 +1299,6 @@ export const claimConfirmation = mutation({
     ) {
       throw new Error("This approval was already handled in another view.");
     }
-    const job = await ctx.db
-      .query("spectraRunJobs")
-      .withIndex("by_run_execution", (q) =>
-        q.eq("runId", args.runId).eq("executionId", args.executionId),
-      )
-      .unique();
-    if (!job || job.status === "cancelled" || job.status === "failed")
-      throw new Error(
-        "The durable run job is unavailable. Retry the run instead.",
-      );
     const now = Date.now();
     await ctx.db.patch(args.runId, {
       status: "queued",
@@ -1264,26 +1314,6 @@ export const claimConfirmation = mutation({
       heartbeatAt: now,
       updatedAt: now,
     });
-    const payload =
-      job.payload &&
-      typeof job.payload === "object" &&
-      !Array.isArray(job.payload)
-        ? (job.payload as Record<string, unknown>)
-        : {};
-    await ctx.db.patch(job._id, {
-      status: "queued",
-      payload: {
-        ...payload,
-        kind: "resume_operations",
-        approvalAccepted: true,
-      },
-      availableAt: now,
-      workerId: undefined,
-      leaseExpiresAt: undefined,
-      completedAt: undefined,
-      lastError: undefined,
-      updatedAt: now,
-    });
     const cards = await ctx.db
       .query("spectraResultCards")
       .withIndex("by_run", (q) => q.eq("runId", args.runId))
@@ -1294,7 +1324,7 @@ export const claimConfirmation = mutation({
           status: "queued",
           title: "Applying confirmed changes",
           summary:
-            "Your approval is saved. A durable worker will apply each authorized operation.",
+            "Your approval is saved. Spectra is applying each authorized operation.",
           actions: [],
           updatedAt: now,
         }),
@@ -1302,6 +1332,7 @@ export const claimConfirmation = mutation({
     );
     return {
       operationIds: proposed.map((operation) => operation._id),
+      resultCardId: cards[0]?._id,
       queued: true,
     };
   },

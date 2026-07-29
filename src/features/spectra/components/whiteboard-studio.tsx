@@ -27,6 +27,7 @@ import {
   Plus,
   Redo2,
   Search,
+  SlidersHorizontal,
   Square,
   StickyNote,
   Table2,
@@ -47,6 +48,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type WheelEvent as ReactWheelEvent,
 } from "react";
@@ -148,6 +150,11 @@ function BoardNode({
   /** Canonical pointer for this node, e.g. `/nodes/3`. */
   path?: string;
 }) {
+  const [editingText, setEditingText] = useState(false);
+  const nodeElementRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!selected) setEditingText(false);
+  }, [selected]);
   if (node.hidden) return null;
   const content =
     node.content &&
@@ -155,8 +162,41 @@ function BoardNode({
     !Array.isArray(node.content)
       ? (node.content as Record<string, unknown>)
       : {};
+  const beginTextEditing = (
+    event: ReactMouseEvent<HTMLInputElement | HTMLTextAreaElement>,
+  ) => {
+    if (readOnly || node.locked || compact) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setEditingText(true);
+    const control = event.currentTarget;
+    window.requestAnimationFrame(() => {
+      control.focus();
+      control.setSelectionRange(control.value.length, control.value.length);
+    });
+  };
+  const textPointerDown = (event: ReactPointerEvent<HTMLElement>) => {
+    // Select-mode follows the familiar canvas contract: drag anywhere on an
+    // object to move it; double-click its text to enter editing. Once editing,
+    // pointer gestures belong to the native input for caret/selection.
+    if (editingText) event.stopPropagation();
+  };
+  const enterTextEditing = () => {
+    if (readOnly || node.locked || compact) return;
+    setEditingText(true);
+    window.requestAnimationFrame(() => {
+      const control =
+        nodeElementRef.current?.querySelector<
+          HTMLInputElement | HTMLTextAreaElement
+        >("input, textarea");
+      if (!control) return;
+      control.focus();
+      control.setSelectionRange(control.value.length, control.value.length);
+    });
+  };
   return (
     <div
+      ref={nodeElementRef}
       className="whiteboard-node"
       data-ai-region={aiRegionAttr(aiActive)}
       {...(path ? targetAttrs(path) : {})}
@@ -222,6 +262,27 @@ function BoardNode({
       }}
       onClick={(event) => {
         event.stopPropagation();
+        const textControl = (event.target as Element).closest<
+          HTMLInputElement | HTMLTextAreaElement
+        >("input, textarea");
+        if (
+          selected &&
+          event.detail >= 2 &&
+          textControl &&
+          event.currentTarget.contains(textControl) &&
+          !readOnly &&
+          !node.locked &&
+          !compact
+        ) {
+          setEditingText(true);
+          window.requestAnimationFrame(() => {
+            textControl.focus();
+            textControl.setSelectionRange(
+              textControl.value.length,
+              textControl.value.length,
+            );
+          });
+        }
         onSelect(event.shiftKey);
       }}
       onPointerDown={onPointerDown}
@@ -277,10 +338,12 @@ function BoardNode({
           typeof content.body === "string") ? (
         <div className="whiteboard-card-node">
           <input
+            {...(path ? targetAttrs(`${path}/content/header`) : {})}
             value={String(content.header ?? "")}
-            readOnly={readOnly || node.locked || compact}
+            readOnly={readOnly || node.locked || compact || !editingText}
             aria-label={`${node.semanticLabel || "Card"} title`}
-            onPointerDown={(event) => event.stopPropagation()}
+            onPointerDown={textPointerDown}
+            onDoubleClick={beginTextEditing}
             onFocus={() => onSelect(false)}
             onChange={(event) =>
               onContentChange({ header: event.target.value })
@@ -297,10 +360,12 @@ function BoardNode({
             }}
           />
           <textarea
+            {...(path ? targetAttrs(`${path}/content/body`) : {})}
             value={String(content.body ?? "")}
-            readOnly={readOnly || node.locked || compact}
+            readOnly={readOnly || node.locked || compact || !editingText}
             aria-label={`${node.semanticLabel || "Card"} body`}
-            onPointerDown={(event) => event.stopPropagation()}
+            onPointerDown={textPointerDown}
+            onDoubleClick={beginTextEditing}
             onFocus={() => onSelect(false)}
             onChange={(event) =>
               onContentChange({ body: event.target.value })
@@ -319,10 +384,12 @@ function BoardNode({
         </div>
       ) : (
         <textarea
+          {...(path ? targetAttrs(`${path}/content/text`) : {})}
           value={whiteboardNodeText(node)}
-          readOnly={readOnly || node.locked || compact}
+          readOnly={readOnly || node.locked || compact || !editingText}
           aria-label={node.semanticLabel || `${node.type} text`}
-          onPointerDown={(event) => event.stopPropagation()}
+          onPointerDown={textPointerDown}
+          onDoubleClick={beginTextEditing}
           onFocus={() => onSelect(false)}
           onChange={(event) => onTextChange(event.target.value)}
           style={{
@@ -366,13 +433,36 @@ function BoardNode({
       {selected &&
       !readOnly &&
       !compact &&
+      !editingText &&
+      node.type !== "frame" &&
+      node.type !== "group" &&
+      node.type !== "image" &&
+      node.type !== "embed" &&
+      node.type !== "table" ? (
+        <button
+          type="button"
+          className="whiteboard-node-edit"
+          aria-label="Edit object text"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation();
+            onSelect(false);
+            enterTextEditing();
+          }}
+        >
+          <TextCursorInput className="h-3.5 w-3.5" />
+        </button>
+      ) : null}
+      {selected &&
+      !readOnly &&
+      !compact &&
       node.type !== "frame" &&
       node.type !== "group" ? (
         <button
           type="button"
           className="whiteboard-node-resize"
           aria-label="Resize object"
-          data-spectra-part="handle:se"
+          {...(path ? targetAttrs(path, "handle:se") : {})}
           onPointerDown={onResizePointerDown}
         />
       ) : null}
@@ -402,6 +492,9 @@ export function WhiteboardStudio({
   onActiveRegionChange?: (regionId: string) => void;
 }) {
   const board = useMemo(() => normalizeWhiteboardContent(content), [content]);
+  // Viewport is personal presence, never shared artifact content. Panning or
+  // zooming in one differently-sized pane must not move every collaborator.
+  const [viewport, setViewport] = useState(board.viewport);
   const [tool, setTool] = useState<Tool>("select");
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
   const selectedNodeId = selectedNodeIds.at(-1);
@@ -416,6 +509,7 @@ export function WhiteboardStudio({
   const [undo, setUndo] = useState<WhiteboardContent[]>([]);
   const [redo, setRedo] = useState<WhiteboardContent[]>([]);
   const [presenting, setPresenting] = useState(false);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
   const [assets, setAssets] = useState<SpectraArtifactAsset[]>([]);
   const [assetError, setAssetError] = useState<string>();
   const [uploadingImage, setUploadingImage] = useState(false);
@@ -428,7 +522,7 @@ export function WhiteboardStudio({
   const boardInputRef = useRef<HTMLInputElement>(null);
   const selectionHandledRef = useRef(false);
   const page =
-    board.pages.find((candidate) => candidate.id === board.viewport.pageId) ??
+    board.pages.find((candidate) => candidate.id === viewport.pageId) ??
     board.pages[0]!;
   const layers = board.layers.filter((layer) => layer.pageId === page.id);
   const visibleLayerIds = new Set(
@@ -441,13 +535,13 @@ export function WhiteboardStudio({
     (edge) => edge.pageId === page.id && visibleLayerIds.has(edge.layerId),
   );
   const renderedNodes = useMemo(() => {
-    const margin = 520 / Math.max(board.viewport.zoom, 0.05);
-    const left = board.viewport.x - margin;
-    const top = board.viewport.y - margin;
+    const margin = 520 / Math.max(viewport.zoom, 0.05);
+    const left = viewport.x - margin;
+    const top = viewport.y - margin;
     const right =
-      board.viewport.x + canvasSize.width / board.viewport.zoom + margin;
+      viewport.x + canvasSize.width / viewport.zoom + margin;
     const bottom =
-      board.viewport.y + canvasSize.height / board.viewport.zoom + margin;
+      viewport.y + canvasSize.height / viewport.zoom + margin;
     return nodes.filter(
       (node) =>
         node.x + node.width >= left &&
@@ -456,9 +550,9 @@ export function WhiteboardStudio({
         node.y <= bottom,
     );
   }, [
-    board.viewport.x,
-    board.viewport.y,
-    board.viewport.zoom,
+    viewport.x,
+    viewport.y,
+    viewport.zoom,
     canvasSize.height,
     canvasSize.width,
     nodes,
@@ -491,6 +585,14 @@ export function WhiteboardStudio({
     artifacts.map((artifact) => [artifact._id, artifact]),
   );
   const assetMap = new Map(assets.map((asset) => [asset.assetId, asset]));
+
+  useEffect(() => {
+    if (!selectedNodeId) setInspectorOpen(false);
+  }, [selectedNodeId]);
+
+  useEffect(() => {
+    setViewport(board.viewport);
+  }, [artifactId]);
 
   useEffect(() => {
     let active = true;
@@ -548,10 +650,10 @@ export function WhiteboardStudio({
     const bounds = canvasRef.current?.getBoundingClientRect();
     return {
       x:
-        (clientX - (bounds?.left ?? 0)) / board.viewport.zoom +
-        board.viewport.x,
+        (clientX - (bounds?.left ?? 0)) / viewport.zoom +
+        viewport.x,
       y:
-        (clientY - (bounds?.top ?? 0)) / board.viewport.zoom + board.viewport.y,
+        (clientY - (bounds?.top ?? 0)) / viewport.zoom + viewport.y,
     };
   };
   const snap = (value: number) =>
@@ -728,8 +830,8 @@ export function WhiteboardStudio({
       pointerId: event.pointerId,
       startClientX: event.clientX,
       startClientY: event.clientY,
-      startX: board.viewport.x,
-      startY: board.viewport.y,
+      startX: viewport.x,
+      startY: viewport.y,
       snapshot: clone(board),
     };
   }
@@ -737,14 +839,15 @@ export function WhiteboardStudio({
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
     if (drag.mode === "pan")
-      mutate((draft) => {
-        draft.viewport.x =
+      setViewport((current) => ({
+        ...current,
+        x:
           drag.startX -
-          (event.clientX - drag.startClientX) / draft.viewport.zoom;
-        draft.viewport.y =
+          (event.clientX - drag.startClientX) / current.zoom,
+        y:
           drag.startY -
-          (event.clientY - drag.startClientY) / draft.viewport.zoom;
-      }, false);
+          (event.clientY - drag.startClientY) / current.zoom,
+      }));
     else if (drag.mode === "resize")
       mutate((draft) => {
         const node = draft.nodes.find(
@@ -755,14 +858,14 @@ export function WhiteboardStudio({
             48,
             snap(
               (drag.startWidth ?? node.width) +
-                (event.clientX - drag.startClientX) / draft.viewport.zoom,
+                (event.clientX - drag.startClientX) / viewport.zoom,
             ),
           );
           node.height = Math.max(
             40,
             snap(
               (drag.startHeight ?? node.height) +
-                (event.clientY - drag.startClientY) / draft.viewport.zoom,
+                (event.clientY - drag.startClientY) / viewport.zoom,
             ),
           );
         }
@@ -770,9 +873,9 @@ export function WhiteboardStudio({
     else
       mutate((draft) => {
         const deltaX =
-          (event.clientX - drag.startClientX) / draft.viewport.zoom;
+          (event.clientX - drag.startClientX) / viewport.zoom;
         const deltaY =
-          (event.clientY - drag.startClientY) / draft.viewport.zoom;
+          (event.clientY - drag.startClientY) / viewport.zoom;
         for (const [nodeId, start] of Object.entries(drag.nodeStarts ?? {})) {
           const node = draft.nodes.find((candidate) => candidate.id === nodeId);
           if (!node || node.locked) continue;
@@ -795,14 +898,15 @@ export function WhiteboardStudio({
     const before = worldPoint(event.clientX, event.clientY);
     const zoom = Math.max(
       0.1,
-      Math.min(4, board.viewport.zoom * Math.exp(-event.deltaY * 0.0015)),
+      Math.min(4, viewport.zoom * Math.exp(-event.deltaY * 0.0015)),
     );
     const bounds = event.currentTarget.getBoundingClientRect();
-    mutate((draft) => {
-      draft.viewport.zoom = zoom;
-      draft.viewport.x = before.x - (event.clientX - bounds.left) / zoom;
-      draft.viewport.y = before.y - (event.clientY - bounds.top) / zoom;
-    }, false);
+    setViewport((current) => ({
+      ...current,
+      zoom,
+      x: before.x - (event.clientX - bounds.left) / zoom,
+      y: before.y - (event.clientY - bounds.top) / zoom,
+    }));
   }
   function undoAction() {
     const previous = undo.at(-1);
@@ -961,9 +1065,10 @@ export function WhiteboardStudio({
     setSelectedNodeIds(childIds);
   }
   const setZoom = (zoom: number) =>
-    mutate((draft) => {
-      draft.viewport.zoom = Math.max(0.1, Math.min(4, zoom));
-    }, false);
+    setViewport((current) => ({
+      ...current,
+      zoom: Math.max(0.1, Math.min(4, zoom)),
+    }));
 
   async function insertImage(file: File) {
     if (readOnly) return;
@@ -1405,8 +1510,8 @@ export function WhiteboardStudio({
 
   function addPage() {
     const token = Date.now().toString(36);
+    const pageId = `page-${token}`;
     mutate((draft) => {
-      const pageId = `page-${token}`;
       draft.pages.push({ id: pageId, name: `Page ${draft.pages.length + 1}` });
       draft.layers.push({
         id: `layer-${token}`,
@@ -1415,8 +1520,8 @@ export function WhiteboardStudio({
         visible: true,
         locked: false,
       });
-      draft.viewport = { pageId, x: 0, y: 0, zoom: 1 };
     });
+    setViewport({ pageId, x: 0, y: 0, zoom: 1 });
   }
 
   function addLayer() {
@@ -1437,8 +1542,8 @@ export function WhiteboardStudio({
       (candidate) => candidate.visible && !candidate.locked,
     );
     if (!layer || readOnly) return;
-    const baseX = board.viewport.x + (kind === "concept" ? 72 : 180);
-    const baseY = board.viewport.y + (kind === "concept" ? 34 : 120);
+    const baseX = viewport.x + (kind === "concept" ? 72 : 180);
+    const baseY = viewport.y + (kind === "concept" ? 34 : 120);
     mutate((draft) => {
       const specs =
         kind === "concept"
@@ -1509,10 +1614,10 @@ export function WhiteboardStudio({
         data-compact={compact || undefined}
         style={
           {
-            "--board-zoom": board.viewport.zoom,
+            "--board-zoom": viewport.zoom,
             "--board-grid": `${board.settings?.gridSize ?? 24}px`,
-            "--board-x": `${-board.viewport.x * board.viewport.zoom}px`,
-            "--board-y": `${-board.viewport.y * board.viewport.zoom}px`,
+            "--board-x": `${-viewport.x * viewport.zoom}px`,
+            "--board-y": `${-viewport.y * viewport.zoom}px`,
             backgroundColor:
               page.background ?? board.settings?.canvasColor ?? "#fbfbf8",
           } as CSSProperties
@@ -1556,7 +1661,7 @@ export function WhiteboardStudio({
         <div
           className="whiteboard-world"
           style={{
-            transform: `translate(${-board.viewport.x * board.viewport.zoom}px, ${-board.viewport.y * board.viewport.zoom}px) scale(${board.viewport.zoom})`,
+            transform: `translate(${-viewport.x * viewport.zoom}px, ${-viewport.y * viewport.zoom}px) scale(${viewport.zoom})`,
           }}
         >
           <svg className="whiteboard-edges" aria-label="Connectors">
@@ -1855,6 +1960,7 @@ export function WhiteboardStudio({
           </span>
           <button
             type="button"
+            aria-label="Undo board change"
             onClick={undoAction}
             disabled={readOnly || !undo.length}
           >
@@ -1862,6 +1968,7 @@ export function WhiteboardStudio({
           </button>
           <button
             type="button"
+            aria-label="Redo board change"
             onClick={redoAction}
             disabled={readOnly || !redo.length}
           >
@@ -1869,14 +1976,16 @@ export function WhiteboardStudio({
           </button>
           <button
             type="button"
-            onClick={() => setZoom(board.viewport.zoom - 0.1)}
+            aria-label="Zoom out"
+            onClick={() => setZoom(viewport.zoom - 0.1)}
           >
             <ZoomOut className="h-4 w-4" />
           </button>
-          <strong>{Math.round(board.viewport.zoom * 100)}%</strong>
+          <strong>{Math.round(viewport.zoom * 100)}%</strong>
           <button
             type="button"
-            onClick={() => setZoom(board.viewport.zoom + 0.1)}
+            aria-label="Zoom in"
+            onClick={() => setZoom(viewport.zoom + 0.1)}
           >
             <ZoomIn className="h-4 w-4" />
           </button>
@@ -1953,10 +2062,11 @@ export function WhiteboardStudio({
                       type="button"
                       onClick={() => {
                         setSelectedNodeId(node.id);
-                        mutate((draft) => {
-                          draft.viewport.x = node.x - 300;
-                          draft.viewport.y = node.y - 200;
-                        }, false);
+                        setViewport((current) => ({
+                          ...current,
+                          x: node.x - 300,
+                          y: node.y - 200,
+                        }));
                       }}
                     >
                       <strong>
@@ -1979,10 +2089,11 @@ export function WhiteboardStudio({
                       type="button"
                       data-active={candidate.id === page.id || undefined}
                       onClick={() =>
-                        mutate((draft) => {
-                          draft.viewport.pageId = candidate.id;
-                          draft.viewport.x = 0;
-                          draft.viewport.y = 0;
+                        setViewport({
+                          pageId: candidate.id,
+                          x: 0,
+                          y: 0,
+                          zoom: 1,
                         })
                       }
                     >
@@ -2198,6 +2309,22 @@ export function WhiteboardStudio({
             </div>
           ) : null}
           {selectedNode && selectedNodeIds.length === 1 ? (
+            <button
+              type="button"
+              className="whiteboard-inspector-trigger"
+              aria-label={
+                inspectorOpen ? "Hide object details" : "Show object details"
+              }
+              aria-expanded={inspectorOpen}
+              onClick={() => setInspectorOpen((open) => !open)}
+            >
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+              <span>{inspectorOpen ? "Hide details" : "Object details"}</span>
+            </button>
+          ) : null}
+          {selectedNode &&
+          selectedNodeIds.length === 1 &&
+          inspectorOpen ? (
             <div className="whiteboard-inspector">
               <div>
                 <strong>

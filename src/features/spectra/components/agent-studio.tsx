@@ -7,7 +7,6 @@ import {
   Check,
   CheckCircle2,
   ChevronRight,
-  Download,
   Eye,
   Loader2,
   Plus,
@@ -43,7 +42,6 @@ import {
   manageSpectraAgentRelease,
   publishSpectraAgent,
   proposeSpectraAgentImprovement,
-  signSpectraAgentManifest,
   uploadArtifactImportOriginal,
   verifySpectraAgentManifest,
   type SpectraAgentAnalytics,
@@ -150,17 +148,6 @@ async function sha256Blob(blob: Blob) {
     .join("");
 }
 
-function downloadJson(name: string, value: unknown) {
-  const url = URL.createObjectURL(
-    new Blob([JSON.stringify(value, null, 2)], { type: "application/json" }),
-  );
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = name;
-  anchor.click();
-  setTimeout(() => URL.revokeObjectURL(url), 0);
-}
-
 function ChipsEditor({
   label,
   values,
@@ -175,6 +162,8 @@ function ChipsEditor({
   placeholder?: string;
 }) {
   const [draft, setDraft] = useState("");
+  const [expanded, setExpanded] = useState(false);
+  const visibleValues = expanded ? values : values.slice(0, 4);
   const add = () => {
     const value = draft.trim();
     if (!value) return;
@@ -185,7 +174,7 @@ function ChipsEditor({
     <label className="agent-field">
       <span>{label}</span>
       <div className="agent-chip-editor" data-tone={tone}>
-        {values.map((value) => (
+        {visibleValues.map((value) => (
           <button
             type="button"
             key={value}
@@ -196,6 +185,16 @@ function ChipsEditor({
             {value} <X />
           </button>
         ))}
+        {values.length > 4 ? (
+          <button
+            type="button"
+            className="agent-chip-overflow"
+            onClick={() => setExpanded((open) => !open)}
+            aria-expanded={expanded}
+          >
+            {expanded ? "Show less" : `+${values.length - 4} more`}
+          </button>
+        ) : null}
         <input
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
@@ -224,6 +223,7 @@ function ChipsEditor({
 export function AgentStudio({
   artifactId,
   artifactTitle,
+  mode,
   artifacts,
   content,
   onChange,
@@ -234,6 +234,7 @@ export function AgentStudio({
 }: {
   artifactId: string;
   artifactTitle: string;
+  mode: "split" | "tab";
   artifacts: SpectraArtifact[];
   content: unknown;
   onChange: (content: unknown) => void;
@@ -556,44 +557,6 @@ export function AgentStudio({
     }
   }
 
-  async function exportManifest() {
-    if (manifestBusy) return;
-    setManifestBusy("export");
-    setImportMessage(undefined);
-    try {
-      const response = await signSpectraAgentManifest({
-        format: "spectra.agent",
-        version: 1,
-        exportedAt: new Date().toISOString(),
-        content: agent,
-        resources: agent.resources.map(
-          ({ artifactId, label, mode, versionPolicy, pinnedVersionId }) => ({
-            artifactId,
-            label,
-            mode,
-            versionPolicy,
-            pinnedVersionId,
-          }),
-        ),
-      });
-      downloadJson(
-        `${artifactTitle.replace(/[^a-z0-9-_]+/gi, "-") || "agent"}.spectra-agent.json`,
-        response.manifest,
-      );
-      setImportMessage(
-        "Exported a server-signed portable manifest without secrets, private invocations, prompts, memory, or copied resource content.",
-      );
-    } catch (error) {
-      setImportMessage(
-        error instanceof Error
-          ? error.message
-          : "The signed manifest could not be exported.",
-      );
-    } finally {
-      setManifestBusy(null);
-    }
-  }
-
   async function importManifest(file: File) {
     if (manifestBusy || readOnly) return;
     setManifestBusy("import");
@@ -700,7 +663,7 @@ export function AgentStudio({
   const latestRelease = releases[0];
 
   return (
-    <div className="spectra-agent-studio" data-step={step + 1}>
+    <div className="spectra-agent-studio" data-step={step + 1} data-mode={mode}>
       <header className="agent-studio-topline">
         <div>
           <span
@@ -717,19 +680,7 @@ export function AgentStudio({
         </div>
         <div>
           <button type="button" onClick={() => setPreview(true)}>
-            <Eye /> Preview agent
-          </button>
-          <button
-            type="button"
-            onClick={() => void exportManifest()}
-            disabled={Boolean(manifestBusy)}
-          >
-            {manifestBusy === "export" ? (
-              <Loader2 className="animate-spin" />
-            ) : (
-              <Download />
-            )}{" "}
-            Export
+            <Eye /> <span>Preview</span>
           </button>
           <button
             type="button"
@@ -741,7 +692,7 @@ export function AgentStudio({
             ) : (
               <Upload />
             )}{" "}
-            Import
+            <span>Import</span>
           </button>
           <input
             ref={importRef}
@@ -899,16 +850,16 @@ export function AgentStudio({
             <div className="agent-step-content">
               <label className="agent-field">
                 <span>Who is this agent designed to help?</span>
-                  <textarea
-                    value={agent.profile.audienceIntent}
-                    readOnly={readOnly}
-                    data-ai-region={aiRegionAttr(
-                      pathTouches(aiChangedPaths, "/profile/audienceIntent"),
-                    )}
-                    {...targetAttrs("/profile/audienceIntent")}
-                    onChange={(event) =>
-                      updateProfile({ audienceIntent: event.target.value })
-                    }
+                <textarea
+                  value={agent.profile.audienceIntent}
+                  readOnly={readOnly}
+                  data-ai-region={aiRegionAttr(
+                    pathTouches(aiChangedPaths, "/profile/audienceIntent"),
+                  )}
+                  {...targetAttrs("/profile/audienceIntent")}
+                  onChange={(event) =>
+                    updateProfile({ audienceIntent: event.target.value })
+                  }
                   placeholder="Describe needs and context, not a product-role restriction."
                 />
                 <small>
@@ -2080,8 +2031,8 @@ export function AgentStudio({
                 </span>
               </div>
               <p>
-                Only this release&apos;s enabled instructions, tools, bindings, and
-                specialized context load after selection. Private prompts,
+                Only this release&apos;s enabled instructions, tools, bindings,
+                and specialized context load after selection. Private prompts,
                 memory, and invocation threads remain outside the artifact.
               </p>
             </section>

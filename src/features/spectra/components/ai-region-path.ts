@@ -506,7 +506,15 @@ export function preferStreamingContentSource(input: {
 }): "local" | "preview" {
   const { local, preview, blueprintKey, aiState } = input;
   if (preview === undefined) return "local";
-  if (aiState !== "creating" && aiState !== "updating") return "preview";
+  // Existing artifacts are performed by the collaboration actor. The Convex
+  // preview can arrive before that actor has acquired the native control; if
+  // it is rendered here, final content appears first and the caret/effects
+  // perform a disconnected reenactment afterward. Keep the durable editor
+  // stable until protocol-v2 awareness supplies the actor-owned speculative
+  // frames. Pending creates are different: their preview is the only canvas
+  // content until the live room is initialized.
+  if (aiState === "updating") return "local";
+  if (aiState !== "creating") return "preview";
   const localSize = primaryCollectionSize(blueprintKey, local);
   const previewSize = primaryCollectionSize(blueprintKey, preview);
   if (localSize > previewSize) return "local";

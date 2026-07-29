@@ -1,4 +1,5 @@
 import { mutation, query } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { getAuthenticatedActor } from "./identityShared";
@@ -406,20 +407,6 @@ export const pauseForRegionConflict = mutation({
         }),
       ),
     );
-    const job = await ctx.db
-      .query("spectraRunJobs")
-      .withIndex("by_run_execution", (q) =>
-        q.eq("runId", run._id).eq("executionId", args.executionId),
-      )
-      .unique();
-    if (job && job.status === "leased")
-      await ctx.db.patch(job._id, {
-        status: "completed",
-        workerId: undefined,
-        leaseExpiresAt: undefined,
-        completedAt: now,
-        updatedAt: now,
-      });
     return {
       operationId: operation._id,
       runId: run._id,
@@ -523,37 +510,6 @@ export const resumeAfterRegionConflict = mutation({
           : operation.input,
       conflict: undefined,
     });
-    const job = await ctx.db
-      .query("spectraRunJobs")
-      .withIndex("by_run_execution", (q) =>
-        q.eq("runId", run._id).eq("executionId", args.executionId),
-      )
-      .unique();
-    if (!job)
-      throw new Error(
-        "RUN_JOB_UNAVAILABLE: The durable operation queue is missing.",
-      );
-    const payload =
-      job.payload &&
-      typeof job.payload === "object" &&
-      !Array.isArray(job.payload)
-        ? (job.payload as Record<string, unknown>)
-        : {};
-    await ctx.db.patch(job._id, {
-      status: "queued",
-      payload: {
-        ...payload,
-        kind: "resume_operations",
-        conflictOperationId: operation._id,
-        collaborationClientId: operation.conflict.clientId,
-      },
-      availableAt: now,
-      workerId: undefined,
-      leaseExpiresAt: undefined,
-      completedAt: undefined,
-      lastError: undefined,
-      updatedAt: now,
-    });
     await ctx.db.patch(run._id, {
       status: "queued",
       phase: "applying",
@@ -566,6 +522,10 @@ export const resumeAfterRegionConflict = mutation({
       .query("spectraResultCards")
       .withIndex("by_run", (q) => q.eq("runId", run._id))
       .collect();
+    const resultCard = cards[0];
+    const actor = await getAuthenticatedActor(ctx);
+    if (!resultCard || !actor)
+      throw new Error("REGION_CONFLICT_RUN_STALE");
     await Promise.all(
       cards.map((card) =>
         ctx.db.patch(card._id, {
@@ -575,12 +535,24 @@ export const resumeAfterRegionConflict = mutation({
             ? "Applying the resolved edit"
             : "Continuing without the conflicting edit",
           summary: applying
-            ? "The region is available and the durable worker will apply the selected proposal."
+            ? "The region is available and Spectra is applying the selected proposal."
             : "Spectra kept the current region and will continue with any remaining independent work.",
           actions: [],
           updatedAt: now,
         }),
       ),
+    );
+    await ctx.scheduler.runAfter(
+      0,
+      internal.executionScheduler.dispatchSpectraResume,
+      {
+        actorClerkId: actor.clerkId,
+        runId: run._id,
+        resultCardId: resultCard._id,
+        executionId: args.executionId,
+        conflictOperationId: operation._id,
+        collaborationClientId: operation.conflict.clientId,
+      },
     );
     return { runId: run._id, operationId: operation._id, queued: true };
   },

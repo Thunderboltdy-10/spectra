@@ -96,7 +96,7 @@ export function noteAiLocation(update: {
   const sameArtifact = location?.artifactId === update.artifactId;
   // A coarse publisher (the run feed) names only the artifact; never let it
   // overwrite a precise path and note reported by the open studio.
-  location = {
+  const nextLocation: AiLocation = {
     artifactId: update.artifactId,
     ...(update.path !== undefined || !sameArtifact
       ? { path: update.path }
@@ -110,6 +110,14 @@ export function noteAiLocation(update: {
         : {}),
     updatedAt: Date.now(),
   };
+  const samePath = location?.path === nextLocation.path;
+  const sameNote = location?.note === nextLocation.note;
+  // A live interaction frame is often reconstructed from awareness on every
+  // beat. Publishing the same semantic location must be a no-op; otherwise the
+  // store re-renders ArtifactStudioEditor, which republishes the location, and
+  // React correctly stops the resulting external-store feedback loop.
+  if (sameArtifact && samePath && sameNote) return;
+  location = nextLocation;
   if (following && !sameArtifact) dispatchOpen(update.artifactId);
   emit();
 }

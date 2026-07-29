@@ -12,20 +12,24 @@
  */
 
 import { canonicalPath } from "./interaction-model";
+import type { ControlPrimitive } from "./interaction-model";
 
 export type TargetAttributes = {
   "data-spectra-target": string;
   "data-spectra-part"?: string;
+  "data-spectra-primitive"?: ControlPrimitive;
 };
 
 /** Annotate a control with its content path. */
 export function targetAttrs(
   path: string,
   part?: string,
+  primitive?: ControlPrimitive,
 ): TargetAttributes {
   return {
     "data-spectra-target": canonicalPath(path),
     ...(part ? { "data-spectra-part": part } : {}),
+    ...(primitive ? { "data-spectra-primitive": primitive } : {}),
   };
 }
 

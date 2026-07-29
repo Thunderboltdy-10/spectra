@@ -24,6 +24,9 @@ describe("pastTenseProgressTitle", () => {
     expect(pastTenseProgressTitle("Reading source material", true)).toBe(
       "Read source material",
     );
+    expect(pastTenseProgressTitle("Rewriting the overview", true)).toBe(
+      "Rewrote the overview",
+    );
     expect(pastTenseProgressTitle("Mapping the workspace", true)).toBe(
       "Mapped the workspace",
     );

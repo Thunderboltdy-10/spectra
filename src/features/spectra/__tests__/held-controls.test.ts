@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  controlOwnershipKey,
   heldControlsFrom,
   heldExplanation,
 } from "../collaboration/held-controls";
@@ -65,8 +66,9 @@ describe("heldControlsFrom", () => {
 
   it("does not hold a control a peer is merely hovering", () => {
     expect(
-      heldControlsFrom([state({ act: { kind: "hover", at: { x: 0.5, y: 0.5 } } })])
-        .size,
+      heldControlsFrom([
+        state({ act: { kind: "hover", at: { x: 0.5, y: 0.5 } } }),
+      ]).size,
     ).toBe(0);
     expect(heldControlsFrom([state({ act: { kind: "idle" } })]).size).toBe(0);
   });
@@ -126,5 +128,34 @@ describe("heldExplanation", () => {
     });
     expect(message).toContain("Pablo's AI");
     expect(message).toContain("other changes are unaffected");
+  });
+});
+
+describe("controlOwnershipKey", () => {
+  it("treats a sheet cell and its detached formula/value affordances as one control", () => {
+    expect(controlOwnershipKey("/sheets/0/cells/B4")).toBe(
+      "/sheets/0/cells/B4",
+    );
+    expect(controlOwnershipKey("/sheets/0/cells/B4/value")).toBe(
+      "/sheets/0/cells/B4",
+    );
+    expect(controlOwnershipKey("/sheets/0/cells/B4/formula")).toBe(
+      "/sheets/0/cells/B4",
+    );
+    expect(controlOwnershipKey("/sheets/0/cells/B4/format/bold")).toBe(
+      "/sheets/0/cells/B4",
+    );
+  });
+
+  it("does not widen ownership to neighbouring cells or structured fields", () => {
+    expect(controlOwnershipKey("/sheets/0/cells/B5")).toBe(
+      "/sheets/0/cells/B5",
+    );
+    expect(controlOwnershipKey("/questions/2/prompt")).toBe(
+      "/questions/2/prompt",
+    );
+    expect(controlOwnershipKey("/questions/2/options/0")).toBe(
+      "/questions/2/options/0",
+    );
   });
 });

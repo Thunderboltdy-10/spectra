@@ -38,7 +38,12 @@ import {
   useArtifactStudioState,
 } from "../components/artifact-studio";
 import { CommandBar } from "../components/command-bar";
+import {
+  ContextFocusControl,
+  type ComposerFocusMode,
+} from "../components/context-controls";
 import { ShareDialog } from "../components/share-dialog";
+import { useSpectraRun } from "../ai/use-spectra-run";
 import { normalizeAgentContent } from "../agents/model";
 import {
   addSpectraPublicAgent,
@@ -386,9 +391,28 @@ export function AgentLibraryShell() {
     "spectra.agentLibrary.studio",
     artifacts,
   );
+  const activeAgentArtifact = studio.activeArtifact;
+  const activeAgentArtifactId = activeAgentArtifact?._id;
+  const [focusMode, setFocusMode] = useState<ComposerFocusMode>(
+    activeAgentArtifact ? "artifact" : "global",
+  );
+  const runEngine = useSpectraRun({
+    surface: activeAgentArtifact ? "artifact" : "chat",
+    artifactId: activeAgentArtifactId,
+    focusMode,
+    selectedArtifactIds: activeAgentArtifact ? [activeAgentArtifact._id] : [],
+    currentView: activeAgentArtifact ? "agent-editor" : "agent-library",
+    onThreadReady: (threadId) => {
+      router.push(`/chat?threadId=${encodeURIComponent(threadId)}`);
+    },
+  });
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  useEffect(() => {
+    setFocusMode(activeAgentArtifactId ? "artifact" : "global");
+  }, [activeAgentArtifactId]);
+
+  const load = useCallback(async (quiet = false) => {
+    if (!quiet) setLoading(true);
     try {
       const [artifactResult, publicResult, workspaceResult] = await Promise.all(
         [
@@ -411,12 +435,28 @@ export function AgentLibraryShell() {
       );
       return [];
     } finally {
-      setLoading(false);
+      if (!quiet) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     void load();
+  }, [load]);
+
+  useEffect(() => {
+    const refreshVisible = () => {
+      if (document.visibilityState === "visible") void load(true);
+    };
+    const interval = window.setInterval(refreshVisible, 8_000);
+    window.addEventListener("focus", refreshVisible);
+    window.addEventListener("spectra:artifacts-changed", refreshVisible);
+    document.addEventListener("visibilitychange", refreshVisible);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refreshVisible);
+      window.removeEventListener("spectra:artifacts-changed", refreshVisible);
+      document.removeEventListener("visibilitychange", refreshVisible);
+    };
   }, [load]);
 
   useEffect(() => {
@@ -609,26 +649,23 @@ export function AgentLibraryShell() {
       onPrimary={() => primaryAction(card)}
     />
   );
-  const activeAgentArtifact = studio.activeArtifact;
   const artifactQuickChat = activeAgentArtifact ? (
     <div className="agent-library-composer pointer-events-none">
       <div className="pointer-events-auto w-full">
         <CommandBar
           className="w-full"
           placeholder={`Ask Spectra anything about ${activeAgentArtifact.title}…`}
-          onSubmit={(prompt) => {
-            router.push(
-              `/chat?prompt=${encodeURIComponent(
-                `For my agent artifact "${activeAgentArtifact.title}", ${prompt}`,
-              )}`,
-            );
-            return true;
-          }}
+          allowAttachments
+          busy={runEngine.submitting}
+          onStop={runEngine.stop}
+          onSubmit={(prompt, attachments) => runEngine.run(prompt, attachments)}
           context={
-            <span className="flex h-full min-w-[88px] items-center gap-2 px-3 text-[11px] font-semibold text-[var(--text-primary)]">
-              <Bot className="size-4 shrink-0 text-[var(--brand-primary)]" />
-              Agent
-            </span>
+            <ContextFocusControl
+              mode={focusMode}
+              onModeChange={setFocusMode}
+              artifact={activeAgentArtifact}
+              selectedCount={1}
+            />
           }
         />
       </div>
@@ -861,19 +898,17 @@ export function AgentLibraryShell() {
             <CommandBar
               className="w-full"
               placeholder="Ask Spectra anything about agents…"
-              onSubmit={(prompt) => {
-                router.push(
-                  `/chat?prompt=${encodeURIComponent(
-                    `About my Spectra agents, ${prompt}`,
-                  )}`,
-                );
-                return true;
-              }}
+              allowAttachments
+              busy={runEngine.submitting}
+              onStop={runEngine.stop}
+              onSubmit={(prompt, attachments) =>
+                runEngine.run(prompt, attachments)
+              }
               context={
-                <span className="flex h-full min-w-[88px] items-center gap-2 px-3 text-[11px] font-semibold text-[var(--text-primary)]">
-                  <Bot className="size-4 shrink-0 text-[var(--brand-primary)]" />
-                  Agents
-                </span>
+                <ContextFocusControl
+                  mode={focusMode}
+                  onModeChange={setFocusMode}
+                />
               }
               menu={
                 <button

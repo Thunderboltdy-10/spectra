@@ -4,6 +4,7 @@ const IRREGULAR_PROGRESS_VERBS: Record<string, string> = {
   doing: "did",
   making: "made",
   reading: "read",
+  rewriting: "rewrote",
   running: "ran",
   taking: "took",
   writing: "wrote",

@@ -855,9 +855,9 @@ body {
 }
 
 .spectra-deck-menu-trigger {
-  position: absolute !important;
-  top: -59px;
-  left: 588px;
+  position: static !important;
+  top: auto;
+  left: auto;
   z-index: 2;
 }
 
@@ -902,15 +902,15 @@ body {
 }
 
 .spectra-deck-pagination {
-  position: absolute;
-  left: calc(376px + (100% - 394px) / 2);
-  transform: translateX(-50%);
+  position: static;
+  left: auto;
+  transform: none;
 }
 
 .spectra-deck-view-switch {
-  position: absolute;
-  right: 0;
-  top: 1px;
+  position: static;
+  right: auto;
+  top: auto;
 }
 
 .spectra-deck-view-switch button {
@@ -925,6 +925,211 @@ body {
 .spectra-deck-view-switch button[data-active="true"] {
   background: var(--bg-secondary);
   color: var(--text-primary);
+}
+
+.spectra-deck-mode-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border-default);
+  border-radius: 9px;
+  background: var(--bg-secondary);
+}
+
+.spectra-deck-rail-toggle {
+  display: inline-flex;
+  height: 35px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid var(--border-default);
+  border-radius: 8px;
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 620;
+}
+
+.spectra-deck-rail-toggle:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.spectra-flashcard-studio[data-rail-collapsed="true"] > aside {
+  display: none !important;
+}
+
+.spectra-flashcard-studio[data-rail-collapsed="true"]
+  > .spectra-deck-card-editor {
+  grid-column: 1 / -1;
+}
+
+.spectra-deck-mode-switch button {
+  display: inline-flex;
+  height: 29px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 650;
+  transition:
+    background-color 150ms ease,
+    color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.spectra-deck-mode-switch button[data-active="true"] {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  box-shadow: 0 1px 3px rgba(30, 27, 24, 0.1);
+}
+
+.spectra-deck-pagination select {
+  width: min(310px, 34vw);
+  min-width: 150px;
+  height: 32px;
+  padding: 0 30px 0 10px;
+  border: 1px solid var(--border-default);
+  border-radius: 7px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 590;
+  outline: none;
+  text-overflow: ellipsis;
+}
+
+.spectra-flashcard-studio[data-studio-view="view"] > .spectra-deck-metrics,
+.spectra-flashcard-studio[data-studio-view="view"] > aside,
+.spectra-flashcard-studio[data-studio-view="view"] > .spectra-deck-card-editor,
+.spectra-flashcard-studio[data-studio-view="view"] .spectra-deck-edit-action {
+  display: none !important;
+}
+
+.spectra-deck-viewer {
+  display: flex;
+  min-height: min(620px, calc(100vh - 310px));
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 14px;
+  padding: clamp(18px, 4vw, 54px);
+}
+
+.spectra-artifact-studio[data-studio-mode="tab"] .spectra-deck-viewer {
+  grid-column: 1 / -1;
+}
+
+.spectra-artifact-studio[data-studio-mode="split"][data-blueprint="flashcard_deck"]
+  .spectra-deck-metrics {
+  display: none !important;
+}
+
+.spectra-deck-viewer-context {
+  display: flex;
+  width: min(760px, 100%);
+  align-items: center;
+  justify-content: space-between;
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+.spectra-deck-viewer-context strong {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.spectra-deck-viewer-card {
+  display: flex;
+  width: min(760px, 100%);
+  min-height: clamp(300px, 47vh, 480px);
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 18px;
+  padding: clamp(32px, 7vw, 82px);
+  border: 1px solid var(--border-default);
+  border-radius: 18px;
+  background: linear-gradient(
+    145deg,
+    color-mix(in oklab, #7560e8 4%, var(--bg-primary)),
+    var(--bg-primary) 58%
+  );
+  color: var(--text-primary);
+  box-shadow: 0 26px 70px -44px rgba(62, 48, 137, 0.45);
+  text-align: center;
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    transform 180ms ease;
+}
+
+.spectra-deck-viewer-card:hover {
+  border-color: color-mix(in oklab, #7560e8 34%, var(--border-default));
+  box-shadow: 0 30px 76px -42px rgba(62, 48, 137, 0.52);
+  transform: translateY(-1px);
+}
+
+.spectra-deck-viewer-card > span {
+  color: #6b57d5;
+  font-size: 10px;
+  font-weight: 760;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.spectra-deck-viewer-copy {
+  max-width: 620px;
+  font-family: var(--font-display), var(--font-sans), sans-serif;
+  font-size: clamp(24px, 3.2vw, 42px);
+  font-weight: 570;
+  line-height: 1.28;
+}
+
+.spectra-deck-viewer-copy > :first-child {
+  margin-top: 0;
+}
+
+.spectra-deck-viewer-copy > :last-child {
+  margin-bottom: 0;
+}
+
+.spectra-deck-viewer-copy :is(ol, ul) {
+  display: grid;
+  gap: 10px;
+  padding-left: 1.3em;
+  text-align: left;
+}
+
+.spectra-deck-viewer-card[data-density="compact"] .spectra-deck-viewer-copy {
+  font-size: clamp(20px, 2.5vw, 32px);
+}
+
+.spectra-deck-viewer-card[data-density="dense"] {
+  gap: 13px;
+  padding: clamp(24px, 4vw, 48px);
+}
+
+.spectra-deck-viewer-card[data-density="dense"] .spectra-deck-viewer-copy {
+  font-size: clamp(17px, 2vw, 25px);
+  line-height: 1.36;
+}
+
+.spectra-deck-viewer-card > small {
+  max-width: 560px;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.spectra-deck-viewer-card > em {
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-style: normal;
 }
 
 .spectra-deck-card-editor {
@@ -1160,6 +1365,7 @@ body {
 /* Reference 03: compact, full-height formative quiz authoring surface. */
 .spectra-artifact-studio[data-blueprint="quiz"] .spectra-artifact-main {
   padding-bottom: 0;
+  background: transparent;
 }
 
 .spectra-artifact-studio[data-blueprint="quiz"]
@@ -1504,8 +1710,9 @@ body {
   user-select: none;
   background-image: radial-gradient(circle, #d8dcd6 1px, transparent 1.15px);
   background-position: var(--board-x) var(--board-y);
-  background-size: calc(var(--board-grid) * var(--board-zoom))
-    calc(var(--board-grid) * var(--board-zoom));
+  /* The grid is a calm screen-space navigation texture. Zooming the world must
+     not make its dots balloon, disappear, or change density. */
+  background-size: var(--board-grid) var(--board-grid);
 }
 
 .whiteboard-canvas[data-tool="hand"] {
@@ -1581,6 +1788,10 @@ body {
   transition:
     box-shadow 150ms ease,
     outline-color 150ms ease;
+}
+
+.whiteboard-node[data-selected="true"] {
+  z-index: 1000 !important;
 }
 
 .whiteboard-node[data-type="text"],
@@ -1759,6 +1970,28 @@ body {
   background: #745fe7;
   box-shadow: 0 2px 6px rgba(47, 34, 113, 0.28);
   cursor: nwse-resize;
+}
+
+.whiteboard-node-edit {
+  position: absolute;
+  z-index: 4;
+  top: 6px;
+  right: 6px;
+  display: inline-flex;
+  width: 27px;
+  height: 27px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in oklab, #7158e8 45%, #fff);
+  border-radius: 8px;
+  background: #fff;
+  color: #6551d4;
+  box-shadow: 0 4px 12px rgba(57, 43, 113, 0.16);
+  cursor: text;
+}
+
+.whiteboard-node-edit:hover {
+  background: #f4f1ff;
 }
 
 .whiteboard-empty-media,
@@ -2047,7 +2280,7 @@ body {
 .whiteboard-inspector {
   position: absolute;
   z-index: 15;
-  top: 14px;
+  top: 58px;
   right: 14px;
   display: grid;
   width: 224px;
@@ -2058,6 +2291,37 @@ body {
   background: rgba(255, 255, 255, 0.96);
   box-shadow: 0 13px 34px rgba(39, 52, 45, 0.11);
   backdrop-filter: blur(16px);
+}
+
+.whiteboard-inspector-trigger {
+  position: absolute;
+  z-index: 18;
+  top: 14px;
+  right: 14px;
+  display: inline-flex;
+  height: 34px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid #dedfdc;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.96);
+  color: #59645f;
+  font-size: 11px;
+  font-weight: 650;
+  box-shadow: 0 8px 22px rgba(39, 52, 45, 0.09);
+  backdrop-filter: blur(14px);
+  transition:
+    background 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease;
+}
+
+.whiteboard-inspector-trigger:hover,
+.whiteboard-inspector-trigger[aria-expanded="true"] {
+  border-color: #cfc8ef;
+  background: #f7f5ff;
+  color: #5f4fd0;
 }
 
 .whiteboard-multi-toolbar {
@@ -6963,10 +7227,7 @@ button[data-spectra-context-trigger="true"]::after {
 .presentation-studio {
   container: presentation-studio / inline-size;
   overflow: hidden;
-  border: 1px solid var(--border-default);
-  border-radius: 12px;
-  background: var(--bg-elevated);
-  box-shadow: 0 20px 56px -46px rgba(44, 33, 86, 0.5);
+  background: transparent;
 }
 
 .presentation-primary-bar {
@@ -6977,7 +7238,7 @@ button[data-spectra-context-trigger="true"]::after {
   gap: 12px;
   border-bottom: 1px solid var(--border-default);
   padding: 0 16px;
-  background: color-mix(in oklab, var(--bg-elevated) 95%, transparent);
+  background: var(--bg-elevated);
 }
 
 .presentation-primary-bar > div:first-child {
@@ -7041,6 +7302,7 @@ button[data-spectra-context-trigger="true"]::after {
   overflow-x: auto;
   border-bottom: 1px solid var(--border-default);
   padding: 7px 12px;
+  background: var(--bg-elevated);
   scrollbar-width: thin;
 }
 
@@ -7154,7 +7416,6 @@ button[data-spectra-context-trigger="true"]::after {
 }
 
 .presentation-slide-rail {
-  max-height: 780px;
   overflow-y: auto;
   border-right: 1px solid var(--border-default);
   padding: 10px;
@@ -7189,7 +7450,7 @@ button[data-spectra-context-trigger="true"]::after {
 
 .presentation-slide-rail > button > span {
   padding-top: 4px;
-  font-size: 8px;
+  font-size: 9px;
   font-weight: 700;
   text-align: center;
 }
@@ -7207,7 +7468,7 @@ button[data-spectra-context-trigger="true"]::after {
   overflow: hidden;
   padding: 1px 2px 2px;
   color: var(--text-secondary);
-  font-size: 7px;
+  font-size: 9px;
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -7231,6 +7492,55 @@ button[data-spectra-context-trigger="true"]::after {
   min-width: 0;
   padding: 22px;
   background: color-mix(in oklab, var(--bg-secondary) 54%, var(--bg-primary));
+}
+
+.presentation-workspace[data-rail-collapsed="true"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.presentation-slide-switcher {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  gap: 10px;
+  margin: -8px 0 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 0 2px 10px;
+  color: var(--text-tertiary);
+  font-size: 10px;
+}
+
+.presentation-slide-switcher select {
+  min-width: 0;
+  flex: 1;
+  height: 32px;
+  border: 1px solid var(--border-default);
+  border-radius: 7px;
+  background: var(--bg-elevated);
+  padding: 0 30px 0 10px;
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.presentation-slide-switcher button {
+  height: 30px;
+  flex: none;
+  border-radius: 6px;
+  padding: 0 9px;
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.presentation-slide-switcher button:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.presentation-slide-switcher button:disabled {
+  cursor: default;
+  opacity: 0.32;
 }
 
 .presentation-canvas {
@@ -8395,7 +8705,7 @@ button[data-spectra-context-trigger="true"]::after {
   inset: 0;
   /* Presentation mode must sit above the persistent command composer,
      dialogs, and shell chrome while the document element is fullscreen. */
-  z-index: 9999;
+  z-index: 2147483000;
   display: grid;
   grid-template-rows: 52px minmax(0, 1fr) 108px;
   background: #11120f;
@@ -8559,7 +8869,7 @@ button[data-spectra-context-trigger="true"]::after {
     var(--bg-secondary) 62%,
     var(--bg-elevated)
   );
-  box-shadow: 0 18px 44px -40px rgba(33, 43, 38, 0.34);
+  box-shadow: none;
 }
 
 .sheets-menu-bar,
@@ -8572,12 +8882,20 @@ button[data-spectra-context-trigger="true"]::after {
   align-items: center;
 }
 
+.sheets-top-bars {
+  position: sticky;
+  z-index: 35;
+  top: 0;
+  background: var(--bg-elevated);
+  box-shadow: 0 1px var(--border-subtle);
+}
+
 .sheets-menu-bar {
   min-height: 36px;
   gap: 1px;
   border-bottom: 1px solid var(--border-subtle);
   padding: 0 11px;
-  background: color-mix(in oklab, var(--bg-elevated) 96%, transparent);
+  background: var(--bg-elevated);
 }
 
 .sheets-menu-trigger {
@@ -8641,6 +8959,7 @@ button[data-spectra-context-trigger="true"]::after {
   overflow-x: auto;
   border-bottom: 1px solid var(--border-subtle);
   padding: 4px 10px;
+  background: var(--bg-elevated);
   scrollbar-width: none;
 }
 
@@ -8737,7 +9056,7 @@ button[data-spectra-context-trigger="true"]::after {
 .sheets-formula-bar {
   height: 38px;
   border-bottom: 1px solid var(--border-default);
-  background: var(--bg-primary);
+  background: var(--bg-elevated);
 }
 
 .sheets-name-box {
@@ -8884,8 +9203,8 @@ button[data-spectra-context-trigger="true"]::after {
 
 .sheets-grid-frame {
   display: grid;
-  height: min(46vh, 520px);
-  min-height: 330px;
+  height: max(420px, 52dvh);
+  min-height: 420px;
   grid-template-columns: var(--sheet-row-header) minmax(0, 1fr);
   grid-template-rows: var(--sheet-column-header) minmax(0, 1fr);
   overflow: hidden;
@@ -8993,7 +9312,19 @@ button[data-spectra-context-trigger="true"]::after {
 }
 
 .sheets-cell[data-selected="true"] {
-  background-color: color-mix(in oklab, #169b69 5%, var(--bg-primary));
+  background-color: color-mix(in oklab, #7066ed 6%, var(--bg-primary));
+}
+.sheets-cell[data-selection-top="true"] {
+  border-top: 2px solid #7066ed;
+}
+.sheets-cell[data-selection-right="true"] {
+  border-right: 2px solid #7066ed;
+}
+.sheets-cell[data-selection-bottom="true"] {
+  border-bottom: 2px solid #7066ed;
+}
+.sheets-cell[data-selection-left="true"] {
+  border-left: 2px solid #7066ed;
 }
 .sheets-cell[data-frozen-row="true"],
 .sheets-cell[data-frozen-column="true"] {
@@ -9203,6 +9534,26 @@ button[data-spectra-context-trigger="true"]::after {
   background: color-mix(in oklab, var(--bg-primary) 86%, var(--bg-elevated));
   padding: 16px;
 }
+.sheets-analysis-toggle {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: 7px;
+  color: var(--text-tertiary);
+  transition:
+    background-color 140ms ease,
+    color 140ms ease;
+}
+.sheets-analysis-toggle:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.sheets-analysis-toggle svg {
+  width: 15px;
+  height: 15px;
+  transition: transform 160ms ease;
+}
 .sheets-secondary-button {
   display: inline-flex;
   height: 32px;
@@ -9337,17 +9688,9 @@ button[data-spectra-context-trigger="true"]::after {
    keeping expert configuration progressively disclosed by step. */
 .spectra-agent-studio {
   --agent-accent: #7865ed;
-  overflow: hidden;
-  border: 1px solid var(--border-default);
-  border-radius: 12px;
-  background:
-    radial-gradient(
-      circle at 12% 0%,
-      rgba(120, 101, 237, 0.035),
-      transparent 28%
-    ),
-    color-mix(in oklab, var(--bg-elevated) 96%, transparent);
-  box-shadow: 0 20px 56px -48px rgba(39, 28, 89, 0.42);
+  container-type: inline-size;
+  overflow: visible;
+  background: transparent;
 }
 .agent-studio-topline {
   display: flex;
@@ -9428,7 +9771,6 @@ button[data-spectra-context-trigger="true"]::after {
 }
 .agent-studio-layout {
   display: grid;
-  min-height: 640px;
   grid-template-columns: 232px minmax(0, 1fr);
 }
 .agent-studio-layout > nav {
@@ -9624,7 +9966,7 @@ button[data-spectra-context-trigger="true"]::after {
   background: var(--bg-primary);
   padding: 9px;
 }
-.agent-chip-editor > button:not(.agent-chip-add) {
+.agent-chip-editor > button:not(.agent-chip-add):not(.agent-chip-overflow) {
   display: inline-flex;
   height: 25px;
   align-items: center;
@@ -9636,12 +9978,14 @@ button[data-spectra-context-trigger="true"]::after {
   color: #137854;
   font-size: 8px;
 }
-.agent-chip-editor[data-tone="orange"] > button:not(.agent-chip-add) {
+.agent-chip-editor[data-tone="orange"]
+  > button:not(.agent-chip-add):not(.agent-chip-overflow) {
   border-color: color-mix(in oklab, #dc8124 22%, var(--border-default));
   background: color-mix(in oklab, #dc8124 7%, var(--bg-primary));
   color: #b46012;
 }
-.agent-chip-editor[data-tone="violet"] > button:not(.agent-chip-add) {
+.agent-chip-editor[data-tone="violet"]
+  > button:not(.agent-chip-add):not(.agent-chip-overflow) {
   border-color: color-mix(
     in oklab,
     var(--agent-accent) 22%,
@@ -9674,6 +10018,19 @@ button[data-spectra-context-trigger="true"]::after {
   color: var(--text-tertiary);
 }
 .agent-chip-add:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.agent-chip-overflow {
+  height: 25px;
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  padding: 0 8px;
+  color: var(--text-secondary);
+  font-size: 8px;
+  font-weight: 700;
+}
+.agent-chip-overflow:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
 }
@@ -10589,6 +10946,29 @@ button[data-spectra-context-trigger="true"]::after {
   overflow-y: auto;
   white-space: pre-wrap;
 }
+/* Agent configuration is dense, but it must remain comfortably readable in
+   both a studio tile and fullscreen. Earlier 7â€“9px rules came from the old
+   desktop-only comp and made the responsive version technically fit while
+   becoming visually unusable. */
+.spectra-agent-studio
+  :where(p, small, label, button, input, textarea, select, strong) {
+  font-size: 11px !important;
+}
+.spectra-agent-studio :where(input, textarea, select) {
+  font-size: 12px !important;
+  line-height: 1.55;
+}
+.spectra-agent-studio .agent-field > span,
+.spectra-agent-studio .agent-studio-layout > nav strong {
+  font-size: 11.5px !important;
+}
+.spectra-agent-studio .agent-studio-layout > nav small,
+.spectra-agent-studio .agent-studio-layout > main > header p {
+  font-size: 10px !important;
+}
+.spectra-agent-studio .agent-studio-layout > main > header h2 {
+  font-size: 19px;
+}
 @media (max-width: 920px) {
   .agent-studio-layout {
     grid-template-columns: 1fr;
@@ -10639,6 +11019,95 @@ button[data-spectra-context-trigger="true"]::after {
   }
   .agent-review-summary dl {
     grid-template-columns: repeat(2, 1fr);
+  }
+}
+@container (max-width: 920px) {
+  .agent-studio-layout {
+    grid-template-columns: 1fr;
+  }
+  .agent-studio-layout > nav {
+    position: sticky;
+    z-index: 12;
+    top: 0;
+    display: flex;
+    gap: 3px;
+    overflow: hidden;
+    border-right: 0;
+    border-bottom: 1px solid var(--border-subtle);
+    background: color-mix(in oklab, var(--bg-primary) 94%, transparent);
+    padding: 6px 10px;
+    backdrop-filter: blur(14px);
+  }
+  .agent-studio-layout > nav > button {
+    display: grid;
+    width: 34px;
+    min-width: 34px;
+    min-height: 34px;
+    flex: 0 0 34px;
+    grid-template-columns: 22px;
+    align-items: center;
+    justify-content: center;
+    padding: 5px;
+  }
+  .agent-studio-layout > nav > button::after,
+  .agent-studio-layout > nav > button > svg,
+  .agent-studio-layout > nav > button > span:nth-child(2) {
+    display: none;
+  }
+  .agent-studio-layout > nav > button.is-active {
+    min-width: 140px;
+    flex: 1 1 180px;
+    grid-template-columns: 22px minmax(0, 1fr);
+    justify-content: start;
+  }
+  .agent-studio-layout > nav > button.is-active > span:nth-child(2) {
+    display: block;
+    min-width: 0;
+  }
+  .agent-studio-layout > nav > button.is-active small {
+    display: none;
+  }
+  .agent-studio-layout > main {
+    padding: 14px 14px 0;
+  }
+  .agent-two-column,
+  .agent-choice-grid,
+  .agent-tool-grid {
+    grid-template-columns: 1fr;
+  }
+}
+@container (max-width: 560px) {
+  .agent-studio-topline {
+    min-height: 46px;
+    gap: 8px;
+    padding-inline: 12px;
+  }
+  .agent-studio-topline p {
+    display: none;
+  }
+  .agent-studio-topline > div:last-child {
+    flex-shrink: 0;
+  }
+  .agent-studio-topline button {
+    width: 31px;
+    justify-content: center;
+    padding: 0;
+  }
+  .agent-studio-topline button span {
+    display: none;
+  }
+  .agent-studio-layout > nav {
+    overflow-x: auto;
+  }
+  .agent-studio-layout > nav > button.is-active {
+    min-width: 116px;
+  }
+  .agent-step-content {
+    gap: 14px;
+    padding-top: 14px;
+  }
+  .agent-chip-editor {
+    min-height: 58px;
   }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -12296,7 +12765,7 @@ button[data-spectra-context-trigger="true"]::after {
 
 .spectra-deck-study {
   position: fixed;
-  z-index: 1000;
+  z-index: 2147483000;
   inset: 0;
   display: grid;
   grid-template-rows: 58px minmax(0, 1fr) auto;
@@ -13633,10 +14102,15 @@ button[data-spectra-context-trigger="true"]::after {
 
 .spectra-quiz-studio {
   border-top: 1px solid var(--border-default);
+  border-radius: 0 !important;
+  background: transparent;
+  box-shadow: none !important;
 }
 
 .spectra-quiz-studio > div:first-child {
   min-height: 44px;
+  background: transparent;
+  backdrop-filter: none;
 }
 
 .spectra-artifact-studio[data-blueprint="quiz"]
@@ -13649,15 +14123,17 @@ button[data-spectra-context-trigger="true"]::after {
 
 .spectra-quiz-studio [data-quiz-panel="questions"] {
   padding: 12px 10px;
+  background: transparent !important;
 }
 
 .spectra-quiz-studio [data-quiz-panel="editor"] {
   padding: 12px;
+  background: transparent;
 }
 
 .spectra-quiz-studio [data-quiz-panel="settings"] {
   padding: 24px 12px 12px;
-  background: color-mix(in oklab, var(--bg-secondary) 24%, var(--bg-elevated));
+  background: transparent;
 }
 
 .spectra-quiz-question-editor > .mb-4 {
@@ -14347,8 +14823,8 @@ body {
 }
 
 .spectra-artifact-studio[data-blueprint="presentation"] .presentation-studio {
-  border-radius: 7px;
-  background: #fffefd;
+  border-radius: 0;
+  background: transparent;
   box-shadow: none;
 }
 
@@ -14426,6 +14902,11 @@ body {
   .presentation-workspace {
   min-height: 690px;
   grid-template-columns: 184px minmax(0, 1fr);
+}
+
+.spectra-artifact-studio[data-blueprint="presentation"]
+  .presentation-workspace[data-rail-collapsed="true"] {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .spectra-artifact-studio[data-blueprint="presentation"]
@@ -14689,11 +15170,6 @@ body {
   line-height: 16px !important;
 }
 
-.spectra-artifact-studio[data-blueprint="sheets"] .sheets-grid-frame {
-  height: 330px !important;
-  min-height: 330px !important;
-}
-
 .spectra-artifact-studio[data-blueprint="presentation"] .presentation-notes {
   margin-top: 10px;
   border-radius: 5px;
@@ -14766,6 +15242,7 @@ body {
 .spectra-artifact-header .spectra-artifact-identity {
   min-width: 0;
   padding-top: 5px !important;
+  padding-bottom: 12px !important;
 }
 
 .spectra-artifact-header-actions {
@@ -15018,8 +15495,15 @@ body {
   .spectra-artifact-studio[data-blueprint="planner_task"]:not(
       [data-studio-mode="split"]
     )
-    .spectra-planner-studio {
+    .spectra-planner-studio[data-inspector-open="true"] {
     grid-template-columns: minmax(0, 1fr) 332px !important;
+  }
+
+  .spectra-artifact-studio[data-blueprint="planner_task"]:not(
+      [data-studio-mode="split"]
+    )
+    .spectra-planner-studio:not([data-inspector-open="true"]) {
+    grid-template-columns: minmax(0, 1fr) !important;
   }
 
   .spectra-artifact-studio[data-blueprint="planner_task"]:not(
@@ -15322,7 +15806,7 @@ body {
 .spectra-presence-cursor {
   color: var(--presence-color);
   will-change: left, top;
-  transform-origin: 3px 2px;
+  transform-origin: 4px 3px;
   transition: transform 160ms var(--ease-standard);
 }
 
@@ -15345,6 +15829,35 @@ body {
   box-shadow: inset 0 -1.5px 0
     color-mix(in oklab, var(--presence-color) 34%, transparent);
   animation: spectra-presence-provisional 220ms var(--ease-standard) both;
+}
+
+.spectra-presence-provisional-copy {
+  z-index: 1;
+  overflow: hidden;
+  padding: 7px 9px;
+  border-radius: 4px;
+  background: color-mix(
+    in oklab,
+    var(--bg-elevated) 96%,
+    var(--presence-color)
+  );
+  color: var(--text-primary);
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  box-shadow:
+    inset 0 -1.5px 0 color-mix(in oklab, var(--presence-color) 44%, transparent),
+    inset 0 0 0 1px color-mix(in oklab, var(--presence-color) 12%, transparent);
+  animation: spectra-presence-provisional 140ms var(--ease-standard) both;
+}
+
+.spectra-presence-provisional-copy[data-primitive="text"],
+.spectra-presence-provisional-copy[data-primitive="code"] {
+  display: flex;
+  align-items: center;
+  padding-block: 0;
+  white-space: nowrap;
 }
 
 /* Typed ink: one soft sweep that travels along the line being written, timed
@@ -15373,16 +15886,18 @@ body {
 
 .spectra-presence-glyph {
   position: absolute;
-  left: -2px;
-  top: -1px;
+  left: -3px;
+  top: -2px;
   display: block;
+  width: 20px;
+  height: 20px;
   filter: drop-shadow(0 1px 1.5px rgba(26, 20, 14, 0.16));
 }
 
 .spectra-presence-flag {
   position: absolute;
-  left: 11px;
-  top: 13px;
+  left: 14px;
+  top: 16px;
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -15600,9 +16115,23 @@ body {
 
 [data-spectra-held] {
   position: relative;
-  /* A held control accepts focus and selection; only the keystroke is
-     declined, so the caret is never yanked out of the user's hands. */
   caret-color: transparent;
+  cursor: not-allowed !important;
+}
+
+[data-spectra-held="human"] {
+  box-shadow: inset 0 0 0 1px
+    color-mix(in oklab, var(--text-tertiary) 34%, transparent) !important;
+  background-color: color-mix(
+    in oklab,
+    var(--text-tertiary) 4%,
+    var(--bg-primary)
+  ) !important;
+  background-image: repeating-linear-gradient(
+    135deg,
+    transparent 0 6px,
+    color-mix(in oklab, var(--text-tertiary) 7%, transparent) 6px 12px
+  ) !important;
 }
 
 [data-spectra-held]::after {
@@ -15771,6 +16300,207 @@ body {
 @media (prefers-reduced-motion: reduce) {
   [data-spectra-held]::after,
   .spectra-held-notice {
+    animation: none;
+  }
+}
+
+/* Collaboration recovery is contextual chrome, not artifact content. The
+   zero-height anchor in ArtifactStudio keeps reconnect cycles from reflowing
+   every editor while preserving an obvious local recovery action. */
+.spectra-collaboration-notice {
+  max-width: min(520px, calc(100vw - 28px));
+  padding: 8px 10px;
+  border: 1px solid color-mix(in oklab, #d88922 30%, var(--border-default));
+  border-radius: 9px;
+  background: color-mix(in oklab, var(--bg-elevated) 94%, #fff6e7);
+  box-shadow: 0 14px 34px -22px rgba(72, 47, 17, 0.55);
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.35;
+  backdrop-filter: blur(14px) saturate(1.08);
+  animation: spectra-held-notice 180ms var(--ease-standard) both;
+}
+
+.spectra-planner-description-preview {
+  padding: 12px 14px 14px;
+  border: 1px solid var(--border-default);
+  border-radius: 9px;
+  background: color-mix(in oklab, white 54%, var(--bg-primary));
+}
+
+.spectra-planner-description-preview-copy {
+  position: relative;
+  max-height: 132px;
+  margin-top: 8px;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 12.5px;
+  line-height: 1.55;
+  mask-image: linear-gradient(to bottom, #000 0 78%, transparent 100%);
+}
+
+.spectra-planner-description-preview-copy :is(h1, h2, h3, p, ul, ol) {
+  margin: 0 0 5px;
+}
+
+.spectra-planner-description-preview-copy :is(ul, ol) {
+  padding-left: 19px;
+}
+
+.spectra-planner-description-preview-copy ul {
+  list-style: disc;
+}
+
+.spectra-planner-description-preview-copy ol {
+  list-style: decimal;
+}
+
+/* Formatting is available everywhere text carries meaning, but compact fields
+   do not lead with a toolbar. Focusing the native editor reveals the same
+   bold/link/list/equation controls used by the long-form editor. */
+.spectra-rich-text-editor[data-rich-text-variant="compact"] > [role="toolbar"],
+.spectra-rich-text-editor[data-rich-text-variant="card"] > [role="toolbar"],
+.spectra-rich-text-editor[data-rich-text-collapsible="true"]
+  > [role="toolbar"] {
+  min-height: 0;
+  max-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  overflow: hidden;
+  border-bottom-color: transparent;
+  opacity: 0;
+  transition:
+    max-height 160ms var(--ease-standard),
+    padding 160ms var(--ease-standard),
+    opacity 120ms var(--ease-standard);
+}
+
+.spectra-rich-text-editor[data-rich-text-collapsible="true"]:not(:focus-within)
+  > [role="toolbar"] {
+  height: 0 !important;
+  min-height: 0 !important;
+  max-height: 0 !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  border-bottom-width: 0 !important;
+}
+
+.spectra-rich-text-editor[data-rich-text-variant="compact"]:focus-within
+  > [role="toolbar"],
+.spectra-rich-text-editor[data-rich-text-variant="card"]:focus-within
+  > [role="toolbar"],
+.spectra-rich-text-editor[data-rich-text-collapsible="true"]:focus-within
+  > [role="toolbar"] {
+  height: 38px !important;
+  min-height: 38px;
+  max-height: 38px;
+  padding-top: 4px;
+  padding-bottom: 4px;
+  border-bottom-color: var(--border-subtle);
+  opacity: 1;
+}
+
+.spectra-rich-text-editor[data-rich-text-collapsible="true"] .ProseMirror {
+  max-height: 132px;
+  overflow: hidden;
+  mask-image: linear-gradient(to bottom, #000 0 78%, transparent 100%);
+  cursor: text;
+  transition: max-height 180ms var(--ease-standard);
+}
+
+.spectra-rich-text-editor[data-rich-text-collapsible="true"]:focus-within
+  .ProseMirror {
+  max-height: none;
+  mask-image: none;
+}
+
+.spectra-rich-text-editor[data-rich-text-variant="card"] {
+  border-radius: 9px;
+  background:
+    radial-gradient(
+      circle at 88% 12%,
+      color-mix(in oklab, #8b6ff0 5%, transparent),
+      transparent 24%
+    ),
+    color-mix(in oklab, var(--bg-primary) 96%, transparent);
+  box-shadow: 0 18px 42px -34px rgba(57, 38, 97, 0.38);
+}
+
+.spectra-rich-text-editor[data-rich-text-variant="card"] .ProseMirror > * {
+  margin-top: 0;
+  margin-bottom: 0.45em;
+}
+
+.spectra-rich-text-editor[data-rich-text-variant="compact"] .ProseMirror > * {
+  margin-top: 0;
+  margin-bottom: 0.35em;
+}
+
+.spectra-artifact-main
+  :is(button, summary, select, input[type="checkbox"], input[type="radio"]):not(
+    :disabled
+  ) {
+  cursor: pointer;
+}
+
+.spectra-artifact-main
+  :is(
+    input:not([type]),
+    input[type="text"],
+    input[type="search"],
+    input[type="number"],
+    input[type="date"],
+    input[type="time"],
+    input[type="url"],
+    textarea,
+    [contenteditable="true"]
+  ):not(:disabled) {
+  cursor: text;
+}
+
+.spectra-artifact-main
+  [data-spectra-part^="handle:"]:not([aria-disabled="true"]) {
+  cursor: nwse-resize;
+}
+
+.spectra-artifact-main [data-spectra-part="grip"]:not([aria-disabled="true"]) {
+  cursor: grab;
+}
+
+.spectra-artifact-main
+  [data-spectra-part="grip"]:active:not([aria-disabled="true"]) {
+  cursor: grabbing;
+}
+
+/* The main artifact surface is the single vertical scroll owner. Stable
+   gutters prevent responsive reordering and actor geometry from shifting when
+   a scrollbar appears; containment stops a split editor from scrolling the
+   workspace behind it when it reaches an edge. */
+.spectra-artifact-main {
+  min-width: 0;
+  min-height: 0;
+  overflow-x: clip;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  touch-action: pan-y;
+  scroll-behavior: smooth;
+}
+
+.spectra-artifact-main > [data-spectra-editor-root],
+.spectra-artifact-main > .presentation-studio,
+.spectra-artifact-main > .spectra-sheets-studio,
+.spectra-artifact-main > .code-studio,
+.spectra-artifact-main > .whiteboard-studio,
+.spectra-artifact-main > .timetable-studio {
+  min-width: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spectra-artifact-main {
+    scroll-behavior: auto;
+  }
+  .spectra-collaboration-notice {
     animation: none;
   }
 }

@@ -123,7 +123,9 @@ function candidateSelectors(target: SemanticTarget): string[] {
 
   // Documents address blocks by stable id, which survives reflow and reorder.
   if (segments[0] === "blocks" && segments[1]) {
-    const raw = segments[1].startsWith("id:") ? segments[1].slice(3) : segments[1];
+    const raw = segments[1].startsWith("id:")
+      ? segments[1].slice(3)
+      : segments[1];
     selectors.push(`[data-block-id="${cssEscape(raw)}"]`);
   }
 
@@ -178,12 +180,17 @@ export function resolveTargetElement(
   for (let length = segments.length - 1; length > 0; length -= 1) {
     const ancestorPath = `/${segments.slice(0, length).join("/")}`;
     const found =
-      queryVisible(root, `[${TARGET_ATTRIBUTE}="${cssEscape(ancestorPath)}"]`) ??
+      queryVisible(
+        root,
+        `[${TARGET_ATTRIBUTE}="${cssEscape(ancestorPath)}"]`,
+      ) ??
       (segments[0] === "blocks" && length >= 2
         ? queryVisible(
             root,
             `[data-block-id="${cssEscape(
-              segments[1]!.startsWith("id:") ? segments[1]!.slice(3) : segments[1]!,
+              segments[1]!.startsWith("id:")
+                ? segments[1]!.slice(3)
+                : segments[1]!,
             )}"]`,
           )
         : null);
@@ -194,22 +201,37 @@ export function resolveTargetElement(
 }
 
 function queryVisible(root: HTMLElement, selector: string): HTMLElement | null {
-  let found: HTMLElement | null;
+  let candidates: NodeListOf<HTMLElement>;
   try {
-    found = root.querySelector<HTMLElement>(selector);
+    candidates = root.querySelectorAll<HTMLElement>(selector);
   } catch {
     return null;
   }
-  if (!found) return null;
-  // A zero-box element is present but not paintable (collapsed, display:none
-  // ancestor, virtualized-out). Treat it as absent so callers show an off-screen
-  // affordance rather than a cursor stuck at the surface origin.
-  const rect = found.getBoundingClientRect();
-  if (rect.width <= 0 && rect.height <= 0) return null;
-  return found;
+  for (const found of candidates) {
+    const hiddenTarget = found.closest<HTMLElement>(
+      '[data-spectra-hidden-target="true"]',
+    );
+    if (
+      hiddenTarget &&
+      (!document.activeElement ||
+        !hiddenTarget.contains(document.activeElement))
+    )
+      continue;
+    // A zero-box element is present but not paintable (collapsed, display:none
+    // ancestor, virtualized-out). Keep searching: editors may render a
+    // non-interactive preview and the native control with the same semantic
+    // path (slide thumbnails are the common example).
+    const rect = found.getBoundingClientRect();
+    if (rect.width <= 0 && rect.height <= 0) continue;
+    return found;
+  }
+  return null;
 }
 
-function resolvePart(element: HTMLElement, part: string): HTMLElement | undefined {
+function resolvePart(
+  element: HTMLElement,
+  part: string,
+): HTMLElement | undefined {
   const found = element.querySelector<HTMLElement>(
     `[${PART_ATTRIBUTE}="${cssEscape(part)}"]`,
   );
@@ -224,7 +246,8 @@ function isFormField(
   element: HTMLElement,
 ): element is HTMLInputElement | HTMLTextAreaElement {
   return (
-    element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement
+    element instanceof HTMLInputElement ||
+    element instanceof HTMLTextAreaElement
   );
 }
 
@@ -328,7 +351,10 @@ function formFieldCaretRect(
       ? Math.min(Math.max(point.line, 0), lines.length - 1)
       : 0;
   const lineText = lines[lineIndex] ?? "";
-  const prefix = lineText.slice(0, Math.max(0, Math.min(point.offset, lineText.length)));
+  const prefix = lineText.slice(
+    0,
+    Math.max(0, Math.min(point.offset, lineText.length)),
+  );
 
   const paddingLeft = Number.parseFloat(style.paddingLeft) || 0;
   const paddingTop = Number.parseFloat(style.paddingTop) || 0;
@@ -354,7 +380,11 @@ function formFieldCaretRect(
 
   x += prefixWidth;
   const y =
-    rect.top + borderTop + paddingTop + lineIndex * lineHeight - field.scrollTop;
+    rect.top +
+    borderTop +
+    paddingTop +
+    lineIndex * lineHeight -
+    field.scrollTop;
 
   return new DOMRect(x, y, 0, Math.min(lineHeight, rect.height));
 }
@@ -373,7 +403,9 @@ export function caretRectFor(
   if (isFormField(element)) return formFieldCaretRect(element, point);
 
   const scope =
-    typeof point.line === "number" ? resolveLineScope(element, point.line) : element;
+    typeof point.line === "number"
+      ? resolveLineScope(element, point.line)
+      : element;
   const nodes = textNodesUnder(scope);
   if (!nodes.length) {
     // Empty paragraph or freshly created block: the start of the box is true.
@@ -417,7 +449,12 @@ export function selectionRectsFor(
     if (Math.abs(start.top - end.top) < 1) {
       const left = Math.min(start.left, end.left);
       return [
-        new DOMRect(left, start.top, Math.abs(end.left - start.left), start.height),
+        new DOMRect(
+          left,
+          start.top,
+          Math.abs(end.left - start.left),
+          start.height,
+        ),
       ];
     }
     const rect = element.getBoundingClientRect();
@@ -431,12 +468,17 @@ export function selectionRectsFor(
     anchor.line === head.line ||
     (anchor.line === undefined && head.line === undefined);
   const startScope =
-    typeof anchor.line === "number" ? resolveLineScope(element, anchor.line) : element;
+    typeof anchor.line === "number"
+      ? resolveLineScope(element, anchor.line)
+      : element;
   const endScope =
-    typeof head.line === "number" ? resolveLineScope(element, head.line) : element;
+    typeof head.line === "number"
+      ? resolveLineScope(element, head.line)
+      : element;
 
   const startNodes = textNodesUnder(startScope);
-  const endNodes = sameLine && startScope === endScope ? startNodes : textNodesUnder(endScope);
+  const endNodes =
+    sameLine && startScope === endScope ? startNodes : textNodesUnder(endScope);
   const start = locateOffset(startNodes, anchor.offset);
   const end = locateOffset(endNodes, head.offset);
   if (!start || !end) return [];
@@ -464,7 +506,10 @@ function orderSpan(span: TextSpan): TextSpan {
   const { anchor, head } = span;
   const anchorLine = anchor.line ?? 0;
   const headLine = head.line ?? 0;
-  if (anchorLine > headLine || (anchorLine === headLine && anchor.offset > head.offset))
+  if (
+    anchorLine > headLine ||
+    (anchorLine === headLine && anchor.offset > head.offset)
+  )
     return { anchor: head, head: anchor };
   return span;
 }
@@ -507,8 +552,12 @@ export function hitTest(
     ...(part ? { part } : {}),
     element: control,
     fraction: {
-      x: rect.width ? Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)) : 0,
-      y: rect.height ? Math.max(0, Math.min(1, (clientY - rect.top) / rect.height)) : 0,
+      x: rect.width
+        ? Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
+        : 0,
+      y: rect.height
+        ? Math.max(0, Math.min(1, (clientY - rect.top) / rect.height))
+        : 0,
     },
   };
 }
@@ -528,11 +577,14 @@ export function textPointAtClient(
     const style = window.getComputedStyle(element);
     const paddingLeft = Number.parseFloat(style.paddingLeft) || 0;
     const borderLeft = Number.parseFloat(style.borderLeftWidth) || 0;
-    const local = clientX - rect.left - borderLeft - paddingLeft + element.scrollLeft;
+    const local =
+      clientX - rect.left - borderLeft - paddingLeft + element.scrollLeft;
     let best = 0;
     let bestDelta = Number.POSITIVE_INFINITY;
     for (let index = 0; index <= value.length; index += 1) {
-      const delta = Math.abs(measureTextWidth(element, value.slice(0, index)) - local);
+      const delta = Math.abs(
+        measureTextWidth(element, value.slice(0, index)) - local,
+      );
       if (delta < bestDelta) {
         bestDelta = delta;
         best = index;

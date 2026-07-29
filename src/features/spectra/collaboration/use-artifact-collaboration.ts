@@ -33,6 +33,7 @@ export function useArtifactCollaboration(
   const [transport, setTransport] =
     useState<HocuspocusArtifactTransport | null>(null);
   const recoveringRef = useRef(false);
+  const recoveryAttemptRef = useRef(0);
   useEffect(() => {
     if (!artifactId) {
       setTransport(null);
@@ -57,6 +58,15 @@ export function useArtifactCollaboration(
   );
   useEffect(() => {
     if (
+      snapshot.unsynchronizedChanges === 0 &&
+      snapshot.state !== "unsynchronized" &&
+      snapshot.state !== "reconnecting"
+    ) {
+      recoveryAttemptRef.current = 0;
+    }
+  }, [snapshot.state, snapshot.unsynchronizedChanges]);
+  useEffect(() => {
+    if (
       !transport ||
       recoveringRef.current ||
       snapshot.unsynchronizedChanges === 0 ||
@@ -70,11 +80,14 @@ export function useArtifactCollaboration(
     // so rebuild only the transport and let the normal synchronization path
     // reapply that draft under a fresh region claim.
     recoveringRef.current = true;
+    const attempt = recoveryAttemptRef.current;
+    const recoveryDelay = Math.min(10_000, 750 * 2 ** attempt);
+    recoveryAttemptRef.current = Math.min(attempt + 1, 5);
     const timer = window.setTimeout(() => {
       transport.destroy();
       setGeneration((value) => value + 1);
       recoveringRef.current = false;
-    }, 250);
+    }, recoveryDelay);
     return () => {
       window.clearTimeout(timer);
       recoveringRef.current = false;

@@ -51,6 +51,7 @@ import {
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import { createPortal } from "react-dom";
 import {
   createPresentationObject,
   createPresentationSlide,
@@ -1057,7 +1058,12 @@ export function PresentationStudio({
   onActiveRegionChange?: (regionId: string) => void;
 }) {
   const deck = useMemo(() => normalizePresentationContent(content), [content]);
+  const studioRef = useRef<HTMLElement>(null);
   const [surface, setSurface] = useState<PresentationSurface>("slides");
+  const [slideRailPreference, setSlideRailPreference] = useState<
+    "auto" | "open" | "closed"
+  >("auto");
+  const [wideEnoughForSlideRail, setWideEnoughForSlideRail] = useState(true);
   const [notesOpen, setNotesOpen] = useState(false);
   const [activeSlideId, setActiveSlideId] = useState(deck.slides[0]!.id);
   const [selectedObjectId, setSelectedObjectId] = useState<string>();
@@ -1075,6 +1081,20 @@ export function PresentationStudio({
     slideDurations: number[];
     totalMs: number;
   }>();
+  const slideRailOpen =
+    slideRailPreference === "auto"
+      ? wideEnoughForSlideRail
+      : slideRailPreference === "open";
+
+  useEffect(() => {
+    const studio = studioRef.current;
+    if (!studio) return;
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry) setWideEnoughForSlideRail(entry.contentRect.width >= 880);
+    });
+    observer.observe(studio);
+    return () => observer.disconnect();
+  }, []);
   const presentIndexRef = useRef(0);
   const presentSlideStartedAtRef = useRef(0);
   const rehearsalDurationsRef = useRef<number[]>([]);
@@ -1583,16 +1603,40 @@ export function PresentationStudio({
       slide.layoutId = layoutId;
       if (layoutId === "blank" || !slide.objects.length) return;
       const canvasHeight = draft.settings?.aspectRatio === "4:3" ? 750 : 562.5;
-      const visible = slide.objects.filter((object) => !object.hidden);
-      const title =
-        visible.find((object) => object.type === "text") ?? visible[0];
-      const remaining = visible.filter((object) => object.id !== title?.id);
+      const nextObject = (type: PresentationObjectType) => {
+        const object = createPresentationObject(type, slide.objects.length + 1);
+        slide.objects.push(object);
+        return object;
+      };
+      let visible = slide.objects.filter((object) => !object.hidden);
+      let title = visible.find((object) => object.type === "text");
+      if (!title) {
+        title = nextObject("text");
+        visible = [...visible, title];
+      }
+      const remaining = () =>
+        visible.filter((object) => object.id !== title?.id);
       if (layoutId === "title-only" && title) {
         Object.assign(title, {
           x: 90,
           y: canvasHeight * 0.33,
           width: 820,
           height: canvasHeight * 0.22,
+        });
+        return;
+      }
+      if (layoutId === "statement" && title) {
+        Object.assign(title, {
+          x: 110,
+          y: canvasHeight * 0.25,
+          width: 780,
+          height: canvasHeight * 0.5,
+          style: {
+            ...title.style,
+            fontSize: 58,
+            fontWeight: 720,
+            align: "center",
+          },
         });
         return;
       }
@@ -1617,8 +1661,99 @@ export function PresentationStudio({
           });
         return;
       }
+      if (layoutId === "title-visual-text" || layoutId === "visual-story") {
+        let visual = remaining().find((object) =>
+          ["image", "video", "chart", "shape", "embed"].includes(object.type),
+        );
+        if (!visual) {
+          visual = nextObject("shape");
+          visual.content = {
+            shape: "rounded-rectangle",
+            text: "Add a visual",
+          };
+          visible = [...visible, visual];
+        }
+        const bodies = remaining().filter(
+          (object) => object.type === "text" && object.id !== visual?.id,
+        );
+        if (!bodies.length) {
+          let body = nextObject("text");
+          body = withPresentationObjectText(body, "Add the supporting idea");
+          slide.objects[slide.objects.length - 1] = body;
+          visible = [...visible, body];
+          bodies.push(body);
+        }
+        if (layoutId === "title-visual-text") {
+          Object.assign(title, { x: 70, y: 45, width: 860, height: 90 });
+          Object.assign(visual, {
+            x: 70,
+            y: 165,
+            width: 500,
+            height: canvasHeight - 215,
+          });
+          const bodyGap = 16;
+          const bodyHeight =
+            (canvasHeight - 215 - bodyGap * (bodies.length - 1)) /
+            bodies.length;
+          bodies.forEach((body, index) =>
+            Object.assign(body, {
+              x: 610,
+              y: 165 + index * (bodyHeight + bodyGap),
+              width: 320,
+              height: bodyHeight,
+            }),
+          );
+        } else {
+          Object.assign(visual, {
+            x: 0,
+            y: 0,
+            width: 570,
+            height: canvasHeight,
+          });
+          Object.assign(title, {
+            x: 620,
+            y: 100,
+            width: 320,
+            height: 145,
+          });
+          const bodyGap = 14;
+          const bodyHeight =
+            (canvasHeight - 320 - bodyGap * (bodies.length - 1)) /
+            bodies.length;
+          bodies.forEach((body, index) =>
+            Object.assign(body, {
+              x: 620,
+              y: 270 + index * (bodyHeight + bodyGap),
+              width: 310,
+              height: bodyHeight,
+            }),
+          );
+        }
+        return;
+      }
+      if (layoutId === "three-ideas") {
+        Object.assign(title, { x: 70, y: 45, width: 860, height: 90 });
+        const cards = remaining().filter((object) => object.type !== "group");
+        while (cards.length < 3) {
+          const card = nextObject("shape");
+          card.content = {
+            shape: "rounded-rectangle",
+            text: `Key idea ${cards.length + 1}`,
+          };
+          cards.push(card);
+        }
+        cards.slice(0, 3).forEach((card, index) =>
+          Object.assign(card, {
+            x: 70 + index * 300,
+            y: 175,
+            width: 260,
+            height: canvasHeight - 235,
+          }),
+        );
+        return;
+      }
       if (title) Object.assign(title, { x: 70, y: 52, width: 860, height: 92 });
-      remaining.forEach((object, index) => {
+      remaining().forEach((object, index) => {
         if (layoutId === "two-column") {
           const column = index % 2;
           const row = Math.floor(index / 2);
@@ -2278,7 +2413,7 @@ export function PresentationStudio({
       .padStart(2, "0")}`;
 
   return (
-    <section className="presentation-studio">
+    <section ref={studioRef} className="presentation-studio">
       <div className="presentation-primary-bar">
         <div role="tablist" aria-label="Presentation views">
           {(
@@ -2381,6 +2516,25 @@ export function PresentationStudio({
             <button type="button" onClick={addSlide} disabled={readOnly}>
               <Plus className="h-3.5 w-3.5" /> Slide
             </button>
+            <button
+              type="button"
+              onClick={() =>
+                setSlideRailPreference(slideRailOpen ? "closed" : "open")
+              }
+              aria-pressed={slideRailOpen}
+              title={
+                slideRailOpen
+                  ? "Collapse slide previews"
+                  : "Show slide previews"
+              }
+              aria-label={
+                slideRailOpen
+                  ? "Collapse slide previews"
+                  : "Show slide previews"
+              }
+            >
+              <LayoutTemplate className="h-3.5 w-3.5" />
+            </button>
             <span className="presentation-toolbar-rule" />
             <button
               type="button"
@@ -2425,6 +2579,12 @@ export function PresentationStudio({
                   <option value="title-content">Title & content</option>
                   <option value="title-only">Title only</option>
                   <option value="two-column">Two columns</option>
+                  <option value="title-visual-text">
+                    Title, visual & text
+                  </option>
+                  <option value="visual-story">Visual story</option>
+                  <option value="three-ideas">Three ideas</option>
+                  <option value="statement">Statement</option>
                   <option value="full-bleed">Full bleed</option>
                   <option value="blank">Blank</option>
                 </>
@@ -2654,75 +2814,147 @@ export function PresentationStudio({
               </button>
             </div>
           ) : null}
-          <div className="presentation-workspace">
-            <aside className="presentation-slide-rail" aria-label="Slides">
-              {deck.slides.map((slide, index) => (
+          <div
+            className="presentation-workspace"
+            data-rail-collapsed={!slideRailOpen || undefined}
+          >
+            {slideRailOpen ? (
+              <aside className="presentation-slide-rail" aria-label="Slides">
+                {deck.slides.map((slide, index) => (
+                  <button
+                    type="button"
+                    key={slide.id}
+                    data-active={slide.id === activeSlide.id || undefined}
+                    data-dragging={draggingSlideId === slide.id || undefined}
+                    data-ai-region={aiRegionAttr(
+                      pathTouches(aiChangedPaths, `/slides/${index}`),
+                    )}
+                    {...targetAttrs(`/slides/${index}`)}
+                    draggable={!readOnly}
+                    onDragStart={(event) => {
+                      setDraggingSlideId(slide.id);
+                      event.dataTransfer.effectAllowed = "move";
+                      event.dataTransfer.setData(
+                        "application/x-spectra-slide",
+                        slide.id,
+                      );
+                    }}
+                    onDragEnd={() => setDraggingSlideId(undefined)}
+                    onDragOver={(event) => {
+                      if (!readOnly) event.preventDefault();
+                    }}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      moveSlideBefore(slide.id);
+                    }}
+                    onClick={() => {
+                      setActiveSlideId(slide.id);
+                      setSelectedObjectId(undefined);
+                      setLayerSelection([]);
+                      onActiveRegionChange?.(slide.id);
+                    }}
+                  >
+                    <span>{index + 1}</span>
+                    <div
+                      // The rail is a visual preview, not a second editable
+                      // presentation surface. Its canvas deliberately reuses the
+                      // same semantic paths as the real slide, so exclude it from
+                      // presence geometry: otherwise an AI or collaborator cursor
+                      // lands in the thumbnail while the operation trace animates
+                      // on the native canvas.
+                      data-spectra-hidden-target="true"
+                    >
+                      <SlideCanvas
+                        slide={slide}
+                        deck={deck}
+                        assets={assets}
+                        artifacts={artifacts}
+                        readOnly
+                        compact
+                        aiChangedPaths={[]}
+                        onSelectObject={() => undefined}
+                        onPointerDown={() => undefined}
+                        onResizePointerDown={() => undefined}
+                        onPointerMove={() => undefined}
+                        onPointerUp={() => undefined}
+                        onTextChange={() => undefined}
+                        onTextFocus={() => undefined}
+                        onTextBlur={() => undefined}
+                      />
+                    </div>
+                    <strong>{slide.title}</strong>
+                  </button>
+                ))}
                 <button
                   type="button"
-                  key={slide.id}
-                  data-active={slide.id === activeSlide.id || undefined}
-                  data-dragging={draggingSlideId === slide.id || undefined}
-                  data-ai-region={aiRegionAttr(
-                    pathTouches(aiChangedPaths, `/slides/${index}`),
-                  )}
-                  {...targetAttrs(`/slides/${index}`)}
-                  draggable={!readOnly}
-                  onDragStart={(event) => {
-                    setDraggingSlideId(slide.id);
-                    event.dataTransfer.effectAllowed = "move";
-                    event.dataTransfer.setData(
-                      "application/x-spectra-slide",
-                      slide.id,
-                    );
-                  }}
-                  onDragEnd={() => setDraggingSlideId(undefined)}
-                  onDragOver={(event) => {
-                    if (!readOnly) event.preventDefault();
-                  }}
-                  onDrop={(event) => {
-                    event.preventDefault();
-                    moveSlideBefore(slide.id);
-                  }}
-                  onClick={() => {
-                    setActiveSlideId(slide.id);
-                    setSelectedObjectId(undefined);
-                    setLayerSelection([]);
-                    onActiveRegionChange?.(slide.id);
-                  }}
+                  className="presentation-add-slide"
+                  onClick={addSlide}
+                  disabled={readOnly}
                 >
-                  <span>{index + 1}</span>
-                  <div>
-                    <SlideCanvas
-                      slide={slide}
-                      deck={deck}
-                      assets={assets}
-                      artifacts={artifacts}
-                      readOnly
-                      compact
-                      aiChangedPaths={[]}
-                      onSelectObject={() => undefined}
-                      onPointerDown={() => undefined}
-                      onResizePointerDown={() => undefined}
-                      onPointerMove={() => undefined}
-                      onPointerUp={() => undefined}
-                      onTextChange={() => undefined}
-                      onTextFocus={() => undefined}
-                      onTextBlur={() => undefined}
-                    />
-                  </div>
-                  <strong>{slide.title}</strong>
+                  <Plus className="h-3.5 w-3.5" /> Add slide
                 </button>
-              ))}
-              <button
-                type="button"
-                className="presentation-add-slide"
-                onClick={addSlide}
-                disabled={readOnly}
-              >
-                <Plus className="h-3.5 w-3.5" /> Add slide
-              </button>
-            </aside>
+              </aside>
+            ) : null}
             <div className="presentation-stage">
+              {!slideRailOpen ? (
+                <div className="presentation-slide-switcher">
+                  <button
+                    type="button"
+                    aria-label="Previous slide"
+                    disabled={activeSlideIndex <= 0}
+                    onClick={() => {
+                      const slide = deck.slides[activeSlideIndex - 1];
+                      if (!slide) return;
+                      setActiveSlideId(slide.id);
+                      setSelectedObjectId(undefined);
+                      setLayerSelection([]);
+                      onActiveRegionChange?.(slide.id);
+                    }}
+                  >
+                    <ChevronLeft className="h-3.5 w-3.5" />
+                  </button>
+                  <select
+                    aria-label="Current slide"
+                    value={activeSlide.id}
+                    onChange={(event) => {
+                      setActiveSlideId(event.target.value);
+                      setSelectedObjectId(undefined);
+                      setLayerSelection([]);
+                      onActiveRegionChange?.(event.target.value);
+                    }}
+                  >
+                    {deck.slides.map((slide, index) => (
+                      <option key={slide.id} value={slide.id}>
+                        {index + 1} · {slide.title || `Slide ${index + 1}`}
+                      </option>
+                    ))}
+                  </select>
+                  <span>
+                    {activeSlideIndex + 1} of {deck.slides.length}
+                  </span>
+                  <button
+                    type="button"
+                    aria-label="Next slide"
+                    disabled={activeSlideIndex >= deck.slides.length - 1}
+                    onClick={() => {
+                      const slide = deck.slides[activeSlideIndex + 1];
+                      if (!slide) return;
+                      setActiveSlideId(slide.id);
+                      setSelectedObjectId(undefined);
+                      setLayerSelection([]);
+                      onActiveRegionChange?.(slide.id);
+                    }}
+                  >
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSlideRailPreference("open")}
+                  >
+                    Show previews
+                  </button>
+                </div>
+              ) : null}
               <SlideCanvas
                 slide={activeSlide}
                 deck={deck}
@@ -3525,71 +3757,74 @@ export function PresentationStudio({
         </div>
       ) : null}
 
-      {presentedDeck ? (
-        <div
-          className="presentation-presenter"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Presentation mode"
-        >
-          <header>
-            <span>
-              <Clock3 className="h-4 w-4" /> {formatElapsed}
-              {rehearsalMode ? " · Rehearsal" : ""}
-            </span>
-            <strong>{presentedDeck.slides[presentIndex]!.title}</strong>
-            <button type="button" onClick={stopPresenting}>
-              <X className="h-5 w-5" /> Exit
-            </button>
-          </header>
-          <main>
-            <SlideCanvas
-              key={presentedDeck.slides[presentIndex]!.id}
-              slide={presentedDeck.slides[presentIndex]!}
-              deck={presentedDeck}
-              assets={assets}
-              artifacts={artifacts}
-              readOnly
-              compact
-              animateObjects
-              aiChangedPaths={[]}
-              onSelectObject={() => undefined}
-              onPointerDown={() => undefined}
-              onResizePointerDown={() => undefined}
-              onPointerMove={() => undefined}
-              onPointerUp={() => undefined}
-              onTextChange={() => undefined}
-              onTextFocus={() => undefined}
-              onTextBlur={() => undefined}
-            />
-          </main>
-          <footer>
-            <button
-              type="button"
-              disabled={presentIndex === 0}
-              onClick={() => movePresentIndex(-1)}
+      {presentedDeck && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              className="presentation-presenter"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Presentation mode"
             >
-              <ChevronLeft className="h-5 w-5" />
-            </button>
-            <div>
-              <span>
-                {presentIndex + 1} / {presentedDeck.slides.length}
-              </span>
-              <p>
-                {presentedDeck.slides[presentIndex]!.speakerNotes ||
-                  "No speaker notes for this slide."}
-              </p>
-            </div>
-            <button
-              type="button"
-              disabled={presentIndex === presentedDeck.slides.length - 1}
-              onClick={() => movePresentIndex(1)}
-            >
-              <ChevronRight className="h-5 w-5" />
-            </button>
-          </footer>
-        </div>
-      ) : null}
+              <header>
+                <span>
+                  <Clock3 className="h-4 w-4" /> {formatElapsed}
+                  {rehearsalMode ? " · Rehearsal" : ""}
+                </span>
+                <strong>{presentedDeck.slides[presentIndex]!.title}</strong>
+                <button type="button" onClick={stopPresenting}>
+                  <X className="h-5 w-5" /> Exit
+                </button>
+              </header>
+              <main>
+                <SlideCanvas
+                  key={presentedDeck.slides[presentIndex]!.id}
+                  slide={presentedDeck.slides[presentIndex]!}
+                  deck={presentedDeck}
+                  assets={assets}
+                  artifacts={artifacts}
+                  readOnly
+                  compact
+                  animateObjects
+                  aiChangedPaths={[]}
+                  onSelectObject={() => undefined}
+                  onPointerDown={() => undefined}
+                  onResizePointerDown={() => undefined}
+                  onPointerMove={() => undefined}
+                  onPointerUp={() => undefined}
+                  onTextChange={() => undefined}
+                  onTextFocus={() => undefined}
+                  onTextBlur={() => undefined}
+                />
+              </main>
+              <footer>
+                <button
+                  type="button"
+                  disabled={presentIndex === 0}
+                  onClick={() => movePresentIndex(-1)}
+                >
+                  <ChevronLeft className="h-5 w-5" />
+                </button>
+                <div>
+                  <span>
+                    {presentIndex + 1} / {presentedDeck.slides.length}
+                  </span>
+                  <p>
+                    {presentedDeck.slides[presentIndex]!.speakerNotes ||
+                      "No speaker notes for this slide."}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  disabled={presentIndex === presentedDeck.slides.length - 1}
+                  onClick={() => movePresentIndex(1)}
+                >
+                  <ChevronRight className="h-5 w-5" />
+                </button>
+              </footer>
+            </div>,
+            document.body,
+          )
+        : null}
     </section>
   );
 }

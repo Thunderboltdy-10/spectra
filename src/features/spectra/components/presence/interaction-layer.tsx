@@ -486,7 +486,6 @@ function ActorPresence({ visual }: { visual: ActorVisual }) {
   const settled =
     state.lifecycle === "settled" || state.lifecycle === "completed";
   const provisional = Boolean(state.speculation) && !settled;
-
   return (
     <div
       className="spectra-presence-actor"
@@ -544,7 +543,6 @@ function ActorPresence({ visual }: { visual: ActorVisual }) {
           style={boxStyle(placement.box)}
         />
       )}
-
       {/* Resize handles mirror the editor's own affordance. */}
       {resizing && (
         <div

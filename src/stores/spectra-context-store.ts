@@ -16,7 +16,14 @@ export type SpectraContextObject = {
   stale?: boolean;
 };
 
-export type SpectraContinuation = { id: string; title: string; runId?: string; workspaceId?: string };
+export type SpectraContinuation = {
+  id: string;
+  title: string;
+  runId?: string;
+  workspaceId?: string;
+  /** Artifact the conversation was started from, when artifact-scoped. */
+  artifactId?: string;
+};
 
 export type SpectraOpenObjectType = SpectraContextObjectType | "run";
 export type SpectraOpenPresentation = "rail" | "split" | "tab" | "tile" | "thread-panel" | "run-panel" | "full";

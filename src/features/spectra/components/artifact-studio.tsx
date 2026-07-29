@@ -37,6 +37,7 @@ import {
   MessageSquare,
   MessageSquarePlus,
   Minus,
+  MoreHorizontal,
   PanelLeft,
   PanelRight,
   Pencil,
@@ -170,10 +171,11 @@ import {
   actorLabel,
   describeAct,
   describeState,
+  pathSegments,
+  stateIsVisible,
   type ActorIdentity,
   type InteractionState,
 } from "../collaboration/interaction-model";
-import { buildTarget } from "../collaboration/control-descriptors";
 import {
   clearAiLocation,
   disengageFollowAi,
@@ -209,7 +211,11 @@ import {
 import { pythonChartToHtml } from "../code/python-chart";
 import { loadCodeRuntimeAssets } from "../code/runtime-assets-client";
 import type { SpectraSandboxAsset } from "../embed/sandbox-protocol";
-import { normalizePresentationContent } from "../presentation/model";
+import {
+  normalizePresentationContent,
+  presentationObjectText,
+  type PresentationObject,
+} from "../presentation/model";
 import {
   normalizeSheetsContent,
   parseAddress,
@@ -219,9 +225,6 @@ import { sharedTimetableContent } from "../timetable/model";
 import { normalizeWhiteboardContent } from "../whiteboard/model";
 import {
   parseQuizImport,
-  quizCsv,
-  quizJson,
-  quizQtiPackage,
   validateQuizForPublishing,
   type PortableQuizQuestion,
 } from "../quiz/interchange";
@@ -627,6 +630,32 @@ function setAtPointer(target: unknown, path: string, value: unknown) {
   }
   current[segments.at(-1)!] = structuredClone(value);
   return root;
+}
+
+const ARTIFACT_LIVE_METADATA_POINTERS = new Set([
+  "/title",
+  "/summary",
+  "/tags",
+]);
+
+/**
+ * Protocol-v2 canonical paths are content-relative: `/content/blocks/1/text`
+ * travels over awareness as `/blocks/1/text`. Reattach the live-value envelope
+ * only at the boundary that projects a patch over `{title, summary, tags,
+ * content}`. Legacy frames that still include `/content` remain valid.
+ */
+function livePreviewOuterPointer(path: string) {
+  if (path === "/content" || path.startsWith("/content/")) return path;
+  if (ARTIFACT_LIVE_METADATA_POINTERS.has(path)) return path;
+  return path === "/" ? "/content" : `/content${path}`;
+}
+
+/** Content-relative destination for a canonical live patch. */
+function livePreviewContentPointer(path: string): string | null {
+  if (ARTIFACT_LIVE_METADATA_POINTERS.has(path)) return null;
+  if (path === "/content") return "/";
+  if (path.startsWith("/content/")) return path.slice("/content".length);
+  return path;
 }
 
 function mergeAiRegions(
@@ -1214,21 +1243,48 @@ function ReadonlyArtifactSnapshot({
         </div>
       ) : null}
       {blueprintKey === "presentation" ? (
-        <div className="mt-6 grid gap-4 xl:grid-cols-2">
+        <div className="mt-6 grid gap-3">
           {slides.map((slide, index) => (
             <section
               key={String(slide.id ?? index)}
-              className="aspect-video rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-[8%] shadow-sm"
+              className="overflow-hidden rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)]"
             >
-              <span className="text-[8px] font-semibold uppercase tracking-[.1em] text-[var(--text-tertiary)]">
-                Slide {index + 1}
-              </span>
-              <h4 className="mt-3 font-display text-[clamp(17px,2vw,28px)] font-semibold">
-                {String(slide.title ?? "Untitled slide")}
-              </h4>
-              <p className="mt-4 max-w-[80%] text-[10px] leading-5 text-[var(--text-secondary)]">
-                {humanValue(slide.objects).slice(0, 420)}
-              </p>
+              <header className="border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2">
+                <span className="text-[8px] font-semibold uppercase tracking-[.1em] text-[var(--text-tertiary)]">
+                  Slide {index + 1}
+                </span>
+                <h4 className="mt-1 font-display text-[15px] font-semibold leading-tight">
+                  {String(slide.title ?? "Untitled slide")}
+                </h4>
+              </header>
+              <div className="space-y-2 p-3">
+                {arrayOfRecords(slide.objects)
+                  .filter((object) => object.hidden !== true)
+                  .sort(
+                    (left, right) =>
+                      Number(left.readingOrder ?? 0) -
+                      Number(right.readingOrder ?? 0),
+                  )
+                  .slice(0, 8)
+                  .map((object, objectIndex) => (
+                    <div
+                      key={String(object.id ?? objectIndex)}
+                      className="rounded-[7px] border border-[var(--border-subtle)] px-2.5 py-2"
+                    >
+                      <span className="block text-[7px] font-semibold uppercase tracking-[.08em] text-[var(--text-tertiary)]">
+                        {humanizeKey(String(object.type ?? "object"))}
+                      </span>
+                      <p className="mt-1 whitespace-pre-wrap text-[9px] leading-4 text-[var(--text-secondary)]">
+                        {historyPresentationObjectSummary(object)}
+                      </p>
+                    </div>
+                  ))}
+                {arrayOfRecords(slide.objects).length === 0 ? (
+                  <p className="py-3 text-[9px] text-[var(--text-tertiary)]">
+                    Empty slide
+                  </p>
+                ) : null}
+              </div>
             </section>
           ))}
         </div>
@@ -1386,6 +1442,36 @@ function ReadonlyArtifactSnapshot({
   );
 }
 
+function historyPresentationObjectSummary(
+  value: Record<string, unknown>,
+): string {
+  const object = value as unknown as PresentationObject;
+  const directText = presentationObjectText(object).trim();
+  if (directText) return directText.slice(0, 520);
+  const content = record(value.content);
+  if (Array.isArray(content.rows)) {
+    return content.rows
+      .slice(0, 4)
+      .map((row) =>
+        Array.isArray(row)
+          ? row.map((cell) => String(cell ?? "")).join(" · ")
+          : String(row ?? ""),
+      )
+      .join("\n")
+      .slice(0, 520);
+  }
+  if (Array.isArray(content.labels)) {
+    const chartType = humanizeKey(String(content.chartType ?? "chart"));
+    return `${chartType} · ${content.labels.slice(0, 6).map(String).join(", ")}`;
+  }
+  if (typeof value.altText === "string" && value.altText.trim())
+    return value.altText.trim();
+  const binding = record(value.sourceBinding);
+  if (typeof binding.artifactId === "string")
+    return `Linked ${humanizeKey(String(binding.kind ?? "artifact"))}`;
+  return `${humanizeKey(String(value.type ?? "object"))} object`;
+}
+
 function MetricSnapshot({
   label,
   values,
@@ -1507,7 +1593,7 @@ function HistoryComparisonOverlay({
 
   return (
     <section
-      className="absolute inset-0 z-[180] flex min-h-0 flex-col bg-[var(--bg-primary)]"
+      className="absolute inset-0 z-[180] flex min-h-0 flex-col bg-[var(--bg-primary)] pb-[88px]"
       aria-label="Version history comparison"
     >
       <header className="flex h-12 shrink-0 items-center justify-between gap-4 border-b border-[var(--border-default)] bg-[var(--bg-elevated)] px-4">
@@ -2893,6 +2979,131 @@ function snapshotKey(snapshot: {
   return JSON.stringify(snapshot);
 }
 
+type ArtifactEditorSnapshot = ReturnType<typeof artifactEditorSnapshot>;
+
+function valuesEqual(left: unknown, right: unknown) {
+  if (Object.is(left, right)) return true;
+  try {
+    return JSON.stringify(left) === JSON.stringify(right);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Rebase an unsaved local draft over a newer collaborative snapshot.
+ * Yjs normally makes both views converge before this boundary, but persisted
+ * artifact refreshes can race a keystroke. Preserve the local side only where
+ * it actually diverged from its baseline, accept remote-only edits, and report
+ * the rare same-leaf collision instead of treating every refresh as a conflict.
+ */
+function rebaseCollaborativeValue(
+  baseline: unknown,
+  local: unknown,
+  incoming: unknown,
+  path = "",
+): { value: unknown; conflicts: string[] } {
+  if (valuesEqual(local, baseline)) return { value: incoming, conflicts: [] };
+  if (valuesEqual(incoming, baseline) || valuesEqual(local, incoming))
+    return { value: local, conflicts: [] };
+
+  const localRecord =
+    local && typeof local === "object" && !Array.isArray(local)
+      ? (local as Record<string, unknown>)
+      : null;
+  const incomingRecord =
+    incoming && typeof incoming === "object" && !Array.isArray(incoming)
+      ? (incoming as Record<string, unknown>)
+      : null;
+  const baselineRecord =
+    baseline && typeof baseline === "object" && !Array.isArray(baseline)
+      ? (baseline as Record<string, unknown>)
+      : null;
+
+  if (localRecord && incomingRecord && baselineRecord) {
+    const value: Record<string, unknown> = {};
+    const conflicts: string[] = [];
+    const keys = new Set([
+      ...Object.keys(baselineRecord),
+      ...Object.keys(localRecord),
+      ...Object.keys(incomingRecord),
+    ]);
+    for (const key of keys) {
+      const escaped = key.replaceAll("~", "~0").replaceAll("/", "~1");
+      const merged = rebaseCollaborativeValue(
+        baselineRecord[key],
+        localRecord[key],
+        incomingRecord[key],
+        `${path}/${escaped}`,
+      );
+      if (merged.value !== undefined) value[key] = merged.value;
+      conflicts.push(...merged.conflicts);
+    }
+    return { value, conflicts };
+  }
+
+  if (
+    Array.isArray(local) &&
+    Array.isArray(incoming) &&
+    Array.isArray(baseline) &&
+    local.length === incoming.length &&
+    local.length === baseline.length
+  ) {
+    const value: unknown[] = [];
+    const conflicts: string[] = [];
+    for (let index = 0; index < local.length; index += 1) {
+      const merged = rebaseCollaborativeValue(
+        baseline[index],
+        local[index],
+        incoming[index],
+        `${path}/${index}`,
+      );
+      value.push(merged.value);
+      conflicts.push(...merged.conflicts);
+    }
+    return { value, conflicts };
+  }
+
+  // Arrays are indivisible only when their shape changed
+  // (insert/reorder/delete). Region claims prevent normal same-list
+  // contention; retaining local here is safer than duplicating entries.
+  return { value: local, conflicts: [path || "/"] };
+}
+
+function rebaseCollaborativeSnapshot(
+  baseline: ArtifactEditorSnapshot,
+  local: ArtifactEditorSnapshot,
+  incoming: ArtifactEditorSnapshot,
+) {
+  const merged = rebaseCollaborativeValue(baseline, local, incoming);
+  return {
+    snapshot: merged.value as ArtifactEditorSnapshot,
+    conflicts: merged.conflicts,
+  };
+}
+
+function collaborationFailureMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  if (
+    message.includes("COLLABORATION_SYNC_TIMEOUT") ||
+    message.includes("COLLABORATION_NOT_SYNCHRONIZED")
+  )
+    return "This edit is still safely held on this device. Spectra will synchronize it when the live connection catches up.";
+  if (
+    message.includes("COLLABORATION_ACCESS_LOST") ||
+    message.includes("COLLABORATION_READ_ONLY")
+  )
+    return "Your editing access changed before this edit could synchronize.";
+  if (
+    message.includes("AI_ARTIFACT_SCHEMA_INVALID") ||
+    message.includes('"code"') ||
+    message.includes("expected array") ||
+    message.includes("Invalid input")
+  )
+    return "This draft contains an unfinished control that cannot synchronize yet. Your local work is preserved.";
+  return "This edit has not synchronized yet. Your local work is preserved while Spectra retries.";
+}
+
 export function useArtifactStudioState(
   _storageKey: string,
   artifacts: SpectraArtifact[],
@@ -3659,10 +3870,10 @@ function ArtifactStudioEditor({
   compact: boolean;
 }) {
   const permissionReadOnly = artifact.accessLevel === "read";
-  const isCollaborativeArtifact =
-    Boolean(artifact.isShared) ||
-    artifact.ownership === "shared" ||
-    (artifact.sharedWithCount ?? 0) > 0;
+  // The live room is the editing substrate, not a feature unlocked by sharing.
+  // Owners need the identical interaction fabric for private AI work; access
+  // policy still decides who else may authenticate into that room.
+  const isCollaborativeArtifact = true;
   const accessExplanation =
     artifact.ownership === "shared"
       ? artifact.accessReason === "workspace_inheritance"
@@ -3685,6 +3896,9 @@ function ArtifactStudioEditor({
     // Always connect for persistence (Yjs is the write path), but never treat
     // a slow/missing socket as a reason to freeze private editing.
     !(permissionReadOnly && artifact.blueprintKey === "quiz"),
+    artifact.aiState === "edited" && artifact.aiRunId
+      ? `${artifact.aiRunId}:${artifact.updatedAt}`
+      : null,
   );
   const livePermissionLost =
     isCollaborativeArtifact && live.state === "permission_lost";
@@ -3899,10 +4113,7 @@ function ArtifactStudioEditor({
         localSyncKeysRef.current.delete(key);
         if (isCollaborativeArtifact) {
           setLiveConflict({
-            message:
-              error instanceof Error
-                ? error.message
-                : "This change could not be synchronized.",
+            message: collaborationFailureMessage(error),
           });
         }
         return false;
@@ -3990,12 +4201,18 @@ function ArtifactStudioEditor({
   );
   const activeAiCollaborator = useMemo(() => {
     const aiCollaborators = live.presence.filter(
-      (person) => person.actorKind === "ai",
+      (person) =>
+        person.actorKind === "ai" ||
+        person.interactionState?.actor.kind === "ai",
     );
-    // Only treat an AI peer as the active collaborator while it is actually
-    // streaming or holding preview patches. Falling back to any idle AI peer
-    // left cards and regions pulsing forever after the run stopped.
+    // Protocol v2 is authoritative: one actor frame owns presence, native
+    // choreography, provisional content, contention and lifecycle. The v1
+    // preview fields remain only as a bounded compatibility fallback.
     return (
+      aiCollaborators.find(
+        (person) =>
+          person.interactionState && stateIsVisible(person.interactionState),
+      ) ??
       aiCollaborators.find((person) => person.previewPhase === "streaming") ??
       aiCollaborators.find(
         (person) => (person.previewPatches?.length ?? 0) > 0,
@@ -4003,9 +4220,17 @@ function ArtifactStudioEditor({
       null
     );
   }, [live.presence]);
-  const activeAiPresence = activeAiCollaborator?.previewPatches?.length
-    ? activeAiCollaborator
-    : null;
+  const activeAiPreviewPatches = useMemo(
+    () =>
+      activeAiCollaborator?.interactionState?.speculation?.patches?.length
+        ? activeAiCollaborator.interactionState.speculation.patches
+        : (activeAiCollaborator?.previewPatches ?? []),
+    [activeAiCollaborator],
+  );
+  const activeAiPresence =
+    activeAiCollaborator && activeAiPreviewPatches.length > 0
+      ? activeAiCollaborator
+      : null;
   const aiActivitySourceRef = useRef(uniqueToken());
   useEffect(() => {
     const sourceId = aiActivitySourceRef.current;
@@ -4013,13 +4238,21 @@ function ArtifactStudioEditor({
       artifact._id,
       sourceId,
       activeAiCollaborator &&
-        (activeAiCollaborator.previewPhase === "streaming" ||
-          (activeAiCollaborator.previewPatches?.length ?? 0) > 0)
+        (activeAiCollaborator.interactionState
+          ? stateIsVisible(activeAiCollaborator.interactionState)
+          : activeAiCollaborator.previewPhase === "streaming" ||
+            activeAiPreviewPatches.length > 0)
         ? {
             phase: activeAiPresence ? "editing" : "preparing",
-            ...(activeAiCollaborator.previewSequence !== undefined
-              ? { sequence: activeAiCollaborator.previewSequence }
-              : {}),
+            ...(activeAiCollaborator.interactionState?.speculation?.sequence !==
+            undefined
+              ? {
+                  sequence:
+                    activeAiCollaborator.interactionState.speculation.sequence,
+                }
+              : activeAiCollaborator.previewSequence !== undefined
+                ? { sequence: activeAiCollaborator.previewSequence }
+                : {}),
             // Prefer the semantic frame so every surface describes the same
             // operation the editor is performing.
             ...(activeAiCollaborator.interactionState
@@ -4038,9 +4271,14 @@ function ArtifactStudioEditor({
         : null,
     );
     return () => publishArtifactAiActivity(artifact._id, sourceId, null);
-  }, [activeAiCollaborator, activeAiPresence, artifact._id]);
+  }, [
+    activeAiCollaborator,
+    activeAiPresence,
+    activeAiPreviewPatches.length,
+    artifact._id,
+  ]);
   const presencePreview = useMemo(() => {
-    if (!activeAiPresence?.previewPatches?.length) return null;
+    if (!activeAiPresence || activeAiPreviewPatches.length === 0) return null;
     let next: {
       title: string;
       summary: string;
@@ -4053,18 +4291,24 @@ function ArtifactStudioEditor({
       content,
     };
     const paths: string[] = [];
-    for (const patch of activeAiPresence.previewPatches) {
-      next = setAtPointer(next, patch.path, patch.value) as typeof next;
-      if (patch.path === "/content") paths.push("/");
-      else if (patch.path.startsWith("/content/"))
-        paths.push(patch.path.slice("/content".length));
-      else paths.push(patch.path);
+    for (const patch of activeAiPreviewPatches) {
+      const outerPointer = livePreviewOuterPointer(patch.path);
+      next = setAtPointer(next, outerPointer, patch.value) as typeof next;
+      const contentPointer = livePreviewContentPointer(patch.path);
+      if (contentPointer) paths.push(contentPointer);
     }
     return {
       ...next,
       paths: [...new Set(paths)],
     };
-  }, [activeAiPresence?.previewPatches, content, summary, tagDraft, title]);
+  }, [
+    activeAiPresence,
+    activeAiPreviewPatches,
+    content,
+    summary,
+    tagDraft,
+    title,
+  ]);
   const presencePathMemoryRef = useRef<{
     operationKey: string;
     paths: string[];
@@ -4149,7 +4393,9 @@ function ArtifactStudioEditor({
   const catchUpFallbackPaths = joinLateArrival.paths;
   const streamingSource = presencePreview
     ? "presence"
-    : aiPreviewActive && artifact.aiPreview?.content !== undefined
+    : artifact.aiState === "creating" &&
+        aiPreviewActive &&
+        artifact.aiPreview?.content !== undefined
       ? preferStreamingContentSource({
           local: content,
           preview: artifact.aiPreview.content,
@@ -4174,7 +4420,13 @@ function ArtifactStudioEditor({
   const previewHighlightPaths = useMemo(
     () =>
       materializeAiChangedPaths(
-        aiPreviewActive || catchUpActive
+        // A durable update preview describes the complete operation, not the
+        // control the actor owns *now*. Painting it before awareness arrives
+        // exposes every future target as one blue batch and makes the later
+        // caret look like a reenactment. Existing-artifact updates are lit only
+        // by the canonical interaction frame below. Creates may still use the
+        // preview because there is no prior native canvas to preserve.
+        artifact.aiState === "creating" && (aiPreviewActive || catchUpActive)
           ? (artifact.aiPreview?.changedPaths ?? [])
           : [],
         streamingContent,
@@ -4183,19 +4435,22 @@ function ArtifactStudioEditor({
     [
       aiPreviewActive,
       artifact.aiPreview?.changedPaths,
+      artifact.aiState,
       artifact.blueprintKey,
       catchUpActive,
       streamingContent,
     ],
   );
   const effectHighlightPaths = useMemo(() => {
+    // Effects are durable operation metadata. During an update, only the live
+    // actor may reveal a target; otherwise staged effects accumulate and every
+    // edited control lights simultaneously before any native gesture occurs.
+    if (artifact.aiState !== "creating") return [];
     const effectPaths = activeAiEffects.flatMap(
       (effect) => effect.changedPaths,
     );
     const previewPaths =
-      artifact.aiState === "creating" ||
-      artifact.aiState === "updating" ||
-      artifact.aiState === "edited"
+      artifact.aiState === "creating" || artifact.aiState === "edited"
         ? (artifact.aiPreview?.changedPaths ?? [])
         : [];
     const merged = [...effectPaths, ...previewPaths];
@@ -4221,22 +4476,34 @@ function ArtifactStudioEditor({
   ]);
   const effectRegionHighlightPaths = useMemo(
     () =>
-      materializeAiChangedPaths(
-        activeAiEffects.flatMap((effect) =>
-          effect.regionIds.flatMap((regionId) => {
-            const descriptor = live.model?.descriptor(regionId);
-            return descriptor ? [semanticPathToPointer(descriptor.path)] : [];
-          }),
-        ),
-        streamingContent,
-        artifact.blueprintKey,
-      ),
-    [activeAiEffects, artifact.blueprintKey, live.model, streamingContent],
+      artifact.aiState !== "creating"
+        ? []
+        : materializeAiChangedPaths(
+            activeAiEffects.flatMap((effect) =>
+              effect.regionIds.flatMap((regionId) => {
+                const descriptor = live.model?.descriptor(regionId);
+                return descriptor
+                  ? [semanticPathToPointer(descriptor.path)]
+                  : [];
+              }),
+            ),
+            streamingContent,
+            artifact.blueprintKey,
+          ),
+    [
+      activeAiEffects,
+      artifact.aiState,
+      artifact.blueprintKey,
+      live.model,
+      streamingContent,
+    ],
   );
   const presenceRegionHighlightPaths = useMemo(
     () =>
       materializeAiChangedPaths(
-        activeAiCollaborator?.activeRegionId
+        activeAiCollaborator?.activeRegionId &&
+          (!activeAiCollaborator.interactionState ||
+            activeAiCollaborator.interactionState.target)
           ? (() => {
               const descriptor = live.model?.descriptor(
                 activeAiCollaborator.activeRegionId,
@@ -4249,12 +4516,35 @@ function ArtifactStudioEditor({
       ),
     [
       activeAiCollaborator?.activeRegionId,
+      activeAiCollaborator?.interactionState,
       artifact.blueprintKey,
       live.model,
       streamingContent,
     ],
   );
+  const semanticInteractionTargetPaths = useMemo(
+    () =>
+      activeAiCollaborator?.interactionState?.target
+        ? materializeAiChangedPaths(
+            [activeAiCollaborator.interactionState.target.path],
+            streamingContent,
+            artifact.blueprintKey,
+          )
+        : [],
+    [
+      activeAiCollaborator?.interactionState?.target,
+      artifact.blueprintKey,
+      streamingContent,
+    ],
+  );
   const presenceTargetPaths = useMemo(() => {
+    // Protocol v2 owns one semantic control at a time. The same target that
+    // places the actor also places its native trace, including the settle
+    // frame; cumulative speculative patches must never fan one body out across
+    // several controls.
+    if (semanticInteractionTargetPaths.length > 0)
+      return semanticInteractionTargetPaths;
+    if (activeAiCollaborator?.interactionState) return [];
     // During live streaming, light only the active region — completed fields
     // stay visible via content patches without stacking blue traces on every
     // previously touched control.
@@ -4279,9 +4569,11 @@ function ArtifactStudioEditor({
       ),
     ];
   }, [
+    activeAiCollaborator?.interactionState,
     activeAiCollaborator?.previewPhase,
     presenceHighlightPaths,
     presenceRegionHighlightPaths,
+    semanticInteractionTargetPaths,
   ]);
   const hasConcreteHighlightPaths =
     presenceTargetPaths.length > 0 ||
@@ -4317,7 +4609,9 @@ function ArtifactStudioEditor({
         ? liveCreationPaths
         : liveUpdatingPaths.length > 0
           ? liveUpdatingPaths
-          : catchUpFallbackPaths,
+          : artifact.aiState !== "creating"
+            ? []
+            : catchUpFallbackPaths,
     contentDerivedPaths:
       activeAiCollaborator?.previewPhase === "streaming"
         ? []
@@ -4325,8 +4619,10 @@ function ArtifactStudioEditor({
   });
   const liveStreamingAi = Boolean(
     activeAiCollaborator &&
-    (activeAiCollaborator.previewPhase === "streaming" ||
-      (activeAiCollaborator.previewPatches?.length ?? 0) > 0),
+    (activeAiCollaborator.interactionState
+      ? stateIsVisible(activeAiCollaborator.interactionState)
+      : activeAiCollaborator.previewPhase === "streaming" ||
+        activeAiPreviewPatches.length > 0),
   );
   const aiEffectTitles = [
     ...new Set([
@@ -4364,84 +4660,26 @@ function ArtifactStudioEditor({
       aiHighlightDismissed,
     ],
   );
-  // Short edits can finish before the separate AI Yjs connection has time to
-  // publish awareness. Keep presence truthful and immediate by projecting the
-  // artifact's durable AI state into the same collaboration UI until remote
-  // awareness arrives. The synthetic actor speaks protocol v2, so it renders
-  // through the same interaction layer, in the owner's colour, as the real AI
-  // peer it stands in for.
-  const syntheticAiPresence = useMemo<CollaborationPresence | null>(() => {
-    if (activeAiCollaborator || !visibleAiWorking) return null;
-    if (artifact.aiState === "edited") return null;
-    const activeRegionId =
-      activeAiEffects.flatMap((effect) => effect.regionIds)[0] ??
-      (highlightPaths[0] ? `pointer:${highlightPaths[0]}` : undefined);
-    const focusPath = highlightPaths[0];
-    const ownerName = live.displayName?.trim();
-    const aiName = ownerName ? `${ownerName}'s AI` : "Spectra AI";
-    const syntheticClientId = `local-ai:${artifact.aiRunId ?? artifact._id}`;
-    const interactionState: InteractionState = {
-      v: 2,
-      actor: {
-        clientId: syntheticClientId,
-        kind: "ai",
-        name: aiName,
-        ...(live.accountId ? { accountId: live.accountId } : {}),
-        ...(live.accountId ? { ownerAccountId: live.accountId } : {}),
-        ...(ownerName ? { ownerName } : {}),
-        ...(artifact.aiRunId ? { runId: artifact.aiRunId } : {}),
-      },
-      act: { kind: "focus" },
-      lifecycle: "active",
-      target: focusPath
-        ? buildTarget({
-            typeKey: artifact.blueprintKey as ArtifactTypeKey,
-            artifactId: artifact._id,
-            path: focusPath,
-          })
-        : null,
-      note: activeAiEffects.at(-1)?.title ?? "Working",
-      at: Date.now(),
-    };
-    return {
-      clientId: syntheticClientId,
-      accountId: live.accountId,
-      name: aiName,
-      actorKind: "ai",
-      runId: artifact.aiRunId,
-      interactionState,
-      ...(activeRegionId ? { activeRegionId } : {}),
-      previewSequence: 0,
-    };
-  }, [
-    activeAiCollaborator,
-    activeAiEffects,
-    artifact._id,
-    artifact.blueprintKey,
-    artifact.aiRunId,
-    artifact.aiState,
-    highlightPaths,
-    live.accountId,
-    live.displayName,
-    visibleAiWorking,
-  ]);
-  const displayPresence = useMemo(
-    () =>
-      syntheticAiPresence
-        ? [...live.presence, syntheticAiPresence]
-        : live.presence,
-    [live.presence, syntheticAiPresence],
-  );
+  // Never manufacture a second AI body from durable status. If awareness has
+  // not arrived yet, the run may say "preparing", but no cursor is invented.
+  // The real actor's canonical frame is the only source of visible action.
+  const displayPresence = live.presence;
   /** Peers that have not adopted the semantic protocol yet. */
   const legacyPresence = useMemo(
     () => displayPresence.filter((person) => !person.interactionState),
     [displayPresence],
   );
-  // During create/update, prefer the richer of live Yjs vs Convex preview so
-  // mid-open never sticks on empty placeholders while AI writes through Yjs.
+  // Existing-artifact edits may only become provisional through the live
+  // actor's awareness frames. The Convex preview is a recovery ledger, not a
+  // rendering source: using it during cursor/focus/menu beats lets a later
+  // staged value jump ahead of the actor and makes the native gesture look
+  // decorative. Creates are different because no prior native canvas exists;
+  // their preview remains the bounded mid-open bootstrap.
   const durableEditorContent = presencePreview
     ? presencePreview.content
-    : aiPreviewActive && artifact.aiPreview?.content !== undefined
+    : artifact.aiState === "creating" &&
+        aiPreviewActive &&
+        artifact.aiPreview?.content !== undefined
       ? streamingSource === "local"
         ? content
         : mergeAiRegions(content, artifact.aiPreview.content, aiChangedPaths)
@@ -4487,6 +4725,26 @@ function ArtifactStudioEditor({
       }
     },
     [live.transport],
+  );
+
+  const presenceRegionForPath = useCallback(
+    (path: string) => {
+      const segments = pathSegments(path);
+      if (segments[0] === "title") return "metadata:title";
+      if (segments[0] === "summary") return "metadata:summary";
+      if (segments[0] === "tags") return "metadata:tags";
+      return live.modelSnapshot.regionIds
+        .map((regionId) => live.model?.descriptor(regionId))
+        .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
+        .filter((entry) =>
+          entry.path.every(
+            (segment, index) => String(segments[index]) === String(segment),
+          ),
+        )
+        .sort((left, right) => right.path.length - left.path.length)[0]
+        ?.regionId;
+    },
+    [live.model, live.modelSnapshot.regionIds],
   );
 
   /* ---------------------------------------------------------------- *
@@ -4544,9 +4802,12 @@ function ArtifactStudioEditor({
     actor: localActor,
     surfaceRef: presenceSurfaceRef,
     onPublish: publishInteraction,
+    resolveRegionId: presenceRegionForPath,
     // The region this client is working is published with its frames, so the
     // same ownership rules apply to it as to any AI operation.
-    ...(activeCommentRegionId ? { heldRegionIds: [activeCommentRegionId] } : {}),
+    ...(activeCommentRegionId
+      ? { heldRegionIds: [activeCommentRegionId] }
+      : {}),
     enabled: !readOnly && isCollaborativeArtifact,
   });
 
@@ -4608,15 +4869,38 @@ function ArtifactStudioEditor({
   const editorContent = useMemo(() => {
     if (remoteSpeculation.size === 0) return durableEditorContent;
     let next: unknown = durableEditorContent;
+    let documentBlocksAreSpeculative = false;
     for (const [pointer, value] of remoteSpeculation) {
-      if (!pointer.startsWith("/content")) continue;
-      const contentPath = pointer.slice("/content".length);
-      next = contentPath
-        ? setAtPointer(next, contentPath, value)
-        : (value ?? next);
+      const contentPointer = livePreviewContentPointer(pointer);
+      if (!contentPointer) continue;
+      if (/^\/blocks(?:\/|$)/.test(contentPointer))
+        documentBlocksAreSpeculative = true;
+      next =
+        contentPointer === "/"
+          ? (value ?? next)
+          : setAtPointer(next, contentPointer, value);
+    }
+    if (
+      artifact.blueprintKey === "document" &&
+      documentBlocksAreSpeculative &&
+      next &&
+      typeof next === "object" &&
+      !Array.isArray(next)
+    ) {
+      // Document content deliberately stores both semantic blocks and TipTap
+      // JSON. An AI frame patches the semantic block first; if the stale TipTap
+      // mirror remains present, DocumentStudio correctly prefers it and the
+      // entire visible stream is hidden until the durable commit refreshes both
+      // representations. During this causal window, project from the patched
+      // blocks while preserving every other content field.
+      const { tiptap: _staleTiptap, ...blockProjection } = next as Record<
+        string,
+        unknown
+      >;
+      return blockProjection;
     }
     return next;
-  }, [durableEditorContent, remoteSpeculation]);
+  }, [artifact.blueprintKey, durableEditorContent, remoteSpeculation]);
 
   const editorChange =
     aiPreviewActive && artifact.aiPreview?.content !== undefined
@@ -4913,6 +5197,28 @@ function ArtifactStudioEditor({
           setBaseline(incomingSnapshot);
           setRemoteConflict(null);
           aiMergeRef.current = null;
+        } else if (isCollaborativeArtifact) {
+          const local = currentSnapshotRef.current;
+          const rebased = rebaseCollaborativeSnapshot(
+            baseline,
+            local,
+            incomingSnapshot,
+          );
+          reconcilingRemoteRef.current = true;
+          setTitle(rebased.snapshot.title);
+          setSummary(rebased.snapshot.summary);
+          setTagDraft(rebased.snapshot.tagDraft);
+          setContent(rebased.snapshot.content);
+          setBaseline(incomingSnapshot);
+          setRemoteConflict(rebased.conflicts.length ? incomingSnapshot : null);
+          // A successful remote-only merge remains an unsaved local draft. A
+          // same-leaf collision is also preserved locally for explicit review.
+          userHasEditedRef.current = true;
+          dirtyRef.current = true;
+          setDirty(true);
+          window.requestAnimationFrame(() => {
+            reconcilingRemoteRef.current = false;
+          });
         } else setRemoteConflict(incomingSnapshot);
       }
       return;
@@ -4944,6 +5250,7 @@ function ArtifactStudioEditor({
     baseline,
     dismissedRemoteKey,
     incomingSnapshot,
+    isCollaborativeArtifact,
   ]);
 
   useEffect(
@@ -5163,12 +5470,25 @@ function ArtifactStudioEditor({
       });
       return;
     }
-    if (dirty) {
-      const synchronized = await save();
-      if (!synchronized) return;
-    }
     setHistoryBusy(version._id);
     try {
+      // History actions commonly follow the last auto-save by only a few
+      // milliseconds. Treat that save as part of the same ordered session
+      // instead of silently dropping the restore while `syncingRef` is held.
+      const syncDeadline = Date.now() + 12_000;
+      while (syncingRef.current && Date.now() < syncDeadline)
+        await new Promise((resolve) => window.setTimeout(resolve, 40));
+      if (syncingRef.current)
+        throw new Error(
+          "Spectra is still saving your latest edit. The restore was not applied; try again in a moment.",
+        );
+      if (dirtyRef.current) {
+        const synchronized = await synchronizeDraft(currentSnapshotRef.current);
+        if (!synchronized)
+          throw new Error(
+            "Your latest edit could not be saved, so the restore was safely withheld.",
+          );
+      }
       if (!live.supported) throw new Error("ARTIFACT_LIVE_MODEL_UNAVAILABLE");
       // A restore is its own semantic operation. Close any preceding human
       // session first so ordinary edits cannot be mislabeled as a restore.
@@ -5279,6 +5599,9 @@ function ArtifactStudioEditor({
     artifact.blueprintKey === "document"
       ? "min-h-0 flex-1 overflow-y-auto pb-5"
       : "min-h-0 flex-1 overflow-y-auto pb-5 pl-[15px] pr-0 pt-1";
+  const liveConflictLabel = liveConflict?.regionId
+    ? live.model?.descriptor(liveConflict.regionId)?.label
+    : undefined;
   const collaboratorCount = displayPresence.filter(
     (person) => person.clientId !== live.transport?.clientId,
   ).length;
@@ -5326,46 +5649,13 @@ function ArtifactStudioEditor({
         : syncBusy || dirty
           ? "Saving…"
           : "Saved";
-  const quizHeaderQuestions =
-    artifact.blueprintKey === "quiz" ? quizQuestions(editorContent) : [];
-  const quizHeaderMinutes = Math.max(
-    1,
-    Math.ceil(
-      quizHeaderQuestions.reduce(
-        (total, question) => total + (question.timeLimitSeconds ?? 90),
-        0,
-      ) / 60,
-    ),
-  );
-  const quizHeaderDifficulty = quizHeaderQuestions.some(
-    (question) => question.difficulty === "hard",
-  )
-    ? "Hard"
-    : quizHeaderQuestions.length > 0 &&
-        quizHeaderQuestions.every((question) => question.difficulty === "easy")
-      ? "Easy"
-      : "Medium";
   const visibleIdentityTags = tagDraft
     .split(",")
     .map((tag) => tag.trim())
     .filter(Boolean)
     .slice(0, 3);
   const waveCBlueprint = WAVE_C_BLUEPRINTS.has(artifact.blueprintKey);
-  const identityStats =
-    artifact.blueprintKey === "quiz"
-      ? [
-          [String(quizHeaderQuestions.length), "Questions"],
-          [`${quizHeaderMinutes} min`, "Est. time"],
-          [quizHeaderDifficulty, "Difficulty"],
-        ]
-      : null;
-  const showIdentityStats = Boolean(identityStats?.length) && !compact;
   const artifactSyncMessage = studioSyncMessage(syncLabel);
-  const syncIndicatorBusy =
-    syncBusy ||
-    live.state === "connecting" ||
-    live.state === "synchronizing" ||
-    live.state === "reconnecting";
   const identityBlock = (
     <div
       className={`spectra-artifact-identity flex w-full items-start ${compact ? "gap-3 px-5 pb-5" : artifact.blueprintKey === "document" ? "gap-4 px-6 pb-2" : artifact.blueprintKey === "quiz" || waveCBlueprint ? "gap-[10px] px-2 pb-0" : "gap-4 px-1 pb-2"}`}
@@ -5437,39 +5727,6 @@ function ArtifactStudioEditor({
           </div>
         ) : null}
       </div>
-      {showIdentityStats ? (
-        <div className="spectra-artifact-identity-stats mr-3.5 hidden w-[292px] shrink-0 flex-col items-stretch gap-2 lg:flex">
-          <div className="grid h-16 grid-cols-3 overflow-hidden rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-primary)]">
-            {identityStats!.map(([value, label], index) => (
-              <span
-                key={label}
-                className={`grid place-items-center content-center gap-1 ${index ? "border-l border-[var(--border-subtle)]" : ""}`}
-              >
-                <strong className="font-display text-[16px] text-[var(--text-primary)]">
-                  {value}
-                </strong>
-                <small className="text-[9px] text-[var(--text-tertiary)]">
-                  {label}
-                </small>
-              </span>
-            ))}
-          </div>
-          <span
-            className="inline-flex items-center justify-start gap-1.5 text-[10px] text-[var(--text-secondary)]"
-            role="status"
-            aria-live="polite"
-          >
-            {artifactSyncMessage === "Auto-saved" ? (
-              <CheckCircle2 className="h-3.5 w-3.5 text-[var(--success)]" />
-            ) : syncIndicatorBusy ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-cyan)]" />
-            ) : (
-              <Circle className="h-3 w-3 fill-[#d88922] text-[#d88922]" />
-            )}
-            {artifactSyncMessage}
-          </span>
-        </div>
-      ) : null}
     </div>
   );
 
@@ -5499,6 +5756,28 @@ function ArtifactStudioEditor({
       }
       data-blueprint={artifact.blueprintKey}
       data-ai-highlight-paths={highlightPaths.join("|") || undefined}
+      data-ai-protocol={
+        activeAiCollaborator?.interactionState
+          ? "v2"
+          : activeAiCollaborator
+            ? "legacy"
+            : undefined
+      }
+      data-ai-lifecycle={activeAiCollaborator?.interactionState?.lifecycle}
+      data-ai-act={activeAiCollaborator?.interactionState?.act.kind}
+      data-ai-target={activeAiCollaborator?.interactionState?.target?.path}
+      data-ai-speculation-count={
+        activeAiCollaborator?.interactionState?.speculation?.patches.length
+      }
+      data-ai-speculation-shape={
+        activeAiCollaborator?.interactionState?.speculation?.patches
+          .slice(0, 3)
+          .map(
+            (patch) =>
+              `${patch.path}:${typeof patch.value === "string" ? patch.value.length : typeof patch.value}`,
+          )
+          .join("|") || undefined
+      }
       data-ai-gesture={
         activeAiCollaborator?.previewGesture ??
         (activeAiCollaborator?.previewPhase === "streaming"
@@ -5624,7 +5903,7 @@ function ArtifactStudioEditor({
                 }}
               />
             ) : null}
-            {onShare && mode === "split" ? (
+            {onShare ? (
               <IconButton
                 label="Share artifact"
                 onClick={onShare}
@@ -5707,40 +5986,43 @@ function ArtifactStudioEditor({
       {!permissionReadOnly &&
       isCollaborativeArtifact &&
       (live.state === "reconnecting" || live.state === "unsynchronized") ? (
-        <div
-          role="status"
-          className="shrink-0 border-y border-[color-mix(in_oklab,#d88922_26%,var(--border-subtle))] bg-[color-mix(in_oklab,#d88922_7%,var(--bg-primary))] px-5 py-2 text-[11px] text-[var(--text-secondary)]"
-        >
-          Connection interrupted. Spectra is reconnecting collaborators while
-          keeping your draft.
+        <div className="relative z-[60] h-0 shrink-0">
+          <div
+            role="status"
+            className="spectra-collaboration-notice absolute right-3 top-2"
+          >
+            Connection interrupted. Reconnecting while keeping your draft.
+          </div>
         </div>
       ) : null}
       {isCollaborativeArtifact && liveConflict ? (
-        <div
-          role="alert"
-          className="flex shrink-0 items-center gap-3 border-y border-[color-mix(in_oklab,#d88922_28%,var(--border-subtle))] bg-[color-mix(in_oklab,#d88922_7%,var(--bg-primary))] px-5 py-2 text-[11px] text-[var(--text-secondary)]"
-        >
-          <span className="min-w-0 flex-1">
-            {liveConflict.message}
-            {liveConflict.queuePosition
-              ? ` · Queue position ${liveConflict.queuePosition}`
-              : ""}
-            {liveConflict.regionId ? ` · Region ${liveConflict.regionId}` : ""}
-          </span>
-          <button
-            type="button"
-            className="shrink-0 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 py-1 text-[10px] font-medium"
-            onClick={() => void synchronizeDraft(currentSnapshotRef.current)}
+        <div className="relative z-[61] h-0 shrink-0">
+          <div
+            role="alert"
+            className="spectra-collaboration-notice absolute right-3 top-2 flex items-center gap-2"
           >
-            Retry sync
-          </button>
-          <button
-            type="button"
-            className="shrink-0 rounded-[6px] px-2 py-1 text-[10px] font-medium text-[var(--text-tertiary)]"
-            onClick={() => void discardQueuedDraft()}
-          >
-            Keep their version
-          </button>
+            <span className="min-w-0 flex-1">
+              {liveConflict.message}
+              {liveConflictLabel ? ` · ${liveConflictLabel}` : ""}
+              {liveConflict.queuePosition
+                ? ` · Waiting ${liveConflict.queuePosition === 1 ? "next" : `at position ${liveConflict.queuePosition}`}`
+                : ""}
+            </span>
+            <button
+              type="button"
+              className="shrink-0 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 py-1 text-[10px] font-medium"
+              onClick={() => void synchronizeDraft(currentSnapshotRef.current)}
+            >
+              Retry
+            </button>
+            <button
+              type="button"
+              className="shrink-0 rounded-[6px] px-2 py-1 text-[10px] font-medium text-[var(--text-tertiary)]"
+              onClick={() => void discardQueuedDraft()}
+            >
+              Use latest
+            </button>
+          </div>
         </div>
       ) : null}
       {isCollaborativeArtifact &&
@@ -5932,6 +6214,7 @@ function ArtifactStudioEditor({
                 key={`${artifact._id}:agent`}
                 artifactId={artifact._id}
                 artifactTitle={title || artifact.title}
+                mode={mode}
                 artifacts={artifacts}
                 content={editorContent}
                 onChange={editorChange}
@@ -6587,18 +6870,16 @@ function DocumentStudio({
           lines: lineTargets,
         }
       : null;
-    // Reconcile after React's commit. The target is a ProseMirror decoration,
-    // so it remains attached to the same semantic block through every streamed
-    // setContent transaction instead of being wiped from the DOM.
-    const frame = window.requestAnimationFrame(() => {
-      if (editor.isDestroyed) return;
-      if (contentChanged)
-        editor.commands.setContent(incomingEditorJson, { emitUpdate: false });
-      editor.view.dispatch(
-        editor.state.tr.setMeta(aiRegionDecorationKey, target),
-      );
-    });
-    return () => window.cancelAnimationFrame(frame);
+    // Effects already run after React's commit. Apply the projection now:
+    // requestAnimationFrame is throttled in an unfocused collaborator window,
+    // and cancelling the preceding callback for every 112 ms presence beat can
+    // starve TipTap indefinitely, leaving a peer on a provisional prefix.
+    if (editor.isDestroyed) return;
+    if (contentChanged)
+      editor.commands.setContent(incomingEditorJson, { emitUpdate: false });
+    editor.view.dispatch(
+      editor.state.tr.setMeta(aiRegionDecorationKey, target),
+    );
   }, [aiChangedPaths, editor, incomingEditorJson]);
 
   const equationActive = editor?.isActive("equation") ?? false;
@@ -7709,6 +7990,9 @@ function FlashcardStudio({
   const [sectionNameDraft, setSectionNameDraft] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [deckTagDraft, setDeckTagDraft] = useState("");
+  const [studioView, setStudioView] = useState<"edit" | "view">("edit");
+  const [previewRevealed, setPreviewRevealed] = useState(false);
+  const [railCollapsed, setRailCollapsed] = useState(mode === "split");
   const [studyOpen, setStudyOpen] = useState(false);
   const [studyRevealed, setStudyRevealed] = useState(false);
   const [studyIndex, setStudyIndex] = useState(0);
@@ -7734,6 +8018,28 @@ function FlashcardStudio({
   const [deckAssets, setDeckAssets] = useState<SpectraArtifactAsset[]>([]);
   const [deckMediaBusy, setDeckMediaBusy] = useState(false);
   const [deckMediaError, setDeckMediaError] = useState<string>();
+
+  useEffect(() => {
+    const reveal = (event: Event) => {
+      const detail = (
+        event as CustomEvent<{ artifactId?: string; path?: string }>
+      ).detail;
+      if (detail?.artifactId !== artifactId || !detail.path) return;
+      const match = detail.path.match(/^\/cards\/(\d+)(?:\/|$)/);
+      if (!match) return;
+      const index = Number(match[1]);
+      const card = cards[index];
+      if (card) setActiveCardId(card.id);
+      if (
+        /\/(?:variant|difficulty|confidence|section|language|media|explanation|acceptedAlternatives|learningObjective|sourceRefs|bidirectional)(?:\/|$)/.test(
+          detail.path,
+        )
+      )
+        setAdvancedOpen(true);
+    };
+    window.addEventListener("spectra:reveal-target", reveal);
+    return () => window.removeEventListener("spectra:reveal-target", reveal);
+  }, [artifactId, cards]);
   const [maskDraft, setMaskDraft] = useState<{
     x: number;
     y: number;
@@ -7752,6 +8058,18 @@ function FlashcardStudio({
     [cards],
   );
   const activeCard = cards.find((card) => card.id === activeCardId) ?? cards[0];
+  const activeCardIndex = Math.max(
+    0,
+    cards.findIndex((card) => card.id === activeCard?.id),
+  );
+  useEffect(() => {
+    setPreviewRevealed(false);
+  }, [activeCardId, studioView]);
+  const advancedAiPath = aiChangedPaths.find((path) =>
+    /^\/cards\/\d+\/(?:variant|difficulty|confidence|section|language|media|explanation|acceptedAlternatives|learningObjective|sourceRefs|bidirectional)(?:\/|$)/.test(
+      path,
+    ),
+  );
   const deckSettings = record(record(content).settings);
   const activeDeckMedia = activeCard?.media
     ? deckAssets.find((asset) => asset.assetId === activeCard.media?.assetId)
@@ -7925,6 +8243,12 @@ function FlashcardStudio({
     setStudyClock(now);
     setStudyError(undefined);
     setStudyOpen(true);
+    void document.documentElement.requestFullscreen?.().catch(() => undefined);
+  };
+  const closeStudySession = () => {
+    setStudyOpen(false);
+    if (document.fullscreenElement)
+      void document.exitFullscreen().catch(() => undefined);
   };
   const beginStudySessionRef = useRef(beginStudySession);
   useEffect(() => {
@@ -9170,10 +9494,24 @@ function FlashcardStudio({
         (asset) => asset.assetId === activeStudyCard.media?.assetId,
       )
     : undefined;
+  const activePreviewSource = activeCard
+    ? previewRevealed
+      ? activeCard.variant === "cloze"
+        ? clozeAnswer(activeCard.front)
+        : activeCard.back || "No answer yet"
+      : activeCard.variant === "cloze"
+        ? clozePrompt(activeCard.front)
+        : activeCard.front || "Untitled card"
+    : "";
+  const activePreviewPlainText = plannerDescriptionText(
+    plannerDescriptionHtml(activePreviewSource),
+  );
 
   return (
     <div
       className={`spectra-flashcard-studio ml-2.5 grid min-h-[720px] min-w-0 gap-3 ${mode === "tab" ? "lg:grid-cols-[330px_minmax(0,1fr)]" : "grid-cols-1"}`}
+      data-studio-view={studioView}
+      data-rail-collapsed={railCollapsed || undefined}
     >
       <input
         ref={deckMediaInputRef}
@@ -9186,7 +9524,7 @@ function FlashcardStudio({
         }}
       />
       <div
-        className={`grid w-[580px] max-w-full min-w-0 grid-cols-2 overflow-hidden rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] ${mode === "tab" ? "ml-11 sm:grid-cols-5 lg:col-span-2" : ""}`}
+        className={`spectra-deck-metrics grid w-[580px] max-w-full min-w-0 grid-cols-2 overflow-hidden rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] ${mode === "tab" ? "ml-11 sm:grid-cols-5 lg:col-span-2" : ""}`}
       >
         <div className="px-3 py-2">
           <strong className="block font-display text-[16px] leading-5 text-[var(--text-primary)]">
@@ -9233,7 +9571,7 @@ function FlashcardStudio({
         <button
           type="button"
           onClick={() => addCard()}
-          className="inline-flex h-9 items-center gap-2 rounded-[7px] bg-[#7560e8] px-3 text-[12px] font-semibold text-white shadow-[0_8px_20px_-14px_#5f49d4]"
+          className="spectra-deck-edit-action inline-flex h-9 items-center gap-2 rounded-[7px] bg-[#7560e8] px-3 text-[12px] font-semibold text-white shadow-[0_8px_20px_-14px_#5f49d4]"
         >
           <Plus className="h-4 w-4" />
           Add card
@@ -9245,7 +9583,7 @@ function FlashcardStudio({
             setActiveSection(section);
             addCard(section);
           }}
-          className="inline-flex h-9 items-center gap-2 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-primary)]"
+          className="spectra-deck-edit-action inline-flex h-9 items-center gap-2 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-primary)]"
         >
           <Plus className="h-4 w-4" />
           Add section
@@ -9263,7 +9601,7 @@ function FlashcardStudio({
         <button
           type="button"
           onClick={() => deckImportRef.current?.click()}
-          className="inline-flex h-9 items-center gap-2 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-primary)]"
+          className="spectra-deck-edit-action inline-flex h-9 items-center gap-2 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-primary)]"
         >
           <Import className="h-4 w-4" />
           Import
@@ -9277,27 +9615,64 @@ function FlashcardStudio({
           className="spectra-deck-study-trigger inline-flex h-9 items-center gap-2 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-primary)] disabled:opacity-40"
           aria-label={
             !studyStateLoading && dueStudyCount
-              ? `Start study session, ${dueStudyCount} cards due`
-              : "Start study session"
+              ? `Present flashcards, ${dueStudyCount} cards due`
+              : "Present flashcards"
           }
         >
-          <BookOpen className="h-4 w-4" />
-          Study
+          <Play className="h-4 w-4" />
+          Present
           {!studyStateLoading && dueStudyCount ? ` · ${dueStudyCount}` : ""}
         </button>
         <button
           type="button"
           onClick={() => setDeckMenuOpen(!deckMenuOpen)}
           data-active={deckMenuOpen || undefined}
-          className="spectra-deck-menu-trigger inline-flex h-9 items-center gap-2 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-primary)]"
+          className="spectra-deck-edit-action spectra-deck-menu-trigger inline-flex h-9 items-center gap-2 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-primary)]"
           aria-label="Deck templates, study settings, and export"
           title="Templates and export"
         >
           <LayoutTemplate className="h-4 w-4" />
           <span className="hidden sm:inline">Templates</span>
         </button>
+        {studioView === "edit" ? (
+          <button
+            type="button"
+            className="spectra-deck-rail-toggle"
+            aria-expanded={!railCollapsed}
+            onClick={() => setRailCollapsed((collapsed) => !collapsed)}
+          >
+            <PanelLeft className="h-3.5 w-3.5" />
+            {railCollapsed ? "Show cards" : "Hide cards"}
+          </button>
+        ) : null}
         <div
-          className={`spectra-deck-pagination ${mode === "split" ? "w-full justify-between border-t border-[var(--border-subtle)] pt-2" : "ml-auto"} flex min-w-0 items-center gap-1 text-[11px] text-[var(--text-secondary)]`}
+          className="spectra-deck-mode-switch ml-auto"
+          role="tablist"
+          aria-label="Flashcard views"
+        >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={studioView === "edit"}
+            data-active={studioView === "edit" || undefined}
+            onClick={() => setStudioView("edit")}
+          >
+            <Pencil className="h-3.5 w-3.5" />
+            Edit
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={studioView === "view"}
+            data-active={studioView === "view" || undefined}
+            onClick={() => setStudioView("view")}
+          >
+            <Eye className="h-3.5 w-3.5" />
+            View
+          </button>
+        </div>
+        <div
+          className={`spectra-deck-pagination ${mode === "split" ? "w-full justify-between border-t border-[var(--border-subtle)] pt-2" : ""} flex min-w-0 items-center gap-1 text-[11px] text-[var(--text-secondary)]`}
         >
           <button
             type="button"
@@ -9316,13 +9691,20 @@ function FlashcardStudio({
           >
             <ChevronDown className="h-4 w-4 rotate-90" />
           </button>
-          <span>
-            Card{" "}
-            {Math.max(
-              1,
-              cards.findIndex((card) => card.id === activeCard?.id) + 1,
-            )}{" "}
-            of {cards.length}
+          <select
+            aria-label="Current card"
+            value={activeCard?.id ?? ""}
+            onChange={(event) => setActiveCardId(event.target.value)}
+          >
+            {cards.map((card, index) => (
+              <option key={card.id} value={card.id}>
+                {index + 1} ·{" "}
+                {plannerDescriptionText(card.front) || "Untitled card"}
+              </option>
+            ))}
+          </select>
+          <span className="whitespace-nowrap">
+            {activeCardIndex + 1} of {cards.length}
           </span>
           <button
             type="button"
@@ -9344,7 +9726,7 @@ function FlashcardStudio({
             <ChevronDown className="h-4 w-4 -rotate-90" />
           </button>
         </div>
-        <div className="spectra-deck-view-switch flex items-center rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-0.5">
+        <div className="spectra-deck-edit-action spectra-deck-view-switch flex items-center rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-0.5">
           <button
             type="button"
             data-active={railView === "list" || undefined}
@@ -9363,6 +9745,46 @@ function FlashcardStudio({
           </button>
         </div>
       </div>
+      {studioView === "view" && activeCard ? (
+        <section
+          className="spectra-deck-viewer"
+          aria-label={`Flashcard ${activeCardIndex + 1} of ${cards.length}`}
+        >
+          <div className="spectra-deck-viewer-context">
+            <span>{activeCard.section || "Section 1"}</span>
+            <strong>
+              {activeCardIndex + 1} of {cards.length}
+            </strong>
+          </div>
+          <button
+            type="button"
+            className="spectra-deck-viewer-card"
+            data-revealed={previewRevealed || undefined}
+            data-density={
+              activePreviewPlainText.length > 260
+                ? "dense"
+                : activePreviewPlainText.length > 130
+                  ? "compact"
+                  : undefined
+            }
+            onClick={() => setPreviewRevealed((revealed) => !revealed)}
+          >
+            <span>{previewRevealed ? "Answer" : "Prompt"}</span>
+            <div
+              className="spectra-deck-viewer-copy"
+              dangerouslySetInnerHTML={{
+                __html: plannerDescriptionHtml(activePreviewSource),
+              }}
+            />
+            {previewRevealed && activeCard.explanation ? (
+              <small>{activeCard.explanation}</small>
+            ) : !previewRevealed && activeCard.hint ? (
+              <small>{activeCard.hint}</small>
+            ) : null}
+            <em>{previewRevealed ? "Show prompt" : "Reveal answer"}</em>
+          </button>
+        </section>
+      ) : null}
       {deckMenuOpen ? (
         <div className="spectra-deck-menu">
           <strong>Start from a template</strong>
@@ -9731,7 +10153,8 @@ function FlashcardStudio({
                             {index + 1}
                           </span>
                           <span className="min-w-0 truncate text-[12px] font-medium text-[var(--text-primary)]">
-                            {card.front || "Untitled card"}
+                            {plannerDescriptionText(card.front) ||
+                              "Untitled card"}
                           </span>
                           {!card.front.trim() || !card.back.trim() ? (
                             <AlertCircle
@@ -10175,6 +10598,7 @@ function FlashcardStudio({
               type="button"
               className="spectra-deck-advanced-trigger"
               aria-expanded={advancedOpen}
+              {...(advancedAiPath ? targetAttrs(advancedAiPath) : {})}
               onClick={() => setAdvancedOpen(!advancedOpen)}
             >
               <SlidersHorizontal className="h-3.5 w-3.5" />
@@ -10192,6 +10616,7 @@ function FlashcardStudio({
                       aiChangedPaths,
                       `/cards/${cards.findIndex((card) => card.id === activeCard.id)}/variant`,
                     )}
+                    path={`/cards/${cards.findIndex((card) => card.id === activeCard.id)}/variant`}
                   >
                     <select
                       value={activeCard.variant ?? "basic"}
@@ -10218,6 +10643,7 @@ function FlashcardStudio({
                       aiChangedPaths,
                       `/cards/${cards.findIndex((card) => card.id === activeCard.id)}/difficulty`,
                     )}
+                    path={`/cards/${cards.findIndex((card) => card.id === activeCard.id)}/difficulty`}
                   >
                     <select
                       value={activeCard.difficulty ?? "medium"}
@@ -10240,6 +10666,7 @@ function FlashcardStudio({
                       aiChangedPaths,
                       `/cards/${cards.findIndex((card) => card.id === activeCard.id)}/confidence`,
                     )}
+                    path={`/cards/${cards.findIndex((card) => card.id === activeCard.id)}/confidence`}
                   >
                     <select
                       value={activeCard.confidence ?? "unknown"}
@@ -10257,7 +10684,10 @@ function FlashcardStudio({
                       <option value="strong">Strong</option>
                     </select>
                   </Field>
-                  <Field label="Section">
+                  <Field
+                    label="Section"
+                    path={`/cards/${cards.findIndex((card) => card.id === activeCard.id)}/section`}
+                  >
                     <select
                       value={activeCard.section ?? "Section 1"}
                       onChange={(event) =>
@@ -10274,7 +10704,10 @@ function FlashcardStudio({
                       ))}
                     </select>
                   </Field>
-                  <Field label="Language">
+                  <Field
+                    label="Language"
+                    path={`/cards/${cards.findIndex((card) => card.id === activeCard.id)}/language`}
+                  >
                     <input
                       value={activeCard.language ?? ""}
                       onChange={(event) =>
@@ -10325,7 +10758,10 @@ function FlashcardStudio({
                     </div>
                     {activeCard.media ? (
                       <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                        <Field label="Place image on">
+                        <Field
+                          label="Place image on"
+                          path={`/cards/${cards.findIndex((card) => card.id === activeCard.id)}/media/placement`}
+                        >
                           <select
                             value={activeCard.media.placement ?? "front"}
                             onChange={(event) =>
@@ -10345,7 +10781,10 @@ function FlashcardStudio({
                             <option value="back">Answer / back</option>
                           </select>
                         </Field>
-                        <Field label="Image description">
+                        <Field
+                          label="Image description"
+                          path={`/cards/${cards.findIndex((card) => card.id === activeCard.id)}/media/altText`}
+                        >
                           <input
                             value={activeCard.media.altText ?? ""}
                             onChange={(event) =>
@@ -10371,7 +10810,10 @@ function FlashcardStudio({
                     ) : null}
                   </div>
                 ) : null}
-                <Field label="Explanation">
+                <Field
+                  label="Explanation"
+                  path={`/cards/${cards.findIndex((card) => card.id === activeCard.id)}/explanation`}
+                >
                   <textarea
                     value={activeCard.explanation ?? ""}
                     onChange={(event) =>
@@ -10383,7 +10825,10 @@ function FlashcardStudio({
                     placeholder="Why this answer is correct or useful"
                   />
                 </Field>
-                <Field label="Accepted alternatives">
+                <Field
+                  label="Accepted alternatives"
+                  path={`/cards/${cards.findIndex((card) => card.id === activeCard.id)}/acceptedAlternatives`}
+                >
                   <input
                     value={(activeCard.acceptedAlternatives ?? []).join("; ")}
                     onChange={(event) =>
@@ -10398,7 +10843,10 @@ function FlashcardStudio({
                     placeholder="Alternative answer; another accepted form"
                   />
                 </Field>
-                <Field label="Learning objective">
+                <Field
+                  label="Learning objective"
+                  path={`/cards/${cards.findIndex((card) => card.id === activeCard.id)}/learningObjective`}
+                >
                   <input
                     value={activeCard.learningObjective ?? ""}
                     onChange={(event) =>
@@ -10410,7 +10858,10 @@ function FlashcardStudio({
                     placeholder="What should this card help the learner retrieve?"
                   />
                 </Field>
-                <Field label="Sources / provenance">
+                <Field
+                  label="Sources / provenance"
+                  path={`/cards/${cards.findIndex((card) => card.id === activeCard.id)}/sourceRefs`}
+                >
                   <input
                     value={(activeCard.sourceRefs ?? []).join(", ")}
                     onChange={(event) =>
@@ -10428,6 +10879,9 @@ function FlashcardStudio({
                 <label className="spectra-deck-check-field">
                   <input
                     type="checkbox"
+                    {...targetAttrs(
+                      `/cards/${cards.findIndex((card) => card.id === activeCard.id)}/bidirectional`,
+                    )}
                     checked={activeCard.bidirectional === true}
                     disabled={activeCard.variant !== "basic"}
                     onChange={() =>
@@ -10490,242 +10944,261 @@ function FlashcardStudio({
           </div>
         ) : null}
       </section>
-      {studyOpen && studyQueue.length ? (
-        <div
-          className="spectra-deck-study"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Private flashcard study session"
-          onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              event.preventDefault();
-              event.stopPropagation();
-              setStudyOpen(false);
-              return;
-            }
-            if (studyComplete) return;
-            const typing =
-              event.target instanceof HTMLInputElement ||
-              event.target instanceof HTMLTextAreaElement;
-            if (
-              !studyRevealed &&
-              ((!typing && event.key === " ") || event.key === "Enter")
-            ) {
-              event.preventDefault();
-              revealStudyAnswer();
-              return;
-            }
-            if (studyRevealed && ["1", "2", "3", "4"].includes(event.key)) {
-              event.preventDefault();
-              const selected = (["again", "hard", "good", "easy"] as const)[
-                Number(event.key) - 1
-              ];
-              if (selected) void rateStudyCard(selected);
-            }
-          }}
-        >
-          <header>
-            <span>
-              <BookOpen className="h-4 w-4" />
-              <strong>Private study session</strong>
-              <small>
-                {studyComplete
-                  ? `${studyQueue.length} reviewed`
-                  : `${studyIndex + 1} of ${studyQueue.length}`}
-              </small>
-            </span>
-            <button type="button" onClick={() => setStudyOpen(false)}>
-              <X className="h-4 w-4" />
-            </button>
-          </header>
-          {studyError ? (
-            <div className="spectra-deck-study-error" role="alert">
-              <AlertCircle className="h-4 w-4" />
-              <span>{studyError}</span>
-              <button type="button" onClick={() => setStudyError(undefined)}>
-                Dismiss
-              </button>
-            </div>
-          ) : null}
-          {studyComplete ? (
-            <main className="spectra-deck-study-complete">
-              <span className="grid size-12 place-items-center rounded-full bg-[color-mix(in_oklab,var(--success)_10%,var(--bg-primary))] text-[var(--success)]">
-                <CheckCircle2 className="h-6 w-6" />
-              </span>
-              <h3>Study queue complete</h3>
-              <p>
-                Every result was synchronized to your private scheduler. Other
-                collaborators cannot see your answers or review history.
-              </p>
-              <div>
-                {(["again", "hard", "good", "easy"] as const).map((rating) => (
-                  <span key={rating}>
-                    <strong>{studyRatings[rating]}</strong>
-                    <small>{rating}</small>
-                  </span>
-                ))}
-              </div>
-              <button type="button" onClick={beginStudySession}>
-                Review another queue
-              </button>
-            </main>
-          ) : activeStudyCard ? (
-            <main>
-              <section>
+      {studyOpen && studyQueue.length && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              className="spectra-deck-study"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Private flashcard study session"
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  closeStudySession();
+                  return;
+                }
+                if (studyComplete) return;
+                const typing =
+                  event.target instanceof HTMLInputElement ||
+                  event.target instanceof HTMLTextAreaElement;
+                if (
+                  !studyRevealed &&
+                  ((!typing && event.key === " ") || event.key === "Enter")
+                ) {
+                  event.preventDefault();
+                  revealStudyAnswer();
+                  return;
+                }
+                if (studyRevealed && ["1", "2", "3", "4"].includes(event.key)) {
+                  event.preventDefault();
+                  const selected = (["again", "hard", "good", "easy"] as const)[
+                    Number(event.key) - 1
+                  ];
+                  if (selected) void rateStudyCard(selected);
+                }
+              }}
+            >
+              <header>
                 <span>
-                  Prompt
-                  {activeStudyItem?.direction === "reverse" ? " · reverse" : ""}
+                  <BookOpen className="h-4 w-4" />
+                  <strong>Private study session</strong>
+                  <small>
+                    {studyComplete
+                      ? `${studyQueue.length} reviewed`
+                      : `${studyIndex + 1} of ${studyQueue.length}`}
+                  </small>
                 </span>
-                <strong>{activeStudyPrompt}</strong>
-                {activeStudyCard.variant !== "image_occlusion" &&
-                activeStudyCard.media?.placement !== "back" &&
-                activeStudyMedia?.downloadUrl ? (
-                  /* eslint-disable-next-line @next/next/no-img-element */
-                  <img
-                    src={activeStudyMedia.downloadUrl}
-                    alt={
-                      activeStudyCard.media?.altText ||
-                      activeStudyCard.media?.name ||
-                      "Card image"
-                    }
-                    className="mx-auto mt-4 block max-h-[42vh] max-w-full rounded-[9px] border border-[var(--border-default)] object-contain"
-                  />
-                ) : null}
-                {activeStudyCard.variant === "image_occlusion" &&
-                activeStudyMedia?.downloadUrl ? (
-                  <div className="relative mx-auto mt-4 w-fit max-w-full overflow-hidden rounded-[9px] border border-[var(--border-default)] bg-[#17191d]">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={activeStudyMedia.downloadUrl}
-                      alt={
-                        activeStudyCard.media?.altText ||
-                        activeStudyCard.media?.name
-                      }
-                      className="block max-h-[48vh] max-w-full object-contain"
-                    />
-                    {(activeStudyCard.occlusions ?? []).map((mask, index) => (
-                      <span
-                        key={mask.id}
-                        className={`absolute grid place-items-center border text-[11px] font-bold transition-[background-color,border-color,color] ${
-                          studyRevealed
-                            ? "border-[var(--success)] bg-[color-mix(in_oklab,var(--success)_12%,transparent)] text-[var(--success)]"
-                            : "border-white/65 bg-[#252a32] text-white shadow-[0_2px_8px_rgba(0,0,0,0.24)]"
-                        }`}
-                        style={{
-                          left: `${mask.x * 100}%`,
-                          top: `${mask.y * 100}%`,
-                          width: `${mask.width * 100}%`,
-                          height: `${mask.height * 100}%`,
-                        }}
-                      >
-                        {studyRevealed ? mask.label || index + 1 : index + 1}
-                      </span>
-                    ))}
-                  </div>
-                ) : null}
-                {!studyRevealed &&
-                deckSettings.showHints !== false &&
-                activeStudyCard.hint ? (
-                  <small>{activeStudyCard.hint}</small>
-                ) : null}
-              </section>
-              {studyRevealed ? (
-                <section data-answer="true">
-                  <span>Answer</span>
-                  <strong>{activeStudyAnswer}</strong>
-                  {activeStudyCard.variant !== "image_occlusion" &&
-                  activeStudyCard.media?.placement === "back" &&
-                  activeStudyMedia?.downloadUrl ? (
-                    /* eslint-disable-next-line @next/next/no-img-element */
-                    <img
-                      src={activeStudyMedia.downloadUrl}
-                      alt={
-                        activeStudyCard.media.altText ||
-                        activeStudyCard.media.name
-                      }
-                      className="mx-auto mt-3 block max-h-[36vh] max-w-full rounded-[9px] border border-[var(--border-default)] object-contain"
-                    />
-                  ) : null}
-                  {activeStudyCard.variant === "cloze" &&
-                  activeStudyCard.back.trim() ? (
-                    <small>{activeStudyCard.back}</small>
-                  ) : null}
-                  {activeStudyCard.explanation ? (
-                    <small>{activeStudyCard.explanation}</small>
-                  ) : null}
-                  {studyTypedCorrect !== undefined ? (
-                    <small
-                      className={
-                        studyTypedCorrect
-                          ? "text-[var(--success)]"
-                          : "text-[#d88922]"
-                      }
-                    >
-                      {studyTypedCorrect
-                        ? "Your typed answer matched."
-                        : `Your answer: ${studyTypedAnswer}`}
-                    </small>
-                  ) : null}
-                </section>
-              ) : deckSettings.revealMode === "type" ? (
-                <div className="spectra-deck-reveal flex-col !items-stretch gap-2">
-                  <label className="text-left text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
-                    Type your answer
-                  </label>
-                  <div className="flex gap-2">
-                    <input
-                      autoFocus
-                      value={studyTypedAnswer}
-                      onChange={(event) =>
-                        setStudyTypedAnswer(event.target.value)
-                      }
-                      className="h-10 min-w-0 flex-1 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-[13px] text-[var(--text-primary)] outline-none focus:border-[color-mix(in_oklab,#8b6ff0_55%,var(--border-default))]"
-                      placeholder="Recall before revealing"
-                    />
-                    <button type="button" onClick={revealStudyAnswer}>
-                      Check answer
-                    </button>
-                  </div>
-                </div>
-              ) : (
                 <button
                   type="button"
-                  className="spectra-deck-reveal"
-                  onClick={revealStudyAnswer}
+                  aria-label="Close study session"
+                  onClick={closeStudySession}
                 >
-                  Reveal answer
-                  <kbd>Space</kbd>
+                  <X className="h-4 w-4" />
                 </button>
-              )}
-            </main>
-          ) : null}
-          {!studyComplete && studyRevealed ? (
-            <footer>
-              {(["again", "hard", "good", "easy"] as const).map(
-                (rating, index) => (
+              </header>
+              {studyError ? (
+                <div className="spectra-deck-study-error" role="alert">
+                  <AlertCircle className="h-4 w-4" />
+                  <span>{studyError}</span>
                   <button
-                    key={rating}
                     type="button"
-                    data-rating={rating}
-                    disabled={studyReviewBusy}
-                    onClick={() => void rateStudyCard(rating)}
+                    onClick={() => setStudyError(undefined)}
                   >
-                    {studyReviewBusy ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <kbd>{index + 1}</kbd>
-                    )}
-                    <strong>
-                      {rating[0]!.toUpperCase() + rating.slice(1)}
-                    </strong>
-                    <small>{studyIntervalLabels[rating]}</small>
+                    Dismiss
                   </button>
-                ),
-              )}
-            </footer>
-          ) : null}
-        </div>
-      ) : null}
+                </div>
+              ) : null}
+              {studyComplete ? (
+                <main className="spectra-deck-study-complete">
+                  <span className="grid size-12 place-items-center rounded-full bg-[color-mix(in_oklab,var(--success)_10%,var(--bg-primary))] text-[var(--success)]">
+                    <CheckCircle2 className="h-6 w-6" />
+                  </span>
+                  <h3>Study queue complete</h3>
+                  <p>
+                    Every result was synchronized to your private scheduler.
+                    Other collaborators cannot see your answers or review
+                    history.
+                  </p>
+                  <div>
+                    {(["again", "hard", "good", "easy"] as const).map(
+                      (rating) => (
+                        <span key={rating}>
+                          <strong>{studyRatings[rating]}</strong>
+                          <small>{rating}</small>
+                        </span>
+                      ),
+                    )}
+                  </div>
+                  <button type="button" onClick={beginStudySession}>
+                    Review another queue
+                  </button>
+                </main>
+              ) : activeStudyCard ? (
+                <main>
+                  <section>
+                    <span>
+                      Prompt
+                      {activeStudyItem?.direction === "reverse"
+                        ? " · reverse"
+                        : ""}
+                    </span>
+                    <strong>{activeStudyPrompt}</strong>
+                    {activeStudyCard.variant !== "image_occlusion" &&
+                    activeStudyCard.media?.placement !== "back" &&
+                    activeStudyMedia?.downloadUrl ? (
+                      /* eslint-disable-next-line @next/next/no-img-element */
+                      <img
+                        src={activeStudyMedia.downloadUrl}
+                        alt={
+                          activeStudyCard.media?.altText ||
+                          activeStudyCard.media?.name ||
+                          "Card image"
+                        }
+                        className="mx-auto mt-4 block max-h-[42vh] max-w-full rounded-[9px] border border-[var(--border-default)] object-contain"
+                      />
+                    ) : null}
+                    {activeStudyCard.variant === "image_occlusion" &&
+                    activeStudyMedia?.downloadUrl ? (
+                      <div className="relative mx-auto mt-4 w-fit max-w-full overflow-hidden rounded-[9px] border border-[var(--border-default)] bg-[#17191d]">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={activeStudyMedia.downloadUrl}
+                          alt={
+                            activeStudyCard.media?.altText ||
+                            activeStudyCard.media?.name
+                          }
+                          className="block max-h-[48vh] max-w-full object-contain"
+                        />
+                        {(activeStudyCard.occlusions ?? []).map(
+                          (mask, index) => (
+                            <span
+                              key={mask.id}
+                              className={`absolute grid place-items-center border text-[11px] font-bold transition-[background-color,border-color,color] ${
+                                studyRevealed
+                                  ? "border-[var(--success)] bg-[color-mix(in_oklab,var(--success)_12%,transparent)] text-[var(--success)]"
+                                  : "border-white/65 bg-[#252a32] text-white shadow-[0_2px_8px_rgba(0,0,0,0.24)]"
+                              }`}
+                              style={{
+                                left: `${mask.x * 100}%`,
+                                top: `${mask.y * 100}%`,
+                                width: `${mask.width * 100}%`,
+                                height: `${mask.height * 100}%`,
+                              }}
+                            >
+                              {studyRevealed
+                                ? mask.label || index + 1
+                                : index + 1}
+                            </span>
+                          ),
+                        )}
+                      </div>
+                    ) : null}
+                    {!studyRevealed &&
+                    deckSettings.showHints !== false &&
+                    activeStudyCard.hint ? (
+                      <small>{activeStudyCard.hint}</small>
+                    ) : null}
+                  </section>
+                  {studyRevealed ? (
+                    <section data-answer="true">
+                      <span>Answer</span>
+                      <strong>{activeStudyAnswer}</strong>
+                      {activeStudyCard.variant !== "image_occlusion" &&
+                      activeStudyCard.media?.placement === "back" &&
+                      activeStudyMedia?.downloadUrl ? (
+                        /* eslint-disable-next-line @next/next/no-img-element */
+                        <img
+                          src={activeStudyMedia.downloadUrl}
+                          alt={
+                            activeStudyCard.media.altText ||
+                            activeStudyCard.media.name
+                          }
+                          className="mx-auto mt-3 block max-h-[36vh] max-w-full rounded-[9px] border border-[var(--border-default)] object-contain"
+                        />
+                      ) : null}
+                      {activeStudyCard.variant === "cloze" &&
+                      activeStudyCard.back.trim() ? (
+                        <small>{activeStudyCard.back}</small>
+                      ) : null}
+                      {activeStudyCard.explanation ? (
+                        <small>{activeStudyCard.explanation}</small>
+                      ) : null}
+                      {studyTypedCorrect !== undefined ? (
+                        <small
+                          className={
+                            studyTypedCorrect
+                              ? "text-[var(--success)]"
+                              : "text-[#d88922]"
+                          }
+                        >
+                          {studyTypedCorrect
+                            ? "Your typed answer matched."
+                            : `Your answer: ${studyTypedAnswer}`}
+                        </small>
+                      ) : null}
+                    </section>
+                  ) : deckSettings.revealMode === "type" ? (
+                    <div className="spectra-deck-reveal flex-col !items-stretch gap-2">
+                      <label className="text-left text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
+                        Type your answer
+                      </label>
+                      <div className="flex gap-2">
+                        <input
+                          autoFocus
+                          value={studyTypedAnswer}
+                          onChange={(event) =>
+                            setStudyTypedAnswer(event.target.value)
+                          }
+                          className="h-10 min-w-0 flex-1 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-[13px] text-[var(--text-primary)] outline-none focus:border-[color-mix(in_oklab,#8b6ff0_55%,var(--border-default))]"
+                          placeholder="Recall before revealing"
+                        />
+                        <button type="button" onClick={revealStudyAnswer}>
+                          Check answer
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      className="spectra-deck-reveal"
+                      onClick={revealStudyAnswer}
+                    >
+                      Reveal answer
+                      <kbd>Space</kbd>
+                    </button>
+                  )}
+                </main>
+              ) : null}
+              {!studyComplete && studyRevealed ? (
+                <footer>
+                  {(["again", "hard", "good", "easy"] as const).map(
+                    (rating, index) => (
+                      <button
+                        key={rating}
+                        type="button"
+                        data-rating={rating}
+                        disabled={studyReviewBusy}
+                        onClick={() => void rateStudyCard(rating)}
+                      >
+                        {studyReviewBusy ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <kbd>{index + 1}</kbd>
+                        )}
+                        <strong>
+                          {rating[0]!.toUpperCase() + rating.slice(1)}
+                        </strong>
+                        <small>{studyIntervalLabels[rating]}</small>
+                      </button>
+                    ),
+                  )}
+                </footer>
+              ) : null}
+            </div>,
+            document.body,
+          )
+        : null}
       <section className="spectra-deck-print-sheet" aria-hidden="true">
         <header>
           <strong>Flashcard deck</strong>
@@ -10877,12 +11350,47 @@ function QuizStudio({
   const [quizImporting, setQuizImporting] = useState(false);
   const [quizImportReport, setQuizImportReport] = useState<string>();
   const [quizImportError, setQuizImportError] = useState<string>();
+  const [questionNavigatorOpen, setQuestionNavigatorOpen] = useState(
+    mode === "tab",
+  );
+  const [questionDetailsOpen, setQuestionDetailsOpen] = useState(
+    mode === "tab",
+  );
+
+  useEffect(() => {
+    const reveal = (event: Event) => {
+      const detail = (
+        event as CustomEvent<{ artifactId?: string; path?: string }>
+      ).detail;
+      if (detail?.artifactId !== artifactId || !detail.path) return;
+      const match = detail.path.match(/^\/questions\/(\d+)(?:\/|$)/);
+      if (match) {
+        const question = questions[Number(match[1])];
+        if (question) setActiveQuestionId(question.id);
+        if (
+          /\/(?:difficulty|points|timeLimitSeconds|bloomLevel|standards|section|poolId|poolDrawCount|media)(?:\/|$)/.test(
+            detail.path,
+          )
+        )
+          setQuestionDetailsOpen(true);
+        setView("builder");
+        return;
+      }
+      if (detail.path.startsWith("/settings")) setView("settings");
+    };
+    window.addEventListener("spectra:reveal-target", reveal);
+    return () => window.removeEventListener("spectra:reveal-target", reveal);
+  }, [artifactId, questions]);
   const quizImportRef = useRef<HTMLInputElement>(null);
   const quizWasReadOnly = useRef(readOnly);
   const [practiceClockNow, setPracticeClockNow] = useState(0);
   const activeQuestion =
     questions.find((question) => question.id === activeQuestionId) ??
     questions[0];
+  const activeQuestionIndex = Math.max(
+    0,
+    questions.findIndex((question) => question.id === activeQuestion?.id),
+  );
 
   useEffect(() => {
     const nextQuestions = quizQuestions(content);
@@ -11200,6 +11708,12 @@ function QuizStudio({
             : undefined,
       }))
     : questions;
+  const activeDisplayedQuestionIndex = Math.max(
+    0,
+    displayedQuestions.findIndex(
+      (question) => question.id === activeQuestionId,
+    ),
+  );
   const practiceResultByQuestion = new Map(
     (practiceAttempt?.results ?? []).map((result) => [
       result.questionId,
@@ -11552,98 +12066,38 @@ function QuizStudio({
     }
   }
 
-  function exportQuiz(format: "json" | "csv" | "qti") {
-    const portableQuestions = questions as PortableQuizQuestion[];
-    if (format === "json") {
-      downloadDocumentText(
-        "spectra-quiz.json",
-        "application/json;charset=utf-8",
-        quizJson({
-          questions: portableQuestions,
-          settings: { ...quizSettings },
-        }),
-      );
-      setQuizImportReport(
-        readOnly
-          ? "Exported a question-only Spectra JSON copy. Private answer, rubric, and feedback fields remain excluded."
-          : "Exported editable Spectra JSON. Question media remains represented by permission-bound Spectra asset references.",
-      );
-      return;
-    }
-    if (format === "csv") {
-      downloadDocumentText(
-        "spectra-quiz.csv",
-        "text/csv;charset=utf-8",
-        quizCsv(portableQuestions),
-      );
-      setQuizImportReport(
-        readOnly
-          ? "Exported a question-only CSV. Private answer, rubric, and feedback fields remain excluded."
-          : "Exported mapped CSV for portable simple question editing. Rich media and matching structure are not flattened silently.",
-      );
-      return;
-    }
-    downloadDocumentBlob(
-      "spectra-quiz-qti-2.2.zip",
-      quizQtiPackage(portableQuestions),
-    );
-    setQuizImportReport(
-      readOnly
-        ? "Exported a question-only QTI 2.2 package. Private response declarations and feedback remain excluded."
-        : "Exported a QTI 2.2 package. Choice, short-answer, and long-response interactions retain their native shape; advanced interactions are adapted to text-entry items, and Spectra-bound media remains outside this portable package.",
-    );
-  }
-
   return (
-    <div className="spectra-quiz-studio bg-[var(--bg-elevated)]">
-      <div className="flex min-h-11 flex-wrap items-center justify-between gap-3 border-b border-[var(--border-default)] py-1 pl-1 pr-4">
-        <div className="flex items-center gap-3">
+    <div className="spectra-quiz-studio bg-transparent">
+      <div className="flex min-h-10 flex-wrap items-center justify-between gap-1.5 border-b border-[var(--border-default)] bg-transparent px-2 py-1">
+        <div
+          className="order-2 flex min-w-0 items-center rounded-[7px] bg-[var(--bg-secondary)] p-0.5 [&>button]:h-6 [&>button]:px-2 [&>button]:text-[10px]"
+          role="tablist"
+          aria-label="Quiz views"
+        >
           {!readOnly ? (
-            <>
-              <button
-                type="button"
-                className={tabButtonClass(view === "builder")}
-                onClick={() => setView("builder")}
-              >
-                Builder
-              </button>
-              <button
-                type="button"
-                className={tabButtonClass(view === "settings")}
-                onClick={() => setView("settings")}
-              >
-                Settings
-              </button>
-            </>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={view === "builder" || view === "settings"}
+              className={tabButtonClass(
+                view === "builder" || view === "settings",
+              )}
+              onClick={() => setView("builder")}
+            >
+              Edit
+            </button>
           ) : null}
           <button
             type="button"
+            role="tab"
+            aria-selected={view === "preview"}
             className={tabButtonClass(view === "preview")}
             onClick={() => setView("preview")}
           >
-            Preview
-          </button>
-          <button
-            type="button"
-            className={tabButtonClass(view === "responses")}
-            onClick={() => setView("responses")}
-          >
-            Responses
+            View
           </button>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="hidden items-center gap-1.5 text-[10px] text-[var(--text-secondary)] xl:inline-flex">
-            <CheckCircle2 className="h-3.5 w-3.5 text-[var(--success)]" />
-            Auto-saved
-          </span>
-          <button
-            type="button"
-            className={smallActionClass()}
-            onClick={() => setView("preview")}
-          >
-            <Eye className="h-3.5 w-3.5" />
-            Preview
-          </button>
+        <div className="order-1 ml-auto flex shrink-0 items-center gap-1.5">
           {!readOnly ? (
             <>
               <input
@@ -11656,98 +12110,52 @@ function QuizStudio({
                   if (file) void importQuiz(file);
                 }}
               />
-              <button
-                type="button"
-                className={smallActionClass()}
-                disabled={quizImporting}
-                onClick={() => quizImportRef.current?.click()}
-              >
-                {quizImporting ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Import className="h-3.5 w-3.5" />
-                )}
-                Import
-              </button>
+              <details className="order-3 group relative">
+                <summary
+                  className={`${iconButtonClass()} list-none [&::-webkit-details-marker]:hidden`}
+                  aria-label="More quiz options"
+                >
+                  <MoreHorizontal className="h-4 w-4" />
+                </summary>
+                <div className="absolute right-0 top-[calc(100%+6px)] z-40 grid min-w-44 gap-1 rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 shadow-xl">
+                  <button
+                    type="button"
+                    className={smallActionClass()}
+                    onClick={() => setView("settings")}
+                  >
+                    <SlidersHorizontal className="h-3.5 w-3.5" />
+                    Quiz settings
+                  </button>
+                  <button
+                    type="button"
+                    className={smallActionClass()}
+                    onClick={() => setView("responses")}
+                  >
+                    <History className="h-3.5 w-3.5" />
+                    Practice history
+                  </button>
+                  <button
+                    type="button"
+                    className={smallActionClass()}
+                    disabled={quizImporting}
+                    onClick={() => quizImportRef.current?.click()}
+                  >
+                    {quizImporting ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Import className="h-3.5 w-3.5" />
+                    )}
+                    Import questions
+                  </button>
+                </div>
+              </details>
             </>
           ) : null}
-          <details className="spectra-quiz-export-menu relative">
-            <summary className={smallActionClass()}>
-              <FileDown className="h-3.5 w-3.5" />
-              <span className="hidden xl:inline">Export</span>
-              <ChevronDown className="h-3 w-3" />
-            </summary>
-            <div className="absolute right-0 top-[calc(100%+6px)] z-30 grid min-w-[190px] gap-1 rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 shadow-[0_16px_44px_rgba(24,22,45,0.14)]">
-              <button type="button" onClick={() => exportQuiz("json")}>
-                Spectra JSON
-              </button>
-              <button type="button" onClick={() => exportQuiz("csv")}>
-                Editable CSV
-              </button>
-              <button type="button" onClick={() => exportQuiz("qti")}>
-                QTI 2.2 package
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setQuizImportReport(
-                    readOnly
-                      ? "Opened the printable learner question set. Private answer and rubric fields remain excluded."
-                      : "Opened the complete printable quiz and answer-key representation.",
-                  );
-                  window.print();
-                }}
-              >
-                Print / save PDF
-              </button>
-            </div>
-          </details>
-          <span className="hidden items-center gap-5 rounded-[8px] border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-1.5 text-[10px] text-[var(--text-tertiary)]">
-            <strong className="font-display text-[16px] text-[var(--text-primary)]">
-              {questions.length}
-            </strong>{" "}
-            questions{" "}
-            <strong className="font-display text-[16px] text-[var(--text-primary)]">
-              {Math.max(
-                1,
-                Math.ceil(
-                  questions.reduce(
-                    (total, question) =>
-                      total + (question.timeLimitSeconds ?? 90),
-                    0,
-                  ) / 60,
-                ),
-              )}{" "}
-              min
-            </strong>
-            <strong className="font-display text-[14px] capitalize text-[var(--text-primary)]">
-              {questions.some((question) => question.difficulty === "hard")
-                ? "Hard"
-                : questions.every((question) => question.difficulty === "easy")
-                  ? "Easy"
-                  : "Medium"}
-            </strong>
-          </span>
-          <span
-            className={`hidden rounded-full px-2 py-1 text-[9px] font-semibold lg:inline-flex ${
-              published
-                ? "bg-[color-mix(in_oklab,var(--success)_9%,var(--bg-primary))] text-[var(--success)]"
-                : record(content).publishedAt
-                  ? "bg-[color-mix(in_oklab,var(--warning)_9%,var(--bg-primary))] text-[var(--warning)]"
-                  : "bg-[var(--bg-secondary)] text-[var(--text-tertiary)]"
-            }`}
-          >
-            {published
-              ? "Practice live"
-              : record(content).publishedAt
-                ? "Draft changes"
-                : "Private draft"}
-          </span>
           {!readOnly ? (
             <>
               <button
                 type="button"
-                className={`h-8 rounded-[7px] px-3 text-[12px] font-semibold ${published ? "border border-[var(--success)] text-[var(--success)]" : "bg-[#7560e8] text-white"}`}
+                className={`order-2 h-7 rounded-[6px] px-2.5 text-[10.5px] font-semibold ${published ? "border border-[var(--success)] text-[var(--success)]" : "bg-[var(--text-primary)] text-[var(--bg-primary)]"}`}
                 disabled={practiceBusy || (published && !synchronizationReady)}
                 onClick={() => {
                   if (published) {
@@ -11760,8 +12168,8 @@ function QuizStudio({
                 {practiceBusy
                   ? "Opening…"
                   : published
-                    ? "Practice live"
-                    : "Publish practice"}
+                    ? "Open practice"
+                    : "Publish"}
               </button>
             </>
           ) : published ? (
@@ -11908,298 +12316,370 @@ function QuizStudio({
                 </button>
               </div>
             ) : null}
-            {displayedQuestions.map((question, index) => (
-              <div
-                key={question.id}
-                className={`rounded-[8px] border bg-[var(--bg-primary)] p-4 ${submitted || revealedPracticeResultByQuestion.has(question.id) ? ((practiceAttempt ? revealedPracticeResultByQuestion.get(question.id)?.correct === null : question.type === "long_response") ? "border-[color-mix(in_oklab,var(--accent-cyan)_28%,var(--border-default))]" : questionCorrect(question) ? "border-[color-mix(in_oklab,var(--success)_48%,var(--border-default))]" : "border-[color-mix(in_oklab,var(--danger)_38%,var(--border-default))]") : "border-[var(--border-default)]"}`}
-              >
-                <div className="text-[12px] font-semibold text-[var(--text-secondary)]">
-                  Question {index + 1}
-                </div>
-                <div className="mt-2 text-[15px] font-medium text-[var(--text-primary)]">
-                  {question.prompt || "Untitled question"}
-                </div>
-                {question.media ? (
-                  quizAssetMap.get(question.media.assetId)?.downloadUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={
-                        quizAssetMap.get(question.media.assetId)!.downloadUrl!
-                      }
-                      alt={question.media.altText ?? ""}
-                      className="mt-3 max-h-[320px] w-full rounded-[8px] border border-[var(--border-default)] object-contain"
-                    />
-                  ) : (
-                    <div className="mt-3 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4 text-[10px] text-[var(--text-tertiary)]">
-                      Question image unavailable
-                    </div>
+            <div className="flex items-center gap-2 rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-2">
+              <button
+                type="button"
+                className={iconButtonClass()}
+                aria-label="Previous preview question"
+                disabled={activeDisplayedQuestionIndex === 0}
+                onClick={() =>
+                  setActiveQuestionId(
+                    displayedQuestions[
+                      Math.max(0, activeDisplayedQuestionIndex - 1)
+                    ]?.id ?? "",
                   )
-                ) : null}
-                <div className="mt-3 space-y-2">
-                  {question.type === "multiple_choice" ||
-                  question.type === "true_false" ? (
-                    question.options.map((option, optionIndex) => (
-                      <button
-                        type="button"
-                        disabled={submitted}
-                        onClick={() =>
-                          void synchronizePracticeAnswer(question.id, option)
+                }
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <label className="grid min-w-0 flex-1 grid-cols-[auto_minmax(0,1fr)] items-center gap-2 px-1">
+                <span className="text-[9px] font-semibold uppercase tracking-[0.07em] text-[var(--text-tertiary)]">
+                  Question
+                </span>
+                <select
+                  aria-label="Current preview question"
+                  className="h-8 min-w-0 truncate bg-transparent text-[11px] font-medium text-[var(--text-primary)] outline-none"
+                  value={
+                    displayedQuestions[activeDisplayedQuestionIndex]?.id ?? ""
+                  }
+                  onChange={(event) => setActiveQuestionId(event.target.value)}
+                >
+                  {displayedQuestions.map((question, index) => (
+                    <option key={question.id} value={question.id}>
+                      {index + 1} ·{" "}
+                      {plannerDescriptionText(question.prompt) ||
+                        "Untitled question"}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <span className="shrink-0 text-[10px] text-[var(--text-tertiary)]">
+                {activeDisplayedQuestionIndex + 1} of{" "}
+                {displayedQuestions.length}
+              </span>
+              <button
+                type="button"
+                className={iconButtonClass()}
+                aria-label="Next preview question"
+                disabled={
+                  activeDisplayedQuestionIndex === displayedQuestions.length - 1
+                }
+                onClick={() =>
+                  setActiveQuestionId(
+                    displayedQuestions[
+                      Math.min(
+                        displayedQuestions.length - 1,
+                        activeDisplayedQuestionIndex + 1,
+                      )
+                    ]?.id ?? "",
+                  )
+                }
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+            {displayedQuestions
+              .filter((_, index) => index === activeDisplayedQuestionIndex)
+              .map((question) => (
+                <div
+                  key={question.id}
+                  className={`rounded-[8px] border bg-[var(--bg-primary)] p-4 ${submitted || revealedPracticeResultByQuestion.has(question.id) ? ((practiceAttempt ? revealedPracticeResultByQuestion.get(question.id)?.correct === null : question.type === "long_response") ? "border-[color-mix(in_oklab,var(--accent-cyan)_28%,var(--border-default))]" : questionCorrect(question) ? "border-[color-mix(in_oklab,var(--success)_48%,var(--border-default))]" : "border-[color-mix(in_oklab,var(--danger)_38%,var(--border-default))]") : "border-[var(--border-default)]"}`}
+                >
+                  <div className="text-[12px] font-semibold text-[var(--text-secondary)]">
+                    Question {activeDisplayedQuestionIndex + 1}
+                  </div>
+                  <div className="mt-2 text-[15px] font-medium text-[var(--text-primary)]">
+                    {plannerDescriptionText(question.prompt) ||
+                      "Untitled question"}
+                  </div>
+                  {question.media ? (
+                    quizAssetMap.get(question.media.assetId)?.downloadUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={
+                          quizAssetMap.get(question.media.assetId)!.downloadUrl!
                         }
-                        key={`${question.id}-${optionIndex}`}
-                        className={`flex w-full items-center gap-2 rounded-[7px] border px-3 py-2 text-left text-[13px] transition ${answers[question.id] === option ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-elevated))] text-[var(--text-primary)]" : "border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}
-                      >
-                        <Radio className="h-3.5 w-3.5" />
-                        {option || `Option ${optionIndex + 1}`}
-                      </button>
-                    ))
-                  ) : question.type === "select_all" ? (
-                    question.options.map((option, optionIndex) => {
-                      const selected = answerArray(question.id).includes(
-                        option,
-                      );
-                      return (
+                        alt={question.media.altText ?? ""}
+                        className="mt-3 max-h-[320px] w-full rounded-[8px] border border-[var(--border-default)] object-contain"
+                      />
+                    ) : (
+                      <div className="mt-3 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4 text-[10px] text-[var(--text-tertiary)]">
+                        Question image unavailable
+                      </div>
+                    )
+                  ) : null}
+                  <div className="mt-3 space-y-2">
+                    {question.type === "multiple_choice" ||
+                    question.type === "true_false" ? (
+                      question.options.map((option, optionIndex) => (
                         <button
                           type="button"
                           disabled={submitted}
-                          onClick={() => {
-                            const current = answerArray(question.id);
-                            void synchronizePracticeAnswer(
-                              question.id,
-                              JSON.stringify(
-                                selected
-                                  ? current.filter((value) => value !== option)
-                                  : [...current, option],
-                              ),
-                            );
-                          }}
+                          onClick={() =>
+                            void synchronizePracticeAnswer(question.id, option)
+                          }
                           key={`${question.id}-${optionIndex}`}
-                          className={`flex w-full items-center gap-2 rounded-[7px] border px-3 py-2 text-left text-[13px] ${selected ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-elevated))]" : "border-[var(--border-default)]"}`}
+                          className={`flex w-full items-center gap-2 rounded-[7px] border px-3 py-2 text-left text-[13px] transition ${answers[question.id] === option ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-elevated))] text-[var(--text-primary)]" : "border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}
                         >
-                          <span
-                            className={`flex h-4 w-4 items-center justify-center rounded-[4px] border ${selected ? "border-[var(--accent-cyan)] bg-[var(--accent-cyan)] text-white" : "border-[var(--border-default)]"}`}
-                          >
-                            {selected ? <Check className="h-3 w-3" /> : null}
-                          </span>
+                          <Radio className="h-3.5 w-3.5" />
                           {option || `Option ${optionIndex + 1}`}
                         </button>
-                      );
-                    })
-                  ) : question.type === "ordering" ? (
-                    <div className="space-y-2">
-                      {(answerArray(question.id).length
-                        ? answerArray(question.id)
-                        : question.options
-                      ).map((option, optionIndex, order) => (
-                        <div
-                          key={`${question.id}-${option}-${optionIndex}`}
-                          className="grid grid-cols-[24px_minmax(0,1fr)_auto] items-center gap-2 rounded-[7px] border border-[var(--border-default)] px-3 py-2 text-[13px]"
-                        >
-                          <strong>{optionIndex + 1}</strong>
-                          <span>{option || `Option ${optionIndex + 1}`}</span>
-                          <div className="flex gap-1">
-                            <button
-                              type="button"
-                              disabled={submitted || optionIndex === 0}
-                              onClick={() => {
-                                const next = [...order];
-                                [next[optionIndex - 1], next[optionIndex]] = [
-                                  next[optionIndex]!,
-                                  next[optionIndex - 1]!,
-                                ];
-                                void synchronizePracticeAnswer(
-                                  question.id,
-                                  JSON.stringify(next),
-                                );
-                              }}
-                              aria-label={`Move ${option} earlier`}
-                            >
-                              <ChevronDown className="h-3.5 w-3.5 rotate-180" />
-                            </button>
-                            <button
-                              type="button"
-                              disabled={
-                                submitted || optionIndex === order.length - 1
-                              }
-                              onClick={() => {
-                                const next = [...order];
-                                [next[optionIndex], next[optionIndex + 1]] = [
-                                  next[optionIndex + 1]!,
-                                  next[optionIndex]!,
-                                ];
-                                void synchronizePracticeAnswer(
-                                  question.id,
-                                  JSON.stringify(next),
-                                );
-                              }}
-                              aria-label={`Move ${option} later`}
-                            >
-                              <ChevronDown className="h-3.5 w-3.5" />
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : question.type === "matching" ? (
-                    <div className="space-y-2">
-                      {(question.matchingPairs ?? []).map((pair) => {
-                        const current = answerArray(question.id);
-                        const selected = current
-                          .find((value) => value.startsWith(`${pair.id}:`))
-                          ?.slice(pair.id.length + 1);
-                        const choices =
-                          question.matchingChoices ??
-                          (question.matchingPairs ?? []).map(
-                            (candidate) => candidate.right ?? "",
-                          );
-                        return (
-                          <label
-                            key={pair.id}
-                            className="grid grid-cols-[minmax(0,1fr)_18px_minmax(0,1fr)] items-center gap-2 rounded-[7px] border border-[var(--border-default)] px-3 py-2"
-                          >
-                            <span className="text-[12px] font-medium text-[var(--text-primary)]">
-                              {pair.left || "Untitled prompt"}
-                            </span>
-                            <span className="text-center text-[var(--text-tertiary)]">
-                              →
-                            </span>
-                            <select
-                              disabled={submitted}
-                              value={selected ?? ""}
-                              onChange={(event) => {
-                                const next = current.filter(
-                                  (value) => !value.startsWith(`${pair.id}:`),
-                                );
-                                if (event.target.value)
-                                  next.push(`${pair.id}:${event.target.value}`);
-                                void synchronizePracticeAnswer(
-                                  question.id,
-                                  JSON.stringify(next),
-                                );
-                              }}
-                              className={inputClass()}
-                            >
-                              <option value="">Choose a match</option>
-                              {choices.map((choice, choiceIndex) => (
-                                <option
-                                  key={`${pair.id}-${choice}-${choiceIndex}`}
-                                  value={choice}
-                                >
-                                  {choice}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
+                      ))
+                    ) : question.type === "select_all" ? (
+                      question.options.map((option, optionIndex) => {
+                        const selected = answerArray(question.id).includes(
+                          option,
                         );
-                      })}
-                    </div>
-                  ) : question.type === "long_response" ? (
-                    <textarea
-                      disabled={submitted}
-                      value={answers[question.id] ?? ""}
-                      onChange={(event) =>
-                        setAnswers((current) => ({
-                          ...current,
-                          [question.id]: event.target.value,
-                        }))
-                      }
-                      onBlur={(event) =>
-                        void synchronizePracticeAnswer(
-                          question.id,
-                          event.currentTarget.value,
-                        )
-                      }
-                      className={textareaClass("min-h-[150px]")}
-                      placeholder="Develop your response"
-                    />
-                  ) : (
-                    <input
-                      type={question.type === "numeric" ? "number" : "text"}
-                      disabled={submitted}
-                      value={answers[question.id] ?? ""}
-                      onChange={(event) =>
-                        setAnswers((current) => ({
-                          ...current,
-                          [question.id]: event.target.value,
-                        }))
-                      }
-                      onBlur={(event) =>
-                        void synchronizePracticeAnswer(
-                          question.id,
-                          event.currentTarget.value,
-                        )
-                      }
-                      className={inputClass()}
-                      placeholder="Type your answer"
-                    />
-                  )}
-                </div>
-                {revealedPracticeResultByQuestion.has(question.id) ||
-                (submitted && !readOnly && !practiceAttempt) ? (
-                  <div className="mt-3 border-t border-[var(--border-subtle)] pt-3 text-[11px] leading-5 text-[var(--text-secondary)]">
-                    <div>
-                      <strong className="text-[var(--text-primary)]">
-                        Answer:
-                      </strong>{" "}
-                      {practiceAttempt
-                        ? Array.isArray(
-                            revealedPracticeResultByQuestion.get(question.id)
-                              ?.expected,
+                        return (
+                          <button
+                            type="button"
+                            disabled={submitted}
+                            onClick={() => {
+                              const current = answerArray(question.id);
+                              void synchronizePracticeAnswer(
+                                question.id,
+                                JSON.stringify(
+                                  selected
+                                    ? current.filter(
+                                        (value) => value !== option,
+                                      )
+                                    : [...current, option],
+                                ),
+                              );
+                            }}
+                            key={`${question.id}-${optionIndex}`}
+                            className={`flex w-full items-center gap-2 rounded-[7px] border px-3 py-2 text-left text-[13px] ${selected ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-elevated))]" : "border-[var(--border-default)]"}`}
+                          >
+                            <span
+                              className={`flex h-4 w-4 items-center justify-center rounded-[4px] border ${selected ? "border-[var(--accent-cyan)] bg-[var(--accent-cyan)] text-white" : "border-[var(--border-default)]"}`}
+                            >
+                              {selected ? <Check className="h-3 w-3" /> : null}
+                            </span>
+                            {option || `Option ${optionIndex + 1}`}
+                          </button>
+                        );
+                      })
+                    ) : question.type === "ordering" ? (
+                      <div className="space-y-2">
+                        {(answerArray(question.id).length
+                          ? answerArray(question.id)
+                          : question.options
+                        ).map((option, optionIndex, order) => (
+                          <div
+                            key={`${question.id}-${option}-${optionIndex}`}
+                            className="grid grid-cols-[24px_minmax(0,1fr)_auto] items-center gap-2 rounded-[7px] border border-[var(--border-default)] px-3 py-2 text-[13px]"
+                          >
+                            <strong>{optionIndex + 1}</strong>
+                            <span>{option || `Option ${optionIndex + 1}`}</span>
+                            <div className="flex gap-1">
+                              <button
+                                type="button"
+                                disabled={submitted || optionIndex === 0}
+                                onClick={() => {
+                                  const next = [...order];
+                                  [next[optionIndex - 1], next[optionIndex]] = [
+                                    next[optionIndex]!,
+                                    next[optionIndex - 1]!,
+                                  ];
+                                  void synchronizePracticeAnswer(
+                                    question.id,
+                                    JSON.stringify(next),
+                                  );
+                                }}
+                                aria-label={`Move ${option} earlier`}
+                              >
+                                <ChevronDown className="h-3.5 w-3.5 rotate-180" />
+                              </button>
+                              <button
+                                type="button"
+                                disabled={
+                                  submitted || optionIndex === order.length - 1
+                                }
+                                onClick={() => {
+                                  const next = [...order];
+                                  [next[optionIndex], next[optionIndex + 1]] = [
+                                    next[optionIndex + 1]!,
+                                    next[optionIndex]!,
+                                  ];
+                                  void synchronizePracticeAnswer(
+                                    question.id,
+                                    JSON.stringify(next),
+                                  );
+                                }}
+                                aria-label={`Move ${option} later`}
+                              >
+                                <ChevronDown className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : question.type === "matching" ? (
+                      <div className="space-y-2">
+                        {(question.matchingPairs ?? []).map((pair) => {
+                          const current = answerArray(question.id);
+                          const selected = current
+                            .find((value) => value.startsWith(`${pair.id}:`))
+                            ?.slice(pair.id.length + 1);
+                          const choices =
+                            question.matchingChoices ??
+                            (question.matchingPairs ?? []).map(
+                              (candidate) => candidate.right ?? "",
+                            );
+                          return (
+                            <label
+                              key={pair.id}
+                              className="grid grid-cols-[minmax(0,1fr)_18px_minmax(0,1fr)] items-center gap-2 rounded-[7px] border border-[var(--border-default)] px-3 py-2"
+                            >
+                              <span className="text-[12px] font-medium text-[var(--text-primary)]">
+                                {pair.left || "Untitled prompt"}
+                              </span>
+                              <span className="text-center text-[var(--text-tertiary)]">
+                                →
+                              </span>
+                              <select
+                                disabled={submitted}
+                                value={selected ?? ""}
+                                onChange={(event) => {
+                                  const next = current.filter(
+                                    (value) => !value.startsWith(`${pair.id}:`),
+                                  );
+                                  if (event.target.value)
+                                    next.push(
+                                      `${pair.id}:${event.target.value}`,
+                                    );
+                                  void synchronizePracticeAnswer(
+                                    question.id,
+                                    JSON.stringify(next),
+                                  );
+                                }}
+                                className={inputClass()}
+                              >
+                                <option value="">Choose a match</option>
+                                {choices.map((choice, choiceIndex) => (
+                                  <option
+                                    key={`${pair.id}-${choice}-${choiceIndex}`}
+                                    value={choice}
+                                  >
+                                    {choice}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    ) : question.type === "long_response" ? (
+                      <textarea
+                        disabled={submitted}
+                        value={answers[question.id] ?? ""}
+                        onChange={(event) =>
+                          setAnswers((current) => ({
+                            ...current,
+                            [question.id]: event.target.value,
+                          }))
+                        }
+                        onBlur={(event) =>
+                          void synchronizePracticeAnswer(
+                            question.id,
+                            event.currentTarget.value,
                           )
-                          ? (
-                              revealedPracticeResultByQuestion.get(question.id)
-                                ?.expected as string[]
-                            ).join(" · ")
-                          : String(
-                              revealedPracticeResultByQuestion.get(question.id)
-                                ?.expected ?? "Not available",
-                            )
-                        : question.type === "matching"
-                          ? (question.matchingPairs ?? [])
-                              .map(
-                                (pair) => `${pair.left} → ${pair.right ?? ""}`,
-                              )
-                              .join(" · ")
-                          : question.type === "long_response"
-                            ? "Advisory review — no single auto-scored answer"
-                            : question.type === "select_all" ||
-                                question.type === "ordering"
-                              ? (
-                                  question.correctAnswers ?? question.options
-                                ).join(" · ")
-                              : question.correctAnswer}
-                    </div>
-                    {(
-                      practiceAttempt
-                        ? revealedPracticeResultByQuestion.get(question.id)
-                            ?.explanation
-                        : question.explanation
-                    ) ? (
-                      <div className="mt-1">
+                        }
+                        className={textareaClass("min-h-[150px]")}
+                        placeholder="Develop your response"
+                      />
+                    ) : (
+                      <input
+                        type={question.type === "numeric" ? "number" : "text"}
+                        disabled={submitted}
+                        value={answers[question.id] ?? ""}
+                        onChange={(event) =>
+                          setAnswers((current) => ({
+                            ...current,
+                            [question.id]: event.target.value,
+                          }))
+                        }
+                        onBlur={(event) =>
+                          void synchronizePracticeAnswer(
+                            question.id,
+                            event.currentTarget.value,
+                          )
+                        }
+                        className={inputClass()}
+                        placeholder="Type your answer"
+                      />
+                    )}
+                  </div>
+                  {revealedPracticeResultByQuestion.has(question.id) ||
+                  (submitted && !readOnly && !practiceAttempt) ? (
+                    <div className="mt-3 border-t border-[var(--border-subtle)] pt-3 text-[11px] leading-5 text-[var(--text-secondary)]">
+                      <div>
+                        <strong className="text-[var(--text-primary)]">
+                          Answer:
+                        </strong>{" "}
                         {practiceAttempt
+                          ? Array.isArray(
+                              revealedPracticeResultByQuestion.get(question.id)
+                                ?.expected,
+                            )
+                            ? (
+                                revealedPracticeResultByQuestion.get(
+                                  question.id,
+                                )?.expected as string[]
+                              ).join(" · ")
+                            : String(
+                                revealedPracticeResultByQuestion.get(
+                                  question.id,
+                                )?.expected ?? "Not available",
+                              )
+                          : question.type === "matching"
+                            ? (question.matchingPairs ?? [])
+                                .map(
+                                  (pair) =>
+                                    `${pair.left} → ${pair.right ?? ""}`,
+                                )
+                                .join(" · ")
+                            : question.type === "long_response"
+                              ? "Advisory review — no single auto-scored answer"
+                              : question.type === "select_all" ||
+                                  question.type === "ordering"
+                                ? (
+                                    question.correctAnswers ?? question.options
+                                  ).join(" · ")
+                                : question.correctAnswer}
+                      </div>
+                      {(
+                        practiceAttempt
                           ? revealedPracticeResultByQuestion.get(question.id)
                               ?.explanation
-                          : question.explanation}
-                      </div>
-                    ) : null}
-                    {practiceAttempt &&
-                    revealedPracticeResultByQuestion.get(question.id)
-                      ?.advisoryFeedback ? (
-                      <div className="mt-1 rounded-[6px] bg-[var(--bg-secondary)] px-2 py-1.5 text-[var(--text-secondary)]">
-                        {
-                          revealedPracticeResultByQuestion.get(question.id)
-                            ?.advisoryFeedback
-                        }
-                      </div>
-                    ) : null}
-                    {question.sourceRefs?.length ? (
-                      <div className="mt-1 text-[var(--text-tertiary)]">
-                        Sources: {question.sourceRefs.join(" · ")}
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
-            ))}
+                          : question.explanation
+                      ) ? (
+                        <div className="mt-1">
+                          {practiceAttempt
+                            ? revealedPracticeResultByQuestion.get(question.id)
+                                ?.explanation
+                            : question.explanation}
+                        </div>
+                      ) : null}
+                      {practiceAttempt &&
+                      revealedPracticeResultByQuestion.get(question.id)
+                        ?.advisoryFeedback ? (
+                        <div className="mt-1 rounded-[6px] bg-[var(--bg-secondary)] px-2 py-1.5 text-[var(--text-secondary)]">
+                          {
+                            revealedPracticeResultByQuestion.get(question.id)
+                              ?.advisoryFeedback
+                          }
+                        </div>
+                      ) : null}
+                      {question.sourceRefs?.length ? (
+                        <div className="mt-1 text-[var(--text-tertiary)]">
+                          Sources: {question.sourceRefs.join(" · ")}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              ))}
             <div className="flex justify-end gap-2 pt-3">
               {practiceSyncing.length ? (
                 <span className="mr-auto inline-flex items-center gap-2 text-[10px] text-[var(--text-tertiary)]">
@@ -12530,17 +13010,101 @@ function QuizStudio({
         </div>
       ) : (
         <div
-          className={`grid min-h-[680px] ${mode === "tab" ? "pr-[10px] lg:grid-cols-[334px_minmax(0,1fr)_202px]" : "grid-cols-1"}`}
+          className={`grid ${mode === "tab" ? `pr-[10px] ${questionNavigatorOpen ? "lg:grid-cols-[292px_minmax(0,1fr)_210px]" : "lg:grid-cols-[62px_minmax(0,1fr)_210px]"}` : "grid-cols-1"}`}
         >
           <aside
             data-quiz-panel="questions"
-            className={`${mode === "tab" ? "border-r" : "border-b"} border-[var(--border-default)] p-3`}
+            className={`${mode === "tab" ? "border-r p-3" : "border-b px-4 py-2.5"} border-[var(--border-default)]`}
           >
             <div className="flex items-center justify-between gap-2">
-              <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
-                Questions ({questions.length})
-              </span>
-              {!readOnly ? (
+              {mode !== "tab" && !questionNavigatorOpen ? (
+                <div className="flex min-w-0 flex-1 items-center gap-1.5">
+                  <button
+                    type="button"
+                    className={iconButtonClass()}
+                    aria-label="Previous question"
+                    disabled={activeQuestionIndex === 0}
+                    onClick={() =>
+                      setActiveQuestionId(
+                        questions[Math.max(0, activeQuestionIndex - 1)]?.id ??
+                          "",
+                      )
+                    }
+                  >
+                    <ChevronLeft className="h-3.5 w-3.5" />
+                  </button>
+                  <label className="grid min-w-0 flex-1 grid-cols-[auto_minmax(0,1fr)] items-center gap-2 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2">
+                    <span className="text-[9px] font-semibold uppercase tracking-[0.07em] text-[var(--text-tertiary)]">
+                      Question
+                    </span>
+                    <select
+                      aria-label="Current question"
+                      className="h-8 min-w-0 truncate bg-transparent text-[11px] font-medium text-[var(--text-primary)] outline-none"
+                      value={activeQuestion?.id ?? ""}
+                      onChange={(event) =>
+                        setActiveQuestionId(event.target.value)
+                      }
+                    >
+                      {questions.map((question, index) => (
+                        <option key={question.id} value={question.id}>
+                          {index + 1} ·{" "}
+                          {plannerDescriptionText(question.prompt) ||
+                            "Untitled question"}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <span className="shrink-0 text-[10px] text-[var(--text-tertiary)]">
+                    {activeQuestionIndex + 1} of {questions.length}
+                  </span>
+                  <button
+                    type="button"
+                    className={iconButtonClass()}
+                    aria-label="Next question"
+                    disabled={activeQuestionIndex === questions.length - 1}
+                    onClick={() =>
+                      setActiveQuestionId(
+                        questions[
+                          Math.min(
+                            questions.length - 1,
+                            activeQuestionIndex + 1,
+                          )
+                        ]?.id ?? "",
+                      )
+                    }
+                  >
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    className={iconButtonClass()}
+                    onClick={() => setQuestionNavigatorOpen(true)}
+                    aria-label="Browse all questions"
+                  >
+                    <PanelLeft className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  className={`flex min-w-0 items-center gap-2 text-left text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)] ${mode === "tab" && !questionNavigatorOpen ? "w-full justify-center" : ""}`}
+                  onClick={() => setQuestionNavigatorOpen((open) => !open)}
+                  aria-expanded={questionNavigatorOpen}
+                  aria-label={
+                    questionNavigatorOpen
+                      ? "Collapse question navigator"
+                      : "Browse questions"
+                  }
+                >
+                  <PanelLeft className="h-3.5 w-3.5 shrink-0" />
+                  {mode === "tab" && !questionNavigatorOpen ? null : (
+                    <span className="truncate">
+                      Question {activeQuestionIndex + 1} of {questions.length}
+                    </span>
+                  )}
+                </button>
+              )}
+              {!readOnly && questionNavigatorOpen ? (
                 <button
                   type="button"
                   className={smallActionClass()}
@@ -12550,49 +13114,75 @@ function QuizStudio({
                 </button>
               ) : null}
             </div>
-            <div className="-mt-1.5 space-y-1.5">
-              {questions.map((question, index) => (
-                <button
-                  key={question.id}
-                  type="button"
-                  className={`grid min-h-11 w-full grid-cols-[28px_auto_minmax(0,1fr)_16px] items-center gap-2 rounded-[8px] border px-2 py-1.5 text-left ${
-                    activeQuestion?.id === question.id
-                      ? "border-[#8b6ff0] bg-[color-mix(in_oklab,#8b6ff0_6%,var(--bg-primary))]"
-                      : "border-[var(--border-default)] bg-[var(--bg-primary)] hover:bg-[var(--bg-hover)]"
-                  }`}
-                  onClick={() => setActiveQuestionId(question.id)}
-                  data-ai-region={aiRegionAttr(
-                    pathTouches(aiChangedPaths, `/questions/${index}`),
-                  )}
-                >
-                  <span className="rounded-[6px] border border-[var(--border-default)] py-1 text-center text-[12px] text-[var(--text-secondary)]">
-                    {index + 1}
-                  </span>
-                  <span className="rounded-[5px] bg-[color-mix(in_oklab,#8b6ff0_8%,var(--bg-primary))] px-1.5 py-1 text-[9px] font-medium text-[#7560e8]">
-                    {
-                      {
-                        multiple_choice: "MCQ",
-                        short_answer: "Short answer",
-                        true_false: "True / False",
-                        select_all: "Select all",
-                        ordering: "Ordering",
-                        numeric: "Numeric",
-                        fill_blank: "Fill blank",
-                        long_response: "Long response",
-                        matching: "Matching",
-                      }[question.type]
-                    }
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block truncate text-[10px] font-medium text-[var(--text-primary)]">
-                      {question.prompt || "Untitled question"}
+            {questionNavigatorOpen ? (
+              <div className="mt-2 max-h-[min(46vh,440px)] space-y-1.5 overflow-y-auto pr-0.5">
+                {questions.map((question, index) => (
+                  <button
+                    key={question.id}
+                    type="button"
+                    className={`grid min-h-11 w-full grid-cols-[28px_auto_minmax(0,1fr)_16px] items-center gap-2 rounded-[8px] border px-2 py-1.5 text-left ${
+                      activeQuestion?.id === question.id
+                        ? "border-[#8b6ff0] bg-[color-mix(in_oklab,#8b6ff0_6%,var(--bg-primary))]"
+                        : "border-[var(--border-default)] bg-[var(--bg-primary)] hover:bg-[var(--bg-hover)]"
+                    }`}
+                    onClick={() => setActiveQuestionId(question.id)}
+                    data-ai-region={aiRegionAttr(
+                      pathTouches(aiChangedPaths, `/questions/${index}`),
+                    )}
+                    {...targetAttrs(`/questions/${index}`)}
+                  >
+                    <span className="rounded-[6px] border border-[var(--border-default)] py-1 text-center text-[12px] text-[var(--text-secondary)]">
+                      {index + 1}
                     </span>
-                  </span>
-                  <GripVertical className="h-3.5 w-3.5 text-[var(--text-tertiary)]" />
-                </button>
-              ))}
-            </div>
-            {!readOnly ? (
+                    <span className="rounded-[5px] bg-[color-mix(in_oklab,#8b6ff0_8%,var(--bg-primary))] px-1.5 py-1 text-[9px] font-medium text-[#7560e8]">
+                      {
+                        {
+                          multiple_choice: "MCQ",
+                          short_answer: "Short answer",
+                          true_false: "True / False",
+                          select_all: "Select all",
+                          ordering: "Ordering",
+                          numeric: "Numeric",
+                          fill_blank: "Fill blank",
+                          long_response: "Long response",
+                          matching: "Matching",
+                        }[question.type]
+                      }
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block truncate text-[10px] font-medium text-[var(--text-primary)]">
+                        {plannerDescriptionText(question.prompt) ||
+                          "Untitled question"}
+                      </span>
+                    </span>
+                    <GripVertical className="h-3.5 w-3.5 text-[var(--text-tertiary)]" />
+                  </button>
+                ))}
+              </div>
+            ) : mode === "tab" ? (
+              <div className="mt-2 grid gap-1">
+                {questions.map((question, index) => (
+                  <button
+                    key={question.id}
+                    type="button"
+                    aria-label={`Open question ${index + 1}`}
+                    title={
+                      plannerDescriptionText(question.prompt) ||
+                      `Question ${index + 1}`
+                    }
+                    onClick={() => setActiveQuestionId(question.id)}
+                    className={`h-8 rounded-[7px] text-[10px] font-semibold transition ${
+                      activeQuestion?.id === question.id
+                        ? "bg-[var(--text-primary)] text-[var(--bg-primary)]"
+                        : "text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                    }`}
+                  >
+                    {index + 1}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            {!readOnly && questionNavigatorOpen ? (
               <button
                 type="button"
                 className={`${smallActionClass()} mt-2`}
@@ -12638,266 +13228,301 @@ function QuizStudio({
             ) : null}
           </section>
           <aside data-quiz-panel="settings" className="p-3">
-            {activeQuestion ? (
-              <div className="grid gap-3">
-                <Field
-                  label="Difficulty"
-                  aiActive={pathTouches(
-                    aiChangedPaths,
-                    `/questions/${questions.findIndex((question) => question.id === activeQuestion.id)}/difficulty`,
-                  )}
-                >
-                  <select
-                    value={activeQuestion.difficulty ?? "medium"}
-                    onChange={(event) =>
-                      updateQuestion(activeQuestion.id, {
-                        difficulty: event.target
-                          .value as QuizQuestion["difficulty"],
-                      })
-                    }
-                    className={inputClass()}
+            {mode === "split" ? (
+              <button
+                type="button"
+                className="mb-2 flex w-full items-center justify-between rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-left text-[11px] font-semibold text-[var(--text-primary)]"
+                onClick={() => setQuestionDetailsOpen((open) => !open)}
+                aria-expanded={questionDetailsOpen}
+              >
+                Question details
+                <ChevronDown
+                  className={`h-3.5 w-3.5 transition-transform ${questionDetailsOpen ? "rotate-180" : ""}`}
+                />
+              </button>
+            ) : null}
+            {mode === "tab" || questionDetailsOpen ? (
+              activeQuestion ? (
+                <div className="grid gap-3">
+                  <Field
+                    label="Difficulty"
+                    aiActive={pathTouches(
+                      aiChangedPaths,
+                      `/questions/${questions.findIndex((question) => question.id === activeQuestion.id)}/difficulty`,
+                    )}
+                    path={`/questions/${questions.findIndex((question) => question.id === activeQuestion.id)}/difficulty`}
                   >
-                    <option value="easy">Easy</option>
-                    <option value="medium">Medium</option>
-                    <option value="hard">Hard</option>
-                  </select>
-                </Field>
-                <Field
-                  label="Points"
-                  aiActive={pathTouches(
-                    aiChangedPaths,
-                    `/questions/${questions.findIndex((question) => question.id === activeQuestion.id)}/points`,
-                  )}
-                >
-                  <input
-                    type="number"
-                    value={activeQuestion.points ?? 1}
-                    min={1}
-                    onChange={(event) =>
-                      updateQuestion(activeQuestion.id, {
-                        points: Number(event.target.value),
-                      })
-                    }
-                    className={inputClass()}
-                  />
-                </Field>
-                <Field label="Time">
-                  <input
-                    type="number"
-                    value={activeQuestion.timeLimitSeconds ?? 90}
-                    min={0}
-                    onChange={(event) =>
-                      updateQuestion(activeQuestion.id, {
-                        timeLimitSeconds: Number(event.target.value),
-                      })
-                    }
-                    className={inputClass()}
-                  />
-                </Field>
-                <Field label="Bloom's taxonomy">
-                  <select
-                    value={activeQuestion.bloomLevel ?? "remember"}
-                    onChange={(event) =>
-                      updateQuestion(activeQuestion.id, {
-                        bloomLevel: event.target.value as NonNullable<
-                          QuizQuestion["bloomLevel"]
-                        >,
-                      })
-                    }
-                    className={inputClass()}
-                  >
-                    <option value="remember">Remember</option>
-                    <option value="understand">Understand</option>
-                    <option value="apply">Apply</option>
-                    <option value="analyze">Analyze</option>
-                    <option value="evaluate">Evaluate</option>
-                    <option value="create">Create</option>
-                  </select>
-                </Field>
-                <Field label="Standards (optional)">
-                  <div className="spectra-quiz-standard-editor">
-                    {(activeQuestion.standards ?? []).map((standard) => (
-                      <span key={standard}>
-                        {standard}
-                        <button
-                          type="button"
-                          aria-label={`Remove ${standard}`}
-                          onClick={() =>
-                            updateQuestion(activeQuestion.id, {
-                              standards: (
-                                activeQuestion.standards ?? []
-                              ).filter((item) => item !== standard),
-                            })
-                          }
-                        >
-                          <X className="h-2.5 w-2.5" />
-                        </button>
-                      </span>
-                    ))}
-                    <input
-                      aria-label="Add standard"
-                      placeholder="+ Add standard"
-                      onKeyDown={(event) => {
-                        if (event.key !== "Enter" && event.key !== ",") return;
-                        event.preventDefault();
-                        const value = event.currentTarget.value
-                          .trim()
-                          .replace(/,$/, "");
-                        if (!value) return;
+                    <select
+                      value={activeQuestion.difficulty ?? "medium"}
+                      onChange={(event) =>
                         updateQuestion(activeQuestion.id, {
-                          standards: Array.from(
-                            new Set([
-                              ...(activeQuestion.standards ?? []),
-                              value,
-                            ]),
-                          ),
-                        });
-                        event.currentTarget.value = "";
-                      }}
-                    />
-                  </div>
-                </Field>
-                <details className="spectra-quiz-advanced">
-                  <summary>
-                    <SlidersHorizontal className="h-3.5 w-3.5" />
-                    Advanced placement
-                    <ChevronDown className="ml-auto h-3.5 w-3.5" />
-                  </summary>
-                  <div>
-                    <Field label="Section">
-                      <input
-                        value={activeQuestion.section ?? ""}
-                        onChange={(event) =>
-                          updateQuestion(activeQuestion.id, {
-                            section: event.target.value || undefined,
-                          })
-                        }
-                        className={inputClass()}
-                        placeholder="e.g. Foundations"
-                      />
-                    </Field>
-                    <Field label="Random pool">
-                      <input
-                        value={activeQuestion.poolId ?? ""}
-                        onChange={(event) =>
-                          updateQuestion(activeQuestion.id, {
-                            poolId: event.target.value || undefined,
-                            poolDrawCount: event.target.value
-                              ? (activeQuestion.poolDrawCount ?? 1)
-                              : undefined,
-                          })
-                        }
-                        className={inputClass()}
-                        placeholder="e.g. glycolysis-core"
-                      />
-                    </Field>
-                    {activeQuestion.poolId ? (
-                      <Field label="Questions drawn from pool">
-                        <input
-                          type="number"
-                          min={1}
-                          max={100}
-                          value={activeQuestion.poolDrawCount ?? 1}
-                          onChange={(event) =>
-                            updateQuestion(activeQuestion.id, {
-                              poolDrawCount: Math.max(
-                                1,
-                                Math.min(100, Number(event.target.value) || 1),
-                              ),
-                            })
-                          }
-                          className={inputClass()}
-                        />
-                      </Field>
-                    ) : null}
-                    <p>
-                      Questions with the same pool name share one draw count.
-                      Ungrouped questions always appear.
-                    </p>
-                  </div>
-                </details>
-                <div className="spectra-quiz-media">
-                  {activeQuestion.media ? (
-                    <>
-                      {quizAssetMap.get(activeQuestion.media.assetId)
-                        ?.downloadUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={
-                            quizAssetMap.get(activeQuestion.media.assetId)!
-                              .downloadUrl!
-                          }
-                          alt={activeQuestion.media.altText ?? ""}
-                        />
-                      ) : (
-                        <div data-missing="true">
-                          <ImageIcon className="h-4 w-4" /> Media unavailable
-                        </div>
-                      )}
-                      <Field label="Image description">
-                        <input
-                          value={activeQuestion.media.altText ?? ""}
-                          onChange={(event) =>
-                            updateQuestion(activeQuestion.id, {
-                              media: {
-                                ...activeQuestion.media!,
-                                altText: event.target.value,
-                              },
-                            })
-                          }
-                          className={inputClass()}
-                          placeholder="Describe the image for learners who cannot see it"
-                        />
-                      </Field>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          void removeQuestionMedia(activeQuestion.id)
-                        }
-                      >
-                        <Trash2 className="h-3.5 w-3.5" /> Remove image
-                      </button>
-                    </>
-                  ) : (
-                    <label
-                      onDragOver={(event) => event.preventDefault()}
-                      onDrop={(event) => {
-                        event.preventDefault();
-                        const file = event.dataTransfer.files?.[0];
-                        if (file?.type.startsWith("image/"))
-                          void uploadQuestionMedia(file);
-                      }}
+                          difficulty: event.target
+                            .value as QuizQuestion["difficulty"],
+                        })
+                      }
+                      className={inputClass()}
                     >
-                      {uploadingQuizMedia ? (
-                        <>
-                          <Loader2 className="mx-auto mb-2 h-4 w-4 animate-spin" />
-                          Uploading image…
-                        </>
-                      ) : (
-                        <>
-                          <span>Drag and drop image</span>
-                          <span>or</span>
-                          <strong>Browse</strong>
-                        </>
-                      )}
+                      <option value="easy">Easy</option>
+                      <option value="medium">Medium</option>
+                      <option value="hard">Hard</option>
+                    </select>
+                  </Field>
+                  <Field
+                    label="Points"
+                    aiActive={pathTouches(
+                      aiChangedPaths,
+                      `/questions/${questions.findIndex((question) => question.id === activeQuestion.id)}/points`,
+                    )}
+                    path={`/questions/${questions.findIndex((question) => question.id === activeQuestion.id)}/points`}
+                  >
+                    <input
+                      type="number"
+                      value={activeQuestion.points ?? 1}
+                      min={1}
+                      onChange={(event) =>
+                        updateQuestion(activeQuestion.id, {
+                          points: Number(event.target.value),
+                        })
+                      }
+                      className={inputClass()}
+                    />
+                  </Field>
+                  <Field
+                    label="Time"
+                    aiActive={pathTouches(
+                      aiChangedPaths,
+                      `/questions/${questions.findIndex((question) => question.id === activeQuestion.id)}/timeLimitSeconds`,
+                    )}
+                    path={`/questions/${questions.findIndex((question) => question.id === activeQuestion.id)}/timeLimitSeconds`}
+                  >
+                    <input
+                      type="number"
+                      value={activeQuestion.timeLimitSeconds ?? 90}
+                      min={0}
+                      onChange={(event) =>
+                        updateQuestion(activeQuestion.id, {
+                          timeLimitSeconds: Number(event.target.value),
+                        })
+                      }
+                      className={inputClass()}
+                    />
+                  </Field>
+                  <Field
+                    label="Bloom's taxonomy"
+                    aiActive={pathTouches(
+                      aiChangedPaths,
+                      `/questions/${questions.findIndex((question) => question.id === activeQuestion.id)}/bloomLevel`,
+                    )}
+                    path={`/questions/${questions.findIndex((question) => question.id === activeQuestion.id)}/bloomLevel`}
+                  >
+                    <select
+                      value={activeQuestion.bloomLevel ?? "remember"}
+                      onChange={(event) =>
+                        updateQuestion(activeQuestion.id, {
+                          bloomLevel: event.target.value as NonNullable<
+                            QuizQuestion["bloomLevel"]
+                          >,
+                        })
+                      }
+                      className={inputClass()}
+                    >
+                      <option value="remember">Remember</option>
+                      <option value="understand">Understand</option>
+                      <option value="apply">Apply</option>
+                      <option value="analyze">Analyze</option>
+                      <option value="evaluate">Evaluate</option>
+                      <option value="create">Create</option>
+                    </select>
+                  </Field>
+                  <Field label="Standards (optional)">
+                    <div className="spectra-quiz-standard-editor">
+                      {(activeQuestion.standards ?? []).map((standard) => (
+                        <span key={standard}>
+                          {standard}
+                          <button
+                            type="button"
+                            aria-label={`Remove ${standard}`}
+                            onClick={() =>
+                              updateQuestion(activeQuestion.id, {
+                                standards: (
+                                  activeQuestion.standards ?? []
+                                ).filter((item) => item !== standard),
+                              })
+                            }
+                          >
+                            <X className="h-2.5 w-2.5" />
+                          </button>
+                        </span>
+                      ))}
                       <input
-                        type="file"
-                        accept="image/*"
-                        hidden
-                        disabled={uploadingQuizMedia}
-                        onChange={(event) => {
-                          const file = event.currentTarget.files?.[0];
-                          if (file) void uploadQuestionMedia(file);
+                        aria-label="Add standard"
+                        placeholder="+ Add standard"
+                        onKeyDown={(event) => {
+                          if (event.key !== "Enter" && event.key !== ",")
+                            return;
+                          event.preventDefault();
+                          const value = event.currentTarget.value
+                            .trim()
+                            .replace(/,$/, "");
+                          if (!value) return;
+                          updateQuestion(activeQuestion.id, {
+                            standards: Array.from(
+                              new Set([
+                                ...(activeQuestion.standards ?? []),
+                                value,
+                              ]),
+                            ),
+                          });
                           event.currentTarget.value = "";
                         }}
                       />
-                    </label>
-                  )}
-                  {quizMediaError ? (
-                    <p role="status">{quizMediaError}</p>
-                  ) : null}
+                    </div>
+                  </Field>
+                  <details className="spectra-quiz-advanced">
+                    <summary>
+                      <SlidersHorizontal className="h-3.5 w-3.5" />
+                      Advanced placement
+                      <ChevronDown className="ml-auto h-3.5 w-3.5" />
+                    </summary>
+                    <div>
+                      <Field label="Section">
+                        <input
+                          value={activeQuestion.section ?? ""}
+                          onChange={(event) =>
+                            updateQuestion(activeQuestion.id, {
+                              section: event.target.value || undefined,
+                            })
+                          }
+                          className={inputClass()}
+                          placeholder="e.g. Foundations"
+                        />
+                      </Field>
+                      <Field label="Random pool">
+                        <input
+                          value={activeQuestion.poolId ?? ""}
+                          onChange={(event) =>
+                            updateQuestion(activeQuestion.id, {
+                              poolId: event.target.value || undefined,
+                              poolDrawCount: event.target.value
+                                ? (activeQuestion.poolDrawCount ?? 1)
+                                : undefined,
+                            })
+                          }
+                          className={inputClass()}
+                          placeholder="e.g. glycolysis-core"
+                        />
+                      </Field>
+                      {activeQuestion.poolId ? (
+                        <Field label="Questions drawn from pool">
+                          <input
+                            type="number"
+                            min={1}
+                            max={100}
+                            value={activeQuestion.poolDrawCount ?? 1}
+                            onChange={(event) =>
+                              updateQuestion(activeQuestion.id, {
+                                poolDrawCount: Math.max(
+                                  1,
+                                  Math.min(
+                                    100,
+                                    Number(event.target.value) || 1,
+                                  ),
+                                ),
+                              })
+                            }
+                            className={inputClass()}
+                          />
+                        </Field>
+                      ) : null}
+                      <p>
+                        Questions with the same pool name share one draw count.
+                        Ungrouped questions always appear.
+                      </p>
+                    </div>
+                  </details>
+                  <div className="spectra-quiz-media">
+                    {activeQuestion.media ? (
+                      <>
+                        {quizAssetMap.get(activeQuestion.media.assetId)
+                          ?.downloadUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={
+                              quizAssetMap.get(activeQuestion.media.assetId)!
+                                .downloadUrl!
+                            }
+                            alt={activeQuestion.media.altText ?? ""}
+                          />
+                        ) : (
+                          <div data-missing="true">
+                            <ImageIcon className="h-4 w-4" /> Media unavailable
+                          </div>
+                        )}
+                        <Field label="Image description">
+                          <input
+                            value={activeQuestion.media.altText ?? ""}
+                            onChange={(event) =>
+                              updateQuestion(activeQuestion.id, {
+                                media: {
+                                  ...activeQuestion.media!,
+                                  altText: event.target.value,
+                                },
+                              })
+                            }
+                            className={inputClass()}
+                            placeholder="Describe the image for learners who cannot see it"
+                          />
+                        </Field>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            void removeQuestionMedia(activeQuestion.id)
+                          }
+                        >
+                          <Trash2 className="h-3.5 w-3.5" /> Remove image
+                        </button>
+                      </>
+                    ) : (
+                      <label
+                        onDragOver={(event) => event.preventDefault()}
+                        onDrop={(event) => {
+                          event.preventDefault();
+                          const file = event.dataTransfer.files?.[0];
+                          if (file?.type.startsWith("image/"))
+                            void uploadQuestionMedia(file);
+                        }}
+                      >
+                        {uploadingQuizMedia ? (
+                          <>
+                            <Loader2 className="mx-auto mb-2 h-4 w-4 animate-spin" />
+                            Uploading image…
+                          </>
+                        ) : (
+                          <>
+                            <span>Drag and drop image</span>
+                            <span>or</span>
+                            <strong>Browse</strong>
+                          </>
+                        )}
+                        <input
+                          type="file"
+                          accept="image/*"
+                          hidden
+                          disabled={uploadingQuizMedia}
+                          onChange={(event) => {
+                            const file = event.currentTarget.files?.[0];
+                            if (file) void uploadQuestionMedia(file);
+                            event.currentTarget.value = "";
+                          }}
+                        />
+                      </label>
+                    )}
+                    {quizMediaError ? (
+                      <p role="status">{quizMediaError}</p>
+                    ) : null}
+                  </div>
                 </div>
-              </div>
+              ) : null
             ) : null}
           </aside>
         </div>
@@ -12937,7 +13562,9 @@ function QuizStudio({
         <ol>
           {questions.map((question) => (
             <li key={question.id}>
-              <h2>{question.prompt || "Untitled question"}</h2>
+              <h2>
+                {plannerDescriptionText(question.prompt) || "Untitled question"}
+              </h2>
               {question.options.length ? (
                 <ul>
                   {question.options.map((option, index) => (
@@ -12996,14 +13623,24 @@ function plannerDescriptionText(value: string) {
     .trim();
 }
 
-function PlannerDescriptionEditor({
+function ArtifactRichTextEditor({
   value,
   disabled,
   onChange,
+  onFocus,
+  path,
+  placeholder = "Write something…",
+  variant = "compact",
+  collapsible = false,
 }: {
   value: string;
   disabled?: boolean;
   onChange: (value: string) => void;
+  onFocus?: () => void;
+  path?: string;
+  placeholder?: string;
+  variant?: "planner" | "compact" | "card";
+  collapsible?: boolean;
 }) {
   const onChangeRef = useRef(onChange);
   const contentKeyRef = useRef(plannerDescriptionHtml(value));
@@ -13018,7 +13655,9 @@ function PlannerDescriptionEditor({
       StarterKit.configure({ link: false, underline: false }),
       Underline,
       TiptapLink.configure({ openOnClick: false, autolink: true }),
-      Placeholder.configure({ placeholder: "What needs to happen?" }),
+      Equation,
+      InlineEquation,
+      Placeholder.configure({ placeholder }),
     ],
     content: initialContent,
     editable: !disabled,
@@ -13026,9 +13665,14 @@ function PlannerDescriptionEditor({
     editorProps: {
       attributes: {
         class:
-          "min-h-[136px] px-4 py-3 text-[13px] leading-6 text-[var(--text-primary)] outline-none",
+          variant === "card"
+            ? "min-h-[180px] px-6 py-8 text-center font-serif text-[24px] leading-snug text-[var(--text-primary)] outline-none"
+            : variant === "planner"
+              ? "min-h-[136px] px-4 py-3 text-[13px] leading-6 text-[var(--text-primary)] outline-none"
+              : "min-h-[62px] px-3 py-2 text-[12px] leading-5 text-[var(--text-primary)] outline-none",
       },
     },
+    onFocus: () => onFocus?.(),
     onUpdate: ({ editor: current }) => {
       const html = current.getHTML();
       contentKeyRef.current = html;
@@ -13057,33 +13701,37 @@ function PlannerDescriptionEditor({
 
   return (
     <div
-      className="spectra-planner-description"
+      className="spectra-planner-description spectra-rich-text-editor"
       data-disabled={disabled || undefined}
+      data-rich-text-variant={variant}
+      data-rich-text-collapsible={collapsible || undefined}
+      data-spectra-hidden-target={collapsible ? "true" : undefined}
+      {...(path ? targetAttrs(path) : {})}
     >
-      <div role="toolbar" aria-label="Description formatting">
+      <div role="toolbar" aria-label="Text formatting">
         <ToolbarTextButton
-          label="Bold description"
+          label="Bold"
           onClick={() => editor?.chain().focus().toggleBold().run()}
           active={editor?.isActive("bold")}
         >
           <Bold className="h-3.5 w-3.5" />
         </ToolbarTextButton>
         <ToolbarTextButton
-          label="Italic description"
+          label="Italic"
           onClick={() => editor?.chain().focus().toggleItalic().run()}
           active={editor?.isActive("italic")}
         >
           <Italic className="h-3.5 w-3.5" />
         </ToolbarTextButton>
         <ToolbarTextButton
-          label="Underline description"
+          label="Underline"
           onClick={() => editor?.chain().focus().toggleUnderline().run()}
           active={editor?.isActive("underline")}
         >
           <UnderlineIcon className="h-3.5 w-3.5" />
         </ToolbarTextButton>
         <ToolbarTextButton
-          label="Strikethrough description"
+          label="Strikethrough"
           onClick={() => editor?.chain().focus().toggleStrike().run()}
           active={editor?.isActive("strike")}
         >
@@ -13124,7 +13772,42 @@ function PlannerDescriptionEditor({
             setLinkOpen((open) => !open);
           }}
         />
-        <span>Rich text</span>
+        <ToolbarButton
+          label="Inline equation"
+          icon={Sigma}
+          active={editor?.isActive("inlineEquation")}
+          onClick={() =>
+            editor
+              ?.chain()
+              .focus()
+              .insertContent({
+                type: "inlineEquation",
+                attrs: { latex: "x" },
+              })
+              .run()
+          }
+        />
+        <ToolbarTextButton
+          label="Block equation"
+          onClick={() =>
+            editor
+              ?.chain()
+              .focus()
+              .insertContent({
+                type: "equation",
+                attrs: {
+                  latex: "x",
+                  display: "block",
+                  alignment: "center",
+                },
+              })
+              .run()
+          }
+          active={editor?.isActive("equation")}
+        >
+          <span className="text-[9px] font-semibold">fx</span>
+        </ToolbarTextButton>
+        <span>Format</span>
       </div>
       {linkOpen ? (
         <form
@@ -13209,6 +13892,7 @@ function PlannerStudio({
   const [newSourceRef, setNewSourceRef] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
   const [importingTask, setImportingTask] = useState(false);
   const [taskToolReport, setTaskToolReport] = useState<string>();
 
@@ -13611,23 +14295,49 @@ function PlannerStudio({
       : task.startAt && task.dueAt && task.dueAt < task.startAt
         ? "Due time cannot be before the task starts."
         : undefined;
+  const inspectorAiPath = aiChangedPaths.find((path) =>
+    ["/startAt", "/endAt", "/allDay", "/linkedArtifactIds", "/reminders"].some(
+      (prefix) => pathTouches([path], prefix),
+    ),
+  );
 
   return (
     <div
-      className={`spectra-planner-studio grid gap-2 ${mode === "tab" ? "lg:grid-cols-[minmax(0,1fr)_392px]" : "grid-cols-1"}`}
+      data-inspector-open={inspectorOpen || undefined}
+      className={`spectra-planner-studio grid gap-2 ${
+        mode === "tab" && inspectorOpen
+          ? "lg:grid-cols-[minmax(0,1fr)_minmax(300px,360px)]"
+          : "grid-cols-1"
+      }`}
     >
       <fieldset className="contents" disabled={readOnly}>
-        <section className="rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
+        <section className="min-w-0 px-1 py-2 sm:px-2">
+          {mode === "tab" ? (
+            <div className="mb-2 flex justify-end">
+              <button
+                type="button"
+                className="inline-flex h-8 items-center gap-1.5 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 text-[11px] font-medium text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                onClick={() => setInspectorOpen((value) => !value)}
+                aria-expanded={inspectorOpen}
+                {...targetAttrs(inspectorAiPath ?? "/view/taskDetails")}
+              >
+                <PanelRight className="h-3.5 w-3.5" />
+                {inspectorOpen ? "Hide task details" : "Task details"}
+              </button>
+            </div>
+          ) : null}
           <Field
             label="Description"
             aiActive={pathTouches(aiChangedPaths, "/description")}
-
             path="/description"
           >
-            <PlannerDescriptionEditor
+            <ArtifactRichTextEditor
               value={task.description ?? ""}
               disabled={readOnly || sourceLocked("description")}
               onChange={(description) => commit({ ...task, description })}
+              placeholder="What needs to happen?"
+              variant="planner"
+              collapsible
             />
           </Field>
           <div
@@ -13737,7 +14447,7 @@ function PlannerStudio({
             </Field>
           </div>
           <div className="mt-4">
-            <Field label="Tags">
+            <Field label="Tags" path="/tags">
               <div className="flex min-h-10 flex-wrap items-center gap-1.5 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 py-1.5">
                 {tagsFromDraft(tagDraft).map((tag) => (
                   <button
@@ -13823,6 +14533,7 @@ function PlannerStudio({
           <div className="spectra-planner-advanced mt-4 rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-primary)]">
             <button
               type="button"
+              {...targetAttrs("/recurrence")}
               className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left text-[12px] font-semibold text-[var(--text-secondary)]"
               onClick={() => setAdvancedOpen((value) => !value)}
               aria-expanded={advancedOpen}
@@ -14059,7 +14770,7 @@ function PlannerStudio({
             readOnly={readOnly}
           />
           <div className="mt-5">
-            <Field label="Sources / provenance">
+            <Field label="Sources / provenance" path="/sourceRefs">
               <div className="flex min-h-10 flex-wrap items-center gap-1.5 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 py-1.5">
                 {task.sourceRefs.map((sourceRef) => {
                   const sourceArtifact = artifacts.find(
@@ -14109,7 +14820,7 @@ function PlannerStudio({
           </div>
         </section>
       </fieldset>
-      {mode === "tab" ? (
+      {mode === "tab" && inspectorOpen ? (
         <aside className="space-y-4">
           <SideCard title="Task blueprint">
             <div className="flex items-center gap-3">
@@ -14544,6 +15255,7 @@ function QuestionEditor({
         <select
           value={question.type}
           data-ai-region={aiRegionAttr(aiField("type"))}
+          {...targetAttrs(`${qPath}/type`)}
           onChange={(event) => {
             const type = event.target.value as QuizQuestion["type"];
             onChange({
@@ -14593,25 +15305,17 @@ function QuestionEditor({
         </select>
       </div>
       <div className="mt-2">
-        <Field label="Question">
-          <div className="spectra-quiz-prompt-editor">
-            <div role="toolbar" aria-label="Question formatting">
-              <strong>B</strong>
-              <em>I</em>
-              <u>U</u>
-              <Link2 className="h-3.5 w-3.5" />
-              <List className="h-3.5 w-3.5" />
-              <ListOrdered className="h-3.5 w-3.5" />
-              <Code2 className="h-3.5 w-3.5" />
-            </div>
-            <textarea
-              value={question.prompt}
-              onChange={(event) => onChange({ prompt: event.target.value })}
-              data-ai-region={aiRegionAttr(aiField("prompt"))}
-              className="min-h-[58px] w-full resize-none bg-transparent px-3 py-2 text-[12px] leading-5 text-[var(--text-primary)] outline-none"
-              placeholder="Write a clear question"
-            />
-          </div>
+        <Field
+          label="Question"
+          aiActive={aiField("prompt")}
+          path={`${qPath}/prompt`}
+        >
+          <ArtifactRichTextEditor
+            value={question.prompt}
+            onChange={(prompt) => onChange({ prompt })}
+            path={`${qPath}/prompt`}
+            placeholder="Write a clear question"
+          />
         </Field>
       </div>
       {["multiple_choice", "true_false", "select_all", "ordering"].includes(
@@ -14627,7 +15331,7 @@ function QuestionEditor({
             {question.options.map((option, index) => (
               <div
                 key={question.optionIds[index] ?? index}
-                className="grid grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-2"
+                className="grid grid-cols-[22px_minmax(0,1fr)_auto] items-center gap-2"
               >
                 {question.type === "ordering" ? (
                   <span className="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--border-default)] text-[11px] font-semibold text-[var(--text-secondary)]">
@@ -14636,7 +15340,7 @@ function QuestionEditor({
                 ) : (
                   <button
                     type="button"
-                    className={`flex h-4 w-4 items-center justify-center rounded-full border ${
+                    className={`flex h-5 w-5 items-center justify-center rounded-full border transition-colors ${
                       question.type === "select_all"
                         ? (question.correctAnswers ?? []).includes(option) &&
                           option
@@ -14657,6 +15361,15 @@ function QuestionEditor({
                         });
                       } else onChange({ correctAnswer: option });
                     }}
+                    {...targetAttrs(
+                      `${qPath}/${
+                        question.type === "select_all"
+                          ? "correctAnswers"
+                          : "correctAnswer"
+                      }`,
+                      `option:${index}`,
+                      "toggle",
+                    )}
                     aria-label={`${
                       question.type === "select_all" &&
                       (question.correctAnswers ?? []).includes(option)
@@ -14667,17 +15380,23 @@ function QuestionEditor({
                     {(question.type === "select_all"
                       ? (question.correctAnswers ?? []).includes(option)
                       : question.correctAnswer === option) && option ? (
-                      <Check className="h-2.5 w-2.5" />
+                      <Check className="h-3 w-3" />
                     ) : (
-                      <Circle className="h-2.5 w-2.5" />
+                      <Circle className="h-3 w-3" />
                     )}
                   </button>
                 )}
                 <input
                   value={option}
                   onChange={(event) => updateOption(index, event.target.value)}
+                  readOnly={question.type === "true_false"}
                   data-ai-region={aiRegionAttr(aiField(`options/${index}`))}
-                  className={inputClass()}
+                  {...targetAttrs(`${qPath}/options/${index}`)}
+                  className={`${inputClass()} ${
+                    question.type === "true_false"
+                      ? "cursor-default bg-[var(--bg-secondary)] text-[var(--text-secondary)]"
+                      : ""
+                  }`}
                   placeholder={`Option ${index + 1}`}
                 />
                 <div className="flex items-center gap-1">
@@ -14735,107 +15454,86 @@ function QuestionEditor({
                       </button>
                     </>
                   ) : null}
-                  <button
-                    type="button"
-                    className={iconButtonClass()}
-                    onClick={() => {
-                      const removed = question.options[index];
-                      const options = question.options.filter(
-                        (_, candidate) => candidate !== index,
-                      );
-                      const optionIds = question.optionIds.filter(
-                        (_, candidate) => candidate !== index,
-                      );
-                      onChange({
-                        options,
-                        optionIds,
-                        correctAnswer:
-                          question.correctAnswer === removed
-                            ? ""
-                            : question.correctAnswer,
-                        correctAnswers: (question.correctAnswers ?? []).filter(
-                          (answer) => answer !== removed,
-                        ),
-                      });
-                    }}
-                    aria-label="Remove option"
-                  >
-                    <Minus className="h-4 w-4" />
-                  </button>
+                  {question.type !== "true_false" ? (
+                    <button
+                      type="button"
+                      className={iconButtonClass()}
+                      onClick={() => {
+                        const removed = question.options[index];
+                        const options = question.options.filter(
+                          (_, candidate) => candidate !== index,
+                        );
+                        const optionIds = question.optionIds.filter(
+                          (_, candidate) => candidate !== index,
+                        );
+                        onChange({
+                          options,
+                          optionIds,
+                          correctAnswer:
+                            question.correctAnswer === removed
+                              ? ""
+                              : question.correctAnswer,
+                          correctAnswers: (
+                            question.correctAnswers ?? []
+                          ).filter((answer) => answer !== removed),
+                        });
+                      }}
+                      aria-label="Remove option"
+                    >
+                      <Minus className="h-4 w-4" />
+                    </button>
+                  ) : null}
                 </div>
               </div>
             ))}
           </div>
-          <div className="mt-2 flex items-center gap-2">
-            <button
-              type="button"
-              className={smallActionClass()}
-              onClick={() =>
-                onChange({
-                  options: [...question.options, ""],
-                  optionIds: [...question.optionIds, id("option")],
-                })
-              }
-            >
-              <Plus className="h-3.5 w-3.5" /> Add option
-            </button>
-            {question.type !== "ordering" ? (
+          {question.type !== "true_false" ? (
+            <div className="mt-2 flex items-center gap-2">
               <button
                 type="button"
                 className={smallActionClass()}
-                onClick={() => {
-                  const paired = question.options.map((option, index) => ({
-                    option,
-                    optionId: question.optionIds[index] ?? id("option"),
-                  }));
-                  for (let index = paired.length - 1; index > 0; index -= 1) {
-                    const target = Math.floor(Math.random() * (index + 1));
-                    [paired[index], paired[target]] = [
-                      paired[target]!,
-                      paired[index]!,
-                    ];
-                  }
+                onClick={() =>
                   onChange({
-                    options: paired.map(({ option }) => option),
-                    optionIds: paired.map(({ optionId }) => optionId),
-                  });
-                }}
-              >
-                <Shuffle className="h-3.5 w-3.5" /> Shuffle options
-              </button>
-            ) : null}
-          </div>
-          {question.type !== "ordering" && question.type !== "select_all" ? (
-            <label className="mt-3 block">
-              <span className="mb-1.5 block text-[12px] font-semibold text-[var(--text-secondary)]">
-                Correct answer
-              </span>
-              <select
-                value={question.correctAnswer ?? ""}
-                onChange={(event) =>
-                  onChange({ correctAnswer: event.target.value })
+                    options: [...question.options, ""],
+                    optionIds: [...question.optionIds, id("option")],
+                  })
                 }
-                data-ai-region={aiRegionAttr(aiField("correctAnswer"))}
-                className="h-9 w-full rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 text-[13px] text-[var(--text-primary)] outline-none"
-                aria-label="Correct answer"
               >
-                <option value="">Select the correct option</option>
-                {question.options
-                  .filter((option) => option.trim())
-                  .map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-              </select>
-            </label>
+                <Plus className="h-3.5 w-3.5" /> Add option
+              </button>
+              {question.type !== "ordering" ? (
+                <button
+                  type="button"
+                  className={smallActionClass()}
+                  onClick={() => {
+                    const paired = question.options.map((option, index) => ({
+                      option,
+                      optionId: question.optionIds[index] ?? id("option"),
+                    }));
+                    for (let index = paired.length - 1; index > 0; index -= 1) {
+                      const target = Math.floor(Math.random() * (index + 1));
+                      [paired[index], paired[target]] = [
+                        paired[target]!,
+                        paired[index]!,
+                      ];
+                    }
+                    onChange({
+                      options: paired.map(({ option }) => option),
+                      optionIds: paired.map(({ optionId }) => optionId),
+                    });
+                  }}
+                >
+                  <Shuffle className="h-3.5 w-3.5" /> Shuffle options
+                </button>
+              ) : null}
+            </div>
           ) : null}
           <p className="mt-2 text-[11px] text-[var(--text-tertiary)]">
             {question.type === "ordering"
               ? "The order shown above is the canonical answer."
               : question.type === "select_all"
                 ? "Select every correct option using the marker beside it."
-                : "Use the markers beside options or the Correct answer control."}
+                : "Select the correct option using its marker."}
           </p>
         </section>
       ) : question.type === "matching" ? (
@@ -14881,6 +15579,7 @@ function QuestionEditor({
                     aiField(`matchingPairs/${index}/left`) ||
                       aiField(`matchingPairs/${index}`),
                   )}
+                  {...targetAttrs(`${qPath}/matchingPairs/${index}/left`)}
                   className={inputClass()}
                   placeholder={`Prompt ${index + 1}`}
                 />
@@ -14903,6 +15602,7 @@ function QuestionEditor({
                     aiField(`matchingPairs/${index}/right`) ||
                       aiField(`matchingPairs/${index}`),
                   )}
+                  {...targetAttrs(`${qPath}/matchingPairs/${index}/right`)}
                   className={inputClass()}
                   placeholder={`Match ${index + 1}`}
                 />
@@ -15154,6 +15854,7 @@ function TaskListEditor({
         <button
           type="button"
           className={smallActionClass()}
+          {...targetAttrs("/subtasks")}
           onClick={() =>
             commit({
               ...task,
@@ -15179,6 +15880,7 @@ function TaskListEditor({
           >
             <button
               type="button"
+              {...targetAttrs(`/subtasks/${index}/done`)}
               disabled={subtask.id === "empty"}
               aria-label={
                 subtask.id === "empty"
@@ -15210,6 +15912,7 @@ function TaskListEditor({
               )}
             </button>
             <input
+              {...targetAttrs(`/subtasks/${index}/title`)}
               value={subtask.title}
               onChange={(event) =>
                 commit({
@@ -15240,6 +15943,7 @@ function TaskListEditor({
             />
             <button
               type="button"
+              {...targetAttrs(`/subtasks/${index}`)}
               disabled={subtask.id === "empty"}
               aria-label={`Remove ${subtask.title || "subtask"}`}
               className="text-[var(--text-tertiary)] hover:text-[var(--danger)] disabled:opacity-0"
@@ -16410,16 +17114,29 @@ function CardFace({
         ) : null}
       </div>
       <div className={onNoteChange ? "spectra-card-face-shell" : undefined}>
-        <textarea
-          ref={textareaRef}
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          onFocus={() => onFocus?.()}
-          data-ai-region={aiRegionAttr(aiActive)}
-          {...(path ? targetAttrs(path) : {})}
-          className="min-h-[180px] w-full resize-none rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-6 py-8 text-center font-serif text-[24px] leading-snug text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[color-mix(in_oklab,#8b6ff0_55%,var(--border-default))]"
-          placeholder={placeholder}
-        />
+        {clozeMode ? (
+          <textarea
+            ref={textareaRef}
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
+            onFocus={() => onFocus?.()}
+            data-ai-region={aiRegionAttr(aiActive)}
+            {...(path ? targetAttrs(path) : {})}
+            className="min-h-[180px] w-full resize-none rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-6 py-8 text-center font-serif text-[24px] leading-snug text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[color-mix(in_oklab,#8b6ff0_55%,var(--border-default))]"
+            placeholder={placeholder}
+          />
+        ) : (
+          <div data-ai-region={aiRegionAttr(aiActive)}>
+            <ArtifactRichTextEditor
+              value={value}
+              onChange={onChange}
+              onFocus={onFocus}
+              path={path}
+              placeholder={placeholder}
+              variant="card"
+            />
+          </div>
+        )}
         {onNoteChange ? (
           <input
             value={noteValue ?? ""}

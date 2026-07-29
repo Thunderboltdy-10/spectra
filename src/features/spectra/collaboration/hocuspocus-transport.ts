@@ -256,6 +256,21 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
     this.emit();
   }
 
+  private samePresence(
+    left: CollaborationPresence[] | undefined,
+    right: CollaborationPresence[],
+  ) {
+    if (!left || left.length !== right.length) return false;
+    return left.every((person, index) => {
+      const other = right[index];
+      return (
+        other !== undefined &&
+        person.clientId === other.clientId &&
+        JSON.stringify(person) === JSON.stringify(other)
+      );
+    });
+  }
+
   private startAuthorizationWatch() {
     if (this.authorizationTimer !== undefined) return;
     this.authorizationTimer = window.setInterval(() => {
@@ -387,9 +402,8 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
                 }),
           });
         },
-        onAwarenessChange: ({ states }) =>
-          this.update({
-            presence: states.map((entry) => {
+        onAwarenessChange: ({ states }) => {
+          const presence: CollaborationPresence[] = states.map((entry) => {
               const user =
                 entry.user && typeof entry.user === "object"
                   ? (entry.user as Record<string, unknown>)
@@ -418,7 +432,7 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
                   ? { color: user.color }
                   : {}),
                 ...(user.actorKind === "ai" || user.actorKind === "human"
-                  ? { actorKind: user.actorKind }
+                  ? { actorKind: user.actorKind as "ai" | "human" }
                   : {}),
                 ...(typeof user.runId === "string"
                   ? { runId: user.runId }
@@ -519,8 +533,11 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
                   ? { viewport: user.viewport }
                   : {}),
               };
-            }),
-          }),
+            });
+          if (!this.samePresence(this.presence, presence)) {
+            this.update({ presence });
+          }
+        },
         onAuthenticationFailed: ({ reason }) => {
           const revoked = authenticationActuallyRevoked(reason);
           this.update({
@@ -610,17 +627,30 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
     }
     this.intentionallyDisconnected = false;
     this.update({ state: "reconnecting", error: undefined });
-    this.provider.connect();
+    await this.provider.connect();
+    // `connect()` is a no-op while the socket is already open. That matters
+    // when one broadcast was missed: the transport can still look perfectly
+    // "synchronized" while its Y.Doc is one durable commit behind. A sync-step
+    // round trip asks the gateway for the actual state-vector delta and makes
+    // retry a real reconciliation rather than a cosmetic status transition.
+    this.provider.forceSync();
     this.provider.flushPendingUpdates();
     await this.flush();
   }
 
   setPresence(fields: Omit<CollaborationPresence, "clientId">) {
-    this.localPresence = {
+    const nextPresence = {
       ...(this.localPresence ?? {}),
       ...fields,
       clientId: this.clientId,
     };
+    if (
+      this.localPresence &&
+      JSON.stringify(this.localPresence) === JSON.stringify(nextPresence)
+    ) {
+      return;
+    }
+    this.localPresence = nextPresence;
     this.provider?.setAwarenessField("user", this.localPresence);
   }
 

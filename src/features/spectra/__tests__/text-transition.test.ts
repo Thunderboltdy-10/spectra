@@ -4,7 +4,10 @@ import {
   planTextTransition,
   pointForOffset,
 } from "../collaboration/text-transition";
-import { planChoreography, scheduleConcurrently } from "../collaboration/choreography";
+import {
+  planChoreography,
+  scheduleConcurrently,
+} from "../collaboration/choreography";
 import type { SemanticTarget } from "../collaboration/interaction-model";
 
 function frames(before: string, after: string, code = false) {
@@ -26,10 +29,7 @@ describe("planTextTransition", () => {
   it("never emits a partial word", () => {
     // The naive diff of colour -> color leaves "colr"; snapping to token
     // boundaries must replace the whole word instead.
-    const plan = frames(
-      "The colour of the sky",
-      "The color of the sky",
-    );
+    const plan = frames("The colour of the sky", "The color of the sky");
     for (const frame of plan.frames) {
       expect(frame.value).not.toContain("colr");
       expect(frame.value).not.toMatch(/\bcolo\b/);
@@ -38,7 +38,8 @@ describe("planTextTransition", () => {
 
   it("preserves the untouched prefix and suffix in every frame", () => {
     const before = "Intro sentence. The middle claim is wrong. Closing note.";
-    const after = "Intro sentence. The middle claim is now correct. Closing note.";
+    const after =
+      "Intro sentence. The middle claim is now correct. Closing note.";
     const plan = frames(before, after);
     for (const frame of plan.frames) {
       expect(frame.value.startsWith("Intro sentence.")).toBe(true);
@@ -78,7 +79,8 @@ describe("planTextTransition", () => {
 
   it("splits code on line boundaries so no frame shows a broken statement", () => {
     const before = "const a = 1;\nconst b = 2;\nreturn a + b;";
-    const after = "const a = 1;\nconst b = 20;\nconst c = 3;\nreturn a + b + c;";
+    const after =
+      "const a = 1;\nconst b = 20;\nconst c = 3;\nreturn a + b + c;";
     const plan = frames(before, after, true);
     for (const frame of plan.frames) {
       // Every line in every frame is either empty or terminated.
@@ -111,12 +113,16 @@ describe("planTextTransition", () => {
     const before = "alpha beta gamma";
     const after = "alpha delta gamma";
     const plan = frames(before, after);
-    expect(after.slice(plan.changed.start, plan.changed.end)).toContain("delta");
+    expect(after.slice(plan.changed.start, plan.changed.end)).toContain(
+      "delta",
+    );
   });
 
   it("survives replacing everything", () => {
     const plan = frames("completely different", "nothing alike here");
-    expect(plan.frames[plan.frames.length - 1]!.value).toBe("nothing alike here");
+    expect(plan.frames[plan.frames.length - 1]!.value).toBe(
+      "nothing alike here",
+    );
   });
 
   it("survives an empty starting value", () => {
@@ -142,7 +148,10 @@ describe("planTextTransition", () => {
 
 describe("line helpers", () => {
   it("locates the changed line range", () => {
-    expect(changedLineRange("a\nb\nc", "a\nB\nc")).toEqual({ start: 1, end: 1 });
+    expect(changedLineRange("a\nb\nc", "a\nB\nc")).toEqual({
+      start: 1,
+      end: 1,
+    });
     expect(changedLineRange("a\nb", "a\nb")).toBeNull();
   });
 
@@ -160,6 +169,34 @@ const textTarget: SemanticTarget = {
 };
 
 describe("planChoreography", () => {
+  it("streams whole-cell sheet patches through the native grid-cell value", () => {
+    const plan = planChoreography({
+      target: {
+        path: "/sheets/id:sheet-1/cells/B4",
+        primitive: "gridCell",
+        label: "Cell B4",
+      },
+      before: { value: "Substrate concentration", format: { bold: false } },
+      after: {
+        value: "Substrate affinity (lower Km means higher affinity)",
+        format: { bold: false },
+      },
+    });
+
+    expect(plan).not.toBeNull();
+    expect(
+      plan?.frames.some(
+        (frame) =>
+          frame.act.kind === "type" &&
+          typeof frame.value === "string" &&
+          frame.value.includes("affinity"),
+      ),
+    ).toBe(true);
+    expect(plan?.frames.at(-1)?.value).toBe(
+      "Substrate affinity (lower Km means higher affinity)",
+    );
+  });
+
   it("performs a text edit as focus, select, clear, type, settle", () => {
     const plan = planChoreography({
       target: textTarget,
@@ -225,7 +262,12 @@ describe("planChoreography", () => {
 
   it("animates a toggle as press then state change", () => {
     const plan = planChoreography({
-      target: { artifactId: "a", path: "/allDay", primitive: "toggle", label: "All day" },
+      target: {
+        artifactId: "a",
+        path: "/allDay",
+        primitive: "toggle",
+        label: "All day",
+      },
       before: false,
       after: true,
     })!;
@@ -250,7 +292,9 @@ describe("planChoreography", () => {
     })!;
     const kinds = plan.frames.map((frame) => frame.act.kind);
     expect(kinds).toContain("dragStart");
-    expect(kinds.filter((kind) => kind === "dragMove").length).toBeGreaterThan(2);
+    expect(kinds.filter((kind) => kind === "dragMove").length).toBeGreaterThan(
+      2,
+    );
     expect(kinds).toContain("dragRelease");
   });
 
@@ -298,7 +342,12 @@ describe("planChoreography", () => {
 
   it("plans structural create and remove", () => {
     const created = planChoreography({
-      target: { artifactId: "a", path: "/slides/4", primitive: "listItem", label: "Slide 5" },
+      target: {
+        artifactId: "a",
+        path: "/slides/4",
+        primitive: "listItem",
+        label: "Slide 5",
+      },
       intent: "create",
       after: { id: "s5" },
     })!;
@@ -341,12 +390,20 @@ describe("planChoreography", () => {
 describe("scheduleConcurrently", () => {
   it("starts independent targets at once", () => {
     const one = planChoreography({
-      target: { artifactId: "a", path: "/cards/0/front", primitive: "richtext" },
+      target: {
+        artifactId: "a",
+        path: "/cards/0/front",
+        primitive: "richtext",
+      },
       before: "a",
       after: "b",
     })!;
     const two = planChoreography({
-      target: { artifactId: "a", path: "/cards/1/front", primitive: "richtext" },
+      target: {
+        artifactId: "a",
+        path: "/cards/1/front",
+        primitive: "richtext",
+      },
       before: "a",
       after: "c",
     })!;

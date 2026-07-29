@@ -90,6 +90,24 @@ describe("follow AI", () => {
     expect(getAiLocation()).toBeNull();
   });
 
+  it("does not republish an unchanged semantic location", () => {
+    noteAiLocation({
+      artifactId: "art-1",
+      path: "/questions/3/prompt",
+      note: "Rewriting question 3",
+    });
+    const first = getAiLocation();
+    expect(first).not.toBeNull();
+
+    noteAiLocation({
+      artifactId: "art-1",
+      path: "/questions/3/prompt",
+      note: "Rewriting question 3",
+    });
+
+    expect(getAiLocation()).toBe(first);
+  });
+
   it("ignores a programmatic-open window that has expired", () => {
     vi.useFakeTimers();
     try {

@@ -130,6 +130,20 @@ function cssEscape(value: string) {
   return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
+function paintableTarget(element: HTMLElement | null): HTMLElement | null {
+  if (!element) return null;
+  const hiddenTarget = element.closest<HTMLElement>(
+    '[data-spectra-hidden-target="true"]',
+  );
+  if (
+    hiddenTarget &&
+    (!document.activeElement || !hiddenTarget.contains(document.activeElement))
+  )
+    return null;
+  const rect = element.getBoundingClientRect();
+  return rect.width > 0 || rect.height > 0 ? element : null;
+}
+
 function resolveAiTarget(
   studio: HTMLElement,
   person: CollaborationPresence,
@@ -140,13 +154,13 @@ function resolveAiTarget(
       const block = studio.querySelector<HTMLElement>(
         `[data-block-id="${cssEscape(id)}"]`,
       );
-      if (block) return block;
+      if (paintableTarget(block)) return block;
     }
     if (kind === "address") {
       const cell = studio.querySelector<HTMLElement>(
         `[data-address="${cssEscape(id)}"]`,
       );
-      if (cell) return cell;
+      if (paintableTarget(cell)) return cell;
     }
     if (kind === "region") {
       const region =
@@ -156,7 +170,7 @@ function resolveAiTarget(
         studio.querySelector<HTMLElement>(
           `[data-spectra-region="${cssEscape(id)}"]`,
         );
-      if (region) return region;
+      if (paintableTarget(region)) return region;
     }
     if (kind === "path") {
       // Prefer the canonical annotation, so a migrated editor needs no legacy
@@ -168,13 +182,13 @@ function resolveAiTarget(
         studio.querySelector<HTMLElement>(
           `[data-ai-path="${cssEscape(id)}"]`,
         );
-      if (byPath) return byPath;
+      if (paintableTarget(byPath)) return byPath;
       const blockMatch = id.match(/\/(?:content\/)?blocks\/(?:id:)?([^/]+)/i);
       if (blockMatch) {
         const block = studio.querySelector<HTMLElement>(
           `[data-block-id="${cssEscape(decodeURIComponent(blockMatch[1]!))}"]`,
         );
-        if (block) return block;
+        if (paintableTarget(block)) return block;
       }
     }
   }
@@ -189,7 +203,7 @@ function resolveAiTarget(
       studio.querySelector<HTMLElement>(
         `[data-block-id="${cssEscape(person.activeRegionId)}"]`,
       );
-    if (region) return region;
+    if (paintableTarget(region)) return region;
   }
   // Last resort: one active AI region only — never pick among many and thrash.
   const regions = Array.from(
@@ -198,12 +212,13 @@ function resolveAiTarget(
     const rect = element.getBoundingClientRect();
     return rect.width > 0 && rect.height > 0;
   });
-  if (regions.length === 1) return regions[0]!;
+  if (regions.length === 1) return paintableTarget(regions[0]!);
   return (
-    regions.find((element) =>
-      element.matches('input, textarea, select, [contenteditable="true"]'),
+    paintableTarget(
+      regions.find((element) =>
+        element.matches('input, textarea, select, [contenteditable="true"]'),
+      ) ?? regions[0] ?? null,
     ) ??
-    regions[0] ??
     null
   );
 }
@@ -338,6 +353,14 @@ export function CollaborationCursorLayer({
             const target = resolveAiTarget(studio, person);
             if (target) {
               const targetRect = target.getBoundingClientRect();
+              const studioRect = studio.getBoundingClientRect();
+              if (
+                targetRect.right <= studioRect.left ||
+                targetRect.left >= studioRect.right ||
+                targetRect.bottom <= studioRect.top ||
+                targetRect.top >= studioRect.bottom
+              )
+                continue;
               const charOffset =
                 typeof person.cursor?.anchor?.charOffset === "number"
                   ? person.cursor.anchor.charOffset
@@ -386,11 +409,26 @@ export function CollaborationCursorLayer({
               next[person.clientId] = anchored;
               continue;
             }
+            // A semantic anchor that is collapsed, on another slide/sheet, or
+            // outside this peer's scroll viewport has no honest in-editor
+            // position. Keep the actor in the collaboration surface only;
+            // never fall back to normalized remote coordinates or edge-pin it.
+            continue;
           }
           if (validCursor(person.cursor)) {
             next[person.clientId] = {
-              left: person.cursor.x * layerRect.width,
-              top: person.cursor.y * layerRect.height,
+              // Different pane widths can legitimately put the collaborator at
+              // the very edge of this viewport. Keep the body exact enough to
+              // convey direction, but inset it so the cursor and name do not
+              // disappear beneath the layer's clipping boundary.
+              left: Math.max(
+                12,
+                Math.min(layerRect.width - 24, person.cursor.x * layerRect.width),
+              ),
+              top: Math.max(
+                14,
+                Math.min(layerRect.height - 34, person.cursor.y * layerRect.height),
+              ),
             };
           }
         }
@@ -534,7 +572,7 @@ export function CollaborationCursorLayer({
           >
             {showCaret ? (
               <span
-                className="ml-0 inline-block h-[1.15em] w-[2px] animate-pulse motion-reduce:animate-none"
+                className="ml-0 inline-block h-[1.22em] w-[3px] rounded-full animate-pulse motion-reduce:animate-none"
                 style={{
                   backgroundColor: color,
                   boxShadow: `0 0 8px color-mix(in oklab, ${color} 55%, transparent)`,
@@ -542,7 +580,8 @@ export function CollaborationCursorLayer({
               />
             ) : showPointer ? (
               <MousePointer2
-                className="h-5 w-5 -translate-x-1 -translate-y-1 fill-current drop-shadow-[0_2px_3px_rgba(20,18,15,.18)]"
+                strokeWidth={2.35}
+                className="h-6 w-6 -translate-x-1.5 -translate-y-1.5 scale-x-[1.12] fill-current drop-shadow-[0_2px_4px_rgba(20,18,15,.22)]"
                 style={{ color }}
               />
             ) : null}

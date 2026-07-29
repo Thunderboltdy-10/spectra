@@ -1,4 +1,5 @@
-import { mutation, query } from "./_generated/server";
+import { internalMutation, mutation, query } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
@@ -26,6 +27,45 @@ const EMPTY_COUNTS = {
   conflicts: 0,
   errors: 0,
 };
+
+function scheduleSync(
+  ctx: MutationCtx,
+  integrationId: Id<"schoolIntegrations">,
+  scheduledFor: number,
+) {
+  return ctx.scheduler.runAt(
+    Math.max(Date.now(), scheduledFor),
+    internal.executionScheduler.dispatchManageBacSync,
+    { integrationId, scheduledFor },
+  );
+}
+
+export const scheduleExisting = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const integrations = (
+      await Promise.all(
+        (["connected", "degraded"] as const).map((status) =>
+          ctx.db
+            .query("schoolIntegrations")
+            .withIndex("by_status_next_sync", (q) => q.eq("status", status))
+            .collect(),
+        ),
+      )
+    ).flat();
+    let scheduled = 0;
+    for (const integration of integrations) {
+      if (
+        typeof integration.nextSyncAt !== "number" ||
+        integration.blockedReason
+      )
+        continue;
+      await scheduleSync(ctx, integration._id, integration.nextSyncAt);
+      scheduled += 1;
+    }
+    return { scheduled };
+  },
+});
 
 const vCapabilityInput = v.object({
   category: v.string(),
@@ -1094,11 +1134,14 @@ export const claimScheduledSync = mutation({
           createdAt: now,
           updatedAt: now,
         });
+      const nextSyncAt =
+        now + integration.syncPolicy.frequencyMinutes * 60_000;
       await ctx.db.patch(integration._id, {
-        nextSyncAt: now + integration.syncPolicy.frequencyMinutes * 60_000,
+        nextSyncAt,
         blockedReason: undefined,
         updatedAt: now,
       });
+      await scheduleSync(ctx, integration._id, nextSyncAt);
       return {
         integrationId: integration._id,
         syncRunId,
@@ -1220,7 +1263,10 @@ export const beginSync = mutation({
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx);
     const integration = await integrationForSchool(ctx, actor.schoolId);
-    if (!integration || integration.status !== "connected")
+    if (
+      !integration ||
+      !["connected", "degraded"].includes(integration.status)
+    )
       throw new Error(
         "INTEGRATION_NOT_READY: ManageBac must be connected with verified readable capabilities.",
       );
@@ -1367,6 +1413,7 @@ export const requestAiRefresh = mutation({
       nextSyncAt: now,
       updatedAt: now,
     });
+    await scheduleSync(ctx, integration._id, now);
     await writeAuditEvent(ctx, {
       actorAccountId: actor.accountId,
       schoolId: actor.schoolId,
@@ -2592,6 +2639,11 @@ export const failSync = mutation({
       signature: args.signature,
     });
     const now = Date.now();
+    const retryAt =
+      args.retryAfterAt ??
+      (args.errorCode === "INTEGRATION_CREDENTIAL_REJECTED"
+        ? now + 365 * 24 * 60 * 60_000
+        : now + Math.min(30 * 60_000, 30_000 * 2 ** syncRun.attemptCount));
     const partial =
       syncRun.counts.created +
         syncRun.counts.updated +
@@ -2617,11 +2669,7 @@ export const failSync = mutation({
       stage: "failed",
       errorCode: text(args.errorCode, 200),
       errorSummary: text(args.errorSummary, 500),
-      nextAttemptAt:
-        args.retryAfterAt ??
-        (args.errorCode === "INTEGRATION_CREDENTIAL_REJECTED"
-          ? now + 365 * 24 * 60 * 60_000
-          : now + Math.min(30 * 60_000, 30_000 * 2 ** syncRun.attemptCount)),
+      nextAttemptAt: retryAt,
       attemptCount: syncRun.attemptCount + 1,
       completedAt: now,
       updatedAt: now,
@@ -2635,8 +2683,14 @@ export const failSync = mutation({
         args.errorCode === "INTEGRATION_CREDENTIAL_REJECTED"
           ? "The stored read-only credential was rejected by ManageBac."
           : undefined,
+      nextSyncAt:
+        args.errorCode === "INTEGRATION_CREDENTIAL_REJECTED"
+          ? undefined
+          : retryAt,
       updatedAt: now,
     });
+    if (args.errorCode !== "INTEGRATION_CREDENTIAL_REJECTED")
+      await scheduleSync(ctx, integration._id, retryAt);
     return { failed: true, partial };
   },
 });
@@ -2826,12 +2880,15 @@ export const completeSync = mutation({
       completedAt: now,
       updatedAt: now,
     });
+    const nextSyncAt =
+      now + integration.syncPolicy.frequencyMinutes * 60_000;
     await ctx.db.patch(integration._id, {
       status: syncRun.counts.errors > 0 ? "degraded" : "connected",
       lastSyncAt: now,
-      nextSyncAt: now + integration.syncPolicy.frequencyMinutes * 60_000,
+      nextSyncAt,
       updatedAt: now,
     });
+    await scheduleSync(ctx, integration._id, nextSyncAt);
     return { status, counts };
   },
 });
@@ -3207,7 +3264,21 @@ export const listMyClassCandidates = query({
       .unique();
     if (!integration || integration.status === "revoked")
       return { integration: null, classes: [] as Array<Record<string, unknown>>, lastSyncAt: undefined as number | undefined, nextSyncAt: undefined as number | undefined };
-    const [records, projections] = await Promise.all([
+    const mapping = await ctx.db
+      .query("externalIdentityMappings")
+      .withIndex("by_integration_account", (q) =>
+        q.eq("integrationId", integration._id).eq("accountId", actor.accountId),
+      )
+      .unique();
+    if (!mapping || mapping.status !== "verified")
+      return {
+        integration: safeIntegration(integration),
+        classes: [] as Array<Record<string, unknown>>,
+        identityRequired: true,
+        lastSyncAt: integration.lastSyncAt,
+        nextSyncAt: integration.nextSyncAt,
+      };
+    const [records, projections, membershipRows] = await Promise.all([
       ctx.db
         .query("externalRecords")
         .withIndex("by_school_updated", (q) => q.eq("schoolId", actor.schoolId))
@@ -3218,7 +3289,26 @@ export const listMyClassCandidates = query({
         .withIndex("by_account_updated", (q) => q.eq("accountId", actor.accountId))
         .order("desc")
         .take(2_000),
+      Promise.all(
+        ["class", "course", "membership"].map((recordType) =>
+          ctx.db
+            .query("externalRecords")
+            .withIndex("by_account_type", (q) =>
+              q
+                .eq("mappedAccountId", actor.accountId)
+                .eq("recordType", recordType),
+            )
+            .take(500),
+        ),
+      ),
     ]);
+    const accessibleClassIds = new Set(
+      membershipRows
+        .flat()
+        .flatMap((item) =>
+          item.providerClassId ? [item.providerClassId] : [],
+        ),
+    );
     const workspaceByProviderKey = new Map(
       projections
         .filter(
@@ -3229,8 +3319,37 @@ export const listMyClassCandidates = query({
         )
         .map((item) => [item.providerKey, item.projectionId] as const),
     );
-    const classes = records
-      .filter((item) => item.recordType === "class" && !item.tombstone)
+    const eligibleClasses = records
+      .filter(
+        (item) =>
+          item.recordType === "class" &&
+          !item.tombstone &&
+          ((item.mappedAccountId === actor.accountId) ||
+            Boolean(
+              item.providerClassId &&
+              accessibleClassIds.has(item.providerClassId),
+            )),
+      );
+    const bestClassByProvider = new Map<
+      string,
+      (typeof eligibleClasses)[number]
+    >();
+    const candidateScore = (item: (typeof eligibleClasses)[number]) => {
+      const normalized = record(item.normalized);
+      const title = text(normalized.name ?? normalized.title, 180);
+      return (
+        (item.mappedAccountId === actor.accountId ? 10_000 : 0) +
+        (title && title !== "ManageBac class" ? 1_000 : 0) +
+        item.fetchedAt / 1_000_000_000_000
+      );
+    };
+    for (const item of eligibleClasses) {
+      const key = item.providerClassId ?? item.providerRecordId;
+      const current = bestClassByProvider.get(key);
+      if (!current || candidateScore(item) > candidateScore(current))
+        bestClassByProvider.set(key, item);
+    }
+    const classes = [...bestClassByProvider.values()]
       .map((item) => {
         const normalized = record(item.normalized);
         const archived =
@@ -3279,6 +3398,35 @@ export const materializeClassWorkspaces = mutation({
       throw new Error(
         "INTEGRATION_NOT_CONNECTED: ManageBac is not connected for this school.",
       );
+    const mapping = await ctx.db
+      .query("externalIdentityMappings")
+      .withIndex("by_integration_account", (q) =>
+        q.eq("integrationId", integration._id).eq("accountId", actor.accountId),
+      )
+      .unique();
+    if (!mapping || mapping.status !== "verified")
+      throw new Error(
+        "INTEGRATION_IDENTITY_REQUIRED: Verify your ManageBac email before creating class workspaces.",
+      );
+    const membershipRows = (
+      await Promise.all(
+        ["class", "course", "membership"].map((recordType) =>
+          ctx.db
+            .query("externalRecords")
+            .withIndex("by_account_type", (q) =>
+              q
+                .eq("mappedAccountId", actor.accountId)
+                .eq("recordType", recordType),
+            )
+            .take(500),
+        ),
+      )
+    ).flat();
+    const accessibleClassIds = new Set(
+      membershipRows.flatMap((item) =>
+        item.providerClassId ? [item.providerClassId] : [],
+      ),
+    );
     const selected = args.recordIds.slice(0, 100);
     let created = 0;
     let skipped = 0;
@@ -3289,7 +3437,10 @@ export const materializeClassWorkspaces = mutation({
         source.schoolId !== actor.schoolId ||
         source.integrationId !== integration._id ||
         source.recordType !== "class" ||
-        source.tombstone
+        source.tombstone ||
+        (source.mappedAccountId !== actor.accountId &&
+          (!source.providerClassId ||
+            !accessibleClassIds.has(source.providerClassId)))
       ) {
         skipped += 1;
         continue;

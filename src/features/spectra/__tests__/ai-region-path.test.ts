@@ -303,6 +303,17 @@ describe("sheetsCellHighlightPaths", () => {
 });
 
 describe("preferStreamingContentSource", () => {
+  it("keeps existing artifacts stable until the AI actor publishes native frames", () => {
+    expect(
+      preferStreamingContentSource({
+        local: { questions: [{ prompt: "Durable question" }] },
+        preview: { questions: [{ prompt: "Final model answer arrived early" }] },
+        blueprintKey: "quiz",
+        aiState: "updating",
+      }),
+    ).toBe("local");
+  });
+
   it("prefers richer live content over lagging preview during create", () => {
     expect(
       preferStreamingContentSource({

@@ -159,13 +159,34 @@ function settle(value?: unknown): ChoreographyFrame {
 function asText(value: unknown): string | null {
   if (typeof value === "string") return value;
   if (value === null || value === undefined) return "";
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (typeof value === "number" || typeof value === "boolean")
+    return String(value);
   return null;
 }
 
-function planTextEdit(request: ChoreographyRequest): ChoreographyFrame[] | null {
-  const before = asText(request.before);
-  const after = asText(request.after);
+function textValueForTarget(
+  target: SemanticTarget,
+  value: unknown,
+): string | null {
+  if (
+    target.primitive === "gridCell" &&
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  ) {
+    const cell = value as Record<string, unknown>;
+    if (typeof cell.formula === "string" && cell.formula.length > 0)
+      return cell.formula;
+    return asText(cell.value);
+  }
+  return asText(value);
+}
+
+function planTextEdit(
+  request: ChoreographyRequest,
+): ChoreographyFrame[] | null {
+  const before = textValueForTarget(request.target, request.before);
+  const after = textValueForTarget(request.target, request.after);
   if (before === null || after === null || before === after) return null;
 
   const isCode = request.target.primitive === "code";
@@ -205,7 +226,13 @@ function planTextEdit(request: ChoreographyRequest): ChoreographyFrame[] | null 
       }
       case "delete": {
         frames.push({
-          act: { kind: "delete", span: { anchor: point(frame.value, frame.caret), head: point(frame.value, frame.caret) } },
+          act: {
+            kind: "delete",
+            span: {
+              anchor: point(frame.value, frame.caret),
+              head: point(frame.value, frame.caret),
+            },
+          },
           hold: frame.hold,
           value: frame.value,
         });
@@ -239,7 +266,9 @@ function planTextEdit(request: ChoreographyRequest): ChoreographyFrame[] | null 
  * Dropdown: move → press → open → walk options → select → close
  * ------------------------------------------------------------------ */
 
-function planDropdown(request: ChoreographyRequest): ChoreographyFrame[] | null {
+function planDropdown(
+  request: ChoreographyRequest,
+): ChoreographyFrame[] | null {
   const after = request.after;
   const chosen =
     typeof after === "string" || typeof after === "number"
@@ -289,7 +318,9 @@ function planDropdown(request: ChoreographyRequest): ChoreographyFrame[] | null 
     walked.push(next.value);
     if (walked.length >= 6) break;
   }
-  const perStep = walked.length ? Math.max(70, Math.round(420 / walked.length)) : 0;
+  const perStep = walked.length
+    ? Math.max(70, Math.round(420 / walked.length))
+    : 0;
   for (const option of walked) {
     frames.push({
       act: { kind: "menuNavigate", option },
@@ -330,7 +361,9 @@ function labelFor(
   options: Array<{ value: string; label: string }>,
   value: string,
 ): string {
-  return options.find((option) => option.value === value)?.label ?? humanize(value);
+  return (
+    options.find((option) => option.value === value)?.label ?? humanize(value)
+  );
 }
 
 function humanize(value: string): string {
@@ -427,7 +460,9 @@ function planSpatial(request: ChoreographyRequest): ChoreographyFrame[] | null {
     frames.push({
       act: { kind: "dragMove", at: { x: ratio, y: ratio } },
       hold: 80,
-      ...(request.dropTarget !== undefined ? { dropTarget: request.dropTarget } : {}),
+      ...(request.dropTarget !== undefined
+        ? { dropTarget: request.dropTarget }
+        : {}),
       // Only the final frame carries the durable position; intermediate frames
       // are visual so a half-applied coordinate never reaches the document.
       ...(step === steps && request.after !== undefined
@@ -439,7 +474,9 @@ function planSpatial(request: ChoreographyRequest): ChoreographyFrame[] | null {
     act: { kind: "dragRelease" },
     hold: 200,
     ...(request.after !== undefined ? { value: request.after } : {}),
-    ...(request.dropTarget !== undefined ? { dropTarget: request.dropTarget } : {}),
+    ...(request.dropTarget !== undefined
+      ? { dropTarget: request.dropTarget }
+      : {}),
     note: `Placing ${request.target.label ?? "the object"}`,
   });
   frames.push(settle(request.after));
@@ -481,16 +518,16 @@ function geometryChanged(before: unknown, after: unknown): boolean {
   if (typeof before !== "object" || typeof after !== "object") return false;
   const left = before as Record<string, unknown>;
   const right = after as Record<string, unknown>;
-  return GEOMETRY_KEYS.some(
-    (key) => key in right && left[key] !== right[key],
-  );
+  return GEOMETRY_KEYS.some((key) => key in right && left[key] !== right[key]);
 }
 
 /* ------------------------------------------------------------------ *
  * Structural: create, remove, reorder, group, switch view
  * ------------------------------------------------------------------ */
 
-function planListItem(request: ChoreographyRequest): ChoreographyFrame[] | null {
+function planListItem(
+  request: ChoreographyRequest,
+): ChoreographyFrame[] | null {
   if (request.before === undefined && request.after !== undefined)
     return planStructural({ ...request, intent: "create" });
   if (request.before !== undefined && request.after === undefined)

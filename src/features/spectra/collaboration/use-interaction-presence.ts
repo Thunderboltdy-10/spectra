@@ -87,6 +87,8 @@ export function useInteractionPresence(options: {
   onPublish: (state: InteractionState | null) => void;
   /** Regions this client currently holds, surfaced for lock affordances. */
   heldRegionIds?: readonly string[];
+  /** Resolve a DOM target to the artifact model's semantic lock region. */
+  resolveRegionId?: (path: string) => string | undefined;
   enabled?: boolean;
 }): InteractionPublisher {
   const {
@@ -96,6 +98,7 @@ export function useInteractionPresence(options: {
     surfaceRef,
     onPublish,
     heldRegionIds,
+    resolveRegionId,
     enabled = true,
   } = options;
 
@@ -146,16 +149,30 @@ export function useInteractionPresence(options: {
       buildTarget({
         typeKey: typeKey ?? "document",
         artifactId: artifactId ?? "",
-        path,
+        path: canonicalPath(path),
+        ...(resolveRegionId?.(canonicalPath(path))
+          ? { regionId: resolveRegionId(canonicalPath(path)) }
+          : {}),
         ...extras,
       }),
-    [artifactId, typeKey],
+    [artifactId, resolveRegionId, typeKey],
   );
 
   const publish = useCallback(
     (input: PublishInput) => {
       if (!enabled || !actor || !artifactId) return;
       const target = input.target ?? null;
+      const holdsTarget =
+        target &&
+        input.lifecycle !== "idle" &&
+        input.lifecycle !== "settled" &&
+        input.lifecycle !== "completed" &&
+        input.act.kind !== "idle" &&
+        input.act.kind !== "hover";
+      const frameRegionIds = [
+        ...(heldKey ? heldKey.split(",") : []),
+        ...(holdsTarget && target.regionId ? [target.regionId] : []),
+      ];
       const next = normalizeInteractionState({
         v: 2,
         actor,
@@ -180,7 +197,9 @@ export function useInteractionPresence(options: {
               },
             }
           : {}),
-        ...(heldKey ? { heldRegionIds: heldKey.split(",") } : {}),
+        ...(frameRegionIds.length
+          ? { heldRegionIds: [...new Set(frameRegionIds)] }
+          : {}),
         at: Date.now(),
       });
 
@@ -210,8 +229,21 @@ export function useInteractionPresence(options: {
 
   const armIdleDecay = useCallback(() => {
     if (idleTimer.current !== null) window.clearTimeout(idleTimer.current);
-    idleTimer.current = window.setTimeout(publishIdle, HOVER_IDLE_MS);
-  }, [publishIdle]);
+    idleTimer.current = window.setTimeout(() => {
+      const surface = surfaceRef.current;
+      const active = document.activeElement;
+      // A stationary caret is not stale presence. People pause to think while
+      // continuing to own the native control; blur/disconnect clears it.
+      if (
+        surface &&
+        active instanceof Element &&
+        surface.contains(active) &&
+        active.closest(`[${TARGET_ATTRIBUTE}]`)
+      )
+        return;
+      publishIdle();
+    }, HOVER_IDLE_MS);
+  }, [publishIdle, surfaceRef]);
 
   /* ---------------------------------------------------------------- *
    * DOM bindings
@@ -225,6 +257,30 @@ export function useInteractionPresence(options: {
     /** Target currently being dragged or resized, so movement stays attributed. */
     let gesture: { kind: "drag" | "resize"; target: SemanticTarget } | null =
       null;
+    // Browsers dispatch selectionchange immediately after input. Without this
+    // short causal window the caret frame overwrites the typing frame (and its
+    // provisional value) before a peer can render a single character.
+    let typingUntil = 0;
+    let typingPath = "";
+    let blurTimer: number | null = null;
+
+    const semanticTarget = (
+      path: string,
+      extras?: { part?: string; primitive?: SemanticTarget["primitive"] },
+    ): SemanticTarget => {
+      const built = buildTarget({
+        typeKey,
+        artifactId,
+        path: canonicalPath(path),
+        ...(resolveRegionId?.(canonicalPath(path))
+          ? { regionId: resolveRegionId(canonicalPath(path)) }
+          : {}),
+        ...(extras?.part ? { part: extras.part } : {}),
+      });
+      return extras?.primitive
+        ? { ...built, primitive: extras.primitive }
+        : built;
+    };
 
     const controlFor = (node: EventTarget | null): SemanticTarget | null => {
       if (!(node instanceof Element)) return null;
@@ -237,11 +293,12 @@ export function useInteractionPresence(options: {
         partNode && control.contains(partNode)
           ? (partNode.getAttribute(PART_ATTRIBUTE) ?? undefined)
           : undefined;
-      return buildTarget({
-        typeKey,
-        artifactId,
-        path: canonicalPath(path),
+      const primitive = control.getAttribute(
+        "data-spectra-primitive",
+      ) as SemanticTarget["primitive"] | null;
+      return semanticTarget(path, {
         ...(part ? { part } : {}),
+        ...(primitive ? { primitive } : {}),
       });
     };
 
@@ -255,7 +312,7 @@ export function useInteractionPresence(options: {
           const over = hitTest(surface, event.clientX, event.clientY);
           const dropTarget =
             over && over.path !== gesture.target.path
-              ? buildTarget({ typeKey, artifactId, path: over.path })
+              ? semanticTarget(over.path)
               : null;
           publish(
             gesture.kind === "resize"
@@ -286,12 +343,10 @@ export function useInteractionPresence(options: {
         }
         publish({
           act: { kind: "hover", at: over.fraction },
-          target: buildTarget({
-            typeKey,
-            artifactId,
-            path: over.path,
-            ...(over.part ? { part: over.part } : {}),
-          }),
+          target: semanticTarget(
+            over.path,
+            over.part ? { part: over.part } : undefined,
+          ),
         });
       });
     };
@@ -304,13 +359,32 @@ export function useInteractionPresence(options: {
     const onFocusIn = (event: FocusEvent) => {
       const target = controlFor(event.target);
       if (!target) return;
+      if (idleTimer.current !== null) {
+        window.clearTimeout(idleTimer.current);
+        idleTimer.current = null;
+      }
       publishTextState(target, event.target);
     };
 
     const onFocusOut = (event: FocusEvent) => {
       if (!controlFor(event.target)) return;
-      // Leaving a field settles it rather than leaving a caret parked there.
-      publish({ act: { kind: "idle" }, lifecycle: "idle" });
+      typingUntil = 0;
+      typingPath = "";
+      if (blurTimer !== null) window.clearTimeout(blurTimer);
+      // React may replace a controlled input while a collaborative snapshot
+      // lands. Defer release through that reconciliation turn: if native focus
+      // is restored inside the same semantic surface, keep the caret acquired.
+      blurTimer = window.setTimeout(() => {
+        blurTimer = null;
+        const active = document.activeElement;
+        const restored =
+          active && surface.contains(active) ? controlFor(active) : null;
+        if (restored && primitiveHoldsText(restored.primitive)) {
+          publishTextState(restored, active);
+          return;
+        }
+        publish({ act: { kind: "idle" }, lifecycle: "idle" });
+      }, 0);
     };
 
     /** Publish caret or selection for a text-bearing control. */
@@ -344,7 +418,19 @@ export function useInteractionPresence(options: {
       const active = document.activeElement;
       if (!active || !surface.contains(active)) return;
       const target = controlFor(active);
-      if (!target) return;
+      if (!target || !primitiveHoldsText(target.primitive)) return;
+      if (Date.now() < typingUntil && target.path === typingPath) {
+        const points = readTextPoints(active);
+        const value = readValue(active);
+        publish({
+          act: points
+            ? { kind: "type", point: points.head }
+            : { kind: "focus" },
+          target,
+          ...(value !== undefined ? { provisionalValue: value } : {}),
+        });
+        return;
+      }
       publishTextState(target, active);
     };
 
@@ -352,8 +438,14 @@ export function useInteractionPresence(options: {
       const node = event.target;
       const target = controlFor(node);
       if (!target) return;
+      if (idleTimer.current !== null) {
+        window.clearTimeout(idleTimer.current);
+        idleTimer.current = null;
+      }
       const value = readValue(node);
       const points = readTextPoints(node);
+      typingUntil = Date.now() + 420;
+      typingPath = target.path;
       publish({
         act: points ? { kind: "type", point: points.head } : { kind: "focus" },
         target,
@@ -395,6 +487,28 @@ export function useInteractionPresence(options: {
       }
       if (target.primitive === "button") {
         publish({ act: { kind: "press" }, target });
+        window.setTimeout(
+          () =>
+            publish({
+              act: { kind: "press" },
+              target,
+              lifecycle: "settled",
+            }),
+          420,
+        );
+        return;
+      }
+      if (target.primitive === "toggle") {
+        publish({ act: { kind: "press" }, target });
+        window.setTimeout(
+          () =>
+            publish({
+              act: { kind: "press" },
+              target,
+              lifecycle: "settled",
+            }),
+          420,
+        );
       }
     };
 
@@ -405,13 +519,18 @@ export function useInteractionPresence(options: {
       const over = hitTest(surface, event.clientX, event.clientY);
       publish(
         finished.kind === "resize"
-          ? { act: { kind: "resizeRelease" }, target: finished.target }
+          ? {
+              act: { kind: "resizeRelease" },
+              target: finished.target,
+              lifecycle: "settled",
+            }
           : {
               act: { kind: "dragRelease" },
               target: finished.target,
+              lifecycle: "settled",
               dropTarget:
                 over && over.path !== finished.target.path
-                  ? buildTarget({ typeKey, artifactId, path: over.path })
+                  ? semanticTarget(over.path)
                   : null,
             },
       );
@@ -428,10 +547,25 @@ export function useInteractionPresence(options: {
           menu: menuFor(node, target),
           provisionalValue: node.value,
         });
-        // Close the observed menu immediately afterwards.
+        // Let peers actually see the committed option before the native menu
+        // closes. A 140 ms flash converges data but reads as no interaction.
         window.setTimeout(
-          () => publish({ act: { kind: "menuClose" }, target }),
-          140,
+          () => {
+            publish({
+              act: { kind: "menuClose" },
+              target,
+            });
+            window.setTimeout(
+              () =>
+                publish({
+                  act: { kind: "menuClose" },
+                  target,
+                  lifecycle: "settled",
+                }),
+              180,
+            );
+          },
+          520,
         );
         return;
       }
@@ -452,6 +586,49 @@ export function useInteractionPresence(options: {
       }
     };
 
+    const onClick = (event: MouseEvent) => {
+      const target = controlFor(event.target);
+      if (
+        !target ||
+        (target.primitive !== "toggle" && target.primitive !== "button")
+      )
+        return;
+      window.setTimeout(() => {
+        const node = event.target instanceof Element ? event.target : null;
+        const state =
+          node?.getAttribute("aria-checked") ??
+          node?.getAttribute("aria-pressed") ??
+          node?.getAttribute("data-state");
+        publish({
+          act:
+            target.primitive === "toggle"
+              ? {
+                  kind: "toggle",
+                  value:
+                    state === "false" || state === "off"
+                      ? false
+                      : state === "true" || state === "on"
+                        ? true
+                        : (target.part ?? true),
+                }
+              : { kind: "press" },
+          target,
+        });
+        window.setTimeout(
+          () =>
+            publish({
+              act:
+                target.primitive === "toggle"
+                  ? { kind: "toggle", value: target.part ?? true }
+                  : { kind: "press" },
+              target,
+              lifecycle: "settled",
+            }),
+          520,
+        );
+      }, 0);
+    };
+
     const onDragStart = (event: DragEvent) => {
       const target = controlFor(event.target);
       if (!target) return;
@@ -467,7 +644,7 @@ export function useInteractionPresence(options: {
         target: gesture.target,
         dropTarget:
           over && over.path !== gesture.target.path
-            ? buildTarget({ typeKey, artifactId, path: over.path })
+            ? semanticTarget(over.path)
             : null,
       });
     };
@@ -476,7 +653,11 @@ export function useInteractionPresence(options: {
       if (!gesture) return;
       const finished = gesture;
       gesture = null;
-      publish({ act: { kind: "dragRelease" }, target: finished.target });
+      publish({
+        act: { kind: "dragRelease" },
+        target: finished.target,
+        lifecycle: "settled",
+      });
     };
 
     surface.addEventListener("pointermove", onPointerMove, { passive: true });
@@ -486,14 +667,33 @@ export function useInteractionPresence(options: {
     surface.addEventListener("focusout", onFocusOut);
     surface.addEventListener("input", onInput);
     surface.addEventListener("change", onChange);
+    surface.addEventListener("click", onClick);
     surface.addEventListener("dragstart", onDragStart);
     surface.addEventListener("dragover", onDragOver);
     surface.addEventListener("dragend", onDragEnd);
     document.addEventListener("selectionchange", onSelectionChange);
     window.addEventListener("pointerup", onPointerUp);
+    const focusHeartbeat = window.setInterval(() => {
+      const active = document.activeElement;
+      if (!active || !surface.contains(active)) return;
+      const target = controlFor(active);
+      if (!target || !primitiveHoldsText(target.primitive)) return;
+      const value = readValue(active);
+      const points = readTextPoints(active);
+      publish({
+        act: points ? { kind: "caret", point: points.head } : { kind: "focus" },
+        target,
+        // A sequence-bearing frame is intentionally not deduplicated. It is
+        // the lease renewal for a stationary native focus and lets a joining
+        // AI distinguish "still thinking here" from abandoned presence.
+        ...(value !== undefined ? { provisionalValue: value } : {}),
+      });
+    }, 800);
 
     return () => {
       if (frame) cancelAnimationFrame(frame);
+      if (blurTimer !== null) window.clearTimeout(blurTimer);
+      window.clearInterval(focusHeartbeat);
       if (idleTimer.current !== null) window.clearTimeout(idleTimer.current);
       surface.removeEventListener("pointermove", onPointerMove);
       surface.removeEventListener("pointerleave", onPointerLeave);
@@ -502,6 +702,7 @@ export function useInteractionPresence(options: {
       surface.removeEventListener("focusout", onFocusOut);
       surface.removeEventListener("input", onInput);
       surface.removeEventListener("change", onChange);
+      surface.removeEventListener("click", onClick);
       surface.removeEventListener("dragstart", onDragStart);
       surface.removeEventListener("dragover", onDragOver);
       surface.removeEventListener("dragend", onDragEnd);
@@ -518,6 +719,7 @@ export function useInteractionPresence(options: {
     onPublish,
     publish,
     publishIdle,
+    resolveRegionId,
     surfaceRef,
     typeKey,
   ]);
@@ -541,7 +743,10 @@ function readValue(node: EventTarget | null): unknown {
   if (node instanceof HTMLTextAreaElement || node instanceof HTMLSelectElement)
     return node.value;
   if (node instanceof HTMLElement && node.isContentEditable)
-    return node.textContent ?? "";
+    // Rich text is one collaborative value, not a plain-text shadow. Publish
+    // the actual native HTML so bold, links, lists and equations remain visible
+    // during provisional typing instead of disappearing until durable sync.
+    return node.innerHTML;
   return undefined;
 }
 

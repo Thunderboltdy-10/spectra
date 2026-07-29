@@ -951,7 +951,7 @@ describe("Spectra run route", () => {
     expect(convexMutation.mock.calls.some(([name, args]) => String(name).includes("spectraRuns:updateStatus") && (args as { decision?: string }).decision === "clarify")).toBe(true);
   });
 
-  it("uses the explicit structured-output fallback only after the native DeepSeek call fails", async () => {
+  it("uses the full agent-tool fallback only after the native DeepSeek call fails", async () => {
     const answerPlan = { decision: "answer", intent: { mode: "answer", requestedArtifactTypes: [], requestedVisibleArtifactCount: 0, targetArtifactId: null, targetWorkspaceId: null }, finalResponse: "Fallback worked.", operations: [] };
     const { fetchMock } = setup(answerPlan);
     fetchMock.mockReset()
@@ -963,10 +963,11 @@ describe("Spectra run route", () => {
     await response.text();
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const primary = JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body)) as Record<string, unknown>;
-    const fallback = JSON.parse(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body)) as { provider: unknown; response_format?: unknown };
+    const fallback = JSON.parse(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body)) as { provider: unknown; tools?: unknown[]; tool_choice?: unknown };
     expect(Array.isArray(primary.tools)).toBe(true);
     expect(fallback.provider).toEqual({ order: ["baidu"], only: ["baidu"], allow_fallbacks: false, require_parameters: true });
-    expect(fallback.response_format).toBeTruthy();
+    expect(Array.isArray(fallback.tools)).toBe(true);
+    expect(fallback.tool_choice).toBe("auto");
   });
 
   it("repairs one malformed fallback response before exposing a failure", async () => {

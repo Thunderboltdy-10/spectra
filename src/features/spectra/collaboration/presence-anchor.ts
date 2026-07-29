@@ -179,6 +179,11 @@ export function positionForPresenceAnchor(
     mode === "typing" ||
     mode === "selecting" ||
     typeof cursor.anchor.charOffset === "number";
+  const isVisibleInLayer = (rect: DOMRect) =>
+    rect.right > layerRect.left &&
+    rect.left < layerRect.right &&
+    rect.bottom > layerRect.top &&
+    rect.top < layerRect.bottom;
 
   if (
     wantsExactCaret &&
@@ -191,7 +196,7 @@ export function positionForPresenceAnchor(
       cursor.anchor.charOffset,
       cursor.anchor.lineIndex,
     );
-    if (caretRect) {
+    if (caretRect && isVisibleInLayer(caretRect)) {
       return {
         left: Math.max(
           4,
@@ -211,7 +216,12 @@ export function positionForPresenceAnchor(
   const target = resolvePresenceAnchorElement(root, cursor.anchor);
   if (!target) return null;
   const targetRect = target.getBoundingClientRect();
-  if (targetRect.width <= 0 || targetRect.height <= 0) return null;
+  if (
+    targetRect.width <= 0 ||
+    targetRect.height <= 0 ||
+    !isVisibleInLayer(targetRect)
+  )
+    return null;
 
   // Pointer hover may use fractional offsets. Typing without charOffset falls
   // back to the start of the line — never a mid-box guess.

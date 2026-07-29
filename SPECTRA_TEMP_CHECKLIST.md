@@ -1,0 +1,40 @@
+Cannot stop until everything below is fully implemented. Once a feature is implemented, should be removed:
+- Quiz artifact and others still look really bad. The components/field inputs that make them up should not be inside their own container with white background
+- When in /chat, a side panel with thread cannot open up as it is always continuing the thread shown in normal chat view
+- Standardize artifact headers, summaries, universal actions, status, spacing, and integrated editor canvases.
+- Make Details, Activity, navigator, and inspector panels collapse to zero width with one clear restore control; never leave a residual sidebar or blank gutter.
+- Remove editor height caps, outer white/tinted shells, clipped content, and cramped typography in split, grouped, and fullscreen layouts.
+- Make document and shared rich-text toolbars consistent, sticky, and fully support formatting and equations.
+- Responsively redesign the agent editor and validate creation, editing, publishing, collaboration, and recovery.
+- Verify agent sharing with view/modify permissions and make quick chat identical to other artifact conversations.
+- Add exclusive Auto-or-agent selection and prove meaningful specialist-agent behavior.
+- Standardize collapsible collection navigation across flashcards, slides, files, layers, sheets, and agent sections.
+- Add titled previous/next slide controls and adapt the compact titled navigator as the primary flashcard navigation pattern.
+- Unify Edit/View mode switching for quiz, flashcards, and code, with Split as code-only, and keep flashcard preview separate from editing.
+- Give every presentable artifact one consistent Present action and a full-viewport presentation layer above artifacts, threads, and quick chat.
+- Remove unnecessary export emphasis and implement intentional per-artifact import formats and recovery.
+- Verify semantic AI and collaborator choreography for every shared control and structural action primitive.
+- Complete PowerPoint-grade presentation editing, reusable native layouts, and spatially excellent AI creation/refinement without tiny text or collisions.
+- Complete direct-manipulation whiteboard editing and spatially excellent AI placement, routing, grouping, resizing, and connection choreography.
+- Verify Follow AI reveal behavior and default non-intrusive behavior across hidden targets and divergent layouts.
+- Verify history through unsaved edits, collaborators, queued/in-flight AI, stale operations, retry, and grouped artifacts.
+- Ensure every AI operation is attributed in history and partial restore appends a new version without deleting intervening history.
+- Repair realtime notifications, continuation context, tab closing, stale presence, and reconnect lifecycle.
+- Keep one automatic continuation retry invisible, preserve completed progress, and expose only compact scoped retry UI after the second failure.
+- Implement and verify artifact-specific embeds and AI-created embeds.
+- Repair responsive workspace cards, multi-select grouping, tiling, focus, resizing, ordering, and presence.
+- Unify the Artifacts and Workspace information architecture without losing search, placement, grouping, or filtering power.
+- Simplify artifact/workspace discovery controls and preserve title priority over tags, tertiary metadata, and decorative detail.
+- Verify P/C sharing, arrival, departure, fullscreen presence, semantic cursor geometry, reconnect cadence, and all contention permutations.
+- Verify stale AI operations against human edits made after prompt submission without artifact-wide blocking or silent intent loss.
+- Sweep every registered artifact in solo, AI, P/C, and AI × human modes across split, grouped, and fullscreen layouts.
+- Verify malformed, partial, interrupted, retried, navigated, and reloaded AI operations preserve completed work without duplication.
+- Replace the Spectra AI polling worker with immediate Convex-scheduled resumable idempotent stages, duplicate claims, stale recovery, cancellation, retry, heartbeat, events, and no long Vercel callbacks.
+- Replace the ManageBac polling worker with nextSyncAt Convex scheduling, resumable idempotent pages, duplicate claims, backoff, and only low-frequency cron reconciliation.
+- Keep native DeepSeek the normal full-reasoning route, preserve same-model emergency fallback, and repair its provider/account failure without hiding native-route regressions.
+- Scope normal ManageBac access and sync strictly to the verified signed-in user email; keep school-wide administration explicitly separate.
+- Simplify the ManageBac page header and controls, remove empty/zero-value vanity metrics, and match the shared full-width responsive studio layout.
+- Project verified ManageBac classes, timetable events, and tasks into user-scoped Spectra timetable and planner views with live refresh.
+- Generalize planner items beyond assignments to tasks, recurring work, subjects, and linked timetable/class context while simplifying excess fields.
+- Maintain exactly one account timetable artifact, create it automatically, prevent deletion or duplication, and support an explicit reset.
+- Revisit every current Phase F/G success criterion in the campaign plan and finish only after the whole experience is excellent under real repeated verification.

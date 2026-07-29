@@ -4,11 +4,13 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
+import { toast } from "sonner";
 import {
   Atom,
   BarChart3,
@@ -50,6 +52,7 @@ import {
   getSpectraArtifactCommentNotifications,
   getSpectraPlannerReminderNotifications,
   getSpectraTimetableReminderNotifications,
+  getSpectraShareInvitations,
   getSpectraWorkspaces,
   getSpectraThreads,
   markSpectraArtifactCommentNotificationsRead,
@@ -58,6 +61,7 @@ import {
   type SpectraArtifactCommentNotification,
   type SpectraPlannerReminderNotification,
   type SpectraTimetableReminderNotification,
+  type SpectraShareInvitation,
   type SpectraWorkspace,
   type SpectraThread,
 } from "@/features/spectra/data/api";
@@ -167,6 +171,10 @@ function ShellNavigation() {
   const [timetableNotifications, setTimetableNotifications] = useState<
     SpectraTimetableReminderNotification[]
   >([]);
+  const [shareInvitations, setShareInvitations] = useState<
+    SpectraShareInvitation[]
+  >([]);
+  const knownShareInvitationIdsRef = useRef<Set<string> | null>(null);
   const [administrationIdentity, setAdministrationIdentity] =
     useState<AdministrationIdentity | null>(null);
 
@@ -269,14 +277,41 @@ function ShellNavigation() {
   const refreshNotifications = useCallback(async () => {
     setNotificationsLoading(true);
     try {
-      const [comments, planner, timetable] = await Promise.all([
+      const [comments, planner, timetable, shares] = await Promise.all([
         getSpectraArtifactCommentNotifications(false, 30),
         getSpectraPlannerReminderNotifications(false, 30),
         getSpectraTimetableReminderNotifications(false, 30),
+        getSpectraShareInvitations(),
       ]);
       setCommentNotifications(comments.notifications);
       setPlannerNotifications(planner.notifications);
       setTimetableNotifications(timetable.notifications);
+      const nextShareIds = new Set(
+        shares.invitations.map((invitation) => invitation.invitationId),
+      );
+      const knownShareIds = knownShareInvitationIdsRef.current;
+      if (knownShareIds) {
+        for (const invitation of shares.invitations) {
+          if (knownShareIds.has(invitation.invitationId)) continue;
+          toast.message(
+            `${invitation.inviter?.name ?? "A collaborator"} shared ${invitation.resource.title}`,
+            {
+              description:
+                invitation.level === "modify"
+                  ? "You can collaborate and make changes."
+                  : "You have read-only access.",
+              action: {
+                label: "Review",
+                onClick: () => {
+                  window.location.href = "/artifacts?collection=invitations";
+                },
+              },
+            },
+          );
+        }
+      }
+      knownShareInvitationIdsRef.current = nextShareIds;
+      setShareInvitations(shares.invitations);
     } catch {
       // Navigation remains fully usable when the notification service is unavailable.
     } finally {
@@ -286,8 +321,22 @@ function ShellNavigation() {
 
   useEffect(() => {
     void refreshNotifications();
-    const interval = window.setInterval(refreshNotifications, 60_000);
-    return () => window.clearInterval(interval);
+    const interval = window.setInterval(refreshNotifications, 8_000);
+    const refreshVisible = () => {
+      if (document.visibilityState === "visible") void refreshNotifications();
+    };
+    window.addEventListener("focus", refreshVisible);
+    window.addEventListener("spectra:notifications-changed", refreshVisible);
+    document.addEventListener("visibilitychange", refreshVisible);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refreshVisible);
+      window.removeEventListener(
+        "spectra:notifications-changed",
+        refreshVisible,
+      );
+      document.removeEventListener("visibilitychange", refreshVisible);
+    };
   }, [refreshNotifications]);
 
   const notifications = useMemo(
@@ -325,8 +374,23 @@ function ShellNavigation() {
           createdAt: item.createdAt,
           readAt: item.readAt,
         })),
+        ...shareInvitations.map((item) => ({
+          id: item.invitationId,
+          kind: "share" as const,
+          artifactId: item.resourceId,
+          href: "/artifacts?collection=invitations",
+          title: `${item.inviter?.name ?? "A collaborator"} shared ${item.resource.title}`,
+          detail: `${item.level === "modify" ? "Can modify" : "Read-only"} access Â· Review invitation`,
+          createdAt: item.createdAt,
+          readAt: undefined,
+        })),
       ].sort((a, b) => b.createdAt - a.createdAt),
-    [commentNotifications, plannerNotifications, timetableNotifications],
+    [
+      commentNotifications,
+      plannerNotifications,
+      shareInvitations,
+      timetableNotifications,
+    ],
   );
   const unreadCount = notifications.filter((item) => !item.readAt).length;
 
@@ -362,6 +426,7 @@ function ShellNavigation() {
   const markNotificationRead = useCallback(
     async (item: (typeof notifications)[number]) => {
       if (item.readAt) return;
+      if (item.kind === "share") return;
       if (item.kind === "comment")
         await markSpectraArtifactCommentNotificationsRead([item.id]);
       else if (item.kind === "planner")
@@ -626,12 +691,12 @@ function ShellNavigation() {
             </div>
           ) : null}
           {notificationsOpen ? (
-            <section className="absolute bottom-2 left-[228px] z-[80] w-[340px] overflow-hidden rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[0_22px_70px_rgba(27,20,12,.18)]">
+            <section className="fixed right-4 top-4 z-[80] w-[340px] overflow-hidden rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[0_22px_70px_rgba(27,20,12,.18)]">
               <header className="flex items-center justify-between border-b border-[var(--border-subtle)] px-4 py-3">
                 <div>
                   <strong className="text-[12px]">Notifications</strong>
                   <p className="text-[9px] text-[var(--text-tertiary)]">
-                    Comments, tasks, and calendar reminders
+                    Shares, comments, tasks, and reminders
                   </p>
                 </div>
                 <button
@@ -648,7 +713,11 @@ function ShellNavigation() {
                 {notifications.slice(0, 30).map((item) => (
                   <Link
                     key={`wide:${item.kind}:${item.id}`}
-                    href={`/artifacts?artifactId=${encodeURIComponent(item.artifactId)}`}
+                    href={
+                      "href" in item
+                        ? item.href
+                        : `/artifacts?artifactId=${encodeURIComponent(item.artifactId)}`
+                    }
                     onClick={() => {
                       setNotificationsOpen(false);
                       void markNotificationRead(item);
@@ -864,14 +933,14 @@ function ShellNavigation() {
             <RailTooltip>Notifications</RailTooltip>
           </button>
           {notificationsOpen ? (
-            <section className="absolute bottom-0 left-[58px] z-[80] w-[340px] overflow-hidden rounded-[14px] border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[0_22px_70px_rgba(27,20,12,.2)]">
+            <section className="fixed right-4 top-4 z-[80] w-[340px] overflow-hidden rounded-[14px] border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[0_22px_70px_rgba(27,20,12,.2)]">
               <header className="flex items-center justify-between border-b border-[var(--border-subtle)] px-4 py-3">
                 <div>
                   <strong className="text-[13px] text-[var(--text-primary)]">
                     Notifications
                   </strong>
                   <p className="text-[10px] text-[var(--text-tertiary)]">
-                    Comments, tasks, and calendar reminders
+                    Shares, comments, tasks, and reminders
                   </p>
                 </div>
                 <button
@@ -888,13 +957,19 @@ function ShellNavigation() {
                   const Icon =
                     item.kind === "comment"
                       ? MessageSquareText
-                      : item.kind === "planner"
-                        ? ListTodo
-                        : CalendarClock;
+                      : item.kind === "share"
+                        ? Share2
+                        : item.kind === "planner"
+                          ? ListTodo
+                          : CalendarClock;
                   return (
                     <Link
                       key={`${item.kind}:${item.id}`}
-                      href={`/artifacts?artifactId=${encodeURIComponent(item.artifactId)}`}
+                      href={
+                        "href" in item
+                          ? item.href
+                          : `/artifacts?artifactId=${encodeURIComponent(item.artifactId)}`
+                      }
                       onClick={() => {
                         setNotificationsOpen(false);
                         void markNotificationRead(item);
@@ -1040,7 +1115,7 @@ function ShellNavigation() {
                   Notifications
                 </h2>
                 <p className="mt-0.5 text-[11px] text-[var(--text-tertiary)]">
-                  Comments, tasks, and calendar reminders
+                  Shares, comments, tasks, and reminders
                 </p>
               </div>
               <button
@@ -1057,13 +1132,19 @@ function ShellNavigation() {
                 const Icon =
                   item.kind === "comment"
                     ? MessageSquareText
-                    : item.kind === "planner"
-                      ? ListTodo
-                      : CalendarClock;
+                    : item.kind === "share"
+                      ? Share2
+                      : item.kind === "planner"
+                        ? ListTodo
+                        : CalendarClock;
                 return (
                   <Link
                     key={`mobile:${item.kind}:${item.id}`}
-                    href={`/artifacts?artifactId=${encodeURIComponent(item.artifactId)}`}
+                    href={
+                      "href" in item
+                        ? item.href
+                        : `/artifacts?artifactId=${encodeURIComponent(item.artifactId)}`
+                    }
                     onClick={() => {
                       setNotificationsOpen(false);
                       void markNotificationRead(item);

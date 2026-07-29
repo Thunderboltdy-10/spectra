@@ -37,6 +37,10 @@ export type AiStreamBeat = {
   lineIndex?: number;
   /** When set, paint a non-collapsed selection 0..selectionEnd before typing. */
   selectionEnd?: number;
+  /** Explicit phase for spatial gestures whose value changes over many beats. */
+  gesturePhase?: "start" | "move" | "release";
+  /** Exact sub-control for composite gestures, such as a resize handle. */
+  focusPart?: string;
 };
 
 const ATOMIC_ENUM_FIELDS = new Set([
@@ -81,6 +85,13 @@ type LeafChange = {
   path: Array<string | number>;
   before: unknown;
   after: unknown;
+};
+
+type CollectionChange = {
+  path: Array<string | number>;
+  kind: "insert" | "remove";
+  index: number;
+  item: unknown;
 };
 
 function pathKey(path: Array<string | number>) {
@@ -148,6 +159,161 @@ function collectLeafChanges(
   return [{ path, before, after }];
 }
 
+function stableItemIdentity(value: unknown): string | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  for (const key of ["id", "_id", "key", "address"]) {
+    const candidate = record[key];
+    if (typeof candidate === "string" && candidate.length > 0)
+      return `${key}:${candidate}`;
+  }
+  return null;
+}
+
+function itemsMatch(left: unknown, right: unknown) {
+  const leftIdentity = stableItemIdentity(left);
+  const rightIdentity = stableItemIdentity(right);
+  if (leftIdentity || rightIdentity) return leftIdentity === rightIdentity;
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+/**
+ * Return only the next structural mutation. Re-running this after every beat
+ * gives collections a visible, ordered lifecycle instead of replacing a whole
+ * array (and lighting every sibling) in one frame.
+ */
+function firstCollectionChange(
+  before: unknown,
+  after: unknown,
+  path: Array<string | number> = [],
+): CollectionChange | null {
+  if (Array.isArray(before) && Array.isArray(after)) {
+    if (before.length !== after.length) {
+      let prefix = 0;
+      while (
+        prefix < before.length &&
+        prefix < after.length &&
+        itemsMatch(before[prefix], after[prefix])
+      )
+        prefix += 1;
+
+      if (after.length > before.length)
+        return {
+          path,
+          kind: "insert",
+          index: prefix,
+          item: after[prefix],
+        };
+      return {
+        path,
+        kind: "remove",
+        index: prefix,
+        item: before[prefix],
+      };
+    }
+    for (let index = 0; index < before.length; index += 1) {
+      const nested = firstCollectionChange(before[index], after[index], [
+        ...path,
+        index,
+      ]);
+      if (nested) return nested;
+    }
+    return null;
+  }
+  if (
+    before &&
+    after &&
+    typeof before === "object" &&
+    typeof after === "object" &&
+    !Array.isArray(before) &&
+    !Array.isArray(after)
+  ) {
+    const beforeRecord = before as Record<string, unknown>;
+    const afterRecord = after as Record<string, unknown>;
+    for (const key of Object.keys(afterRecord)) {
+      if (!(key in beforeRecord)) continue;
+      const nested = firstCollectionChange(
+        beforeRecord[key],
+        afterRecord[key],
+        [...path, key],
+      );
+      if (nested) return nested;
+    }
+  }
+  return null;
+}
+
+const STRUCTURAL_STRING_KEYS = new Set([
+  "id",
+  "_id",
+  "key",
+  "type",
+  "kind",
+  "variant",
+  "layoutId",
+  "role",
+  "format",
+]);
+
+/**
+ * A valid-enough provisional body for a newly introduced structured item.
+ * Identity, geometry and discriminants exist immediately so the native editor
+ * can render and locate it; authored prose and nested collections then form in
+ * their own observable beats.
+ */
+function provisionalItem(value: unknown, key = ""): unknown {
+  if (typeof value === "string")
+    return STRUCTURAL_STRING_KEYS.has(key) ? value : "";
+  if (Array.isArray(value)) return [];
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(
+      ([childKey, child]) => [childKey, provisionalItem(child, childKey)],
+    ),
+  );
+}
+
+function collectionLabel(path: readonly (string | number)[]) {
+  const name = String(path.at(-1) ?? "item")
+    .replaceAll("_", " ")
+    .replace(/s$/, "");
+  return `Add ${name || "item"}`;
+}
+
+function collectionBeats(
+  base: ArtifactLiveValue,
+  change: CollectionChange,
+): AiStreamBeat[] {
+  const collectionPath = uiFocusPath(change.path);
+  const itemPath = `${collectionPath === "/" ? "" : collectionPath}/${change.index}`;
+  const label = collectionLabel(change.path);
+  const staged = structuredClone(base) as ArtifactLiveValue;
+  const collection = valueAtPath(staged, pathKey(change.path));
+  if (!Array.isArray(collection)) return [];
+
+  if (change.kind === "insert")
+    collection.splice(change.index, 0, provisionalItem(change.item));
+  else collection.splice(change.index, 1);
+
+  return [
+    ...approachBeats(base, collectionPath, label),
+    {
+      delayMs: 260,
+      value: staged,
+      previewGesture: "selecting",
+      cursorMode: "pointer",
+      interaction: {
+        kind: change.kind === "insert" ? "create" : "remove",
+        targetId: itemPath,
+        targetKind: "path",
+        label,
+      },
+      focusPath: itemPath,
+      menu: null,
+    },
+  ];
+}
+
 function setAtPath(
   value: unknown,
   path: readonly (string | number)[],
@@ -176,7 +342,9 @@ function isDropdownChange(change: LeafChange) {
 }
 
 function isToggleChange(change: LeafChange) {
-  return typeof change.before === "boolean" && typeof change.after === "boolean";
+  return (
+    typeof change.before === "boolean" && typeof change.after === "boolean"
+  );
 }
 
 function dropdownOptions(change: LeafChange) {
@@ -214,7 +382,7 @@ function approachBeats(
       menu: null,
     },
     {
-      delayMs: 160,
+      delayMs: 240,
       value,
       previewGesture: "selecting",
       cursorMode: "pointer",
@@ -413,7 +581,7 @@ function textApproachBeats(
       menu: null,
     },
     {
-      delayMs: 140,
+      delayMs: 180,
       value,
       previewGesture: "selecting",
       cursorMode: "selecting",
@@ -428,7 +596,7 @@ function textApproachBeats(
       menu: null,
     },
     {
-      delayMs: 220,
+      delayMs: 300,
       value,
       previewGesture: "selecting",
       cursorMode: "selecting",
@@ -445,7 +613,7 @@ function textApproachBeats(
     },
     // Clear the selected line before typing so peers never see old+new overlap.
     {
-      delayMs: 70,
+      delayMs: 110,
       value: cleared,
       previewGesture: "typing",
       cursorMode: "typing",
@@ -462,27 +630,110 @@ function textApproachBeats(
   ];
 }
 
-function setAtPathSafe(
-  value: ArtifactLiveValue,
-  path: string,
-  next: string,
-) {
+function setAtPathSafe(value: ArtifactLiveValue, path: string, next: unknown) {
   const segments = path
     .replace(/^\//, "")
     .split("/")
     .filter(Boolean)
     .map((segment) =>
-      /^\d+$/.test(segment) ? Number(segment) : segment.replaceAll("~1", "/").replaceAll("~0", "~"),
+      /^\d+$/.test(segment)
+        ? Number(segment)
+        : segment.replaceAll("~1", "/").replaceAll("~0", "~"),
     );
   let current: unknown = value;
   for (const segment of segments.slice(0, -1)) {
     if (!current || typeof current !== "object") return;
-    current = (current as Record<string | number, unknown>)[segment as string | number];
+    current = (current as Record<string | number, unknown>)[
+      segment as string | number
+    ];
   }
   if (!current || typeof current !== "object") return;
   const last = segments.at(-1);
   if (last === undefined) return;
   (current as Record<string | number, unknown>)[last as string | number] = next;
+}
+
+function spatialNodeChange(change: LeafChange) {
+  const key = pathKey(change.path);
+  const match = key.match(/^\/content\/nodes\/(\d+)\/(x|y|width|height)$/);
+  return match &&
+    typeof change.before === "number" &&
+    typeof change.after === "number"
+    ? { index: Number(match[1]), field: match[2]!, key }
+    : null;
+}
+
+function spatialBeats(
+  current: ArtifactLiveValue,
+  changes: LeafChange[],
+): AiStreamBeat[] {
+  const grouped = new Map<number, LeafChange[]>();
+  for (const change of changes) {
+    const spatial = spatialNodeChange(change);
+    if (!spatial) continue;
+    const rows = grouped.get(spatial.index) ?? [];
+    rows.push(change);
+    grouped.set(spatial.index, rows);
+  }
+  const beats: AiStreamBeat[] = [];
+  let value = structuredClone(current) as ArtifactLiveValue;
+  for (const [index, nodeChanges] of grouped) {
+    const position = nodeChanges.filter((change) =>
+      /\/(?:x|y)$/.test(pathKey(change.path)),
+    );
+    const size = nodeChanges.filter((change) =>
+      /\/(?:width|height)$/.test(pathKey(change.path)),
+    );
+    const focusPath = `/content/nodes/${index}`;
+    const perform = (
+      kind: "dragging" | "resizing",
+      activeChanges: LeafChange[],
+    ) => {
+      if (!activeChanges.length) return;
+      beats.push({
+        delayMs: 190,
+        value: structuredClone(value),
+        previewGesture: "selecting",
+        interaction: {
+          kind,
+          targetId: focusPath,
+          targetKind: "path",
+        },
+        focusPath,
+        ...(kind === "resizing" ? { focusPart: "handle:se" } : {}),
+        gesturePhase: "start",
+        menu: null,
+      });
+      const start = structuredClone(value) as ArtifactLiveValue;
+      for (let frame = 1; frame <= 6; frame += 1) {
+        const next = structuredClone(start) as ArtifactLiveValue;
+        for (const change of activeChanges) {
+          const interpolated =
+            Number(change.before) +
+            (Number(change.after) - Number(change.before)) * (frame / 6);
+          setAtPathSafe(next, pathKey(change.path), interpolated);
+        }
+        value = next;
+        beats.push({
+          delayMs: frame === 6 ? 150 : 78,
+          value: structuredClone(value),
+          previewGesture: "selecting",
+          interaction: {
+            kind,
+            targetId: focusPath,
+            targetKind: "path",
+          },
+          focusPath,
+          ...(kind === "resizing" ? { focusPart: "handle:se" } : {}),
+          gesturePhase: frame === 6 ? "release" : "move",
+          menu: null,
+        });
+      }
+    };
+    perform("dragging", position);
+    perform("resizing", size);
+  }
+  return beats;
 }
 
 /**
@@ -495,9 +746,44 @@ export function buildArtifactLivePreviewBeats(
   before: ArtifactLiveValue,
   after: ArtifactLiveValue,
 ): AiStreamBeat[] {
+  const structuralChange = firstCollectionChange(
+    {
+      title: before.title,
+      summary: before.summary,
+      tags: before.tags,
+      content: before.content,
+    },
+    {
+      title: after.title,
+      summary: after.summary,
+      tags: after.tags,
+      content: after.content,
+    },
+  );
+  if (structuralChange) {
+    const structuralBeats = collectionBeats(before, structuralChange);
+    const staged = structuralBeats.at(-1)?.value;
+    if (staged && JSON.stringify(staged) !== JSON.stringify(before)) {
+      return [
+        ...structuralBeats,
+        ...buildArtifactLivePreviewBeats(staged, after),
+      ];
+    }
+  }
+
   const leafChanges = collectLeafChanges(
-    { title: before.title, summary: before.summary, tags: before.tags, content: before.content },
-    { title: after.title, summary: after.summary, tags: after.tags, content: after.content },
+    {
+      title: before.title,
+      summary: before.summary,
+      tags: before.tags,
+      content: before.content,
+    },
+    {
+      title: after.title,
+      summary: after.summary,
+      tags: after.tags,
+      content: after.content,
+    },
   );
   if (leafChanges.length === 0) return [];
 
@@ -513,6 +799,12 @@ export function buildArtifactLivePreviewBeats(
       .filter((change) => !isDropdownChange(change) && !isToggleChange(change))
       .map((change) => pathKey(change.path)),
   );
+  const spatialChanges = leafChanges.filter((change) =>
+    Boolean(spatialNodeChange(change)),
+  );
+  for (const change of spatialChanges) {
+    remainingPaths.delete(pathKey(change.path));
+  }
 
   for (const change of atomic) {
     if (isDropdownChange(change)) {
@@ -526,6 +818,12 @@ export function buildArtifactLivePreviewBeats(
       beats.push(...sequence);
       current = structuredClone(sequence.at(-1)!.value) as ArtifactLiveValue;
     }
+  }
+
+  if (spatialChanges.length) {
+    const sequence = spatialBeats(current, spatialChanges);
+    beats.push(...sequence);
+    current = structuredClone(sequence.at(-1)!.value) as ArtifactLiveValue;
   }
 
   if (remainingPaths.size === 0) {
@@ -589,7 +887,10 @@ export function buildArtifactLivePreviewBeats(
         ? lineAnchorForRewrite(baselineBefore, baselineAfter, focusValue)
         : { lineIndex: activeLineIndex, offsetInLine: 0, contentOffset: 0 };
     beats.push({
-      delayMs: 72,
+      // Stay above the collaboration/editor coalescing window. This is the
+      // visible typing cadence, not an artificial post-hoc animation: every
+      // beat carries the actor's current caret and speculative native value.
+      delayMs: 148,
       value: frame,
       previewGesture: "typing",
       cursorMode: "typing",

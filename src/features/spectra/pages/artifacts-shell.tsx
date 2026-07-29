@@ -90,6 +90,7 @@ import {
   getSpectraArtifacts,
   getSpectraOverview,
   getSpectraShareInvitations,
+  getSpectraThread,
   postSpectra,
   type SpectraArtifact,
   type SpectraBlueprintKey,
@@ -159,13 +160,18 @@ function useOutsideClick<T extends HTMLElement>(
 export function ArtifactsShell() {
   const searchParams = useSearchParams();
   const requestedArtifactId = searchParams.get("artifactId");
+  const requestedCollection = searchParams.get("collection");
   const [allArtifacts, setAllArtifacts] = useState<SpectraArtifact[]>([]);
   const [workspaces, setWorkspaces] = useState<SpectraWorkspace[]>([]);
   const [resultCards, setResultCards] = useState<SpectraResultCard[]>([]);
   const [activeFilter, setActiveFilter] = useState<"all" | SpectraBlueprintKey>(
     "all",
   );
-  const [collection, setCollection] = useState<ArtifactCollection>("mine");
+  const [collection, setCollection] = useState<ArtifactCollection>(
+    requestedCollection === "shared" || requestedCollection === "invitations"
+      ? requestedCollection
+      : "mine",
+  );
   const [shareInvitations, setShareInvitations] = useState<
     SpectraShareInvitation[]
   >([]);
@@ -263,6 +269,18 @@ export function ArtifactsShell() {
     setVisibleArtifactIds,
     setActiveWorkspaceContext,
   } = useSpectraContext(allArtifacts, workspaces);
+  useEffect(() => {
+    if (!liveThread) return;
+    setComposerThread((current) =>
+      current?.id === liveThread.id
+        ? current
+        : {
+            id: liveThread.id,
+            title: liveThread.title,
+            workspaceId: selectedWorkspaceId || undefined,
+          },
+    );
+  }, [liveThread, selectedWorkspaceId, setComposerThread]);
   const studio = useArtifactStudioState(
     "spectra.shared.artifactStudio",
     allArtifacts,
@@ -293,6 +311,36 @@ export function ArtifactsShell() {
     },
     [closePresentation, openObject],
   );
+  useEffect(() => {
+    const focusedArtifactId = studio.activeArtifact?._id;
+    if (!composerThread || !focusedArtifactId) return;
+    let disposed = false;
+    void getSpectraThread(composerThread.id)
+      .then(({ thread }) => {
+        if (disposed) return;
+        if (thread.artifactId === focusedArtifactId) {
+          if (composerThread.artifactId !== focusedArtifactId)
+            setComposerThread((current) =>
+              current?.id === thread._id
+                ? { ...current, artifactId: focusedArtifactId }
+                : current,
+            );
+          return;
+        }
+        setComposerThread(null);
+        setLiveThread(null);
+      })
+      .catch(() => undefined);
+    return () => {
+      disposed = true;
+    };
+  }, [
+    composerThread?.artifactId,
+    composerThread?.id,
+    setComposerThread,
+    setLiveThread,
+    studio.activeArtifact?._id,
+  ]);
   const tiledArtifacts = useMemo(
     () =>
       tileArtifactIds.flatMap((id) => {
@@ -549,6 +597,22 @@ export function ArtifactsShell() {
     }
   }, []);
 
+  useEffect(() => {
+    const refreshVisible = () => {
+      if (document.visibilityState === "visible") void load(true);
+    };
+    const interval = window.setInterval(refreshVisible, 8_000);
+    window.addEventListener("focus", refreshVisible);
+    window.addEventListener("spectra:artifacts-changed", refreshVisible);
+    document.addEventListener("visibilitychange", refreshVisible);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refreshVisible);
+      window.removeEventListener("spectra:artifacts-changed", refreshVisible);
+      document.removeEventListener("visibilitychange", refreshVisible);
+    };
+  }, [load]);
+
   const openArtifactSurface = useCallback(
     (artifact: SpectraArtifact) => {
       // A user-chosen open ends spectating; a follow-dispatched open does not.
@@ -588,9 +652,21 @@ export function ArtifactsShell() {
       setComposerThread((current) =>
         current?.id === threadId
           ? current
-          : { id: threadId, title: "Current conversation" },
+          : {
+              id: threadId,
+              title: "Current conversation",
+              ...(studio.activeArtifact
+                ? { artifactId: studio.activeArtifact._id }
+                : {}),
+            },
       );
-      setLiveThread({ id: threadId, title: "Current conversation" });
+      setLiveThread({
+        id: threadId,
+        title:
+          liveThread?.id === threadId
+            ? liveThread.title
+            : "Current conversation",
+      });
       setActiveRunPanelId(null);
       window.dispatchEvent(new Event("spectra:threads-changed"));
     },
@@ -914,6 +990,7 @@ export function ArtifactsShell() {
             : "declineShareInvitation",
         invitationId,
       });
+      window.dispatchEvent(new Event("spectra:notifications-changed"));
       toast.success(
         response === "accept"
           ? "Shared item added to your library."
@@ -1867,18 +1944,6 @@ export function ArtifactsShell() {
               onContinue={() => {
                 void (async () => {
                   if (composerThread?.id === liveThread.id) {
-                    setComposerThread(null);
-                    try {
-                      await postSpectra({
-                        action: "selectRunTab",
-                        runId: undefined,
-                      });
-                      window.dispatchEvent(
-                        new Event("spectra:threads-changed"),
-                      );
-                    } catch {
-                      // Local deselect already applied.
-                    }
                     return;
                   }
                   try {

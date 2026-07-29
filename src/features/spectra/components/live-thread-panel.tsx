@@ -25,7 +25,7 @@ export function LiveThreadPanel({
   width: number;
   onWidthChange: (width: number) => void;
   onClose: () => void;
-  /** Select this thread for QC continuation and pin it to the front of the run tabs. */
+  /** Legacy selection hook; open threads now continue automatically. */
   onContinue?: () => void;
   continuing?: boolean;
   onOpenArtifact?: (artifactId: string) => void;
@@ -76,7 +76,16 @@ export function LiveThreadPanel({
             <Crosshair className="h-3.5 w-3.5" />
             <span>{follow.following ? "Following" : "Follow AI"}</span>
           </button>
-          {onContinue ? (
+          {continuing ? (
+            <span
+              className="spectra-icon-action text-[var(--accent-cyan)]"
+              aria-label="Messages automatically continue this thread"
+              data-tooltip="Messages continue here"
+              title="The next message continues this conversation"
+            >
+              <MessageSquare className="h-4 w-4" />
+            </span>
+          ) : onContinue ? (
             <button
               type="button"
               onClick={onContinue}
@@ -113,7 +122,7 @@ export function LiveThreadPanel({
         </header>
         {/* Spectating is a state the user is in, so it says so — and says what
             it is watching. Any direct interaction elsewhere disengages it. */}
-        {follow.following ? (
+        {follow.following && (follow.location || liveExchange) ? (
           <div className="spectra-follow-strip" role="status">
             <span className="spectra-follow-strip-pip" aria-hidden="true" />
             <span className="spectra-follow-strip-text">

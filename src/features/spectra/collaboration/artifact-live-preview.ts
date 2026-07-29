@@ -111,10 +111,13 @@ function buildSelectReplaceFrames(before: string, after: string): string[] {
   if (before === after) return [];
   if (!after) return [after];
   const frames: string[] = [];
-  // Human-paced: a short burst of characters per frame, capped so long lines
-  // finish in about a second rather than feeling glacial.
-  const targetFrames = Math.min(22, Math.max(6, Math.ceil(after.length / 6)));
-  const stepChars = Math.max(2, Math.ceil(after.length / targetFrames));
+  // Awareness and rich-editor projection both have a render cadence. Six
+  // 72-ms frames can be coalesced into a single visible replacement even
+  // though the server technically streamed them. Keep enough meaningful
+  // bursts for a short label to be legible, while bounding long prose so the
+  // actor remains quick rather than theatrical.
+  const targetFrames = Math.min(28, Math.max(10, Math.ceil(after.length / 5)));
+  const stepChars = Math.max(1, Math.floor(after.length / targetFrames));
   for (let typed = stepChars; typed < after.length; typed += stepChars) {
     frames.push(after.slice(0, typed));
   }

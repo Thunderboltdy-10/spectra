@@ -955,17 +955,48 @@ function ProgressTrace({
 }
 
 function PersistedProgressTrace({ trace }: { trace: SpectraThreadTrace }) {
-  const rows = (trace.events ?? []).filter(
-    (event) =>
-      (!trace.run.executionId || event.executionId === trace.run.executionId) &&
-      (event.type === "progress" ||
-        event.type === "operation_preview" ||
-        event.type === "approval_accepted" ||
-        event.type === "approval_rejected" ||
-        event.type === "error" ||
-        event.type === "stopped" ||
-        event.type === "interrupted"),
-  );
+  const rows = (trace.events ?? []).filter((event) => {
+    if (trace.run.executionId && event.executionId !== trace.run.executionId)
+      return false;
+    if (
+      ![
+        "progress",
+        "operation_preview",
+        "approval_accepted",
+        "approval_rejected",
+        "error",
+        "stopped",
+        "interrupted",
+      ].includes(event.type)
+    )
+      return false;
+    // An intentional stop is authoritative over a late provider/error event
+    // from the same execution. A proposal cancelled before execution must also
+    // never be rendered in the past tense as though the edit landed.
+    if (
+      trace.run.status === "cancelled" &&
+      (event.type === "error" || event.type === "interrupted")
+    )
+      return false;
+    if (event.type === "operation_preview") {
+      const preview =
+        event.payload.preview &&
+        typeof event.payload.preview === "object" &&
+        !Array.isArray(event.payload.preview)
+          ? (event.payload.preview as { operationIndex?: unknown })
+          : null;
+      const operationIndex =
+        typeof preview?.operationIndex === "number"
+          ? preview.operationIndex
+          : null;
+      if (
+        operationIndex !== null &&
+        trace.operations[operationIndex]?.status === "cancelled"
+      )
+        return false;
+    }
+    return true;
+  });
   if (rows.length === 0) return null;
   const rawSteps = rows.map((event, index) => {
     const payload = event.payload;
@@ -1487,10 +1518,11 @@ export function ConversationSurface({
     () =>
       (detail?.traces ?? []).filter(
         (trace) =>
+          !persistedUserRunIds.has(trace.run._id) &&
           !persistedAssistantRunIds.has(trace.run._id) &&
           trace.run.status !== "completed",
       ),
-    [detail, persistedAssistantRunIds],
+    [detail, persistedAssistantRunIds, persistedUserRunIds],
   );
   useEffect(() => {
     if (!following) return;
@@ -1607,29 +1639,44 @@ export function ConversationSurface({
                   className={cn("group relative", compact ? "mb-7" : "mb-10")}
                 >
                   {message.role === "user" ? (
-                    <div className="ml-auto max-w-[82%]">
-                      <div className="whitespace-pre-wrap rounded-[18px_18px_5px_18px] border border-[color-mix(in_oklab,var(--accent-cyan)_16%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--accent-cyan)_5%,var(--bg-elevated))] px-4 py-3 text-[13px] leading-6 text-[var(--text-primary)]">
-                        {message.content}
-                        {messageAttachments(message).length > 0 ? (
-                          <div className="mt-3 flex flex-wrap gap-1.5">
-                            {messageAttachments(message).map((attachment) => (
-                              <span
-                                key={`${attachment.name}:${attachment.size ?? 0}`}
-                                className="flex max-w-[220px] items-center gap-1.5 rounded-[7px] bg-[color-mix(in_oklab,var(--bg-primary)_72%,transparent)] px-2 py-1 text-[10px] text-[var(--text-secondary)]"
-                              >
-                                <FileText className="h-3 w-3 shrink-0" />
-                                <span className="truncate">
-                                  {attachment.name}
+                    <>
+                      <div className="ml-auto max-w-[82%]">
+                        <div className="whitespace-pre-wrap rounded-[18px_18px_5px_18px] border border-[color-mix(in_oklab,var(--accent-cyan)_16%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--accent-cyan)_5%,var(--bg-elevated))] px-4 py-3 text-[13px] leading-6 text-[var(--text-primary)]">
+                          {message.content}
+                          {messageAttachments(message).length > 0 ? (
+                            <div className="mt-3 flex flex-wrap gap-1.5">
+                              {messageAttachments(message).map((attachment) => (
+                                <span
+                                  key={`${attachment.name}:${attachment.size ?? 0}`}
+                                  className="flex max-w-[220px] items-center gap-1.5 rounded-[7px] bg-[color-mix(in_oklab,var(--bg-primary)_72%,transparent)] px-2 py-1 text-[10px] text-[var(--text-secondary)]"
+                                >
+                                  <FileText className="h-3 w-3 shrink-0" />
+                                  <span className="truncate">
+                                    {attachment.name}
+                                  </span>
                                 </span>
-                              </span>
-                            ))}
-                          </div>
-                        ) : null}
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+                        <div className="mt-1.5 text-right text-[10px] text-[var(--text-tertiary)]">
+                          {messageMeta(message)}
+                        </div>
                       </div>
-                      <div className="mt-1.5 text-right text-[10px] text-[var(--text-tertiary)]">
-                        {messageMeta(message)}
-                      </div>
-                    </div>
+                      {trace &&
+                      trace.run.status === "failed" &&
+                      liveExchange?.runId !== trace.run._id &&
+                      !persistedAssistantRunIds.has(trace.run._id) ? (
+                        <div className="relative mt-4 pl-7">
+                          <span className="absolute left-0 top-1.5 h-2 w-2 rounded-full bg-[#b77721] shadow-[0_0_0_4px_color-mix(in_oklab,#b77721_10%,transparent)]" />
+                          <PersistedProgressTrace trace={trace} />
+                          <PersistedRunOutcomeNote
+                            trace={trace}
+                            onRetryRun={onRetryRun}
+                          />
+                        </div>
+                      ) : null}
+                    </>
                   ) : (
                     <div className="relative pl-7">
                       <span className="absolute left-0 top-1.5 h-2 w-2 rounded-full bg-[var(--accent-cyan)] shadow-[0_0_0_4px_color-mix(in_oklab,var(--accent-cyan)_12%,transparent)]" />

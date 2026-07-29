@@ -73,7 +73,8 @@ export function getSpectraVisionProviderRouting() {
 }
 
 export function allowSpectraProviderFallbacks() {
-  // Availability recovery keeps the configured model unchanged.
+  // Native DeepSeek remains the first and normal route. Same-model recovery
+  // providers are an explicit availability escape hatch, not load balancing.
   return process.env.SPECTRA_ALLOW_PROVIDER_FALLBACKS !== "false";
 }
 

@@ -161,7 +161,7 @@ const DESCRIPTORS: Record<ArtifactTypeKey, readonly ControlRule[]> = {
     { pattern: "/questions/*/bloom", primitive: "dropdown", label: (c) => `Question ${c[0]} Bloom level`, identified: true },
     { pattern: "/questions/*/options", primitive: "listItem", label: (c) => `Question ${c[0]} options`, identified: true },
     { pattern: "/questions/*/options/*", primitive: "text", label: (c) => `Question ${c[0]} option ${c[1]}`, identified: true },
-    { pattern: "/questions/*/correctAnswer", primitive: "text", label: (c) => `Question ${c[0]} answer`, identified: true },
+    { pattern: "/questions/*/correctAnswer", primitive: "dropdown", label: (c) => `Question ${c[0]} answer`, identified: true },
     { pattern: "/questions/*/correctOptionIds/**", primitive: "toggle", label: (c) => `Question ${c[0]} correct options`, identified: true },
     { pattern: "/questions/*/tolerance", primitive: "text", label: (c) => `Question ${c[0]} tolerance`, identified: true },
     { pattern: "/questions/*/explanation", primitive: "richtext", label: (c) => `Question ${c[0]} explanation`, identified: true },
@@ -488,6 +488,24 @@ const DESCRIPTORS: Record<ArtifactTypeKey, readonly ControlRule[]> = {
     },
     {
       pattern: "/nodes/*/content",
+      primitive: "richtext",
+      label: (c) => `Card ${c[0]} text`,
+      identified: true,
+    },
+    {
+      pattern: "/nodes/*/content/header",
+      primitive: "text",
+      label: (c) => `Card ${c[0]} title`,
+      identified: true,
+    },
+    {
+      pattern: "/nodes/*/content/body",
+      primitive: "richtext",
+      label: (c) => `Card ${c[0]} body`,
+      identified: true,
+    },
+    {
+      pattern: "/nodes/*/content/text",
       primitive: "richtext",
       label: (c) => `Card ${c[0]} text`,
       identified: true,

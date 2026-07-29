@@ -137,7 +137,25 @@ export function ChatShell() {
       : null;
     setThreads(threadRows.threads);
     setWorkspaces(overview.workspaces);
-    setArtifacts(overview.artifacts);
+    setArtifacts((current) => {
+      const next = new Map(
+        overview.artifacts.map((artifact) => [artifact._id, artifact] as const),
+      );
+      const currentlyOpenIds = new Set(
+        useSpectraContextStore
+          .getState()
+          .openObjects.filter((object) => object.type === "artifact")
+          .map((object) => object.id),
+      );
+      // The overview is deliberately bounded. An Inbox artifact opened from a
+      // result card can be absent from a later refresh while it remains a real,
+      // canonical object. Preserve only actively mounted artifacts so a run
+      // completion cannot make the editor look like a temporary tab.
+      for (const artifact of current)
+        if (currentlyOpenIds.has(artifact._id) && !next.has(artifact._id))
+          next.set(artifact._id, artifact);
+      return [...next.values()];
+    });
     if (nextThreadId === activeThreadRef.current) setDetail(selected);
     window.dispatchEvent(new Event("spectra:threads-changed"));
     return { threadFound: !nextThreadId || Boolean(selected) };

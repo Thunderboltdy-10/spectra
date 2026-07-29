@@ -114,6 +114,21 @@ describe("resolveTargetElement", () => {
     ).toBeNull();
   });
 
+  it("skips semantic duplicates inside previews and resolves the native control", () => {
+    const frame = surface(`
+      <div data-spectra-hidden-target="true">
+        <div data-spectra-target="/slides/5/objects/0/text" data-rect="20,20,80,20" id="thumbnail"></div>
+      </div>
+      <div data-spectra-target="/slides/5/objects/0/text" data-rect="120,80,320,80" id="canvas"></div>
+    `);
+    const resolved = resolveTargetElement(
+      frame.element,
+      target("/slides/5/objects/0/text"),
+    );
+    expect(resolved?.element.id).toBe("canvas");
+    expect(resolved?.precision).toBe("exact");
+  });
+
   it("resolves a sub-part such as a resize handle", () => {
     const frame = surface(`
       <div data-spectra-target="/slides/0/objects/0" data-rect="120,80,200,60">
@@ -136,7 +151,9 @@ describe("surface coordinate space", () => {
     const box = toSurfaceBox(
       frame,
       document
-        .querySelector<HTMLElement>('[data-spectra-target="/slides/0/objects/0"]')!
+        .querySelector<HTMLElement>(
+          '[data-spectra-target="/slides/0/objects/0"]',
+        )!
         .getBoundingClientRect(),
     );
     // Origin sits at (100,50), so the control is 80 across and 80 down from it.
@@ -145,12 +162,12 @@ describe("surface coordinate space", () => {
 
   it("reports the edge a scrolled-away target left through", () => {
     const frame = surface("");
-    expect(offSurfaceEdge(frame, { left: 10, top: -220, width: 80, height: 20 })).toBe(
-      "top",
-    );
-    expect(offSurfaceEdge(frame, { left: 10, top: 900, width: 80, height: 20 })).toBe(
-      "bottom",
-    );
+    expect(
+      offSurfaceEdge(frame, { left: 10, top: -220, width: 80, height: 20 }),
+    ).toBe("top");
+    expect(
+      offSurfaceEdge(frame, { left: 10, top: 900, width: 80, height: 20 }),
+    ).toBe("bottom");
     expect(
       offSurfaceEdge(frame, { left: 10, top: 40, width: 80, height: 20 }),
     ).toBeUndefined();

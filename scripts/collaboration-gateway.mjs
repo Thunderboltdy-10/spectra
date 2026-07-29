@@ -123,6 +123,70 @@ function boundedPresence(value, max = 4_000) {
   }
 }
 
+function interactionPresence(value, context, actorKind) {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return undefined;
+  const source = value;
+  // A cumulative speculative document can exceed the awareness budget even
+  // when the semantic actor/target/act frame is tiny. Never drop the actor
+  // with its payload: preserve the causal v2 body and omit only oversized
+  // speculation. Legacy previewPatches are bounded independently below.
+  const boundedWhole = boundedPresence(source, 28_000);
+  const state =
+    boundedWhole ??
+    {
+      v: source.v,
+      actor: source.actor,
+      act: source.act,
+      lifecycle: source.lifecycle,
+      target: source.target,
+      dropTarget: source.dropTarget,
+      menu: boundedPresence(source.menu, 4_000),
+      speculation: boundedPresence(source.speculation, 20_000),
+      note:
+        typeof source.note === "string" ? source.note.slice(0, 160) : undefined,
+      heldRegionIds: Array.isArray(source.heldRegionIds)
+        ? source.heldRegionIds
+            .filter((id) => typeof id === "string")
+            .slice(0, 64)
+        : undefined,
+      at: source.at,
+    };
+  if (state.v !== 2) return undefined;
+  const actor =
+    state.actor && typeof state.actor === "object" && !Array.isArray(state.actor)
+      ? state.actor
+      : {};
+  // Identity is gateway-authenticated. The client may describe the action and
+  // target, but it cannot impersonate another collaborator or another owner's
+  // AI by embedding arbitrary actor fields in the semantic frame.
+  return {
+    ...state,
+    actor: {
+      ...actor,
+      clientId: context.clientId,
+      kind: actorKind,
+      name:
+        actorKind === "ai"
+          ? `${context.displayName}'s AI`
+          : context.displayName,
+      accountId: context.accountId,
+      ...(actorKind === "ai"
+        ? {
+            ownerAccountId: context.accountId,
+            ownerName: context.displayName,
+          }
+        : {}),
+      ...(actorKind === "ai" && typeof actor.runId === "string"
+        ? { runId: actor.runId.slice(0, 120) }
+        : {}),
+      ...(actorKind === "ai" && typeof actor.operationId === "string"
+        ? { operationId: actor.operationId.slice(0, 120) }
+        : {}),
+    },
+  };
+}
+
 function expandProjection(value, regions, active = new Set()) {
   if (
     value &&
@@ -472,6 +536,11 @@ const server = new Server({
         supplied.actorKind === "ai" || supplied.actorKind === "human"
           ? supplied.actorKind
           : "human";
+      const interactionState = interactionPresence(
+        supplied.interactionState,
+        context,
+        actorKind,
+      );
       const activeRegionIds = Array.isArray(supplied.activeRegionIds)
         ? supplied.activeRegionIds
             .filter((regionId) => typeof regionId === "string")
@@ -484,7 +553,10 @@ const server = new Server({
           accountId: context.accountId,
           // AI connections keep the owner's accountId/name so peers can render
           // owner-specific presence like "Pablo's Spectra".
-          name: context.displayName,
+          name:
+            actorKind === "ai"
+              ? `${context.displayName}'s AI`
+              : context.displayName,
           color: presenceColor(context.accountId),
           actorKind,
           ...(actorKind === "ai" && typeof supplied.runId === "string"
@@ -513,6 +585,15 @@ const server = new Server({
             : {}),
           ...(actorKind === "ai" && supplied.previewPhase === "streaming"
             ? { previewPhase: "streaming" }
+            : {}),
+          // Protocol v2 is the authoritative interaction envelope. It binds
+          // actor identity, semantic target, native act, provisional patches,
+          // held regions and lifecycle into one authenticated awareness frame.
+          // Dropping it forces clients to reconstruct choreography from the
+          // legacy cursor/preview fields, visually separating the "fake human"
+          // performance from the real mutation.
+          ...(interactionState
+            ? { interactionState }
             : {}),
           ...(boundedPresence(supplied.cursor) !== undefined
             ? { cursor: boundedPresence(supplied.cursor) }

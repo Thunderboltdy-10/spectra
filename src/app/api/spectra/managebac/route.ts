@@ -69,6 +69,12 @@ function string(value: unknown, maximum = 2_000) {
   return typeof value === "string" ? value.trim().slice(0, maximum) : "";
 }
 
+function identifier(value: unknown, maximum = 500) {
+  if (typeof value === "number" && Number.isFinite(value))
+    return String(value).slice(0, maximum);
+  return string(value, maximum);
+}
+
 /**
  * School portal hosts (e.g. gcm.managebac.com) are not the Public API.
  * Map them to the regional API host documented by Faria (CA default).
@@ -103,6 +109,203 @@ function canonicalJson(value: unknown): string {
 
 function digest(value: unknown) {
   return createHash("sha256").update(canonicalJson(value)).digest("base64url");
+}
+
+function officialPersonalCapabilities() {
+  const shared = {
+    scope: "personal" as const,
+    minimumRole: "student" as const,
+    permissionState: "read_only" as const,
+    verificationStatus: "verified" as const,
+    routeSource: "manual_verified" as const,
+    contractVersion: "v2p2",
+    freshnessSlaMinutes: 60,
+  };
+  return [
+    {
+      ...shared,
+      category: "People",
+      name: "Resolve signed-in student",
+      recordType: "person",
+      path: "/v2p2/students",
+      purpose:
+        "Resolve exactly one ManageBac student from the signed-in account's verified email.",
+      pagination: "none" as const,
+      changeStrategy: "unknown" as const,
+      responseSchemaHash: digest({
+        students: [{ id: "number", email: "string" }],
+      }),
+      normalization: {
+        identityOnly: true,
+        recordsPath: "students",
+        idPath: "id",
+        emailPath: "email",
+        emailQueryParameter: "q",
+        requiredPaths: ["id", "email"],
+        fields: {
+          email: "email",
+          firstName: "first_name",
+          lastName: "last_name",
+          role: "role",
+          program: "program",
+          yearGroupId: "year_group_id",
+        },
+      },
+    },
+    {
+      ...shared,
+      category: "Classes",
+      name: "My class memberships",
+      recordType: "class",
+      path: "/v2p2/memberships?user_ids={student_id}",
+      purpose:
+        "Retrieve only the class memberships belonging to the resolved signed-in student.",
+      personalIdParameter: "student_id",
+      pagination: "page" as const,
+      changeStrategy: "full_reconciliation",
+      responseSchemaHash: digest({
+        memberships: [
+          {
+            id: "number",
+            user_id: "number",
+            class_id: "number",
+            user_email: "string",
+          },
+        ],
+      }),
+      normalization: {
+        recordsPath: "memberships",
+        idPath: "id",
+        classIdPath: "class_id",
+        modifiedAtPath: "updated_at",
+        pageParameter: "page",
+        nextCursorPath: "meta.next_page",
+        cursorParameter: "page",
+        requiredPaths: ["id", "class_id", "user_id"],
+        recordKeyTemplate: "class:{class_id}",
+        classification: "personal",
+        audienceScope: "mapped_user",
+        fields: {
+          name: ["class_name", "name", "uniq_class_id"],
+          title: ["class_name", "name", "uniq_class_id"],
+          role: "role",
+          level: "level",
+          userEmail: "user_email",
+          userId: "user_id",
+          classId: "class_id",
+          updatedAt: "updated_at",
+        },
+      },
+    },
+    {
+      ...shared,
+      category: "Classes",
+      name: "Details for my classes",
+      recordType: "class",
+      path: "/v2p2/classes/{class_id}",
+      purpose:
+        "Resolve display details only for class IDs discovered through the signed-in student's memberships.",
+      pagination: "none" as const,
+      changeStrategy: "full_reconciliation",
+      responseSchemaHash: digest({ class: { id: "number" } }),
+      normalization: {
+        fanOutParameter: "class_id",
+        classIdFromRouteParameter: "class_id",
+        recordsPath: ["class", "$"],
+        idPath: "id",
+        requiredPaths: ["id"],
+        recordKeyTemplate: "class:{id}",
+        classification: "personal",
+        audienceScope: "mapped_user",
+        fields: {
+          name: [
+            "name",
+            "class_name",
+            "subject.name",
+            "subject_name",
+            "uniq_class_id",
+          ],
+          title: [
+            "name",
+            "class_name",
+            "subject.name",
+            "subject_name",
+            "uniq_class_id",
+          ],
+          description: "description",
+          program: ["program.name", "programme.name", "program", "programme"],
+          grade: ["grade.name", "year_group.name", "grade", "year"],
+          level: ["level.name", "level"],
+          classId: ["uniq_class_id", "class_id", "id"],
+          updatedAt: "updated_at",
+        },
+      },
+    },
+    {
+      ...shared,
+      category: "Tasks",
+      name: "Tasks for my classes",
+      recordType: "assignment",
+      path: "/v2p2/classes/{class_id}/tasks",
+      purpose:
+        "Retrieve tasks only for classes discovered through the signed-in student's memberships.",
+      pagination: "page" as const,
+      changeStrategy: "full_reconciliation",
+      responseSchemaHash: digest({ tasks: [{ id: "number" }] }),
+      normalization: {
+        fanOutParameter: "class_id",
+        classIdFromRouteParameter: "class_id",
+        recordsPath: ["tasks", "coursework", "items"],
+        idPath: "id",
+        modifiedAtPath: "updated_at",
+        pageParameter: "page",
+        nextCursorPath: "meta.next_page",
+        cursorParameter: "page",
+        requiredPaths: ["id"],
+        recordKeyTemplate: "task:{id}",
+        classification: "personal",
+        audienceScope: "mapped_user",
+        fields: {
+          title: ["title", "name", "task.title", "task.name"],
+          description: [
+            "description",
+            "notes",
+            "task.description",
+            "task.notes",
+          ],
+          dueAt: ["due_at", "due_date", "deadline", "task.due_at", "task.due_date"],
+          startAt: ["starts_at", "start_date", "task.starts_at"],
+          taskType: ["task_type_name", "task_type", "type"],
+          className: ["class_name", "class.title"],
+          updatedAt: "updated_at",
+        },
+      },
+    },
+    {
+      ...shared,
+      category: "Timetable",
+      name: "Timetable for my classes",
+      recordType: "timetable",
+      path: "/v2p2/classes/{class_id}/timetable",
+      purpose:
+        "Retrieve timetable slots only for classes discovered through the signed-in student's memberships.",
+      pagination: "none" as const,
+      changeStrategy: "full_reconciliation",
+      responseSchemaHash: digest({
+        timetable: { academic_years: [{ id: "number", slots: [] }] },
+      }),
+      normalization: {
+        fanOutParameter: "class_id",
+        classIdFromRouteParameter: "class_id",
+        transform: "managebac_timetable",
+        recordsPath: "timetable.academic_years",
+        idPath: "id",
+        classification: "personal",
+        audienceScope: "mapped_user",
+        fields: {},
+      },
+    },
+  ];
 }
 
 function exactDigest(value: unknown) {
@@ -220,23 +423,83 @@ async function connectorContext(
       );
 }
 
+async function ensureOfficialPersonalCapabilityManifest(
+  actor: ConnectorActor,
+  integrationId: string,
+  context: ConnectorContext,
+) {
+  const official = officialPersonalCapabilities();
+  const requiredPaths = new Set(official.map((item) => item.path));
+  if (
+    [...requiredPaths].every((path) =>
+      context.capabilities.some((item) => item.path === path),
+    )
+  )
+    return context;
+  if (actor.schoolRole !== "school_admin") return context;
+  const existing = context.capabilities.map(
+    ({ _id: _capabilityId, ...item }) => ({
+      ...item,
+      freshnessSlaMinutes: 120,
+      permissionState: "read_only" as const,
+      verificationStatus: "verified" as const,
+      routeSource: "tenant_reference" as const,
+    }),
+  );
+  const merged = new Map(
+    [...existing, ...official].map((item) => [item.path, item] as const),
+  );
+  const capabilities = [...merged.values()];
+  await convexMutation("managebac:replaceCapabilityManifest", {
+    integrationId,
+    sourceHash: digest({
+      source: "spectra-official-personal-v2p2",
+      capabilities,
+    }),
+    providerVersion: "v2p2",
+    capabilities,
+  });
+  return connectorContext(actor, integrationId);
+}
+
 function atPath(value: unknown, path: string | undefined) {
   if (!path || path === "$" || path === ".") return value;
-  return path
+  const segments = path
     .replace(/^\$\.?/, "")
     .split(".")
-    .filter(Boolean)
-    .reduce<unknown>((current, segment) => {
+    .filter(Boolean);
+  const visit = (current: unknown, index: number): unknown => {
+    if (index >= segments.length) return current;
+    const segment = segments[index]!;
+    if (segment === "*")
+      return Array.isArray(current)
+        ? current.flatMap((item) => {
+            const result = visit(item, index + 1);
+            return Array.isArray(result) ? result : result === undefined ? [] : [result];
+          })
+        : undefined;
       if (current === null || current === undefined) return undefined;
       const indexMatch = segment.match(/^(.+)\[(\d+)]$/);
       if (indexMatch) {
         const parent = object(current)[indexMatch[1]!];
-        return Array.isArray(parent)
+        const next = Array.isArray(parent)
           ? parent[Number(indexMatch[2])]
           : undefined;
+        return visit(next, index + 1);
       }
-      return object(current)[segment];
-    }, value);
+      return visit(object(current)[segment], index + 1);
+  };
+  return visit(value, 0);
+}
+
+function atFirstPath(value: unknown, paths: unknown) {
+  const candidates = Array.isArray(paths) ? paths : [paths];
+  for (const candidate of candidates) {
+    if (typeof candidate !== "string") continue;
+    const found = atPath(value, candidate);
+    if (found !== undefined && found !== null && found !== "") return found;
+  }
+  return undefined;
 }
 
 function timestamp(value: unknown) {
@@ -361,10 +624,61 @@ function normalizeProviderPage(
   payload: unknown,
   capability: ConnectorContext["capabilities"][number],
   accountId: string | undefined,
+  routeParameters: Record<string, string> = {},
 ) {
   const config = object(capability.normalization);
-  const recordsPath = string(config.recordsPath, 300) || "$";
-  const rawRecordsValue = atPath(payload, recordsPath);
+  const recordsPath = Array.isArray(config.recordsPath)
+    ? config.recordsPath
+    : string(config.recordsPath, 300) || "$";
+  const rawRecordsValue =
+    config.transform === "managebac_timetable"
+      ? (() => {
+          const years = atPath(payload, "timetable.academic_years");
+          if (!Array.isArray(years)) return [];
+          const rows: Array<Record<string, unknown>> = [];
+          const today = new Date();
+          const horizon = new Date(today.getTime() + 8 * 7 * 24 * 60 * 60_000);
+          for (const yearValue of years) {
+            const year = object(yearValue);
+            const yearId = String(year.id ?? "current");
+            const starts = timestamp(year.start_date ?? year.starts_on);
+            const ends = timestamp(year.end_date ?? year.ends_on);
+            const slots = Array.isArray(year.slots) ? year.slots : [];
+            for (const slotValue of slots) {
+              const slot = object(slotValue);
+              if (slot.enabled === false) continue;
+              const day = Number(slot.day);
+              const period = Number(slot.period);
+              if (!Number.isInteger(day) || day < 1 || day > 7) continue;
+              const cursor = new Date(today);
+              const currentIsoDay = cursor.getUTCDay() || 7;
+              cursor.setUTCDate(cursor.getUTCDate() + ((day - currentIsoDay + 7) % 7));
+              cursor.setUTCHours(8 + Math.max(0, period - 1), 0, 0, 0);
+              for (
+                let occurrence = new Date(cursor);
+                occurrence <= horizon;
+                occurrence = new Date(occurrence.getTime() + 7 * 24 * 60 * 60_000)
+              ) {
+                if (starts && occurrence.getTime() < starts) continue;
+                if (ends && occurrence.getTime() > ends) continue;
+                rows.push({
+                  id: `${yearId}:${day}:${period}:${occurrence.toISOString().slice(0, 10)}`,
+                  title: `Class period ${period}`,
+                  day,
+                  period,
+                  location: slot.location,
+                  start_at: occurrence.toISOString(),
+                  end_at: new Date(
+                    occurrence.getTime() + 50 * 60_000,
+                  ).toISOString(),
+                  academic_year_id: yearId,
+                });
+              }
+            }
+          }
+          return rows.slice(0, 500);
+        })()
+      : atFirstPath(payload, recordsPath);
   const rawRecords = Array.isArray(rawRecordsValue)
     ? rawRecordsValue
     : rawRecordsValue && typeof rawRecordsValue === "object"
@@ -394,17 +708,19 @@ function normalizeProviderPage(
       );
     const normalized: JsonObject = {};
     for (const [key, path] of Object.entries(fieldMap)) {
-      if (typeof path !== "string") continue;
-      const value = atPath(raw, path);
+      const value = atFirstPath(raw, path);
       if (value !== undefined) normalized[key] = normalizedScalar(value);
     }
     const keyTemplate =
       string(config.recordKeyTemplate, 500) ||
       `${capability.recordType}:{${idPath}}`;
-    const providerClassId = string(
-      atPath(raw, string(config.classIdPath, 300)),
-      500,
+    const classIdFromRouteParameter = string(
+      config.classIdFromRouteParameter,
+      120,
     );
+    const providerClassId =
+      identifier(atPath(raw, string(config.classIdPath, 300)), 500) ||
+      identifier(routeParameters[classIdFromRouteParameter], 500);
     const academicPeriodKey = string(
       atPath(raw, string(config.academicPeriodPath, 300)),
       300,
@@ -464,6 +780,7 @@ function capabilityUrl(
     cursor?: string;
     page?: number;
     verifiedEmail?: string;
+    routeParameters?: Record<string, string>;
   },
 ) {
   const base = new URL(context.integration.baseUrl);
@@ -479,6 +796,13 @@ function capabilityUrl(
       encodeURIComponent(input.providerUserId),
     );
   }
+  for (const [parameter, value] of Object.entries(
+    input.routeParameters ?? {},
+  ))
+    path = path.replaceAll(
+      `{${parameter}}`,
+      encodeURIComponent(value),
+    );
   if (/\{[^}]+}/.test(path))
     throw new Error(
       `INTEGRATION_ROUTE_PARAMETERS_UNRESOLVED: ${capability.name} needs a verified route binding.`,
@@ -513,6 +837,7 @@ async function providerFetch(
     cursor?: string;
     page?: number;
     verifiedEmail?: string;
+    routeParameters?: Record<string, string>;
   },
 ) {
   const url = capabilityUrl(context, capability, input);
@@ -649,14 +974,15 @@ async function resolveIdentity(
     );
     const providerUserId =
       matches.length === 1
-        ? string(atPath(matches[0], idPath), 500)
+        ? identifier(atPath(matches[0], idPath), 500)
         : undefined;
+    const providerUserIdHash = providerUserId
+      ? createHash("sha256").update(providerUserId).digest("base64url")
+      : undefined;
     const body = {
       matchCount: matches.length,
-      providerUserId: providerUserId || null,
-      providerUserIdHash: providerUserId
-        ? createHash("sha256").update(providerUserId).digest("base64url")
-        : null,
+      ...(providerUserId ? { providerUserId } : {}),
+      ...(providerUserIdHash ? { providerUserIdHash } : {}),
       verifiedEmailHash: createHash("sha256")
         .update(actor.email.toLowerCase())
         .digest("base64url"),
@@ -666,13 +992,7 @@ async function resolveIdentity(
       operation: "identity",
       integrationId,
       syncRunId: started.syncRunId,
-      payload: {
-        ...body,
-        providerUserId: providerUserId || undefined,
-        providerUserIdHash: providerUserId
-          ? body.providerUserIdHash
-          : undefined,
-      },
+      payload: body,
       mutation: "managebac:commitIdentityResolution",
     });
     return {
@@ -708,6 +1028,7 @@ async function runSync(
     integrationId: string;
     serviceSubject: string;
   },
+  options: { personalOnly?: boolean } = {},
 ) {
   if (
     context.mapping.status !== "verified" &&
@@ -732,12 +1053,16 @@ async function runSync(
     skipped?: string;
   }> = [];
   const ordered = [...context.capabilities].sort((a, b) => {
-    const priority = (item: typeof a) =>
-      item.recordType === "class"
+    const priority = (item: typeof a) => {
+      const config = object(item.normalization);
+      return config.identityOnly === true
         ? 0
-        : ["assignment", "deadline", "assessment"].includes(item.recordType)
+        : item.recordType === "class"
           ? 1
-          : 2;
+        : ["assignment", "deadline", "assessment"].includes(item.recordType)
+            ? 2
+            : 3;
+    };
     return priority(a) - priority(b);
   });
   const minimumRequestGap = Math.ceil(
@@ -745,6 +1070,7 @@ async function runSync(
       Math.max(1, Math.min(180, context.integration.requestBudgetPerMinute)),
   );
   let lastProviderRequestAt = 0;
+  const accessibleClassIds = new Set<string>();
   const pacedFetch = async (
     capability: ConnectorContext["capabilities"][number],
     input: Parameters<typeof providerFetch>[3],
@@ -759,6 +1085,23 @@ async function runSync(
   };
   try {
     for (const capability of ordered) {
+      const capabilityConfig = object(capability.normalization);
+      if (
+        capabilityConfig.identityOnly === true ||
+        (options.personalOnly && capability.scope !== "personal")
+      ) {
+        summaries.push({
+          capabilityId: capability._id,
+          name: capability.name,
+          pages: 0,
+          records: 0,
+          skipped:
+            capabilityConfig.identityOnly === true
+              ? "Identity lookup already completed for this account."
+              : "Personal refresh leaves school-wide catalog routes untouched.",
+        });
+        continue;
+      }
       if (
         kind === "reconciliation" &&
         actor.schoolRole === "school_admin" &&
@@ -802,55 +1145,83 @@ async function runSync(
         });
         continue;
       }
-      let cursor: string | undefined;
-      let page = 1;
-      let recordCount = 0;
-      let lastPayloadShape: unknown;
-      try {
-        do {
-          const providerPayload = await pacedFetch(capability, {
-            providerUserId: context.mapping.providerUserId,
-            cursor,
-            page,
-          });
-          lastPayloadShape = shape(providerPayload);
-          const normalized = normalizeProviderPage(
-            providerPayload,
-            capability,
-            actor.schoolRole === "school_admin" ? undefined : actor.accountId,
-          );
-          for (const item of normalized.records)
-            seen.add(item.providerRecordKey);
-          const commitPayload = {
-            capabilityId: capability._id,
-            records: normalized.records.map(
-              ({ mappedAccountId: _mappedAccountId, ...item }) => item,
-            ),
-            ...(normalized.nextCursor
-              ? { nextCursor: normalized.nextCursor }
-              : {}),
-            pageNumber: page,
-          };
-          await signedCommit(actor, {
-            operation: "sync-page",
-            integrationId: context.integration._id,
-            syncRunId: started.syncRunId,
-            payload: commitPayload,
-            mutation: "managebac:commitNormalizedPage",
-            serviceSubject: scheduled?.serviceSubject,
-          });
-          recordCount += normalized.records.length;
-          cursor = normalized.nextCursor || undefined;
-          page += 1;
-          if (page > 500)
-            throw new Error(
-              `INTEGRATION_PAGINATION_GUARD: ${capability.name} exceeded 500 pages.`,
-            );
-        } while (cursor);
+      const fanOutParameter = string(
+        capabilityConfig.fanOutParameter,
+        120,
+      );
+      const routeBindings = fanOutParameter
+        ? [...accessibleClassIds].map((classId) => ({
+            [fanOutParameter]: classId,
+          }))
+        : [{} as Record<string, string>];
+      if (fanOutParameter && routeBindings.length === 0) {
         summaries.push({
           capabilityId: capability._id,
           name: capability.name,
-          pages: page - 1,
+          pages: 0,
+          records: 0,
+          skipped: "No verified class membership targets this route.",
+        });
+        continue;
+      }
+      let pageCount = 0;
+      let recordCount = 0;
+      let lastPayloadShape: unknown;
+      try {
+        for (const routeParameters of routeBindings) {
+          let cursor: string | undefined;
+          let page = 1;
+          do {
+            const providerPayload = await pacedFetch(capability, {
+              providerUserId: context.mapping.providerUserId,
+              cursor,
+              page,
+              routeParameters,
+            });
+            lastPayloadShape = shape(providerPayload);
+            const normalized = normalizeProviderPage(
+              providerPayload,
+              capability,
+              capability.scope === "personal" ? actor.accountId : undefined,
+              routeParameters,
+            );
+            for (const item of normalized.records) {
+              seen.add(item.providerRecordKey);
+              if (item.providerClassId)
+                accessibleClassIds.add(item.providerClassId);
+            }
+            const commitPayload = {
+              capabilityId: capability._id,
+              records: normalized.records.map(
+                ({ mappedAccountId: _mappedAccountId, ...item }) => item,
+              ),
+              ...(normalized.nextCursor
+                ? { nextCursor: normalized.nextCursor }
+                : {}),
+              pageNumber: pageCount + 1,
+            };
+            await signedCommit(actor, {
+              operation: "sync-page",
+              integrationId: context.integration._id,
+              syncRunId: started.syncRunId,
+              payload: commitPayload,
+              mutation: "managebac:commitNormalizedPage",
+              serviceSubject: scheduled?.serviceSubject,
+            });
+            recordCount += normalized.records.length;
+            pageCount += 1;
+            cursor = normalized.nextCursor || undefined;
+            page += 1;
+            if (pageCount > 500)
+              throw new Error(
+                `INTEGRATION_PAGINATION_GUARD: ${capability.name} exceeded 500 pages.`,
+              );
+          } while (cursor);
+        }
+        summaries.push({
+          capabilityId: capability._id,
+          name: capability.name,
+          pages: pageCount,
           records: recordCount,
         });
         if (capability.changeStrategy === "full_reconciliation")
@@ -882,11 +1253,11 @@ async function runSync(
             lastPayloadShape ?? {
               category: capability.category,
               path: capability.path,
-              page,
+              page: pageCount + 1,
             },
           ),
           providerRecordKeyHash: digest(
-            `${capability._id}:${capability.path}:${page}`,
+            `${capability._id}:${capability.path}:${pageCount + 1}`,
           ),
           sanitizedSample,
         };
@@ -901,7 +1272,7 @@ async function runSync(
         summaries.push({
           capabilityId: capability._id,
           name: capability.name,
-          pages: Math.max(0, page - 1),
+          pages: pageCount,
           records: recordCount,
           skipped: `${reasonCode}: route quarantined for administrator review.`,
         });
@@ -1248,7 +1619,13 @@ export async function POST(request: NextRequest) {
       throw new Error(
         "INTEGRATION_NOT_CONFIGURED: ManageBac is not configured.",
       );
-    const context = await connectorContext(actor, integrationId);
+    let context = await connectorContext(actor, integrationId);
+    if (action === "resolveIdentity")
+      context = await ensureOfficialPersonalCapabilityManifest(
+        actor,
+        integrationId,
+        context,
+      );
     const secret = await loadSchoolSecretForConnector({
       schoolId: actor.schoolId,
       purpose: "managebac-api-token",
@@ -1275,6 +1652,8 @@ export async function POST(request: NextRequest) {
           "bootstrap",
           refreshed,
           secret.value,
+          undefined,
+          { personalOnly: true },
         );
         return ok({ identity, bootstrap });
       }

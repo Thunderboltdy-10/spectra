@@ -215,7 +215,14 @@ function operationPreviewMessage(preview: {
               : preview.action === "place"
                 ? "Placing"
                 : "Connecting";
-  return new RegExp(`^${verb}\\b`, "i").test(preview.title)
+  // A preview title can already describe an earlier phase of the same
+  // operation ("Preparing the focused artifact"). Prefixing that with the
+  // operation verb produced claims such as "Updating Preparing..." and, once
+  // the next step arrived, "Updated Preparing...". Preserve any authored
+  // present-progressive title so the trace says what is actually happening.
+  return /^(?:preparing|opening|reviewing|reading|inspecting|planning|validating|checking|rewriting|editing|updating|creating|building|placing|removing|connecting|organizing)\b/i.test(
+    preview.title,
+  ) || new RegExp(`^${verb}\\b`, "i").test(preview.title)
     ? preview.title
     : `${verb} ${preview.title}`;
 }
@@ -325,6 +332,7 @@ export function useSpectraRun({
     initialCards.map(persistedToStream),
   );
   const [activeRequestCount, setActiveRequestCount] = useState(0);
+  const [stopSuppressed, setStopSuppressed] = useState(false);
   const [observedContinuationRunId, setObservedContinuationRunId] = useState<
     string | null
   >(null);
@@ -693,14 +701,25 @@ export function useSpectraRun({
               toast.message(
                 "Some of that could not be finished. Completed work stays saved.",
               );
-            } else {
-              toast.error(event.message);
             }
             setLiveExchange((current) =>
               current && (!liveExchangeId || current.id === liveExchangeId)
                 ? { ...current, status: "failed" }
                 : current,
             );
+            // Keep a short grace window for the route's one quiet continuation.
+            // A following progress event revives this same exchange without any
+            // red flash; a genuinely terminal stream is then removed and its
+            // compact durable failure/retry state becomes authoritative.
+            window.setTimeout(() => {
+              setLiveExchange((current) =>
+                current &&
+                (!liveExchangeId || current.id === liveExchangeId) &&
+                current.status === "failed"
+                  ? null
+                  : current,
+              );
+            }, 450);
           }
           if (event.type === "stopped" || event.type === "interrupted")
             changed = true;
@@ -871,6 +890,7 @@ export function useSpectraRun({
           beginSettled = true;
           resolve(accepted);
         };
+        setStopSuppressed(false);
         setActiveRequestCount((count) => count + 1);
         setLiveExchange({
           id: exchangeId,
@@ -1122,37 +1142,33 @@ export function useSpectraRun({
     async (runId?: string) => {
       const targetRunId =
         runId ?? liveExchange?.runId ?? observedContinuationRunId;
-      if (!targetRunId) {
-        toast.message(
-          "Spectra is still starting this run. Stop will be available in a moment.",
-        );
-        return;
-      }
-      try {
-        const response = await fetch("/api/spectra/run", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "stop", runId: targetRunId }),
-        });
-        if (!response.ok)
-          throw new Error(
-            (await response.text().catch(() => "")) ||
-              "This run can no longer be stopped safely.",
-          );
-        activeRequests.current.forEach((requestRunId, controller) => {
-          if (requestRunId === targetRunId) {
-            controller.abort();
-            activeRequests.current.delete(controller);
-          }
-        });
-        activeRunIds.current.delete(targetRunId);
-        setActiveRequestCount((count) => Math.max(0, count - 1));
-        // Cancellation is an intentional terminal state, not a failed exchange.
-        // Clear the optimistic stream immediately so buffered response chunks
-        // cannot keep painting a live/failed state over the durable stopped run.
-        setLiveExchange((current) =>
-          current?.runId === targetRunId ? null : current,
-        );
+      const submissionKey = liveExchange?.id;
+      if (!targetRunId && !submissionKey) return;
+      setStopSuppressed(true);
+
+      // Stop is locally immediate. Durable cancellation follows with either the
+      // acknowledged run id or the idempotent submission key used to create it.
+      // This prevents a slow provider/request stream from leaving the red stop
+      // control visibly stuck while the server settles the same execution.
+      activeRequests.current.forEach((requestRunId, controller) => {
+        if (
+          (targetRunId && requestRunId === targetRunId) ||
+          (!targetRunId && requestRunId === null)
+        ) {
+          controller.abort();
+          activeRequests.current.delete(controller);
+        }
+      });
+      if (targetRunId) activeRunIds.current.delete(targetRunId);
+      setActiveRequestCount((count) => Math.max(0, count - 1));
+      setLiveExchange((current) =>
+        current &&
+        ((!targetRunId && current.id === submissionKey) ||
+          current.runId === targetRunId)
+          ? null
+          : current,
+      );
+      if (targetRunId)
         setCards((current) =>
           current.map((card) =>
             card.runId === targetRunId
@@ -1161,7 +1177,7 @@ export function useSpectraRun({
                   status: "cancelled",
                   title: "Stopped",
                   summary:
-                    "Stopped by you. Any partial response remains available in the thread.",
+                    "Stopped by you. Any completed work remains available.",
                   actions: [
                     {
                       key: "retry",
@@ -1175,12 +1191,41 @@ export function useSpectraRun({
               : card,
           ),
         );
+      else
+        setCards((current) =>
+          current.filter(
+            (card) => card.runId !== `pending:${submissionKey}`,
+          ),
+        );
+      try {
+        const response = await fetch("/api/spectra/run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "stop",
+            runId: targetRunId,
+            submissionKey,
+          }),
+        });
+        if (!response.ok) {
+          // The durable worker may have settled while this browser still owns
+          // a buffered SSE request. A conflict means there is nothing left to
+          // cancel remotely; do not let that obsolete request mask the durable
+          // terminal state forever.
+          if (response.status === 409) {
+            window.dispatchEvent(new Event("spectra:threads-changed"));
+            await onDataChanged?.();
+            return;
+          }
+          throw new Error(
+            (await response.text().catch(() => "")) ||
+              "This run can no longer be stopped safely.",
+          );
+        }
         window.dispatchEvent(new Event("spectra:threads-changed"));
         await onDataChanged?.();
-        toast.message(
-          "Stopped. Any partial response remains saved in the thread.",
-        );
       } catch (error) {
+        setStopSuppressed(false);
         toast.error(
           error instanceof Error
             ? error.message
@@ -1188,13 +1233,19 @@ export function useSpectraRun({
         );
       }
     },
-    [liveExchange?.runId, observedContinuationRunId, onDataChanged],
+    [
+      liveExchange?.id,
+      liveExchange?.runId,
+      observedContinuationRunId,
+      onDataChanged,
+    ],
   );
 
   const retry = useCallback(
     async (runId: string) => {
       toast.dismiss();
       const exchangeId = crypto.randomUUID();
+      setStopSuppressed(false);
       setActiveRequestCount((count) => count + 1);
       setLiveExchange({
         id: exchangeId,
@@ -1234,7 +1285,8 @@ export function useSpectraRun({
   );
 
   const submitting =
-    activeRequestCount > 0 || Boolean(observedContinuationRunId);
+    !stopSuppressed &&
+    (activeRequestCount > 0 || Boolean(observedContinuationRunId));
   return useMemo(
     () => ({
       cards,

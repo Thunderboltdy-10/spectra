@@ -26,6 +26,8 @@ export const presentationSkill = defineArtifactSkill({
   ],
   operations: [
     "Plan narrative and outline, add or reorder slides, compose layouts, create/rewrite/move/resize objects, apply themes, and write speaker notes.",
+    "Use the native layout vocabulary intentionally: title-content for a conventional explanation, title-visual-text for an evidence-led slide, visual-story for a dominant visual with supporting copy, three-ideas for three parallel points, statement for one memorable claim, two-column for comparison, and full-bleed only when the media can carry the slide.",
+    "A layout is a starting constraint, not a finished design. After choosing it, adjust object geometry, type scale, crop, whitespace, alignment, and emphasis to fit the actual content; never leave generic placeholders or default cascaded coordinates.",
     "Generate charts from stable Sheets ranges and check overflow, contrast, hierarchy, alignment, reading order, sources, and presenter output.",
   ],
   preservationRules: [
@@ -34,6 +36,8 @@ export const presentationSkill = defineArtifactSkill({
   ],
   validation: [
     "Check canvas bounds, text overflow, missing media/fonts, contrast, type scale, alignment, alt text, reading order, citations, and unavailable live sources.",
+    "Reject slides that look like documents pasted onto a canvas: keep one clear idea per slide, prefer short display copy, maintain deliberate whitespace, align every edge, and use visuals or diagrams when they improve understanding.",
+    "Inspect the rendered slide at presentation scale after every structural change. Fix collisions, tiny text, accidental empty regions, weak hierarchy, repeated layouts, and low-information decorative shapes before declaring success.",
     "Ensure every slide advances the narrative and remains legible in presenter, embed, exported, narrow review, and reduced-motion states.",
   ],
   approvals: [

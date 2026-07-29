@@ -3532,6 +3532,26 @@ export function WorkspaceShell() {
   );
 
   useEffect(() => {
+    if (
+      !liveThread ||
+      studio.mode !== "split" ||
+      !studio.activeArtifact
+    )
+      return;
+    // Artifact + conversation is one working surface, not two side panels
+    // competing with a third, crushed workspace behind them. Promote the
+    // artifact to the main canvas while the thread occupies the companion
+    // lane. The underlying hub remains in navigation history and returns when
+    // the user closes the artifact.
+    studio.openTab(studio.activeArtifact);
+  }, [
+    liveThread,
+    studio.activeArtifact,
+    studio.mode,
+    studio.openTab,
+  ]);
+
+  useEffect(() => {
     if (!requestedHome) return;
     goToHomeHub();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- hub bootstrap once per requestedHome
@@ -3627,6 +3647,21 @@ export function WorkspaceShell() {
     setVisibleObjects,
     setActiveWorkspaceContext,
   } = useSpectraContext(allArtifacts, workspaces);
+  useEffect(() => {
+    if (!liveThread) return;
+    // An open conversation is the active conversational context. Requiring a
+    // second tiny toggle made consecutive sends race between "new" and
+    // "continued", producing temporary tabs and surprise fresh threads.
+    setComposerThread((current) =>
+      current?.id === liveThread.id
+        ? current
+        : {
+            id: liveThread.id,
+            title: liveThread.title,
+            workspaceId: selectedWorkspaceId,
+          },
+    );
+  }, [liveThread, selectedWorkspaceId, setComposerThread]);
   useEffect(() => {
     if (!requestedThreadId) return;
     void getSpectraThread(requestedThreadId)
@@ -3726,6 +3761,38 @@ export function WorkspaceShell() {
   const commandFocusArtifact = studio.isOpen
     ? studio.activeArtifact
     : selectedArtifact;
+  useEffect(() => {
+    const focusedArtifactId = commandFocusArtifact?._id;
+    if (!composerThread || !focusedArtifactId) return;
+    let disposed = false;
+    void getSpectraThread(composerThread.id)
+      .then(({ thread }) => {
+        if (disposed) return;
+        if (thread.artifactId === focusedArtifactId) {
+          if (composerThread.artifactId !== focusedArtifactId)
+            setComposerThread((current) =>
+              current?.id === thread._id
+                ? { ...current, artifactId: focusedArtifactId }
+                : current,
+            );
+          return;
+        }
+        // A conversation follows its artifact automatically, but it never
+        // silently follows the user into a different artifact.
+        setComposerThread(null);
+        setLiveThread(null);
+      })
+      .catch(() => undefined);
+    return () => {
+      disposed = true;
+    };
+  }, [
+    commandFocusArtifact?._id,
+    composerThread?.id,
+    composerThread?.artifactId,
+    setComposerThread,
+    setLiveThread,
+  ]);
   useEffect(() => {
     setVisibleObjects([
       ...tiledArtifacts.map((artifact) => ({
@@ -4023,10 +4090,11 @@ export function WorkspaceShell() {
         // the editor preserve unrelated local typing and prevents a preview from
         // masquerading as a committed revision.
         //
-        // Focused edits publish an early SSE patch with changedPaths: [] so the
-        // card paints "updating" before exact regions exist. Mirror create
-        // behavior: keep prior paths or default to `/` (sheets stay cell-exact)
-        // so studios can light data-ai-region before the query catch-up arrives.
+        // An approach/queue frame has no edited region yet. Painting `/` here
+        // made every control flash blue before the AI body reached its target,
+        // and a resumed operation looked complete before its native gesture
+        // began. Preserve an already concrete path, otherwise remain unpainted
+        // until the live performer publishes the first real beat.
         const updatingChangedPaths =
           Array.isArray(patch.changedPaths) && patch.changedPaths.length > 0
             ? patch.changedPaths.filter(
@@ -4034,9 +4102,7 @@ export function WorkspaceShell() {
               )
             : artifact.aiPreview?.changedPaths?.length
               ? artifact.aiPreview.changedPaths
-              : artifact.blueprintKey === "sheets"
-                ? []
-                : ["/"];
+              : [];
         return {
           ...artifact,
           aiState: "updating",
@@ -4177,11 +4243,23 @@ export function WorkspaceShell() {
       setComposerThread((current) =>
         current?.id === threadId
           ? current
-          : { id: threadId, title: "Current conversation" },
+          : {
+              id: threadId,
+              title: "Current conversation",
+              ...(commandFocusArtifact
+                ? { artifactId: commandFocusArtifact._id }
+                : {}),
+            },
       );
       // Workspace QC has no ConversationSurface of its own. Open the live
       // thread panel so progress traces stay visible outside /chat.
-      setLiveThread({ id: threadId, title: "Current conversation" });
+      setLiveThread({
+        id: threadId,
+        title:
+          liveThread?.id === threadId
+            ? liveThread.title
+            : "Current conversation",
+      });
       setActiveRunPanelId(null);
       window.dispatchEvent(new Event("spectra:threads-changed"));
     },
@@ -6178,20 +6256,7 @@ export function WorkspaceShell() {
               continuing={composerThread?.id === liveThread.id}
               onContinue={() => {
                 void (async () => {
-                  // Blue/active icon toggles off so the next message starts fresh.
                   if (composerThread?.id === liveThread.id) {
-                    setComposerThread(null);
-                    try {
-                      await postSpectra({
-                        action: "selectRunTab",
-                        runId: undefined,
-                      });
-                      window.dispatchEvent(
-                        new Event("spectra:threads-changed"),
-                      );
-                    } catch {
-                      // Local deselect already applied.
-                    }
                     return;
                   }
                   try {

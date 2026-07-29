@@ -46,6 +46,18 @@ export type HeldControl = {
 };
 
 /**
+ * Resolve the smallest indivisible native control represented by a content
+ * path. Most paths already identify one control exactly. A sheet cell is the
+ * important exception: the grid, formula bar, value editor and formatting
+ * affordances are several renderings of one cell and must share ownership.
+ */
+export function controlOwnershipKey(path: string): string {
+  const canonical = canonicalPath(path);
+  const cell = canonical.match(/^(\/sheets\/[^/]+\/cells\/[^/]+)/);
+  return cell?.[1] ?? canonical;
+}
+
+/**
  * Acts that constitute *acquisition*. Hovering over a field or resting a cursor
  * near it claims nothing; a caret, a selection, an open menu, a live drag or an
  * actual mutation does. Getting this line right is what keeps the guard from
@@ -151,21 +163,32 @@ export function useHeldControlGuard(input: {
     if (!surface) return;
 
     const marked: HTMLElement[] = [];
+    const entryByOwnershipKey = new Map<string, HeldControl>();
     for (const entry of held.values()) {
-      let element: HTMLElement | null = null;
-      try {
-        element = surface.querySelector<HTMLElement>(
-          `[${TARGET_ATTRIBUTE}="${cssEscape(entry.path)}"]`,
-        );
-      } catch {
-        element = null;
+      const key = controlOwnershipKey(entry.path);
+      if (!entryByOwnershipKey.has(key)) entryByOwnershipKey.set(key, entry);
+    }
+
+    const entryForElement = (element: HTMLElement): HeldControl | undefined => {
+      const path = element.getAttribute(TARGET_ATTRIBUTE) ?? "";
+      return entryByOwnershipKey.get(controlOwnershipKey(path));
+    };
+
+    const candidates = surface.querySelectorAll<HTMLElement>(
+      `[${TARGET_ATTRIBUTE}]`,
+    );
+    for (const entry of held.values()) {
+      const ownershipKey = controlOwnershipKey(entry.path);
+      for (const element of candidates) {
+        const path = element.getAttribute(TARGET_ATTRIBUTE) ?? "";
+        if (controlOwnershipKey(path) !== ownershipKey) continue;
+        // Never contest an affordance the user is already inside. Its sibling
+        // renderings remain marked, but the active local edit wins the race.
+        if (element.contains(document.activeElement)) continue;
+        element.setAttribute(HELD_ATTRIBUTE, entry.kind);
+        element.setAttribute(HELD_BY_ATTRIBUTE, entry.label);
+        marked.push(element);
       }
-      if (!element) continue;
-      // Never contest a control the user is already inside.
-      if (element.contains(document.activeElement)) continue;
-      element.setAttribute(HELD_ATTRIBUTE, entry.kind);
-      element.setAttribute(HELD_BY_ATTRIBUTE, entry.label);
-      marked.push(element);
     }
 
     /**
@@ -178,10 +201,35 @@ export function useHeldControlGuard(input: {
       if (!(node instanceof HTMLElement)) return;
       const control = node.closest<HTMLElement>(`[${HELD_ATTRIBUTE}]`);
       if (!control) return;
-      const path = control.getAttribute(TARGET_ATTRIBUTE) ?? "";
-      const entry = held.get(canonicalPath(path));
+      const entry = entryForElement(control);
       if (!entry) return;
       event.preventDefault();
+      window.dispatchEvent(
+        new CustomEvent<HeldDeclinedDetail>(HELD_DECLINED_EVENT, {
+          detail: {
+            path: entry.path,
+            label: entry.label,
+            message: heldExplanation(entry),
+          },
+        }),
+      );
+    };
+
+    /**
+     * If the peer already owned the control before this pointer press, do not
+     * let a second actor acquire it. A user who was focused first is still
+     * preserved by the `contains(document.activeElement)` exception, so this
+     * closes the race without ever ejecting an existing local caret.
+     */
+    const declineAcquisition = (event: Event) => {
+      const node = event.target;
+      if (!(node instanceof HTMLElement)) return;
+      const control = node.closest<HTMLElement>(`[${HELD_ATTRIBUTE}]`);
+      if (!control || control.contains(document.activeElement)) return;
+      const entry = entryForElement(control);
+      if (!entry) return;
+      event.preventDefault();
+      event.stopPropagation();
       window.dispatchEvent(
         new CustomEvent<HeldDeclinedDetail>(HELD_DECLINED_EVENT, {
           detail: {
@@ -203,9 +251,9 @@ export function useHeldControlGuard(input: {
       const node = event.target;
       if (!(node instanceof HTMLElement)) return;
       const control = node.closest<HTMLElement>(`[${HELD_ATTRIBUTE}]`);
-      if (!control || !isAtomicControl(control)) return;
-      const path = control.getAttribute(TARGET_ATTRIBUTE) ?? "";
-      const entry = held.get(canonicalPath(path));
+      if (!control || (!isAtomicControl(control) && !isAtomicControl(node)))
+        return;
+      const entry = entryForElement(control);
       if (!entry) return;
       event.preventDefault();
       event.stopPropagation();
@@ -221,10 +269,12 @@ export function useHeldControlGuard(input: {
     };
 
     surface.addEventListener("beforeinput", declineInput, true);
+    surface.addEventListener("pointerdown", declineAcquisition, true);
     surface.addEventListener("click", declineAtomicPress, true);
 
     return () => {
       surface.removeEventListener("beforeinput", declineInput, true);
+      surface.removeEventListener("pointerdown", declineAcquisition, true);
       surface.removeEventListener("click", declineAtomicPress, true);
       for (const element of marked) {
         element.removeAttribute(HELD_ATTRIBUTE);
@@ -248,6 +298,7 @@ const ATOMIC_ROLES = new Set([
 ]);
 
 function isAtomicControl(element: HTMLElement): boolean {
+  if (element instanceof HTMLButtonElement) return true;
   const role = element.getAttribute("role");
   if (role && ATOMIC_ROLES.has(role)) return true;
   if (element instanceof HTMLSelectElement) return true;
@@ -255,10 +306,4 @@ function isAtomicControl(element: HTMLElement): boolean {
     return element.type === "checkbox" || element.type === "radio";
   }
   return false;
-}
-
-function cssEscape(value: string): string {
-  if (typeof CSS !== "undefined" && typeof CSS.escape === "function")
-    return CSS.escape(value);
-  return value.replace(/["\\]/g, "\\$&");
 }

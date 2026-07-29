@@ -33,7 +33,10 @@ import {
   aiInteractionFrame,
   aiSettleFrame,
 } from "@/features/spectra/ai/ai-interaction-frames";
-import type { ActorIdentity as FabricActor } from "@/features/spectra/collaboration/interaction-model";
+import type {
+  ActorIdentity as FabricActor,
+  InteractionAct,
+} from "@/features/spectra/collaboration/interaction-model";
 
 type ArtifactRecord = {
   _id: string;
@@ -59,6 +62,65 @@ type CollaborationSession = {
   token: string;
   url: string;
 };
+
+/**
+ * A live-preview beat already describes the native gesture being performed.
+ * Preserve that choreography instead of re-deriving every frame solely from
+ * its value delta: menu-opening and pointer beats intentionally carry the
+ * unchanged value, while the eventual menu selection carries the mutation.
+ */
+function actForStreamBeat(input: {
+  beat: AiStreamBeat;
+  previousBeat?: AiStreamBeat;
+  before: unknown;
+  after: unknown;
+}): InteractionAct | undefined {
+  const { beat, previousBeat, before, after } = input;
+  if (beat.menu?.open) {
+    if (!previousBeat?.menu?.open) return { kind: "menuOpen" };
+    // The committed menu beat both moves the highlight and changes the native
+    // value. Treat the value transition as the selection; otherwise the actor
+    // appears to navigate and then silently changes the control before close.
+    if (!Object.is(before, after))
+      return {
+        kind: "menuSelect",
+        option: beat.menu.highlighted ?? String(after ?? ""),
+      };
+    if (previousBeat.menu.highlighted !== beat.menu.highlighted)
+      return {
+        kind: "menuNavigate",
+        option: beat.menu.highlighted ?? "",
+      };
+    return { kind: "menuOpen" };
+  }
+  if (beat.menu === null && previousBeat?.menu?.open)
+    return { kind: "menuClose" };
+
+  switch (beat.interaction?.kind) {
+    case "pointer":
+      return { kind: "hover" };
+    case "focus":
+      return { kind: "focus" };
+    case "toggle":
+      return !Object.is(before, after)
+        ? { kind: "toggle", value: Boolean(after) }
+        : { kind: "press" };
+    case "dragging":
+      return beat.gesturePhase === "release"
+        ? { kind: "dragRelease" }
+        : beat.gesturePhase === "move"
+          ? { kind: "dragMove" }
+          : { kind: "dragStart" };
+    case "resizing":
+      return beat.gesturePhase === "release"
+        ? { kind: "resizeRelease" }
+        : beat.gesturePhase === "move"
+          ? { kind: "resizeMove" }
+          : { kind: "resizeStart" };
+    default:
+      return undefined;
+  }
+}
 
 type RegionClaim = {
   claimId: string;
@@ -157,7 +219,10 @@ async function createCollaborationSession(
     accountId: actor.accountId,
     schoolId: actor.schoolId,
     clientId,
-    displayName: actor.name.trim() ? `${actor.name.trim()}'s AI` : "Spectra AI",
+    // The gateway appends owner attribution for AI awareness. Keep the token's
+    // authenticated display name as the owner so it never becomes
+    // "Pablo's AI's AI" after sanitization.
+    displayName: actor.name.trim() || "Spectra",
     level,
     policyVersion: room.policyVersion,
     schemaVersion: room.schemaVersion ?? artifact.schemaVersion ?? 1,
@@ -318,6 +383,94 @@ async function acquirePlanClaims(params: {
   return claims;
 }
 
+function humanHeldRegions(provider: HocuspocusProvider): Set<string> {
+  const held = new Set<string>();
+  for (const state of provider.awareness?.getStates().values() ?? []) {
+    const user =
+      state?.user && typeof state.user === "object"
+        ? (state.user as Record<string, unknown>)
+        : null;
+    const interaction =
+      user?.interactionState &&
+      typeof user.interactionState === "object" &&
+      !Array.isArray(user.interactionState)
+        ? (user.interactionState as Record<string, unknown>)
+        : null;
+    const actor =
+      interaction?.actor &&
+      typeof interaction.actor === "object" &&
+      !Array.isArray(interaction.actor)
+        ? (interaction.actor as Record<string, unknown>)
+        : null;
+    const act =
+      interaction?.act &&
+      typeof interaction.act === "object" &&
+      !Array.isArray(interaction.act)
+        ? (interaction.act as Record<string, unknown>)
+        : null;
+    const lifecycle = interaction?.lifecycle;
+    if (
+      actor?.kind !== "human" ||
+      act?.kind === "idle" ||
+      act?.kind === "hover" ||
+      lifecycle === "idle" ||
+      lifecycle === "completed" ||
+      lifecycle === "settled" ||
+      lifecycle === "failed" ||
+      lifecycle === "cancelled"
+    )
+      continue;
+    for (const regionId of Array.isArray(interaction?.heldRegionIds)
+      ? interaction.heldRegionIds
+      : []) {
+      if (typeof regionId === "string" && regionId) held.add(regionId);
+    }
+  }
+  return held;
+}
+
+async function waitForHumanRegions(params: {
+  provider: HocuspocusProvider;
+  plan: ArtifactYjsMutationPlan;
+  signal?: AbortSignal;
+  onConflict?: (conflict: {
+    regionId: string;
+    queuePosition: number;
+    actorKind: "human" | "ai";
+  }) => void | Promise<void>;
+  onConflictResolved?: () => void | Promise<void>;
+}) {
+  const requested = new Set(
+    params.plan.regions.map((region) => region.regionId),
+  );
+  const firstHeld = () =>
+    [...humanHeldRegions(params.provider)].find((regionId) =>
+      requested.has(regionId),
+    );
+  let occupied = firstHeld();
+  if (!occupied) return;
+  await params.onConflict?.({
+    regionId: occupied,
+    queuePosition: 1,
+    actorKind: "human",
+  });
+  let freeSince = 0;
+  while (occupied || !freeSince || Date.now() - freeSince < 1_200) {
+    const aborted = abortError(params.signal);
+    if (aborted) throw aborted;
+    // A human edit is not an AI failure. Keep the same operation queued for
+    // as long as the run remains alive; the worker heartbeat and abort signal
+    // already provide the correct lifecycle boundaries. The old 75s deadline
+    // turned an entirely healthy collaboration session into a raw red error
+    // while the person was still using the control.
+    await new Promise<void>((resolve) => setTimeout(resolve, 90));
+    occupied = firstHeld();
+    if (occupied) freeSince = 0;
+    else if (!freeSince) freeSince = Date.now();
+  }
+  await params.onConflictResolved?.();
+}
+
 async function synchronizeMutation(params: {
   document: Y.Doc;
   provider: HocuspocusProvider;
@@ -336,10 +489,29 @@ async function synchronizeMutation(params: {
     queuePosition: number;
     actorKind: "human" | "ai";
   }) => void | Promise<void>;
+  onConflictResolved?: () => void | Promise<void>;
   baseSnapshot?: ArtifactRegionSnapshot;
   proposedSnapshot?: ArtifactRegionSnapshot;
+  /**
+   * Re-read the live model after a human-held target becomes free. A queued
+   * operation may have waited through several collaborator transactions; its
+   * visible performance and conflict snapshots must start from that new truth,
+   * not from the value that existed when the model response first arrived.
+   */
+  rebaseAfterHumanWait?: () => {
+    plan: ArtifactYjsMutationPlan;
+    streamBase: ArtifactLiveValue;
+    streamBeats: readonly AiStreamBeat[];
+    baseSnapshot: ArtifactRegionSnapshot;
+    proposedSnapshot: ArtifactRegionSnapshot;
+  };
 }) {
-  if (params.plan.regions.length === 0)
+  let plan = params.plan;
+  let streamBase = params.streamBase;
+  let streamBeats = params.streamBeats;
+  let baseSnapshot = params.baseSnapshot;
+  let proposedSnapshot = params.proposedSnapshot;
+  if (plan.regions.length === 0)
     return { changedRegionIds: [] as string[] };
   const presence = params.provider.awareness?.getLocalState()?.user;
   const presenceRecord =
@@ -361,8 +533,10 @@ async function synchronizeMutation(params: {
     runId: params.runId,
     operationId: params.operationId,
   };
-  const fabricTypeKey = requireArtifactType(params.session.artifact.blueprintKey);
-  const startingRegionId = params.plan.regions[0]?.regionId;
+  const fabricTypeKey = requireArtifactType(
+    params.session.artifact.blueprintKey,
+  );
+  const startingRegionId = plan.regions[0]?.regionId;
   params.provider.setAwarenessField("user", {
     ...presenceRecord,
     ...(startingRegionId
@@ -372,17 +546,39 @@ async function synchronizeMutation(params: {
         }
       : {}),
   });
+  // Provisional human work is already real collaboration state even though it
+  // has not produced a Yjs transaction yet. Respect that exact semantic region
+  // before acquiring durable claims, otherwise AI can commit underneath a
+  // collaborator's local draft and later announce a result their blur erases.
+  await waitForHumanRegions({
+    provider: params.provider,
+    plan,
+    signal: params.signal,
+    onConflict: params.onConflict,
+    onConflictResolved: params.onConflictResolved,
+  });
+  const rebased = params.rebaseAfterHumanWait?.();
+  if (rebased) {
+    plan = rebased.plan;
+    streamBase = rebased.streamBase;
+    streamBeats = rebased.streamBeats;
+    baseSnapshot = rebased.baseSnapshot;
+    proposedSnapshot = rebased.proposedSnapshot;
+  }
+  if (plan.regions.length === 0) {
+    return { changedRegionIds: [] as string[] };
+  }
   const claims = await acquirePlanClaims({
     artifactId: params.session.artifact._id,
     clientId: params.session.clientId,
     runId: params.runId,
     operationId: params.operationId,
     baseStateVectorHash: stateVectorHash(params.document),
-    plan: params.plan,
+    plan,
     signal: params.signal,
     onConflict: params.onConflict,
-    baseSnapshot: params.baseSnapshot,
-    proposedSnapshot: params.proposedSnapshot,
+    baseSnapshot,
+    proposedSnapshot,
   });
   /** Last control the AI touched, so the settle frame lands on it. */
   let lastFramePath: string | undefined;
@@ -423,29 +619,29 @@ async function synchronizeMutation(params: {
   };
   try {
     const beats: AiStreamBeat[] =
-      params.streamBeats && params.streamBeats.length > 0
-        ? [...params.streamBeats]
+      streamBeats && streamBeats.length > 0
+        ? [...streamBeats]
         : (params.streamValues ?? []).map((value) => ({
             delayMs: 560,
             value,
             previewGesture: "typing" as const,
             cursorMode: "typing" as const,
           }));
-    let previousStream = params.streamBase;
+    let previousStream = streamBase;
     for (const [sequence, beat] of beats.entries()) {
       settleSequence = sequence + 1;
       const aborted = abortError(params.signal);
       if (aborted) throw aborted;
-      if (!params.streamBase) continue;
+      if (!streamBase) continue;
       const streamValue = beat.value;
       // Cumulative from the pre-edit baseline so peers can reconstruct the full
       // speculative document. Focus/highlight use the delta against the prior
       // frame so only the live edit lights up.
       const previewPatches = artifactLivePreviewPatches(
-        params.streamBase,
+        streamBase,
         streamValue,
       );
-      const priorStream = previousStream ?? params.streamBase;
+      const priorStream = previousStream ?? streamBase;
       const deltaPatches = artifactLivePreviewPatches(priorStream, streamValue);
       previousStream = streamValue;
       const focusPatch =
@@ -458,12 +654,11 @@ async function synchronizeMutation(params: {
       const blockMatch = focusPath.match(
         /\/(?:content\/)?blocks\/(?:id:)?([^/]+)/i,
       );
-      let blockId = blockMatch
-        ? decodeURIComponent(blockMatch[1]!)
-        : undefined;
+      let blockId = blockMatch ? decodeURIComponent(blockMatch[1]!) : undefined;
       if (blockId && /^\d+$/.test(blockId)) {
         const blocks = (
-          streamValue.content as { blocks?: Array<{ id?: unknown }> } | undefined
+          streamValue.content as
+            { blocks?: Array<{ id?: unknown }> } | undefined
         )?.blocks;
         const indexed = Array.isArray(blocks)
           ? blocks[Number(blockId)]
@@ -473,24 +668,30 @@ async function synchronizeMutation(params: {
       }
       const matchedRegion =
         (blockId
-          ? params.plan.regions.find(
+          ? plan.regions.find(
               (region) =>
                 region.regionId === blockId ||
                 region.regionId.endsWith(`:${blockId}`) ||
                 region.regionId.includes(blockId),
             )
           : undefined) ??
-        params.plan.regions.find((region) =>
+        plan.regions.find((region) =>
           focusPath.includes(region.regionId.replace(/^.*:/, "")),
         ) ??
-        params.plan.regions[0];
+        plan.regions[0];
       const activeRegionId = matchedRegion?.regionId;
-      const focusValue = focusPatch?.value;
+      // Gesture-only beats deliberately have no diff patch. They still point
+      // at a real current value; treating that as `undefined` makes an
+      // unchanged dropdown look like a newly created control.
+      const focusValue =
+        focusPatch !== undefined
+          ? focusPatch.value
+          : valueAtPath(streamValue, focusPath);
       const finalAtPath = valueAtPath(
         beats[beats.length - 1]?.value ?? streamValue,
         focusPath,
       );
-      const beforeAtPath = valueAtPath(params.streamBase, focusPath);
+      const beforeAtPath = valueAtPath(streamBase, focusPath);
       const caretAnchor =
         typeof beat.caretOffset === "number"
           ? {
@@ -526,10 +727,29 @@ async function synchronizeMutation(params: {
         selectionEnd > 0;
       // Protocol v2 frame. The act is derived from the values themselves, so
       // presence can only claim an edit that genuinely happened between beats.
-      const framePath = focusPath.startsWith("/content/")
+      const contentRelativeFramePath = focusPath.startsWith("/content/")
         ? focusPath.slice("/content".length)
         : focusPath;
+      // Document mutations are diffed by array index, but the rendered editor
+      // exposes stable block ids. Presence geometry must use the stable
+      // identity while speculation keeps its index-based JSON pointer. If the
+      // actor publishes `/blocks/1/text`, the patch can stream correctly yet
+      // the cursor has no DOM target — producing the exact split-brain
+      // experience where blue ink appears without a body or caret.
+      const framePath =
+        blockId && blockMatch
+          ? contentRelativeFramePath.replace(
+              /^\/blocks\/(?:id:)?[^/]+/i,
+              `/blocks/id:${encodeURIComponent(blockId)}`,
+            )
+          : contentRelativeFramePath;
       lastFramePath = framePath;
+      const beatAct = actForStreamBeat({
+        beat,
+        previousBeat: beats[sequence - 1],
+        before: valueAtPath(priorStream, focusPath),
+        after: focusValue,
+      });
       const interactionState = aiInteractionFrame({
         artifactId: params.session.artifact._id,
         typeKey: fabricTypeKey,
@@ -538,22 +758,26 @@ async function synchronizeMutation(params: {
         ...(activeRegionId ? { regionId: activeRegionId } : {}),
         before: valueAtPath(priorStream, focusPath),
         after: focusValue,
+        ...(beatAct ? { act: beatAct } : {}),
+        ...(beat.focusPart ? { part: beat.focusPart } : {}),
         ...(selectingLine ? { selectionEnd } : {}),
-        ...(beat.menu?.open && beat.menu.label
-          ? {
-              menu: {
-                label: beat.menu.label,
-                options: (beat.menu.options ?? []).map((option) =>
-                  typeof option === "string"
-                    ? { value: option, label: option }
-                    : option,
-                ),
-                ...(beat.menu.highlighted
-                  ? { highlighted: beat.menu.highlighted }
-                  : {}),
-              },
-            }
-          : {}),
+        ...(beat.menu === null
+          ? { menu: null }
+          : beat.menu?.open && beat.menu.label
+            ? {
+                menu: {
+                  label: beat.menu.label,
+                  options: (beat.menu.options ?? []).map((option) =>
+                    typeof option === "string"
+                      ? { value: option, label: option }
+                      : option,
+                  ),
+                  ...(beat.menu.highlighted
+                    ? { highlighted: beat.menu.highlighted }
+                    : {}),
+                },
+              }
+            : {}),
         sequence,
         patches: previewPatches.map((patch) => ({
           path: patch.path,
@@ -678,7 +902,11 @@ async function synchronizeMutation(params: {
             sequence % 3 === 0) &&
           stagedPaths.length > 0
         ) {
-          void convexMutation("spectraArtifacts:stageAiPatch", {
+          // Keep the durable preview ledger ordered with the awareness body.
+          // Fire-and-forget writes could arrive after a later frame (or even
+          // after settle), making the thread announce "updating" once the
+          // visible gesture had already completed.
+          await convexMutation("spectraArtifacts:stageAiPatch", {
             artifactId: params.session.artifact._id,
             runId: params.runId,
             executionId: params.executionId,
@@ -693,7 +921,7 @@ async function synchronizeMutation(params: {
         }
       }
     }
-    params.document.transact(params.plan.apply, {
+    params.document.transact(plan.apply, {
       kind: "spectra-ai-operation",
       runId: params.runId,
       operationId: params.operationId,
@@ -725,8 +953,8 @@ async function synchronizeMutation(params: {
           typeKey: fabricTypeKey,
           actor: fabricActor,
           path: settledPath,
-          ...(params.plan.regions[0]?.regionId
-            ? { regionId: params.plan.regions[0].regionId }
+          ...(plan.regions[0]?.regionId
+            ? { regionId: plan.regions[0].regionId }
             : {}),
           before: undefined,
           after: undefined,
@@ -736,7 +964,7 @@ async function synchronizeMutation(params: {
       await new Promise<void>((resolve) => setTimeout(resolve, 420));
     }
     return {
-      changedRegionIds: params.plan.regions.map((region) => region.regionId),
+      changedRegionIds: plan.regions.map((region) => region.regionId),
     };
   } catch (error) {
     await releaseClaims(claims, params.session.clientId, "cancel");
@@ -835,12 +1063,24 @@ export async function applyAiArtifactMutation(params: {
     queuePosition: number;
     actorKind: "human" | "ai";
   }) => void | Promise<void>;
+  onConflictResolved?: () => void | Promise<void>;
   collaborationClientId?: string;
   checkpointBeforeAi?: boolean;
 }) {
+  // The browser client id identifies the owner/viewer, not the AI body. Reusing
+  // it for the worker makes every observer with that id discard the AI cursor
+  // as its own local presence. This is especially easy to trigger on queued
+  // continuation, where the human id is deliberately carried into the resume
+  // request. Keep attribution in `ownerAccountId`, but give every operation a
+  // distinct collaboration transport identity.
+  const ownerClientHint = params.collaborationClientId?.trim()
+    ? `:${params.collaborationClientId.trim().slice(0, 36)}`
+    : "";
   const clientId =
-    params.collaborationClientId?.trim().slice(0, 180) ||
-    `ai:${params.runId}:${params.operationId}:${randomUUID()}`.slice(0, 180);
+    `ai:${params.runId}:${params.operationId}${ownerClientHint}:${randomUUID()}`.slice(
+      0,
+      180,
+    );
   const session = await createCollaborationSession(params.artifactId, clientId);
   const typeKey = requireArtifactType(session.artifact.blueprintKey);
   const document = new Y.Doc();
@@ -985,6 +1225,7 @@ export async function applyAiArtifactMutation(params: {
         getConnectionError: () => connectionError,
         signal: params.signal,
         onConflict: params.onConflict,
+        onConflictResolved: params.onConflictResolved,
         baseSnapshot: snapshotArtifactRegions(
           typeKey,
           baseline,
@@ -1003,27 +1244,32 @@ export async function applyAiArtifactMutation(params: {
         "AI_ARTIFACT_INITIALIZATION_FAILED: The live artifact model is unavailable.",
       );
 
-    const desired = params.resolveDesired(current);
-    const desiredContent = normalizeArtifactContent(typeKey, desired.content);
-    const validated = validateArtifactContent(typeKey, desiredContent);
-    if (!validated.success) {
-      const issue = validated.error.issues[0];
-      const path = issue?.path?.length ? issue.path.join(".") : "";
-      const detail = issue?.message ?? "The edited artifact is invalid.";
-      throw new Error(
-        path
-          ? `AI_ARTIFACT_SCHEMA_INVALID: Invalid input at ${path}: ${detail}`
-          : `AI_ARTIFACT_SCHEMA_INVALID: ${detail}`,
-      );
-    }
-    const normalizedDesired: ArtifactLiveValue = {
-      title: desired.title.trim() || "Untitled artifact",
-      ...(desired.summary?.trim() ? { summary: desired.summary.trim() } : {}),
-      tags: [
-        ...new Set(desired.tags.map((tag) => tag.trim()).filter(Boolean)),
-      ].slice(0, 80),
-      content: validated.data,
+    const resolveValidatedValue = (
+      base: ArtifactLiveValue,
+    ): ArtifactLiveValue => {
+      const desired = params.resolveDesired(base);
+      const desiredContent = normalizeArtifactContent(typeKey, desired.content);
+      const validated = validateArtifactContent(typeKey, desiredContent);
+      if (!validated.success) {
+        const issue = validated.error.issues[0];
+        const path = issue?.path?.length ? issue.path.join(".") : "";
+        const detail = issue?.message ?? "The edited artifact is invalid.";
+        throw new Error(
+          path
+            ? `AI_ARTIFACT_SCHEMA_INVALID: Invalid input at ${path}: ${detail}`
+            : `AI_ARTIFACT_SCHEMA_INVALID: ${detail}`,
+        );
+      }
+      return {
+        title: desired.title.trim() || "Untitled artifact",
+        ...(desired.summary?.trim() ? { summary: desired.summary.trim() } : {}),
+        tags: [
+          ...new Set(desired.tags.map((tag) => tag.trim()).filter(Boolean)),
+        ].slice(0, 80),
+        content: validated.data,
+      };
     };
+    const normalizedDesired = resolveValidatedValue(current);
     const initialPlan = planArtifactYjsMutation(
       document,
       typeKey,
@@ -1058,37 +1304,7 @@ export async function applyAiArtifactMutation(params: {
     // an earlier database projection.
     const refreshed = readArtifactYjsDocument(document, typeKey);
     if (!refreshed) throw new Error("AI_ARTIFACT_LIVE_STATE_LOST");
-    const refreshedDesired = params.resolveDesired(refreshed);
-    const refreshedContent = normalizeArtifactContent(
-      typeKey,
-      refreshedDesired.content,
-    );
-    const refreshedValidation = validateArtifactContent(
-      typeKey,
-      refreshedContent,
-    );
-    if (!refreshedValidation.success) {
-      const issue = refreshedValidation.error.issues[0];
-      const path = issue?.path?.length ? issue.path.join(".") : "";
-      const detail = issue?.message ?? "The edited artifact is invalid.";
-      throw new Error(
-        path
-          ? `AI_ARTIFACT_SCHEMA_INVALID: Invalid input at ${path}: ${detail}`
-          : `AI_ARTIFACT_SCHEMA_INVALID: ${detail}`,
-      );
-    }
-    const refreshedValue: ArtifactLiveValue = {
-      title: refreshedDesired.title.trim() || "Untitled artifact",
-      ...(refreshedDesired.summary?.trim()
-        ? { summary: refreshedDesired.summary.trim() }
-        : {}),
-      tags: [
-        ...new Set(
-          refreshedDesired.tags.map((tag) => tag.trim()).filter(Boolean),
-        ),
-      ].slice(0, 80),
-      content: refreshedValidation.data,
-    };
+    const refreshedValue = resolveValidatedValue(refreshed);
     const refreshedPlan = planArtifactYjsMutation(
       document,
       typeKey,
@@ -1114,6 +1330,7 @@ export async function applyAiArtifactMutation(params: {
       getConnectionError: () => connectionError,
       signal: params.signal,
       onConflict: params.onConflict,
+      onConflictResolved: params.onConflictResolved,
       baseSnapshot: snapshotArtifactRegions(
         typeKey,
         refreshed,
@@ -1124,6 +1341,34 @@ export async function applyAiArtifactMutation(params: {
         refreshedValue,
         changedRegionIds,
       ),
+      rebaseAfterHumanWait: () => {
+        const liveBase = readArtifactYjsDocument(document, typeKey);
+        if (!liveBase) throw new Error("AI_ARTIFACT_LIVE_STATE_LOST");
+        const liveDesired = resolveValidatedValue(liveBase);
+        const livePlan = planArtifactYjsMutation(
+          document,
+          typeKey,
+          liveDesired,
+        );
+        const liveRegionIds = livePlan.regions.map(
+          (region) => region.regionId,
+        );
+        return {
+          plan: livePlan,
+          streamBase: liveBase,
+          streamBeats: buildArtifactLivePreviewBeats(liveBase, liveDesired),
+          baseSnapshot: snapshotArtifactRegions(
+            typeKey,
+            liveBase,
+            liveRegionIds,
+          ),
+          proposedSnapshot: snapshotArtifactRegions(
+            typeKey,
+            liveDesired,
+            liveRegionIds,
+          ),
+        };
+      },
     });
     return { artifactId: params.artifactId, ...result };
   } finally {

@@ -91,6 +91,9 @@ export function formatPlanApplicationPublicError(error: unknown) {
   if (error instanceof SyntaxError)
     return "I couldn't finish that response yet. Your work is unchanged, and you can try once more.";
   const message = error instanceof Error ? error.message : "Spectra run failed.";
+  if (/AI_ARTIFACT_REGION_BUSY/i.test(message)) {
+    return "That control is still being edited. Spectra left it untouched; finish the active edit and retry.";
+  }
   if (
     /\b(artifactId|workspaceId|threadId|plannerItemId|operationId|sourceId|targetId|object ID|database id|owned id)\b/i.test(
       message,

@@ -32,7 +32,6 @@ const quizQuestionSchema = z
           })
           .strict(),
       )
-      .min(2)
       .max(100)
       .optional(),
     explanation: z.string().optional(),
@@ -66,55 +65,11 @@ const quizQuestionSchema = z
       .strict()
       .optional(),
   })
-  .passthrough()
-  .superRefine((question, ctx) => {
-    if (
-      question.type === "short_answer" ||
-      question.type === "numeric" ||
-      question.type === "fill_blank" ||
-      question.type === "long_response"
-    )
-      return;
-    if (question.type === "matching") {
-      if ((question.matchingPairs ?? []).length < 2)
-        ctx.addIssue({
-          code: "custom",
-          path: ["matchingPairs"],
-          message: "Matching questions require at least two complete pairs",
-        });
-      return;
-    }
-    const options = (question.options ?? [])
-      .map((option) => option.trim())
-      .filter(Boolean);
-    if (options.length < 2)
-      ctx.addIssue({
-        code: "custom",
-        path: ["options"],
-        message: "Choice and ordering questions require at least two options",
-      });
-    if (
-      (question.type === "multiple_choice" || question.type === "true_false") &&
-      options.length > 0 &&
-      !options.includes(question.correctAnswer)
-    ) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["correctAnswer"],
-        message: "The correct answer must match one of the options",
-      });
-    }
-    if (question.type === "select_all") {
-      const answers = question.correctAnswers ?? [];
-      if (answers.some((answer) => !options.includes(answer))) {
-        ctx.addIssue({
-          code: "custom",
-          path: ["correctAnswers"],
-          message: "Every correct answer must match an option",
-        });
-      }
-    }
-  });
+  // Quiz artifacts are collaborative drafts. Incomplete options, answers, and
+  // matching pairs must remain synchronizable while a human or AI is visibly
+  // composing them. Publish-time completeness is enforced by
+  // validateQuizForPublishing instead of rejecting intermediate live state.
+  .passthrough();
 
 export const quizContentSchema = z
   .object({

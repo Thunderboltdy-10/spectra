@@ -172,6 +172,7 @@ describe("planChoreography", () => {
   it("streams whole-cell sheet patches through the native grid-cell value", () => {
     const plan = planChoreography({
       target: {
+        artifactId: "art-1",
         path: "/sheets/id:sheet-1/cells/B4",
         primitive: "gridCell",
         label: "Cell B4",

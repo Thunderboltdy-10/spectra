@@ -74,6 +74,7 @@ import {
   CommandBarMenuItem,
   CommandBarSubmenu,
 } from "../components/command-bar";
+import { ComposerArtifactDock } from "../components/composer-artifact-dock";
 import {
   ContextFocusControl,
   GlobalSearch,
@@ -3210,6 +3211,7 @@ export function WorkspaceShell() {
     }>
   >([]);
   const restoringNavRef = useRef(false);
+  const skipAutoContinueThreadIdRef = useRef<string | null>(null);
   const [studioPanelWidth, setStudioPanelWidth] = useState(720);
   const [liveThreadPanelWidth, setLiveThreadPanelWidth] = useState(480);
   const [pendingCreateType, setPendingCreateType] =
@@ -3608,7 +3610,9 @@ export function WorkspaceShell() {
   );
   const setLiveThread = useCallback(
     (thread: { id: string; title: string } | null) => {
-      if (thread)
+      if (thread) {
+        if (skipAutoContinueThreadIdRef.current !== thread.id)
+          skipAutoContinueThreadIdRef.current = null;
         openObject({
           type: "thread",
           id: thread.id,
@@ -3616,7 +3620,7 @@ export function WorkspaceShell() {
           presentation: "thread-panel",
           workspaceId: selectedWorkspaceId,
         });
-      else closePresentation("thread-panel");
+      } else closePresentation("thread-panel");
     },
     [closePresentation, openObject, selectedWorkspaceId],
   );
@@ -3652,9 +3656,10 @@ export function WorkspaceShell() {
   } = useSpectraContext(allArtifacts, workspaces);
   useEffect(() => {
     if (!liveThread) return;
-    // An open conversation is the active conversational context. Requiring a
-    // second tiny toggle made consecutive sends race between "new" and
-    // "continued", producing temporary tabs and surprise fresh threads.
+    // An open conversation is the active conversational context by default.
+    // If the user explicitly stops continuing while keeping the panel open,
+    // respect that until they re-select continue or open another thread.
+    if (skipAutoContinueThreadIdRef.current === liveThread.id) return;
     setComposerThread((current) =>
       current?.id === liveThread.id
         ? current
@@ -3767,10 +3772,14 @@ export function WorkspaceShell() {
   useEffect(() => {
     const focusedArtifactId = commandFocusArtifact?._id;
     if (!composerThread || !focusedArtifactId) return;
+    // Only auto-scope when this conversation already belongs to an artifact.
+    // Opening a free-standing thread beside an artifact must not close the panel.
+    if (!composerThread.artifactId) return;
     let disposed = false;
     void getSpectraThread(composerThread.id)
       .then(({ thread }) => {
         if (disposed) return;
+        if (!thread.artifactId) return;
         if (thread.artifactId === focusedArtifactId) {
           if (composerThread.artifactId !== focusedArtifactId)
             setComposerThread((current) =>
@@ -3783,7 +3792,6 @@ export function WorkspaceShell() {
         // A conversation follows its artifact automatically, but it never
         // silently follows the user into a different artifact.
         setComposerThread(null);
-        setLiveThread(null);
       })
       .catch(() => undefined);
     return () => {
@@ -3794,7 +3802,6 @@ export function WorkspaceShell() {
     composerThread?.id,
     composerThread?.artifactId,
     setComposerThread,
-    setLiveThread,
   ]);
   useEffect(() => {
     setVisibleObjects([
@@ -6103,11 +6110,26 @@ export function WorkspaceShell() {
           <div className="pointer-events-none absolute bottom-0 left-0 right-[var(--spectra-studio-width,0px)] z-[220] bg-transparent px-2 pb-3 pt-2 sm:px-5 sm:pb-5 lg:px-8 min-[1920px]:right-0">
             <div className="pointer-events-auto mx-auto max-w-[880px]">
               <div ref={setAttachmentsHost} />
+              <ComposerArtifactDock
+                artifacts={allArtifacts}
+                cards={runEngine.cards}
+                assistantContent={
+                  runEngine.liveExchange?.content ??
+                  runEngine.cards[0]?.summary
+                }
+                onOpen={(artifactId) => {
+                  const artifact = allArtifacts.find(
+                    (item) => item._id === artifactId,
+                  );
+                  if (artifact) openArtifactPanel(artifact);
+                }}
+              />
               <DurableRunTabs
                 workspaceId={selectedWorkspaceId}
                 optimistic={runEngine.liveExchange}
                 openThreadId={liveThread?.id}
                 onOpen={(_runId, threadId, title, artifactId) => {
+                  skipAutoContinueThreadIdRef.current = null;
                   setActiveRunPanelId(null);
                   setLiveThread({ id: threadId, title });
                   setComposerThread({
@@ -6124,8 +6146,9 @@ export function WorkspaceShell() {
                   }
                 }}
                 onDeselect={() => {
+                  if (liveThread)
+                    skipAutoContinueThreadIdRef.current = liveThread.id;
                   setComposerThread(null);
-                  setLiveThread(null);
                 }}
                 onStop={(runId) => runEngine.stop(runId)}
                 onRetry={(runId) => void runEngine.retry(runId)}
@@ -6260,8 +6283,11 @@ export function WorkspaceShell() {
               onContinue={() => {
                 void (async () => {
                   if (composerThread?.id === liveThread.id) {
+                    skipAutoContinueThreadIdRef.current = liveThread.id;
+                    setComposerThread(null);
                     return;
                   }
+                  skipAutoContinueThreadIdRef.current = null;
                   try {
                     const result = await postSpectra<{
                       runId?: string;

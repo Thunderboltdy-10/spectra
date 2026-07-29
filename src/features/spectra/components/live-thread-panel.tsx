@@ -76,19 +76,10 @@ export function LiveThreadPanel({
             <Crosshair className="h-3.5 w-3.5" />
             <span>{follow.following ? "Following" : "Follow AI"}</span>
           </button>
-          {continuing ? (
-            <span
-              className="spectra-icon-action text-[var(--accent-cyan)]"
-              aria-label="Messages automatically continue this thread"
-              data-tooltip="Messages continue here"
-              title="The next message continues this conversation"
-            >
-              <MessageSquare className="h-4 w-4" />
-            </span>
-          ) : onContinue ? (
+          {onContinue || continuing ? (
             <button
               type="button"
-              onClick={onContinue}
+              onClick={() => onContinue?.()}
               className={`spectra-icon-action ${continuing ? "text-[var(--accent-cyan)]" : "text-[var(--text-secondary)] hover:text-[var(--accent-cyan)]"}`}
               aria-label={
                 continuing

@@ -151,6 +151,7 @@ export function coerceCommonPlanSchemaSlips(value: unknown) {
     "conversationSummary",
     "choices",
     "finalResponse",
+    "presentedArtifactIds",
     "operations",
   ]);
   const plan: Record<string, unknown> = {};
@@ -167,6 +168,7 @@ export function coerceCommonPlanSchemaSlips(value: unknown) {
       : "Done.";
   }
   if (!Array.isArray(plan.operations)) plan.operations = [];
+  if (!Array.isArray(plan.presentedArtifactIds)) plan.presentedArtifactIds = [];
   if (plan.choices === undefined) plan.choices = null;
   if (plan.conversationTitle === undefined) plan.conversationTitle = null;
   if (

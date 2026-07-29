@@ -13440,19 +13440,11 @@ button[data-spectra-context-trigger="true"]::after {
 }
 
 .spectra-conversation {
-  background-image:
-    linear-gradient(
-      90deg,
-      transparent calc(50% - 411px),
-      color-mix(in oklab, var(--border-default) 18%, transparent)
-        calc(50% - 410px),
-      transparent calc(50% - 409px)
-    ),
-    radial-gradient(
-      circle at 50% -12%,
-      color-mix(in oklab, var(--accent-cyan) 5%, transparent),
-      transparent 35%
-    );
+  background-image: radial-gradient(
+    circle at 50% -12%,
+    color-mix(in oklab, var(--accent-cyan) 5%, transparent),
+    transparent 35%
+  );
 }
 
 /* Code and interactive visualisation studio -------------------------------- */
@@ -14655,30 +14647,15 @@ body {
 /* Shared Spectra redesign polish — transitions, composer, rails. */
 .spectra-command-bar {
   border-radius: 18px !important;
-  border: 1px solid var(--border-default) !important;
-  background: color-mix(
-    in oklab,
-    var(--bg-elevated) 92%,
-    transparent
-  ) !important;
-  box-shadow:
-    0 10px 36px -18px rgba(41, 34, 27, 0.35),
-    0 1px 2px rgba(41, 34, 27, 0.04) !important;
-  backdrop-filter: blur(16px);
-  transition:
-    box-shadow var(--motion-base) var(--ease-standard),
-    border-color var(--motion-fast) var(--ease-standard);
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none;
 }
 
 .spectra-command-bar:focus-within {
-  border-color: color-mix(
-    in oklab,
-    var(--brand-primary) 42%,
-    var(--border-default)
-  ) !important;
-  box-shadow:
-    0 14px 40px -16px rgba(41, 34, 27, 0.4),
-    0 0 0 3px color-mix(in oklab, var(--brand-primary) 14%, transparent) !important;
+  border: 0 !important;
+  box-shadow: none !important;
 }
 
 .spectra-wave-y a,

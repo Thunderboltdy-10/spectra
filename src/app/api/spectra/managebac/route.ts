@@ -237,6 +237,12 @@ function officialPersonalCapabilities() {
           grade: ["grade.name", "year_group.name", "grade", "year"],
           level: ["level.name", "level"],
           classId: ["uniq_class_id", "class_id", "id"],
+          yearGroupId: [
+            "year_group.id",
+            "year_group_id",
+            "grade.id",
+            "grade_id",
+          ],
           updatedAt: "updated_at",
         },
       },
@@ -303,6 +309,82 @@ function officialPersonalCapabilities() {
         classification: "personal",
         audienceScope: "mapped_user",
         fields: {},
+      },
+    },
+    {
+      ...shared,
+      category: "Resources",
+      name: "Resources for my classes",
+      recordType: "class_resource",
+      path: "/v2p2/classes/{class_id}/resources",
+      purpose:
+        "Retrieve class resources only for classes discovered through the signed-in student's memberships.",
+      pagination: "page" as const,
+      changeStrategy: "full_reconciliation",
+      responseSchemaHash: digest({ resources: [{ id: "number" }] }),
+      normalization: {
+        fanOutParameter: "class_id",
+        classIdFromRouteParameter: "class_id",
+        recordsPath: ["resources", "files", "items", "documents"],
+        idPath: "id",
+        modifiedAtPath: "updated_at",
+        pageParameter: "page",
+        nextCursorPath: "meta.next_page",
+        cursorParameter: "page",
+        requiredPaths: ["id"],
+        recordKeyTemplate: "resource:{id}",
+        classification: "personal",
+        audienceScope: "mapped_user",
+        fields: {
+          title: ["title", "name", "filename", "file_name"],
+          description: ["description", "notes", "body"],
+          url: ["url", "download_url", "file_url", "link"],
+          className: ["class_name", "class.title"],
+          updatedAt: "updated_at",
+        },
+      },
+    },
+    {
+      ...shared,
+      category: "CAS",
+      name: "My CAS experiences",
+      recordType: "cas_experience",
+      path: "/v2p2/year-groups/{year_group_id}/projects/cas/experiences/students?student_ids={student_id}",
+      purpose:
+        "Retrieve CAS experiences for the signed-in student within their year group.",
+      personalIdParameter: "student_id",
+      pagination: "page" as const,
+      changeStrategy: "full_reconciliation",
+      responseSchemaHash: digest({
+        students: [{ id: "number", experiences: [{ id: "number" }] }],
+      }),
+      normalization: {
+        fanOutParameter: "year_group_id",
+        fanOutSource: "year_group",
+        recordsPath: ["students", "experiences", "cas_experiences", "items"],
+        idPath: "id",
+        modifiedAtPath: "updated_at",
+        pageParameter: "page",
+        nextCursorPath: "meta.next_page",
+        cursorParameter: "page",
+        requiredPaths: ["id"],
+        recordKeyTemplate: "cas_experience:{id}",
+        classification: "personal",
+        audienceScope: "mapped_user",
+        fields: {
+          title: ["name", "title"],
+          description: ["description", "notes", "reflection"],
+          status: ["status", "progress.title", "approval_status"],
+          startAt: ["start_date", "starts_at"],
+          endAt: ["end_date", "ends_at"],
+          creativity: "creativity",
+          activity: "activity",
+          service: "service",
+          creativityHours: "creativity_hours",
+          activityHours: "activity_hours",
+          serviceHours: "service_hours",
+          updatedAt: "updated_at",
+        },
       },
     },
   ];
@@ -1071,6 +1153,7 @@ async function runSync(
   );
   let lastProviderRequestAt = 0;
   const accessibleClassIds = new Set<string>();
+  const accessibleYearGroupIds = new Set<string>();
   const pacedFetch = async (
     capability: ConnectorContext["capabilities"][number],
     input: Parameters<typeof providerFetch>[3],
@@ -1149,9 +1232,14 @@ async function runSync(
         capabilityConfig.fanOutParameter,
         120,
       );
+      const fanOutSource = string(capabilityConfig.fanOutSource, 120);
+      const fanOutIds =
+        fanOutSource === "year_group"
+          ? accessibleYearGroupIds
+          : accessibleClassIds;
       const routeBindings = fanOutParameter
-        ? [...accessibleClassIds].map((classId) => ({
-            [fanOutParameter]: classId,
+        ? [...fanOutIds].map((value) => ({
+            [fanOutParameter]: value,
           }))
         : [{} as Record<string, string>];
       if (fanOutParameter && routeBindings.length === 0) {
@@ -1160,7 +1248,10 @@ async function runSync(
           name: capability.name,
           pages: 0,
           records: 0,
-          skipped: "No verified class membership targets this route.",
+          skipped:
+            fanOutSource === "year_group"
+              ? "No verified year group targets this route yet."
+              : "No verified class membership targets this route.",
         });
         continue;
       }
@@ -1189,6 +1280,20 @@ async function runSync(
               seen.add(item.providerRecordKey);
               if (item.providerClassId)
                 accessibleClassIds.add(item.providerClassId);
+              const normalizedRecord =
+                item.normalized &&
+                typeof item.normalized === "object" &&
+                !Array.isArray(item.normalized)
+                  ? (item.normalized as Record<string, unknown>)
+                  : null;
+              const yearGroupId = identifier(
+                normalizedRecord?.yearGroupId ??
+                  normalizedRecord?.year_group_id ??
+                  normalizedRecord?.grade,
+                500,
+              );
+              if (yearGroupId && /^\d+$/.test(yearGroupId))
+                accessibleYearGroupIds.add(yearGroupId);
             }
             const commitPayload = {
               capabilityId: capability._id,

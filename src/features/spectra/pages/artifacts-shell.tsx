@@ -63,6 +63,7 @@ import {
   CommandBarMenuItem,
   CommandBarSubmenu,
 } from "../components/command-bar";
+import { ComposerArtifactDock } from "../components/composer-artifact-dock";
 import {
   ContextFocusControl,
   GlobalSearch,
@@ -269,8 +270,10 @@ export function ArtifactsShell() {
     setVisibleArtifactIds,
     setActiveWorkspaceContext,
   } = useSpectraContext(allArtifacts, workspaces);
+  const skipAutoContinueThreadIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (!liveThread) return;
+    if (skipAutoContinueThreadIdRef.current === liveThread.id) return;
     setComposerThread((current) =>
       current?.id === liveThread.id
         ? current
@@ -300,24 +303,28 @@ export function ArtifactsShell() {
   );
   const setLiveThread = useCallback(
     (thread: { id: string; title: string } | null) => {
-      if (thread)
+      if (thread) {
+        if (skipAutoContinueThreadIdRef.current !== thread.id)
+          skipAutoContinueThreadIdRef.current = null;
         openObject({
           type: "thread",
           id: thread.id,
           label: thread.title,
           presentation: "thread-panel",
         });
-      else closePresentation("thread-panel");
+      } else closePresentation("thread-panel");
     },
     [closePresentation, openObject],
   );
   useEffect(() => {
     const focusedArtifactId = studio.activeArtifact?._id;
     if (!composerThread || !focusedArtifactId) return;
+    if (!composerThread.artifactId) return;
     let disposed = false;
     void getSpectraThread(composerThread.id)
       .then(({ thread }) => {
         if (disposed) return;
+        if (!thread.artifactId) return;
         if (thread.artifactId === focusedArtifactId) {
           if (composerThread.artifactId !== focusedArtifactId)
             setComposerThread((current) =>
@@ -328,7 +335,6 @@ export function ArtifactsShell() {
           return;
         }
         setComposerThread(null);
-        setLiveThread(null);
       })
       .catch(() => undefined);
     return () => {
@@ -338,7 +344,6 @@ export function ArtifactsShell() {
     composerThread?.artifactId,
     composerThread?.id,
     setComposerThread,
-    setLiveThread,
     studio.activeArtifact?._id,
   ]);
   const tiledArtifacts = useMemo(
@@ -1798,11 +1803,26 @@ export function ArtifactsShell() {
           >
             <div className="pointer-events-auto mx-auto max-w-[880px]">
               <div ref={setAttachmentsHost} />
+              <ComposerArtifactDock
+                artifacts={allArtifacts}
+                cards={runEngine.cards}
+                assistantContent={
+                  runEngine.liveExchange?.content ??
+                  runEngine.cards[0]?.summary
+                }
+                onOpen={(artifactId) => {
+                  const artifact = allArtifacts.find(
+                    (item) => item._id === artifactId,
+                  );
+                  if (artifact) openArtifactSurface(artifact);
+                }}
+              />
               <DurableRunTabs
                 workspaceId={selectedWorkspaceId || undefined}
                 optimistic={runEngine.liveExchange}
                 openThreadId={liveThread?.id}
                 onOpen={(_runId, threadId, title, artifactId) => {
+                  skipAutoContinueThreadIdRef.current = null;
                   setActiveRunPanelId(null);
                   setLiveThread({ id: threadId, title });
                   setComposerThread({
@@ -1819,8 +1839,9 @@ export function ArtifactsShell() {
                   }
                 }}
                 onDeselect={() => {
+                  if (liveThread)
+                    skipAutoContinueThreadIdRef.current = liveThread.id;
                   setComposerThread(null);
-                  setLiveThread(null);
                 }}
                 onStop={(runId) => runEngine.stop(runId)}
                 onRetry={(runId) => void runEngine.retry(runId)}
@@ -1951,8 +1972,11 @@ export function ArtifactsShell() {
               onContinue={() => {
                 void (async () => {
                   if (composerThread?.id === liveThread.id) {
+                    skipAutoContinueThreadIdRef.current = liveThread.id;
+                    setComposerThread(null);
                     return;
                   }
+                  skipAutoContinueThreadIdRef.current = null;
                   try {
                     const result = await postSpectra<{
                       runId?: string;

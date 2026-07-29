@@ -417,6 +417,7 @@ export const spectraPlanSchema = z
       .nullable()
       .optional(),
     finalResponse: z.string().trim().min(1).max(4_000),
+    presentedArtifactIds: z.array(idText).max(8).optional().default([]),
     operations: z.array(modelOperationSchema),
   })
   .strict()
@@ -1082,6 +1083,7 @@ export const SPECTRA_PLAN_JSON_SCHEMA = {
     "choices",
     "progressUpdates",
     "finalResponse",
+    "presentedArtifactIds",
     "operations",
   ],
   properties: {
@@ -1356,5 +1358,10 @@ export const SPECTRA_PLAN_JSON_SCHEMA = {
       },
     },
     finalResponse: { type: "string", minLength: 1, maxLength: 4000 },
+    presentedArtifactIds: {
+      type: "array",
+      items: { type: "string" },
+      maxItems: 8,
+    },
   },
 } as const;

@@ -340,6 +340,7 @@ export const beginRun = mutation({
     }
     const workspaceItemId = await ensureThreadWorkspacePlacement(ctx, {
       threadId,
+      ownerAccountId: actor._id,
       workspaceId,
       summary: "Conversation in progress",
       // A conversation belongs in its workspace immediately, but ordinary

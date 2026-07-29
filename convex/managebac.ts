@@ -1371,6 +1371,7 @@ export const beginSync = mutation({
 export const requestAiRefresh = mutation({
   args: {
     reason: v.optional(v.string()),
+    force: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx);
@@ -1382,7 +1383,7 @@ export const requestAiRefresh = mutation({
         reason: "not_connected" as const,
       };
     const now = Date.now();
-    const cooldownMs = 15 * 60_000;
+    const cooldownMs = args.force ? 2 * 60_000 : 15 * 60_000;
     if (integration.lastSyncAt && now - integration.lastSyncAt < cooldownMs)
       return {
         started: false,
@@ -3234,23 +3235,47 @@ export const recordsForPurpose = query({
           timestampValue(normalized.dueAt ?? normalized.deadlineAt) ??
           timestampValue(normalized.startAt ?? normalized.start) ??
           null;
+        // Upcoming deadlines default to "now onward" so stale historical tasks
+        // do not crowd out current ManageBac work when the model omits a range.
+        const effectiveFrom =
+          args.from ??
+          (args.purpose === "upcoming_deadlines"
+            ? Date.now() - 2 * 24 * 60 * 60_000
+            : undefined);
         return (
           timestamp === null ||
-          ((args.from === undefined || timestamp >= args.from) &&
+          ((effectiveFrom === undefined || timestamp >= effectiveFrom) &&
             (args.to === undefined || timestamp <= args.to))
         );
       })
       .sort((a, b) => {
         const left = record(a.normalized);
         const right = record(b.normalized);
+        const leftTs =
+          timestampValue(left.dueAt ?? left.startAt ?? left.start) ??
+          Number.MAX_SAFE_INTEGER;
+        const rightTs =
+          timestampValue(right.dueAt ?? right.startAt ?? right.start) ??
+          Number.MAX_SAFE_INTEGER;
+        if (args.purpose === "upcoming_deadlines") return leftTs - rightTs;
+        // Prefer freshest provider updates for CAS/classes/resources.
         return (
-          (timestampValue(left.dueAt ?? left.startAt ?? left.start) ??
-            Number.MAX_SAFE_INTEGER) -
-          (timestampValue(right.dueAt ?? right.startAt ?? right.start) ??
-            Number.MAX_SAFE_INTEGER)
+          (b.sourceModifiedAt ?? b.fetchedAt ?? 0) -
+          (a.sourceModifiedAt ?? a.fetchedAt ?? 0)
         );
       })
       .slice(0, Math.max(1, Math.min(args.limit ?? 50, 200)));
+    const staleByAge =
+      !integration.lastSyncAt ||
+      Date.now() - integration.lastSyncAt >
+        integration.freshnessSlaMinutes * 60_000;
+    // Empty CAS/deadlines while connected usually means the cache never
+    // ingested those routes — treat as stale so the AI can refresh.
+    const staleByEmptyPurpose =
+      limited.length === 0 &&
+      (args.purpose === "cas" ||
+        args.purpose === "upcoming_deadlines" ||
+        args.purpose === "class_resources");
     return {
       connected: true,
       records: limited.map((item) => ({
@@ -3262,10 +3287,7 @@ export const recordsForPurpose = query({
         fetchedAt: item.fetchedAt,
         provenanceUrl: item.provenanceUrl,
       })),
-      stale:
-        !integration.lastSyncAt ||
-        Date.now() - integration.lastSyncAt >
-          integration.freshnessSlaMinutes * 60_000,
+      stale: staleByAge || staleByEmptyPurpose,
       provenance: {
         provider: "ManageBac",
         lastSyncAt: integration.lastSyncAt,

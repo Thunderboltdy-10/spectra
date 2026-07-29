@@ -590,11 +590,6 @@ export function CommandBar({
             placeholder={placeholder}
             className="max-h-32 min-h-9 min-w-0 flex-1 resize-none overflow-y-auto bg-transparent px-2 py-2 text-[13.5px] leading-5 text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
           />
-          {!value.trim() ? (
-            <span className="pointer-events-none mb-1.5 hidden shrink-0 items-center gap-1 self-end rounded-[5px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--text-tertiary)] sm:flex">
-              ⌘ K
-            </span>
-          ) : null}
           {busy && onStop ? (
             <button
               type="button"

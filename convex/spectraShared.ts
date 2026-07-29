@@ -702,22 +702,68 @@ export function finalizeArtifactSummary(params: {
   }
 }
 
+export async function resolveThreadWorkspaceId(
+  ctx: Pick<MutationCtx, "db">,
+  params: {
+    ownerAccountId: Id<"accounts">;
+    workspaceId?: Id<"spectraWorkspaces">;
+  },
+) {
+  if (params.workspaceId) {
+    const workspace = await ctx.db.get(params.workspaceId);
+    if (
+      workspace &&
+      workspace.ownerAccountId === params.ownerAccountId &&
+      workspace.status === "active"
+    )
+      return workspace._id;
+  }
+  const recent = await ctx.db
+    .query("spectraWorkspaces")
+    .withIndex("by_account_activity", (q) =>
+      q.eq("ownerAccountId", params.ownerAccountId),
+    )
+    .order("desc")
+    .take(12);
+  return (
+    recent.find((workspace) => workspace.status === "active")?._id ?? undefined
+  );
+}
+
 export async function ensureThreadWorkspacePlacement(
   ctx: Pick<MutationCtx, "db">,
   params: {
     threadId: Id<"spectraThreads">;
+    ownerAccountId?: Id<"accounts">;
     workspaceId?: Id<"spectraWorkspaces">;
     summary?: string;
     pinned?: boolean;
   },
 ) {
-  if (!params.workspaceId) return undefined;
+  const thread = await ctx.db.get(params.threadId);
+  if (!thread || thread.status === "deleted") return undefined;
+  const workspaceId =
+    params.workspaceId ??
+    thread.workspaceId ??
+    (params.ownerAccountId
+      ? await resolveThreadWorkspaceId(ctx, {
+          ownerAccountId: params.ownerAccountId,
+          workspaceId: undefined,
+        })
+      : undefined);
+  if (!workspaceId) return undefined;
+  if (thread.workspaceId !== workspaceId) {
+    await ctx.db.patch(params.threadId, {
+      workspaceId,
+      updatedAt: Date.now(),
+    });
+  }
   const now = Date.now();
   const existing = await ctx.db
     .query("spectraWorkspaceItems")
     .withIndex("by_workspace_source", (q) =>
       q
-        .eq("workspaceId", params.workspaceId!)
+        .eq("workspaceId", workspaceId)
         .eq("sourceType", "thread")
         .eq("sourceId", params.threadId),
     )
@@ -735,7 +781,7 @@ export async function ensureThreadWorkspacePlacement(
     return existing._id;
   }
   return ctx.db.insert("spectraWorkspaceItems", {
-    workspaceId: params.workspaceId,
+    workspaceId,
     sourceType: "thread",
     sourceId: params.threadId,
     viewData: {

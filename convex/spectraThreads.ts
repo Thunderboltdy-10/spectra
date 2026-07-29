@@ -100,6 +100,7 @@ export const create = mutation({
     });
     await ensureThreadWorkspacePlacement(ctx, {
       threadId,
+      ownerAccountId: actor._id,
       workspaceId: args.workspaceId,
       summary: "Conversation ready",
     });

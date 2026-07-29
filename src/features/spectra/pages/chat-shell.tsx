@@ -29,6 +29,7 @@ import { useSpectraRun } from "../ai/use-spectra-run";
 import { useSpectraContext } from "../hooks/use-spectra-context";
 import { ConversationSurface } from "../components/conversation-surface";
 import { CommandBar } from "../components/command-bar";
+import { ComposerArtifactDock } from "../components/composer-artifact-dock";
 import {
   ContextFocusControl,
   GlobalSearch,
@@ -816,8 +817,16 @@ export function ChatShell() {
           onDirtyChange={studio.setDirty}
         />
       ) : null}
-      <div className="pointer-events-none absolute bottom-0 left-0 right-[var(--spectra-studio-width,0px)] z-50 bg-transparent px-4 pb-5 pt-2 sm:px-8 min-[1920px]:right-0">
+      <div className="pointer-events-none absolute bottom-0 left-0 right-[var(--spectra-studio-width,0px)] z-50 bg-transparent px-5 pb-5 pt-2 sm:px-8 min-[1920px]:right-0">
         <div className="pointer-events-auto mx-auto max-w-[820px]">
+          <ComposerArtifactDock
+            artifacts={artifacts}
+            cards={runEngine.cards}
+            assistantContent={
+              runEngine.liveExchange?.content ?? runEngine.cards[0]?.summary
+            }
+            onOpen={openArtifact}
+          />
           {pageComposer}
         </div>
       </div>

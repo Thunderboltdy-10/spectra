@@ -5,6 +5,7 @@ import {
   BookOpen,
   Bot,
   Check,
+  Crosshair,
   Files,
   FileText,
   FolderPlus,
@@ -28,6 +29,7 @@ import {
 } from "../data/api";
 import { useSpectraContextStore } from "@/stores/spectra-context-store";
 import { toast } from "sonner";
+import { spectraBus } from "../events";
 
 export type ComposerFocusMode =
   "global" | "workspace" | "artifact" | "selection" | "thread";
@@ -407,6 +409,22 @@ export function ContextFocusControl({
                 <div className="mx-1 mb-1 border-t border-[var(--border-subtle)] px-1 pb-1.5 pt-2 text-[11px] font-semibold text-[var(--text-secondary)]">
                   Also use
                 </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpen(false);
+                    void spectraBus.command("context.beginPicking", {
+                      source: "composer",
+                    });
+                  }}
+                  className="mx-1 mb-1.5 flex min-h-10 w-[calc(100%-8px)] items-center gap-2 rounded-[8px] border border-[var(--border-default)] px-2.5 text-left text-[11px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
+                >
+                  <Crosshair className="h-3.5 w-3.5 text-[var(--accent-cyan)]" />
+                  Pick from page
+                  <span className="ml-auto text-[9px] font-normal text-[var(--text-tertiary)]">
+                    Semantic targets
+                  </span>
+                </button>
                 <div className="mx-1 mb-1.5 flex h-10 items-center gap-2 rounded-[8px] bg-[var(--bg-primary)] px-2.5 shadow-[inset_0_0_0_1px_var(--border-default)]">
                   <Search className="h-3.5 w-3.5 text-[var(--text-tertiary)]" />
                   <input
@@ -425,7 +443,7 @@ export function ContextFocusControl({
                     <div className="flex flex-wrap gap-1">
                       {explicit.map((item) => (
                         <button
-                          key={`explicit:${item.type}:${item.id}`}
+                          key={`explicit:${item.type}:${item.id}:${item.semanticTargetId ?? "root"}`}
                           type="button"
                           onClick={() => removeExplicit(item.type, item.id)}
                           className={`inline-flex max-w-full items-center gap-1 rounded-[6px] px-1.5 py-1 text-[10px] ${item.stale ? "bg-[color-mix(in_oklab,var(--danger)_8%,var(--bg-secondary))] text-[var(--danger)]" : "bg-[var(--bg-secondary)] text-[var(--text-secondary)]"}`}

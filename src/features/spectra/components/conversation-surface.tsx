@@ -31,7 +31,7 @@ import {
   Wrench,
 } from "lucide-react";
 import { toast } from "sonner";
-import { RichText } from "@/components/chat/rich-text";
+import { SpectraRichContent } from "./spectra-rich-content";
 import { cn } from "@/lib/utils";
 import { useSpectraRun, type SpectraLiveExchange } from "../ai/use-spectra-run";
 import { operationCounts, useRunLedger } from "../collaboration/run-ledger";
@@ -1881,7 +1881,7 @@ export function ConversationSurface({
                       {trace && trace.run.providerUsed !== "Spectra" ? (
                         <PersistedProgressTrace trace={trace} />
                       ) : null}
-                      <RichText
+                      <SpectraRichContent
                         content={message.content}
                         className={cn(
                           "text-[14px] leading-7 text-[var(--text-primary)]",
@@ -2009,7 +2009,7 @@ export function ConversationSurface({
                       }
                     />
                     {liveExchange.content ? (
-                      <RichText
+                      <SpectraRichContent
                         content={liveExchange.content}
                         className={cn(
                           "text-[14px] leading-7 text-[var(--text-primary)]",
@@ -2208,6 +2208,11 @@ export function ThreadConversation({
     // tabs so this panel can still recover live progress after a refresh.
     observeDurableRuns: !parentLiveExchange,
   });
+  const activeRunId =
+    parentLiveExchange?.runId ??
+    detail?.traces.find((trace) =>
+      ["queued", "running", "awaiting_confirmation", "awaiting_resolution"].includes(trace.run.status),
+    )?.run._id;
   return (
     <ConversationSurface
       detail={detail}
@@ -2244,6 +2249,8 @@ export function ThreadConversation({
             busy={runEngine.submitting}
             allowAttachments
             onStop={runEngine.stop}
+            activeRunId={activeRunId}
+            onSteer={runEngine.steer}
             onSubmit={(value, attachments) => runEngine.run(value, attachments)}
             context={
               <span className="flex items-center gap-1.5 text-[11px] text-[var(--text-secondary)]">

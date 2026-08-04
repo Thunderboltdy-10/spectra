@@ -37,7 +37,6 @@ import {
   Table2,
   Code2,
   Workflow,
-  CalendarDays,
   Bot,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -82,6 +81,7 @@ import {
   type ComposerFocusMode,
 } from "../components/context-controls";
 import { DurableRunTabs } from "../components/durable-run-tabs";
+import { WorkbenchInspectorTabs } from "../components/workbench-inspector-tabs";
 import { RunDetailPanel } from "../components/run-detail-panel";
 import { LiveThreadPanel } from "../components/live-thread-panel";
 import {
@@ -120,6 +120,7 @@ import {
   type SpectraWorkspaceItem,
 } from "../data/api";
 import type { ArtifactTypeKey } from "../artifacts/types";
+import { readSharedWorkbenchSession, updateWorkbenchSurface, writeSharedWorkbenchSession } from "../workbench";
 
 type ViewMode = "list" | "board" | "canvas";
 type WorkspaceSort = "updated" | "created" | "title" | "type";
@@ -621,7 +622,7 @@ function WorkspaceHome({
     list.filter((artifact) => artifact.updatedAt >= weekAgo).length;
   const metricCards = [
     {
-      label: "Artifacts",
+      label: "Work",
       count: artifacts.length,
       delta: freshThisWeek(artifacts),
       icon: FileText,
@@ -704,7 +705,7 @@ function WorkspaceHome({
                 Mission Control
               </h1>
               <p className="mt-2 max-w-[46ch] text-[14px] leading-relaxed text-[var(--text-secondary)]">
-                Your overview of work, artifacts, and activity across Spectra.
+                Your overview of work, conversations, and activity across Spectra.
               </p>
             </div>
           </div>
@@ -889,7 +890,7 @@ function WorkspaceHome({
                         </span>
                         <span className="mt-2.5 flex items-center gap-1.5 text-[8.5px] text-[var(--text-tertiary)]">
                           <span className="font-normal text-[var(--text-secondary)]">
-                            {count} artifacts
+                            {count} work items
                           </span>
                           <span aria-hidden="true">·</span>
                           <span>
@@ -931,7 +932,7 @@ function WorkspaceHome({
               workspaces={workspaces}
               groupBy="workspace"
               title="All work"
-              subtitle="Artifacts and conversations across your workspaces"
+              subtitle="Work and conversations across your workspaces"
               showHeader={false}
               flatTable
               showInbox={false}
@@ -1025,7 +1026,7 @@ function WorkspaceHome({
                         You {entry.detail.toLowerCase()}{" "}
                         {meta.label
                           ? `a ${meta.label.toLowerCase()}`
-                          : "an artifact"}
+                          : "a work item"}
                       </div>
                     </div>
                     <span className="mt-0.5 shrink-0 text-[11px] tabular-nums text-[var(--text-tertiary)]">
@@ -1211,7 +1212,7 @@ function WorkspaceHeader({
   return (
     <header
       className="spectra-workspace-header border-b border-[var(--border-default)] bg-[var(--bg-primary)] px-5 pb-0 pt-4"
-      aria-label={`${artifactCount} artifacts, ${threadCount} threads, ${cardCount} pinned, ${activeRuns} active runs`}
+      aria-label={`${artifactCount} work items, ${threadCount} threads, ${cardCount} pinned, ${activeRuns} active runs`}
     >
       <div className="flex items-start justify-between gap-5">
         <div className="flex min-w-0 items-start gap-4">
@@ -1368,7 +1369,7 @@ function WorkspaceLibraryToolbar({
     updated: "Recently updated",
     created: "Recently created",
     title: "Title A–Z",
-    type: "Artifact type",
+    type: "Work type",
   };
   const types: Array<{ key: "all" | WorkspaceObjectType; label: string }> = [
     { key: "all", label: "All" },
@@ -1381,7 +1382,6 @@ function WorkspaceLibraryToolbar({
     { key: "sheets", label: "Sheets" },
     { key: "code", label: "Code" },
     { key: "whiteboard", label: "Whiteboards" },
-    { key: "timetable", label: "Timetable" },
     { key: "thread", label: "Threads" },
   ];
   return (
@@ -1656,7 +1656,7 @@ function CardsView({
     return (
       <EmptyWorkspaceState
         title="No workspace cards yet"
-        message="Create or add an artifact to start building this workspace."
+        message="Create or add work to start building this workspace."
       />
     );
   }
@@ -1889,7 +1889,7 @@ function _TimelineView({
           ? "Conversation active"
           : created && entry.artifact
             ? `${blueprintMeta[entry.artifact.blueprintKey].label} created`
-            : "Artifact edited",
+            : "Work edited",
       summary: workspaceEntrySummary(entry),
       time: entry.item.updatedAt,
     };
@@ -2156,7 +2156,7 @@ function LibraryView({
     return (
       <EmptyWorkspaceState
         title="No library items here"
-        message="Add artifacts to this workspace to group them by type."
+        message="Add work to this workspace to group it by type."
       />
     );
   }
@@ -2174,7 +2174,6 @@ function LibraryView({
     { key: "sheets", label: "Sheets" },
     { key: "code", label: "Code & Visualisations" },
     { key: "whiteboard", label: "Whiteboards" },
-    { key: "timetable", label: "Timetable Items" },
     { key: "thread", label: "Threads" },
   ];
   const groups = groupOrder
@@ -2196,7 +2195,7 @@ function LibraryView({
       <div>
         <div className="mb-3 mt-5 flex items-center justify-between">
           <h2 className="font-display text-[16px] font-semibold text-[var(--text-primary)]">
-            All artifacts
+            All work
           </h2>
           <button
             type="button"
@@ -2810,67 +2809,58 @@ function Inspector({
     return (
       <aside className="hidden w-[318px] shrink-0 border-l border-[var(--border-default)] bg-[var(--bg-primary)] px-5 py-6 xl:block">
         <InspectorTitle
-          title="Selected artifact"
+          title="Selected work"
           onClose={onClose}
           trailing={collapseControl}
         />
-        <div className="mt-5">
-          <Icon
-            className="h-8 w-8 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5"
-            style={{ color: meta.color }}
-          />
-          <div className="mt-3 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
-            {meta.label}
-          </div>
-          <h2 className="mt-2 font-display text-[22px] font-semibold leading-tight text-[var(--text-primary)]">
-            {selectedArtifact.title}
-          </h2>
-          <div className="mt-2 text-[12px] text-[var(--text-secondary)]">
-            Updated {formatRelativeTime(selectedArtifact.updatedAt)}
-          </div>
-        </div>
-        <InspectorSection title="Summary">
-          <p className="text-[13px] leading-6 text-[var(--text-secondary)]">
-            {selectedArtifact.summary}
-          </p>
-        </InspectorSection>
-        <InspectorSection title="Placement">
-          <div className="rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 text-[13px] font-medium text-[var(--text-primary)]">
-            {selectedPlacements[0]?.workspaceTitle ??
-              workspace?.title ??
-              "General"}
-            <div className="mt-1 text-[11px] font-normal text-[var(--text-secondary)]">
-              Workspace card
-            </div>
-          </div>
-        </InspectorSection>
-        <InspectorSection title="Linked objects">
-          <div className="space-y-2">
-            {links.slice(0, 5).map(({ artifact }) => (
-              <InspectorObject key={artifact._id} artifact={artifact} />
-            ))}
-            {links.length === 0 ? (
-              <div className="text-[13px] text-[var(--text-secondary)]">
-                No links yet.
+        <WorkbenchInspectorTabs
+          work={selectedArtifact}
+          overview={(
+            <div>
+              <div className="mt-5">
+                <Icon
+                  className="h-8 w-8 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5"
+                  style={{ color: meta.color }}
+                />
+                <div className="mt-3 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">{meta.label} · {selectedArtifact.status}</div>
+                <h2 className="mt-2 font-display text-[22px] font-semibold leading-tight text-[var(--text-primary)]">{selectedArtifact.title}</h2>
+                <div className="mt-2 text-[12px] text-[var(--text-secondary)]">Updated {formatRelativeTime(selectedArtifact.updatedAt)}</div>
               </div>
-            ) : null}
-          </div>
-        </InspectorSection>
-        <InspectorSection title="Quick actions">
-          <ActionRow
-            icon={ExternalLink}
-            label="Open detail"
-            onClick={() => onOpenArtifact(selectedArtifact)}
-          />
-          <button
-            type="button"
-            className={smallButtonClass("danger")}
-            onClick={onHide}
-          >
-            <Trash2 className="h-4 w-4" />
-            Remove from workspace
-          </button>
-        </InspectorSection>
+              <InspectorSection title="Description">
+                <p className="text-[13px] leading-6 text-[var(--text-secondary)]">{selectedArtifact.summary || "No description yet."}</p>
+              </InspectorSection>
+              <InspectorSection title="People and access">
+                <MetricRow label="Owner" value={selectedArtifact.owner?.name ?? "You"} />
+                <MetricRow label="Access" value={selectedArtifact.accessLevel === "read" ? "Read-only" : "Edit"} />
+                <MetricRow label="Collaborators" value={String(selectedArtifact.sharedWithCount ?? 0)} />
+                <MetricRow label="Sharing" value={selectedArtifact.isShared ? "Shared" : "Private"} />
+              </InspectorSection>
+              <InspectorSection title="Workspace placement">
+                <div className="space-y-2">
+                  {selectedPlacements.map((placement) => <div key={placement.workspaceId} className="rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 text-[12px] font-medium text-[var(--text-primary)]">{placement.workspaceTitle}</div>)}
+                  {selectedPlacements.length === 0 ? <div className="rounded-[8px] border border-dashed border-[var(--border-default)] p-3 text-[11px] leading-5 text-[var(--text-secondary)]">This work is unplaced. Add it to {workspace?.title ?? "a workspace"} to keep it near related context.</div> : null}
+                </div>
+              </InspectorSection>
+              <InspectorSection title="References and backlinks">
+                <div className="space-y-2">
+                  {links.slice(0, 5).map(({ artifact }) => <InspectorObject key={artifact._id} artifact={artifact} />)}
+                  {links.length === 0 ? <div className="text-[13px] text-[var(--text-secondary)]">No references yet.</div> : null}
+                </div>
+              </InspectorSection>
+              <InspectorSection title="Sources and provenance">
+                <p className="text-[11px] leading-5 text-[var(--text-secondary)]">
+                  {selectedArtifact.createdFrom?.source
+                    ? `Created from ${selectedArtifact.createdFrom.source.replaceAll("_", " ")}${selectedArtifact.createdFrom.sourceAttachmentNames?.length ? ` with ${selectedArtifact.createdFrom.sourceAttachmentNames.length} source file${selectedArtifact.createdFrom.sourceAttachmentNames.length === 1 ? "" : "s"}` : ""}.`
+                    : "No external source provenance is recorded."}
+                </p>
+              </InspectorSection>
+              <InspectorSection title="Actions">
+                <ActionRow icon={ExternalLink} label="Open work" onClick={() => onOpenArtifact(selectedArtifact)} />
+                <button type="button" className={smallButtonClass("danger")} onClick={onHide}><Trash2 className="h-4 w-4" />Remove from workspace</button>
+              </InspectorSection>
+            </div>
+          )}
+        />
       </aside>
     );
   }
@@ -2892,6 +2882,10 @@ function Inspector({
     (run) => run.status === "queued" || run.status === "running",
   ).length;
   const sharedWithCount = workspace?.sharedWithCount ?? 0;
+  const workspaceSources = Array.from(new Set(workspaceArtifacts.flatMap((work) => [
+    ...(work.createdFrom?.sourceAttachmentNames ?? []),
+    ...(work.createdFrom?.source ? [work.createdFrom.source.replaceAll("_", " ")] : []),
+  ]))).slice(0, 8);
 
   return (
     <aside className="hidden w-[320px] shrink-0 border-l border-[var(--border-default)] bg-[var(--bg-primary)] px-5 py-6 xl:block">
@@ -2924,7 +2918,7 @@ function Inspector({
           <MetricRow label="Shared with" value={String(sharedWithCount)} />
         ) : null}
         <MetricRow
-          label="Artifacts"
+          label="Work"
           value={String(workspaceArtifacts.length)}
         />
         <MetricRow label="Active runs" value={String(activeRuns)} />
@@ -2959,6 +2953,24 @@ function Inspector({
             </p>
           ) : null}
         </div>
+      </InspectorSection>
+
+      <InspectorSection title="People and access">
+        <MetricRow label="Your access" value={workspace?.accessLevel === "read" ? "Read-only" : "Edit"} />
+        <MetricRow label="Collaborators" value={String(sharedWithCount)} />
+        <MetricRow label="Sharing" value={workspace?.isShared ? "Shared" : "Private"} />
+      </InspectorSection>
+
+      <InspectorSection title="Workspace context and sources">
+        <p className="text-[11px] leading-5 text-[var(--text-secondary)]">{workspace?.description || "Add a description to give people and Spectra durable workspace context."}</p>
+        <div className="mt-2 space-y-1">
+          {workspaceSources.map((source) => <div key={source} className="truncate rounded-[6px] bg-[var(--bg-secondary)] px-2 py-1.5 text-[10px] text-[var(--text-secondary)]">{source}</div>)}
+          {workspaceSources.length === 0 ? <p className="text-[10px] text-[var(--text-tertiary)]">No workspace sources attached yet.</p> : null}
+        </div>
+      </InspectorSection>
+
+      <InspectorSection title="Arrangement">
+        <p className="text-[11px] leading-5 text-[var(--text-secondary)]">Pinned work, the current view, split ratios, tabs, and inspector state are preserved for this workbench.</p>
       </InspectorSection>
 
       {workspaceTags.length ? (
@@ -3158,10 +3170,15 @@ function _PinnedArtifactShelf({
   );
 }
 
-export function WorkspaceShell() {
+export function WorkspaceShell({ initialWorkspaceId }: { initialWorkspaceId?: string } = {}) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const requestedWorkspaceId = searchParams.get("workspaceId") ?? undefined;
+  const requestedWorkspaceId = initialWorkspaceId ?? searchParams.get("workspaceId") ?? undefined;
+  useEffect(() => {
+    if (!requestedWorkspaceId) return;
+    const session = readSharedWorkbenchSession(window.localStorage);
+    writeSharedWorkbenchSession(window.localStorage, updateWorkbenchSurface(session, { workspaceId: requestedWorkspaceId }));
+  }, [requestedWorkspaceId]);
   const requestedThreadId = searchParams.get("threadId") ?? undefined;
   const requestedHome = searchParams.get("home") === "1";
   const [overview, setOverview] = useState<SpectraOverview | null>(null);
@@ -3549,12 +3566,7 @@ export function WorkspaceShell() {
     // lane. The underlying hub remains in navigation history and returns when
     // the user closes the artifact.
     studio.openTab(studio.activeArtifact);
-  }, [
-    liveThread,
-    studio.activeArtifact,
-    studio.mode,
-    studio.openTab,
-  ]);
+  }, [liveThread, studio]);
 
   useEffect(() => {
     if (!requestedHome) return;
@@ -3799,6 +3811,7 @@ export function WorkspaceShell() {
     };
   }, [
     commandFocusArtifact?._id,
+    composerThread,
     composerThread?.id,
     composerThread?.artifactId,
     setComposerThread,
@@ -4261,15 +4274,6 @@ export function WorkspaceShell() {
                 : {}),
             },
       );
-      // Workspace QC has no ConversationSurface of its own. Open the live
-      // thread panel so progress traces stay visible outside /chat.
-      setLiveThread({
-        id: threadId,
-        title:
-          liveThread?.id === threadId
-            ? liveThread.title
-            : "Current conversation",
-      });
       setActiveRunPanelId(null);
       window.dispatchEvent(new Event("spectra:threads-changed"));
     },
@@ -4431,7 +4435,7 @@ export function WorkspaceShell() {
       else if (next.size < 24) next.add(artifact._id);
       else
         toast.message(
-          "Context can include up to 24 explicitly selected artifacts.",
+          "Context can include up to 24 explicitly selected work items.",
         );
       return next;
     });
@@ -4581,10 +4585,10 @@ export function WorkspaceShell() {
 
   function replaceWorkspaceLocation(workspaceId?: string) {
     const href = workspaceId
-      ? `/workspace?workspaceId=${encodeURIComponent(workspaceId)}`
+      ? `/workspace/${encodeURIComponent(workspaceId)}`
       : "/workspace";
     const current = requestedWorkspaceId
-      ? `/workspace?workspaceId=${encodeURIComponent(requestedWorkspaceId)}`
+      ? `/workspace/${encodeURIComponent(requestedWorkspaceId)}`
       : "/workspace";
     if (
       href !== current ||
@@ -5536,7 +5540,7 @@ export function WorkspaceShell() {
                   Delete {artifactDeletePending.title}?
                 </h2>
                 <p className="mt-2 text-[13px] leading-5 text-[var(--text-secondary)]">
-                  The artifact, its placements, version history, and directly
+                  This work item, its placements, version history, and directly
                   linked run history will be permanently removed.
                 </p>
                 <div className="mt-5 flex justify-end gap-2">
@@ -5579,7 +5583,7 @@ export function WorkspaceShell() {
                   New workspace
                 </div>
                 <div className="mt-1 text-[12px] text-[var(--text-secondary)]">
-                  Create a subject space that stays synced with artifacts.
+                  Create a subject space that stays connected to related work.
                 </div>
               </div>
               <input
@@ -6158,6 +6162,12 @@ export function WorkspaceShell() {
                 onRevise={(card, revision) =>
                   void runEngine.revise(card, revision)
                 }
+                onInput={(threadId, response, attachments) =>
+                  runEngine.run(response, attachments ?? [], { threadId })
+                }
+                onSteer={(runId, mode, text) =>
+                  runEngine.steer(runId, mode, text)
+                }
               />
               {multiSelectMode ? (
                 <SelectionActionBar
@@ -6203,6 +6213,8 @@ export function WorkspaceShell() {
                   busy={runEngine.submitting}
                   allowConcurrent={!composerThread}
                   onStop={runEngine.stop}
+                  activeRunId={runEngine.liveExchange?.runId ?? composerThread?.runId}
+                  onSteer={runEngine.steer}
                   onStartNewThread={() => setComposerThread(null)}
                   context={
                     <ContextFocusControl
@@ -6222,7 +6234,7 @@ export function WorkspaceShell() {
                         <MessageSquare className="h-4 w-4" />
                         New chat
                       </CommandBarMenuItem>
-                      <CommandBarSubmenu label="New artifact" icon={Plus}>
+                      <CommandBarSubmenu label="New work" icon={Plus}>
                         {createTypes.map((type) => {
                           const Icon = type.icon;
                           return (

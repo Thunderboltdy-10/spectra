@@ -15,6 +15,25 @@ export const ARTIFACT_TYPE_KEYS = [
 
 export type ArtifactTypeKey = (typeof ARTIFACT_TYPE_KEYS)[number];
 
+/**
+ * Canonical creatable work types. `timetable` remains in the legacy artifact
+ * union only so old snapshots and links can be migrated into `/calendar`.
+ */
+export const WORK_TYPE_KEYS = [
+  "document",
+  "flashcard_deck",
+  "quiz",
+  "planner_task",
+  "agent",
+  "presentation",
+  "sheets",
+  "code",
+  "whiteboard",
+] as const;
+
+export type WorkTypeKey = (typeof WORK_TYPE_KEYS)[number];
+export const CREATABLE_ARTIFACT_TYPE_KEYS = WORK_TYPE_KEYS;
+
 export type SemanticRegion = {
   regionId: string;
   kind: string;

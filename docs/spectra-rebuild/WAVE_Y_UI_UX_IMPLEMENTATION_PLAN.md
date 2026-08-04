@@ -1,3 +1,5 @@
+> Historical plan: superseded by `SPECTRA_DEFINITIVE_TRANSFORMATION_PLAN.md`. Retained as implementation evidence only.
+
 # Spectra Wave Y UI/UX Implementation Plan
 
 Wave Y targets the active post-Wave-X surfaces in `src/features/spectra` and the shared `/chat`, `/workspace`, and `/artifacts` shells. `src/components/workspace-v2` is intentionally excluded. The visual direction is a premium academic instrument: warm paper, editorial type, semantic object color, dense but quiet controls, and purposeful live-AI motion.

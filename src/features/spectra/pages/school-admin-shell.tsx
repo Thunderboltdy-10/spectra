@@ -54,6 +54,7 @@ import {
   mutateAdministration,
   type SchoolAdministrationOverview,
 } from "@/features/spectra/administration/api";
+import { metricDefinition } from "@/features/spectra/administration/metric-registry";
 import {
   AdminButton,
   AdminCard,
@@ -209,6 +210,8 @@ function OverviewSurface({
             value={formatCompact(data.metrics.members)}
             detail={`${data.metrics.active30d} active in 30 days`}
             tone="green"
+            state={data.metricStates.members}
+            source={metricDefinition("school.members").source}
             action={
               <AdminButton className="w-full" onClick={() => onTab("people")}>
                 Manage members
@@ -221,6 +224,8 @@ function OverviewSurface({
             value={formatCompact(data.metrics.invitations)}
             detail={`${data.metrics.invitations} awaiting response`}
             tone="violet"
+            state={data.metricStates.invitations}
+            source={metricDefinition("school.invitations").source}
             action={
               <AdminButton className="w-full" onClick={() => onTab("people")}>
                 Review invites
@@ -233,6 +238,8 @@ function OverviewSurface({
             value={formatCompact(data.metrics.pendingApprovals)}
             detail="Support and operational requests"
             tone="orange"
+            state={data.metricStates.pendingApprovals}
+            source={metricDefinition("school.pending_approvals").source}
             action={
               <AdminButton
                 className="w-full"
@@ -248,6 +255,8 @@ function OverviewSurface({
             value={formatCompact(data.metrics.classWorkspaces)}
             detail={`${data.metrics.groups} active groups`}
             tone="green"
+            state={data.metricStates.classWorkspaces}
+            source={metricDefinition("school.class_workspaces").source}
             action={
               <AdminButton className="w-full" onClick={() => onTab("groups")}>
                 View all

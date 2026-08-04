@@ -1,5 +1,7 @@
 # Wave Z — One Coherent Spectra Product
 
+> Historical plan: superseded by `SPECTRA_DEFINITIVE_TRANSFORMATION_PLAN.md`. Retained as implementation evidence only.
+
 Created: 2026-07-11. This is the live coordination plan. Product behavior is defined in `SPECTRA_PRODUCT_SOURCE_OF_TRUTH.md`. Earlier completion claims are evidence only.
 
 ## Rules

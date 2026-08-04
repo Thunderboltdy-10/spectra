@@ -1,0 +1,218 @@
+import { describe, expect, it } from "vitest";
+import { getBlueprint } from "../blueprints";
+import { ARTIFACT_TYPE_KEYS, type ArtifactTypeKey } from "../artifacts/types";
+import {
+  createWorkAnchorAdapter,
+  deserializeSemanticAnchor,
+  getWorkAnchorAdapter,
+  serializeSemanticAnchor,
+  type SemanticAnchor,
+} from "../anchors";
+import {
+  WORK_REFERENCE_CONTRACTS,
+  changeReferenceView,
+  createBoardCapture,
+  createNativeReferenceInsertion,
+  getWorkReferenceContract,
+  insertionFromPaste,
+  referenceIdentity,
+  resizeReference,
+  resolveBoardCapture,
+  setReferenceState,
+  suggestReferencePlacement,
+  validateReferenceView,
+  type ReferenceNode,
+} from "../references";
+import { ContextSourceRegistry } from "../context/registry/context-source-registry";
+import {
+  PermissionAwareSemanticIndex,
+  createSemanticIndexEntry,
+  entityTypeForAnchor,
+  semanticEntriesForWork,
+  type SemanticIndexEntry,
+} from "../context";
+import {
+  RICH_CONTENT_SURFACES,
+  IncrementalRichContentParser,
+  getRichContentAdapter,
+  parseSpectraRichContent,
+} from "../rich-content";
+import {
+  WORK_SOURCE_CONTRACTS,
+  createEvidenceSpan,
+  createPortableSourceBundle,
+  createVerifiedSource,
+  preserveSourcesThroughConversion,
+  verifyCitation,
+} from "../sources";
+import {
+  createRootCommentAnchor,
+  migrateLegacyCommentAnchor,
+  reanchorComment,
+  resolveCommentAnchor,
+  revealCommentTarget,
+} from "../comments";
+
+function content(type: ArtifactTypeKey) {
+  const blueprint = getBlueprint(type);
+  if (!blueprint) throw new Error(`Missing blueprint ${type}`);
+  return structuredClone(blueprint.defaultContent);
+}
+
+function rootAnchor(type: ArtifactTypeKey, workId = `work-${type}`): SemanticAnchor {
+  return createRootCommentAnchor(workId, type, 1);
+}
+
+function reference(type: ArtifactTypeKey = "document"): ReferenceNode {
+  const contract = getWorkReferenceContract(type);
+  const target = contract.targets[0]!;
+  return {
+    id: "reference-1",
+    protocolVersion: 2,
+    target: { workId: "target-1", workType: type, anchor: { ...rootAnchor(type, "target-1"), kind: target.kind }, view: target.views[0] },
+    state: "collapsed",
+    versionPolicy: "live",
+    status: "ready",
+  };
+}
+
+describe("Phase 7 semantic identity contracts", () => {
+  it("provides round-trippable root and region anchors for every registered work type", () => {
+    for (const type of ARTIFACT_TYPE_KEYS) {
+      const adapter = getWorkAnchorAdapter(type);
+      const value = content(type);
+      const root = adapter.createFromSelection(`work-${type}`, {}, value)!;
+      expect(root.kind).toBe("work:root");
+      expect(adapter.exists(root, value)).toBe(true);
+      expect(adapter.describe(root, value)).toMatch(/whole/i);
+      const roundTrip = deserializeSemanticAnchor(serializeSemanticAnchor({ ...root, relativePosition: Uint8Array.from([1, 2, 3]) }));
+      expect([...roundTrip.relativePosition!]).toEqual([1, 2, 3]);
+      const migrated = adapter.migrate({ ...root, schemaVersion: 0 }, value);
+      expect(migrated.schemaVersion).toBeGreaterThan(0);
+    }
+  });
+
+  it("delegates reveal and geometry through the shared adapter", async () => {
+    let revealed = false;
+    const adapter = createWorkAnchorAdapter("document", {
+      reveal: () => { revealed = true; },
+      geometry: () => ({ x: 1, y: 2, width: 3, height: 4 }),
+    });
+    const anchor = rootAnchor("document");
+    await adapter.reveal(anchor, { focus: true });
+    expect(revealed).toBe(true);
+    expect(adapter.resolveGeometry(anchor)).toEqual({ x: 1, y: 2, width: 3, height: 4 });
+  });
+
+  it("keeps one reference identity while state, view, size, and version policy change", () => {
+    const initial = reference();
+    const identity = referenceIdentity(initial);
+    const expanded = setReferenceState(initial, "expanded");
+    const resized = resizeReference(expanded, 900, 700, { width: 620, height: 480 });
+    const viewed = changeReferenceView(resized, "section");
+    const pinned = { ...viewed, versionPolicy: { pinnedVersionId: "version-1" } } satisfies ReferenceNode;
+    expect(referenceIdentity(pinned)).toBe(identity);
+    expect(resized).toMatchObject({ width: 620, height: 480 });
+    expect(pinned.target.view).toBe("section");
+  });
+
+  it("declares useful targets, views, and native insertion for every work type and origin", () => {
+    expect(Object.keys(WORK_REFERENCE_CONTRACTS).sort()).toEqual([...ARTIFACT_TYPE_KEYS].sort());
+    for (const hostType of ARTIFACT_TYPE_KEYS) {
+      const contract = getWorkReferenceContract(hostType);
+      expect(contract.targets.length).toBeGreaterThan(0);
+      for (const target of contract.targets) {
+        expect(target.views.length).toBeGreaterThan(0);
+        expect(validateReferenceView(hostType, target.kind, target.views[0])).toBe(true);
+      }
+      for (const origin of ["command", "paste", "drag", "context", "ai", "suggestion"] as const) {
+        expect(createNativeReferenceInsertion(hostType, reference(), origin)).toMatchObject({ hostWorkType: hostType, primitive: contract.insertion, origin });
+      }
+    }
+    expect(insertionFromPaste("document", "https://spectra.test/library/target-1#intro", () => reference())).toMatchObject({ primitive: "tiptap_node", origin: "paste" });
+    expect(insertionFromPaste("document", "https://example.com", () => reference())).toBeNull();
+  });
+
+  it("captures board semantics and reports moved/deleted object truth", () => {
+    const capture = createBoardCapture({ objectIds: ["a", "b", "b"], frameId: "frame-1", camera: { x: 10, y: 20, zoom: 99, width: 800, height: 600 } });
+    expect(capture.objectIds).toEqual(["a", "b"]);
+    expect(capture.camera.zoom).toBe(8);
+    expect(resolveBoardCapture(capture, ["b"])).toMatchObject({ available: ["b"], missing: ["a"], status: "partial" });
+    expect(resolveBoardCapture(capture, [])).toMatchObject({ status: "missing" });
+  });
+
+  it("emits only high-confidence dismissible suggestions", () => {
+    expect(suggestReferencePlacement({ confidence: 0.7, referencedWorkId: "w1", alreadyPlaced: false })).toBeNull();
+    expect(suggestReferencePlacement({ confidence: 0.95, referencedWorkId: "w1", workspaceId: "ws", alreadyPlaced: false, rawSpectraUrl: "/library/w1" })).toMatchObject({ kind: "replace_url", dismissible: true });
+  });
+});
+
+describe("Phase 7 context and semantic index", () => {
+  it("registers only permitted targets and resolves the deepest eligible nested target", () => {
+    const registry = new ContextSourceRegistry();
+    const base = { type: "Document", contextSummary: async () => ({ title: "T", text: "S" }) };
+    const disposeRoot = registry.register({ ...base, id: "root", anchor: rootAnchor("document"), label: "Root", permissions: "allowed" });
+    registry.register({ ...base, id: "child", parentId: "root", anchor: { ...rootAnchor("document"), kind: "block", path: ["document", "blocks", "b1"] }, label: "Child", permissions: "allowed" });
+    registry.register({ ...base, id: "secret", anchor: { ...rootAnchor("document"), path: ["blocks", "secret", "line"] }, label: "Secret", permissions: "denied" });
+    expect(registry.listEligible().map((entry) => entry.id).sort()).toEqual(["child", "root"]);
+    expect(registry.resolveNested(["root", "secret", "child"])?.id).toBe("child");
+    disposeRoot();
+    expect(registry.get("root")).toBeUndefined();
+  });
+
+  it("filters permissions before search exposure for every retrieval purpose", () => {
+    const index = new PermissionAwareSemanticIndex();
+    const visible = createSemanticIndexEntry({ semanticId: "visible", entityType: "source", workspaceIds: ["ws-1"], permissionScope: { workspaceIds: ["ws-1"] }, text: "primary climate evidence", updatedAt: 2, provenance: { provider: "spectra" } });
+    const secret = createSemanticIndexEntry({ semanticId: "secret", entityType: "agent_evidence", workspaceIds: ["ws-2"], permissionScope: { workspaceIds: ["ws-2"] }, text: "primary climate secret", updatedAt: 3, provenance: { provider: "spectra" } });
+    index.upsert(visible); index.upsert(secret);
+    for (const purpose of ["kbar", "library", "context", "agent_routing", "reference_suggestion", "memory", "school"] as const) {
+      expect(index.search("climate", { accountId: "a", workspaceIds: ["ws-1"] }, 40, purpose).map((entry) => entry.semanticId)).toEqual(["visible"]);
+    }
+  });
+
+  it("maps all work regions to specific entity kinds", () => {
+    const expected = new Set<SemanticIndexEntry["entityType"]>();
+    for (const type of ARTIFACT_TYPE_KEYS) expected.add(entityTypeForAnchor({ ...rootAnchor(type), kind: type === "sheets" ? "chart" : type === "whiteboard" ? "frame" : type === "agent" ? "evidence" : "region" }));
+    expect([...expected]).toEqual(expect.arrayContaining(["document_block", "slide_element", "sheet_chart", "board_frame", "code_file", "quiz_question", "card", "agent_evidence", "plan_task", "work"]));
+    const rows = semanticEntriesForWork({ workId: "w", workspaceIds: ["ws"], title: "Research", permissionScope: { workspaceIds: ["ws"] }, updatedAt: 1, regions: [{ regionId: "b1", label: "Intro", text: "Evidence", anchor: { ...rootAnchor("document", "w"), kind: "block", path: ["blocks", "b1"] } }] });
+    expect(rows.map((entry) => entry.entityType)).toEqual(["work", "document_block"]);
+  });
+});
+
+describe("Phase 7 rich content, citations, exports, and comments", () => {
+  it("parses the full canonical AST and preserves stable completed blocks while streaming", () => {
+    const source = "# Heading\n\nParagraph `code` $x+1$ [[cite:source:1:evidence:1|A]] [[ref:work-2|Linked work]] [^n]\n\n- one\n- two\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\n```ts\nconst x = 1;\n```\n\n$$\nx^2\n$$\n\n> [!NOTE] Careful\n\n![Diagram](/diagram.png)\n\nSource: primary record\n\n[^n]: footnote";
+    const ast = parseSpectraRichContent(source);
+    expect([...new Set(ast.blocks.map((block) => block.type))]).toEqual(expect.arrayContaining(["heading", "paragraph", "list", "table", "code_block", "math_block", "callout", "media", "source_note", "footnote"]));
+    const parser = new IncrementalRichContentParser();
+    const first = parser.append("First paragraph\n\n```ts\nconst");
+    expect(first.complete).toBe(false);
+    const stable = first.blocks[0];
+    const second = parser.append(" x = 1;\n```");
+    expect(second.complete).toBe(true);
+    expect(second.blocks[0]).toBe(stable);
+    for (const surface of RICH_CONTENT_SURFACES) expect(getRichContentAdapter(surface).toText(getRichContentAdapter(surface).fromText(source))).toBe(source);
+  });
+
+  it("requires verified source/evidence integrity and preserves it across every work conversion", () => {
+    const source = createVerifiedSource({ title: "Primary source", accessedAt: "2026-08-03T00:00:00.000Z", sourceType: "paper", authority: "primary", provider: "fixture", url: "https://example.com/paper?utm_source=test", content: "Supported claim" });
+    const evidence = createEvidenceSpan(source, "Supported claim", { page: 2 });
+    const citation = verifyCitation({ sourceId: source.id, evidenceIds: [evidence.id], label: "A" }, [source], [evidence]);
+    const bundle = createPortableSourceBundle({ sources: [source], evidence: [evidence], citations: [citation] });
+    expect(() => createPortableSourceBundle({ sources: [source], evidence: [], citations: [citation] })).toThrow("SOURCE_BUNDLE_CONTAINS_UNVERIFIED_CITATION");
+    expect(Object.keys(WORK_SOURCE_CONTRACTS).sort()).toEqual([...ARTIFACT_TYPE_KEYS].sort());
+    for (const type of ARTIFACT_TYPE_KEYS) expect(preserveSourcesThroughConversion({ text: "answer" }, bundle, type).sourceBundle.citations).toHaveLength(1);
+  });
+
+  it("migrates, orphans, reveals, selects, and reanchors comments through shared adapters", async () => {
+    const value = content("document");
+    const adapter = createWorkAnchorAdapter("document");
+    const root = createRootCommentAnchor("work-1", "document", 1);
+    expect(resolveCommentAnchor(root, adapter, value).status).toBe("attached");
+    const legacy = migrateLegacyCommentAnchor({ artifactId: "work-1", artifactType: "document", regionId: "missing", excerpt: "gone", relativePosition: [3, 4] });
+    const orphan = resolveCommentAnchor(legacy, adapter, value);
+    expect(orphan.status).toBe("orphaned");
+    expect((await revealCommentTarget(orphan, adapter)).selected).toBe(true);
+    expect(reanchorComment(orphan, root)).toMatchObject({ status: "attached", selected: true });
+  });
+});

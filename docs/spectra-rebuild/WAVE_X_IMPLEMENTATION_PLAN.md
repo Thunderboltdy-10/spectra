@@ -1,5 +1,7 @@
 # Wave X — Alive, Reliable, Context-Aware
 
+> Historical plan: superseded by `SPECTRA_DEFINITIVE_TRANSFORMATION_PLAN.md`. Retained as implementation evidence only.
+
 Created: 2026-07-10. This is the authoritative live source of truth for Wave X. It supersedes prior wave completion claims where current code evidence conflicts.
 
 ## Product direction

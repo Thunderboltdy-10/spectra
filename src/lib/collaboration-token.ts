@@ -1,6 +1,7 @@
 import "server-only";
 
 import { SignJWT } from "jose";
+import { SPECTRA_PROTOCOL_VERSIONS } from "@/features/spectra/migrations/protocol";
 
 export type CollaborationSessionClaims = {
   artifactId: string;
@@ -14,6 +15,13 @@ export type CollaborationSessionClaims = {
   level: "read" | "modify";
   policyVersion: number;
   schemaVersion: number;
+  protocolVersion: number;
+  permissionEpoch: number;
+  actorKind: "human" | "ai" | "system";
+  access: "read_only" | "edit";
+  internalCapabilities: string[];
+  runId?: string;
+  operationId?: string;
 };
 
 function signingKey() {
@@ -32,4 +40,8 @@ export async function signCollaborationSession(claims: CollaborationSessionClaim
     .setIssuedAt()
     .setExpirationTime("10m")
     .sign(signingKey());
+}
+
+export function collaborationProtocolVersion() {
+  return SPECTRA_PROTOCOL_VERSIONS.collaboration;
 }

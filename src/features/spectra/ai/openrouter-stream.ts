@@ -159,7 +159,7 @@ export class ProviderStreamStalledError extends Error {
   readonly providerLabel: string;
   readonly timeoutMs: number;
 
-  constructor(timeoutMs: number, providerLabel = "DeepSeek") {
+  constructor(timeoutMs: number, providerLabel = "OpenAI") {
     super(
       `The current ${providerLabel} route produced no meaningful stream data for ${Math.round(timeoutMs / 1_000)} seconds.`,
     );
@@ -172,7 +172,7 @@ export class ProviderStreamStalledError extends Error {
 /** Display label for stall copy; prefer the live OpenRouter `provider` field. */
 export function formatProviderStallLabel(
   provider?: string | null,
-  fallback = "DeepSeek",
+  fallback = "OpenAI",
 ) {
   const value = provider?.trim();
   if (!value) return fallback;
@@ -228,7 +228,7 @@ async function readStreamChunk(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   lastMeaningfulAt: number,
   idleTimeoutMs?: number,
-  providerLabel = "DeepSeek",
+  providerLabel = "OpenAI",
 ) {
   if (!idleTimeoutMs) return reader.read();
   const remaining = Math.max(1, idleTimeoutMs - (Date.now() - lastMeaningfulAt));
@@ -258,7 +258,7 @@ export async function readOpenRouterResponse(
   onReasoningText?: (delta: string) => void,
   onPlanText?: (text: string) => void,
   idleTimeoutMs?: number,
-  providerLabelHint = "DeepSeek",
+  providerLabelHint = "OpenAI",
 ): Promise<OpenRouterPlanResult> {
   const startedAt = Date.now();
   const contentType = response.headers.get("content-type") ?? "";
@@ -418,7 +418,7 @@ export async function readOpenRouterAgentTurn(
   onReasoningText?: (delta: string) => void,
   onToolArguments?: (call: OpenRouterAgentToolCall) => void,
   idleTimeoutMs?: number,
-  providerLabelHint = "DeepSeek",
+  providerLabelHint = "OpenAI",
 ): Promise<OpenRouterAgentTurn> {
   const startedAt = Date.now();
   const contentType = response.headers.get("content-type") ?? "";
@@ -513,7 +513,7 @@ export async function readOpenRouterAgentTurn(
         chunk = JSON.parse(pendingJsonPayload + raw) as Record<string, unknown>;
         pendingJsonPayload = "";
       } catch {
-        // DeepSeek-compatible routes occasionally emit one malformed fragment
+        // OpenRouter-compatible routes occasionally emit one malformed fragment
         // and then resume with a complete standalone event. Do not poison the
         // remainder of the agent turn by concatenating every later event onto
         // that fragment; prefer the authoritative standalone event when it is

@@ -61,7 +61,9 @@ export class ArtifactRegionController {
     }, 9_000);
     try {
       this.transport.transact(unique.map((entry) => entry.regionId).join(","), change);
-      await this.transport.flush();
+      // The transaction is accepted into the local Y.Doc synchronously. Room
+      // broadcast, durable append and Convex projection continue independently;
+      // an ordinary edit must never wait for flush/projection latency.
       for (const claim of claims) await postSpectra({ action: "releaseRegionClaim", claimId: claim.claimId, clientId: this.transport.clientId, resolution: "apply" });
       return { applied: true as const, claims };
     } catch (error) {

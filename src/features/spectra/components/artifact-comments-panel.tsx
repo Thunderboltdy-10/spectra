@@ -26,6 +26,8 @@ import {
   type SpectraSchoolMember,
 } from "../data/api";
 import { formatRelativeTime } from "./spectra-view-model";
+import { SpectraRichContent } from "./spectra-rich-content";
+import { LocalAutocompleteTextarea } from "../compute/autocomplete";
 
 export type ArtifactCommentRegion = {
   regionId: string;
@@ -50,6 +52,7 @@ export function ArtifactCommentsPanel({
   regions,
   preferredRegionId,
   currentAccountId,
+  relativePosition,
   onClose,
 }: {
   open: boolean;
@@ -58,6 +61,7 @@ export function ArtifactCommentsPanel({
   regions: readonly ArtifactCommentRegion[];
   preferredRegionId?: string;
   currentAccountId?: string;
+  relativePosition?: Uint8Array;
   onClose: () => void;
 }) {
   const [comments, setComments] = useState<SpectraArtifactComment[]>([]);
@@ -172,6 +176,9 @@ export function ArtifactCommentsPanel({
         commentBody: value,
         regionId: replyTo?.anchor.regionId ?? regionId,
         fallbackExcerpt: regionLabel(regions, replyTo?.anchor.regionId ?? regionId),
+        ...(!replyTo && relativePosition
+          ? { relativePositionBase64: bytesToBase64(relativePosition) }
+          : {}),
         mentionedAccountIds: mentions.map((member) => member.accountId),
       });
       setBody("");
@@ -280,7 +287,7 @@ export function ArtifactCommentsPanel({
                   <textarea autoFocus value={editingBody} onChange={(event) => setEditingBody(event.target.value)} className="min-h-20 w-full resize-y rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2 text-[12px] leading-5 text-[var(--text-primary)] outline-none focus:border-[var(--border-strong)]" />
                   <div className="mt-2 flex justify-end gap-2"><button type="button" onClick={() => setEditingId(null)} className="rounded-[6px] px-2 py-1 text-[10px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]">Cancel</button><button type="button" disabled={!editingBody.trim() || busy === `edit:${comment._id}`} onClick={() => void saveEdit(comment)} className="rounded-[6px] bg-[var(--text-primary)] px-2.5 py-1 text-[10px] font-semibold text-[var(--bg-primary)] disabled:opacity-45">Save</button></div>
                 </div>
-              ) : <p className="mt-1.5 whitespace-pre-wrap text-[12px] leading-5 text-[var(--text-primary)]">{comment.body}</p>}
+              ) : <SpectraRichContent content={comment.body} className="mt-1.5 whitespace-pre-wrap text-[12px] leading-5 text-[var(--text-primary)]" />}
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
                 {comment.status !== "deleted" ? <button type="button" onClick={() => { setReplyTo(comment); setRegionId(comment.anchor.regionId); }} className="inline-flex h-6 items-center gap-1 rounded-[5px] px-1.5 text-[9px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"><Reply className="h-3 w-3" />Reply</button> : null}
                 {comment.status !== "deleted" ? <button type="button" onClick={() => void setResolved(comment, comment.status !== "resolved")} className="inline-flex h-6 items-center gap-1 rounded-[5px] px-1.5 text-[9px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"><Check className="h-3 w-3" />{comment.status === "resolved" ? "Reopen" : "Resolve"}</button> : null}
@@ -321,7 +328,7 @@ export function ArtifactCommentsPanel({
           <div className="shrink-0 border-t border-[var(--border-default)] bg-[var(--bg-primary)] p-3">
             {replyTo ? <div className="mb-2 flex items-center gap-2 rounded-[7px] bg-[var(--bg-secondary)] px-2.5 py-2 text-[10px] text-[var(--text-secondary)]"><CornerUpLeft className="h-3 w-3" /><span className="min-w-0 flex-1 truncate">Replying to {replyTo.author?.name ?? "comment"}</span><button type="button" onClick={() => setReplyTo(null)} aria-label="Cancel reply"><X className="h-3 w-3" /></button></div> : null}
             <div className="rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] focus-within:border-[var(--border-strong)]">
-              <textarea value={body} onChange={(event) => setBody(event.target.value)} onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === "Enter") void createComment(); }} placeholder={replyTo ? "Write a reply…" : "Add a comment…"} className="min-h-[76px] w-full resize-none bg-transparent px-3 pt-2.5 text-[12px] leading-5 text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]" />
+              <LocalAutocompleteTextarea surface="comment" value={body} onValueChange={setBody} onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === "Enter") void createComment(); }} placeholder={replyTo ? "Write a reply…" : "Add a comment…"} className="min-h-[76px] w-full" textareaClassName="min-h-[76px] w-full resize-none px-3 pt-2.5 text-[12px] leading-5 text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]" />
               {mentions.length ? <div className="flex flex-wrap gap-1 px-3 pb-2">{mentions.map((member) => <button type="button" key={member.accountId} onClick={() => setMentions((current) => current.filter((entry) => entry.accountId !== member.accountId))} className="inline-flex items-center gap-1 rounded-full bg-[var(--bg-secondary)] px-2 py-1 text-[9px] text-[var(--text-secondary)]">@{member.name}<X className="h-2.5 w-2.5" /></button>)}</div> : null}
               <div className="flex items-center gap-1.5 border-t border-[var(--border-subtle)] px-2 py-2">
                 <div className="relative min-w-0 flex-1"><MapPin className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-[var(--text-tertiary)]" /><select value={replyTo?.anchor.regionId ?? regionId} disabled={Boolean(replyTo)} onChange={(event) => setRegionId(event.target.value)} className="h-8 w-full min-w-0 appearance-none truncate rounded-[6px] bg-[var(--bg-secondary)] pl-7 pr-6 text-[9px] text-[var(--text-secondary)] outline-none disabled:opacity-70">{regions.map((region) => <option key={region.regionId} value={region.regionId}>{region.label}</option>)}{regions.length === 0 ? <option value="artifact:structure">Whole artifact</option> : null}</select><ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-3 w-3 -translate-y-1/2 text-[var(--text-tertiary)]" /></div>
@@ -336,4 +343,10 @@ export function ArtifactCommentsPanel({
       </aside>
     </div>
   );
+}
+
+function bytesToBase64(value: Uint8Array) {
+  let binary = "";
+  for (const byte of value) binary += String.fromCharCode(byte);
+  return btoa(binary);
 }

@@ -886,6 +886,12 @@ export async function POST(request: NextRequest) {
         body: requireString(body.commentBody, "commentBody"),
         anchor: {
           regionId: requireString(body.regionId, "regionId"),
+          relativePosition:
+            typeof body.relativePositionBase64 === "string"
+              ? Uint8Array.from(
+                  Buffer.from(body.relativePositionBase64, "base64"),
+                ).buffer
+              : undefined,
           fallbackExcerpt: optionalString(body.fallbackExcerpt),
           geometry:
             body.geometry && typeof body.geometry === "object"

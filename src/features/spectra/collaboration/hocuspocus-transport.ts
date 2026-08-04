@@ -9,6 +9,7 @@ import type {
   CollaborationTransportSnapshot,
 } from "./types";
 import { readInteractionState } from "./interaction-model";
+import { resolveDocumentRelativeSelection } from "../work/models/yjs/relative-position";
 
 function authenticationActuallyRevoked(reason?: string) {
   const value = (reason ?? "").toUpperCase();
@@ -122,6 +123,21 @@ function collaborationSelection(
   const candidate = value as Record<string, unknown>;
   if (candidate.kind !== "text") return undefined;
   if (!Array.isArray(candidate.ranges)) return undefined;
+  const relativeValue =
+    candidate.relative && typeof candidate.relative === "object"
+      ? (candidate.relative as Record<string, unknown>)
+      : null;
+  const relative =
+    relativeValue &&
+    typeof relativeValue.blockId === "string" &&
+    relativeValue.anchor instanceof Uint8Array &&
+    relativeValue.head instanceof Uint8Array
+      ? {
+          blockId: relativeValue.blockId,
+          anchor: relativeValue.anchor,
+          head: relativeValue.head,
+        }
+      : undefined;
   const ranges = candidate.ranges.flatMap((entry) => {
     if (!entry || typeof entry !== "object") return [];
     const range = entry as Record<string, unknown>;
@@ -154,6 +170,7 @@ function collaborationSelection(
       ? { text: candidate.text.slice(0, 280) }
       : {}),
     ranges,
+    ...(relative ? { relative } : {}),
   };
 }
 
@@ -175,7 +192,13 @@ async function session(
   const response = await fetch("/api/spectra/collaboration/token", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ artifactId, partitionKey, clientId, schemaVersion }),
+    body: JSON.stringify({
+      artifactId,
+      partitionKey,
+      clientId,
+      schemaVersion,
+      realtimeProvider: "hocuspocus",
+    }),
     cache: "no-store",
   });
   const payload = (await response.json()) as
@@ -269,6 +292,30 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
         JSON.stringify(person) === JSON.stringify(other)
       );
     });
+  }
+
+  private resolveRelativePresence(
+    presence: CollaborationPresence,
+  ): CollaborationPresence {
+    const relative = presence.selection?.relative;
+    if (!relative) return presence;
+    const resolved = resolveDocumentRelativeSelection(this.document, relative);
+    if (!resolved) return presence;
+    return {
+      ...presence,
+      selection: {
+        ...presence.selection,
+        kind: "text",
+        collapsed: resolved.anchor === resolved.head,
+        ranges: [
+          {
+            blockId: resolved.blockId,
+            startOffset: Math.min(resolved.anchor, resolved.head),
+            endOffset: Math.max(resolved.anchor, resolved.head),
+          },
+        ],
+      },
+    };
   }
 
   private startAuthorizationWatch() {
@@ -534,8 +581,11 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
                   : {}),
               };
             });
-          if (!this.samePresence(this.presence, presence)) {
-            this.update({ presence });
+          const resolvedPresence = presence.map((entry) =>
+            this.resolveRelativePresence(entry),
+          );
+          if (!this.samePresence(this.presence, resolvedPresence)) {
+            this.update({ presence: resolvedPresence });
           }
         },
         onAuthenticationFailed: ({ reason }) => {
@@ -655,12 +705,11 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
   }
 
   transact(regionId: string, change: () => void) {
-    if (this.state !== "synchronized" || this.unsynchronizedChanges > 0)
-      throw new Error(
-        "COLLABORATION_NOT_SYNCHRONIZED: Reconnect before editing. Spectra does not queue offline changes.",
-      );
-    if (this.level !== "modify")
+    if (this.state === "permission_lost" || this.level === "read")
       throw new Error("COLLABORATION_READ_ONLY: You have read-only access.");
+    // Hocuspocus remains only as a compatibility provider, but it must not
+    // freeze a native Y.Doc while reconnecting. Its provider records local
+    // updates and state-vector sync merges them when the socket returns.
     this.document.transact(change, {
       kind: "spectra-region",
       regionId,

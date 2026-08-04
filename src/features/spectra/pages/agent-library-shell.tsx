@@ -370,10 +370,10 @@ function LibrarySectionBlock({
   );
 }
 
-export function AgentLibraryShell() {
+export function AgentLibraryShell({ initialAgentId }: { initialAgentId?: string } = {}) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const requestedAgentId = searchParams.get("agentId");
+  const requestedAgentId = initialAgentId ?? searchParams.get("agentId");
   const [artifacts, setArtifacts] = useState<SpectraArtifact[]>([]);
   const [publicAgents, setPublicAgents] = useState<SpectraPublicAgent[]>([]);
   const [workspaces, setWorkspaces] = useState<SpectraWorkspace[]>([]);

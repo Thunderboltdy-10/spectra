@@ -149,7 +149,7 @@ export function useSpectraContext(artifacts: SpectraArtifact[], workspaces: Spec
     selectionCount: selectionDraft.length,
     explicitContextIds,
     explicitContextObjectKeys,
-    explicitContextObjects: explicit.filter((object) => !object.stale).map(({ type, id, label, workspaceId }) => ({ type, id, label, workspaceId })),
+    explicitContextObjects: explicit.filter((object) => !object.stale).map(({ type, id, label, workspaceId, semanticTargetId, semanticAnchor, contextSummary }) => ({ type, id, label, workspaceId, semanticTargetId, semanticAnchor, contextSummary })),
     contextArtifactIds,
     setSelectedContextIds,
     toggleSelectedObject,

@@ -52,6 +52,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { createPortal } from "react-dom";
+import { LocalAutocompleteTextarea } from "../compute/autocomplete";
 import {
   createPresentationObject,
   createPresentationSlide,
@@ -415,8 +416,9 @@ function PresentationObjectView({
       onPointerDown={onPointerDown}
     >
       {object.type === "text" ? (
-        <textarea
+        <LocalAutocompleteTextarea
           ref={textAreaRef}
+          surface="slide_text"
           data-text-preset={textPreset}
           data-ai-region={aiRegionAttr(aiActive)}
           {...(path ? targetAttrs(`${path}/text`) : {})}
@@ -424,7 +426,7 @@ function PresentationObjectView({
           readOnly={readOnly || object.locked || compact}
           onFocus={onTextFocus}
           onBlur={onTextBlur}
-          onChange={(event) => onTextChange(event.target.value)}
+          onValueChange={onTextChange}
           onPointerDown={(event) => event.stopPropagation()}
           style={{
             color: String(styleValue(object, "color", "#173f35")),
@@ -446,7 +448,8 @@ function PresentationObjectView({
             textAlign: String(styleValue(object, "align", "left")) as
               "left" | "center" | "right",
           }}
-          className="presentation-object-text"
+          className="size-full"
+          textareaClassName="presentation-object-text"
           aria-label="Slide text"
         />
       ) : object.type === "shape" ? (
@@ -807,15 +810,17 @@ function PresentationObjectInspector({
       {["image", "chart", "video"].includes(object.type) ? (
         <label>
           Alternative text
-          <textarea
+          <LocalAutocompleteTextarea
+            surface="description"
             value={object.altText ?? ""}
             disabled={readOnly}
             placeholder="Describe the meaning, not only the appearance."
-            onChange={(event) =>
+            onValueChange={(altText) =>
               onUpdate((candidate) => {
-                candidate.altText = event.target.value;
+                candidate.altText = altText;
               })
             }
+            textareaClassName="w-full"
           />
         </label>
       ) : null}
@@ -2997,19 +3002,21 @@ export function PresentationStudio({
                 </button>
                 {notesOpen ? (
                   <>
-                    <textarea
+                    <LocalAutocompleteTextarea
+                      surface="slide_text"
                       value={activeSlide.speakerNotes ?? ""}
                       readOnly={readOnly}
                       placeholder="Add private speaking prompts, source reminders, or rehearsal cues."
                       onFocus={() =>
                         onActiveRegionChange?.(`${activeSlide.id}:notes`)
                       }
-                      onChange={(event) =>
+                      onValueChange={(speakerNotes) =>
                         mutate((draft) => {
                           draft.slides[activeSlideIndex]!.speakerNotes =
-                            event.target.value;
+                            speakerNotes;
                         })
                       }
+                      textareaClassName="w-full"
                     />
                     <span>
                       {(activeSlide.speakerNotes ?? "").length} characters

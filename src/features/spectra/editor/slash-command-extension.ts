@@ -1,5 +1,6 @@
 import { Extension, type Editor } from "@tiptap/core";
 import Suggestion, { type SuggestionOptions } from "@tiptap/suggestion";
+import { spectraBus } from "../events";
 
 export type SlashCommandItem = {
   id: string;
@@ -37,6 +38,10 @@ export const SLASH_COMMANDS: SlashCommandItem[] = [
       reader.readAsDataURL(file);
     };
     input.click();
+  } },
+  { id: "reference", label: "Reference", description: "Insert visible work without copying it", icon: "link", section: "Media", aliases: ["embed", "work"], action: (editor) => {
+    const hostWorkId = editor.view.dom.dataset.workId;
+    if (hostWorkId) spectraBus.command("reference.beginPicking", { hostWorkId });
   } },
   { id: "callout-info", label: "Info callout", description: "Highlight useful context", icon: "info", section: "Callouts", aliases: ["note"], action: (editor) => editor.chain().focus().setCallout({ type: "info" }).run() },
   { id: "callout-warning", label: "Warning callout", description: "Highlight a caution", icon: "alert-triangle", section: "Callouts", action: (editor) => editor.chain().focus().setCallout({ type: "warning" }).run() },

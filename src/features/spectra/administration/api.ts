@@ -18,6 +18,10 @@ export type UsageSeriesPoint = {
   values: Record<string, number>;
 };
 
+export type AdministrationMetricState =
+  | { kind: "available"; updatedAt?: number }
+  | { kind: "partial"; details: string };
+
 export type SchoolAdministrationOverview = {
   school: {
     schoolId: string;
@@ -56,6 +60,8 @@ export type SchoolAdministrationOverview = {
     messages: number | null;
     aiRuns: number | null;
   };
+  metricStates: Record<keyof SchoolAdministrationOverview["metrics"], AdministrationMetricState>;
+  computedAt: number;
   usage: {
     totals: Record<string, number>;
     series: UsageSeriesPoint[];
@@ -117,6 +123,20 @@ export type PlatformAdministrationOverview = {
     messages: number | null;
     retentionPercent: number;
   };
+  metricStates: {
+    activeSchools: AdministrationMetricState;
+    totalUsers: AdministrationMetricState;
+    activeUsers30d: AdministrationMetricState;
+    artifactsCreated: AdministrationMetricState;
+    messages: AdministrationMetricState;
+    retentionPercent: AdministrationMetricState;
+    storageBytes: AdministrationMetricState;
+    integrationHealth: AdministrationMetricState;
+    feedback: AdministrationMetricState;
+    failedRuns24h: AdministrationMetricState;
+    openRequests: AdministrationMetricState;
+  };
+  computedAt: number;
   usage: {
     totals: Record<string, number>;
     series: UsageSeriesPoint[];

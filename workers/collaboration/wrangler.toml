@@ -1,0 +1,14 @@
+name = "spectra-collaboration"
+main = "src/worker.ts"
+compatibility_date = "2026-07-31"
+
+[[durable_objects.bindings]]
+name = "COLLABORATION_ROOMS"
+class_name = "CollaborationRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["CollaborationRoom"]
+
+[vars]
+SPECTRA_COLLAB_PROTOCOL_VERSION = "1"

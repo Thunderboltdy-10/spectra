@@ -9,6 +9,7 @@ import { GlobalErrorBoundary } from "@/components/global-error-boundary";
 import { useAuth } from "@clerk/nextjs";
 import { ConvexReactClient } from "convex/react";
 import { ConvexProviderWithClerk } from "convex/react-clerk";
+import { LocalComputeCacheController } from "@/features/spectra/compute/cache/local-compute-cache-controller";
 
 const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL;
 const convexClient = convexUrl ? new ConvexReactClient(convexUrl) : null;
@@ -28,6 +29,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
         {content}
         <DynamicFavicon />
         <GlobalSettingsDrawer />
+        <LocalComputeCacheController />
         <CookieConsentManager />
         <Toaster
           theme="system"

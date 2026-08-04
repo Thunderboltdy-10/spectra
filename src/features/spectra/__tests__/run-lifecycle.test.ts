@@ -26,7 +26,7 @@ describe("Spectra AIRun lifecycle", () => {
 
     expect(completed.status).toBe("completed");
     expect(completed.completedAt).toBe(3);
-    expect(completed.modelUsed).toBe("deepseek/deepseek-v4-pro");
+    expect(completed.modelUsed).toBe("openai/gpt-5.6");
   });
 
   it("creates failed result cards from failed runs", () => {

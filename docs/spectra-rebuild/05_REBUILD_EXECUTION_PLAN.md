@@ -1,3 +1,5 @@
+> Historical plan: superseded by `SPECTRA_DEFINITIVE_TRANSFORMATION_PLAN.md`. Retained as implementation evidence only.
+
 # Spectra Rebuild Execution Plan
 
 This is the overall staged plan. The first coding-agent run should not implement; it should produce a repo-specific execution plan based on this.

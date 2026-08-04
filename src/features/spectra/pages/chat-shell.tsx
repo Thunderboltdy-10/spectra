@@ -92,9 +92,13 @@ export function ChatShell() {
       (object) =>
         object.type === "thread" && object.presentation === "thread-panel",
     ) ?? null;
-  const liveThread = threadPanelObject
-    ? { id: threadPanelObject.id, title: threadPanelObject.label }
-    : null;
+  const liveThread = useMemo(
+    () =>
+      threadPanelObject
+        ? { id: threadPanelObject.id, title: threadPanelObject.label }
+        : null,
+    [threadPanelObject],
+  );
   const {
     composerThread,
     setComposerThread,
@@ -481,6 +485,13 @@ export function ChatShell() {
       allowConcurrent={!continuingThread}
       allowAttachments
       onStop={runEngine.stop}
+      activeRunId={
+        runEngine.liveExchange?.runId ??
+        detail?.traces.find((trace) =>
+          ["queued", "running", "awaiting_confirmation", "awaiting_resolution"].includes(trace.run.status),
+        )?.run._id
+      }
+      onSteer={runEngine.steer}
       onStartNewThread={() => selectThread(null)}
       onSubmit={(value, attachments) => runEngine.run(value, attachments)}
       menu={

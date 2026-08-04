@@ -592,7 +592,7 @@ export function WhiteboardStudio({
 
   useEffect(() => {
     setViewport(board.viewport);
-  }, [artifactId]);
+  }, [artifactId, board.viewport]);
 
   useEffect(() => {
     let active = true;

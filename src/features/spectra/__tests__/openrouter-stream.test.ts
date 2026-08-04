@@ -15,17 +15,17 @@ import {
 } from "../ai/model-config";
 
 describe("OpenRouter public response streaming", () => {
-  it("restricts the primary call to native DeepSeek and keeps fallback routing explicit", () => {
+  it("restricts the primary call to the configured Luna route and keeps fallback routing explicit", () => {
     delete process.env.SPECTRA_ALLOW_PROVIDER_FALLBACKS;
     expect(allowSpectraProviderFallbacks()).toBe(true);
-    expect(getSpectraProviderRouting("primary")).toEqual({ order: ["deepseek"], only: ["deepseek"], allow_fallbacks: false });
+    expect(getSpectraProviderRouting("primary")).toEqual({ order: ["OpenAI"], only: ["OpenAI"], allow_fallbacks: false });
     expect(getSpectraVisionProviderRouting()).toEqual({
       order: ["Xiaomi"],
       only: ["Xiaomi"],
       allow_fallbacks: false,
     });
     expect(getSpectraVisionModelId()).toBe("xiaomi/mimo-v2.5");
-    expect(getSpectraProviderRouting("fallback")).toEqual({ order: ["baidu", "streamlake", "deepinfra"], only: ["baidu", "streamlake", "deepinfra"], allow_fallbacks: true, require_parameters: true });
+    expect(getSpectraProviderRouting("fallback")).toEqual({ order: ["OpenAI"], only: ["OpenAI"], allow_fallbacks: true, require_parameters: true });
   });
   it("decodes only the public finalResponse JSON string", () => {
     expect(extractPartialJsonStringField('{"decision":"answer","finalResponse":"Line one\\nLine \\"two', "finalResponse"))

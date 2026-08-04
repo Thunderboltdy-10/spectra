@@ -69,6 +69,8 @@ import {
 } from "@/features/spectra/administration/api";
 import { formatRelativeTime } from "@/features/spectra/components/spectra-view-model";
 import { KeyboardShortcutsRegistrar } from "@/components/keyboard-shortcuts";
+import { RouteSidePanelHost } from "@/features/spectra/components/route-side-panel-host";
+import { ViewportContextPicker } from "@/features/spectra/components/viewport-context-picker";
 
 type AppShellProps = {
   children: ReactNode;
@@ -80,10 +82,10 @@ type AppShellProps = {
 const ordinaryDestinations = [
   { href: "/chat", label: "Chat", icon: MessageSquareText },
   { href: "/workspace", label: "Home", icon: LayoutGrid },
-  { href: "/artifacts", label: "Artifacts", icon: LibraryBig },
-  { href: "/timetable", label: "Timetable", icon: CalendarClock },
+  { href: "/library", label: "Library", icon: LibraryBig },
+  { href: "/calendar", label: "Calendar", icon: CalendarClock },
   { href: "/agents", label: "Agents", icon: Bot },
-  { href: "/school-data", label: "School data", icon: School },
+  { href: "/school", label: "School", icon: School },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
 ] as const;
 
@@ -120,7 +122,7 @@ function workspaceColor(workspace: SpectraWorkspace, index: number) {
 }
 
 function workspaceHref(workspaceId: string) {
-  return `/workspace?workspaceId=${encodeURIComponent(workspaceId)}`;
+  return `/workspace/${encodeURIComponent(workspaceId)}`;
 }
 
 function RailTooltip({ children }: { children: ReactNode }) {
@@ -296,7 +298,7 @@ function ShellNavigation() {
               action: {
                 label: "Review",
                 onClick: () => {
-                  window.location.href = "/artifacts?collection=invitations";
+                  window.location.href = "/library?collection=invitations";
                 },
               },
             },
@@ -371,7 +373,7 @@ function ShellNavigation() {
           id: item.invitationId,
           kind: "share" as const,
           artifactId: item.resourceId,
-          href: "/artifacts?collection=invitations",
+          href: "/library?collection=invitations",
           title: `${item.inviter?.name ?? "A collaborator"} shared ${item.resource.title}`,
           detail: `${item.level === "modify" ? "Can modify" : "Read-only"} access · Review invitation`,
           createdAt: item.createdAt,
@@ -449,19 +451,20 @@ function ShellNavigation() {
     <>
       <aside
         aria-label="Spectra navigation"
+        data-collapsed={sidebarCollapsed}
         className={cn(
-          "spectra-shell-sidebar fixed inset-y-0 left-0 z-40 w-[240px] flex-col border-r border-[var(--border-default)] bg-[var(--bg-sidebar)]",
-          sidebarCollapsed ? "hidden" : "hidden md:flex",
+          "spectra-shell-sidebar fixed inset-y-0 left-0 z-40 hidden flex-col overflow-hidden border-r border-[var(--border-default)] bg-[var(--bg-sidebar)] transition-[width] duration-200 md:flex",
+          sidebarCollapsed ? "w-[76px]" : "w-[240px]",
         )}
       >
         <button
           type="button"
           onClick={toggleSidebar}
-          aria-label="Collapse sidebar"
-          title="Collapse sidebar"
+          aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
           className="absolute right-3 top-4 z-10 grid size-8 place-items-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
         >
-          <PanelLeftClose size={14} />
+          {sidebarCollapsed ? <PanelLeftOpen size={14} /> : <PanelLeftClose size={14} />}
         </button>
         <Link
           href="/workspace?home=1"
@@ -469,11 +472,11 @@ function ShellNavigation() {
           aria-label="Spectra home"
         >
           <SpectraLogo size={20} />
-          <span className="font-[family-name:var(--font-display)] text-[17px] font-semibold tracking-[-.025em] text-[#171513]">
+          <span className={cn("font-[family-name:var(--font-display)] text-[17px] font-semibold tracking-[-.025em] text-[#171513] transition-opacity", sidebarCollapsed && "pointer-events-none opacity-0")}>
             spectra
           </span>
         </Link>
-        <label className="relative mx-3 mt-2.5 block">
+        <label className={cn("relative mx-3 mt-2.5 block", sidebarCollapsed && "pointer-events-none h-0 overflow-hidden opacity-0")}>
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-[var(--text-tertiary)]" />
           <input
             value={sidebarSearch}
@@ -502,8 +505,10 @@ function ShellNavigation() {
                     );
                 }}
                 aria-current={active ? "page" : undefined}
+                title={sidebarCollapsed ? (label === "Home" ? "Workspace" : label) : undefined}
                 className={cn(
-                  "relative flex h-9 items-center gap-2.5 rounded-[6px] px-2.5 text-[13px] font-medium transition-colors",
+                  "relative flex h-9 items-center gap-2.5 rounded-[6px] text-[13px] font-medium transition-colors",
+                  sidebarCollapsed ? "justify-center px-0" : "px-2.5",
                   active
                     ? "bg-[#eeece9] text-[#171513]"
                     : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
@@ -511,27 +516,18 @@ function ShellNavigation() {
               >
                 {active ? <ActiveRailMarker /> : null}
                 <Icon size={15} strokeWidth={active ? 2.05 : 1.65} />
-                <span>{label === "Home" ? "Workspace" : label}</span>
+                <span className={cn(sidebarCollapsed && "sr-only")}>{label === "Home" ? "Workspace" : label}</span>
               </Link>
             );
           })}
         </nav>
         <Link
           href="/chat"
-          className="mx-3 mt-2.5 flex h-8 items-center justify-center gap-2 rounded-[7px] bg-[var(--brand-primary)] text-[11px] font-semibold text-white shadow-[0_1px_2px_rgba(83,61,180,.16)] transition hover:brightness-95"
+          className={cn("mx-3 mt-2.5 flex h-8 items-center justify-center gap-2 rounded-[7px] bg-[var(--brand-primary)] text-[11px] font-semibold text-white shadow-[0_1px_2px_rgba(83,61,180,.16)] transition hover:brightness-95", sidebarCollapsed && "mx-auto w-10")}
         >
-          <Plus size={15} /> New chat
+          <Plus size={15} /> <span className={cn(sidebarCollapsed && "sr-only")}>New chat</span>
         </Link>
-        <div className="relative mx-3 mt-2">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-[var(--text-tertiary)]" />
-          <input
-            value={sidebarSearch}
-            onChange={(event) => setSidebarSearch(event.target.value)}
-            placeholder="Search chats"
-            className="h-8 w-full rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-elevated)] pl-8 pr-2 text-[11px] outline-none placeholder:text-[var(--text-placeholder)]"
-          />
-        </div>
-        <div className="spectra-thin-scrollbar min-h-0 flex-1 overflow-y-auto px-3 pb-3">
+        <div className={cn("spectra-thin-scrollbar min-h-0 flex-1 overflow-y-auto pb-3", sidebarCollapsed ? "px-2" : "px-3")}>
           {([true, false] as const).map((pinned) => {
             const term = sidebarSearch.trim().toLowerCase();
             const rows = threads
@@ -544,7 +540,7 @@ function ShellNavigation() {
             if (!rows.length) return null;
             return (
               <section key={String(pinned)} className="mt-3">
-                <h2 className="px-1 text-[10px] font-semibold uppercase tracking-[.1em] text-[var(--text-tertiary)]">
+                <h2 className={cn("px-1 text-[10px] font-semibold uppercase tracking-[.1em] text-[var(--text-tertiary)]", sidebarCollapsed && "sr-only")}>
                   {pinned ? "Pinned" : "Recents"}
                 </h2>
                 <div className="mt-1 space-y-0.5">
@@ -552,7 +548,7 @@ function ShellNavigation() {
                     <Link
                       key={thread._id}
                       href={`/chat?threadId=${encodeURIComponent(thread._id)}`}
-                      className="group flex h-8 items-center gap-2 rounded-[5px] px-1.5 text-[12px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                      className={cn("group flex h-8 items-center gap-2 rounded-[5px] text-[12px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]", sidebarCollapsed ? "justify-center px-0" : "px-1.5")}
                     >
                       <i
                         className="size-1.5 shrink-0 rounded-full"
@@ -560,10 +556,10 @@ function ShellNavigation() {
                           background: index % 4 === 3 ? "#8371ee" : "#1aa47b",
                         }}
                       />
-                      <span className="min-w-0 flex-1 truncate">
+                      <span className={cn("min-w-0 flex-1 truncate", sidebarCollapsed && "sr-only")}>
                         {thread.title}
                       </span>
-                      <span className="shrink-0 text-[8.5px] tabular-nums text-[var(--text-tertiary)]">
+                      <span className={cn("shrink-0 text-[8.5px] tabular-nums text-[var(--text-tertiary)]", sidebarCollapsed && "hidden")}>
                         {formatRelativeTime(
                           thread.lastMessageAt ?? thread.updatedAt,
                         )}
@@ -574,6 +570,23 @@ function ShellNavigation() {
               </section>
             );
           })}
+          <section className="mt-3" aria-label="Workspaces">
+            <h2 className={cn("px-1 text-[10px] font-semibold uppercase tracking-[.1em] text-[var(--text-tertiary)]", sidebarCollapsed && "sr-only")}>Workspaces</h2>
+            <div className="mt-1 space-y-0.5">
+              {workspaces.map((workspace, index) => {
+                const Icon = workspaceIcon(workspace);
+                const active = pathname.startsWith("/workspace/") && pathname.endsWith(`/${workspace._id}`);
+                return (
+                  <Link key={workspace._id} href={workspaceHref(workspace._id)} aria-current={active ? "page" : undefined} aria-label={workspace.title} title={sidebarCollapsed ? workspace.title : undefined} className={cn("relative flex h-9 items-center gap-2 rounded-[6px] text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]", sidebarCollapsed ? "justify-center px-0" : "px-1.5", active && "bg-[var(--bg-hover)] text-[var(--text-primary)]")}>
+                    {active ? <ActiveRailMarker /> : null}
+                    <span className="grid size-6 shrink-0 place-items-center rounded-[6px] text-white" style={{ background: workspaceColor(workspace, index) }}><Icon size={12} /></span>
+                    <span className={cn("min-w-0 flex-1 truncate", sidebarCollapsed && "sr-only")}>{workspace.title}</span>
+                  </Link>
+                );
+              })}
+              <Link href="/workspace?create=1" className={cn("flex h-9 items-center gap-2 rounded-[6px] text-[11px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]", sidebarCollapsed ? "justify-center" : "px-1.5")} aria-label="Create workspace"><Plus size={14} /><span className={cn(sidebarCollapsed && "sr-only")}>Create workspace</span></Link>
+            </div>
+          </section>
           {workspacesLoading ? (
             <div className="mt-4 h-16 animate-pulse rounded-[7px] bg-[var(--bg-secondary)]" />
           ) : null}
@@ -651,7 +664,7 @@ function ShellNavigation() {
                     .toUpperCase()
                 )}
               </span>
-              <span className="min-w-0 flex-1">
+              <span className={cn("min-w-0 flex-1", sidebarCollapsed && "sr-only")}>
                 <strong className="block truncate text-[10px] font-semibold text-[var(--text-primary)]">
                   {administrationIdentity.account.name}
                 </strong>
@@ -687,7 +700,7 @@ function ShellNavigation() {
                     href={
                       "href" in item
                         ? item.href
-                        : `/artifacts?artifactId=${encodeURIComponent(item.artifactId)}`
+                        : `/library/${encodeURIComponent(item.artifactId)}`
                     }
                     onClick={() => {
                       setNotificationsOpen(false);
@@ -718,11 +731,12 @@ function ShellNavigation() {
           ) : null}
         </div>
       </aside>
+      {false ? (
       <aside
         aria-label="Spectra navigation"
         className={cn(
           "fixed inset-y-0 left-0 z-40 w-[76px] flex-col border-r",
-          sidebarCollapsed ? "hidden md:flex" : "hidden",
+          "hidden",
         )}
         style={{
           borderColor: "var(--border-default)",
@@ -928,7 +942,7 @@ function ShellNavigation() {
                       href={
                         "href" in item
                           ? item.href
-                          : `/artifacts?artifactId=${encodeURIComponent(item.artifactId)}`
+                          : `/library/${encodeURIComponent(item.artifactId)}`
                       }
                       onClick={() => {
                         setNotificationsOpen(false);
@@ -987,6 +1001,7 @@ function ShellNavigation() {
           </button>
         </div>
       </aside>
+      ) : null}
 
       {mobileWorkspaceOpen ? (
         <>
@@ -1106,7 +1121,7 @@ function ShellNavigation() {
                     href={
                       "href" in item
                         ? item.href
-                        : `/artifacts?artifactId=${encodeURIComponent(item.artifactId)}`
+                        : `/library/${encodeURIComponent(item.artifactId)}`
                     }
                     onClick={() => {
                       setNotificationsOpen(false);
@@ -1224,8 +1239,8 @@ export function AppShell({
   const showTabRail =
     pathname === "/workspace" ||
     pathname.startsWith("/workspace/") ||
-    pathname === "/artifacts" ||
-    pathname.startsWith("/artifacts/");
+    pathname === "/library" ||
+    pathname.startsWith("/library/");
 
   useEffect(() => {
     setShellSidebarCollapsed(
@@ -1289,6 +1304,8 @@ export function AppShell({
           )}
         >
           {children}
+          <RouteSidePanelHost />
+          <ViewportContextPicker />
         </div>
       </main>
     </div>

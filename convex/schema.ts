@@ -44,7 +44,8 @@ export default defineSchema({
   })
     .index("by_clerk_id", ["clerkId"])
     .index("by_email", ["email"])
-    .index("by_status", ["status"]),
+    .index("by_status", ["status"])
+    .index("by_status_last_seen", ["status", "lastSeenAt"]),
 
   schoolMemberships: defineTable({
     accountId: v.id("accounts"),
@@ -218,7 +219,8 @@ export default defineSchema({
   })
     .index("by_school_status", ["schoolId", "status", "createdAt"])
     .index("by_reporter_created", ["reporterAccountId", "createdAt"])
-    .index("by_status_created", ["status", "createdAt"]),
+    .index("by_status_created", ["status", "createdAt"])
+    .index("by_created", ["createdAt"]),
 
   schoolRequests: defineTable({
     schoolId: v.optional(v.id("schools")),
@@ -579,6 +581,7 @@ export default defineSchema({
   })
     .index("by_school_day", ["schoolId", "day"])
     .index("by_account_day", ["accountId", "day"])
+    .index("by_day", ["day"])
     .index("by_school_category_day", ["schoolId", "category", "day"])
     .index("by_meter", [
       "schoolId",
@@ -605,6 +608,7 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_school_day", ["schoolId", "day"])
+    .index("by_day", ["day"])
     .index("by_day_category", ["day", "category"])
     .index("by_counter", ["schoolId", "day", "category", "dimension"]),
 
@@ -1081,6 +1085,125 @@ export default defineSchema({
     .index("by_projection", ["projectionType", "projectionId"])
     .index("by_account_updated", ["accountId", "updatedAt"]),
 
+  calendarItems: defineTable({
+    ownerAccountId: v.id("accounts"),
+    schoolId: v.id("schools"),
+    workspaceId: v.optional(v.id("spectraWorkspaces")),
+    kind: v.union(
+      v.literal("official_event"),
+      v.literal("official_deadline"),
+      v.literal("task"),
+      v.literal("scheduled_work_block"),
+      v.literal("personal_event"),
+      v.literal("milestone"),
+      v.literal("reminder"),
+    ),
+    title: v.string(),
+    notes: v.optional(v.string()),
+    startAt: v.optional(v.number()),
+    endAt: v.optional(v.number()),
+    allDay: v.boolean(),
+    timezone: v.string(),
+    timePrecision: v.union(
+      v.literal("exact"),
+      v.literal("verified_period"),
+      v.literal("date_only"),
+      v.literal("unknown"),
+    ),
+    status: v.union(
+      v.literal("active"),
+      v.literal("completed"),
+      v.literal("cancelled"),
+      v.literal("removed"),
+    ),
+    sourceLocked: v.boolean(),
+    sourceProvider: v.optional(v.string()),
+    sourceRecordId: v.optional(v.id("externalRecords")),
+    sourceKey: v.optional(v.string()),
+    sourceHash: v.optional(v.string()),
+    sourceUrl: v.optional(v.string()),
+    sourceFreshAt: v.optional(v.number()),
+    sourceCapabilityState: v.optional(
+      v.union(
+        v.literal("available"),
+        v.literal("refreshing"),
+        v.literal("stale"),
+        v.literal("partial"),
+        v.literal("permission_denied"),
+        v.literal("unsupported"),
+        v.literal("schema_incompatible"),
+        v.literal("unavailable"),
+      ),
+    ),
+    location: v.optional(v.string()),
+    teacher: v.optional(v.string()),
+    classId: v.optional(v.string()),
+    planArtifactId: v.optional(v.id("spectraArtifacts")),
+    planTaskId: v.optional(v.string()),
+    taskItemId: v.optional(v.id("calendarItems")),
+    officialDeadlineItemId: v.optional(v.id("calendarItems")),
+    linkedArtifactIds: v.array(v.id("spectraArtifacts")),
+    recurrence: v.optional(v.string()),
+    legacyArtifactId: v.optional(v.id("spectraArtifacts")),
+    legacyEventId: v.optional(v.string()),
+    revision: v.number(),
+    createdBy: v.union(
+      v.literal("human"),
+      v.literal("ai"),
+      v.literal("source"),
+      v.literal("migration"),
+    ),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_account_start", ["ownerAccountId", "startAt"])
+    .index("by_account_status", ["ownerAccountId", "status"])
+    .index("by_account_kind", ["ownerAccountId", "kind"])
+    .index("by_source_key", ["ownerAccountId", "sourceKey"])
+    .index("by_source_record", ["sourceRecordId"])
+    .index("by_plan_task", ["planArtifactId", "planTaskId"])
+    .index("by_task_item", ["taskItemId"])
+    .index("by_legacy_event", ["legacyArtifactId", "legacyEventId"]),
+
+  calendarPeriodMaps: defineTable({
+    schoolId: v.id("schools"),
+    periodKey: v.string(),
+    label: v.string(),
+    startMinutes: v.number(),
+    endMinutes: v.number(),
+    timezone: v.string(),
+    weekdays: v.array(v.number()),
+    verifiedByAccountId: v.id("accounts"),
+    verifiedAt: v.number(),
+    source: v.union(v.literal("school_admin"), v.literal("provider_contract")),
+    sourceVersion: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_school_period", ["schoolId", "periodKey"])
+    .index("by_school_updated", ["schoolId", "updatedAt"]),
+
+  calendarMigrations: defineTable({
+    ownerAccountId: v.id("accounts"),
+    schoolId: v.id("schools"),
+    legacyArtifactId: v.id("spectraArtifacts"),
+    version: v.number(),
+    status: v.union(
+      v.literal("running"),
+      v.literal("completed"),
+      v.literal("partial"),
+      v.literal("failed"),
+    ),
+    migratedCount: v.number(),
+    skippedCount: v.number(),
+    errorSummary: v.optional(v.string()),
+    startedAt: v.number(),
+    completedAt: v.optional(v.number()),
+    updatedAt: v.number(),
+  })
+    .index("by_legacy_artifact", ["legacyArtifactId"])
+    .index("by_account_status", ["ownerAccountId", "status"]),
+
   spectraWorkspaces: defineTable({
     ownerAccountId: v.id("accounts"),
     schoolId: v.optional(v.id("schools")),
@@ -1089,6 +1212,24 @@ export default defineSchema({
     icon: v.optional(v.string()),
     color: v.optional(v.string()),
     starterKey: v.optional(v.string()),
+    sourceContext: v.optional(
+      v.object({
+        provider: v.string(),
+        integrationId: v.id("schoolIntegrations"),
+        sourceRecordId: v.id("externalRecords"),
+        providerClassId: v.optional(v.string()),
+        academicPeriodKey: v.optional(v.string()),
+        sourceHash: v.string(),
+        freshAt: v.number(),
+        capabilityState: v.union(
+          v.literal("available"),
+          v.literal("stale"),
+          v.literal("partial"),
+        ),
+        availableCapabilities: v.array(v.string()),
+        missingCapabilities: v.array(v.string()),
+      }),
+    ),
     aiState: v.optional(
       v.union(
         v.literal("creating"),
@@ -1251,6 +1392,7 @@ export default defineSchema({
   })
     .index("by_account_status", ["ownerAccountId", "status"])
     .index("by_account_updated", ["ownerAccountId", "updatedAt"])
+    .index("by_account_created", ["ownerAccountId", "createdAt"])
     .index("by_account_status_updated", [
       "ownerAccountId",
       "status",
@@ -2003,6 +2145,7 @@ export default defineSchema({
     body: v.string(),
     anchor: v.object({
       regionId: v.string(),
+      semanticAnchor: v.optional(v.any()),
       relativePosition: v.optional(v.bytes()),
       geometry: v.optional(v.any()),
       fallbackExcerpt: v.optional(v.string()),

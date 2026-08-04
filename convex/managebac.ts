@@ -14,6 +14,7 @@ import {
   defaultArtifactContent,
   defaultArtifactSchemaVersion,
 } from "./spectraShared";
+import { upsertSourceCalendarItem } from "./calendarShared";
 
 const EMPTY_COUNTS = {
   fetched: 0,
@@ -814,10 +815,15 @@ export const adminOverview = query({
   args: {},
   handler: async (ctx) => {
     const actor = await requireSchoolAdmin(ctx);
+    const periodMaps = await ctx.db
+      .query("calendarPeriodMaps")
+      .withIndex("by_school_updated", (q) => q.eq("schoolId", actor.schoolId))
+      .collect();
     const integration = await integrationForSchool(ctx, actor.schoolId);
     if (!integration)
       return {
         integration: null,
+        periodMaps,
         capabilities: [],
         syncRuns: [],
         conflicts: [],
@@ -879,6 +885,7 @@ export const adminOverview = query({
     const school = await ctx.db.get(actor.schoolId);
     return {
       integration: safeIntegration(integration),
+      periodMaps,
       school: school ? { _id: school._id, name: school.name } : null,
       capabilities,
       syncRuns,
@@ -920,6 +927,95 @@ export const adminOverview = query({
         ),
       ),
     };
+  },
+});
+
+export const upsertCalendarPeriodMap = mutation({
+  args: {
+    periodKey: v.string(),
+    label: v.string(),
+    startMinutes: v.number(),
+    endMinutes: v.number(),
+    timezone: v.string(),
+    weekdays: v.array(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireSchoolAdmin(ctx);
+    const periodKey = args.periodKey.trim().slice(0, 120);
+    const label = args.label.trim().slice(0, 160);
+    const timezone = args.timezone.trim().slice(0, 100);
+    const weekdays = [...new Set(args.weekdays.map(Math.floor))].filter(
+      (weekday) => weekday >= 0 && weekday <= 6,
+    );
+    if (!periodKey || !label || !timezone)
+      throw new Error("CALENDAR_PERIOD_REQUIRED: Key, label, and timezone are required.");
+    if (
+      !Number.isInteger(args.startMinutes) ||
+      !Number.isInteger(args.endMinutes) ||
+      args.startMinutes < 0 ||
+      args.endMinutes > 24 * 60 ||
+      args.endMinutes <= args.startMinutes
+    )
+      throw new Error("CALENDAR_PERIOD_TIME_INVALID: Choose a valid start and end time.");
+    if (!weekdays.length)
+      throw new Error("CALENDAR_PERIOD_WEEKDAYS_REQUIRED: Choose at least one weekday.");
+    const existing = await ctx.db
+      .query("calendarPeriodMaps")
+      .withIndex("by_school_period", (q) =>
+        q.eq("schoolId", actor.schoolId).eq("periodKey", periodKey),
+      )
+      .unique();
+    const now = Date.now();
+    const value = {
+      label,
+      startMinutes: args.startMinutes,
+      endMinutes: args.endMinutes,
+      timezone,
+      weekdays,
+      verifiedByAccountId: actor.accountId,
+      verifiedAt: now,
+      source: "school_admin" as const,
+      updatedAt: now,
+    };
+    const periodMapId = existing
+      ? (await ctx.db.patch(existing._id, value), existing._id)
+      : await ctx.db.insert("calendarPeriodMaps", {
+          schoolId: actor.schoolId,
+          periodKey,
+          ...value,
+          createdAt: now,
+        });
+    await writeAuditEvent(ctx, {
+      actorAccountId: actor.accountId,
+      schoolId: actor.schoolId,
+      action: "integration.managebac.period_map.upserted",
+      targetType: "calendar_period_map",
+      targetId: periodMapId,
+      metadata: { periodKey, timezone },
+      retentionClass: "security",
+    });
+    return { periodMapId, verifiedAt: now };
+  },
+});
+
+export const removeCalendarPeriodMap = mutation({
+  args: { periodMapId: v.id("calendarPeriodMaps") },
+  handler: async (ctx, args) => {
+    const actor = await requireSchoolAdmin(ctx);
+    const period = await ctx.db.get(args.periodMapId);
+    if (!period || period.schoolId !== actor.schoolId)
+      throw new Error("CALENDAR_PERIOD_NOT_FOUND");
+    await ctx.db.delete(period._id);
+    await writeAuditEvent(ctx, {
+      actorAccountId: actor.accountId,
+      schoolId: actor.schoolId,
+      action: "integration.managebac.period_map.removed",
+      targetType: "calendar_period_map",
+      targetId: period._id,
+      metadata: { periodKey: period.periodKey },
+      retentionClass: "security",
+    });
+    return { removed: true };
   },
 });
 
@@ -969,7 +1065,7 @@ export const myOverview = query({
           q.eq("mappedAccountId", actor.accountId),
         )
         .order("desc")
-        .take(300),
+        .take(2_000),
     ]);
     return {
       integration: safeIntegration(integration),
@@ -993,6 +1089,8 @@ export const myOverview = query({
         verificationStatus: item.verificationStatus,
         freshnessSlaMinutes: item.freshnessSlaMinutes,
         lastVerifiedAt: item.lastVerifiedAt,
+        lastSuccessAt: item.lastSuccessAt,
+        lastErrorCode: item.lastErrorCode,
       })),
       syncRuns,
       conflicts,
@@ -1568,9 +1666,75 @@ async function ensureClassWorkspace(
       q.eq("integrationId", integration._id).eq("providerKey", providerKey),
     )
     .unique();
-  if (existing) return { projection: existing, created: false };
   const normalized = record(source.normalized);
   const now = Date.now();
+  const capabilities = await ctx.db
+    .query("integrationCapabilities")
+    .withIndex("by_integration", (q) => q.eq("integrationId", integration._id))
+    .collect();
+  const availableCapabilities = capabilities
+    .filter(
+      (capability) =>
+        capability.permissionState === "read_only" &&
+        capability.verificationStatus === "verified" &&
+        capability.lastSuccessAt !== undefined,
+    )
+    .map((capability) => capability.category);
+  const missingCapabilities = capabilities
+    .filter(
+      (capability) =>
+        capability.permissionState !== "read_only" ||
+        capability.verificationStatus !== "verified" ||
+        capability.lastErrorCode !== undefined,
+    )
+    .map((capability) => capability.category);
+  const sourceContext = {
+    provider: "managebac",
+    integrationId: integration._id,
+    sourceRecordId: source._id,
+    providerClassId: source.providerClassId,
+    academicPeriodKey: source.academicPeriodKey,
+    sourceHash: source.sourceHash,
+    freshAt: source.fetchedAt,
+    capabilityState:
+      now - source.fetchedAt > integration.freshnessSlaMinutes * 60_000
+        ? ("stale" as const)
+        : missingCapabilities.length
+          ? ("partial" as const)
+          : ("available" as const),
+    availableCapabilities: [...new Set(availableCapabilities)].sort(),
+    missingCapabilities: [...new Set(missingCapabilities)].sort(),
+  };
+  if (existing) {
+    const existingWorkspaceId =
+      existing.projectionType === "workspace"
+        ? ctx.db.normalizeId("spectraWorkspaces", existing.projectionId)
+        : null;
+    const existingWorkspace = existingWorkspaceId
+      ? await ctx.db.get(existingWorkspaceId)
+      : null;
+    if (existingWorkspace) {
+      await ctx.db.patch(existingWorkspace._id, {
+        title: text(normalized.name ?? normalized.title, 180, "ManageBac class"),
+        description:
+          text(normalized.description, 600) ||
+          `${text(normalized.course ?? normalized.programme, 120)} - Source-linked from ManageBac`,
+        sourceContext,
+        updatedAt: now,
+      });
+      await ctx.db.patch(existing._id, {
+        recordId: source._id,
+        sourceHash: source.sourceHash,
+        state: "active",
+        updatedAt: now,
+      });
+      return {
+        projection: (await ctx.db.get(existing._id))!,
+        created: false,
+        refreshed: true,
+      };
+    }
+  }
   const workspaceId = await ctx.db.insert("spectraWorkspaces", {
     ownerAccountId: accountId,
     schoolId: integration.schoolId,
@@ -1583,12 +1747,28 @@ async function ensureClassWorkspace(
     icon: "BookOpen",
     color: text(normalized.color, 32, "#429379"),
     starterKey: "managebac-class",
+    sourceContext,
     status: "active",
     defaultView: "cards",
     createdAt: now,
     updatedAt: now,
     lastActivityAt: now,
   });
+  if (existing) {
+    await ctx.db.patch(existing._id, {
+      recordId: source._id,
+      projectionType: "workspace",
+      projectionId: String(workspaceId),
+      sourceHash: source.sourceHash,
+      state: "active",
+      updatedAt: now,
+    });
+    return {
+      projection: (await ctx.db.get(existing._id))!,
+      created: true,
+      refreshed: false,
+    };
+  }
   const projectionId = await ctx.db.insert("externalProjections", {
     integrationId: integration._id,
     schoolId: integration.schoolId,
@@ -1739,60 +1919,6 @@ async function ensurePlannerProjection(
   return { projection: (await ctx.db.get(projectionId))!, created: true };
 }
 
-async function timetableArtifactForAccount(
-  ctx: MutationCtx,
-  integration: Doc<"schoolIntegrations">,
-  accountId: Id<"accounts">,
-) {
-  const existingProjections = await ctx.db
-    .query("externalProjections")
-    .withIndex("by_account_updated", (q) => q.eq("accountId", accountId))
-    .collect();
-  for (const projection of existingProjections) {
-    if (
-      projection.integrationId !== integration._id ||
-      projection.projectionType !== "timetable_event"
-    )
-      continue;
-    const artifactId = projection.projectionId.split("#", 1)[0];
-    if (!artifactId) continue;
-    const normalizedId = ctx.db.normalizeId("spectraArtifacts", artifactId);
-    const artifact = normalizedId ? await ctx.db.get(normalizedId) : null;
-    if (artifact?.blueprintKey === "timetable" && artifact.status === "active")
-      return artifact;
-  }
-  const now = Date.now();
-  const content = defaultArtifactContent("timetable") as Record<
-    string,
-    unknown
-  >;
-  const title = "My school timetable";
-  const artifactId = await ctx.db.insert("spectraArtifacts", {
-    ownerAccountId: accountId,
-    schoolId: integration.schoolId,
-    blueprintKey: "timetable",
-    schemaVersion: defaultArtifactSchemaVersion("timetable"),
-    title,
-    summary: "Classes and school deadlines synchronized from ManageBac",
-    content,
-    textIndex: buildArtifactTextIndex({
-      title,
-      summary: "Classes and school deadlines synchronized from ManageBac",
-      content,
-      tags: ["managebac", "timetable", "source-linked"],
-    }),
-    tags: ["managebac", "source-linked"],
-    status: "active",
-    createdFrom: {
-      source: "manual",
-      contextSummary: "Automatic ManageBac timetable bootstrap",
-    },
-    createdAt: now,
-    updatedAt: now,
-  });
-  return (await ctx.db.get(artifactId))!;
-}
-
 async function ensureTimetableProjection(
   ctx: MutationCtx,
   integration: Doc<"schoolIntegrations">,
@@ -1806,127 +1932,42 @@ async function ensureTimetableProjection(
       q.eq("integrationId", integration._id).eq("providerKey", providerKey),
     )
     .unique();
-  if (existing) return { projection: existing, created: false };
-  const normalized = record(source.normalized);
-  const start = isoValue(
-    normalized.startAt ?? normalized.start ?? normalized.beginsAt,
-  );
-  const due = isoValue(normalized.dueAt ?? normalized.deadlineAt);
-  if (!start && !due) return { projection: null, created: false };
-  const eventStart = start ?? due!;
-  const eventEnd =
-    isoValue(normalized.endAt ?? normalized.end ?? normalized.finishesAt) ??
-    new Date(
-      Date.parse(eventStart) + (due && !start ? 30 : 60) * 60_000,
-    ).toISOString();
-  const artifact = await timetableArtifactForAccount(
-    ctx,
-    integration,
-    accountId,
-  );
-  const content = record(artifact.content);
-  const layers = array(content.layers).map(record);
-  const layerId = source.providerClassId
-    ? `managebac-class:${source.providerClassId.slice(0, 120)}`
-    : source.recordType === "deadline" || source.recordType === "assessment"
-      ? "tasks"
-      : "classes";
-  if (!layers.some((layer) => layer.id === layerId)) {
-    layers.push({
-      id: layerId,
-      name: text(
-        normalized.className ?? normalized.courseName,
-        120,
-        "ManageBac class",
-      ),
-      kind: source.providerClassId ? "class" : "external",
-      visible: true,
-      color: "#26a879",
-      sourceId: source.providerClassId?.slice(0, 180),
-      authority: "external",
-      locked: true,
-    });
-  }
-  const eventId = `managebac:${source.providerRecordKey}`.slice(0, 180);
-  const plannerProjection = await ctx.db
-    .query("externalProjections")
-    .withIndex("by_provider_key", (q) =>
-      q
-        .eq("integrationId", integration._id)
-        .eq("providerKey", `planner:${source.providerRecordKey}`),
-    )
-    .unique();
-  const linkedTaskId =
-    plannerProjection?.projectionType === "planner_task"
-      ? plannerProjection.projectionId
-      : undefined;
-  const title = text(
-    normalized.title ?? normalized.name,
-    300,
-    source.recordType === "deadline" ? "ManageBac deadline" : "ManageBac event",
-  );
-  const event = {
-    id: eventId,
-    layerId,
-    title,
-    start: eventStart,
-    end:
-      Date.parse(eventEnd) > Date.parse(eventStart)
-        ? eventEnd
-        : new Date(Date.parse(eventStart) + 30 * 60_000).toISOString(),
-    allDay: normalized.allDay === true || Boolean(due && !start),
-    timezone: text(normalized.timezone, 100, "UTC"),
-    sourceRef: source.providerRecordKey.slice(0, 180),
-    sourceVersion: source.payloadVersion.slice(0, 180),
-    sourceHash: source.sourceHash.slice(0, 180),
-    sourceStatus: "active",
-    ...(text(normalized.location, 300)
-      ? { location: text(normalized.location, 300) }
-      : {}),
-    ...(text(normalized.description ?? normalized.notes, 20_000)
-      ? { notes: text(normalized.description ?? normalized.notes, 20_000) }
-      : {}),
-    ...(linkedTaskId
-      ? { taskId: linkedTaskId, artifactIds: [linkedTaskId] }
-      : {}),
-    provenance: {
-      actor: "source",
-      source: "ManageBac",
-      importedAt: Date.now(),
-    },
-    locked: true,
-  };
-  const nextContent = {
-    timezone: text(content.timezone, 100, "UTC"),
-    layers,
-    events: [...array(content.events), event],
-  };
-  const now = Date.now();
-  await ctx.db.patch(artifact._id, {
-    content: nextContent,
-    textIndex: buildArtifactTextIndex({
-      title: artifact.title,
-      summary: artifact.summary ?? "",
-      content: nextContent,
-      tags: artifact.tags,
-    }),
-    updatedAt: now,
-  });
-  const projectionId = await ctx.db.insert("externalProjections", {
-    integrationId: integration._id,
+  const calendar = await upsertSourceCalendarItem(ctx, {
+    ownerAccountId: accountId,
     schoolId: integration.schoolId,
-    recordId: source._id,
-    accountId,
-    projectionType: "timetable_event",
-    projectionId: `${artifact._id}#${eventId}`,
-    providerKey,
+    sourceRecordId: source._id,
+    sourceKey: source.providerRecordKey,
     sourceHash: source.sourceHash,
-    state: "active",
-    bootstrapVersion: integration.bootstrapVersion,
-    createdAt: now,
-    updatedAt: now,
+    sourceUrl: source.provenanceUrl,
+    fetchedAt: source.fetchedAt,
+    recordType: source.recordType,
+    normalized: record(source.normalized),
   });
-  return { projection: (await ctx.db.get(projectionId))!, created: true };
+  const now = Date.now();
+  if (existing) {
+    await ctx.db.patch(existing._id, {
+      projectionId: String(calendar.itemId),
+      sourceHash: source.sourceHash,
+      state: "active",
+      updatedAt: now,
+    });
+    return { projection: (await ctx.db.get(existing._id))!, created: calendar.created };
+  }
+  const projectionId = await ctx.db.insert("externalProjections", {
+      integrationId: integration._id,
+      schoolId: integration.schoolId,
+      recordId: source._id,
+      accountId,
+      projectionType: "timetable_event",
+      projectionId: String(calendar.itemId),
+      providerKey,
+      sourceHash: source.sourceHash,
+      state: "active",
+      bootstrapVersion: integration.bootstrapVersion,
+      createdAt: now,
+      updatedAt: now,
+    });
+  return { projection: (await ctx.db.get(projectionId))!, created: calendar.created };
 }
 
 async function ensureResourceProjection(
@@ -1942,7 +1983,6 @@ async function ensureResourceProjection(
       q.eq("integrationId", integration._id).eq("providerKey", providerKey),
     )
     .unique();
-  if (existing) return { projection: existing, created: false };
   const normalized = record(source.normalized);
   const workspaceId = await classWorkspaceId(
     ctx,
@@ -1988,6 +2028,15 @@ async function ensureResourceProjection(
         createdAt: now,
         updatedAt: now,
       });
+  }
+  if (existing) {
+    await ctx.db.patch(existing._id, {
+      recordId: source._id,
+      sourceHash: source.sourceHash,
+      state: "active",
+      updatedAt: now,
+    });
+    return { projection: (await ctx.db.get(existing._id))!, created: false };
   }
   const projectionId = await ctx.db.insert("externalProjections", {
     integrationId: integration._id,
@@ -2191,21 +2240,13 @@ async function markProjectionSourceRemoved(
     return;
   }
   if (projection.projectionType === "timetable_event") {
-    const [artifactValue, eventId] = projection.projectionId.split("#");
-    const artifactId = artifactValue
-      ? ctx.db.normalizeId("spectraArtifacts", artifactValue)
-      : null;
-    const artifact = artifactId ? await ctx.db.get(artifactId) : null;
-    if (!artifact || artifact.blueprintKey !== "timetable" || !eventId) return;
-    const content = record(artifact.content);
-    const events = array(content.events).map((item) => {
-      const event = record(item);
-      return event.id === eventId
-        ? { ...event, sourceStatus: "removed" }
-        : event;
-    });
-    await ctx.db.patch(artifact._id, {
-      content: { ...content, events },
+    const itemId = ctx.db.normalizeId("calendarItems", projection.projectionId);
+    const item = itemId ? await ctx.db.get(itemId) : null;
+    if (!item) return;
+    await ctx.db.patch(item._id, {
+      status: "removed",
+      sourceCapabilityState: "stale",
+      revision: item.revision + 1,
       updatedAt: Date.now(),
     });
   }
@@ -2230,19 +2271,16 @@ async function projectRecord(
       syncRun.accountId,
       source,
     );
-    if (["deadline", "assessment"].includes(source.recordType)) {
-      const timetable = await ensureTimetableProjection(
-        ctx,
-        integration,
-        syncRun.accountId,
-        source,
-      );
-      return {
-        projected: true,
-        created: result.created || timetable.created,
-      };
-    }
-    return { projected: true, created: result.created };
+    const calendar = await ensureTimetableProjection(
+      ctx,
+      integration,
+      syncRun.accountId,
+      source,
+    );
+    return {
+      projected: true,
+      created: result.created || calendar.created,
+    };
   }
   if (
     ["timetable", "lesson", "class_event", "calendar_event"].includes(
@@ -3426,6 +3464,47 @@ export const listMyClassCandidates = query({
   },
 });
 
+async function ensureClassWorkspaceItem(
+  ctx: MutationCtx,
+  workspaceId: Id<"spectraWorkspaces">,
+  accountId: Id<"accounts">,
+  sourceType: "artifact" | "custom",
+  sourceId: string,
+  viewData: {
+    titleOverride?: string;
+    compactSummary?: string;
+    cardVariant?: string;
+  } = {},
+) {
+  const existing = await ctx.db
+    .query("spectraWorkspaceItems")
+    .withIndex("by_workspace_source", (q) =>
+      q
+        .eq("workspaceId", workspaceId)
+        .eq("sourceType", sourceType)
+        .eq("sourceId", sourceId),
+    )
+    .unique();
+  if (existing) return false;
+  const now = Date.now();
+  await ctx.db.insert("spectraWorkspaceItems", {
+    workspaceId,
+    sourceType,
+    sourceId,
+    viewData: {
+      ...viewData,
+      pinned: false,
+      hidden: false,
+    },
+    layout: { view: "cards" },
+    placedByAccountId: accountId,
+    accessProjection: true,
+    createdAt: now,
+    updatedAt: now,
+  });
+  return true;
+}
+
 export const materializeClassWorkspaces = mutation({
   args: {
     recordIds: v.array(v.id("externalRecords")),
@@ -3475,6 +3554,8 @@ export const materializeClassWorkspaces = mutation({
     );
     const selected = args.recordIds.slice(0, 100);
     let created = 0;
+    let refreshed = 0;
+    let projected = 0;
     let skipped = 0;
     for (const recordId of selected) {
       const source = await ctx.db.get(recordId);
@@ -3498,9 +3579,113 @@ export const materializeClassWorkspaces = mutation({
         source,
       );
       if (result.created) created += 1;
-      else skipped += 1;
+      else refreshed += 1;
+      const workspaceId = ctx.db.normalizeId(
+        "spectraWorkspaces",
+        result.projection.projectionId,
+      );
+      if (!workspaceId || !source.providerClassId) continue;
+      const relatedTypes = [
+        "assignment",
+        "deadline",
+        "assessment",
+        "resource",
+        "file",
+        "class_resource",
+        "school_resource",
+        "discussion",
+        "announcement",
+      ];
+      const related = (
+        await Promise.all(
+          relatedTypes.map((recordType) =>
+            ctx.db
+              .query("externalRecords")
+              .withIndex("by_class_type", (q) =>
+                q
+                  .eq("providerClassId", source.providerClassId)
+                  .eq("recordType", recordType),
+              )
+              .take(500),
+          ),
+        )
+      )
+        .flat()
+        .filter(
+          (record) =>
+            record.integrationId === integration._id &&
+            !record.tombstone &&
+            (!source.academicPeriodKey ||
+              !record.academicPeriodKey ||
+              record.academicPeriodKey === source.academicPeriodKey) &&
+            (record.mappedAccountId === undefined ||
+              record.mappedAccountId === actor.accountId),
+        );
+      for (const relatedRecord of related) {
+        if (["assignment", "deadline", "assessment"].includes(relatedRecord.recordType)) {
+          const task = await ensurePlannerProjection(
+            ctx,
+            integration,
+            actor.accountId,
+            relatedRecord,
+          );
+          const taskId = ctx.db.normalizeId(
+            "spectraArtifacts",
+            task.projection.projectionId,
+          );
+          if (
+            taskId &&
+            (await ensureClassWorkspaceItem(
+              ctx,
+              workspaceId,
+              actor.accountId,
+              "artifact",
+              String(taskId),
+              { compactSummary: "School source task Â· personal planning remains separate" },
+            ))
+          )
+            projected += 1;
+          continue;
+        }
+        if (["resource", "file", "class_resource", "school_resource"].includes(relatedRecord.recordType)) {
+          await ensureResourceProjection(
+            ctx,
+            integration,
+            actor.accountId,
+            relatedRecord,
+          );
+          projected += 1;
+          continue;
+        }
+        const normalized = record(relatedRecord.normalized);
+        if (
+          await ensureClassWorkspaceItem(
+            ctx,
+            workspaceId,
+            actor.accountId,
+            "custom",
+            `managebac:${relatedRecord._id}`,
+            {
+              titleOverride: text(
+                normalized.title ?? normalized.name ?? normalized.subject,
+                240,
+                relatedRecord.recordType === "discussion"
+                  ? "Class discussion"
+                  : "Class announcement",
+              ),
+              compactSummary: plainText(
+                normalized.description ?? normalized.body ?? normalized.message,
+                500,
+                "Source-linked class update",
+              ),
+              cardVariant: `school-${relatedRecord.recordType}`,
+            },
+          )
+        )
+          projected += 1;
+      }
     }
-    return { created, skipped, requested: selected.length };
+    return { created, refreshed, projected, skipped, requested: selected.length };
   },
 });
 

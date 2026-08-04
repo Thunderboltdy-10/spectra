@@ -7,6 +7,7 @@ import {
   validateArtifactContent,
 } from "../artifacts/registry";
 import type { ArtifactTypeKey } from "../artifacts/types";
+import { WORK_TYPE_KEYS } from "../artifacts/types";
 
 const defaultContent: Record<ArtifactTypeKey, unknown> = {
   document: {
@@ -179,6 +180,10 @@ export const BUILT_IN_BLUEPRINTS = ARTIFACT_TYPE_MANIFESTS.map(
   }),
 );
 
+const creatableBlueprints = BUILT_IN_BLUEPRINTS.filter((blueprint) =>
+  (WORK_TYPE_KEYS as readonly string[]).includes(blueprint.key),
+);
+
 export type BuiltInBlueprintKey = ArtifactTypeKey;
 
 const blueprintByKey = new Map<string, ArtifactBlueprint>(
@@ -186,7 +191,7 @@ const blueprintByKey = new Map<string, ArtifactBlueprint>(
 );
 
 export function listBlueprints() {
-  return BUILT_IN_BLUEPRINTS;
+  return creatableBlueprints;
 }
 
 export function getBlueprint(key: string) {

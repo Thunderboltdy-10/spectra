@@ -338,6 +338,12 @@ export function buildBoundedContextPacket(input: {
     intent?: unknown;
   } | null;
   currentView?: string;
+  semanticTargets?: Array<{
+    id: string;
+    label?: string;
+    summary?: string;
+    anchor?: Record<string, unknown>;
+  }>;
   linksByArtifact?: Record<string, unknown[]>;
   recentActivity?: unknown[];
   workspaceMap?: unknown[];
@@ -472,6 +478,12 @@ export function buildBoundedContextPacket(input: {
         "bounded workspaces, threads, and Inbox map with retrieval available",
     },
     currentView: input.currentView ?? "unknown",
+    semanticTargets: (input.semanticTargets ?? []).slice(0, 24).map((target) => ({
+      id: target.id,
+      label: target.label?.slice(0, 240),
+      summary: target.summary?.slice(0, 4_000),
+      anchor: target.anchor,
+    })),
     workspace: input.workspace
       ? {
           id: input.workspace._id,

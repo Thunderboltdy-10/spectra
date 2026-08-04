@@ -9,6 +9,9 @@ import { markdown } from "@codemirror/lang-markdown";
 import { python } from "@codemirror/lang-python";
 import { openSearchPanel } from "@codemirror/search";
 import { Decoration, EditorView } from "@codemirror/view";
+import { yCollab } from "y-codemirror.next";
+import { Awareness } from "y-protocols/awareness";
+import type * as Y from "yjs";
 import {
   AlertTriangle,
   Box,
@@ -118,6 +121,7 @@ import {
 } from "./sandboxed-artifact-runtime";
 import { aiRegionAttr, pathTouches } from "./ai-region-path";
 import { targetAttrs } from "../collaboration/target-attributes";
+import { codeFileText } from "../work/models/yjs/code-adapter";
 
 type CodeProblem = {
   id: string;
@@ -377,6 +381,7 @@ export function CodeStudio({
   onChange,
   aiChangedPaths = [],
   readOnly,
+  collaborationDocument,
   synchronizationReady,
   syncMessage = "Auto-saved",
   onActiveRegionChange,
@@ -388,11 +393,21 @@ export function CodeStudio({
   onChange: (content: unknown) => void;
   aiChangedPaths?: string[];
   readOnly: boolean;
+  collaborationDocument?: Y.Doc;
   synchronizationReady: boolean;
   syncMessage?: string;
   onActiveRegionChange?: (regionId: string) => void;
 }) {
   const incoming = useMemo(() => normalizeCodeContent(content), [content]);
+  const collaborationAwareness = useMemo(
+    () =>
+      collaborationDocument ? new Awareness(collaborationDocument) : null,
+    [collaborationDocument],
+  );
+  useEffect(
+    () => () => collaborationAwareness?.destroy(),
+    [collaborationAwareness],
+  );
   const incomingRef = useRef(incoming);
   useEffect(() => {
     incomingRef.current = incoming;
@@ -501,6 +516,13 @@ export function CodeStudio({
   const activeFile =
     workbook.files.find((file) => file.id === activeFileId) ??
     workbook.files[0]!;
+  const activeSharedText = useMemo(
+    () =>
+      collaborationDocument
+        ? codeFileText(collaborationDocument, activeFile.id)
+        : null,
+    [activeFile.id, collaborationDocument, incoming],
+  );
   const filteredFiles = workbook.files.filter((file) =>
     file.path.toLowerCase().includes(fileQuery.trim().toLowerCase()),
   );
@@ -847,6 +869,22 @@ export function CodeStudio({
   }, []);
 
   function updateActiveSource(source: string) {
+    if (activeSharedText) {
+      // yCollab already wrote this edit to the file's Y.Text. Keep only the
+      // local runtime/preview projection current; emitting the whole project
+      // through onChange would overwrite concurrent files on every keystroke.
+      setWorkbook((current) => {
+        const next = structuredClone(current);
+        const file = next.files.find(
+          (candidate) => candidate.id === activeFile.id,
+        );
+        if (!file) return current;
+        file.lineIds = reconcileLineIds(file.source, file.lineIds, source);
+        file.source = source;
+        return next;
+      });
+      return;
+    }
     mutate((draft) => {
       const file = draft.files.find(
         (candidate) => candidate.id === activeFile.id,
@@ -2950,6 +2988,7 @@ export function CodeStudio({
                       : {})}
                   >
                     <CodeMirror
+                      key={`${activeFile.id}:${collaborationDocument?.clientID ?? "local"}`}
                       value={activeFile.source}
                       height="100%"
                       editable={!readOnly}
@@ -2958,6 +2997,9 @@ export function CodeStudio({
                         editorTheme,
                         presenceExtension,
                         aiLineExtension,
+                        ...(activeSharedText && collaborationAwareness
+                          ? [yCollab(activeSharedText, collaborationAwareness)]
+                          : []),
                         EditorView.lineWrapping,
                       ]}
                       basicSetup={{

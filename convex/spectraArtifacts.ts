@@ -1559,7 +1559,7 @@ export const create = mutation({
     const actor = await requireSpectraActor(ctx);
     if (args.blueprintKey === "timetable") {
       throw new Error(
-        "Every account already has a Timetable. Open Timetable to edit it instead of creating another.",
+        "Calendar is an application surface, not creatable work. Open Calendar to schedule tasks, work blocks, or personal events.",
       );
     }
     if (args.runId) {

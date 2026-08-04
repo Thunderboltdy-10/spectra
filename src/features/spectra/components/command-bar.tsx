@@ -6,16 +6,20 @@ import {
   ArrowUp,
   ChevronRight,
   FileText,
+  GitBranch,
   Image as ImageIcon,
   Loader2,
+  MessageSquarePlus,
   Paperclip,
   Plus,
   Square,
   X,
 } from "lucide-react";
 import { createPortal } from "react-dom";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
+import { useLocalAutocomplete } from "@/features/spectra/compute/autocomplete";
+import { useSpectraPreferences } from "@/features/spectra/settings/preference-store";
 
 type CommandBarProps = {
   placeholder: string;
@@ -33,6 +37,12 @@ type CommandBarProps = {
   onStop?: () => void;
   allowConcurrent?: boolean;
   onStartNewThread?: () => void;
+  activeRunId?: string;
+  onSteer?: (
+    runId: string,
+    mode: "refine_current_goal" | "redirect_next_step" | "replace_goal" | "cancel_current_action",
+    text: string,
+  ) => void | Promise<unknown>;
 };
 
 export type CommandAttachment = {
@@ -211,12 +221,18 @@ export function CommandBar({
   onStop,
   allowConcurrent = false,
   onStartNewThread,
+  activeRunId,
+  onSteer,
 }: CommandBarProps) {
   const [value, setValue] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [attachments, setAttachments] = useState<CommandAttachment[]>([]);
   const [sending, setSending] = useState(false);
   const [blockedAttempt, setBlockedAttempt] = useState(false);
+  const [steering, setSteering] = useState(false);
+  const [steerText, setSteerText] = useState("");
+  const [steerMode, setSteerMode] = useState<"refine_current_goal" | "redirect_next_step" | "replace_goal" | "cancel_current_action">("refine_current_goal");
+  const [steerQueued, setSteerQueued] = useState(false);
   const [queuedSubmissions, setQueuedSubmissions] = useState<
     Array<{ value: string; attachments: CommandAttachment[] }>
   >([]);
@@ -227,6 +243,16 @@ export function CommandBar({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const hasMenu = allowAttachments || Boolean(menu);
+  const autocompleteHintId = useId();
+  const { preferences } = useSpectraPreferences();
+  const autocomplete = useLocalAutocomplete({
+    value,
+    surface: "quick_chat",
+    enabled:
+      preferences.writing.smartCompletion &&
+      preferences.writing.quickChatSuggestions,
+    delayMs: preferences.writing.delayMs,
+  });
 
   async function addFiles(files: FileList | null) {
     if (!files) return;
@@ -533,6 +559,20 @@ export function CommandBar({
       >
         <Plus className="h-4 w-4" />
       </button>
+      {onStartNewThread ? (
+        <button
+          type="button"
+          onClick={() => {
+            onStartNewThread();
+            setBlockedAttempt(false);
+          }}
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[8px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+          aria-label="Start a new thread"
+          title="New thread"
+        >
+          <MessageSquarePlus className="h-4 w-4" />
+        </button>
+      ) : null}
       <div className="spectra-command-surface flex min-h-12 min-w-0 flex-1 flex-col rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 shadow-[0_3px_12px_rgba(27,20,12,0.08)]">
         {blockedAttempt ? (
           <div
@@ -566,30 +606,85 @@ export function CommandBar({
             ) : null}
           </div>
         ) : null}
+        {activeRunId && onSteer ? (
+          <div className="mb-1 rounded-[8px] bg-[color-mix(in_oklab,var(--accent-cyan)_5%,var(--bg-primary))] px-2 py-1.5">
+            <div className="flex items-center gap-1.5">
+              <GitBranch className="h-3 w-3 text-[var(--accent-cyan)]" />
+              <span className="mr-auto text-[9px] font-medium text-[var(--text-secondary)]">
+                {steerQueued ? "Will apply after the current step" : "A run is active"}
+              </span>
+              <button type="button" onClick={() => setSteering((current) => !current)} className="h-6 rounded-[5px] px-2 text-[9px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" aria-expanded={steering}>Steer</button>
+            </div>
+            {steering ? (
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                <select value={steerMode} onChange={(event) => setSteerMode(event.target.value as typeof steerMode)} className="h-8 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 text-[9px] text-[var(--text-secondary)] outline-none">
+                  <option value="refine_current_goal">Refine goal</option>
+                  <option value="redirect_next_step">Redirect next step</option>
+                  <option value="replace_goal">Replace goal</option>
+                  <option value="cancel_current_action">Cancel current action</option>
+                </select>
+                <input value={steerText} onChange={(event) => setSteerText(event.target.value)} placeholder="What should change?" className="h-8 min-w-[160px] flex-1 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 text-[10px] outline-none focus:border-[var(--accent-cyan)]" />
+                <button type="button" disabled={!steerText.trim()} onClick={async () => { const text = steerText.trim(); if (!text) return; await onSteer(activeRunId, steerMode, text); setSteerText(""); setSteerQueued(true); setSteering(false); }} className="h-8 rounded-[6px] bg-[var(--text-primary)] px-2.5 text-[9px] font-semibold text-[var(--bg-primary)] disabled:opacity-40">Queue</button>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
         {showInlineBubbles ? bubbles : null}
         <div className="flex items-end gap-2">
           {context ? (
             <div className="mb-0.5 flex shrink-0 self-end">{context}</div>
           ) : null}
-          <textarea
-            ref={textareaRef}
-            rows={1}
-            value={value}
-            onChange={(event) => setValue(event.target.value)}
-            onKeyDown={(event) => {
-              if (
-                event.key === "Enter" &&
-                !event.shiftKey &&
-                !event.nativeEvent.isComposing &&
-                event.keyCode !== 229
-              ) {
-                event.preventDefault();
-                void submit();
-              }
-            }}
-            placeholder={placeholder}
-            className="max-h-32 min-h-9 min-w-0 flex-1 resize-none overflow-y-auto bg-transparent px-2 py-2 text-[13.5px] leading-5 text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
-          />
+          <div className="relative min-w-0 flex-1">
+            {autocomplete.suggestion ? (
+              <div aria-hidden="true" className="pointer-events-none absolute inset-0 max-h-32 overflow-hidden whitespace-pre-wrap break-words px-2 py-2 text-[13.5px] leading-5">
+                <span className="invisible">{value}</span>
+                <span className="text-[var(--text-tertiary)] opacity-70">{autocomplete.suggestion.text}</span>
+              </div>
+            ) : null}
+            <textarea
+              ref={textareaRef}
+              rows={1}
+              value={value}
+              onChange={(event) => setValue(event.target.value)}
+              onCompositionStart={autocomplete.compositionStart}
+              onCompositionEnd={autocomplete.compositionEnd}
+              aria-describedby={autocomplete.suggestion ? autocompleteHintId : undefined}
+              onKeyDown={(event) => {
+                if (autocomplete.suggestion && event.key === "Escape") {
+                  event.preventDefault();
+                  autocomplete.dismiss();
+                  return;
+                }
+                if (autocomplete.suggestion && event.key === "Tab") {
+                  event.preventDefault();
+                  setValue(autocomplete.accept("all"));
+                  return;
+                }
+                if (
+                  autocomplete.suggestion &&
+                  event.key === "ArrowRight" &&
+                  event.currentTarget.selectionStart === value.length &&
+                  event.currentTarget.selectionEnd === value.length
+                ) {
+                  event.preventDefault();
+                  setValue(autocomplete.accept("word"));
+                  return;
+                }
+                if (
+                  event.key === "Enter" &&
+                  !event.shiftKey &&
+                  !event.nativeEvent.isComposing &&
+                  event.keyCode !== 229
+                ) {
+                  event.preventDefault();
+                  void submit();
+                }
+              }}
+              placeholder={placeholder}
+              className="relative z-[1] max-h-32 min-h-9 w-full resize-none overflow-y-auto bg-transparent px-2 py-2 text-[13.5px] leading-5 text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
+            />
+            {autocomplete.suggestion ? <span id={autocompleteHintId} className="sr-only">Suggestion available. Press Tab to accept all, Right Arrow to accept a word, or Escape to dismiss.</span> : null}
+          </div>
           {busy && onStop ? (
             <button
               type="button"

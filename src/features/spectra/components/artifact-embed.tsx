@@ -14,11 +14,13 @@ import {
   Send,
   X,
 } from "lucide-react";
-import { useState, type CSSProperties } from "react";
+import { useRef, useState, type CSSProperties } from "react";
 import type { SpectraArtifactEmbed } from "../data/api";
 import { blueprintMeta } from "./artifact-card";
 import { LiveCodeRuntime } from "./live-code-runtime";
 import { PublishedCodeRuntime } from "./published-code-runtime";
+import { isArtifactTypeKey } from "../artifacts/registry";
+import { getWorkReferenceContract, validateReferenceView } from "../references";
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -59,7 +61,11 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
   const canInteract =
     embed.effectiveInteraction === "interact" ||
     embed.effectiveInteraction === "edit";
-  if (!type || !source) return null;
+  if (!type || !source || !isArtifactTypeKey(type)) return null;
+  const contract = getWorkReferenceContract(type);
+  const requestedView = typeof embed.displayPreferences?.view === "string" ? embed.displayPreferences.view : undefined;
+  const targetKind = contract.targets.find((target) => !requestedView || (target.views as readonly string[]).includes(requestedView))?.kind ?? contract.targets[0]!.kind;
+  const activeView = validateReferenceView(type, targetKind, requestedView) ? requestedView : contract.targets[0]!.views[0];
 
   if (type === "document") {
     const blocks = records(content.blocks).slice(
@@ -437,12 +443,25 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
     );
   }
 
-  return (
-    <div className="rounded-[8px] border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-4 text-[11px] leading-5 text-[var(--text-secondary)]">
-      {textFrom(content, embed.mode === "compact" ? 260 : 900) ||
-        "No preview content"}
-    </div>
-  );
+  if (type === "agent") {
+    const mission = record(content.mission);
+    const skills = records(content.skills);
+    const evidence = records(content.evidenceBindings ?? content.evidence);
+    return (
+      <div className="grid gap-2 sm:grid-cols-3">
+        <div className="sm:col-span-3 rounded-[8px] border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-3">
+          <div className="text-[8px] uppercase tracking-[.1em] text-[var(--text-tertiary)]">Mission</div>
+          <p className="mt-1 text-[11px] leading-5 text-[var(--text-primary)]">{textFrom(mission.objective ?? content.objective, 420) || "Mission is still being shaped."}</p>
+        </div>
+        <Metric label="Skills" value={String(skills.length)} />
+        <Metric label="Evidence" value={String(evidence.length)} />
+        <Metric label="Release" value={String(content.releaseStatus ?? content.status ?? "draft")} />
+      </div>
+    );
+  }
+
+  void activeView;
+  return null;
 }
 
 function Metric({ label, value }: { label: string; value: string }) {
@@ -464,6 +483,7 @@ export function ArtifactEmbed({
   onOpenSource,
   onRetry,
   onModeChange,
+  onResize,
   onRequestAccess,
   onCancelAccessRequest,
   onUseLiveVersion,
@@ -473,10 +493,12 @@ export function ArtifactEmbed({
   onOpenSource?: (artifactId: string) => void;
   onRetry?: () => void;
   onModeChange?: (mode: "compact" | "expanded") => void;
+  onResize?: (size: { width: number; height: number }) => void;
   onRequestAccess?: () => void;
   onCancelAccessRequest?: (requestId: string) => void;
   onUseLiveVersion?: () => void;
 }) {
+  const rootRef = useRef<HTMLElement | null>(null);
   const meta = embed.source ? blueprintMeta[embed.source.blueprintKey] : null;
   const Icon = meta?.icon ?? FileQuestion;
   const status =
@@ -485,7 +507,7 @@ export function ArtifactEmbed({
           icon: Send,
           title: "Access requested",
           detail:
-            "The source owner will decide whether to grant access. This embed unlocks automatically after approval.",
+            "The source owner will decide whether to grant access. This reference unlocks automatically after approval.",
         }
       : embed.state === "no_access"
         ? {
@@ -499,7 +521,7 @@ export function ArtifactEmbed({
               icon: AlertCircle,
               title: "Source was deleted",
               detail:
-                "The surrounding artifact is unchanged, but this projection is no longer available.",
+                "The surrounding work is unchanged, but this reference is no longer available.",
             }
           : embed.state === "version_unavailable"
             ? {
@@ -585,7 +607,28 @@ export function ArtifactEmbed({
   }
   if (!embed.source || !meta) return null;
   return (
-    <section className="overflow-hidden rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[0_1px_2px_rgba(28,24,18,0.025)]">
+    <section
+      ref={rootRef}
+      data-reference-id={embed.embedId}
+      className="overflow-hidden rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[0_1px_2px_rgba(28,24,18,0.025)]"
+      style={embed.mode === "expanded" ? {
+        width: typeof embed.displayPreferences?.width === "number" ? embed.displayPreferences.width : undefined,
+        height: typeof embed.displayPreferences?.height === "number" ? embed.displayPreferences.height : undefined,
+        maxWidth: "100%",
+        maxHeight: "min(720px, 80vh)",
+        minWidth: 240,
+        minHeight: 160,
+        resize: onResize ? "both" : undefined,
+        overflow: "auto",
+      } : undefined}
+      onPointerUp={() => {
+        if (!onResize || embed.mode !== "expanded" || !rootRef.current) return;
+        const bounds = rootRef.current.getBoundingClientRect();
+        const priorWidth = typeof embed.displayPreferences?.width === "number" ? embed.displayPreferences.width : 0;
+        const priorHeight = typeof embed.displayPreferences?.height === "number" ? embed.displayPreferences.height : 0;
+        if (Math.abs(bounds.width - priorWidth) > 3 || Math.abs(bounds.height - priorHeight) > 3) onResize({ width: Math.round(bounds.width), height: Math.round(bounds.height) });
+      }}
+    >
       <header className="flex flex-wrap items-center gap-2 border-b border-[var(--border-subtle)] px-3 py-2.5 sm:px-4">
         <span
           className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] bg-[color-mix(in_oklab,var(--embed-accent)_9%,var(--bg-secondary))]"
@@ -605,6 +648,7 @@ export function ArtifactEmbed({
             <span>{embed.mode === "compact" ? "Compact" : "Expanded"}</span>
             <span>·</span>
             <span>{embed.versionPolicy === "pinned" ? "Pinned" : "Live"}</span>
+            {typeof embed.displayPreferences?.view === "string" ? <><span>Â·</span><span>{embed.displayPreferences.view.replaceAll("_", " ")}</span></> : null}
             {embed.state === "archived" ? (
               <>
                 <span>·</span>
@@ -628,7 +672,7 @@ export function ArtifactEmbed({
             }
             className="flex h-8 items-center gap-1.5 rounded-[7px] px-2 text-[9px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-45"
             aria-label={
-              embed.mode === "compact" ? "Expand embed" : "Collapse embed"
+              embed.mode === "compact" ? "Expand reference" : "Collapse reference"
             }
           >
             {embed.mode === "compact" ? (

@@ -324,6 +324,9 @@ export function useSpectraRun({
     id: string;
     label?: string;
     workspaceId?: string;
+    semanticTargetId?: string;
+    semanticAnchor?: Record<string, unknown>;
+    contextSummary?: string;
   }>;
   currentView?: string;
   observeDurableRuns?: boolean;
@@ -877,6 +880,7 @@ export function useSpectraRun({
     (
       prompt: string,
       attachments: CommandAttachment[] = [],
+      options?: { threadId?: string },
     ): Promise<boolean> => {
       const clean = prompt.trim();
       if (!clean) return Promise.resolve(false);
@@ -904,7 +908,7 @@ export function useSpectraRun({
           id: optimisticCardId,
           runId: `pending:${exchangeId}`,
           status: "running",
-          title: "Spectra",
+          title: "Starting run",
           summary: clean,
           variant: "status",
           actions: [],
@@ -939,7 +943,7 @@ export function useSpectraRun({
             surface,
             workspaceId,
             artifactId,
-            threadId: durableThreadId.current,
+            threadId: options?.threadId ?? durableThreadId.current,
             focusMode,
             selectedArtifactIds,
             explicitContextObjects,
@@ -1000,6 +1004,55 @@ export function useSpectraRun({
       upsert,
       workspaceId,
     ],
+  );
+
+  const queuedSteering = useRef(new Set<string>());
+  const steer = useCallback(
+    async (
+      runId: string,
+      mode:
+        | "refine_current_goal"
+        | "redirect_next_step"
+        | "replace_goal"
+        | "cancel_current_action",
+      text: string,
+    ) => {
+      const clean = text.trim();
+      if (!clean || queuedSteering.current.has(runId)) return false;
+      queuedSteering.current.add(runId);
+      try {
+        await consume({
+          action: "steer",
+          runId,
+          steerMode: mode,
+          steerText: clean,
+        });
+        toast.message("Will apply after the current step.");
+        if (mode === "cancel_current_action") {
+          await consume({ action: "stop", runId });
+          queuedSteering.current.delete(runId);
+          return true;
+        }
+        void (async () => {
+          for (let attempt = 0; attempt < 400; attempt += 1) {
+            await new Promise((resolve) => window.setTimeout(resolve, 1_500));
+            const { runTabs } = await getSpectraRunTabs({ limit: 120, force: true }).catch(() => ({ runTabs: [] }));
+            const target = runTabs.find((tab) => tab.runId === runId);
+            if (!target) continue;
+            if (["queued", "running", "awaiting_confirmation", "awaiting_resolution"].includes(target.run.status)) continue;
+            await run(clean, [], { threadId: target.threadId });
+            break;
+          }
+          queuedSteering.current.delete(runId);
+        })();
+        return true;
+      } catch (error) {
+        queuedSteering.current.delete(runId);
+        toast.error(error instanceof Error ? error.message : "Could not queue steering.");
+        return false;
+      }
+    },
+    [consume, run],
   );
 
   const keepAsThread = useCallback(
@@ -1296,6 +1349,7 @@ export function useSpectraRun({
       stop,
       retry,
       revise,
+      steer,
       onCardAction,
       selectedRunId,
       openDetails,
@@ -1311,6 +1365,7 @@ export function useSpectraRun({
       openDetails,
       retry,
       revise,
+      steer,
       run,
       selectedRunId,
       stop,

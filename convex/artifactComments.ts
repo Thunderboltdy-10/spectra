@@ -8,6 +8,7 @@ import { isSensitiveQuizRegion } from "./quizPrivacy";
 
 const anchor = v.object({
   regionId: v.string(),
+  semanticAnchor: v.optional(v.any()),
   relativePosition: v.optional(v.bytes()),
   geometry: v.optional(v.any()),
   fallbackExcerpt: v.optional(v.string()),
@@ -133,6 +134,18 @@ export const list = query({
       const author = accounts.get(comment.authorAccountId);
       return {
         ...comment,
+        anchor: {
+          ...comment.anchor,
+          semanticAnchor: comment.anchor.semanticAnchor ?? {
+            workId: String(artifact._id),
+            workType: artifact.blueprintKey,
+            kind: comment.anchor.regionId === "work:root" ? "work:root" : "semantic_region",
+            path: comment.anchor.regionId === "work:root" ? ["work", "root"] : ["region", comment.anchor.regionId],
+            stableIds: comment.anchor.regionId === "work:root" ? { workId: String(artifact._id) } : { regionId: comment.anchor.regionId },
+            fallbackExcerpt: comment.anchor.fallbackExcerpt,
+            schemaVersion: 1,
+          },
+        },
         author: author
           ? {
               accountId: author._id,
@@ -363,6 +376,15 @@ export const create = mutation({
       body,
       anchor: {
         regionId,
+        semanticAnchor: args.anchor.semanticAnchor ?? {
+          workId: String(artifact._id),
+          workType: artifact.blueprintKey,
+          kind: regionId === "work:root" ? "work:root" : "semantic_region",
+          path: regionId === "work:root" ? ["work", "root"] : ["region", regionId],
+          stableIds: regionId === "work:root" ? { workId: String(artifact._id) } : { regionId },
+          fallbackExcerpt: args.anchor.fallbackExcerpt?.trim().slice(0, 500),
+          schemaVersion: 1,
+        },
         relativePosition: args.anchor.relativePosition,
         geometry: args.anchor.geometry,
         fallbackExcerpt: args.anchor.fallbackExcerpt?.trim().slice(0, 500),
@@ -501,12 +523,21 @@ export const reanchor = mutation({
     const comment = await ctx.db.get(args.commentId);
     if (!comment || comment.status === "deleted")
       throw new Error("COMMENT_NOT_FOUND");
-    await requireArtifactCapability(ctx, comment.artifactId, "comment");
+    const { artifact } = await requireArtifactCapability(ctx, comment.artifactId, "comment");
     const regionId = args.anchor.regionId.trim().slice(0, 240);
     if (!regionId) throw new Error("COMMENT_ANCHOR_REQUIRED");
     await ctx.db.patch(comment._id, {
       anchor: {
         regionId,
+        semanticAnchor: args.anchor.semanticAnchor ?? {
+          workId: String(artifact._id),
+          workType: artifact.blueprintKey,
+          kind: regionId === "work:root" ? "work:root" : "semantic_region",
+          path: regionId === "work:root" ? ["work", "root"] : ["region", regionId],
+          stableIds: regionId === "work:root" ? { workId: String(artifact._id) } : { regionId },
+          fallbackExcerpt: args.anchor.fallbackExcerpt?.trim().slice(0, 500),
+          schemaVersion: 1,
+        },
         relativePosition: args.anchor.relativePosition,
         geometry: args.anchor.geometry,
         fallbackExcerpt: args.anchor.fallbackExcerpt?.trim().slice(0, 500),

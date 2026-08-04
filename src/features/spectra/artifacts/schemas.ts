@@ -91,6 +91,47 @@ export const agentContentSchema = z
       )
       .max(200),
     releaseNotes: z.string().max(4_000),
+    mission: z
+      .object({ objective: text })
+      .passthrough()
+      .optional(),
+    foundationSections: z
+      .array(
+        z
+          .object({
+            id,
+            type: z.string().min(1).max(100),
+            question: text.optional(),
+            answer: text.optional(),
+          })
+          .passthrough(),
+      )
+      .max(500)
+      .optional(),
+    evidenceBindings: z
+      .array(
+        z
+          .object({
+            id,
+            title: z.string().max(500),
+            description: text.optional(),
+          })
+          .passthrough(),
+      )
+      .max(2_000)
+      .optional(),
+    releaseDrafts: z
+      .array(
+        z
+          .object({
+            id,
+            releaseSummary: text.optional(),
+            status: z.string().max(100).optional(),
+          })
+          .passthrough(),
+      )
+      .max(500)
+      .optional(),
   })
   .strict();
 
@@ -1045,6 +1086,7 @@ export const codeContentSchema = z
 
 export const whiteboardContentSchema = z
   .object({
+    zOrder: z.array(id).max(100_000).optional(),
     viewport: z
       .object({
         x: z.number().min(-1_000_000).max(1_000_000),

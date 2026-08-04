@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ARTIFACT_TYPE_KEYS } from "@/features/spectra/artifacts/types";
+import { WORK_TYPE_KEYS } from "@/features/spectra/artifacts/types";
 import {
   listBlueprints,
   requireBlueprint,
@@ -7,9 +7,9 @@ import {
 } from "@/features/spectra/blueprints";
 
 describe("Spectra blueprint registry", () => {
-  it("registers only first-class artifact blueprints", () => {
+  it("registers only creatable first-class work blueprints", () => {
     expect(listBlueprints().map((blueprint) => blueprint.key)).toEqual([
-      ...ARTIFACT_TYPE_KEYS,
+      ...WORK_TYPE_KEYS,
     ]);
   });
 

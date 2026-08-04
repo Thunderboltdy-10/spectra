@@ -309,7 +309,7 @@ function setup(
   });
   process.env.OPENROUTER_API_KEY = "test-key";
   process.env.SPECTRA_TEST_INLINE_RUNS = "1";
-  const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ model: "deepseek/deepseek-v4-pro-20260423", provider: "DeepSeek", choices: [{ message: { content: JSON.stringify(plan) } }] }), { status: 200 }));
+  const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ model: "openai/gpt-5.6", provider: "OpenAI", choices: [{ message: { content: JSON.stringify(plan) } }] }), { status: 200 }));
   vi.stubGlobal("fetch", fetchMock);
   return { convexQuery, convexMutation, fetchMock, getSavedArtifact: () => savedArtifact };
 }
@@ -723,9 +723,9 @@ describe("Spectra run route", () => {
     const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
     const payload = JSON.parse(String(request.body)) as { model: string; provider: { order: string[]; only: string[]; allow_fallbacks: boolean }; reasoning?: unknown; stream: boolean; tools?: Array<{ function?: { name?: string } }> };
     expect(fetchMock.mock.calls[0]?.[0]).toBe("https://openrouter.ai/api/v1/chat/completions");
-    expect(payload.model).toBe("deepseek/deepseek-v4-pro");
-    expect(payload.provider).toEqual({ order: ["deepseek"], only: ["deepseek"], allow_fallbacks: false });
-    expect(payload.reasoning).toEqual({ enabled: false, exclude: true });
+    expect(payload.model).toBe("openai/gpt-5.6");
+    expect(payload.provider).toEqual({ order: ["OpenAI"], only: ["OpenAI"], allow_fallbacks: false });
+    expect(payload.reasoning).toEqual({ effort: "high", exclude: true });
     expect(payload.tools?.map((tool) => tool.function?.name)).toEqual(
       expect.arrayContaining([
         "retrieve_memory",
@@ -739,7 +739,7 @@ describe("Spectra run route", () => {
     expect(payload.stream).toBe(true);
     expect(new Headers(request.headers).get("X-OpenRouter-Title")).toBe("Spectra AI Operation Engine");
     const completedCall = convexMutation.mock.calls.find(([name, args]) => String(name).includes("spectraRuns:updateStatus") && (args as { status?: string }).status === "completed");
-    expect(completedCall?.[1]).toMatchObject({ providerUsed: "DeepSeek", modelUsed: "deepseek/deepseek-v4-pro-20260423" });
+    expect(completedCall?.[1]).toMatchObject({ providerUsed: "OpenAI", modelUsed: "openai/gpt-5.6" });
   });
 
   it("reads focused content on demand before submitting a mutation plan", async () => {
@@ -951,12 +951,12 @@ describe("Spectra run route", () => {
     expect(convexMutation.mock.calls.some(([name, args]) => String(name).includes("spectraRuns:updateStatus") && (args as { decision?: string }).decision === "clarify")).toBe(true);
   });
 
-  it("uses the full agent-tool fallback only after the native DeepSeek call fails", async () => {
+  it("uses the full agent-tool recovery route only after the native Luna call fails", async () => {
     const answerPlan = { decision: "answer", intent: { mode: "answer", requestedArtifactTypes: [], requestedVisibleArtifactCount: 0, targetArtifactId: null, targetWorkspaceId: null }, finalResponse: "Fallback worked.", operations: [] };
     const { fetchMock } = setup(answerPlan);
     fetchMock.mockReset()
       .mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: "native unavailable" } }), { status: 503 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ model: "deepseek/deepseek-v4-pro-20260423", provider: "Baidu", choices: [{ message: { content: JSON.stringify(answerPlan) } }] }), { status: 200 }));
+      .mockResolvedValueOnce(new Response(JSON.stringify({ model: "openai/gpt-5.6", provider: "OpenAI", choices: [{ message: { content: JSON.stringify(answerPlan) } }] }), { status: 200 }));
     const route = await import("@/app/api/spectra/run/route");
     const response = await route.POST(new NextRequest("http://localhost/api/spectra/run", { method: "POST", body: JSON.stringify({ action: "run", surface: "workspace", workspaceId: "workspace-real", prompt: "Answer briefly." }) }));
     expect(response.status).toBe(200);
@@ -965,7 +965,7 @@ describe("Spectra run route", () => {
     const primary = JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body)) as Record<string, unknown>;
     const fallback = JSON.parse(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body)) as { provider: unknown; tools?: unknown[]; tool_choice?: unknown };
     expect(Array.isArray(primary.tools)).toBe(true);
-    expect(fallback.provider).toEqual({ order: ["baidu"], only: ["baidu"], allow_fallbacks: false, require_parameters: true });
+    expect(fallback.provider).toEqual({ order: ["OpenAI"], only: ["OpenAI"], allow_fallbacks: false, require_parameters: true });
     expect(Array.isArray(fallback.tools)).toBe(true);
     expect(fallback.tool_choice).toBe("auto");
   });

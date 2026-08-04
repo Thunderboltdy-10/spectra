@@ -49,6 +49,7 @@ import {
   mutateAdministration,
   type PlatformAdministrationOverview,
 } from "@/features/spectra/administration/api";
+import { metricDefinition } from "@/features/spectra/administration/metric-registry";
 import {
   AdminButton,
   AdminCard,
@@ -308,6 +309,8 @@ function PlatformOverviewSurface({
           value={formatCompact(data.metrics.activeSchools)}
           detail="Current operational tenants"
           tone="green"
+          state={data.metricStates.activeSchools}
+          source={metricDefinition("platform.active_schools").source}
         />
         <MetricCard
           icon={Users}
@@ -315,6 +318,8 @@ function PlatformOverviewSurface({
           value={formatCompact(data.metrics.totalUsers)}
           detail={`${formatCompact(data.metrics.activeUsers30d)} active in 30 days`}
           tone="violet"
+          state={data.metricStates.totalUsers}
+          source={metricDefinition("platform.total_users").source}
         />
         <MetricCard
           icon={Database}
@@ -322,6 +327,8 @@ function PlatformOverviewSurface({
           value={formatCompact(data.metrics.artifactsCreated)}
           detail="Unknown until metadata counters are complete"
           tone="orange"
+          state={data.metricStates.artifactsCreated}
+          source={metricDefinition("platform.work_created").source}
         />
         <MetricCard
           icon={MessageCircle}
@@ -329,6 +336,8 @@ function PlatformOverviewSurface({
           value={formatCompact(data.metrics.messages)}
           detail="Never inferred by reading private threads"
           tone="blue"
+          state={data.metricStates.messages}
+          source={metricDefinition("platform.messages").source}
         />
         <MetricCard
           icon={Activity}
@@ -336,6 +345,8 @@ function PlatformOverviewSurface({
           value={`${data.metrics.retentionPercent}%`}
           detail="Account activity, not private content"
           tone="green"
+          state={data.metricStates.retentionPercent}
+          source={metricDefinition("platform.retention").source}
         />
       </div>
 

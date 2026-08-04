@@ -10,6 +10,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import type { CapabilityState } from "@/features/spectra/core/capability-truth";
+import { CapabilityTruthBadge } from "@/features/spectra/integrations/status/capability-truth";
 import {
   Select,
   SelectContent,
@@ -70,6 +72,8 @@ export function MetricCard({
   detail,
   tone = "green",
   action,
+  state,
+  source,
 }: {
   icon: LucideIcon;
   label: string;
@@ -77,6 +81,8 @@ export function MetricCard({
   detail: string;
   tone?: "green" | "violet" | "orange" | "blue";
   action?: ReactNode;
+  state?: CapabilityState;
+  source?: string;
 }) {
   const toneClass = {
     green: "bg-[#e9f6f0] text-[#15906b]",
@@ -88,7 +94,10 @@ export function MetricCard({
     <AdminCard className="min-w-0 p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-[11px] text-[var(--text-secondary)]">{label}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-[11px] text-[var(--text-secondary)]">{label}</p>
+            {state ? <CapabilityTruthBadge state={state} className="min-h-5 px-2 text-[9px]" /> : null}
+          </div>
           <strong className="mt-2 block truncate font-sans text-[26px] font-normal leading-none tracking-[-.02em] text-[var(--text-primary)]">
             {value}
           </strong>
@@ -102,6 +111,11 @@ export function MetricCard({
           >
             {detail}
           </p>
+          {source ? (
+            <p className="mt-1 truncate text-[9px] text-[var(--text-tertiary)]" title={source}>
+              {source}
+            </p>
+          ) : null}
         </div>
         <span
           className={cn(

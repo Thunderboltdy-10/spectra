@@ -74,6 +74,8 @@ import { TaskItem } from "@tiptap/extension-task-item";
 import { Image } from "@tiptap/extension-image";
 import TextAlign from "@tiptap/extension-text-align";
 import Highlight from "@tiptap/extension-highlight";
+import Collaboration from "@tiptap/extension-collaboration";
+import type * as Y from "yjs";
 import {
   Children,
   cloneElement,
@@ -92,10 +94,8 @@ import { createPortal } from "react-dom";
 import { currentTimeMs, shuffleInPlace, uniqueToken } from "@/lib/unique-token";
 import { SlashCommand } from "../editor/slash-command-extension";
 import { createSlashCommandRenderer } from "../editor/slash-command-renderer";
-import {
-  spectraObjectKey,
-  useSpectraContextStore,
-} from "@/stores/spectra-context-store";
+import { useSpectraContextStore } from "@/stores/spectra-context-store";
+import { projectLegacyWorkSession } from "../work/session/session-controller";
 import { Callout } from "../editor/callout-node";
 import { DragHandle } from "../editor/drag-handle";
 import { StableBlockId } from "../editor/stable-block-id";
@@ -105,6 +105,12 @@ import {
   type AiRegionDecorationTarget,
 } from "../editor/ai-region-decoration";
 import { Equation, InlineEquation } from "../editor/equation-node";
+import {
+  SpectraCitationNode,
+  SpectraReferenceNode,
+} from "../editor/reference-citation-nodes";
+import { SpectraTiptapAutocomplete } from "../compute/autocomplete";
+import { useSpectraPreferences } from "../settings/preference-store";
 import {
   aiRegionAttr,
   contentDerivedHighlightPaths,
@@ -192,6 +198,15 @@ import {
 import type { ArtifactTypeKey } from "../artifacts/types";
 import { changedArtifactRegionIds } from "../collaboration/artifact-yjs-model";
 import { isArtifactTypeKey } from "../artifacts/registry";
+import { getWorkDefinition } from "../work/registry";
+import { ContextSourceBoundary } from "./context-source-boundary";
+import { contextSourceRegistry } from "../context";
+import { spectraBus } from "../events";
+import { parseSpectraWorkUrl } from "../references";
+import {
+  createDocumentRelativeSelection,
+  encodeDocumentRelativeSelection,
+} from "../work/models/yjs";
 import { SheetsStudio } from "./sheets-studio";
 import { CodeStudio } from "./code-studio";
 import { PresentationStudio } from "./presentation-studio";
@@ -3201,40 +3216,28 @@ export function useArtifactStudioState(
       ),
     [artifacts, synchronizedSnapshots],
   );
-  const studioObjects = useMemo(
+  const session = useMemo(
     () =>
-      openObjects.filter(
-        (object) =>
-          object.type === "artifact" &&
-          (object.presentation === "split" || object.presentation === "tab") &&
-          artifactById.has(object.id),
+      projectLegacyWorkSession(
+        artifactById,
+        openObjects,
+        activeOpenObjectKey,
+        dirtyArtifactIds,
       ),
-    [artifactById, openObjects],
+    [activeOpenObjectKey, artifactById, dirtyArtifactIds, openObjects],
   );
-  const activeObject =
-    studioObjects.find(
-      (object) => spectraObjectKey(object) === activeOpenObjectKey,
-    ) ?? null;
-  const mode: StudioMode =
-    activeObject?.presentation === "split" ||
-    activeObject?.presentation === "tab"
-      ? activeObject.presentation
-      : "closed";
-  const activeArtifactId = activeObject?.id ?? null;
-  const activeArtifact = activeArtifactId
-    ? (artifactById.get(activeArtifactId) ?? null)
-    : null;
+  const mode: StudioMode = session.mode;
+  const activeArtifactId = session.activeWorkId;
+  const activeArtifact = session.activeWork;
   const tabs = useMemo<StudioTab[]>(
     () =>
-      studioObjects
-        .filter((object) => object.presentation === "tab")
-        .map((object, index) => ({ artifactId: object.id, openedAt: index })),
-    [studioObjects],
+      session.tabs.map((tab) => ({
+        artifactId: tab.workId,
+        openedAt: tab.openedAt,
+      })),
+    [session.tabs],
   );
-  const dirtyIds = useMemo(
-    () => new Set(dirtyArtifactIds.filter((id) => artifactById.has(id))),
-    [artifactById, dirtyArtifactIds],
-  );
+  const dirtyIds = session.dirtyIds;
 
   const openSplit = useCallback(
     (artifact: SpectraArtifact) => {
@@ -3361,6 +3364,61 @@ export function ArtifactStudio({
     [artifact._id, onDirtyChange],
   );
 
+  const contextRegistration = useMemo(() => {
+    if (!isArtifactTypeKey(artifact.blueprintKey)) return null;
+    const definition = getWorkDefinition(artifact.blueprintKey);
+    const summary =
+      artifact.summary?.trim() ||
+      `${definition.userFacingName} named ${artifact.title}`;
+    return {
+      id: `work:${artifact._id}:root`,
+      anchor: {
+        workId: artifact._id,
+        workType: artifact.blueprintKey,
+        kind: "work:root",
+        path: ["work", "root"],
+        stableIds: { workId: artifact._id },
+        fallbackExcerpt: summary.slice(0, 240),
+        schemaVersion: definition.model.schemaVersion,
+      },
+      label: artifact.title,
+      type: `${definition.userFacingName} root`,
+      workspaceId: artifact.placements?.[0]?.workspaceId,
+      permissions: "allowed" as const,
+      contextSummary: async () => ({
+        title: artifact.title,
+        text: summary,
+        provenance: [`work:${artifact._id}`],
+      }),
+    };
+  }, [
+    artifact._id,
+    artifact.blueprintKey,
+    artifact.placements,
+    artifact.summary,
+    artifact.title,
+  ]);
+
+  useEffect(() => spectraBus.handle("work.revealAnchor", ({ anchor, focus }) => {
+    if (anchor.workId !== artifact._id) return;
+    const host = contextSourceRegistry.get(`work:${artifact._id}:root`)?.element?.();
+    if (!host) return;
+    const regionId = anchor.stableIds?.regionId ?? (anchor.path[0] === "region" ? anchor.path.at(-1) : undefined);
+    const revealed = anchor.kind === "work:root"
+      ? false
+      : revealTarget(host, {
+          artifactId: artifact._id,
+          path: `/${anchor.path.join("/")}`,
+          primitive: "richtext",
+          ...(regionId ? { regionId } : {}),
+        });
+    if (!revealed) host.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
+    if (focus) {
+      host.dataset.anchorFocus = "true";
+      window.setTimeout(() => { if (host.dataset.anchorFocus === "true") delete host.dataset.anchorFocus; }, 1_200);
+    }
+  }), [artifact._id]);
+
   const threadId =
     artifact.blueprintKey === "thread_reference" &&
     typeof record(artifact.content).threadId === "string"
@@ -3457,10 +3515,21 @@ export function ArtifactStudio({
       </div>
     );
 
+  const contextualBody = contextRegistration ? (
+    <ContextSourceBoundary
+      registration={contextRegistration}
+      className="h-full min-h-0"
+    >
+      {body}
+    </ContextSourceBoundary>
+  ) : (
+    body
+  );
+
   if (mode === "tab") {
     return (
       <section className="min-w-0 flex-1 border-l border-[var(--border-default)]">
-        {body}
+        {contextualBody}
       </section>
     );
   }
@@ -3473,7 +3542,7 @@ export function ArtifactStudio({
       cssWidthVariable="--spectra-studio-width"
       minWidth={560}
     >
-      {body}
+      {contextualBody}
     </StudioSplitShell>
   );
 }
@@ -3916,6 +3985,8 @@ function ArtifactStudioEditor({
   const [historyOpen, setHistoryOpen] = useState(false);
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [activeCommentRegionId, setActiveCommentRegionId] = useState<string>();
+  const [commentRelativePosition, setCommentRelativePosition] =
+    useState<Uint8Array>();
   const [embedsOpen, setEmbedsOpen] = useState(false);
   const detailsEligible =
     artifact.blueprintKey !== "planner_task" &&
@@ -5098,6 +5169,10 @@ function ArtifactStudioEditor({
         Number.isFinite(detail.caretOffset)
           ? Math.max(0, Math.floor(detail.caretOffset))
           : (detail.ranges?.[0]?.startOffset ?? 0);
+      if (detail.relative)
+        setCommentRelativePosition(
+          encodeDocumentRelativeSelection(detail.relative),
+        );
       live.transport?.setPresence({
         actorKind: "human",
         selection: {
@@ -5107,6 +5182,7 @@ function ArtifactStudioEditor({
             ? { text: detail.text.slice(0, 280) }
             : {}),
           ranges: Array.isArray(detail.ranges) ? detail.ranges : [],
+          ...(detail.relative ? { relative: detail.relative } : {}),
         },
         interaction: {
           kind: collapsed ? "typing" : "selecting",
@@ -5618,10 +5694,11 @@ function ArtifactStudioEditor({
       };
     });
     return [
-      { regionId: "metadata:title", label: "Artifact title", kind: "metadata" },
+      { regionId: "work:root", label: "General comment", kind: "root" },
+      { regionId: "metadata:title", label: "Work title", kind: "metadata" },
       {
         regionId: "metadata:summary",
-        label: "Artifact summary",
+        label: "Work summary",
         kind: "metadata",
       },
       ...semantic,
@@ -5939,7 +6016,7 @@ function ArtifactStudioEditor({
               icon={MessageSquare}
             />
             <IconButton
-              label="Embedded artifacts"
+              label="References"
               onClick={() => setEmbedsOpen(true)}
               icon={Link2}
             />
@@ -6118,6 +6195,11 @@ function ArtifactStudioEditor({
                 onChange={editorChange}
                 aiChangedPaths={highlightPaths}
                 readOnly={readOnly}
+                collaborationDocument={
+                  live.modelSnapshot.initialized
+                    ? live.transport?.document
+                    : undefined
+                }
                 header={null}
               />
             ) : null}
@@ -6185,6 +6267,11 @@ function ArtifactStudioEditor({
                 onChange={editorChange}
                 aiChangedPaths={highlightPaths}
                 readOnly={readOnly}
+                collaborationDocument={
+                  live.modelSnapshot.initialized
+                    ? live.transport?.document
+                    : undefined
+                }
                 synchronizationReady={isSyncReady(syncLabel)}
                 syncMessage={artifactSyncMessage}
                 onActiveRegionChange={handleActiveRegionChange}
@@ -6281,6 +6368,7 @@ function ArtifactStudioEditor({
         regions={commentRegions}
         preferredRegionId={activeCommentRegionId}
         currentAccountId={currentAccountId}
+        relativePosition={commentRelativePosition}
         onClose={() => setCommentsOpen(false)}
       />
       <ArtifactEmbedsPanel
@@ -6667,6 +6755,7 @@ function DocumentStudio({
   onChange,
   aiChangedPaths = [],
   readOnly = false,
+  collaborationDocument,
   header,
 }: {
   artifactId: string;
@@ -6675,8 +6764,10 @@ function DocumentStudio({
   onChange: (content: unknown) => void;
   aiChangedPaths?: string[];
   readOnly?: boolean;
+  collaborationDocument?: Y.Doc;
   header: ReactNode;
 }) {
+  const { preferences } = useSpectraPreferences();
   const [initialContent] = useState(() =>
     documentJsonFromContent(content, title),
   );
@@ -6717,7 +6808,17 @@ function DocumentStudio({
         heading: { levels: [1, 2, 3] },
         link: false,
         underline: false,
+        undoRedo: collaborationDocument ? false : undefined,
       }),
+      ...(collaborationDocument
+        ? [
+            Collaboration.configure({
+              fragment: collaborationDocument.getXmlFragment(
+                "spectra:document-v2",
+              ),
+            }),
+          ]
+        : []),
       Underline,
       TiptapLink.configure({ openOnClick: false, autolink: true }),
       Table.configure({ resizable: true, lastColumnResizable: true }),
@@ -6732,9 +6833,18 @@ function DocumentStudio({
       Callout,
       Equation,
       InlineEquation,
+      SpectraReferenceNode,
+      SpectraCitationNode,
       DragHandle,
       StableBlockId,
       AiRegionDecoration,
+      SpectraTiptapAutocomplete.configure({
+        enabled:
+          preferences.writing.smartCompletion &&
+          preferences.writing.longFormSuggestions &&
+          !readOnly,
+        delayMs: preferences.writing.delayMs,
+      }),
       Placeholder.configure({ placeholder: "Type / for commands" }),
       SlashCommand.configure({
         suggestion: {
@@ -6746,13 +6856,29 @@ function DocumentStudio({
       // TipTap packages resolve through mixed @tiptap/core versions in this
       // workspace; cast keeps the editor API usable under production typecheck.
     ] as never[],
-    content: initialContent,
+    content: collaborationDocument ? undefined : initialContent,
     editable: !readOnly,
     immediatelyRender: false,
     editorProps: {
       attributes: {
+        "data-work-id": artifactId,
         class:
           "min-h-[620px] px-2 pb-24 pt-2 outline-none font-serif text-[19px] leading-8 text-[var(--text-primary)]",
+      },
+      handlePaste: (view, event) => {
+        const target = parseSpectraWorkUrl(event.clipboardData?.getData("text/plain") ?? "");
+        const nodeType = view.state.schema.nodes.spectraReference;
+        if (!target || !nodeType) return false;
+        const node = nodeType.create({
+          id: uniqueToken(),
+          workId: target.workId,
+          anchor: target.fragment ? { kind: "fragment", path: [target.fragment], schemaVersion: 1 } : null,
+          state: "collapsed",
+          versionPolicy: "live",
+          label: "Referenced work",
+        });
+        view.dispatch(view.state.tr.replaceSelectionWith(node).scrollIntoView());
+        return true;
       },
     },
     onUpdate: ({ editor }) => {
@@ -6762,7 +6888,15 @@ function DocumentStudio({
       // Extension normalization can emit an update during the editor's mount
       // frame even when the user changed nothing. Treat that frame as editor
       // hydration; genuine input begins immediately afterward.
-      if (!editorReadyForUserChanges.current || readOnly) return;
+      if (
+        !editorReadyForUserChanges.current ||
+        readOnly ||
+        collaborationDocument
+      )
+        return;
+      // Native collaboration already committed this transaction directly to
+      // the bound XmlFragment. Mirroring it through React/onChange would turn
+      // each keystroke back into a full projected document replacement.
       onChange(documentContentFromJson(nextJson, content));
     },
     onSelectionUpdate: ({ editor }) => {
@@ -6796,6 +6930,16 @@ function DocumentStudio({
         });
       });
       const text = empty ? "" : editor.state.doc.textBetween(from, to, "\n");
+      const firstRange = ranges[0];
+      const relative =
+        collaborationDocument && firstRange
+          ? createDocumentRelativeSelection(
+              collaborationDocument,
+              firstRange.blockId,
+              firstRange.startOffset,
+              firstRange.endOffset,
+            )
+          : null;
       editor.view.dom.dispatchEvent(
         new CustomEvent("spectra-presence-selection", {
           bubbles: true,
@@ -6804,13 +6948,37 @@ function DocumentStudio({
             collapsed: empty,
             ...(text ? { text: text.slice(0, 280) } : {}),
             ranges,
+            ...(relative ? { relative } : {}),
             caretOffset,
             primaryBlockId,
           },
         }),
       );
     },
-  });
+  }, [collaborationDocument]);
+
+  useEffect(() => spectraBus.handle("reference.insert", ({ hostWorkId, target }) => {
+    if (hostWorkId !== artifactId || !editor || readOnly) return;
+    editor.chain().focus().insertContent({
+      type: "spectraReference",
+      attrs: {
+        id: uniqueToken(),
+        workId: target.workId,
+        anchor: {
+          workId: target.workId,
+          workType: target.workType,
+          kind: target.kind,
+          path: [...target.path],
+          stableIds: target.stableIds,
+          fallbackExcerpt: target.fallbackExcerpt,
+          schemaVersion: target.schemaVersion,
+        },
+        state: "collapsed",
+        versionPolicy: "live",
+        label: target.fallbackExcerpt ?? "Referenced work",
+      },
+    }).run();
+  }), [artifactId, editor, readOnly]);
 
   useEffect(() => {
     editor?.setEditable(!readOnly);
@@ -6900,12 +7068,15 @@ function DocumentStudio({
     // and cancelling the preceding callback for every 112 ms presence beat can
     // starve TipTap indefinitely, leaving a peer on a provisional prefix.
     if (editor.isDestroyed) return;
-    if (contentChanged)
+    // Native Y.XmlFragment collaboration is already bound directly to the
+    // editor. Reapplying a projected JSON snapshot here would reset selection,
+    // corrupt IME composition, and turn a remote delta into a full replace.
+    if (contentChanged && !collaborationDocument)
       editor.commands.setContent(incomingEditorJson, { emitUpdate: false });
     editor.view.dispatch(
       editor.state.tr.setMeta(aiRegionDecorationKey, target),
     );
-  }, [aiChangedPaths, editor, incomingEditorJson]);
+  }, [aiChangedPaths, collaborationDocument, editor, incomingEditorJson]);
 
   const equationActive = editor?.isActive("equation") ?? false;
   const equationAttrs = equationActive

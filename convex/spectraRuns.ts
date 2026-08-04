@@ -160,43 +160,6 @@ async function requireOwnedRun(
   return { actor, run };
 }
 
-function provisionalTitle(prompt: string) {
-  const ignored = new Set([
-    "please",
-    "can",
-    "could",
-    "would",
-    "spectra",
-    "help",
-    "me",
-    "with",
-    "about",
-    "the",
-    "a",
-    "an",
-    "to",
-    "for",
-    "from",
-    "into",
-    "this",
-    "that",
-    "these",
-    "those",
-    "make",
-    "create",
-  ]);
-  const words = prompt
-    .replace(/[`*_#[\](){}<>]/g, " ")
-    .split(/\s+/)
-    .map((word) => word.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, ""))
-    .filter((word) => word && !ignored.has(word.toLowerCase()))
-    .slice(0, 4);
-  return (words.length ? words : ["New", "thread"])
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(" ")
-    .slice(0, 48);
-}
-
 export const beginRun = mutation({
   args: {
     sourceSurface: vSurface,
@@ -320,7 +283,9 @@ export const beginRun = mutation({
     }
 
     const now = Date.now();
-    const title = provisionalTitle(cleanPrompt);
+    // A neutral status label is replaced by the first structured model title.
+    // Never fabricate a prompt-truncation title before the model responds.
+    const title = "New conversation";
     const workspaceId = thread ? thread.workspaceId : requestedWorkspaceId;
     let threadId = thread?._id;
     if (!threadId) {
@@ -981,19 +946,82 @@ export const listTabs = query({
     return (
       await Promise.all(
         [...canonicalByThread.values()].map(async (tab) => {
-          const [run, thread, cards] = await Promise.all([
+          const [run, thread, cards, messages, events] = await Promise.all([
             ctx.db.get(tab.runId),
             ctx.db.get(tab.threadId),
             ctx.db
               .query("spectraResultCards")
               .withIndex("by_run", (q) => q.eq("runId", tab.runId))
               .collect(),
+            ctx.db
+              .query("spectraMessages")
+              .withIndex("by_run", (q) => q.eq("runId", tab.runId))
+              .collect(),
+            ctx.db
+              .query("spectraRunEvents")
+              .withIndex("by_run_sequence", (q) => q.eq("runId", tab.runId))
+              .collect(),
           ]);
+          const latestAssistant = messages
+            .filter((message) => message.role === "assistant")
+            .sort((a, b) => b.createdAt - a.createdAt)[0];
+          const rawChoices = latestAssistant?.metadata?.choices as
+            | { question?: unknown; options?: unknown }
+            | undefined;
+          const options = Array.isArray(rawChoices?.options)
+            ? rawChoices.options.flatMap((option): Array<{ title: string; description?: string | null }> => {
+                if (!option || typeof option !== "object") return [];
+                const row = option as { title?: unknown; description?: unknown };
+                if (typeof row.title !== "string" || !row.title.trim()) return [];
+                return [{
+                  title: row.title.trim(),
+                  description: typeof row.description === "string" ? row.description : null,
+                }];
+              })
+            : [];
+          const inputRequest =
+            typeof rawChoices?.question === "string" &&
+            rawChoices.question.trim() &&
+            options.length >= 2 &&
+            options.length <= 6
+              ? {
+                  kind: "choice" as const,
+                  prompt: rawChoices.question.trim(),
+                  options,
+                }
+              : null;
+          const meaningfulSteps = events
+            .filter((event) => event.type === "progress" || event.type === "checkpoint" || event.type === "operation_result")
+            .sort((a, b) => a.sequence - b.sequence)
+            .flatMap((event): string[] => {
+              const payload = event.payload && typeof event.payload === "object"
+                ? event.payload as Record<string, unknown>
+                : {};
+              const item = payload.runItem && typeof payload.runItem === "object"
+                ? payload.runItem as Record<string, unknown>
+                : {};
+              const itemPayload = item.payload && typeof item.payload === "object"
+                ? item.payload as Record<string, unknown>
+                : {};
+              const checkpoint = itemPayload.checkpoint && typeof itemPayload.checkpoint === "object"
+                ? itemPayload.checkpoint as Record<string, unknown>
+                : {};
+              const value =
+                (typeof checkpoint.summary === "string" && checkpoint.summary) ||
+                (typeof payload.detail === "string" && payload.detail) ||
+                (typeof payload.title === "string" && payload.title) ||
+                (typeof payload.message === "string" && payload.message);
+              return value && value.trim() ? [value.trim()] : [];
+            });
+          const checkpointSummary = meaningfulSteps.at(-1);
           return {
             ...tab,
             run,
             thread,
             card: cards.sort((a, b) => b.updatedAt - a.updatedAt)[0] ?? null,
+            inputRequest,
+            checkpointSummary,
+            recentSteps: meaningfulSteps.slice(-2),
           };
         }),
       )

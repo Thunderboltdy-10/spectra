@@ -24,6 +24,7 @@ import {
   LockKeyhole,
   Network,
   Play,
+  Plus,
   RefreshCw,
   RotateCcw,
   Save,
@@ -36,6 +37,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CommandBar } from "../components/command-bar";
+import { CapabilityTruthBadge } from "@/features/spectra/integrations/status/capability-truth";
 import {
   configureSpectraManageBac,
   disconnectSpectraManageBac,
@@ -45,6 +47,8 @@ import {
   resolveSpectraManageBacConflict,
   resolveSpectraManageBacIdentity,
   syncSpectraManageBac,
+  upsertSpectraCalendarPeriodMap,
+  removeSpectraCalendarPeriodMap,
   type SpectraManageBacCapability,
   type SpectraManageBacConflict,
   type SpectraManageBacOverview,
@@ -55,7 +59,8 @@ import {
 type Tab =
   | "overview"
   | "classes"
-  | "timetable"
+  | "calendar"
+  | "periods"
   | "tasks"
   | "history"
   | "conflicts"
@@ -64,7 +69,8 @@ type Tab =
 const tabs: Array<{ key: Tab; label: string }> = [
   { key: "overview", label: "Overview" },
   { key: "classes", label: "Classes" },
-  { key: "timetable", label: "Timetable" },
+  { key: "calendar", label: "Calendar" },
+  { key: "periods", label: "Period map" },
   { key: "tasks", label: "Tasks" },
   { key: "history", label: "Sync history" },
   { key: "conflicts", label: "Conflicts" },
@@ -315,6 +321,94 @@ function RecordsList({
   );
 }
 
+type PeriodMap = NonNullable<SpectraManageBacOverview["data"]["periodMaps"]>[number];
+
+function minutesFromTime(value: string) {
+  const [hours, minutes] = value.split(":").map(Number);
+  return (hours ?? 0) * 60 + (minutes ?? 0);
+}
+
+function timeFromMinutes(value: number) {
+  return `${String(Math.floor(value / 60)).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}`;
+}
+
+function PeriodMapPanel({
+  periodMaps,
+  busy,
+  onSave,
+  onRemove,
+}: {
+  periodMaps: PeriodMap[];
+  busy: string;
+  onSave: (period: {
+    periodKey: string;
+    label: string;
+    startMinutes: number;
+    endMinutes: number;
+    timezone: string;
+    weekdays: number[];
+  }) => Promise<unknown>;
+  onRemove: (periodMapId: string) => Promise<unknown>;
+}) {
+  const [draft, setDraft] = useState({
+    periodKey: "",
+    label: "",
+    start: "08:30",
+    end: "09:20",
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+    weekdays: [1, 2, 3, 4, 5],
+  });
+  const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  return (
+    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
+      <section className="overflow-hidden rounded-[9px] border border-[var(--border-subtle)] bg-[var(--bg-elevated)]">
+        <header className="border-b border-[var(--border-subtle)] px-4 py-3">
+          <div className="flex items-center gap-2"><Clock3 size={14} className="text-[#2f8769]" /><h2 className="text-[12px] font-semibold">Verified school periods</h2></div>
+          <p className="mt-1 text-[10px] leading-4 text-[var(--text-tertiary)]">Calendar uses these only when a provider event supplies a period key but no exact timestamp. Exact source times always win.</p>
+        </header>
+        {periodMaps.length ? (
+          <div className="divide-y divide-[var(--border-subtle)]">
+            {periodMaps.slice().sort((a, b) => a.startMinutes - b.startMinutes).map((period) => (
+              <article key={period._id} className="flex items-center gap-3 px-4 py-3">
+                <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-[#ebf7f2] text-[10px] font-bold text-[#277b5e]">{period.periodKey.slice(0, 3).toUpperCase()}</span>
+                <div className="min-w-0 flex-1"><div className="flex items-center gap-2"><strong className="truncate text-[11px]">{period.label}</strong><StatusPill state="good">Verified</StatusPill></div><p className="mt-1 text-[9px] text-[var(--text-tertiary)]">{timeFromMinutes(period.startMinutes)}â€“{timeFromMinutes(period.endMinutes)} Â· {period.timezone} Â· {period.weekdays.map((day) => weekdays[day]).join(", ")}</p></div>
+                <button type="button" disabled={Boolean(busy)} onClick={() => void onRemove(period._id)} className="grid size-7 place-items-center rounded-md text-[var(--text-tertiary)] hover:bg-[#fff0ed] hover:text-[#a84436] disabled:opacity-45" aria-label={`Remove ${period.label}`}><X size={13} /></button>
+              </article>
+            ))}
+          </div>
+        ) : <EmptyState icon={Clock3} title="No verified period map" detail="Events without exact timestamps remain partial until an administrator verifies their period schedule." />}
+      </section>
+
+      <form
+        className="rounded-[9px] border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-4"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void onSave({
+            periodKey: draft.periodKey,
+            label: draft.label,
+            startMinutes: minutesFromTime(draft.start),
+            endMinutes: minutesFromTime(draft.end),
+            timezone: draft.timezone,
+            weekdays: draft.weekdays,
+          }).then(() => setDraft((current) => ({ ...current, periodKey: "", label: "" })));
+        }}
+      >
+        <div className="flex items-center gap-2"><Plus size={14} /><h2 className="text-[12px] font-semibold">Add or replace a period</h2></div>
+        <p className="mt-1 text-[10px] leading-4 text-[var(--text-tertiary)]">Use the exact provider period identifier. Saving the same key updates it idempotently and records administrator verification.</p>
+        <div className="mt-4 grid grid-cols-2 gap-3">
+          <label className="text-[9px] font-medium text-[var(--text-secondary)]">Period key<input required value={draft.periodKey} onChange={(event) => setDraft((current) => ({ ...current, periodKey: event.target.value }))} className="mt-1 h-9 w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 text-[11px] outline-none focus:border-[#39856d]" placeholder="period-1" /></label>
+          <label className="text-[9px] font-medium text-[var(--text-secondary)]">Label<input required value={draft.label} onChange={(event) => setDraft((current) => ({ ...current, label: event.target.value }))} className="mt-1 h-9 w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 text-[11px] outline-none focus:border-[#39856d]" placeholder="Period 1" /></label>
+          <label className="text-[9px] font-medium text-[var(--text-secondary)]">Start<input required type="time" value={draft.start} onChange={(event) => setDraft((current) => ({ ...current, start: event.target.value }))} className="mt-1 h-9 w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 text-[11px]" /></label>
+          <label className="text-[9px] font-medium text-[var(--text-secondary)]">End<input required type="time" value={draft.end} onChange={(event) => setDraft((current) => ({ ...current, end: event.target.value }))} className="mt-1 h-9 w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 text-[11px]" /></label>
+        </div>
+        <label className="mt-3 block text-[9px] font-medium text-[var(--text-secondary)]">IANA timezone<input required value={draft.timezone} onChange={(event) => setDraft((current) => ({ ...current, timezone: event.target.value }))} className="mt-1 h-9 w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 text-[11px]" placeholder="Europe/Madrid" /></label>
+        <fieldset className="mt-3"><legend className="text-[9px] font-medium text-[var(--text-secondary)]">Weekdays</legend><div className="mt-1.5 flex flex-wrap gap-1">{weekdays.map((label, value) => <button key={label} type="button" aria-pressed={draft.weekdays.includes(value)} onClick={() => setDraft((current) => ({ ...current, weekdays: current.weekdays.includes(value) ? current.weekdays.filter((day) => day !== value) : [...current.weekdays, value].sort() }))} className={cn("h-7 rounded-md border px-2 text-[9px] font-semibold", draft.weekdays.includes(value) ? "border-[#2d7d62] bg-[#edf8f3] text-[#24664f]" : "border-[var(--border-default)] text-[var(--text-tertiary)]")}>{label}</button>)}</div></fieldset>
+        <button type="submit" disabled={Boolean(busy)} className="mt-4 inline-flex h-9 w-full items-center justify-center gap-2 rounded-md bg-[#173d33] text-[10px] font-semibold text-white disabled:opacity-45"><Save size={13} />Verify period</button>
+      </form>
+    </div>
+  );
+}
+
 export function ManageBacIntegrationShell() {
   const router = useRouter();
   const [overview, setOverview] = useState<SpectraManageBacOverview | null>(
@@ -406,6 +500,22 @@ export function ManageBacIntegrationShell() {
     [records],
   );
   const coverage = integration?.capabilityCoverage;
+  const integrationCapabilityState = !integration
+    ? ({ kind: "not_connected" } as const)
+    : integration.status === "connected"
+      ? ({ kind: "available", updatedAt: integration.lastSyncAt } as const)
+      : integration.status === "validating"
+        ? ({ kind: "refreshing" } as const)
+        : integration.status === "degraded"
+          ? ({
+              kind: "partial",
+              details: integration.blockedReason ?? "Some verified capabilities did not synchronize.",
+            } as const)
+          : ({
+              kind: "unavailable",
+              retryable: integration.status !== "revoked",
+              message: integration.blockedReason ?? "The provider connection is unavailable.",
+            } as const);
   const coveragePercent = coverage?.discovered
     ? Math.round((coverage.verifiedReadable / coverage.discovered) * 100)
     : 0;
@@ -542,12 +652,15 @@ export function ManageBacIntegrationShell() {
                   <span className="block text-[9px] font-semibold uppercase tracking-[.12em] text-[var(--text-tertiary)]">
                     ManageBac · Admin setup
                   </span>
-                  <h1 className="mt-1 font-display text-[26px] font-semibold tracking-[-.025em]">
-                    ManageBac connection
-                  </h1>
+                  <div className="mt-1 flex flex-wrap items-center gap-2.5">
+                    <h1 className="font-display text-[26px] font-semibold tracking-[-.025em]">
+                      ManageBac connection
+                    </h1>
+                    <CapabilityTruthBadge state={integrationCapabilityState} />
+                  </div>
                   <p className="mt-1 max-w-[520px] text-[11px] text-[var(--text-tertiary)]">
-                    School administrators configure the API base URL, school-wide
-                    key, and run school syncs here. Individual class workspaces
+                    School administrators manage the canonical provider connection,
+                    school-wide key, verified periods, and synchronization here. Individual class workspaces
                     are created from{" "}
                     <a
                       href="/school-data"
@@ -785,7 +898,7 @@ export function ManageBacIntegrationShell() {
 
                   <section className="rounded-[9px] border border-[var(--border-subtle)] p-4">
                     <h2 className="text-[12px] font-semibold">
-                      Timetable preview
+                      Calendar source preview
                     </h2>
                     <p className="mt-0.5 text-[9px] text-[var(--text-tertiary)]">
                       Source-owned times remain locked; personal overlays stay
@@ -836,7 +949,7 @@ export function ManageBacIntegrationShell() {
                     </div>
                     <button
                       type="button"
-                      onClick={() => setTab("timetable")}
+                      onClick={() => setTab("calendar")}
                       className="mt-3 text-[10px] text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
                     >
                       {timetable.length
@@ -939,11 +1052,26 @@ export function ManageBacIntegrationShell() {
                   emptyTitle="No classes synchronized"
                   emptyDetail="Verified class capabilities will create one idempotent workspace per current class and academic period."
                 />
-              ) : tab === "timetable" ? (
+              ) : tab === "calendar" ? (
                 <RecordsList
                   records={timetable}
-                  emptyTitle="No timetable source events"
-                  emptyDetail="Verified lessons and calendar routes will populate locked source layers in your timetable artifact."
+                  emptyTitle="No Calendar source events"
+                  emptyDetail="Verified lessons and Calendar routes populate source-locked Calendar layers without creating work items."
+                />
+              ) : tab === "periods" ? (
+                <PeriodMapPanel
+                  periodMaps={data?.periodMaps ?? []}
+                  busy={busy}
+                  onSave={(period) =>
+                    runAction(`period:${period.periodKey}`, () =>
+                      upsertSpectraCalendarPeriodMap(period),
+                    )
+                  }
+                  onRemove={(periodMapId) =>
+                    runAction(`period-remove:${periodMapId}`, () =>
+                      removeSpectraCalendarPeriodMap(periodMapId),
+                    )
+                  }
                 />
               ) : tab === "tasks" ? (
                 <RecordsList
@@ -1727,19 +1855,19 @@ function SettingsDialog({
         <div className="space-y-4 p-5">
           <label className="block">
             <span className="mb-1.5 block text-[10px] font-medium">
-              API base URL
+              Canonical API endpoint
             </span>
             <input
               value={config.baseUrl}
-              onChange={(event) =>
-                setConfig((current) => ({
-                  ...current,
-                  baseUrl: event.target.value,
-                }))
-              }
+              readOnly
+              aria-readonly="true"
               className={input}
               placeholder="https://api.managebac.com"
             />
+            <span className="mt-1 block text-[9px] leading-4 text-[var(--text-tertiary)]">
+              Spectra owns this provider endpoint. Tenant route manifests are
+              reviewed separately and cannot redirect credentials.
+            </span>
           </label>
           <label className="block">
             <span className="mb-1.5 block text-[10px] font-medium">

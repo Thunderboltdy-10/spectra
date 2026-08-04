@@ -229,6 +229,17 @@ export type SpectraManageBacOverview = {
     /** True when MANAGEBAC_API_KEY is present server-side for temporary testing. */
     envTokenAvailable?: boolean;
     school?: { _id: string; name: string } | null;
+    periodMaps?: Array<{
+      _id: string;
+      periodKey: string;
+      label: string;
+      startMinutes: number;
+      endMinutes: number;
+      timezone: string;
+      weekdays: number[];
+      verifiedAt: number;
+      source: "school_admin" | "provider_contract";
+    }>;
     mapping?: {
       status: "pending" | "verified" | "no_match" | "ambiguous" | "revoked";
       matchCount?: number;
@@ -672,6 +683,15 @@ export type SpectraRunTab = {
   run: SpectraRun;
   thread: SpectraThread;
   card?: SpectraResultCard | null;
+  inputRequest?:
+    | {
+        kind: "choice";
+        prompt: string;
+        options: Array<{ title: string; description?: string | null }>;
+      }
+    | null;
+  checkpointSummary?: string;
+  recentSteps?: string[];
 };
 
 export type SpectraArtifactComment = {
@@ -683,6 +703,16 @@ export type SpectraArtifactComment = {
   body: string;
   anchor: {
     regionId: string;
+    semanticAnchor?: {
+      workId: string;
+      workType: ArtifactTypeKey;
+      kind: string;
+      path: string[];
+      stableIds?: Record<string, string>;
+      fallbackExcerpt?: string;
+      schemaVersion: number;
+    };
+    relativePosition?: ArrayBuffer;
     fallbackExcerpt?: string;
     geometry?: unknown;
   };
@@ -1215,6 +1245,27 @@ export async function resolveSpectraManageBacConflict(input: {
 export async function disconnectSpectraManageBac() {
   return postManageBac<{ disconnected: boolean }>({
     action: "disconnect",
+  });
+}
+
+export async function upsertSpectraCalendarPeriodMap(input: {
+  periodKey: string;
+  label: string;
+  startMinutes: number;
+  endMinutes: number;
+  timezone: string;
+  weekdays: number[];
+}) {
+  return postManageBac<{ periodMapId: string; verifiedAt: number }>({
+    action: "upsertPeriodMap",
+    ...input,
+  });
+}
+
+export async function removeSpectraCalendarPeriodMap(periodMapId: string) {
+  return postManageBac<{ removed: true }>({
+    action: "removePeriodMap",
+    periodMapId,
   });
 }
 

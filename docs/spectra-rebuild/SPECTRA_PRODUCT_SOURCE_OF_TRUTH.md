@@ -1,3 +1,5 @@
+> Historical plan: superseded by `SPECTRA_DEFINITIVE_TRANSFORMATION_PLAN.md`. Retained as implementation evidence only.
+
 # Spectra Product Source of Truth
 
 Status: canonical product contract  

@@ -14,6 +14,18 @@ export type SpectraContextObject = {
   workspaceId?: string;
   capability?: "context" | "tile" | "continue";
   stale?: boolean;
+  semanticTargetId?: string;
+  semanticAnchor?: {
+    workId: string;
+    workType: string;
+    kind: string;
+    path: string[];
+    stableIds?: Record<string, string>;
+    fallbackExcerpt?: string;
+    schemaVersion: number;
+    relativePosition?: number[];
+  };
+  contextSummary?: string;
 };
 
 export type SpectraContinuation = {
@@ -82,7 +94,9 @@ type SpectraContextState = {
 };
 
 function sameObject(a: Pick<SpectraContextObject, "type" | "id">, b: Pick<SpectraContextObject, "type" | "id">) {
-  return a.type === b.type && a.id === b.id;
+  const left = a as Pick<SpectraContextObject, "type" | "id" | "semanticTargetId">;
+  const right = b as Pick<SpectraContextObject, "type" | "id" | "semanticTargetId">;
+  return left.type === right.type && left.id === right.id && left.semanticTargetId === right.semanticTargetId;
 }
 
 function dedupe(objects: SpectraContextObject[]) {
@@ -111,12 +125,16 @@ export function normalizeTileObjects(objects: SpectraOpenObject[], cap = 24) {
 
 function upsertOpenObject(objects: SpectraOpenObject[], object: SpectraOpenObject) {
   const key = spectraObjectKey(object);
-  // Side panels are additive working context and can coexist. Only primary
-  // surfaces that share the same slot (split) replace each other.
+  // Work can coexist with one auxiliary conversation, but conversation panels
+  // share one physical slot. Multiple runs remain alive in the run rail and
+  // can be switched into this slot without duplicating narrow panels.
   const conflictingPresentations =
     object.presentation === "split"
       ? new Set<SpectraOpenPresentation>(["split"])
-      : new Set<SpectraOpenPresentation>();
+      : object.presentation === "thread-panel" ||
+          object.presentation === "run-panel"
+        ? new Set<SpectraOpenPresentation>(["thread-panel", "run-panel"])
+        : new Set<SpectraOpenPresentation>();
   return [
     ...objects.filter((row) => spectraObjectKey(row) !== key && !conflictingPresentations.has(row.presentation)),
     object,

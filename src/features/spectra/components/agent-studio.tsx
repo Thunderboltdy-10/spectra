@@ -52,6 +52,7 @@ import {
 } from "../data/api";
 import { aiRegionAttr, pathTouches } from "./ai-region-path";
 import { targetAttrs } from "../collaboration/target-attributes";
+import { LocalAutocompleteTextarea } from "../compute/autocomplete";
 
 const STEPS = [
   { title: "Purpose", detail: "Goal, scope and outcomes", icon: Sparkles },
@@ -755,7 +756,8 @@ export function AgentStudio({
               <div className="agent-two-column">
                 <label className="agent-field">
                   <span>What is the primary purpose of this agent?</span>
-                  <textarea
+                  <LocalAutocompleteTextarea
+                    surface="agent_foundry"
                     value={agent.profile.purpose}
                     readOnly={readOnly}
                     maxLength={4000}
@@ -763,9 +765,7 @@ export function AgentStudio({
                       pathTouches(aiChangedPaths, "/profile/purpose"),
                     )}
                     {...targetAttrs("/profile/purpose")}
-                    onChange={(event) =>
-                      updateProfile({ purpose: event.target.value })
-                    }
+                    onValueChange={(purpose) => updateProfile({ purpose })}
                     placeholder="Explain the specialist goal and what this agent should help people achieve."
                   />
                   <small>{agent.profile.purpose.length}/4000</small>
@@ -850,16 +850,15 @@ export function AgentStudio({
             <div className="agent-step-content">
               <label className="agent-field">
                 <span>Who is this agent designed to help?</span>
-                <textarea
+                <LocalAutocompleteTextarea
+                  surface="agent_foundry"
                   value={agent.profile.audienceIntent}
                   readOnly={readOnly}
                   data-ai-region={aiRegionAttr(
                     pathTouches(aiChangedPaths, "/profile/audienceIntent"),
                   )}
                   {...targetAttrs("/profile/audienceIntent")}
-                  onChange={(event) =>
-                    updateProfile({ audienceIntent: event.target.value })
-                  }
+                  onValueChange={(audienceIntent) => updateProfile({ audienceIntent })}
                   placeholder="Describe needs and context, not a product-role restriction."
                 />
                 <small>
@@ -896,15 +895,16 @@ export function AgentStudio({
                     When is this agent substantially better than ordinary
                     Spectra?
                   </span>
-                  <textarea
+                  <LocalAutocompleteTextarea
+                    surface="agent_foundry"
                     value={agent.routing.description}
                     readOnly={readOnly}
-                    onChange={(event) =>
+                    onValueChange={(description) =>
                       commit({
                         ...agent,
                         routing: {
                           ...agent.routing,
-                          description: event.target.value,
+                          description,
                         },
                       })
                     }
@@ -1120,15 +1120,16 @@ export function AgentStudio({
                           })
                         }
                       />
-                      <textarea
+                      <LocalAutocompleteTextarea
+                        surface="agent_foundry"
                         value={skill.instructions}
                         readOnly={readOnly}
-                        onChange={(event) =>
+                        onValueChange={(instructions) =>
                           commit({
                             ...agent,
                             skills: agent.skills.map((item) =>
                               item.id === skill.id
-                                ? { ...item, instructions: event.target.value }
+                                ? { ...item, instructions }
                                 : item,
                             ),
                           })
@@ -1381,16 +1382,17 @@ export function AgentStudio({
               </div>
               <label className="agent-field">
                 <span>Complete agent instructions</span>
-                <textarea
-                  className="agent-instructions"
+                <LocalAutocompleteTextarea
+                  surface="agent_foundry"
+                  textareaClassName="agent-instructions"
                   value={agent.instructions.text}
                   readOnly={readOnly}
-                  onChange={(event) =>
+                  onValueChange={(text) =>
                     commit({
                       ...agent,
                       instructions: {
                         ...agent.instructions,
-                        text: event.target.value,
+                        text,
                       },
                     })
                   }
@@ -1722,12 +1724,11 @@ export function AgentStudio({
                 </label>
                 <label className="agent-field">
                   <span>Release notes</span>
-                  <textarea
+                  <LocalAutocompleteTextarea
+                    surface="agent_foundry"
                     value={agent.releaseNotes}
                     readOnly={readOnly}
-                    onChange={(event) =>
-                      commit({ ...agent, releaseNotes: event.target.value })
-                    }
+                    onValueChange={(releaseNotes) => commit({ ...agent, releaseNotes })}
                     placeholder="What changed, and what should users know?"
                   />
                 </label>

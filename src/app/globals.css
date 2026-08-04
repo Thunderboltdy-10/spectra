@@ -1007,7 +1007,8 @@ body {
 
 /* Browse and Progress read the deck; they hide the authoring chrome rather
    than shrinking it, so a side panel is a reader and not a cramped builder. */
-.spectra-flashcard-studio:not([data-studio-view="build"]) > .spectra-deck-metrics,
+.spectra-flashcard-studio:not([data-studio-view="build"])
+  > .spectra-deck-metrics,
 .spectra-flashcard-studio:not([data-studio-view="build"]) > aside,
 .spectra-flashcard-studio:not([data-studio-view="build"])
   > .spectra-deck-card-editor,
@@ -7836,6 +7837,23 @@ button[data-spectra-context-trigger="true"]::after {
   box-shadow: 0 2px 8px rgba(25, 22, 18, 0.07);
 }
 
+.presentation-citation-footer {
+  position: absolute;
+  z-index: 20;
+  right: 2.2cqw;
+  bottom: 1.6cqw;
+  max-width: 64cqw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0.35cqw 0.9cqw;
+  border-radius: 6px;
+  background: color-mix(in oklab, white 78%, transparent);
+  color: color-mix(in oklab, currentColor 72%, transparent);
+  font-size: clamp(6px, 0.6cqw, 10px);
+  pointer-events: none;
+}
+
 .presentation-guide {
   position: absolute;
   z-index: 40;
@@ -9980,7 +9998,8 @@ button[data-spectra-context-trigger="true"]::after {
 .foundry-input:focus-visible,
 .foundry-textarea textarea:focus-visible {
   border-color: var(--foundry-mark);
-  box-shadow: 0 0 0 3px color-mix(in oklab, var(--foundry-mark) 16%, transparent);
+  box-shadow: 0 0 0 3px
+    color-mix(in oklab, var(--foundry-mark) 16%, transparent);
   outline: none;
 }
 
@@ -10015,7 +10034,8 @@ button[data-spectra-context-trigger="true"]::after {
   background: var(--foundry-mark);
   padding: 11px 18px;
   color: #fff;
-  box-shadow: 0 1px 2px color-mix(in oklab, var(--foundry-mark) 26%, transparent);
+  box-shadow: 0 1px 2px
+    color-mix(in oklab, var(--foundry-mark) 26%, transparent);
 }
 
 .foundry-primary:hover:not(:disabled) {
@@ -10151,7 +10171,8 @@ button[data-spectra-context-trigger="true"]::after {
 .foundry-mission-objective.is-ai-changed {
   background: color-mix(in oklab, var(--foundry-mark) 12%, transparent);
   border-radius: 4px;
-  box-shadow: 0 0 0 4px color-mix(in oklab, var(--foundry-mark) 12%, transparent);
+  box-shadow: 0 0 0 4px
+    color-mix(in oklab, var(--foundry-mark) 12%, transparent);
 }
 
 .foundry-mission-facts {
@@ -17457,7 +17478,11 @@ body {
   height: 24px;
   padding: 0 8px;
   border-radius: 6px;
-  background: color-mix(in oklab, var(--accent-violet) 20%, var(--bg-secondary));
+  background: color-mix(
+    in oklab,
+    var(--accent-violet) 20%,
+    var(--bg-secondary)
+  );
   color: var(--text-primary);
   font-size: 11.5px;
   line-height: 24px;
@@ -17493,7 +17518,8 @@ body {
   top: 0;
   bottom: 0;
   width: 0;
-  border-left: 1px dashed color-mix(in oklab, var(--accent-gold) 70%, transparent);
+  border-left: 1px dashed
+    color-mix(in oklab, var(--accent-gold) 70%, transparent);
 }
 
 .spectra-plan-milestone > span {

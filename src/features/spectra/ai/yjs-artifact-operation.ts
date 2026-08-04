@@ -31,6 +31,12 @@ import {
   type ArtifactTypeKey,
 } from "@/features/spectra/artifacts/types";
 import { validateArtifactContent } from "@/features/spectra/artifacts/registry";
+import {
+  applyBibliographySlides,
+  collectDeckCitations,
+  removeBibliographySlides,
+} from "@/features/spectra/presentation/bibliography";
+import type { PresentationContent } from "@/features/spectra/presentation/model";
 import { normalizeArtifactContent } from "@/features/spectra/ai/content-normalization";
 import {
   aiInteractionFrame,
@@ -100,10 +106,9 @@ class CloudflareAiRealtimeProvider implements AiRealtimeProvider {
       this.localUser === undefined ? null : { user: this.localUser },
     getStates: () =>
       new Map(
-        this.transport.getSnapshot().presence.map((presence) => [
-          presence.clientId,
-          { user: presence },
-        ]),
+        this.transport
+          .getSnapshot()
+          .presence.map((presence) => [presence.clientId, { user: presence }]),
       ),
   };
 
@@ -489,10 +494,10 @@ async function createCollaborationSession(
     level,
     url:
       providerKind === "cloudflare"
-        ? process.env.SPECTRA_CLOUDFLARE_COLLAB_URL ??
+        ? (process.env.SPECTRA_CLOUDFLARE_COLLAB_URL ??
           process.env.NEXT_PUBLIC_SPECTRA_COLLAB_URL ??
-          "ws://localhost:8787"
-        : process.env.NEXT_PUBLIC_SPECTRA_COLLAB_URL ?? "ws://localhost:1234",
+          "ws://localhost:8787")
+        : (process.env.NEXT_PUBLIC_SPECTRA_COLLAB_URL ?? "ws://localhost:1234"),
   };
 }
 
@@ -739,7 +744,9 @@ async function waitForHumanRegions(params: {
       idleTimer = setTimeout(() => finish(), 1_200);
     };
     const onAbort = () =>
-      finish(abortError(params.signal) ?? new DOMException("Aborted", "AbortError"));
+      finish(
+        abortError(params.signal) ?? new DOMException("Aborted", "AbortError"),
+      );
     const unsubscribe = params.provider.subscribeState(evaluate);
     params.signal?.addEventListener("abort", onAbort, { once: true });
     evaluate();
@@ -787,8 +794,7 @@ async function synchronizeMutation(params: {
   let streamBeats = params.streamBeats;
   let baseSnapshot = params.baseSnapshot;
   let proposedSnapshot = params.proposedSnapshot;
-  if (plan.regions.length === 0)
-    return { changedRegionIds: [] as string[] };
+  if (plan.regions.length === 0) return { changedRegionIds: [] as string[] };
   const presence = params.provider.awareness?.getLocalState()?.user;
   const presenceRecord =
     presence && typeof presence === "object"
@@ -1312,6 +1318,29 @@ export async function readLiveArtifactValue(params: {
   }
 }
 
+/**
+ * Deterministic per-type content policy applied to every AI write after
+ * schema validation. The model can only produce create/update payloads, so
+ * derived structure that must stay honest lives here rather than in the
+ * prompt: for presentations the References slides are rebuilt from actual
+ * slide citations on every write (build_bibliography), which means a deck
+ * with citations always carries a truthful, current references trail and a
+ * deck whose citations were removed loses its stale generated slides. This is
+ * the execution half of INV-09 for decks — the AI can never hand-author or
+ * forget a bibliography.
+ */
+function enforceAiContentPolicy(typeKey: ArtifactTypeKey, content: unknown) {
+  if (typeKey !== "presentation") return content;
+  const deck = content as PresentationContent;
+  if (!Array.isArray(deck.slides)) return content;
+  if (collectDeckCitations(deck).length > 0) {
+    applyBibliographySlides(deck);
+  } else {
+    removeBibliographySlides(deck);
+  }
+  return deck;
+}
+
 export async function applyAiArtifactMutation(params: {
   artifactId: string;
   runId: string;
@@ -1510,7 +1539,7 @@ export async function applyAiArtifactMutation(params: {
         tags: [
           ...new Set(desired.tags.map((tag) => tag.trim()).filter(Boolean)),
         ].slice(0, 80),
-        content: validated.data,
+        content: enforceAiContentPolicy(typeKey, validated.data),
       };
     };
     const normalizedDesired = resolveValidatedValue(current);
@@ -1589,14 +1618,8 @@ export async function applyAiArtifactMutation(params: {
         const liveBase = readLiveYjsDocument(document, typeKey);
         if (!liveBase) throw new Error("AI_ARTIFACT_LIVE_STATE_LOST");
         const liveDesired = resolveValidatedValue(liveBase);
-        const livePlan = planLiveYjsMutation(
-          document,
-          typeKey,
-          liveDesired,
-        );
-        const liveRegionIds = livePlan.regions.map(
-          (region) => region.regionId,
-        );
+        const livePlan = planLiveYjsMutation(document, typeKey, liveDesired);
+        const liveRegionIds = livePlan.regions.map((region) => region.regionId);
         return {
           plan: livePlan,
           streamBase: liveBase,

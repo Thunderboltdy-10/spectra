@@ -65,6 +65,11 @@ import {
   type PresentationSlide,
 } from "../presentation/model";
 import {
+  applyBibliographySlides,
+  BIBLIOGRAPHY_SLIDE_MARKER,
+  collectDeckCitations,
+} from "../presentation/bibliography";
+import {
   abortArtifactImportUpload,
   beginArtifactImportOriginal,
   completeArtifactImport,
@@ -665,6 +670,22 @@ function SlideCanvas({
           {deck.slides.findIndex((candidate) => candidate.id === slide.id) + 1}
         </span>
       ) : null}
+      {slide.citations?.length ? (
+        <span
+          className="presentation-citation-footer"
+          aria-label={`Sources on this slide: ${slide.citations
+            .map((citation) => citation.label)
+            .join(", ")}`}
+        >
+          {slide.citations
+            .slice(0, 3)
+            .map((citation) => citation.label)
+            .join(" · ")}
+          {slide.citations.length > 3
+            ? ` · +${slide.citations.length - 3}`
+            : ""}
+        </span>
+      ) : null}
       {guides?.x !== undefined ? (
         <span
           className="presentation-guide presentation-guide--vertical"
@@ -1122,6 +1143,11 @@ export function PresentationStudio({
   const activeSlide =
     deck.slides.find((slide) => slide.id === activeSlideId) ?? deck.slides[0]!;
   const activeSlideIndex = deck.slides.indexOf(activeSlide);
+  const deckCitations = useMemo(() => collectDeckCitations(deck), [deck]);
+  const deckCitationCount = deckCitations.length;
+  const deckHasBibliography = deck.slides.some(
+    (slide) => slide.accessibility?.label === BIBLIOGRAPHY_SLIDE_MARKER,
+  );
   const selectedObject = activeSlide.objects.find(
     (object) => object.id === selectedObjectId,
   );
@@ -3487,25 +3513,49 @@ export function PresentationStudio({
                     AI checks, history, and export.
                   </p>
                 </div>
-                <button
-                  type="button"
-                  disabled={readOnly}
-                  onClick={() =>
-                    mutate((draft) => {
-                      const slide = draft.slides[activeSlideIndex]!;
-                      slide.citations = [
-                        ...(slide.citations ?? []),
-                        {
-                          id: `citation-${Date.now().toString(36)}`,
-                          label: "New source",
-                        },
-                      ];
-                    })
-                  }
-                >
-                  <Plus className="h-3.5 w-3.5" /> Add citation
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={readOnly}
+                    onClick={() =>
+                      mutate((draft) => {
+                        const slide = draft.slides[activeSlideIndex]!;
+                        slide.citations = [
+                          ...(slide.citations ?? []),
+                          {
+                            id: `citation-${Date.now().toString(36)}`,
+                            label: "New source",
+                          },
+                        ];
+                      })
+                    }
+                  >
+                    <Plus className="h-3.5 w-3.5" /> Add citation
+                  </button>
+                  <button
+                    type="button"
+                    disabled={readOnly}
+                    title="Collect every slide citation onto a References slide"
+                    onClick={() =>
+                      mutate((draft) => {
+                        applyBibliographySlides(draft);
+                      })
+                    }
+                  >
+                    <List className="h-3.5 w-3.5" />{" "}
+                    {deckHasBibliography
+                      ? "Update references slide"
+                      : "Build references slide"}
+                  </button>
+                </div>
               </div>
+              {deckCitationCount > 0 && !deckHasBibliography ? (
+                <p className="presentation-empty-copy">
+                  {deckCitationCount}{" "}
+                  {deckCitationCount === 1 ? "citation" : "citations"} across
+                  the deck — build a references slide to close it.
+                </p>
+              ) : null}
               {activeSlide.citations?.length ? (
                 <div className="presentation-citation-list">
                   {activeSlide.citations.map((citation, citationIndex) => (

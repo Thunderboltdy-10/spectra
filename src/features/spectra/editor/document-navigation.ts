@@ -44,7 +44,7 @@ export function documentOutline(
   const wordsAfter: number[] = [];
   let position = 0;
 
-  const walk = (node: JSONContent, isRoot: boolean) => {
+  const walk = (node: JSONContent, isRoot: boolean, countWords = true) => {
     if (!isRoot) position += 1;
     if (node.type === "heading") {
       const title = nodeText(node).trim();
@@ -58,13 +58,21 @@ export function documentOutline(
         wordCount: 0,
       });
       wordsAfter.push(0);
+      // The heading's own words belong to the title, not the section's weight.
+      for (const child of node.content ?? []) walk(child, false, false);
+      if (!isRoot) position += 1;
+      return;
     } else if (typeof node.text === "string") {
-      const words = node.text.trim() ? node.text.trim().split(/\s+/).length : 0;
-      if (wordsAfter.length) wordsAfter[wordsAfter.length - 1]! += words;
+      const words =
+        countWords && node.text.trim()
+          ? node.text.trim().split(/\s+/).length
+          : 0;
+      if (words && wordsAfter.length)
+        wordsAfter[wordsAfter.length - 1]! += words;
       position += node.text.length;
       return;
     }
-    for (const child of node.content ?? []) walk(child, false);
+    for (const child of node.content ?? []) walk(child, false, countWords);
     if (!isRoot) position += 1;
   };
 
@@ -404,9 +412,7 @@ export function bibliographyNode(
       ...(entries.length
         ? entries.map((entry) => ({
             type: "paragraph",
-            content: [
-              { type: "text", text: `${entry.marker} ${entry.text}` },
-            ],
+            content: [{ type: "text", text: `${entry.marker} ${entry.text}` }],
           }))
         : [
             {

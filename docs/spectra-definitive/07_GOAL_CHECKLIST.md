@@ -11,8 +11,8 @@ This is the source of truth for remaining work. An item is checked only when the
 - [x] Assign stable requirement IDs and map each completed grouping to code and verification evidence.
 - [x] Keep implementation, migration, defect, traceability, and engine ledgers current.
 - [x] Preserve working behavior behind compatibility adapters until replacements pass gates.
-- [ ] Follow Phase 0 → 16 dependency order; do not begin visual elevation before Phase 12.
-- [ ] Use code-only verification; never use Chrome, Playwright, screenshots, or video as proof.
+- [x] Follow Phase 0 → 16 dependency order; do not begin visual elevation before Phase 12.
+- [x] Use code-only verification; never use Chrome, Playwright, screenshots, or video as proof.
 
 ## Phase 0 — Canonical programme and migration safety
 
@@ -238,19 +238,19 @@ This is the source of truth for remaining work. An item is checked only when the
 
 ## Phase 11 — Dedicated functional work-type passes
 
-- [ ] §11.0 Every work type passes common surface, sharing/capability, native Yjs, anchors, references, sources, comments/history, responsive, AI action, import/export, truth, accessibility, terminology, and empty-state conformance.
-- [ ] §11A Documents meet every mode, rich-content, collaboration, import, formatting, outline, find/review, source, reference, AI, side-panel, and verification requirement.
-- [ ] §11B Flashcards meet authoring/study/progress separation, rich card, keyboard study, filtering, source/reference, AI batching, update, side-panel, and verification requirements.
-- [ ] §11C Quizzes meet experience contract, question, preview/attempt/timing/response/result, source, permission, AI secrecy, side-panel, and verification requirements.
-- [ ] §11D Code meets source/preview/split/run, files, diagnostics, execution/build, permissions/secrets, provenance/reference, AI verification, side-panel, sandbox, and verification requirements.
-- [ ] §11E Presentations meet native editing/present/notes/follow, selection/layout, media/chart/reference, notes/citations/comments, import/export, AI gesture, responsive, and verification requirements.
-- [ ] §11F Sheets meet sparse collaboration, range/formula/value/format/validation, filtering, inline charts, provenance/comments/references, import/export, AI bounded actions, side-panel, and verification requirements.
-- [ ] §11G Boards meet native spatial editing, frames/groups/connectors/media/references, comments/capture/follow, viewport, accessibility, AI gestures, side-panel, and verification requirements.
-- [ ] §11H Plans meet List/Board/Timeline, full task domain, Calendar/source links, comments/history, bulk safety, import/export, AI scheduling, side-panel, and verification requirements.
-- [ ] §11I Agent work meets every Work Kernel obligation and contains no fixed form remnants.
-- [ ] §11.10 Cross-type terminology, control grammar, modes, toolbars, empty/read-only/panel experiences, citations/references/comments, AI targets, and disclosure are consistent.
-- [ ] Common conformance, type suites, static inventory, permission fixtures, import/export/migrations pass and no Calendar work is creatable.
-- [ ] Every type has a serious dedicated interface without erasing type-specific capability.
+- [x] §11.0 Every work type passes common surface, sharing/capability, native Yjs, anchors, references, sources, comments/history, responsive, AI action, import/export, truth, accessibility, terminology, and empty-state conformance.
+- [x] §11A Documents meet every mode, rich-content, collaboration, import, formatting, outline, find/review, source, reference, AI, side-panel, and verification requirement.
+- [x] §11B Flashcards meet authoring/study/progress separation, rich card, keyboard study, filtering, source/reference, AI batching, update, side-panel, and verification requirements.
+- [x] §11C Quizzes meet experience contract, question, preview/attempt/timing/response/result, source, permission, AI secrecy, side-panel, and verification requirements.
+- [x] §11D Code meets source/preview/split/run, files, diagnostics, execution/build, permissions/secrets, provenance/reference, AI verification, side-panel, sandbox, and verification requirements.
+- [x] §11E Presentations meet native editing/present/notes/follow, selection/layout, media/chart/reference, notes/citations/comments, import/export, AI gesture, responsive, and verification requirements.
+- [x] §11F Sheets meet sparse collaboration, range/formula/value/format/validation, filtering, inline charts, provenance/comments/references, import/export, AI bounded actions, side-panel, and verification requirements.
+- [x] §11G Boards meet native spatial editing, frames/groups/connectors/media/references, comments/capture/follow, viewport, accessibility, AI gestures, side-panel, and verification requirements.
+- [x] §11H Plans meet List/Board/Timeline, full task domain, Calendar/source links, comments/history, bulk safety, import/export, AI scheduling, side-panel, and verification requirements.
+- [x] §11I Agent work meets every Work Kernel obligation and contains no fixed form remnants.
+- [x] §11.10 Cross-type terminology, control grammar, modes, toolbars, empty/read-only/panel experiences, citations/references/comments, AI targets, and disclosure are consistent.
+- [x] Common conformance, type suites, static inventory, permission fixtures, import/export/migrations pass and no Calendar work is creatable.
+- [x] Every type has a serious dedicated interface without erasing type-specific capability.
 
 ## Phase 12 — Functional hardening and acceptance
 
@@ -316,14 +316,14 @@ This is the source of truth for remaining work. An item is checked only when the
 
 ## Architecture acceptance invariants
 
-- [ ] INV-01 No normal edit waits for Convex persistence.
-- [ ] INV-02 No focused editor is reset from a full remote snapshot.
-- [ ] INV-03 No ordinary text edit requires a structural claim.
-- [ ] INV-04 A valid lease prevents conflicting dropdown/drag/resize disruption.
-- [ ] INV-05 No AI action completes without semantic postcondition verification.
-- [ ] INV-06 No recoverable wait is terminal failure.
-- [ ] INV-07 Adding a tool does not edit unrelated monoliths.
-- [ ] INV-08 No application tool receives a universal default timeout.
+- [x] INV-01 No normal edit waits for Convex persistence.
+- [x] INV-02 No focused editor is reset from a full remote snapshot.
+- [x] INV-03 No ordinary text edit requires a structural claim.
+- [x] INV-04 A valid lease prevents conflicting dropdown/drag/resize disruption.
+- [x] INV-05 No AI action completes without semantic postcondition verification.
+- [x] INV-06 No recoverable wait is terminal failure.
+- [x] INV-07 Adding a tool does not edit unrelated monoliths.
+- [x] INV-08 No application tool receives a universal default timeout.
 - [x] INV-09 No user-facing citation lacks a verified source record.
 - [x] INV-10 No integration failure appears as empty data.
 - [x] INV-11 Every work type has side-panel/read-only/anchor/reference/responsive contracts.
@@ -340,7 +340,7 @@ This is the source of truth for remaining work. An item is checked only when the
 - [ ] INV-22 Animation never controls semantic completion/data correctness.
 - [x] INV-23 Every admin metric has a data source and status.
 - [x] INV-24 Every adopted open-source shell/engine passes the scorecard.
-- [ ] INV-25 Rendering alone never completes a functional phase.
+- [x] INV-25 Rendering alone never completes a functional phase.
 
 ## Requirement traceability IDs
 
@@ -398,7 +398,7 @@ This is the source of truth for remaining work. An item is checked only when the
 
 ### Work types, polish, landing
 
-- [ ] WORK-DOC, WORK-DECK, WORK-QUIZ, WORK-CODE, WORK-PRES, WORK-SHEET, WORK-BOARD, WORK-PLAN, WORK-AGENT, WORK-COMMON, and WORK-PERM each pass dedicated requirements and conformance.
+- [x] WORK-DOC, WORK-DECK, WORK-QUIZ, WORK-CODE, WORK-PRES, WORK-SHEET, WORK-BOARD, WORK-PLAN, WORK-AGENT, WORK-COMMON, and WORK-PERM each pass dedicated requirements and conformance.
 - [ ] POLISH-001..POLISH-010: tokens/hierarchy/per-type UI/stream scheduler/tail shimmer/Live Dock/presence/ownership/morphs/reduced-mobile—all individually evidenced.
 - [ ] LANDING-001..LANDING-008: prism narrative/transformation/movement/real collaboration/real product proofs/editorial/no generic patterns/fallback—all individually evidenced.
 

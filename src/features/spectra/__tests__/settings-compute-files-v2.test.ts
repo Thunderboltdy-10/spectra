@@ -221,13 +221,13 @@ describe("Phase 8 settings, compute, files and autocomplete", () => {
     const tiptap = readFileSync("src/features/spectra/compute/autocomplete/tiptap-autocomplete-extension.ts", "utf8");
     const documentStudio = readFileSync("src/features/spectra/components/artifact-studio.tsx", "utf8");
     const presentationStudio = readFileSync("src/features/spectra/components/presentation-studio.tsx", "utf8");
-    const agentStudio = readFileSync("src/features/spectra/components/agent-studio.tsx", "utf8");
+    const agentFoundry = readFileSync("src/features/spectra/components/agent-foundry.tsx", "utf8");
     expect(tiptap).toContain('type: "offer"');
     expect(tiptap).toContain('.setMeta("spectra:autocomplete-accepted", true)');
     expect(tiptap).toContain("remoteOrAiTransaction");
     expect(documentStudio).toContain("SpectraTiptapAutocomplete.configure");
     expect(presentationStudio).toContain('surface="slide_text"');
-    expect(agentStudio).toContain('surface="agent_foundry"');
+    expect(agentFoundry).toContain('surface="agent_foundry"');
   });
 
   it("bounds Python and JS/TS/React runtimes and retains explicit server fallbacks", () => {

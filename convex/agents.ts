@@ -11,6 +11,8 @@ import { commitDirectHumanChange, commitHumanCheckpoint } from "./changeGroups";
 const vEvalResult = v.object({
   caseId: v.string(),
   category: v.string(),
+  layer: v.optional(v.string()),
+  judgedBy: v.optional(v.string()),
   required: v.boolean(),
   score: v.number(),
   passed: v.boolean(),
@@ -20,6 +22,19 @@ const vEvalResult = v.object({
   inputTokens: v.optional(v.number()),
   outputTokens: v.optional(v.number()),
 });
+
+const vEvalLimitation = v.object({
+  kind: v.string(),
+  layer: v.optional(v.string()),
+  detail: v.string(),
+});
+
+/** Layers whose verdict does not come from a model judging free text. */
+const DETERMINISTIC_EVAL_LAYERS = new Set([
+  "contract",
+  "tool_sandbox",
+  "regression",
+]);
 
 function canonical(value: unknown): string {
   if (value === null || typeof value !== "object")
@@ -139,6 +154,10 @@ export const beginEvalRun = mutation({
     modelId: v.string(),
     provider: v.string(),
     threshold: v.optional(v.number()),
+    // The layered suite compiled from the agent's own skills, mission and
+    // evidence (§10.10). Built by the server route, not the browser. Legacy
+    // agents with no compiled skills fall back to `content.evals`.
+    cases: v.optional(v.array(v.any())),
   },
   handler: async (ctx, args) => {
     const { actor, artifact } = await requireArtifactCapability(
@@ -154,10 +173,15 @@ export const beginEvalRun = mutation({
       !Array.isArray(artifact.content)
         ? (artifact.content as Record<string, unknown>)
         : {};
-    const cases = Array.isArray(content.evals) ? content.evals : [];
+    const supplied = Array.isArray(args.cases) ? args.cases : [];
+    const cases = supplied.length
+      ? supplied
+      : Array.isArray(content.evals)
+        ? content.evals
+        : [];
     if (cases.length === 0)
       throw new Error(
-        "AGENT_EVAL_CASE_REQUIRED: Add at least one synthetic evaluation case.",
+        "AGENT_EVAL_CASE_REQUIRED: Compile at least one skill, or add an evaluation case.",
       );
     const now = Date.now();
     const staleRuns = await ctx.db
@@ -230,6 +254,7 @@ export const settleEvalRun = mutation({
   args: {
     evalRunId: v.id("agentEvalRuns"),
     results: v.array(vEvalResult),
+    limitations: v.optional(v.array(vEvalLimitation)),
     payloadDigest: v.string(),
     timestamp: v.number(),
     nonce: v.string(),
@@ -260,6 +285,8 @@ export const settleEvalRun = mutation({
     const results = args.results.map((result) => ({
       caseId: result.caseId.slice(0, 180),
       category: result.category.slice(0, 100),
+      ...(result.layer ? { layer: result.layer.slice(0, 60) } : {}),
+      ...(result.judgedBy ? { judgedBy: result.judgedBy.slice(0, 40) } : {}),
       required: result.required,
       score: Math.max(0, Math.min(1, result.score)),
       passed: result.passed,
@@ -273,15 +300,56 @@ export const settleEvalRun = mutation({
     const averageScore =
       results.reduce((sum, result) => sum + result.score, 0) /
       Math.max(1, results.length);
+
+    // Verification strength is derived here rather than trusted from the
+    // caller, so the publish gate cannot be talked into accepting a run that
+    // only ever asked a model to grade its own answer (§10.10).
+    const layers = new Set(
+      results.flatMap((result) => (result.layer ? [result.layer] : [])),
+    );
+    const judged = results.filter((result) => result.judgedBy);
+    const hasDeterministic = [...layers].some((layer) =>
+      DETERMINISTIC_EVAL_LAYERS.has(layer),
+    );
+    const hasExternalTruth =
+      layers.has("mission_truth") ||
+      judged.some((result) => result.judgedBy === "human");
+    const hasAdversarial = layers.has("adversarial");
+    const selfJudgedOnly =
+      judged.length > 0 &&
+      judged.every((result) => result.judgedBy === "self");
+    const verificationStrength =
+      results.length === 0
+        ? "unverified"
+        : hasExternalTruth && hasDeterministic && hasAdversarial
+          ? "strong"
+          : (hasDeterministic || hasExternalTruth) && hasAdversarial
+            ? "moderate"
+            : selfJudgedOnly && !hasDeterministic
+              ? "weak"
+              : "moderate";
+
+    const limitations = (args.limitations ?? []).slice(0, 40).map((entry) => ({
+      kind: entry.kind.slice(0, 60),
+      ...(entry.layer ? { layer: entry.layer.slice(0, 60) } : {}),
+      detail: entry.detail.replace(/\s+/g, " ").trim().slice(0, 600),
+    }));
+
     const passed =
       averageScore >= run.threshold &&
-      results.every((result) => !result.required || result.passed);
+      results.every((result) => !result.required || result.passed) &&
+      // A suite with no adversarial layer has not shown the agent resists
+      // instruction injection, so it cannot pass. Layerless legacy runs are
+      // unaffected.
+      (layers.size === 0 || hasAdversarial);
     const now = Date.now();
     await ctx.db.patch(run._id, {
       status: passed ? "passed" : "failed",
       passedCount,
       averageScore,
       results,
+      ...(limitations.length > 0 ? { limitations } : {}),
+      verificationStrength,
       completedAt: now,
       updatedAt: now,
     });
@@ -296,6 +364,7 @@ export const settleEvalRun = mutation({
         passed,
         caseCount: results.length,
         averageScore: Math.round(averageScore * 1_000) / 1_000,
+        verificationStrength,
       },
       retentionClass: "operational",
     });
@@ -305,6 +374,8 @@ export const settleEvalRun = mutation({
       passedCount,
       caseCount: results.length,
       averageScore,
+      verificationStrength,
+      limitations,
       results,
     };
   },
@@ -633,6 +704,216 @@ export const decideImprovement = mutation({
       retentionClass: "operational",
     });
     return { proposalId: proposal._id, status: args.decision };
+  },
+});
+
+/* ------------------------------------------------------------------ */
+/* Background Foundry compilation (§10.8)                              */
+/* ------------------------------------------------------------------ */
+
+const COMPILER_STAGE_LABELS: Array<{ stage: string; label: string }> = [
+  { stage: "interpret_mission", label: "Reading the mission" },
+  { stage: "extract_evidence", label: "Analysing sources" },
+  { stage: "propose_skills", label: "Drafting skills" },
+  { stage: "create_evaluations", label: "Writing checks" },
+  {
+    stage: "produce_routing_signature",
+    label: "Working out when to use this agent",
+  },
+  { stage: "identify_failure_modes", label: "Looking for weak points" },
+  { stage: "detect_overlap", label: "Checking for duplicate skills" },
+  { stage: "compile_release", label: "Preparing the release" },
+];
+
+const vCompilerStage = v.object({
+  stage: v.string(),
+  status: v.union(
+    v.literal("pending"),
+    v.literal("running"),
+    v.literal("completed"),
+    v.literal("failed"),
+    v.literal("skipped"),
+  ),
+  label: v.string(),
+  detail: v.optional(v.string()),
+  processed: v.optional(v.number()),
+  total: v.optional(v.number()),
+  startedAt: v.optional(v.number()),
+  completedAt: v.optional(v.number()),
+  error: v.optional(v.string()),
+});
+
+/**
+ * Starts a compilation job. Only one runs per agent at a time; an existing job
+ * for the same draft is returned rather than duplicated.
+ */
+export const beginCompilerJob = mutation({
+  args: {
+    agentId: v.id("spectraArtifacts"),
+    skipStages: v.optional(v.array(v.string())),
+  },
+  handler: async (ctx, args) => {
+    const { actor, artifact } = await requireArtifactCapability(
+      ctx,
+      args.agentId,
+      "modify",
+    );
+    if (artifact.blueprintKey !== "agent" || !artifact.schoolId)
+      throw new Error("AGENT_COMPILE_INVALID: This artifact is not an agent.");
+
+    const now = Date.now();
+    const draftHash = await agentDraftHash(artifact);
+
+    const active = await ctx.db
+      .query("agentCompilerJobs")
+      .withIndex("by_agent_status", (q) =>
+        q.eq("agentId", artifact._id).eq("status", "running"),
+      )
+      .collect();
+    const queued = await ctx.db
+      .query("agentCompilerJobs")
+      .withIndex("by_agent_status", (q) =>
+        q.eq("agentId", artifact._id).eq("status", "queued"),
+      )
+      .collect();
+
+    for (const job of [...active, ...queued]) {
+      // A job for the same draft is already in flight; reuse it. A job for an
+      // older draft is superseded, so cancel it rather than letting two
+      // compilations race to write the same result.
+      if (job.draftHash === draftHash && job.startedAt > now - 15 * 60_000)
+        return { jobId: job._id, runId: job.runId, reused: true };
+      await ctx.db.patch(job._id, {
+        status: "cancelled",
+        completedAt: now,
+        updatedAt: now,
+      });
+    }
+
+    const skip = new Set(args.skipStages ?? []);
+    const runId = `agent-compile-${artifact._id}-${now.toString(36)}`;
+    const jobId = await ctx.db.insert("agentCompilerJobs", {
+      agentId: artifact._id,
+      schoolId: artifact.schoolId,
+      creatorAccountId: actor.accountId,
+      runId,
+      draftHash,
+      status: "queued",
+      stages: COMPILER_STAGE_LABELS.map((entry) => ({
+        stage: entry.stage,
+        status: skip.has(entry.stage)
+          ? ("skipped" as const)
+          : ("pending" as const),
+        label: entry.label,
+      })),
+      startedAt: now,
+      updatedAt: now,
+    });
+
+    return { jobId, runId, draftHash, reused: false };
+  },
+});
+
+export const updateCompilerJob = mutation({
+  args: {
+    jobId: v.id("agentCompilerJobs"),
+    status: v.optional(
+      v.union(
+        v.literal("running"),
+        v.literal("completed"),
+        v.literal("failed"),
+        v.literal("cancelled"),
+      ),
+    ),
+    stages: v.optional(v.array(vCompilerStage)),
+    diagnostics: v.optional(
+      v.array(
+        v.object({
+          severity: v.string(),
+          stage: v.string(),
+          message: v.string(),
+          subjectId: v.optional(v.string()),
+        }),
+      ),
+    ),
+    result: v.optional(v.any()),
+  },
+  handler: async (ctx, args) => {
+    const job = await ctx.db.get(args.jobId);
+    if (!job) throw new Error("AGENT_COMPILE_JOB_NOT_FOUND");
+    await requireArtifactCapability(ctx, job.agentId, "modify");
+
+    const now = Date.now();
+    const terminal =
+      args.status === "completed" ||
+      args.status === "failed" ||
+      args.status === "cancelled";
+
+    await ctx.db.patch(args.jobId, {
+      ...(args.status ? { status: args.status } : {}),
+      ...(args.stages ? { stages: args.stages } : {}),
+      ...(args.diagnostics ? { diagnostics: args.diagnostics } : {}),
+      ...(args.result !== undefined ? { result: args.result } : {}),
+      ...(terminal ? { completedAt: now } : {}),
+      updatedAt: now,
+    });
+    return { jobId: args.jobId, updatedAt: now };
+  },
+});
+
+/**
+ * The newest compilation for this agent, with whether it is stale against the
+ * current draft. Foundry renders this in place of a Live Dock tab.
+ */
+export const compilerJob = query({
+  args: { agentId: v.id("spectraArtifacts") },
+  handler: async (ctx, args) => {
+    const { artifact } = await requireArtifactCapability(
+      ctx,
+      args.agentId,
+      "read",
+    );
+    if (artifact.blueprintKey !== "agent") return null;
+
+    const [job] = await ctx.db
+      .query("agentCompilerJobs")
+      .withIndex("by_agent_started", (q) => q.eq("agentId", artifact._id))
+      .order("desc")
+      .take(1);
+    if (!job) return null;
+
+    const draftHash = await agentDraftHash(artifact);
+    return {
+      jobId: job._id,
+      runId: job.runId,
+      status: job.status,
+      stages: job.stages,
+      diagnostics: job.diagnostics ?? [],
+      result: job.result ?? null,
+      draftHash: job.draftHash,
+      stale: job.draftHash !== draftHash,
+      startedAt: job.startedAt,
+      updatedAt: job.updatedAt,
+      completedAt: job.completedAt,
+    };
+  },
+});
+
+export const cancelCompilerJob = mutation({
+  args: { jobId: v.id("agentCompilerJobs") },
+  handler: async (ctx, args) => {
+    const job = await ctx.db.get(args.jobId);
+    if (!job) throw new Error("AGENT_COMPILE_JOB_NOT_FOUND");
+    await requireArtifactCapability(ctx, job.agentId, "modify");
+    if (job.status === "completed" || job.status === "failed")
+      return { jobId: args.jobId, cancelled: false };
+    const now = Date.now();
+    await ctx.db.patch(args.jobId, {
+      status: "cancelled",
+      completedAt: now,
+      updatedAt: now,
+    });
+    return { jobId: args.jobId, cancelled: true };
   },
 });
 

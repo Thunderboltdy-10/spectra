@@ -182,6 +182,13 @@ export async function GET(request: NextRequest) {
       return ok({ attempts: result });
     }
 
+    if (action === "quizResponseSummary") {
+      const result = await spectraQuery("quizPractice:aggregateForOwner", {
+        artifactId: requireString(params.get("artifactId"), "artifactId"),
+      });
+      return ok(result);
+    }
+
     if (action === "artifactUserState") {
       const result = await spectraQuery("artifactUserStates:get", {
         artifactId: requireString(params.get("artifactId"), "artifactId"),
@@ -446,6 +453,14 @@ export async function GET(request: NextRequest) {
       const agentId = requireString(params.get("agentId"), "agentId");
       const analytics = await spectraQuery("agents:analytics", { agentId });
       return ok({ analytics });
+    }
+
+    if (action === "installedAgents") {
+      const agents = await spectraQuery(
+        "spectraArtifacts:listInstalledAgents",
+        {},
+      );
+      return ok({ agents });
     }
 
     if (action === "publicAgents") {
@@ -1389,6 +1404,16 @@ export async function POST(request: NextRequest) {
           typeof body.elapsedMs === "number" && Number.isFinite(body.elapsedMs)
             ? body.elapsedMs
             : undefined,
+      });
+      return ok(result);
+    }
+
+    if (action === "setFlashcardNote") {
+      const result = await spectraMutation("flashcardStudy:setNote", {
+        artifactId: requireString(body.artifactId, "artifactId"),
+        cardId: requireString(body.cardId, "cardId"),
+        direction: requireFlashcardDirection(body.direction),
+        note: typeof body.note === "string" ? body.note : "",
       });
       return ok(result);
     }

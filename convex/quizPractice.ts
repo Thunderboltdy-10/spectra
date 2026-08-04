@@ -2,6 +2,16 @@ import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
 import { requireArtifactCapability } from "./spectraShared";
+import {
+  canRevealQuizAnswers,
+  canStartQuizAttempt,
+  canViewQuizResults,
+  normalizeQuizExperience,
+  quizAttemptHasExpired,
+  quizResponsesArePersisted,
+  quizTimeRemainingMs,
+  type QuizExperience,
+} from "@/features/spectra/quiz/experience";
 
 type QuizQuestion = {
   id: string;
@@ -221,8 +231,15 @@ function safeQuestion(question: QuizQuestion, optionOrder: string[]) {
   };
 }
 
-function cleanResponse(value: unknown) {
-  if (typeof value === "string") return value.slice(0, 12_000);
+/**
+ * Whether a verdict may accompany each response. Only an "immediate" reveal
+ * policy releases an answer mid-attempt; everything else waits.
+ */
+function immediateFeedback(experience: QuizExperience) {
+  return experience.revealAnswers === "immediate";
+}
+
+function cleanResponse(value: unknown) {  if (typeof value === "string") return value.slice(0, 12_000);
   if (Array.isArray(value))
     return value
       .filter((item): item is string => typeof item === "string")
@@ -314,6 +331,7 @@ async function attemptProjection(
   attempt: Doc<"quizPracticeAttempts">,
 ) {
   const snapshot = record(attempt.quizSnapshot);
+  const experience = normalizeQuizExperience(record(snapshot.settings));
   const questions = Array.isArray(snapshot.questions)
     ? (snapshot.questions as QuizQuestion[])
     : [];
@@ -333,8 +351,20 @@ async function attemptProjection(
     );
     return question ? [safeQuestion(question, entry.optionOrder)] : [];
   });
+  // Answers are withheld here, not in the browser. An answer that has not been
+  // released never leaves the server, so no client, export or model can reach
+  // it early (§11C).
+  const now = Date.now();
+  const revealed = canRevealQuizAnswers(experience, {
+    attempt: {
+      status: attempt.status === "submitted" ? "submitted" : "in_progress",
+      ...(attempt.submittedAt ? { submittedAt: attempt.submittedAt } : {}),
+    },
+    viewer: "learner",
+    now,
+  });
   const result =
-    attempt.status === "submitted"
+    attempt.status === "submitted" && revealed
       ? questions.map((question) =>
           questionResult(question, responseByQuestion.get(question.id) ?? ""),
         )
@@ -353,7 +383,13 @@ async function attemptProjection(
     startedAt: attempt.startedAt,
     submittedAt: attempt.submittedAt,
     elapsedMs: attempt.elapsedMs,
+    ...(attempt.timeElapsed ? { timeElapsed: true } : {}),
     settings: record(snapshot.settings),
+    experience,
+    // The clock is derived from the server's startedAt, so a refresh resumes
+    // the same attempt with the time that has actually passed (§11C).
+    timeRemainingMs: quizTimeRemainingMs(experience, attempt, now),
+    answersRevealed: revealed,
     instructions:
       typeof record(snapshot.settings).instructions === "string"
         ? String(record(snapshot.settings).instructions)
@@ -391,20 +427,22 @@ export const start = mutation({
     const questions = questionsFrom(artifact);
     if (!questions.length) throw new Error("QUIZ_HAS_NO_QUESTIONS");
     const settings = record(record(artifact.content).settings);
-    const maxAttempts =
-      typeof settings.maxAttempts === "number"
-        ? Math.max(1, Math.min(100, Math.floor(settings.maxAttempts)))
-        : undefined;
-    if (maxAttempts) {
-      const existingAttempts = await ctx.db
-        .query("quizPracticeAttempts")
-        .withIndex("by_account_artifact_started", (q) =>
-          q.eq("accountId", actor.accountId).eq("artifactId", artifact._id),
-        )
-        .collect();
-      if (existingAttempts.length >= maxAttempts)
-        throw new Error("QUIZ_PRACTICE_ATTEMPT_LIMIT_REACHED");
-    }
+    const experience: QuizExperience = normalizeQuizExperience(settings);
+    // One decision covers attempt limits and the closing deadline, so the
+    // server and the surface can never disagree about whether a person may
+    // start (§11C).
+    const existingAttempts = await ctx.db
+      .query("quizPracticeAttempts")
+      .withIndex("by_account_artifact_started", (q) =>
+        q.eq("accountId", actor.accountId).eq("artifactId", artifact._id),
+      )
+      .collect();
+    const decision = canStartQuizAttempt(experience, {
+      attemptsUsed: existingAttempts.length,
+      now: Date.now(),
+    });
+    if (!decision.allowed)
+      throw new Error(`QUIZ_PRACTICE_UNAVAILABLE: ${decision.reason}`);
     const seed = { value: Number.parseInt(hash(clientAttemptId), 16) >>> 0 };
     const selectedQuestions = pooledQuestions(questions, seed);
     const snapshot = {
@@ -470,6 +508,11 @@ export const saveResponse = mutation({
     )
       throw new Error("QUIZ_ATTEMPT_NOT_EDITABLE");
     const snapshot = record(attempt.quizSnapshot);
+    const experience = normalizeQuizExperience(record(snapshot.settings));
+    // A timed attempt stops accepting responses when its own clock runs out,
+    // whatever the tab believes the remaining time to be.
+    if (quizAttemptHasExpired(experience, attempt, Date.now()))
+      throw new Error("QUIZ_ATTEMPT_TIME_ELAPSED");
     const questions = Array.isArray(snapshot.questions)
       ? (snapshot.questions as QuizQuestion[])
       : [];
@@ -489,7 +532,6 @@ export const saveResponse = mutation({
       .unique();
     if (duplicate) {
       const snapshot = record(attempt.quizSnapshot);
-      const settings = record(snapshot.settings);
       const questions = Array.isArray(snapshot.questions)
         ? (snapshot.questions as QuizQuestion[])
         : [];
@@ -499,9 +541,8 @@ export const saveResponse = mutation({
       return {
         responseId: duplicate._id,
         reused: true,
-        ...(question &&
-        (settings.feedbackRelease === "on_each_response" ||
-          settings.showAnswersImmediately === true)
+        timeRemainingMs: quizTimeRemainingMs(experience, attempt, Date.now()),
+        ...(question && immediateFeedback(experience)
           ? { result: questionResult(question, duplicate.response) }
           : {}),
       };
@@ -530,14 +571,15 @@ export const saveResponse = mutation({
           updatedAt: now,
         });
     await ctx.db.patch(attempt._id, { updatedAt: now });
-    const settings = record(snapshot.settings);
     const question = questions.find((candidate) => candidate.id === questionId);
     return {
       responseId,
       reused: false,
-      ...(question &&
-      (settings.feedbackRelease === "on_each_response" ||
-        settings.showAnswersImmediately === true)
+      // The clock travels back with every saved answer, so a tab that has been
+      // asleep, throttled or offline re-anchors on the server rather than
+      // drifting further from it (§11C).
+      timeRemainingMs: quizTimeRemainingMs(experience, attempt, now),
+      ...(question && immediateFeedback(experience)
         ? { result: questionResult(question, response) }
         : {}),
     };
@@ -571,6 +613,7 @@ export const submit = mutation({
       responses.map((entry) => [entry.questionId, entry.response]),
     );
     const snapshot = record(attempt.quizSnapshot);
+    const experience = normalizeQuizExperience(record(snapshot.settings));
     const questions = Array.isArray(snapshot.questions)
       ? (snapshot.questions as QuizQuestion[])
       : [];
@@ -586,6 +629,14 @@ export const submit = mutation({
       0,
     );
     const now = Date.now();
+    // A submission after the clock ran out is still recorded, and the elapsed
+    // time is capped at the time that was allowed rather than the wall clock —
+    // a late network round trip is not extra time the learner took.
+    const expired = quizAttemptHasExpired(experience, attempt, now);
+    const allowedMs =
+      experience.timing === "countdown" && experience.countdownSeconds
+        ? experience.countdownSeconds * 1000
+        : undefined;
     await ctx.db.patch(attempt._id, {
       status: "submitted",
       score,
@@ -593,7 +644,11 @@ export const submit = mutation({
       percentage: maxScore ? Math.round((score / maxScore) * 10_000) / 100 : 0,
       clientSubmissionId,
       submittedAt: now,
-      elapsedMs: Math.max(0, now - attempt.startedAt),
+      elapsedMs: Math.max(
+        0,
+        Math.min(now - attempt.startedAt, allowedMs ?? Number.MAX_SAFE_INTEGER),
+      ),
+      ...(expired ? { timeElapsed: true } : {}),
       updatedAt: now,
     });
     const submitted = await ctx.db.get(attempt._id);
@@ -628,5 +683,122 @@ export const listMine = query({
         })
         .map((attempt) => attemptProjection(ctx, attempt)),
     );
+  },
+});
+
+/**
+ * What the owner is allowed to know about everyone's attempts (§11C).
+ *
+ * This reports on the cohort, never on a person: no account is named and no
+ * individual response is returned, so a quiz configured for anonymous responses
+ * is served by exactly the same code path as an assigned one. The quiz's own
+ * configuration decides whether there is anything to report at all — a quiz that
+ * keeps nothing has nothing to aggregate, and one whose results belong to the
+ * learner is not the owner's to read.
+ */
+export const aggregateForOwner = query({
+  args: { artifactId: v.id("spectraArtifacts") },
+  handler: async (ctx, args) => {
+    const { artifact } = await requireArtifactCapability(
+      ctx,
+      args.artifactId,
+      "modify",
+    );
+    if (artifact.blueprintKey !== "quiz")
+      throw new Error("QUIZ_PRACTICE_UNAVAILABLE");
+    const experience = normalizeQuizExperience(
+      record(record(artifact.content).settings),
+    );
+    if (!quizResponsesArePersisted(experience))
+      return {
+        available: false as const,
+        reason:
+          "This quiz does not keep responses, so there is nothing to report.",
+      };
+    if (!canViewQuizResults(experience, "teacher"))
+      return {
+        available: false as const,
+        reason: "Results for this quiz belong to the learner.",
+      };
+    const attempts = await ctx.db
+      .query("quizPracticeAttempts")
+      .withIndex("by_artifact_started", (q) => q.eq("artifactId", artifact._id))
+      .order("desc")
+      .take(1_000);
+    const submitted = attempts.filter(
+      (attempt) => attempt.status === "submitted",
+    );
+    const questions = questionsFrom(artifact);
+    const perQuestion = new Map(
+      questions.map((question) => [
+        question.id,
+        {
+          questionId: question.id,
+          prompt: question.prompt.slice(0, 400),
+          answered: 0,
+          correct: 0,
+          // How often each distinct answer was given. Options are the quiz's own
+          // words, so this shows which distractor is doing the work.
+          responses: new Map<string, number>(),
+        },
+      ]),
+    );
+    for (const attempt of submitted) {
+      const responses = await ctx.db
+        .query("quizPracticeResponses")
+        .withIndex("by_attempt", (q) => q.eq("attemptId", attempt._id))
+        .collect();
+      const snapshot = record(attempt.quizSnapshot);
+      const pinned = Array.isArray(snapshot.questions)
+        ? (snapshot.questions as QuizQuestion[])
+        : [];
+      for (const entry of responses) {
+        const bucket = perQuestion.get(entry.questionId);
+        if (!bucket) continue;
+        const question = pinned.find(
+          (candidate) => candidate.id === entry.questionId,
+        );
+        if (!question) continue;
+        bucket.answered += 1;
+        if (questionResult(question, entry.response).correct === true)
+          bucket.correct += 1;
+        const label = Array.isArray(entry.response)
+          ? entry.response.map((value) => String(value)).join(", ")
+          : String(entry.response ?? "");
+        const key = label.slice(0, 200);
+        if (key)
+          bucket.responses.set(key, (bucket.responses.get(key) ?? 0) + 1);
+      }
+    }
+    const scores = submitted.flatMap((attempt) =>
+      typeof attempt.percentage === "number" ? [attempt.percentage] : [],
+    );
+    return {
+      available: true as const,
+      // Cohort size, not a roster. Anonymity is a property of the data returned,
+      // not of what the surface chooses to draw.
+      attemptCount: attempts.length,
+      submittedCount: submitted.length,
+      inProgressCount: attempts.length - submitted.length,
+      timeElapsedCount: submitted.filter((attempt) => attempt.timeElapsed)
+        .length,
+      averagePercentage: scores.length
+        ? Math.round(
+            (scores.reduce((total, value) => total + value, 0) /
+              scores.length) *
+              10,
+          ) / 10
+        : undefined,
+      questions: [...perQuestion.values()].map((bucket) => ({
+        questionId: bucket.questionId,
+        prompt: bucket.prompt,
+        answered: bucket.answered,
+        correct: bucket.correct,
+        commonResponses: [...bucket.responses.entries()]
+          .sort((left, right) => right[1] - left[1])
+          .slice(0, 5)
+          .map(([response, count]) => ({ response, count })),
+      })),
+    };
   },
 });

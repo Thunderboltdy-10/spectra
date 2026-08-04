@@ -48,6 +48,15 @@ const defaultContent: Record<ArtifactTypeKey, unknown> = {
       timed: false,
       shuffleQuestions: false,
       passingScore: 0,
+      // A new quiz starts as practice; presets change this in one step (§11C).
+      experience: {
+        persistence: "personal",
+        identity: "signed_in",
+        timing: "untimed",
+        attempts: "unlimited",
+        revealAnswers: "immediate",
+        resultsVisibility: "learner",
+      },
     },
   },
   planner_task: {
@@ -66,6 +75,18 @@ const defaultContent: Record<ArtifactTypeKey, unknown> = {
     estimateMinutes: null,
     progressNote: "",
     sourceRefs: [],
+    // Required by the task schema: a plan without a timezone cannot place a
+    // deadline, and a task with no recurrence record cannot be told apart from
+    // one whose recurrence was cleared.
+    timezone: "UTC",
+    recurrence: {
+      frequency: "none",
+      interval: 1,
+      weekdays: [],
+      exceptions: [],
+    },
+    assignees: [],
+    watchers: [],
   },
   agent: {
     profile: {

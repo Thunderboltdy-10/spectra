@@ -1,3 +1,9 @@
+import {
+  normalizeQuizExperience,
+  quizAiBoundaryNote,
+  redactQuizQuestionForAI,
+} from "../quiz/experience";
+
 export const CONTEXT_LIMITS = {
   packetCharacters: 28_000,
   artifactExcerptCharacters: 2_800,
@@ -48,14 +54,66 @@ function placements(artifact: ArtifactRecord) {
     : [];
 }
 
-function typedArtifactStructure(
+/**
+ * The quiz answer boundary (§11C, INV-18).
+ *
+ * Answers are already withheld before this point: an artifact fetched with only
+ * read access comes back from Convex with its key removed, so an unreleased
+ * answer never reaches this process, let alone the model. What is missing is the
+ * explanation — without it a model that cannot see the key looks evasive or
+ * invents one. So when the key is absent, the packet says why in the quiz's own
+ * terms, and when it is present the viewer is the author and nothing changes.
+ */
+function quizContentForAI(
   artifact: ArtifactRecord,
-  options?: { preferTrailingBlocks?: boolean },
+  content: Record<string, unknown>,
 ) {
+  if (!Array.isArray(content.questions)) return { content, note: undefined };
+  const experience = normalizeQuizExperience(
+    content.settings && typeof content.settings === "object"
+      ? (content.settings as Record<string, unknown>)
+      : {},
+  );
+  const now = Date.now();
+  let withheld = false;
+  const questions = content.questions.map((value) => {
+    if (!value || typeof value !== "object") return value;
+    const question = value as Record<string, unknown>;
+    if (question.correctAnswer === undefined && question.correctAnswers === undefined)
+      withheld = true;
+    // Defence in depth: if a key did arrive and the policy still withholds it,
+    // it is removed here too rather than trusted to be filtered upstream.
+    const result = redactQuizQuestionForAI(question, experience, {
+      viewer: "teacher",
+      now,
+    });
+    return result.question;
+  });
+  return {
+    content: { ...content, questions },
+    note: withheld ? quizAiBoundaryNote(experience) : undefined,
+  };
+}
+
+/** The artifact as the model may see it, with withheld answers already gone. */
+function artifactContentForAI(artifact: ArtifactRecord) {
   const content =
     artifact.content && typeof artifact.content === "object"
       ? (artifact.content as Record<string, unknown>)
       : {};
+  if (artifact.blueprintKey !== "quiz") return { content, note: undefined };
+  return quizContentForAI(artifact, content);
+}
+
+function typedArtifactStructure(
+  artifact: ArtifactRecord,
+  options?: { preferTrailingBlocks?: boolean; content?: Record<string, unknown> },
+) {
+  const content =
+    options?.content ??
+    (artifact.content && typeof artifact.content === "object"
+      ? (artifact.content as Record<string, unknown>)
+      : {});
   const text = (value: unknown, cap = 600) =>
     typeof value === "string" ? value.slice(0, cap) : value;
   if (artifact.blueprintKey === "quiz" && Array.isArray(content.questions))
@@ -233,6 +291,7 @@ export function artifactContextSnapshot(
     artifact.createdFrom && typeof artifact.createdFrom === "object"
       ? (artifact.createdFrom as Record<string, unknown>)
       : null;
+  const visible = artifactContentForAI(artifact);
   return {
     id: artifact._id,
     title: artifact.title,
@@ -241,10 +300,11 @@ export function artifactContextSnapshot(
       typeof artifact.summary === "string"
         ? artifact.summary.slice(0, 700)
         : undefined,
+    ...(visible.note ? { answerBoundary: visible.note } : {}),
     ...(options?.includeExcerpt
       ? {
           excerpt: compactText(
-            artifact.content ?? artifact.textIndex,
+            artifact.content ? visible.content : artifact.textIndex,
             options.excerptCharacters ??
               CONTEXT_LIMITS.artifactExcerptCharacters,
           ),
@@ -254,6 +314,7 @@ export function artifactContextSnapshot(
       ? {
           structure: typedArtifactStructure(artifact, {
             preferTrailingBlocks: options.preferTrailingBlocks,
+            content: visible.content,
           }),
         }
       : {}),

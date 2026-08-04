@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import {
   AlignCenter,
@@ -394,7 +394,7 @@ function histogramDataset(
     Math.min(6, Math.ceil(-Math.log10(Math.abs(width))) + 1),
   );
   return bins.map((bin) => ({
-    bucket: `${bin.lower.toFixed(precision)}–${bin.upper.toFixed(precision)}`,
+    bucket: `${bin.lower.toFixed(precision)}â€“${bin.upper.toFixed(precision)}`,
     count: bin.count,
   }));
 }
@@ -712,6 +712,7 @@ export function SheetsStudio({
   onChange,
   aiChangedPaths = [],
   readOnly = false,
+  mode = "tab",
   synchronizationReady: _synchronizationReady = true,
   syncMessage = "Auto-saved",
   onActiveRegionChange,
@@ -721,6 +722,8 @@ export function SheetsStudio({
   onChange: (content: unknown) => void;
   aiChangedPaths?: string[];
   readOnly?: boolean;
+  /** A side panel gets the data and the selection, not the whole rig (§11F). */
+  mode?: "split" | "tab";
   synchronizationReady?: boolean;
   syncMessage?: string;
   onActiveRegionChange?: (regionId: string) => void;
@@ -751,7 +754,13 @@ export function SheetsStudio({
     "color_scale" | "greater_than" | "less_than" | "equal_to"
   >("color_scale");
   const [conditionalThreshold, setConditionalThreshold] = useState("0");
-  const [analysisExpanded, setAnalysisExpanded] = useState(false);
+  // Charts live in the sheet, so one can be selected the way a cell is, and a
+  // gesture in progress renders from local state until it commits (Â§11F).
+  const [selectedChartId, setSelectedChartId] = useState<string>();
+  const [chartGesture, setChartGesture] = useState<{
+    id: string;
+    position: SheetChart["position"];
+  }>();
   const [filterEditor, setFilterEditor] = useState<{
     tableId: string;
     column: number;
@@ -1529,17 +1538,85 @@ export function SheetsStudio({
 
   function createChart() {
     if (readOnly) return;
+    // A new chart lands just past the selection it was made from, so the
+    // relationship between the numbers and the picture is visible without
+    // scrolling anywhere (Â§11F).
+    const anchorColumn = normalizedSelection.end.column + 1;
+    const anchorRow = normalizedSelection.start.row;
     const chart: SheetChart = {
       id: `chart-${crypto.randomUUID()}`,
       type: "line",
       sourceRange: rangeLabel(normalizedSelection),
       title: `${activeSheet.name} chart`,
-      position: { x: 0, y: 0, width: 760, height: 320 },
+      position: {
+        x: anchorColumn * COLUMN_WIDTH + 16,
+        y: anchorRow * ROW_HEIGHT,
+        width: 420,
+        height: 260,
+      },
     };
     updateActiveSheet((sheet) => ({
       ...sheet,
       charts: [...sheet.charts, chart],
     }));
+    setSelectedChartId(chart.id);
+  }
+
+  function patchChart(chartId: string, patch: Partial<SheetChart>) {
+    updateActiveSheet((sheet) => ({
+      ...sheet,
+      charts: sheet.charts.map((candidate) =>
+        candidate.id === chartId ? { ...candidate, ...patch } : candidate,
+      ),
+    }));
+  }
+
+  /**
+   * Moving or resizing a chart is one complete gesture, so it holds the pointer
+   * until release and writes the new geometry once â€” a half-finished drag never
+   * reaches the other people in the sheet.
+   */
+  function beginChartGesture(
+    event: ReactPointerEvent<HTMLElement>,
+    chart: SheetChart,
+    kind: "move" | "resize",
+  ) {
+    if (readOnly) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setSelectedChartId(chart.id);
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const origin = chart.position;
+    const target = event.currentTarget;
+    target.setPointerCapture(event.pointerId);
+    let next = origin;
+
+    const onMove = (moveEvent: PointerEvent) => {
+      const deltaX = (moveEvent.clientX - startX) / zoom;
+      const deltaY = (moveEvent.clientY - startY) / zoom;
+      next =
+        kind === "move"
+          ? {
+              ...origin,
+              x: Math.max(0, Math.round(origin.x + deltaX)),
+              y: Math.max(0, Math.round(origin.y + deltaY)),
+            }
+          : {
+              ...origin,
+              width: Math.max(220, Math.round(origin.width + deltaX)),
+              height: Math.max(160, Math.round(origin.height + deltaY)),
+            };
+      setChartGesture({ id: chart.id, position: next });
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      setChartGesture(undefined);
+      if (next !== origin) patchChart(chart.id, { position: next });
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
   }
 
   function toggleTable() {
@@ -1752,7 +1829,7 @@ export function SheetsStudio({
                     ? "date"
                     : sourceCell.numFmt?.includes("%")
                       ? "percent"
-                      : /[$€£¥]/.test(sourceCell.numFmt ?? "")
+                      : /[$â‚¬Â£Â¥]/.test(sourceCell.numFmt ?? "")
                         ? "currency"
                         : "general",
                 fillColor: fillColor ? `#${fillColor.slice(-6)}` : undefined,
@@ -2021,7 +2098,10 @@ export function SheetsStudio({
       : [];
 
   return (
-    <div className="spectra-sheets-studio min-w-0 overflow-hidden">
+    <div
+      className="spectra-sheets-studio min-w-0 overflow-hidden"
+      data-compact={mode === "split" || undefined}
+    >
       <div className="sheets-top-bars">
         <div className="sheets-menu-bar">
           {(["file", "edit", "view", "insert", "format", "data"] as const).map(
@@ -2360,7 +2440,7 @@ export function SheetsStudio({
             {filteredOutRows.size
               ? `${visibleRowIndices.length.toLocaleString()} of ${bounds.rows.toLocaleString()}`
               : bounds.rows.toLocaleString()}{" "}
-            rows · {bounds.columns.toLocaleString()} columns
+            rows Â· {bounds.columns.toLocaleString()} columns
           </span>
         </div>
         <input
@@ -2430,7 +2510,7 @@ export function SheetsStudio({
             }
             disabled={readOnly}
           >
-            .0←
+            .0â†
           </ToolbarButton>
           <ToolbarButton
             label="Increase decimal places"
@@ -2441,7 +2521,7 @@ export function SheetsStudio({
             }
             disabled={readOnly}
           >
-            .0→
+            .0â†’
           </ToolbarButton>
           <select
             aria-label="Number format"
@@ -2537,7 +2617,7 @@ export function SheetsStudio({
             />
           </label>
           <label className="sheets-color-control" title="Cell fill color">
-            <span>◆</span>
+            <span>â—†</span>
             <input
               type="color"
               value={activeCell?.format?.fillColor ?? "#ffffff"}
@@ -2654,7 +2734,7 @@ export function SheetsStudio({
               className="sheets-name-box"
             />
             <span aria-hidden="true" className="sheets-formula-icon">
-              ƒx
+              Æ’x
             </span>
             <input
               aria-label={`Formula for ${activeAddress}`}
@@ -3301,6 +3381,142 @@ export function SheetsStudio({
                 );
               }),
             )}
+            {/* Charts sit on the sheet itself, over the cells they read from,
+                rather than in a separate section underneath the data (Â§11F). */}
+            {activeSheet.charts.map((chart) => {
+              const position =
+                chartGesture?.id === chart.id ? chartGesture.position : chart.position;
+              const selectedChart = selectedChartId === chart.id;
+              const statistics = chartSummary(activeSheet, chart, calculated);
+              return (
+                <div
+                  key={chart.id}
+                  {...targetAttrs(
+                    `/sheets/${activeSheetIndex}/charts/${activeSheet.charts.indexOf(chart)}`,
+                  )}
+                  data-ai-region={aiRegionAttr(
+                    pathTouches(
+                      aiChangedPaths,
+                      `/sheets/${activeSheetIndex}/charts/${activeSheet.charts.indexOf(chart)}`,
+                    ),
+                  )}
+                  className="sheets-chart-object"
+                  data-selected={selectedChart || undefined}
+                  data-dragging={chartGesture?.id === chart.id || undefined}
+                  style={{
+                    left: position.x * zoom,
+                    top: position.y * zoom,
+                    width: position.width * zoom,
+                    height: position.height * zoom,
+                  }}
+                  onPointerDown={(event) => {
+                    event.stopPropagation();
+                    setSelectedChartId(chart.id);
+                  }}
+                >
+                  <header
+                    onPointerDown={(event) =>
+                      beginChartGesture(event, chart, "move")
+                    }
+                  >
+                    <input
+                      value={chart.title}
+                      readOnly={readOnly}
+                      aria-label="Chart title"
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onChange={(event) =>
+                        patchChart(chart.id, { title: event.target.value })
+                      }
+                    />
+                    <select
+                      value={chart.type}
+                      disabled={readOnly}
+                      aria-label={`Chart type for ${chart.title}`}
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onChange={(event) =>
+                        patchChart(chart.id, {
+                          type: event.target.value as SheetChart["type"],
+                        })
+                      }
+                    >
+                      <option value="line">Line</option>
+                      <option value="column">Column</option>
+                      <option value="bar">Bar</option>
+                      <option value="area">Area</option>
+                      <option value="pie">Pie / donut</option>
+                      <option value="scatter">Scatter</option>
+                      <option value="combo">Combination</option>
+                      <option value="histogram">Histogram</option>
+                    </select>
+                    <button
+                      type="button"
+                      aria-label={`Delete ${chart.title}`}
+                      disabled={readOnly}
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onClick={() =>
+                        updateActiveSheet((sheet) => ({
+                          ...sheet,
+                          charts: sheet.charts.filter(
+                            (candidate) => candidate.id !== chart.id,
+                          ),
+                        }))
+                      }
+                    >
+                      <Trash2 />
+                    </button>
+                  </header>
+                  <div className="sheets-chart-plot">
+                    <SheetsChartView
+                      sheet={activeSheet}
+                      chart={chart}
+                      calculated={calculated}
+                    />
+                  </div>
+                  {/* Provenance stays on the object: the range it reads is part
+                      of the chart, not a caption someone has to remember. */}
+                  <footer>
+                    <button
+                      type="button"
+                      title="Select the range this chart reads"
+                      onPointerDown={(event) => event.stopPropagation()}
+                      onClick={() => {
+                        const range = parseRange(
+                          chart.sourceRange.split("!").at(-1) ?? "",
+                        );
+                        if (range) setRange(range);
+                      }}
+                    >
+                      {chart.sourceRange}
+                    </button>
+                    <span>
+                      n {statistics.count} Â· mean{" "}
+                      {statistics.mean === null
+                        ? "â€”"
+                        : statistics.mean.toLocaleString(
+                            workbook.workbook.locale,
+                            { maximumFractionDigits: 3 },
+                          )}
+                    </span>
+                  </footer>
+                  <p className="sr-only">
+                    {chart.title} uses {chart.sourceRange}. It contains{" "}
+                    {statistics.count} observations, with mean{" "}
+                    {statistics.mean ?? "no"}, minimum {statistics.min ?? "no"},
+                    maximum {statistics.max ?? "no"}, and standard deviation{" "}
+                    {statistics.standardDeviation ?? "no"} value.
+                  </p>
+                  {readOnly ? null : (
+                    <span
+                      className="sheets-chart-resize"
+                      role="presentation"
+                      onPointerDown={(event) =>
+                        beginChartGesture(event, chart, "resize")
+                      }
+                    />
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>
@@ -3420,194 +3636,6 @@ export function SheetsStudio({
           <span>{selectedAddresses.length} selected</span>
         )}
       </div>
-      <section className="sheets-chart-region">
-        <div className="flex items-center justify-between gap-3">
-          <button
-            type="button"
-            className="min-w-0 flex-1 text-left"
-            onClick={() => setAnalysisExpanded((expanded) => !expanded)}
-            aria-expanded={analysisExpanded}
-          >
-            <h3 className="text-[13px] font-semibold text-[var(--text-primary)]">
-              Charts and analysis
-            </h3>
-            <p className="mt-0.5 text-[10px] text-[var(--text-tertiary)]">
-              {activeSheet.charts.length
-                ? `${activeSheet.charts.length} linked chart${activeSheet.charts.length === 1 ? "" : "s"}`
-                : "No charts yet"}
-            </p>
-          </button>
-          <div className="flex items-center gap-2">
-            {analysisExpanded ? (
-              <button
-                type="button"
-                onClick={createChart}
-                disabled={readOnly}
-                className="sheets-secondary-button"
-              >
-                <BarChart3 />
-                Create chart from {rangeLabel(normalizedSelection)}
-              </button>
-            ) : null}
-            <button
-              type="button"
-              className="sheets-analysis-toggle"
-              onClick={() => setAnalysisExpanded((expanded) => !expanded)}
-              aria-label={
-                analysisExpanded
-                  ? "Collapse charts and analysis"
-                  : "Expand charts and analysis"
-              }
-              aria-expanded={analysisExpanded}
-            >
-              <ChevronDown
-                className={analysisExpanded ? "rotate-180" : undefined}
-              />
-            </button>
-          </div>
-        </div>
-        {analysisExpanded && activeSheet.charts.length ? (
-          <div className="mt-4 grid gap-4">
-            {activeSheet.charts.map((chart) => {
-              const statistics = chartSummary(activeSheet, chart, calculated);
-              const number = (value: number | null) =>
-                value === null
-                  ? "—"
-                  : value.toLocaleString(workbook.workbook.locale, {
-                      maximumFractionDigits: 5,
-                    });
-              return (
-                <article
-                  key={chart.id}
-                  {...targetAttrs(
-                    `/sheets/${activeSheetIndex}/charts/${activeSheet.charts.indexOf(chart)}`,
-                  )}
-                  data-ai-region={aiRegionAttr(
-                    pathTouches(
-                      aiChangedPaths,
-                      `/sheets/${activeSheetIndex}/charts/${activeSheet.charts.indexOf(chart)}`,
-                    ),
-                  )}
-                  className="sheets-chart-card"
-                >
-                  <header>
-                    <div>
-                      <input
-                        value={chart.title}
-                        readOnly={readOnly}
-                        onChange={(event) =>
-                          updateActiveSheet((sheet) => ({
-                            ...sheet,
-                            charts: sheet.charts.map((candidate) =>
-                              candidate.id === chart.id
-                                ? { ...candidate, title: event.target.value }
-                                : candidate,
-                            ),
-                          }))
-                        }
-                      />
-                      <span>{chart.sourceRange} · linked source</span>
-                    </div>
-                    <select
-                      value={chart.type}
-                      disabled={readOnly}
-                      onChange={(event) =>
-                        updateActiveSheet((sheet) => ({
-                          ...sheet,
-                          charts: sheet.charts.map((candidate) =>
-                            candidate.id === chart.id
-                              ? {
-                                  ...candidate,
-                                  type: event.target
-                                    .value as SheetChart["type"],
-                                }
-                              : candidate,
-                          ),
-                        }))
-                      }
-                      aria-label={`Chart type for ${chart.title}`}
-                    >
-                      <option value="line">Line</option>
-                      <option value="column">Column</option>
-                      <option value="bar">Bar</option>
-                      <option value="area">Area</option>
-                      <option value="pie">Pie / donut</option>
-                      <option value="scatter">Scatter</option>
-                      <option value="combo">Combination</option>
-                      <option value="histogram">Histogram</option>
-                    </select>
-                    <button
-                      type="button"
-                      aria-label={`Delete ${chart.title}`}
-                      disabled={readOnly}
-                      onClick={() =>
-                        updateActiveSheet((sheet) => ({
-                          ...sheet,
-                          charts: sheet.charts.filter(
-                            (candidate) => candidate.id !== chart.id,
-                          ),
-                        }))
-                      }
-                    >
-                      <Trash2 />
-                    </button>
-                  </header>
-                  <div className="sheets-chart-body">
-                    <div className="h-[280px] min-w-0">
-                      <SheetsChartView
-                        sheet={activeSheet}
-                        chart={chart}
-                        calculated={calculated}
-                      />
-                    </div>
-                    <aside
-                      className="sheets-chart-summary"
-                      aria-label={`${chart.title} summary statistics`}
-                    >
-                      <h4>Summary statistics</h4>
-                      <dl>
-                        <div>
-                          <dt>Mean</dt>
-                          <dd>{number(statistics.mean)}</dd>
-                        </div>
-                        <div>
-                          <dt>Maximum</dt>
-                          <dd>{number(statistics.max)}</dd>
-                        </div>
-                        <div>
-                          <dt>Minimum</dt>
-                          <dd>{number(statistics.min)}</dd>
-                        </div>
-                        <div>
-                          <dt>Std deviation</dt>
-                          <dd>{number(statistics.standardDeviation)}</dd>
-                        </div>
-                        <div>
-                          <dt>Observations</dt>
-                          <dd>{statistics.count.toLocaleString()}</dd>
-                        </div>
-                      </dl>
-                    </aside>
-                    <p className="sr-only">
-                      {chart.title} uses {chart.sourceRange}. It contains{" "}
-                      {statistics.count} observations, with mean{" "}
-                      {number(statistics.mean)}, minimum{" "}
-                      {number(statistics.min)}, maximum {number(statistics.max)}
-                      , and standard deviation{" "}
-                      {number(statistics.standardDeviation)}.
-                    </p>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        ) : analysisExpanded ? (
-          <div className="sheets-empty-chart">
-            <BarChart3 />
-            <span>Select a labelled range, then create a chart.</span>
-          </div>
-        ) : null}
-      </section>
       <footer className="sheets-tabs-bar">
         <button
           type="button"
@@ -3668,7 +3696,7 @@ export function SheetsStudio({
                 />
               ) : (
                 <>
-                  <span className="sheets-tab-icon">▦</span>
+                  <span className="sheets-tab-icon">â–¦</span>
                   {sheet.name}
                   <ChevronDown />
                 </>

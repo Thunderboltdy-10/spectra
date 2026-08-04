@@ -219,22 +219,22 @@ This is the source of truth for remaining work. An item is checked only when the
 
 ## Phase 10 — Agent Foundry and safe improvement
 
-- [ ] §10.1 Agent work surface replaces fixed wizard with persistent identity/composer/foundation/evidence/skills/evaluations/releases/sharing/compiler status.
-- [ ] §10.2 Initial objective and interaction-expectation questions produce an adaptive foundation.
-- [ ] §10.3 Generated removable/restorable/history-backed text/choice/file/reference/example/permission/evidence/evaluation/skill sections are contextual, not scripted filler.
-- [ ] §10.4 Persistent creator composer and Continue building add highest-value sections and stop when sufficient.
-- [ ] §10.5 Structured mission is mandatory; evidence/calibration are conditional.
-- [ ] §10.6 Evidence extraction captures criteria/vocabulary/procedures/examples/edges/contradictions/questions/security and isolates untrusted instructions.
-- [ ] §10.7 Versioned first-class skills declare triggers/contracts/procedure/evidence/examples/failures/evaluations/status and load selectively.
-- [ ] §10.8 Hidden background compiler jobs interpret, extract, propose, evaluate, route, diagnose, compile, and show in-Foundry status.
-- [ ] §10.9 Mission-adaptive creation works across educational, research, company, personal, creative, and technical cases.
-- [ ] §10.10 Layered deterministic/held-out/truth/tool/adversarial/regression/independent evaluation reports uncertainty honestly.
-- [ ] §10.11 Competence routing uses structure, semantics, context, evidence, tools, history, and confidence-specific behavior.
-- [ ] §10.12 Verified signals produce evaluated shadowed immutable releases with provenance, rollback, injection resistance, thresholds, and no active self-mutation.
-- [ ] §10.13 Agents page provides Discover/Installed/Yours/Shared and simple sharing/install semantics.
-- [ ] §10.14 Compiled runtime package references mission, skills, evidence, tools, contracts, verification, routing, safety, model, and evaluation; loads only relevant material.
-- [ ] Dynamic sections/history, mission fixtures, evidence security, skills, compiler, evaluation, routing, improvement, immutability, rollback, and sharing checks pass.
-- [ ] Foundry, first-class competence, competence routing, and release-based improvement meet exits.
+- [x] §10.1 Agent work surface replaces fixed wizard with persistent identity/composer/foundation/evidence/skills/evaluations/releases/sharing/compiler status.
+- [x] §10.2 Initial objective and interaction-expectation questions produce an adaptive foundation.
+- [x] §10.3 Generated removable/restorable/history-backed text/choice/file/reference/example/permission/evidence/evaluation/skill sections are contextual, not scripted filler.
+- [x] §10.4 Persistent creator composer and Continue building add highest-value sections and stop when sufficient.
+- [x] §10.5 Structured mission is mandatory; evidence/calibration are conditional.
+- [x] §10.6 Evidence extraction captures criteria/vocabulary/procedures/examples/edges/contradictions/questions/security and isolates untrusted instructions.
+- [x] §10.7 Versioned first-class skills declare triggers/contracts/procedure/evidence/examples/failures/evaluations/status and load selectively.
+- [x] §10.8 Hidden background compiler jobs interpret, extract, propose, evaluate, route, diagnose, compile, and show in-Foundry status.
+- [x] §10.9 Mission-adaptive creation works across educational, research, company, personal, creative, and technical cases.
+- [x] §10.10 Layered deterministic/held-out/truth/tool/adversarial/regression/independent evaluation reports uncertainty honestly.
+- [x] §10.11 Competence routing uses structure, semantics, context, evidence, tools, history, and confidence-specific behavior.
+- [x] §10.12 Verified signals produce evaluated shadowed immutable releases with provenance, rollback, injection resistance, thresholds, and no active self-mutation.
+- [x] §10.13 Agents page provides Discover/Installed/Yours/Shared and simple sharing/install semantics.
+- [x] §10.14 Compiled runtime package references mission, skills, evidence, tools, contracts, verification, routing, safety, model, and evaluation; loads only relevant material.
+- [x] Dynamic sections/history, mission fixtures, evidence security, skills, compiler, evaluation, routing, improvement, immutability, rollback, and sharing checks pass.
+- [x] Foundry, first-class competence, competence routing, and release-based improvement meet exits.
 
 ## Phase 11 — Dedicated functional work-type passes
 
@@ -333,7 +333,7 @@ This is the source of truth for remaining work. An item is checked only when the
 - [x] INV-15 Normal product copy does not use Artifact generically.
 - [x] INV-16 No local compute task runs on the main thread.
 - [x] INV-17 No large local model downloads without capability/user-policy approval.
-- [ ] INV-18 No Agent release self-mutates from untrusted usage content.
+- [x] INV-18 No Agent release self-mutates from untrusted usage content.
 - [x] INV-19 Library/Workspace transition preserves workbench session.
 - [x] INV-20 Sidebar collapse keeps the same navigation tree.
 - [x] INV-21 Reference layout changes preserve semantic identity.
@@ -393,7 +393,7 @@ This is the source of truth for remaining work. An item is checked only when the
 - [x] CAL-001..CAL-008: Calendar registry removal/page/domain/Plan/lane/drag/AI/panel-transfer—all individually evidenced.
 - [x] SCHOOL-001..SCHOOL-011: adapter/audit/all supported domains/time/user/admin/sync/truth/materialization/future providers—all individually evidenced.
 - [x] ADMIN-001..ADMIN-004: user/school/superadmin real sources plus privacy/freshness—all individually evidenced.
-- [ ] AGENT-001..AGENT-018: Foundry/questions/dynamic history/composer/sufficiency/mission/evidence/skills/compiler/adaptation/evaluation/routing/reason/improvement/security/releases/catalog—all individually evidenced.
+- [x] AGENT-001..AGENT-018: Foundry/questions/dynamic history/composer/sufficiency/mission/evidence/skills/compiler/adaptation/evaluation/routing/reason/improvement/security/releases/catalog—all individually evidenced.
 - [ ] MEM-001..MEM-005: hidden navigation/conservative capture/scoped retrieval-correction-deletion/internal tests/no review workflow—all individually evidenced.
 
 ### Work types, polish, landing

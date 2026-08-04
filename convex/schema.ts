@@ -1727,6 +1727,13 @@ export default defineSchema({
     cardId: v.string(),
     direction: v.optional(v.union(v.literal("forward"), v.literal("reverse"))),
     cardVersionId: v.optional(v.id("spectraArtifactVersions")),
+    // What the card was asking when this state was last updated. When the deck
+    // is edited, comparing this against the card's current meaning is how the
+    // learner's progress is preserved for a reworded card and retired for a
+    // rewritten one, without either side overwriting the other (§11B).
+    meaningFingerprint: v.optional(v.string()),
+    // The learner's own note on the card. Deck content never writes here.
+    note: v.optional(v.string()),
     algorithm: v.string(),
     algorithmVersion: v.number(),
     attempts: v.number(),
@@ -1792,6 +1799,9 @@ export default defineSchema({
     startedAt: v.number(),
     submittedAt: v.optional(v.number()),
     elapsedMs: v.optional(v.number()),
+    // Set when the attempt was submitted after its own clock ran out, so the
+    // result can say so instead of quietly looking like an ordinary one.
+    timeElapsed: v.optional(v.boolean()),
     updatedAt: v.number(),
   })
     .index("by_account_client", ["accountId", "clientAttemptId"])
@@ -1886,6 +1896,64 @@ export default defineSchema({
     .index("by_agent_status", ["agentId", "status"])
     .index("by_school_published", ["schoolId", "publishedAt"]),
 
+  /**
+   * Background Foundry compilation (§10.8). These are durable internal runs
+   * whose status surfaces inside Agent Foundry — never as a Live Dock tab.
+   */
+  agentCompilerJobs: defineTable({
+    agentId: v.id("spectraArtifacts"),
+    schoolId: v.id("schools"),
+    creatorAccountId: v.id("accounts"),
+    /** Internal run id; presentation is always in_surface for these. */
+    runId: v.string(),
+    /** Draft hash this job compiled, so a stale job can be detected. */
+    draftHash: v.string(),
+    status: v.union(
+      v.literal("queued"),
+      v.literal("running"),
+      v.literal("completed"),
+      v.literal("failed"),
+      v.literal("cancelled"),
+    ),
+    stages: v.array(
+      v.object({
+        stage: v.string(),
+        status: v.union(
+          v.literal("pending"),
+          v.literal("running"),
+          v.literal("completed"),
+          v.literal("failed"),
+          v.literal("skipped"),
+        ),
+        label: v.string(),
+        detail: v.optional(v.string()),
+        processed: v.optional(v.number()),
+        total: v.optional(v.number()),
+        startedAt: v.optional(v.number()),
+        completedAt: v.optional(v.number()),
+        error: v.optional(v.string()),
+      }),
+    ),
+    diagnostics: v.optional(
+      v.array(
+        v.object({
+          severity: v.string(),
+          stage: v.string(),
+          message: v.string(),
+          subjectId: v.optional(v.string()),
+        }),
+      ),
+    ),
+    /** Compiled result, written once the job completes. */
+    result: v.optional(v.any()),
+    startedAt: v.number(),
+    updatedAt: v.number(),
+    completedAt: v.optional(v.number()),
+  })
+    .index("by_agent_started", ["agentId", "startedAt"])
+    .index("by_agent_status", ["agentId", "status"])
+    .index("by_run", ["runId"]),
+
   agentEvalRuns: defineTable({
     agentId: v.id("spectraArtifacts"),
     schoolId: v.id("schools"),
@@ -1907,6 +1975,10 @@ export default defineSchema({
       v.object({
         caseId: v.string(),
         category: v.string(),
+        // Evaluation layer this case belongs to (§10.10). Absent on runs
+        // recorded before layered evaluation existed.
+        layer: v.optional(v.string()),
+        judgedBy: v.optional(v.string()),
         required: v.boolean(),
         score: v.number(),
         passed: v.boolean(),
@@ -1917,6 +1989,17 @@ export default defineSchema({
         outputTokens: v.optional(v.number()),
       }),
     ),
+    // What this evaluation could not establish, stated rather than implied.
+    limitations: v.optional(
+      v.array(
+        v.object({
+          kind: v.string(),
+          layer: v.optional(v.string()),
+          detail: v.string(),
+        }),
+      ),
+    ),
+    verificationStrength: v.optional(v.string()),
     startedAt: v.number(),
     completedAt: v.optional(v.number()),
     createdAt: v.number(),

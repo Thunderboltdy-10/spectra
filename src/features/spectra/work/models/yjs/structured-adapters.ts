@@ -2,7 +2,7 @@ import * as Y from "yjs";
 import { enumerateArtifactRegions, validateArtifactContent } from "../../../artifacts/registry";
 import type { ArtifactTypeKey, SemanticRegion } from "../../../artifacts/types";
 import { normalizeArtifactContent } from "../../../ai/content-normalization";
-import { normalizeAgentContent } from "../../../agents/model";
+import { normalizeFoundryContent } from "../../../agents/foundry/foundry-document";
 import { normalizePresentationContent } from "../../../presentation/model";
 import { normalizeSheetsContent } from "../../../sheets/model";
 import { sharedTimetableContent } from "../../../timetable/model";
@@ -425,22 +425,14 @@ function normalizeQuizSource(value: unknown) {
   return source;
 }
 
+/**
+ * The Agent Foundry document is the collaborative source of truth: mission,
+ * adaptive sections with their history, evidence bindings and skills all live
+ * under `foundry`. The legacy fields it also carries are the compiled
+ * projection the runtime and publish gates read.
+ */
 function normalizeAgentCollaborativeContent(value: unknown) {
-  const source = isRecord(value) ? value : {};
-  const normalized = normalizeAgentContent(value) as unknown as JsonRecord;
-  return {
-    ...normalized,
-    ...(isRecord(source.mission) ? { mission: source.mission } : {}),
-    ...(Array.isArray(source.foundationSections)
-      ? { foundationSections: source.foundationSections }
-      : {}),
-    ...(Array.isArray(source.evidenceBindings)
-      ? { evidenceBindings: source.evidenceBindings }
-      : {}),
-    ...(Array.isArray(source.releaseDrafts)
-      ? { releaseDrafts: source.releaseDrafts }
-      : {}),
-  };
+  return normalizeFoundryContent(value) as unknown as JsonRecord;
 }
 
 export const sheetsYjsAdapter = new StructuredWorkYjsAdapter(

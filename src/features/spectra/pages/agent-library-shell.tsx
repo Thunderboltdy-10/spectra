@@ -51,21 +51,24 @@ import {
 } from "../components/context-controls";
 import { ShareDialog } from "../components/share-dialog";
 import { useSpectraRun } from "../ai/use-spectra-run";
-import { normalizeAgentContent } from "../agents/model";
+import { normalizeFoundryContent } from "../agents/foundry";
 import {
   addSpectraPublicAgent,
   getSpectraArtifacts,
   getSpectraPublicAgents,
   getSpectraWorkspaces,
   postSpectra,
+  getSpectraInstalledAgents,
+  setSpectraAgentInstalled,
   type SpectraArtifact,
+  type SpectraInstalledAgent,
   type SpectraPublicAgent,
   type SpectraWorkspace,
 } from "../data/api";
 import { formatRelativeTime } from "../components/spectra-view-model";
 
 type SortMode = "relevance" | "recent" | "title";
-type LibrarySection = "owned" | "shared" | "public";
+type LibrarySection = "discover" | "installed" | "yours" | "shared";
 
 type LibraryCard = {
   id: string;
@@ -81,6 +84,8 @@ type LibraryCard = {
   ratingCount?: number;
   artifact?: SpectraArtifact;
   publicAgent?: SpectraPublicAgent;
+  /** Installed agents reference a published release rather than copying it. */
+  installedRelease?: number;
 };
 
 const cardIcons: LucideIcon[] = [
@@ -116,18 +121,24 @@ function subjectLabel(tags: string[], skills: string[]) {
 }
 
 function accessibleCard(artifact: SpectraArtifact): LibraryCard {
-  const content = normalizeAgentContent(artifact.content);
-  const skills = content.skills
-    .filter((skill) => skill.enabled)
-    .map((skill) => skill.name)
-    .filter(Boolean);
+  const content = normalizeFoundryContent(artifact.content);
+  // Foundry skills are the source; the legacy projection is the fallback for
+  // agents built before the Foundry.
+  const skills = (
+    content.foundry.skills.length > 0
+      ? content.foundry.skills
+          .filter((skill) => skill.status !== "deprecated")
+          .map((skill) => skill.name)
+      : content.skills.filter((skill) => skill.enabled).map((skill) => skill.name)
+  ).filter(Boolean);
   const capabilities = [...new Set([...skills, ...artifact.tags])].slice(0, 4);
   return {
     id: artifact._id,
-    section: artifact.ownership === "shared" ? "shared" : "owned",
+    section: artifact.ownership === "shared" ? "shared" : "yours",
     title: artifact.title,
     summary:
       artifact.summary?.trim() ||
+      content.foundry.mission.objective.trim() ||
       content.profile.purpose.trim() ||
       "Configure this specialist agent for a focused learning workflow.",
     subject: subjectLabel(artifact.tags, skills),
@@ -144,7 +155,7 @@ function accessibleCard(artifact: SpectraArtifact): LibraryCard {
 function publicCard(agent: SpectraPublicAgent): LibraryCard {
   return {
     id: agent.agentId,
-    section: "public",
+    section: "discover",
     title: agent.title,
     summary:
       agent.summary?.trim() || agent.purpose.trim() || agent.routingDescription,
@@ -156,6 +167,15 @@ function publicCard(agent: SpectraPublicAgent): LibraryCard {
     rating: agent.rating,
     ratingCount: agent.ratingCount,
     publicAgent: agent,
+  };
+}
+
+function installedCard(agent: SpectraInstalledAgent): LibraryCard {
+  return {
+    ...publicCard(agent),
+    section: "installed",
+    updatedAt: agent.installedAt,
+    installedRelease: agent.releaseNumber,
   };
 }
 
@@ -201,15 +221,15 @@ function AgentCard({
   const tone = cardTones[signature % cardTones.length]!;
   const placed = Boolean(card.artifact?.placements?.length);
   const primaryLabel =
-    card.section === "owned"
-      ? card.artifact?.placements?.length
-        ? "Open agent"
-        : "Added"
-      : card.section === "public"
-        ? "Add agent"
-        : placed
-          ? "Open agent"
-          : "Add to workspace";
+    card.section === "yours"
+      ? "Open agent"
+      : card.section === "discover"
+        ? "Install"
+        : card.section === "installed"
+          ? "Uninstall"
+          : placed
+            ? "Open agent"
+            : "Add to workspace";
   return (
     <article
       className="agent-library-card group"
@@ -234,7 +254,7 @@ function AgentCard({
               <span className="truncate text-[13px] font-semibold text-[var(--text-primary)]">
                 {card.title}
               </span>
-              {card.section === "owned" && card.releaseNumber ? (
+              {card.section === "yours" && card.releaseNumber ? (
                 <CheckCircle2
                   className="size-3.5 shrink-0 text-[var(--success)]"
                   aria-label="Published"
@@ -256,14 +276,16 @@ function AgentCard({
           </span>
           <span aria-hidden="true">·</span>
           <span className="shrink-0">
-            {card.section === "owned"
+            {card.section === "yours"
               ? "Updated"
               : card.section === "shared"
                 ? "Shared"
-                : "Published"}{" "}
+                : card.section === "installed"
+                  ? "Installed"
+                  : "Published"}{" "}
             {formatRelativeTime(card.updatedAt)}
           </span>
-          {card.section === "public" && typeof card.rating === "number" ? (
+          {card.section === "discover" && typeof card.rating === "number" ? (
             <span className="ml-auto shrink-0 font-semibold text-[#b87618]">
               ★ {card.rating.toFixed(1)} ({card.ratingCount})
             </span>
@@ -286,13 +308,13 @@ function AgentCard({
         type="button"
         disabled={busy}
         onClick={onPrimary}
-        className={`agent-library-card__action${card.section === "owned" ? " is-added" : ""}`}
+        className={`agent-library-card__action${card.section === "installed" ? " is-added" : ""}`}
       >
         {busy ? (
           <Loader2 className="size-3.5 animate-spin" />
-        ) : card.section === "owned" ? (
+        ) : card.section === "installed" ? (
           <CheckCircle2 className="size-3.5" />
-        ) : card.section === "public" ||
+        ) : card.section === "discover" ||
           (card.section === "shared" && !placed) ? (
           <Plus className="size-3.5" />
         ) : (
@@ -376,6 +398,9 @@ export function AgentLibraryShell({ initialAgentId }: { initialAgentId?: string 
   const requestedAgentId = initialAgentId ?? searchParams.get("agentId");
   const [artifacts, setArtifacts] = useState<SpectraArtifact[]>([]);
   const [publicAgents, setPublicAgents] = useState<SpectraPublicAgent[]>([]);
+  const [installedAgents, setInstalledAgents] = useState<
+    SpectraInstalledAgent[]
+  >([]);
   const [workspaces, setWorkspaces] = useState<SpectraWorkspace[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyKey, setBusyKey] = useState<string | null>(null);
@@ -421,15 +446,16 @@ export function AgentLibraryShell({ initialAgentId }: { initialAgentId?: string 
   const load = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
     try {
-      const [artifactResult, publicResult, workspaceResult] = await Promise.all(
-        [
+      const [artifactResult, publicResult, installedResult, workspaceResult] =
+        await Promise.all([
           getSpectraArtifacts({ blueprintKey: "agent", placement: "all" }),
           getSpectraPublicAgents({ limit: 100 }),
+          getSpectraInstalledAgents(),
           getSpectraWorkspaces(),
-        ],
-      );
+        ]);
       setArtifacts(artifactResult.artifacts);
       setPublicAgents(publicResult.agents);
+      setInstalledAgents(installedResult.agents);
       setWorkspaces(
         workspaceResult.filter((workspace) => workspace.status === "active"),
       );
@@ -478,15 +504,34 @@ export function AgentLibraryShell({ initialAgentId }: { initialAgentId?: string 
   }, [artifacts, requestedAgentId, studio]);
 
   const cards = useMemo(() => {
-    const accessible = artifacts.map(accessibleCard);
-    const accessibleIds = new Set(artifacts.map((artifact) => artifact._id));
+    // An agent you built stays in Yours even if you also follow it; an agent
+    // you installed from Discover appears once, under Installed.
+    const ownedIds = new Set(
+      artifacts
+        .filter((artifact) => artifact.ownership !== "shared")
+        .map((artifact) => artifact._id),
+    );
+    const installed = installedAgents.filter(
+      (agent) => !agent.ownedByViewer && !ownedIds.has(agent.agentId),
+    );
+    const installedIds = new Set(installed.map((agent) => agent.agentId));
+
+    const accessible = artifacts
+      .filter((artifact) => !installedIds.has(artifact._id))
+      .map(accessibleCard);
+    const accountedFor = new Set([
+      ...artifacts.map((artifact) => artifact._id),
+      ...installedIds,
+    ]);
+
     return [
       ...accessible,
+      ...installed.map(installedCard),
       ...publicAgents
-        .filter((agent) => !accessibleIds.has(agent.agentId))
+        .filter((agent) => !accountedFor.has(agent.agentId))
         .map(publicCard),
     ];
-  }, [artifacts, publicAgents]);
+  }, [artifacts, installedAgents, publicAgents]);
 
   const subjects = useMemo(
     () =>
@@ -528,9 +573,10 @@ export function AgentLibraryShell({ initialAgentId }: { initialAgentId?: string 
       });
   }, [capability, cards, search, sortMode, subject]);
 
-  const owned = visibleCards.filter((card) => card.section === "owned");
+  const discover = visibleCards.filter((card) => card.section === "discover");
+  const installed = visibleCards.filter((card) => card.section === "installed");
+  const yours = visibleCards.filter((card) => card.section === "yours");
   const shared = visibleCards.filter((card) => card.section === "shared");
-  const discover = visibleCards.filter((card) => card.section === "public");
 
   async function createAgent() {
     const payload = createDefaultArtifactPayload("agent");
@@ -559,16 +605,38 @@ export function AgentLibraryShell({ initialAgentId }: { initialAgentId?: string 
     }
   }
 
-  async function addPublic(agent: SpectraPublicAgent) {
+  /**
+   * Installing grants access to the published release and records the install.
+   * The agent is referenced, never copied, so its owner keeps control of it.
+   */
+  async function installAgent(agent: SpectraPublicAgent) {
     setBusyKey(`public:${agent.agentId}`);
     try {
       await addSpectraPublicAgent(agent.agentId);
+      await setSpectraAgentInstalled(agent.agentId, true);
       setPublicPreview(null);
       await load();
-      toast.success(`${agent.title} was added to your Agent Library.`);
+      toast.success(`${agent.title} is installed.`);
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : "Could not add this agent.",
+        error instanceof Error ? error.message : "Could not install this agent.",
+      );
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  async function uninstallAgent(card: LibraryCard) {
+    setBusyKey(`public:${card.id}`);
+    try {
+      await setSpectraAgentInstalled(card.id, false);
+      await load();
+      toast.success(`${card.title} is uninstalled.`);
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Could not uninstall this agent.",
       );
     } finally {
       setBusyKey(null);
@@ -625,8 +693,12 @@ export function AgentLibraryShell({ initialAgentId }: { initialAgentId?: string 
   }
 
   function primaryAction(card: LibraryCard) {
+    if (card.section === "installed") {
+      void uninstallAgent(card);
+      return;
+    }
     if (card.publicAgent) {
-      void addPublic(card.publicAgent);
+      void installAgent(card.publicAgent);
       return;
     }
     if (!card.artifact) return;
@@ -842,34 +914,45 @@ export function AgentLibraryShell({ initialAgentId }: { initialAgentId?: string 
           ) : (
             <>
               <LibrarySectionBlock
-                title="My agents"
-                description="Agents you own and can train, publish, share, and use."
-                cards={owned}
-                limit={expanded.has("owned") ? owned.length : 4}
+                title="Discover"
+                description="Published agents whose owners opened them to your school. Installing references their release; it does not copy the agent."
+                cards={discover}
+                limit={expanded.has("discover") ? discover.length : 4}
                 onViewAll={() =>
-                  setExpanded((current) => new Set(current).add("owned"))
+                  setExpanded((current) => new Set(current).add("discover"))
                 }
               >
                 {renderCard}
               </LibrarySectionBlock>
               <LibrarySectionBlock
-                title="Shared with me"
-                description="Accepted agents from members of your school; add them to any workspace you can modify."
+                title="Installed"
+                description="Agents you installed from Discover. They stay on the release their owner published, and you can uninstall at any time."
+                cards={installed}
+                limit={expanded.has("installed") ? installed.length : 4}
+                onViewAll={() =>
+                  setExpanded((current) => new Set(current).add("installed"))
+                }
+              >
+                {renderCard}
+              </LibrarySectionBlock>
+              <LibrarySectionBlock
+                title="Yours"
+                description="Agents you built. Their skills, evidence and releases live in Agent Foundry."
+                cards={yours}
+                limit={expanded.has("yours") ? yours.length : 4}
+                onViewAll={() =>
+                  setExpanded((current) => new Set(current).add("yours"))
+                }
+              >
+                {renderCard}
+              </LibrarySectionBlock>
+              <LibrarySectionBlock
+                title="Shared"
+                description="Agents shared with you directly, read-only or with edit access. Add them to any workspace you can modify."
                 cards={shared}
                 limit={expanded.has("shared") ? shared.length : 4}
                 onViewAll={() =>
                   setExpanded((current) => new Set(current).add("shared"))
-                }
-              >
-                {renderCard}
-              </LibrarySectionBlock>
-              <LibrarySectionBlock
-                title="Discover"
-                description="Published agents whose owners explicitly enabled public access for your school context."
-                cards={discover}
-                limit={expanded.has("public") ? discover.length : 4}
-                onViewAll={() =>
-                  setExpanded((current) => new Set(current).add("public"))
                 }
               >
                 {renderCard}
@@ -1088,7 +1171,7 @@ export function AgentLibraryShell({ initialAgentId }: { initialAgentId?: string 
               <button
                 type="button"
                 disabled={busyKey === `public:${publicPreview.agentId}`}
-                onClick={() => void addPublic(publicPreview)}
+                onClick={() => void installAgent(publicPreview)}
                 className="inline-flex h-9 items-center gap-2 rounded-[8px] bg-[var(--text-primary)] px-4 text-[12px] font-semibold text-[var(--bg-primary)] disabled:opacity-45"
               >
                 {busyKey === `public:${publicPreview.agentId}` ? (
@@ -1096,7 +1179,7 @@ export function AgentLibraryShell({ initialAgentId }: { initialAgentId?: string 
                 ) : (
                   <Plus className="size-4" />
                 )}
-                Add agent
+                Install agent
               </button>
             </footer>
           </section>

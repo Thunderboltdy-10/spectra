@@ -22,7 +22,7 @@ const PrismCanvas = dynamic(() => import("../prism3d/PrismCanvas"), {
 
 function detectQuality(reduced: boolean): PrismQuality {
   if (reduced) return "low";
-  if (typeof navigator === "undefined") return "medium";
+  if (typeof window === "undefined") return "medium";
   const cores = navigator.hardwareConcurrency ?? 4;
   const memory = (navigator as { deviceMemory?: number }).deviceMemory ?? 8;
   const coarse =

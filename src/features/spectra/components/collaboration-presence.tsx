@@ -1,13 +1,22 @@
 "use client";
 
-import { MousePointer2, Sparkles, Users, X } from "lucide-react";
+import {
+  CornerUpLeft,
+  Eye,
+  EyeOff,
+  MousePointer2,
+  Users,
+  X,
+} from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { SpectraMark } from "@/components/spectra-mark";
 import {
   clientRectsForSelectionRange,
   positionForPresenceAnchor,
   selectionIsActive,
 } from "../collaboration/presence-anchor";
 import type { CollaborationPresence } from "../collaboration/types";
+import { follow, resumeFollow, useFollow } from "../collaboration/follow";
 import {
   actorLabel,
   describeState,
@@ -179,9 +188,7 @@ function resolveAiTarget(
         studio.querySelector<HTMLElement>(
           `[data-spectra-target="${cssEscape(id)}"]`,
         ) ??
-        studio.querySelector<HTMLElement>(
-          `[data-ai-path="${cssEscape(id)}"]`,
-        );
+        studio.querySelector<HTMLElement>(`[data-ai-path="${cssEscape(id)}"]`);
       if (paintableTarget(byPath)) return byPath;
       const blockMatch = id.match(/\/(?:content\/)?blocks\/(?:id:)?([^/]+)/i);
       if (blockMatch) {
@@ -217,9 +224,10 @@ function resolveAiTarget(
     paintableTarget(
       regions.find((element) =>
         element.matches('input, textarea, select, [contenteditable="true"]'),
-      ) ?? regions[0] ?? null,
-    ) ??
-    null
+      ) ??
+        regions[0] ??
+        null,
+    ) ?? null
   );
 }
 
@@ -423,11 +431,17 @@ export function CollaborationCursorLayer({
               // disappear beneath the layer's clipping boundary.
               left: Math.max(
                 12,
-                Math.min(layerRect.width - 24, person.cursor.x * layerRect.width),
+                Math.min(
+                  layerRect.width - 24,
+                  person.cursor.x * layerRect.width,
+                ),
               ),
               top: Math.max(
                 14,
-                Math.min(layerRect.height - 34, person.cursor.y * layerRect.height),
+                Math.min(
+                  layerRect.height - 34,
+                  person.cursor.y * layerRect.height,
+                ),
               ),
             };
           }
@@ -507,7 +521,7 @@ export function CollaborationCursorLayer({
             }}
           >
             <div
-              className="px-2.5 pb-1 pt-1 text-[9px] font-semibold uppercase tracking-[0.08em]"
+              className="px-2.5 pb-1 pt-1 text-micro font-semibold uppercase tracking-[0.08em]"
               style={{ color }}
             >
               {person.menu.label}
@@ -588,11 +602,11 @@ export function CollaborationCursorLayer({
             {person.actorKind === "ai" &&
             (mode === "typing" || mode === "selecting") ? null : (
               <span
-                className="ml-2 -mt-0.5 inline-flex max-w-48 items-center gap-1.5 whitespace-nowrap rounded-[6px] px-2 py-1 text-[10px] font-semibold text-white shadow-[0_5px_18px_rgba(20,18,15,.18)]"
+                className="ml-2 -mt-0.5 inline-flex max-w-48 items-center gap-1.5 whitespace-nowrap rounded-[6px] px-2 py-1 text-micro font-semibold text-white shadow-[0_5px_18px_rgba(20,18,15,.18)]"
                 style={{ backgroundColor: color }}
               >
                 {person.actorKind === "ai" ? (
-                  <Sparkles className="h-3 w-3" />
+                  <SpectraMark mono size={11} />
                 ) : null}
                 {name}
               </span>
@@ -620,6 +634,7 @@ export function CollaborationPresenceIndicator({
   onFocusPresence?: (person: CollaborationPresence) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const followState = useFollow();
   const collaborators = useMemo(
     () =>
       presence.filter((person) => {
@@ -678,8 +693,52 @@ export function CollaborationPresenceIndicator({
         : `Line ${activeAiLine}`
       : activeAiRegion;
   const activeAiColor = activeAi ? presenceColor(activeAi) : null;
+  const followedTarget =
+    followState.target && followState.target.kind !== "ai"
+      ? followState.target
+      : null;
+  const followedPerson = followedTarget
+    ? (collaborators.find(
+        (person) =>
+          person.clientId === (followedTarget as { clientId: string }).clientId,
+      ) ?? null)
+    : null;
+  const disengagedFrom = followState.disengagedFrom;
   return (
-    <div className="relative">
+    <div className="relative flex items-center gap-1.5">
+      {followedTarget ? (
+        <button
+          type="button"
+          onClick={() => followState.disengage("explicit")}
+          className="spectra-follow-chip flex h-9 items-center gap-1.5 rounded-full border pl-2 pr-2.5 text-micro font-semibold"
+          style={{
+            borderColor: followedPerson
+              ? `color-mix(in oklab, ${presenceColor(followedPerson)} 45%, var(--border-default))`
+              : "var(--border-default)",
+            backgroundColor: followedPerson
+              ? `color-mix(in oklab, ${presenceColor(followedPerson)} 7%, var(--bg-primary))`
+              : "var(--bg-hover)",
+            color: "var(--text-secondary)",
+          }}
+          title="Stop following"
+        >
+          <span
+            className="spectra-follow-chip-dot h-1.5 w-1.5 rounded-full"
+            style={{
+              backgroundColor: followedPerson
+                ? presenceColor(followedPerson)
+                : "var(--text-tertiary)",
+            }}
+          />
+          <span className="max-w-32 truncate">
+            Following{" "}
+            <span className="text-[var(--text-primary)]">
+              {(followedTarget as { label: string }).label}
+            </span>
+          </span>
+          <X className="h-3 w-3 text-[var(--text-tertiary)]" />
+        </button>
+      ) : null}
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
@@ -699,7 +758,7 @@ export function CollaborationPresenceIndicator({
           {collaborators.slice(0, 3).map((person) => (
             <span
               key={person.clientId}
-              className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-[var(--bg-primary)] text-[7px] font-bold text-white shadow-sm"
+              className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-[var(--bg-primary)] text-micro font-bold text-white shadow-sm"
               style={{ backgroundColor: presenceColor(person) }}
               title={presenceName(
                 person,
@@ -709,7 +768,7 @@ export function CollaborationPresenceIndicator({
               )}
             >
               {person.actorKind === "ai" ? (
-                <Sparkles className="h-3 w-3" />
+                <SpectraMark mono size={13} />
               ) : (
                 initials(person.name)
               )}
@@ -760,22 +819,31 @@ export function CollaborationPresenceIndicator({
                     ? `${region} · line ${lineIndex + 1}`
                     : `Line ${lineIndex + 1}`
                   : region;
+              const followable = person.interactionState != null;
+              const isFollowed =
+                followedTarget != null &&
+                (followedTarget as { clientId: string }).clientId ===
+                  person.clientId;
               return (
-                <li key={person.clientId}>
+                <li
+                  key={person.clientId}
+                  className="group/row flex items-center hover:bg-[var(--bg-hover)]"
+                >
                   <button
                     type="button"
-                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] hover:bg-[var(--bg-hover)]"
+                    className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left text-[12px]"
                     onClick={() => {
                       onFocusPresence?.(person);
                       setOpen(false);
                     }}
+                    title="Show where they are"
                   >
                     <span
-                      className="flex h-7 w-7 items-center justify-center rounded-full text-[9px] font-bold text-white"
+                      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-micro font-bold text-white"
                       style={{ backgroundColor: presenceColor(person) }}
                     >
                       {person.actorKind === "ai" ? (
-                        <Sparkles className="h-3.5 w-3.5" />
+                        <SpectraMark mono size={15} />
                       ) : (
                         initials(person.name)
                       )}
@@ -784,7 +852,7 @@ export function CollaborationPresenceIndicator({
                       <span className="block truncate font-medium text-[var(--text-primary)]">
                         {label}
                       </span>
-                      <span className="block truncate text-[10px] text-[var(--text-tertiary)]">
+                      <span className="block truncate text-micro text-[var(--text-tertiary)]">
                         {person.interactionState
                           ? describeState(person.interactionState)
                           : place
@@ -797,11 +865,69 @@ export function CollaborationPresenceIndicator({
                       </span>
                     </span>
                   </button>
+                  {followable ? (
+                    <button
+                      type="button"
+                      className={`spectra-follow-row-action mx-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px] border transition ${
+                        isFollowed
+                          ? "border-[color-mix(in_oklab,var(--brand-primary)_35%,var(--border-default))] bg-[color-mix(in_oklab,var(--brand-primary)_8%,var(--bg-primary))] text-[var(--brand-primary)]"
+                          : "border-transparent text-[var(--text-tertiary)] hover:border-[var(--border-subtle)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)] max-lg:opacity-100 lg:opacity-0 lg:group-hover/row:opacity-100 lg:group-focus-within/row:opacity-100"
+                      }`}
+                      aria-label={
+                        isFollowed
+                          ? `Stop following ${label}`
+                          : `Follow ${label}`
+                      }
+                      aria-pressed={isFollowed}
+                      title={
+                        isFollowed
+                          ? `Stop following ${label}`
+                          : `Follow ${label}`
+                      }
+                      onClick={() => {
+                        if (isFollowed) {
+                          followState.disengage("explicit");
+                        } else {
+                          follow({
+                            kind: "collaborator",
+                            clientId: person.clientId,
+                            label,
+                          });
+                        }
+                        setOpen(false);
+                      }}
+                    >
+                      {isFollowed ? (
+                        <EyeOff className="h-3.5 w-3.5" />
+                      ) : (
+                        <Eye className="h-3.5 w-3.5" />
+                      )}
+                    </button>
+                  ) : null}
                 </li>
               );
             })}
           </ul>
         </div>
+      ) : null}
+      {disengagedFrom && disengagedFrom.kind !== "ai" ? (
+        <button
+          type="button"
+          onClick={() => {
+            resumeFollow();
+          }}
+          className="spectra-return-pill fixed bottom-5 left-1/2 z-[80] flex -translate-x-1/2 items-center gap-2 rounded-full border border-[color-mix(in_oklab,var(--brand-primary)_30%,var(--border-default))] bg-[color-mix(in_oklab,var(--bg-elevated)_92%,transparent)] py-1.5 pl-2.5 pr-3 text-caption font-medium text-[var(--text-secondary)] shadow-[0_10px_32px_rgba(20,18,15,.14)] backdrop-blur-md transition hover:border-[color-mix(in_oklab,var(--brand-primary)_45%,var(--border-default))] hover:text-[var(--text-primary)]"
+        >
+          <span className="flex h-5 w-5 items-center justify-center rounded-full bg-[color-mix(in_oklab,var(--brand-primary)_12%,transparent)] text-[var(--brand-primary)]">
+            <CornerUpLeft className="h-3 w-3" />
+          </span>
+          Return to{" "}
+          <span className="font-semibold text-[var(--text-primary)]">
+            {disengagedFrom.kind === "presenter"
+              ? `${disengagedFrom.label}'s presentation`
+              : disengagedFrom.label}
+          </span>
+        </button>
       ) : null}
     </div>
   );

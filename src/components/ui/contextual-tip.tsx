@@ -72,7 +72,7 @@ export function ContextualTip({
           key={actionLabel}
           type="button"
           onClick={onAction}
-          className="animate-in fade-in slide-in-from-bottom-1 duration-300 cursor-pointer whitespace-nowrap rounded border border-[var(--border-default)] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--text-primary)] transition hover:bg-[var(--bg-hover)]"
+          className="animate-in fade-in slide-in-from-bottom-1 duration-300 cursor-pointer whitespace-nowrap rounded border border-[var(--border-default)] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-micro font-medium text-[var(--text-primary)] transition hover:bg-[var(--bg-hover)]"
         >
           {actionLabel}
         </button>

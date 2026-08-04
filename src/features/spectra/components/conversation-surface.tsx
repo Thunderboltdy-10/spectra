@@ -26,12 +26,13 @@ import {
   MessageSquare,
   PencilLine,
   ShieldCheck,
-  Sparkles,
   Undo2,
   Wrench,
 } from "lucide-react";
 import { toast } from "sonner";
+import { SpectraMark } from "@/components/spectra-mark";
 import { SpectraRichContent } from "./spectra-rich-content";
+import { useStreamingReveal } from "../runs/streaming/use-streaming-reveal";
 import { cn } from "@/lib/utils";
 import { useSpectraRun, type SpectraLiveExchange } from "../ai/use-spectra-run";
 import { operationCounts, useRunLedger } from "../collaboration/run-ledger";
@@ -205,7 +206,7 @@ function ChoiceBlock({
         ))}
       </div>
       {selectedTitle ? (
-        <p className="mt-2 text-[10px] text-[var(--text-tertiary)]">
+        <p className="mt-2 text-micro text-[var(--text-tertiary)]">
           Choice saved for this conversation.
         </p>
       ) : null}
@@ -329,7 +330,7 @@ function ArtifactConflictResolution({
           <div className="text-[11px] font-semibold text-[var(--text-primary)]">
             Same-region edit needs your decision
           </div>
-          <p className="mt-0.5 text-[10px] leading-4 text-[var(--text-secondary)]">
+          <p className="mt-0.5 text-micro leading-4 text-[var(--text-secondary)]">
             {detail?.conflict.regionId ??
               operation.conflict?.regionId ??
               "This region"}{" "}
@@ -342,27 +343,27 @@ function ArtifactConflictResolution({
       {detail ? (
         <div className="grid gap-px bg-[var(--border-subtle)] md:grid-cols-3">
           <div className="bg-[var(--bg-primary)] p-2.5">
-            <div className="mb-1.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
+            <div className="mb-1.5 text-micro font-semibold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
               Before Spectra
             </div>
-            <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-[9px] leading-4 text-[var(--text-secondary)]">
+            <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-micro leading-4 text-[var(--text-secondary)]">
               {conflictSnapshot(detail.conflict.baseSnapshot)}
             </pre>
           </div>
           <div className="bg-[var(--bg-primary)] p-2.5">
-            <div className="mb-1.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
+            <div className="mb-1.5 text-micro font-semibold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
               Current
             </div>
-            <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-[9px] leading-4 text-[var(--text-secondary)]">
+            <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-micro leading-4 text-[var(--text-secondary)]">
               {conflictSnapshot(detail.currentSnapshot)}
             </pre>
           </div>
           <div className="bg-[color-mix(in_oklab,var(--accent-cyan)_4%,var(--bg-primary))] p-2.5">
-            <div className="mb-1.5 flex items-center gap-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-[var(--accent-cyan)]">
-              <Sparkles className="h-3 w-3" />
+            <div className="mb-1.5 flex items-center gap-1 text-micro font-semibold uppercase tracking-[0.12em] text-[var(--accent-cyan)]">
+              <SpectraMark mono size={12} />
               Spectra proposal
             </div>
-            <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-[9px] leading-4 text-[var(--text-secondary)]">
+            <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-micro leading-4 text-[var(--text-secondary)]">
               {conflictSnapshot(
                 detail.conflict.proposedSnapshot ?? detail.input,
               )}
@@ -370,7 +371,7 @@ function ArtifactConflictResolution({
           </div>
         </div>
       ) : (
-        <div className="flex items-center gap-2 px-3 py-4 text-[10px] text-[var(--text-tertiary)]">
+        <div className="flex items-center gap-2 px-3 py-4 text-micro text-[var(--text-tertiary)]">
           <Loader2 className="h-3.5 w-3.5 animate-spin" />
           Loading current and proposed states
         </div>
@@ -380,10 +381,10 @@ function ArtifactConflictResolution({
           <div className="mb-2 flex items-center gap-2">
             <PencilLine className="h-3.5 w-3.5 text-[var(--accent-cyan)]" />
             <div>
-              <div className="text-[10px] font-semibold text-[var(--text-primary)]">
+              <div className="text-micro font-semibold text-[var(--text-primary)]">
                 Edit the merged operation
               </div>
-              <p className="mt-0.5 text-[9px] leading-4 text-[var(--text-tertiary)]">
+              <p className="mt-0.5 text-micro leading-4 text-[var(--text-tertiary)]">
                 Adjust only the proposed fields you want Spectra to apply. The
                 operation is validated again before it can touch the artifact.
               </p>
@@ -394,14 +395,14 @@ function ArtifactConflictResolution({
             onChange={(event) => setMergeDraft(event.target.value)}
             spellCheck={false}
             aria-label="Merged artifact operation"
-            className="min-h-44 w-full resize-y rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2.5 font-mono text-[10px] leading-4 text-[var(--text-primary)] outline-none transition focus:border-[var(--accent-cyan)] focus:ring-2 focus:ring-[color-mix(in_oklab,var(--accent-cyan)_15%,transparent)]"
+            className="min-h-44 w-full resize-y rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2.5 font-mono text-micro leading-4 text-[var(--text-primary)] outline-none transition focus:border-[var(--accent-cyan)] focus:ring-2 focus:ring-[color-mix(in_oklab,var(--accent-cyan)_15%,transparent)]"
           />
         </div>
       ) : null}
       {error ? (
         <p
           role="alert"
-          className="border-t border-[var(--border-subtle)] px-3 py-2 text-[10px] text-[var(--danger)]"
+          className="border-t border-[var(--border-subtle)] px-3 py-2 text-micro text-[var(--danger)]"
         >
           {error}
         </p>
@@ -411,7 +412,7 @@ function ArtifactConflictResolution({
           type="button"
           disabled={Boolean(busy)}
           onClick={() => void resolve("cancel")}
-          className="min-h-8 rounded-[7px] px-2.5 text-[10px] font-medium text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] disabled:opacity-45"
+          className="min-h-8 rounded-[7px] px-2.5 text-micro font-medium text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] disabled:opacity-45"
         >
           Cancel proposal
         </button>
@@ -419,7 +420,7 @@ function ArtifactConflictResolution({
           type="button"
           disabled={Boolean(busy)}
           onClick={() => void resolve("keep_current")}
-          className="min-h-8 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 text-[10px] font-semibold text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-45"
+          className="min-h-8 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 text-micro font-semibold text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-45"
         >
           {busy === "keep_current" ? "Keeping…" : "Keep current"}
         </button>
@@ -430,7 +431,7 @@ function ArtifactConflictResolution({
             setError(null);
             setMergeOpen((open) => !open);
           }}
-          className="min-h-8 rounded-[7px] border border-[color-mix(in_oklab,var(--accent-cyan)_32%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_5%,var(--bg-primary))] px-2.5 text-[10px] font-semibold text-[var(--accent-cyan)] hover:bg-[color-mix(in_oklab,var(--accent-cyan)_9%,var(--bg-primary))] disabled:opacity-45"
+          className="min-h-8 rounded-[7px] border border-[color-mix(in_oklab,var(--accent-cyan)_32%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_5%,var(--bg-primary))] px-2.5 text-micro font-semibold text-[var(--accent-cyan)] hover:bg-[color-mix(in_oklab,var(--accent-cyan)_9%,var(--bg-primary))] disabled:opacity-45"
         >
           {mergeOpen ? "Close merge" : "Edit & merge"}
         </button>
@@ -439,7 +440,7 @@ function ArtifactConflictResolution({
             type="button"
             disabled={!available || Boolean(busy)}
             onClick={() => void resolve("merge")}
-            className="min-h-8 rounded-[7px] bg-[var(--accent-cyan)] px-3 text-[10px] font-semibold text-white shadow-[0_5px_16px_color-mix(in_oklab,var(--accent-cyan)_20%,transparent)] disabled:cursor-not-allowed disabled:opacity-40"
+            className="min-h-8 rounded-[7px] bg-[var(--accent-cyan)] px-3 text-micro font-semibold text-white shadow-[0_5px_16px_color-mix(in_oklab,var(--accent-cyan)_20%,transparent)] disabled:cursor-not-allowed disabled:opacity-40"
           >
             {busy === "merge"
               ? "Queuing…"
@@ -452,7 +453,7 @@ function ArtifactConflictResolution({
             type="button"
             disabled={!available || Boolean(busy)}
             onClick={() => void resolve("apply")}
-            className="min-h-8 rounded-[7px] bg-[var(--accent-cyan)] px-3 text-[10px] font-semibold text-white shadow-[0_5px_16px_color-mix(in_oklab,var(--accent-cyan)_20%,transparent)] disabled:cursor-not-allowed disabled:opacity-40"
+            className="min-h-8 rounded-[7px] bg-[var(--accent-cyan)] px-3 text-micro font-semibold text-white shadow-[0_5px_16px_color-mix(in_oklab,var(--accent-cyan)_20%,transparent)] disabled:cursor-not-allowed disabled:opacity-40"
           >
             {busy === "apply"
               ? "Queuing…"
@@ -606,12 +607,12 @@ function CodeProposalReview({
           <div className="text-[11px] font-semibold text-[var(--text-primary)]">
             Code proposal
           </div>
-          <p className="mt-0.5 text-[9px] leading-4 text-[var(--text-secondary)]">
+          <p className="mt-0.5 text-micro leading-4 text-[var(--text-secondary)]">
             Review the project shape and privileged boundaries before anything
             is applied.
           </p>
         </div>
-        <span className="rounded-full bg-[var(--bg-elevated)] px-2 py-1 text-[8px] font-semibold text-[var(--text-tertiary)]">
+        <span className="rounded-full bg-[var(--bg-elevated)] px-2 py-1 text-micro font-semibold text-[var(--text-tertiary)]">
           {changes.length || paths.length} change
           {(changes.length || paths.length) === 1 ? "" : "s"}
         </span>
@@ -621,10 +622,10 @@ function CodeProposalReview({
           {changes.slice(0, 12).map((change) => (
             <div
               key={change.id}
-              className="grid grid-cols-[58px_minmax(0,1fr)_auto] items-center gap-2 px-3 py-2 text-[9px]"
+              className="grid grid-cols-[58px_minmax(0,1fr)_auto] items-center gap-2 px-3 py-2 text-micro"
             >
               <span
-                className={`rounded-full px-1.5 py-0.5 text-center text-[7px] font-bold uppercase tracking-[.08em] ${change.kind === "add" ? "bg-[color-mix(in_oklab,var(--success)_10%,transparent)] text-[var(--success)]" : change.kind === "remove" ? "bg-[color-mix(in_oklab,var(--danger)_9%,transparent)] text-[var(--danger)]" : "bg-[color-mix(in_oklab,var(--accent-cyan)_9%,transparent)] text-[var(--accent-cyan)]"}`}
+                className={`rounded-full px-1.5 py-0.5 text-center text-micro font-bold uppercase tracking-[.08em] ${change.kind === "add" ? "bg-[color-mix(in_oklab,var(--success)_10%,transparent)] text-[var(--success)]" : change.kind === "remove" ? "bg-[color-mix(in_oklab,var(--danger)_9%,transparent)] text-[var(--danger)]" : "bg-[color-mix(in_oklab,var(--accent-cyan)_9%,transparent)] text-[var(--accent-cyan)]"}`}
               >
                 {change.kind}
               </span>
@@ -638,21 +639,21 @@ function CodeProposalReview({
           ))}
         </div>
       ) : (
-        <div className="px-3 py-3 text-[9px] text-[var(--text-secondary)]">
+        <div className="px-3 py-3 text-micro text-[var(--text-secondary)]">
           Targeted patch across {paths.length} stable path
           {paths.length === 1 ? "" : "s"}.
         </div>
       )}
       {sensitive.length ? (
         <div className="border-t border-[var(--border-subtle)] px-3 py-2.5">
-          <div className="mb-1.5 text-[8px] font-bold uppercase tracking-[.1em] text-[var(--text-tertiary)]">
+          <div className="mb-1.5 text-micro font-bold uppercase tracking-[.1em] text-[var(--text-tertiary)]">
             Requires explicit review
           </div>
           <div className="flex flex-wrap gap-1.5">
             {sensitive.map((item) => (
               <span
                 key={item}
-                className="rounded-full border border-[color-mix(in_oklab,#d88922_28%,var(--border-default))] bg-[color-mix(in_oklab,#d88922_6%,var(--bg-primary))] px-2 py-1 text-[8px] font-semibold text-[#a86616]"
+                className="rounded-full border border-[color-mix(in_oklab,#d88922_28%,var(--border-default))] bg-[color-mix(in_oklab,#d88922_6%,var(--bg-primary))] px-2 py-1 text-micro font-semibold text-[#a86616]"
               >
                 {item}
               </span>
@@ -660,7 +661,7 @@ function CodeProposalReview({
           </div>
         </div>
       ) : null}
-      <footer className="border-t border-[var(--border-subtle)] px-3 py-2 text-[8px] text-[var(--text-tertiary)]">
+      <footer className="border-t border-[var(--border-subtle)] px-3 py-2 text-micro text-[var(--text-tertiary)]">
         Source, published builds, and the running preview remain unchanged until
         the proposal is confirmed.
       </footer>
@@ -745,13 +746,13 @@ function OperationalTrace({ trace }: { trace: SpectraThreadTrace }) {
                       {operation.status}
                     </span>
                     {operation.affected.length > 0 ? (
-                      <span className="ml-auto text-[10px] text-[var(--text-tertiary)]">
+                      <span className="ml-auto text-micro text-[var(--text-tertiary)]">
                         {operation.affected.length} affected
                       </span>
                     ) : null}
                   </div>
                   {operation.affected.length > 0 ? (
-                    <div className="mt-1.5 pl-5 text-[10px] leading-4 text-[var(--text-tertiary)]">
+                    <div className="mt-1.5 pl-5 text-micro leading-4 text-[var(--text-tertiary)]">
                       Updated {operation.affected.length} workspace object
                       {operation.affected.length === 1 ? "" : "s"}.
                     </div>
@@ -807,7 +808,7 @@ function RunOutcomeNote({
             ? "one part could not be finished"
             : `${failedCount} parts could not be finished`}
         </p>
-        <p className="mt-0.5 text-[10px] leading-4 text-[var(--text-tertiary)]">
+        <p className="mt-0.5 text-micro leading-4 text-[var(--text-tertiary)]">
           Completed work stays saved. Retry continues only the unfinished part.
         </p>
       </div>
@@ -816,7 +817,7 @@ function RunOutcomeNote({
           type="button"
           onClick={onRetry}
           disabled={retrying}
-          className="flex shrink-0 items-center gap-1.5 rounded-[6px] border border-[color-mix(in_oklab,#d88922_32%,var(--border-default))] px-2 py-1 text-[10px] font-semibold text-[#a86616] transition hover:bg-[color-mix(in_oklab,#d88922_8%,var(--bg-primary))] disabled:opacity-50"
+          className="flex shrink-0 items-center gap-1.5 rounded-[6px] border border-[color-mix(in_oklab,#d88922_32%,var(--border-default))] px-2 py-1 text-micro font-semibold text-[#a86616] transition hover:bg-[color-mix(in_oklab,#d88922_8%,var(--bg-primary))] disabled:opacity-50"
         >
           {retrying ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
           Retry unfinished part
@@ -932,10 +933,7 @@ function ProgressTrace({
       prevRunningRef.current = runningId;
     }
     for (const step of steps) {
-      if (
-        step.status !== "running" &&
-        !completedAtRef.current.has(step.id)
-      ) {
+      if (step.status !== "running" && !completedAtRef.current.has(step.id)) {
         completedAtRef.current.set(step.id, Date.now());
       }
       if (step.status === "running") completedAtRef.current.delete(step.id);
@@ -1066,9 +1064,7 @@ function ProgressTrace({
                         layout={!reduceMotion}
                         initial={reduceMotion ? false : { opacity: 0, y: 6 }}
                         animate={{ opacity: 1, y: 0 }}
-                        exit={
-                          reduceMotion ? undefined : { opacity: 0, y: -4 }
-                        }
+                        exit={reduceMotion ? undefined : { opacity: 0, y: -4 }}
                         transition={{
                           layout: {
                             duration: 0.45,
@@ -1110,9 +1106,7 @@ function ProgressTrace({
                             <motion.p
                               key={`${step.id}:summary`}
                               initial={
-                                reduceMotion
-                                  ? false
-                                  : { height: 0, opacity: 0 }
+                                reduceMotion ? false : { height: 0, opacity: 0 }
                               }
                               animate={{ height: "auto", opacity: 1 }}
                               exit={
@@ -1126,7 +1120,7 @@ function ProgressTrace({
                               }}
                               className="overflow-hidden"
                             >
-                              <span className="ml-5 mt-1 block text-[10px] leading-4 text-[var(--text-tertiary)]">
+                              <span className="ml-5 mt-1 block text-micro leading-4 text-[var(--text-tertiary)]">
                                 {pastTenseProgressTitle(
                                   step.summary,
                                   step.status !== "running",
@@ -1376,12 +1370,12 @@ function AgentRoutingControl({ trace }: { trace: SpectraThreadTrace }) {
   return (
     <div className="mt-2 max-w-[560px]">
       <div
-        className="inline-flex max-w-full items-center gap-1.5 rounded-[7px] border border-[color-mix(in_oklab,var(--accent-cyan)_14%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--accent-cyan)_5%,var(--bg-elevated))] px-2 py-1 text-[10px] text-[var(--text-secondary)]"
+        className="inline-flex max-w-full items-center gap-1.5 rounded-[7px] border border-[color-mix(in_oklab,var(--accent-cyan)_14%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--accent-cyan)_5%,var(--bg-elevated))] px-2 py-1 text-micro text-[var(--text-secondary)]"
         title={reason}
       >
         <Bot className="h-3 w-3 shrink-0 text-[var(--accent-cyan)]" />
         <span className="truncate font-semibold">{title}</span>
-        <span className="shrink-0 text-[9px] text-[var(--text-tertiary)]">
+        <span className="shrink-0 text-micro text-[var(--text-tertiary)]">
           {source === "continued"
             ? "retained"
             : source === "explicit"
@@ -1420,7 +1414,7 @@ function AgentRoutingControl({ trace }: { trace: SpectraThreadTrace }) {
         </button>
       </div>
       {feedbackOpen ? (
-        <div className="mt-1.5 grid gap-2 rounded-[8px] border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-2.5 text-[10px] shadow-[var(--shadow-sm)]">
+        <div className="mt-1.5 grid gap-2 rounded-[8px] border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-2.5 text-micro shadow-[var(--shadow-sm)]">
           <div className="grid grid-cols-[auto_1fr] gap-2">
             <label className="grid gap-1">
               <span className="font-semibold text-[var(--text-secondary)]">
@@ -1468,7 +1462,7 @@ function AgentRoutingControl({ trace }: { trace: SpectraThreadTrace }) {
             placeholder="Optional detail — never include private information"
             className="min-h-16 resize-y rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-2 outline-none"
           />
-          <label className="flex items-start gap-2 text-[9px] text-[var(--text-tertiary)]">
+          <label className="flex items-start gap-2 text-micro text-[var(--text-tertiary)]">
             <input
               type="checkbox"
               checked={shareComment}
@@ -1605,7 +1599,7 @@ function ArtifactResult({
                   )
                   .finally(() => setBusy(false));
               }}
-              className="rounded-[6px] bg-[var(--bg-primary)] px-2.5 py-1.5 text-[10px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+              className="rounded-[6px] bg-[var(--bg-primary)] px-2.5 py-1.5 text-micro text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
             >
               {workspace.title}
             </button>
@@ -1650,6 +1644,42 @@ function WorkspaceResult({
       </span>
       <ExternalLink className="mt-1 h-3.5 w-3.5 text-[var(--text-tertiary)]" />
     </button>
+  );
+}
+
+/**
+ * Live streamed assistant content.
+ *
+ * Canonical text is always complete in state; this component only schedules
+ * the *visible* window (Phase 14.2). While the reveal is unresolved, the
+ * container carries `spectra-stream-active`, so the CSS active-tail shimmer
+ * attaches to the last block only — completed output never shimmers
+ * (POLISH-005). Reduced motion / streaming-reveal off renders canonical text
+ * directly; data and accessibility state never wait for animation (INV-22).
+ */
+function LiveContentReveal({
+  content,
+  streaming,
+  compact,
+}: {
+  content: string;
+  streaming: boolean;
+  compact?: boolean;
+}) {
+  const { visibleText, active } = useStreamingReveal(content, {
+    profile: "conversation",
+    enabled: streaming,
+  });
+  return (
+    <div className={active ? "spectra-stream-active" : undefined}>
+      <SpectraRichContent
+        content={visibleText}
+        className={cn(
+          "text-[14px] leading-7 text-[var(--text-primary)]",
+          !compact && "sm:text-[15px]",
+        )}
+      />
+    </div>
   );
 }
 
@@ -1846,7 +1876,7 @@ export function ConversationSurface({
                               {messageAttachments(message).map((attachment) => (
                                 <span
                                   key={`${attachment.name}:${attachment.size ?? 0}`}
-                                  className="flex max-w-[220px] items-center gap-1.5 rounded-[7px] bg-[color-mix(in_oklab,var(--bg-primary)_72%,transparent)] px-2 py-1 text-[10px] text-[var(--text-secondary)]"
+                                  className="flex max-w-[220px] items-center gap-1.5 rounded-[7px] bg-[color-mix(in_oklab,var(--bg-primary)_72%,transparent)] px-2 py-1 text-micro text-[var(--text-secondary)]"
                                 >
                                   <FileText className="h-3 w-3 shrink-0" />
                                   <span className="truncate">
@@ -1857,7 +1887,7 @@ export function ConversationSurface({
                             </div>
                           ) : null}
                         </div>
-                        <div className="mt-1.5 text-right text-[10px] text-[var(--text-tertiary)]">
+                        <div className="mt-1.5 text-right text-micro text-[var(--text-tertiary)]">
                           {messageMeta(message)}
                         </div>
                       </div>
@@ -1876,8 +1906,10 @@ export function ConversationSurface({
                       ) : null}
                     </>
                   ) : (
-                    <div className="relative pl-7">
-                      <span className="absolute left-0 top-1.5 h-2 w-2 rounded-full bg-[var(--accent-cyan)] shadow-[0_0_0_4px_color-mix(in_oklab,var(--accent-cyan)_12%,transparent)]" />
+                    <div className="relative pl-8">
+                      <span className="absolute left-0 top-0.5 flex h-5 w-5 items-center justify-center rounded-[6px] bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-primary))] shadow-[0_0_0_4px_color-mix(in_oklab,var(--accent-cyan)_9%,transparent)]">
+                        <SpectraMark size={13} />
+                      </span>
                       {trace && trace.run.providerUsed !== "Spectra" ? (
                         <PersistedProgressTrace trace={trace} />
                       ) : null}
@@ -1905,7 +1937,7 @@ export function ConversationSurface({
                           }}
                         />
                       ) : null}
-                      <div className="mt-2 text-[10px] text-[var(--text-tertiary)]">
+                      <div className="mt-2 text-micro text-[var(--text-tertiary)]">
                         {messageMeta(message)}
                       </div>
                       {trace ? <AgentRoutingControl trace={trace} /> : null}
@@ -1989,7 +2021,7 @@ export function ConversationSurface({
                     <div className="rounded-[18px_18px_5px_18px] border border-[color-mix(in_oklab,var(--accent-cyan)_16%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--accent-cyan)_5%,var(--bg-elevated))] px-4 py-3 text-[13px] leading-6 text-[var(--text-primary)]">
                       {liveExchange.prompt}
                     </div>
-                    <div className="mt-1.5 text-right text-[10px] text-[var(--text-tertiary)]">
+                    <div className="mt-1.5 text-right text-micro text-[var(--text-tertiary)]">
                       Sending now
                     </div>
                   </div>
@@ -1998,8 +2030,10 @@ export function ConversationSurface({
               {!liveExchange.runId ||
               !persistedAssistantRunIds.has(liveExchange.runId) ? (
                 <article className={cn("relative", compact ? "mb-7" : "mb-10")}>
-                  <div className="relative pl-7">
-                    <span className="absolute left-0 top-1.5 h-2 w-2 rounded-full bg-[var(--accent-cyan)] shadow-[0_0_0_4px_color-mix(in_oklab,var(--accent-cyan)_12%,transparent)]" />
+                  <div className="relative pl-8">
+                    <span className="absolute left-0 top-0.5 flex h-5 w-5 items-center justify-center rounded-[6px] bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-primary))] shadow-[0_0_0_4px_color-mix(in_oklab,var(--accent-cyan)_9%,transparent)]">
+                      <SpectraMark size={13} />
+                    </span>
                     <ProgressTrace
                       steps={liveExchange.steps}
                       active={liveExchange.status !== "failed"}
@@ -2009,12 +2043,10 @@ export function ConversationSurface({
                       }
                     />
                     {liveExchange.content ? (
-                      <SpectraRichContent
+                      <LiveContentReveal
                         content={liveExchange.content}
-                        className={cn(
-                          "text-[14px] leading-7 text-[var(--text-primary)]",
-                          !compact && "sm:text-[15px]",
-                        )}
+                        streaming={liveExchange.status === "streaming"}
+                        compact={compact}
                       />
                     ) : null}
                     {liveExchange.runId ? (
@@ -2054,7 +2086,7 @@ export function ConversationSurface({
                         {trace.run.status.replaceAll("_", " ")}
                       </span>
                     </div>
-                    <p className="mt-1 text-[10px] leading-4 text-[var(--text-tertiary)]">
+                    <p className="mt-1 text-micro leading-4 text-[var(--text-tertiary)]">
                       {trace.run.status === "running"
                         ? "This response is still in progress. Saved text and progress will catch up here automatically."
                         : trace.run.status === "awaiting_resolution"
@@ -2211,7 +2243,12 @@ export function ThreadConversation({
   const activeRunId =
     parentLiveExchange?.runId ??
     detail?.traces.find((trace) =>
-      ["queued", "running", "awaiting_confirmation", "awaiting_resolution"].includes(trace.run.status),
+      [
+        "queued",
+        "running",
+        "awaiting_confirmation",
+        "awaiting_resolution",
+      ].includes(trace.run.status),
     )?.run._id;
   return (
     <ConversationSurface

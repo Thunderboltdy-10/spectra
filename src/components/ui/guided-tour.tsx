@@ -202,7 +202,7 @@ export function GuidedTour({ open, steps, onClose, onComplete }: GuidedTourProps
         aria-modal="true"
         aria-label="Guided tour"
       >
-        <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)]">
+        <p className="text-micro font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)]">
           Step {stepIndex + 1} of {steps.length}
         </p>
         <h3 className="mt-1 text-base font-semibold text-[var(--text-primary)]">{step.title}</h3>

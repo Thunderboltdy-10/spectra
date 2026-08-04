@@ -26,7 +26,7 @@ export const SlashCommandList = forwardRef<SlashCommandListRef, { items: SlashCo
   const sections = Array.from(Map.groupBy(items, (item) => item.section));
   return <div className="slash-command-dropdown" role="listbox" aria-label="Insert a block">
     {sections.map(([section, commands]) => <div key={section}>
-      <p className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-tertiary)]">{section}</p>
+      <p className="px-3 pb-1 pt-2 text-micro font-semibold uppercase tracking-[0.14em] text-[var(--text-tertiary)]">{section}</p>
       {commands.map((item) => {
         const index = items.indexOf(item);
         const Icon = icons[item.icon as keyof typeof icons];

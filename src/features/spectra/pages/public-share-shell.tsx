@@ -135,7 +135,7 @@ function ArtifactContent({
   return (
     <article className="mx-auto w-full max-w-[920px] rounded-[16px] border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[0_18px_70px_rgba(37,31,24,0.08)]">
       <header className="border-b border-[var(--border-subtle)] px-6 py-6 sm:px-10 sm:py-8">
-        <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
+        <div className="flex items-center gap-2 text-micro font-semibold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
           <Icon className="h-3.5 w-3.5" />
           {artifact.blueprintKey.replaceAll("_", " ")}
         </div>
@@ -184,7 +184,7 @@ function ArtifactContent({
                 key={String(card.id ?? index)}
                 className="rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-5"
               >
-                <span className="text-[9px] font-semibold uppercase tracking-[.11em] text-[#7560e8]">
+                <span className="text-micro font-semibold uppercase tracking-[.11em] text-[#7560e8]">
                   Card {index + 1}
                 </span>
                 <h2 className="mt-3 font-display text-[18px] font-semibold">
@@ -204,7 +204,7 @@ function ArtifactContent({
                 key={String(question.id ?? index)}
                 className="rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-5"
               >
-                <span className="text-[9px] font-semibold uppercase tracking-[.11em] text-[var(--accent-mint)]">
+                <span className="text-micro font-semibold uppercase tracking-[.11em] text-[var(--accent-mint)]">
                   Question {index + 1}
                 </span>
                 <h2 className="mt-2 font-display text-[18px] font-semibold">
@@ -238,7 +238,7 @@ function ArtifactContent({
                   key={field}
                   className="rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-4"
                 >
-                  <span className="text-[10px] capitalize text-[var(--text-tertiary)]">
+                  <span className="text-micro capitalize text-[var(--text-tertiary)]">
                     {field.replace("At", "")}
                   </span>
                   <strong className="mt-1 block text-[13px] capitalize">
@@ -269,7 +269,7 @@ function ArtifactContent({
                 key={String(slide.id ?? index)}
                 className="aspect-video rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-5 shadow-sm"
               >
-                <span className="text-[9px] font-semibold uppercase tracking-[.11em] text-[var(--text-tertiary)]">
+                <span className="text-micro font-semibold uppercase tracking-[.11em] text-[var(--text-tertiary)]">
                   Slide {index + 1}
                 </span>
                 <h2 className="mt-4 font-display text-[20px] font-semibold">
@@ -315,7 +315,7 @@ function ArtifactContent({
                                     key={address}
                                     className="min-w-24 border-b border-r border-[var(--border-subtle)] p-2 align-top"
                                   >
-                                    <span className="block text-[8px] text-[var(--text-tertiary)]">
+                                    <span className="block text-micro text-[var(--text-tertiary)]">
                                       {address}
                                     </span>
                                     <span className="mt-1 block">
@@ -352,7 +352,7 @@ function ArtifactContent({
                   key={String(file.id ?? index)}
                   className="overflow-hidden rounded-[10px] border border-[var(--border-default)]"
                 >
-                  <header className="flex items-center justify-between bg-[var(--bg-secondary)] px-4 py-2 text-[10px]">
+                  <header className="flex items-center justify-between bg-[var(--bg-secondary)] px-4 py-2 text-micro">
                     <strong>{text(file.path, `File ${index + 1}`)}</strong>
                     <span className="text-[var(--text-tertiary)]">
                       {text(file.language)}
@@ -373,7 +373,7 @@ function ArtifactContent({
                 key={String(event.id ?? index)}
                 className="grid gap-1 rounded-[9px] border border-[var(--border-subtle)] px-4 py-3 sm:grid-cols-[180px_1fr]"
               >
-                <time className="text-[10px] text-[var(--text-tertiary)]">
+                <time className="text-micro text-[var(--text-tertiary)]">
                   {text(event.start)
                     ? new Date(text(event.start)).toLocaleString()
                     : "Time not set"}
@@ -390,7 +390,7 @@ function ArtifactContent({
             {nodes.slice(0, 80).map((node, index) => (
               <div
                 key={String(node.id ?? index)}
-                className="absolute rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2 text-[10px] shadow-sm"
+                className="absolute rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2 text-micro shadow-sm"
                 style={{
                   left: `${Math.max(2, Math.min(82, Number(node.x ?? 0) / 12))}%`,
                   top: `${Math.max(2, Math.min(82, Number(node.y ?? 0) / 8))}%`,
@@ -407,7 +407,7 @@ function ArtifactContent({
         ) : null}
         {artifact.blueprintKey === "agent" ? (
           <div className="rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-5">
-            <span className="text-[10px] font-semibold uppercase tracking-[.1em] text-[var(--brand-primary)]">
+            <span className="text-micro font-semibold uppercase tracking-[.1em] text-[var(--brand-primary)]">
               Instructions
             </span>
             <p className="mt-3 whitespace-pre-wrap text-[13px] leading-6">
@@ -435,7 +435,7 @@ function ArtifactContent({
           </p>
         ) : null}
       </div>
-      <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--border-subtle)] px-6 py-4 text-[10px] text-[var(--text-tertiary)] sm:px-10">
+      <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--border-subtle)] px-6 py-4 text-micro text-[var(--text-tertiary)] sm:px-10">
         <span>Read-only public view</span>
         <span>Updated {formatUpdated(artifact.updatedAt)}</span>
       </footer>
@@ -517,7 +517,7 @@ export function PublicShareShell() {
             </span>
             Spectra
           </a>
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-1.5 text-[10px] font-medium text-[var(--text-secondary)]">
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-1.5 text-micro font-medium text-[var(--text-secondary)]">
             <LockKeyhole className="h-3 w-3" />
             Read-only
           </span>
@@ -549,7 +549,7 @@ export function PublicShareShell() {
         {state === "ready" && projection?.resourceType === "workspace" ? (
           <>
             <header className="mb-7">
-              <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[.12em] text-[var(--brand-primary)]">
+              <div className="flex items-center gap-2 text-micro font-semibold uppercase tracking-[.12em] text-[var(--brand-primary)]">
                 <LayoutDashboard className="h-3.5 w-3.5" />
                 Shared workspace
               </div>
@@ -584,7 +584,7 @@ export function PublicShareShell() {
           <ArtifactContent artifact={projection.artifact} />
         ) : null}
         {state === "ready" && expiry ? (
-          <p className="mt-6 text-center text-[10px] text-[var(--text-tertiary)]">
+          <p className="mt-6 text-center text-micro text-[var(--text-tertiary)]">
             This public access expires {expiry}.
           </p>
         ) : null}

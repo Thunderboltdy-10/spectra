@@ -205,7 +205,13 @@ import {
   noteAiLocation,
   useFollowAi,
 } from "../collaboration/follow-ai";
+import {
+  disengageFollow,
+  noteFollowLocation,
+  useFollow,
+} from "../collaboration/follow";
 import { revealTarget } from "../collaboration/interaction-geometry";
+import { resolveTargetElement } from "../collaboration/interaction-geometry";
 import { useJoinLateArrival } from "../collaboration/presentation-lane";
 import {
   HELD_DECLINED_EVENT,
@@ -783,7 +789,9 @@ function ReadonlyCodeSnapshot({
     pythonRef.current?.cancel();
     pythonRef.current = null;
     setState("building");
-    setMessage("Rebuilding this checkpoint with its recorded runtime profileâ€¦");
+    setMessage(
+      "Rebuilding this checkpoint with its recorded runtime profileâ€¦",
+    );
     setConsoleLines([]);
     setPreviewFiles(null);
     setHistoricalAssets([]);
@@ -969,7 +977,7 @@ function ReadonlyCodeSnapshot({
                 type="button"
                 key={file.id}
                 onClick={() => setActiveFileId(file.id)}
-                className={`flex w-full items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-[9px] ${file.id === activeFile.id ? "bg-[var(--bg-elevated)] font-semibold text-[var(--text-primary)]" : "text-[var(--text-secondary)]"}`}
+                className={`flex w-full items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-micro ${file.id === activeFile.id ? "bg-[var(--bg-elevated)] font-semibold text-[var(--text-primary)]" : "text-[var(--text-secondary)]"}`}
               >
                 <FileText className="h-3 w-3" />
                 <span className="truncate">{file.path}</span>
@@ -977,10 +985,10 @@ function ReadonlyCodeSnapshot({
             ))}
           </aside>
           <div className="min-w-0 bg-[#151713] text-[#e8eadf]">
-            <div className="border-b border-white/10 px-3 py-2 text-[8px] text-white/55">
+            <div className="border-b border-white/10 px-3 py-2 text-micro text-white/55">
               {activeFile.path} Â· {activeFile.language}
             </div>
-            <pre className="max-h-[520px] overflow-auto p-4 font-mono text-[9px] leading-4">
+            <pre className="max-h-[520px] overflow-auto p-4 font-mono text-micro leading-4">
               {activeFile.source}
             </pre>
           </div>
@@ -988,7 +996,7 @@ function ReadonlyCodeSnapshot({
       ) : (
         <div className="p-2">
           <p
-            className={`mb-2 rounded-[6px] px-2 py-1.5 text-[8px] ${state === "error" ? "bg-[color-mix(in_oklab,var(--danger)_7%,var(--bg-primary))] text-[var(--danger)]" : "bg-[var(--bg-secondary)] text-[var(--text-secondary)]"}`}
+            className={`mb-2 rounded-[6px] px-2 py-1.5 text-micro ${state === "error" ? "bg-[color-mix(in_oklab,var(--danger)_7%,var(--bg-primary))] text-[var(--danger)]" : "bg-[var(--bg-secondary)] text-[var(--text-secondary)]"}`}
           >
             {message}
           </p>
@@ -1014,11 +1022,11 @@ function ReadonlyCodeSnapshot({
               }
             />
           ) : consoleLines.length ? (
-            <pre className="max-h-[360px] overflow-auto rounded-[8px] bg-[#151713] p-4 font-mono text-[9px] leading-4 text-[#e8eadf]">
+            <pre className="max-h-[360px] overflow-auto rounded-[8px] bg-[#151713] p-4 font-mono text-micro leading-4 text-[#e8eadf]">
               {consoleLines.join("\n")}
             </pre>
           ) : (
-            <div className="flex min-h-[360px] items-center justify-center text-center text-[9px] text-[var(--text-tertiary)]">
+            <div className="flex min-h-[360px] items-center justify-center text-center text-micro text-[var(--text-tertiary)]">
               Choose Rebuild safely to render this inert checkpoint.
             </div>
           )}
@@ -1104,7 +1112,7 @@ function ReadonlyArtifactSnapshot({
               key={card.id}
               className="rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4"
             >
-              <div className="text-[9px] font-semibold uppercase tracking-[.1em] text-[#7560e8]">
+              <div className="text-micro font-semibold uppercase tracking-[.1em] text-[#7560e8]">
                 Card {index + 1} Â· {card.section}
               </div>
               <div className="mt-2 font-display text-[17px] font-semibold">
@@ -1129,7 +1137,7 @@ function ReadonlyArtifactSnapshot({
               key={question.id}
               className="rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4"
             >
-              <div className="text-[9px] font-semibold uppercase tracking-[.1em] text-[var(--accent-mint)]">
+              <div className="text-micro font-semibold uppercase tracking-[.1em] text-[var(--accent-mint)]">
                 Question {index + 1}
               </div>
               <div className="mt-2 font-display text-[17px] font-semibold">
@@ -1194,7 +1202,7 @@ function ReadonlyArtifactSnapshot({
               className="overflow-hidden rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)]"
             >
               <header className="border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2">
-                <span className="text-[8px] font-semibold uppercase tracking-[.1em] text-[var(--text-tertiary)]">
+                <span className="text-micro font-semibold uppercase tracking-[.1em] text-[var(--text-tertiary)]">
                   Slide {index + 1}
                 </span>
                 <h4 className="mt-1 font-display text-[15px] font-semibold leading-tight">
@@ -1215,16 +1223,16 @@ function ReadonlyArtifactSnapshot({
                       key={String(object.id ?? objectIndex)}
                       className="rounded-[7px] border border-[var(--border-subtle)] px-2.5 py-2"
                     >
-                      <span className="block text-[7px] font-semibold uppercase tracking-[.08em] text-[var(--text-tertiary)]">
+                      <span className="block text-micro font-semibold uppercase tracking-[.08em] text-[var(--text-tertiary)]">
                         {humanizeKey(String(object.type ?? "object"))}
                       </span>
-                      <p className="mt-1 whitespace-pre-wrap text-[9px] leading-4 text-[var(--text-secondary)]">
+                      <p className="mt-1 whitespace-pre-wrap text-micro leading-4 text-[var(--text-secondary)]">
                         {historyPresentationObjectSummary(object)}
                       </p>
                     </div>
                   ))}
                 {arrayOfRecords(slide.objects).length === 0 ? (
-                  <p className="py-3 text-[9px] text-[var(--text-tertiary)]">
+                  <p className="py-3 text-micro text-[var(--text-tertiary)]">
                     Empty slide
                   </p>
                 ) : null}
@@ -1255,7 +1263,7 @@ function ReadonlyArtifactSnapshot({
                 key={String(sheet.id ?? index)}
                 className="overflow-hidden rounded-[9px] border border-[var(--border-default)]"
               >
-                <header className="border-b border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[10px] font-semibold">
+                <header className="border-b border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-micro font-semibold">
                   {String(sheet.name ?? `Sheet ${index + 1}`)}
                 </header>
                 <div className="grid grid-cols-4 gap-px bg-[var(--border-subtle)]">
@@ -1264,10 +1272,10 @@ function ReadonlyArtifactSnapshot({
                       key={address}
                       className="min-h-10 bg-[var(--bg-elevated)] px-2 py-1"
                     >
-                      <span className="block text-[7px] text-[var(--text-tertiary)]">
+                      <span className="block text-micro text-[var(--text-tertiary)]">
                         {address}
                       </span>
-                      <span className="block truncate text-[9px]">
+                      <span className="block truncate text-micro">
                         {humanValue(
                           record(value).value ?? record(value).formula ?? value,
                         )}
@@ -1275,7 +1283,7 @@ function ReadonlyArtifactSnapshot({
                     </div>
                   ))}
                   {visibleCells.length === 0 ? (
-                    <div className="col-span-4 p-8 text-center text-[10px] text-[var(--text-tertiary)]">
+                    <div className="col-span-4 p-8 text-center text-micro text-[var(--text-tertiary)]">
                       Empty sheet
                     </div>
                   ) : null}
@@ -1307,7 +1315,7 @@ function ReadonlyArtifactSnapshot({
           {nodes.map((node, index) => (
             <div
               key={String(node.id ?? index)}
-              className="absolute max-w-[150px] rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2 text-[9px] shadow-sm"
+              className="absolute max-w-[150px] rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2 text-micro shadow-sm"
               style={{
                 left: `${8 + ((index * 27) % 72)}%`,
                 top: `${10 + ((index * 31) % 72)}%`,
@@ -1319,7 +1327,7 @@ function ReadonlyArtifactSnapshot({
             </div>
           ))}
           {nodes.length === 0 ? (
-            <div className="flex min-h-[430px] items-center justify-center text-[10px] text-[var(--text-tertiary)]">
+            <div className="flex min-h-[430px] items-center justify-center text-micro text-[var(--text-tertiary)]">
               Empty canvas
             </div>
           ) : null}
@@ -1337,7 +1345,7 @@ function ReadonlyArtifactSnapshot({
                 <div className="truncate text-[11px] font-semibold">
                   {String(event.title ?? "Untitled event")}
                 </div>
-                <div className="mt-0.5 text-[8px] text-[var(--text-tertiary)]">
+                <div className="mt-0.5 text-micro text-[var(--text-tertiary)]">
                   {typeof event.start === "string"
                     ? new Date(event.start).toLocaleString()
                     : typeof event.startAt === "number"
@@ -1353,7 +1361,7 @@ function ReadonlyArtifactSnapshot({
             </section>
           ))}
           {events.length === 0 ? (
-            <p className="text-[10px] text-[var(--text-tertiary)]">
+            <p className="text-micro text-[var(--text-tertiary)]">
               No calendar events.
             </p>
           ) : null}
@@ -1362,7 +1370,7 @@ function ReadonlyArtifactSnapshot({
       {blueprintKey === "agent" ? (
         <div className="mt-6 grid gap-4">
           <section className="rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
-            <div className="text-[8px] font-semibold uppercase tracking-[.1em] text-[var(--accent-cyan)]">
+            <div className="text-micro font-semibold uppercase tracking-[.1em] text-[var(--accent-cyan)]">
               Instructions
             </div>
             <p className="mt-2 whitespace-pre-wrap text-[12px] leading-6 text-[var(--text-primary)]">
@@ -1425,13 +1433,13 @@ function MetricSnapshot({
 }) {
   return (
     <section className="rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
-      <div className="text-[8px] font-semibold uppercase tracking-[.1em] text-[var(--text-tertiary)]">
+      <div className="text-micro font-semibold uppercase tracking-[.1em] text-[var(--text-tertiary)]">
         {label}
       </div>
       <div className="mt-2 text-[18px] font-semibold text-[var(--text-primary)]">
         {values.length}
       </div>
-      <p className="mt-1 line-clamp-3 text-[9px] leading-4 text-[var(--text-secondary)]">
+      <p className="mt-1 line-clamp-3 text-micro leading-4 text-[var(--text-secondary)]">
         {values
           .slice(0, 4)
           .map((value) =>
@@ -1569,7 +1577,7 @@ function HistoryComparisonOverlay({
               <h2 className="truncate font-display text-[16px] font-semibold text-[var(--text-primary)]">
                 {artifact.title}
               </h2>
-              <p className="mt-0.5 text-[9px] text-[var(--text-tertiary)]">
+              <p className="mt-0.5 text-micro text-[var(--text-tertiary)]">
                 Historical state is inert; the current artifact remains live and
                 editable after comparison closes.
               </p>
@@ -1577,7 +1585,7 @@ function HistoryComparisonOverlay({
             <button
               type="button"
               onClick={() => setShowChanges((value) => !value)}
-              className={`h-8 rounded-[7px] border px-3 text-[10px] font-medium ${showChanges ? "border-[color-mix(in_oklab,var(--accent-cyan)_35%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_6%,var(--bg-primary))] text-[var(--text-primary)]" : "border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}
+              className={`h-8 rounded-[7px] border px-3 text-micro font-medium ${showChanges ? "border-[color-mix(in_oklab,var(--accent-cyan)_35%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_6%,var(--bg-primary))] text-[var(--text-primary)]" : "border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}
             >
               {showChanges
                 ? "Show artifact comparison"
@@ -1593,7 +1601,7 @@ function HistoryComparisonOverlay({
                     className="overflow-hidden rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)]"
                   >
                     <header className="border-b border-[var(--border-subtle)] px-3 py-2">
-                      <label className="flex cursor-pointer items-center gap-2 text-[10px] font-semibold text-[var(--text-primary)]">
+                      <label className="flex cursor-pointer items-center gap-2 text-micro font-semibold text-[var(--text-primary)]">
                         <input
                           type="checkbox"
                           disabled={!change.regionId || readOnly}
@@ -1615,18 +1623,18 @@ function HistoryComparisonOverlay({
                     </header>
                     <div className="grid md:grid-cols-2">
                       <div className="border-b border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--danger)_3%,var(--bg-primary))] p-3 md:border-b-0 md:border-r">
-                        <div className="mb-1.5 text-[8px] font-semibold uppercase tracking-[.1em] text-[var(--danger)]">
+                        <div className="mb-1.5 text-micro font-semibold uppercase tracking-[.1em] text-[var(--danger)]">
                           Selected version
                         </div>
-                        <pre className="whitespace-pre-wrap break-words font-sans text-[10px] leading-4 text-[var(--text-secondary)]">
+                        <pre className="whitespace-pre-wrap break-words font-sans text-micro leading-4 text-[var(--text-secondary)]">
                           {change.before}
                         </pre>
                       </div>
                       <div className="bg-[color-mix(in_oklab,var(--accent-cyan)_3%,var(--bg-primary))] p-3">
-                        <div className="mb-1.5 text-[8px] font-semibold uppercase tracking-[.1em] text-[var(--accent-cyan)]">
+                        <div className="mb-1.5 text-micro font-semibold uppercase tracking-[.1em] text-[var(--accent-cyan)]">
                           Current live
                         </div>
-                        <pre className="whitespace-pre-wrap break-words font-sans text-[10px] leading-4 text-[var(--text-primary)]">
+                        <pre className="whitespace-pre-wrap break-words font-sans text-micro leading-4 text-[var(--text-primary)]">
                           {change.after}
                         </pre>
                       </div>
@@ -1647,10 +1655,10 @@ function HistoryComparisonOverlay({
               >
                 <section className="min-h-0 overflow-auto">
                   <div className="sticky top-0 z-10 flex items-center justify-between border-b border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--bg-primary)_94%,transparent)] px-4 py-2 backdrop-blur">
-                    <span className="text-[9px] font-semibold text-[var(--text-primary)]">
+                    <span className="text-micro font-semibold text-[var(--text-primary)]">
                       Version v{selected.versionNumber ?? "â€”"}
                     </span>
-                    <span className="rounded-[5px] bg-[color-mix(in_oklab,#8b6ff0_8%,var(--bg-secondary))] px-1.5 py-0.5 text-[8px] font-medium text-[#6f59cf]">
+                    <span className="rounded-[5px] bg-[color-mix(in_oklab,#8b6ff0_8%,var(--bg-secondary))] px-1.5 py-0.5 text-micro font-medium text-[#6f59cf]">
                       Preview only
                     </span>
                   </div>
@@ -1680,10 +1688,10 @@ function HistoryComparisonOverlay({
                 </button>
                 <section className="min-h-0 overflow-auto">
                   <div className="sticky top-0 z-10 flex items-center justify-between border-b border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--bg-primary)_94%,transparent)] px-4 py-2 backdrop-blur">
-                    <span className="text-[9px] font-semibold text-[var(--text-primary)]">
+                    <span className="text-micro font-semibold text-[var(--text-primary)]">
                       Current live version
                     </span>
-                    <span className="rounded-[5px] bg-[color-mix(in_oklab,var(--success)_8%,var(--bg-secondary))] px-1.5 py-0.5 text-[8px] font-medium text-[var(--success)]">
+                    <span className="rounded-[5px] bg-[color-mix(in_oklab,var(--success)_8%,var(--bg-secondary))] px-1.5 py-0.5 text-micro font-medium text-[var(--success)]">
                       Live
                     </span>
                   </div>
@@ -1702,7 +1710,7 @@ function HistoryComparisonOverlay({
                 <h4 className="mt-3 text-[11px] font-semibold text-[var(--text-primary)]">
                   This version cannot be rendered
                 </h4>
-                <p className="mt-1 text-[9px] leading-4 text-[var(--text-secondary)]">
+                <p className="mt-1 text-micro leading-4 text-[var(--text-secondary)]">
                   Its retained snapshot is{" "}
                   {selected.snapshotState === "corrupt"
                     ? "damaged"
@@ -1719,10 +1727,10 @@ function HistoryComparisonOverlay({
           )}
           <footer className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-[var(--border-default)] bg-[var(--bg-elevated)] px-4 py-3">
             <div>
-              <div className="text-[10px] font-semibold text-[var(--text-primary)]">
+              <div className="text-micro font-semibold text-[var(--text-primary)]">
                 Restore creates a new version
               </div>
-              <p className="mt-0.5 text-[9px] text-[var(--text-tertiary)]">
+              <p className="mt-0.5 text-micro text-[var(--text-tertiary)]">
                 Nothing in the later timeline is overwritten or deleted.
               </p>
             </div>
@@ -1738,7 +1746,7 @@ function HistoryComparisonOverlay({
                 onClick={() =>
                   selected?.after && onRestore(selected, [...selectedRegions])
                 }
-                className="h-8 rounded-[7px] border border-[var(--border-default)] px-3 text-[9px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-35"
+                className="h-8 rounded-[7px] border border-[var(--border-default)] px-3 text-micro font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-35"
               >
                 Restore {selectedRegions.size} selected
               </button>
@@ -1748,7 +1756,7 @@ function HistoryComparisonOverlay({
                   !selected?.after || readOnly || Boolean(busyVersionId)
                 }
                 onClick={() => selected?.after && onRestore(selected)}
-                className="inline-flex h-8 items-center gap-1.5 rounded-[7px] bg-[#7658ed] px-3 text-[9px] font-semibold text-white disabled:opacity-35"
+                className="inline-flex h-8 items-center gap-1.5 rounded-[7px] bg-[#7658ed] px-3 text-micro font-semibold text-white disabled:opacity-35"
               >
                 {busyVersionId ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -1766,7 +1774,7 @@ function HistoryComparisonOverlay({
               <h3 className="text-[12px] font-semibold text-[var(--text-primary)]">
                 Version history
               </h3>
-              <p className="mt-0.5 text-[9px] text-[var(--text-tertiary)]">
+              <p className="mt-0.5 text-micro text-[var(--text-tertiary)]">
                 {versions.length} meaningful versions
               </p>
             </div>
@@ -1777,7 +1785,7 @@ function HistoryComparisonOverlay({
                   setCheckpointOpen((value) => !value);
                   setCheckpointError(null);
                 }}
-                className="flex h-7 items-center gap-1 rounded-[6px] px-2 text-[9px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                className="flex h-7 items-center gap-1 rounded-[6px] px-2 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
               >
                 <Plus className="h-3 w-3" />
                 Checkpoint
@@ -1787,7 +1795,7 @@ function HistoryComparisonOverlay({
           {checkpointOpen ? (
             <div className="border-b border-[var(--border-subtle)] bg-[var(--bg-primary)] p-3">
               <label
-                className="text-[8px] font-semibold uppercase tracking-[.08em] text-[var(--text-tertiary)]"
+                className="text-micro font-semibold uppercase tracking-[.08em] text-[var(--text-tertiary)]"
                 htmlFor="history-checkpoint-name"
               >
                 Checkpoint name
@@ -1805,13 +1813,13 @@ function HistoryComparisonOverlay({
                   }}
                   autoFocus
                   placeholder="e.g. Before teacher review"
-                  className="h-8 min-w-0 flex-1 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 text-[9px] text-[var(--text-primary)] outline-none focus:border-[var(--border-strong)]"
+                  className="h-8 min-w-0 flex-1 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 text-micro text-[var(--text-primary)] outline-none focus:border-[var(--border-strong)]"
                 />
                 <button
                   type="button"
                   disabled={!checkpointName.trim() || checkpointBusy}
                   onClick={() => void createCheckpoint()}
-                  className="h-8 rounded-[7px] bg-[var(--text-primary)] px-2.5 text-[9px] font-semibold text-[var(--bg-primary)] disabled:opacity-35"
+                  className="h-8 rounded-[7px] bg-[var(--text-primary)] px-2.5 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-35"
                 >
                   {checkpointBusy ? (
                     <Loader2 className="h-3 w-3 animate-spin" />
@@ -1823,7 +1831,7 @@ function HistoryComparisonOverlay({
               {checkpointError ? (
                 <p
                   role="alert"
-                  className="mt-2 text-[9px] leading-4 text-[var(--danger)]"
+                  className="mt-2 text-micro leading-4 text-[var(--danger)]"
                 >
                   {checkpointError}
                 </p>
@@ -1836,14 +1844,14 @@ function HistoryComparisonOverlay({
               <div className="absolute bottom-[-8px] left-[18px] top-5 w-px bg-[var(--border-default)]" />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-[10px] font-semibold text-[var(--text-primary)]">
+                  <span className="text-micro font-semibold text-[var(--text-primary)]">
                     Live
                   </span>
-                  <span className="text-[8px] text-[var(--text-tertiary)]">
+                  <span className="text-micro text-[var(--text-tertiary)]">
                     Now
                   </span>
                 </div>
-                <p className="mt-0.5 text-[8px] text-[var(--text-tertiary)]">
+                <p className="mt-0.5 text-micro text-[var(--text-tertiary)]">
                   Current synchronized state
                 </p>
               </div>
@@ -1870,10 +1878,10 @@ function HistoryComparisonOverlay({
                   ) : null}
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center justify-between gap-2">
-                      <span className="truncate text-[10px] font-semibold text-[var(--text-primary)]">
+                      <span className="truncate text-micro font-semibold text-[var(--text-primary)]">
                         v{version.versionNumber ?? versions.length - index}
                       </span>
-                      <span className="shrink-0 text-[8px] text-[var(--text-tertiary)]">
+                      <span className="shrink-0 text-micro text-[var(--text-tertiary)]">
                         {new Date(version.createdAt).toLocaleString([], {
                           day: "2-digit",
                           month: "short",
@@ -1883,15 +1891,15 @@ function HistoryComparisonOverlay({
                       </span>
                     </span>
                     <span className="mt-0.5 flex flex-wrap items-center gap-1.5">
-                      <span className="rounded-[4px] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[7px] font-medium text-[var(--text-secondary)]">
+                      <span className="rounded-[4px] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-micro font-medium text-[var(--text-secondary)]">
                         {historyKind(version)}
                       </span>
-                      <span className="truncate text-[8px] text-[var(--text-tertiary)]">
+                      <span className="truncate text-micro text-[var(--text-tertiary)]">
                         {creator}
                       </span>
                     </span>
                     {version.summary ? (
-                      <span className="mt-1 block line-clamp-2 text-[8px] leading-3.5 text-[var(--text-tertiary)]">
+                      <span className="mt-1 block line-clamp-2 text-micro leading-3.5 text-[var(--text-tertiary)]">
                         {version.summary}
                       </span>
                     ) : null}
@@ -1900,7 +1908,7 @@ function HistoryComparisonOverlay({
               );
             })}
             {versions.length === 0 ? (
-              <div className="px-4 py-10 text-center text-[10px] leading-5 text-[var(--text-tertiary)]">
+              <div className="px-4 py-10 text-center text-micro leading-5 text-[var(--text-tertiary)]">
                 Meaningful human and AI editing sessions will appear here.
               </div>
             ) : null}
@@ -3122,25 +3130,51 @@ export function ArtifactStudio({
     artifact.title,
   ]);
 
-  useEffect(() => spectraBus.handle("work.revealAnchor", ({ anchor, focus }) => {
-    if (anchor.workId !== artifact._id) return;
-    const host = contextSourceRegistry.get(`work:${artifact._id}:root`)?.element?.();
-    if (!host) return;
-    const regionId = anchor.stableIds?.regionId ?? (anchor.path[0] === "region" ? anchor.path.at(-1) : undefined);
-    const revealed = anchor.kind === "work:root"
-      ? false
-      : revealTarget(host, {
-          artifactId: artifact._id,
-          path: `/${anchor.path.join("/")}`,
-          primitive: "richtext",
-          ...(regionId ? { regionId } : {}),
-        });
-    if (!revealed) host.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
-    if (focus) {
-      host.dataset.anchorFocus = "true";
-      window.setTimeout(() => { if (host.dataset.anchorFocus === "true") delete host.dataset.anchorFocus; }, 1_200);
-    }
-  }), [artifact._id]);
+  useEffect(
+    () =>
+      spectraBus.handle("work.revealAnchor", ({ anchor, focus }) => {
+        if (anchor.workId !== artifact._id) return;
+        const host = contextSourceRegistry
+          .get(`work:${artifact._id}:root`)
+          ?.element?.();
+        if (!host) return;
+        const regionId =
+          anchor.stableIds?.regionId ??
+          (anchor.path[0] === "region" ? anchor.path.at(-1) : undefined);
+        const revealed =
+          anchor.kind === "work:root"
+            ? false
+            : revealTarget(host, {
+                artifactId: artifact._id,
+                path: `/${anchor.path.join("/")}`,
+                primitive: "richtext",
+                ...(regionId ? { regionId } : {}),
+              });
+        if (!revealed)
+          host.scrollIntoView({
+            block: "center",
+            inline: "nearest",
+            behavior: "smooth",
+          });
+        if (focus) {
+          // One restrained target pulse on the revealed control itself —
+          // attention lands where the comment points, then settles.
+          const pulseHost =
+            (resolveTargetElement(host, {
+              artifactId: artifact._id,
+              path: `/${anchor.path.join("/")}`,
+              primitive: "richtext",
+              ...(regionId ? { regionId } : {}),
+            })?.element as HTMLElement | null) ?? host;
+          pulseHost.dataset.anchorFocus = "true";
+          window.setTimeout(() => {
+            if (pulseHost.dataset.anchorFocus === "true")
+              delete pulseHost.dataset.anchorFocus;
+          }, 1_200);
+        }
+      }),
+    [artifact._id],
+  );
 
   const threadId =
     artifact.blueprintKey === "thread_reference" &&
@@ -3159,7 +3193,7 @@ export function ArtifactStudio({
               <div className="truncate font-display text-[20px] font-semibold text-[var(--text-primary)]">
                 {artifact.title}
               </div>
-              <div className="mt-0.5 text-[10px] uppercase tracking-[0.11em] text-[var(--text-tertiary)]">
+              <div className="mt-0.5 text-micro uppercase tracking-[0.11em] text-[var(--text-tertiary)]">
                 Conversation Â· {sourceLabel}
               </div>
             </div>
@@ -4589,6 +4623,73 @@ function ArtifactStudioEditor({
     return () => window.clearTimeout(timer);
   }, [followAi.following, aiInteractionState, artifact._id]);
 
+  /* ---------------------------------------------------------------- *
+   * Follow collaborator / presenter (generalized spectator mode)
+   * ---------------------------------------------------------------- */
+
+  const followState = useFollow();
+  const followedClientId =
+    followState.target && followState.target.kind !== "ai"
+      ? followState.target.clientId
+      : null;
+
+  /** The followed person's own frame, when they are in this artifact. */
+  const followedInteractionState = useMemo(
+    () =>
+      followedClientId
+        ? (remoteInteractionStates.find(
+            (state) => state.actor.clientId === followedClientId,
+          ) ?? null)
+        : null,
+    [followedClientId, remoteInteractionStates],
+  );
+
+  // Publish the followed actor's location and keep their working target on
+  // screen — the same contract as Follow AI, without touching focus.
+  const lastFollowRevealRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!followedClientId) {
+      lastFollowRevealRef.current = null;
+      return;
+    }
+    const state = followedInteractionState;
+    if (!state?.target) return;
+    const followTarget = state.target;
+    noteFollowLocation({
+      clientId: followedClientId,
+      artifactId: artifact._id,
+      path: followTarget.path,
+      note: describeState(state),
+    });
+    if (lastFollowRevealRef.current === followTarget.path) return;
+    lastFollowRevealRef.current = followTarget.path;
+    const timer = window.setTimeout(() => {
+      const surface = presenceSurfaceRef.current;
+      if (surface) revealTarget(surface, followTarget);
+    }, 120);
+    return () => window.clearTimeout(timer);
+  }, [followedClientId, followedInteractionState, artifact._id]);
+
+  // Local input always wins: the first gesture ends spectating immediately
+  // and leaves the "Return to …" affordance offered by the header cluster.
+  useEffect(() => {
+    if (!followedClientId) return;
+    const surface = presenceSurfaceRef.current;
+    if (!surface) return;
+    const disengage = () => disengageFollow("user_input");
+    surface.addEventListener("pointerdown", disengage, true);
+    surface.addEventListener("keydown", disengage, true);
+    surface.addEventListener("wheel", disengage, {
+      capture: true,
+      passive: true,
+    });
+    return () => {
+      surface.removeEventListener("pointerdown", disengage, true);
+      surface.removeEventListener("keydown", disengage, true);
+      surface.removeEventListener("wheel", disengage, true);
+    };
+  }, [followedClientId]);
+
   useInteractionPresence({
     artifactId: artifact._id,
     typeKey: artifact.blueprintKey as ArtifactTypeKey,
@@ -5534,7 +5635,7 @@ function ArtifactStudioEditor({
             {visibleIdentityTags.map((tag) => (
               <span
                 key={tag}
-                className="rounded-[6px] bg-[#eaf8f2] px-2 py-1 text-[10px] font-medium text-[#27836a]"
+                className="rounded-[6px] bg-[#eaf8f2] px-2 py-1 text-micro font-medium text-[#27836a]"
               >
                 {tag}
               </span>
@@ -5788,8 +5889,8 @@ function ArtifactStudioEditor({
       </header>
       {readOnly && !livePermissionLost ? (
         <div className="shrink-0 border-y border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-5 py-2 text-[11px] text-[var(--text-secondary)]">
-          Read-only access{accessExplanation ? ` Â· ${accessExplanation}` : ""} Â·
-          You can inspect, comment, and place this artifact, but only a
+          Read-only access{accessExplanation ? ` Â· ${accessExplanation}` : ""}{" "}
+          Â· You can inspect, comment, and place this artifact, but only a
           collaborator with modify access can change it.
         </div>
       ) : accessExplanation ? (
@@ -5833,14 +5934,14 @@ function ArtifactStudioEditor({
             </span>
             <button
               type="button"
-              className="shrink-0 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 py-1 text-[10px] font-medium"
+              className="shrink-0 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 py-1 text-micro font-medium"
               onClick={() => void synchronizeDraft(currentSnapshotRef.current)}
             >
               Retry
             </button>
             <button
               type="button"
-              className="shrink-0 rounded-[6px] px-2 py-1 text-[10px] font-medium text-[var(--text-tertiary)]"
+              className="shrink-0 rounded-[6px] px-2 py-1 text-micro font-medium text-[var(--text-tertiary)]"
               onClick={() => void discardQueuedDraft()}
             >
               Use latest
@@ -6360,185 +6461,203 @@ function DocumentStudio({
   useEffect(() => {
     // Losing edit access mid-session drops the surface to Read rather than
     // leaving a writing UI that no longer writes.
-    if (readOnly) setDocMode((current) => (current === "review" ? current : "read"));
+    if (readOnly)
+      setDocMode((current) => (current === "review" ? current : "read"));
   }, [readOnly]);
-  const editor = useEditor({
-    extensions: [
-      StarterKit.configure({
-        heading: { levels: [1, 2, 3] },
-        link: false,
-        underline: false,
-        undoRedo: collaborationDocument ? false : undefined,
-      }),
-      ...(collaborationDocument
-        ? [
-            Collaboration.configure({
-              fragment: collaborationDocument.getXmlFragment(
-                "spectra:document-v2",
-              ),
-            }),
-          ]
-        : []),
-      Underline,
-      TiptapLink.configure({ openOnClick: false, autolink: true }),
-      Table.configure({ resizable: true, lastColumnResizable: true }),
-      TableRow,
-      TableCell,
-      TableHeader,
-      TaskList,
-      TaskItem.configure({ nested: true }),
-      Image.configure({ allowBase64: true, inline: false }),
-      TextAlign.configure({ types: ["heading", "paragraph"] }),
-      Highlight.configure({ multicolor: true }),
-      Callout,
-      Equation,
-      InlineEquation,
-      SpectraReferenceNode,
-      SpectraCitationNode,
-      DragHandle,
-      StableBlockId,
-      AiRegionDecoration,
-      SpectraTiptapAutocomplete.configure({
-        enabled:
-          preferences.writing.smartCompletion &&
-          preferences.writing.longFormSuggestions &&
-          !readOnly,
-        delayMs: preferences.writing.delayMs,
-      }),
-      Placeholder.configure({ placeholder: "Type / for commands" }),
-      SlashCommand.configure({
-        suggestion: {
-          char: "/",
-          startOfLine: false,
-          render: createSlashCommandRenderer,
-        },
-      }),
-      // TipTap packages resolve through mixed @tiptap/core versions in this
-      // workspace; cast keeps the editor API usable under production typecheck.
-    ] as never[],
-    content: collaborationDocument ? undefined : initialContent,
-    editable: !readOnly,
-    immediatelyRender: false,
-    editorProps: {
-      attributes: {
-        "data-work-id": artifactId,
-        class:
-          "min-h-[620px] px-2 pb-24 pt-2 outline-none font-serif text-[19px] leading-8 text-[var(--text-primary)]",
-      },
-      handlePaste: (view, event) => {
-        const target = parseSpectraWorkUrl(event.clipboardData?.getData("text/plain") ?? "");
-        const nodeType = view.state.schema.nodes.spectraReference;
-        if (!target || !nodeType) return false;
-        const node = nodeType.create({
-          id: uniqueToken(),
-          workId: target.workId,
-          anchor: target.fragment ? { kind: "fragment", path: [target.fragment], schemaVersion: 1 } : null,
-          state: "collapsed",
-          versionPolicy: "live",
-          label: "Referenced work",
-        });
-        view.dispatch(view.state.tr.replaceSelectionWith(node).scrollIntoView());
-        return true;
-      },
-    },
-    onUpdate: ({ editor }) => {
-      const nextJson = editor.getJSON();
-      editorJsonKeyRef.current = JSON.stringify(nextJson);
-      refreshToolbar((value) => value + 1);
-      // Extension normalization can emit an update during the editor's mount
-      // frame even when the user changed nothing. Treat that frame as editor
-      // hydration; genuine input begins immediately afterward.
-      if (
-        !editorReadyForUserChanges.current ||
-        readOnly ||
-        collaborationDocument
-      )
-        return;
-      // Native collaboration already committed this transaction directly to
-      // the bound XmlFragment. Mirroring it through React/onChange would turn
-      // each keystroke back into a full projected document replacement.
-      onChange(documentContentFromJson(nextJson, content));
-    },
-    onSelectionUpdate: ({ editor }) => {
-      refreshToolbar((value) => value + 1);
-      const { from, to, empty } = editor.state.selection;
-      const ranges: Array<{
-        blockId: string;
-        startOffset: number;
-        endOffset: number;
-      }> = [];
-      let primaryBlockId: string | undefined;
-      let caretOffset = 0;
-      editor.state.doc.nodesBetween(from, Math.max(from, to), (node, pos) => {
-        if (typeof node.attrs?.blockId !== "string" || !node.attrs.blockId)
-          return;
-        const blockStart = pos + 1;
-        const blockEnd = pos + node.nodeSize - 1;
-        const startOffset = Math.max(0, Math.min(from, to) - blockStart);
-        const endOffset = Math.max(
-          startOffset,
-          Math.min(blockEnd, Math.max(from, to)) - blockStart,
-        );
-        if (!primaryBlockId) {
-          primaryBlockId = node.attrs.blockId;
-          caretOffset = startOffset;
-        }
-        ranges.push({
-          blockId: node.attrs.blockId,
-          startOffset,
-          endOffset,
-        });
-      });
-      const text = empty ? "" : editor.state.doc.textBetween(from, to, "\n");
-      const firstRange = ranges[0];
-      const relative =
-        collaborationDocument && firstRange
-          ? createDocumentRelativeSelection(
-              collaborationDocument,
-              firstRange.blockId,
-              firstRange.startOffset,
-              firstRange.endOffset,
-            )
-          : null;
-      editor.view.dom.dispatchEvent(
-        new CustomEvent("spectra-presence-selection", {
-          bubbles: true,
-          detail: {
-            kind: "text",
-            collapsed: empty,
-            ...(text ? { text: text.slice(0, 280) } : {}),
-            ranges,
-            ...(relative ? { relative } : {}),
-            caretOffset,
-            primaryBlockId,
+  const editor = useEditor(
+    {
+      extensions: [
+        StarterKit.configure({
+          heading: { levels: [1, 2, 3] },
+          link: false,
+          underline: false,
+          undoRedo: collaborationDocument ? false : undefined,
+        }),
+        ...(collaborationDocument
+          ? [
+              Collaboration.configure({
+                fragment: collaborationDocument.getXmlFragment(
+                  "spectra:document-v2",
+                ),
+              }),
+            ]
+          : []),
+        Underline,
+        TiptapLink.configure({ openOnClick: false, autolink: true }),
+        Table.configure({ resizable: true, lastColumnResizable: true }),
+        TableRow,
+        TableCell,
+        TableHeader,
+        TaskList,
+        TaskItem.configure({ nested: true }),
+        Image.configure({ allowBase64: true, inline: false }),
+        TextAlign.configure({ types: ["heading", "paragraph"] }),
+        Highlight.configure({ multicolor: true }),
+        Callout,
+        Equation,
+        InlineEquation,
+        SpectraReferenceNode,
+        SpectraCitationNode,
+        DragHandle,
+        StableBlockId,
+        AiRegionDecoration,
+        SpectraTiptapAutocomplete.configure({
+          enabled:
+            preferences.writing.smartCompletion &&
+            preferences.writing.longFormSuggestions &&
+            !readOnly,
+          delayMs: preferences.writing.delayMs,
+        }),
+        Placeholder.configure({ placeholder: "Type / for commands" }),
+        SlashCommand.configure({
+          suggestion: {
+            char: "/",
+            startOfLine: false,
+            render: createSlashCommandRenderer,
           },
         }),
-      );
-    },
-  }, [collaborationDocument]);
-
-  useEffect(() => spectraBus.handle("reference.insert", ({ hostWorkId, target }) => {
-    if (hostWorkId !== artifactId || !editor || readOnly) return;
-    editor.chain().focus().insertContent({
-      type: "spectraReference",
-      attrs: {
-        id: uniqueToken(),
-        workId: target.workId,
-        anchor: {
-          workId: target.workId,
-          workType: target.workType,
-          kind: target.kind,
-          path: [...target.path],
-          stableIds: target.stableIds,
-          fallbackExcerpt: target.fallbackExcerpt,
-          schemaVersion: target.schemaVersion,
+        // TipTap packages resolve through mixed @tiptap/core versions in this
+        // workspace; cast keeps the editor API usable under production typecheck.
+      ] as never[],
+      content: collaborationDocument ? undefined : initialContent,
+      editable: !readOnly,
+      immediatelyRender: false,
+      editorProps: {
+        attributes: {
+          "data-work-id": artifactId,
+          class:
+            "min-h-[620px] px-2 pb-24 pt-2 outline-none font-serif text-[19px] leading-8 text-[var(--text-primary)]",
         },
-        state: "collapsed",
-        versionPolicy: "live",
-        label: target.fallbackExcerpt ?? "Referenced work",
+        handlePaste: (view, event) => {
+          const target = parseSpectraWorkUrl(
+            event.clipboardData?.getData("text/plain") ?? "",
+          );
+          const nodeType = view.state.schema.nodes.spectraReference;
+          if (!target || !nodeType) return false;
+          const node = nodeType.create({
+            id: uniqueToken(),
+            workId: target.workId,
+            anchor: target.fragment
+              ? { kind: "fragment", path: [target.fragment], schemaVersion: 1 }
+              : null,
+            state: "collapsed",
+            versionPolicy: "live",
+            label: "Referenced work",
+          });
+          view.dispatch(
+            view.state.tr.replaceSelectionWith(node).scrollIntoView(),
+          );
+          return true;
+        },
       },
-    }).run();
-  }), [artifactId, editor, readOnly]);
+      onUpdate: ({ editor }) => {
+        const nextJson = editor.getJSON();
+        editorJsonKeyRef.current = JSON.stringify(nextJson);
+        refreshToolbar((value) => value + 1);
+        // Extension normalization can emit an update during the editor's mount
+        // frame even when the user changed nothing. Treat that frame as editor
+        // hydration; genuine input begins immediately afterward.
+        if (
+          !editorReadyForUserChanges.current ||
+          readOnly ||
+          collaborationDocument
+        )
+          return;
+        // Native collaboration already committed this transaction directly to
+        // the bound XmlFragment. Mirroring it through React/onChange would turn
+        // each keystroke back into a full projected document replacement.
+        onChange(documentContentFromJson(nextJson, content));
+      },
+      onSelectionUpdate: ({ editor }) => {
+        refreshToolbar((value) => value + 1);
+        const { from, to, empty } = editor.state.selection;
+        const ranges: Array<{
+          blockId: string;
+          startOffset: number;
+          endOffset: number;
+        }> = [];
+        let primaryBlockId: string | undefined;
+        let caretOffset = 0;
+        editor.state.doc.nodesBetween(from, Math.max(from, to), (node, pos) => {
+          if (typeof node.attrs?.blockId !== "string" || !node.attrs.blockId)
+            return;
+          const blockStart = pos + 1;
+          const blockEnd = pos + node.nodeSize - 1;
+          const startOffset = Math.max(0, Math.min(from, to) - blockStart);
+          const endOffset = Math.max(
+            startOffset,
+            Math.min(blockEnd, Math.max(from, to)) - blockStart,
+          );
+          if (!primaryBlockId) {
+            primaryBlockId = node.attrs.blockId;
+            caretOffset = startOffset;
+          }
+          ranges.push({
+            blockId: node.attrs.blockId,
+            startOffset,
+            endOffset,
+          });
+        });
+        const text = empty ? "" : editor.state.doc.textBetween(from, to, "\n");
+        const firstRange = ranges[0];
+        const relative =
+          collaborationDocument && firstRange
+            ? createDocumentRelativeSelection(
+                collaborationDocument,
+                firstRange.blockId,
+                firstRange.startOffset,
+                firstRange.endOffset,
+              )
+            : null;
+        editor.view.dom.dispatchEvent(
+          new CustomEvent("spectra-presence-selection", {
+            bubbles: true,
+            detail: {
+              kind: "text",
+              collapsed: empty,
+              ...(text ? { text: text.slice(0, 280) } : {}),
+              ranges,
+              ...(relative ? { relative } : {}),
+              caretOffset,
+              primaryBlockId,
+            },
+          }),
+        );
+      },
+    },
+    [collaborationDocument],
+  );
+
+  useEffect(
+    () =>
+      spectraBus.handle("reference.insert", ({ hostWorkId, target }) => {
+        if (hostWorkId !== artifactId || !editor || readOnly) return;
+        editor
+          .chain()
+          .focus()
+          .insertContent({
+            type: "spectraReference",
+            attrs: {
+              id: uniqueToken(),
+              workId: target.workId,
+              anchor: {
+                workId: target.workId,
+                workType: target.workType,
+                kind: target.kind,
+                path: [...target.path],
+                stableIds: target.stableIds,
+                fallbackExcerpt: target.fallbackExcerpt,
+                schemaVersion: target.schemaVersion,
+              },
+              state: "collapsed",
+              versionPolicy: "live",
+              label: target.fallbackExcerpt ?? "Referenced work",
+            },
+          })
+          .run();
+      }),
+    [artifactId, editor, readOnly],
+  );
 
   useEffect(() => {
     // Read is a mode, not a permission: it puts the document down without
@@ -6671,7 +6790,9 @@ function DocumentStudio({
         return false;
       }
       if (node.isText && node.text?.trim() && wordsAfter.length)
-        wordsAfter[wordsAfter.length - 1]! += node.text.trim().split(/\s+/).length;
+        wordsAfter[wordsAfter.length - 1]! += node.text
+          .trim()
+          .split(/\s+/).length;
       return true;
     });
     return entries.map((entry, index) => ({
@@ -6801,10 +6922,12 @@ function DocumentStudio({
     editor.state.doc.forEach((node, offset) => {
       if (node.type.name === "heading") {
         inReferences = node.textContent.trim().toLowerCase() === "references";
-        if (inReferences) existing.push({ from: offset, to: offset + node.nodeSize });
+        if (inReferences)
+          existing.push({ from: offset, to: offset + node.nodeSize });
         return;
       }
-      if (inReferences) existing.push({ from: offset, to: offset + node.nodeSize });
+      if (inReferences)
+        existing.push({ from: offset, to: offset + node.nodeSize });
     });
     editorReadyForUserChanges.current = true;
     const chain = editor.chain().focus();
@@ -7406,7 +7529,9 @@ function DocumentStudio({
           </button>
         ) : null}
         <ToolbarButton
-          label={docMode === "write" ? "More formatting options" : "More options"}
+          label={
+            docMode === "write" ? "More formatting options" : "More options"
+          }
           icon={SlidersHorizontal}
           active={toolsOpen}
           onClick={() => setToolsOpen((open) => !open)}
@@ -7641,7 +7766,8 @@ function DocumentStudio({
               {findMatches.length
                 ? `${Math.min(findCursor + 1, findMatches.length)} of ${findMatches.length}`
                 : findDraft
-                  ? findOptions.regex && !documentFindPattern(findDraft, findOptions)
+                  ? findOptions.regex &&
+                    !documentFindPattern(findDraft, findOptions)
                     ? "Not a valid pattern"
                     : "No matches"
                   : ""}
@@ -7894,7 +8020,7 @@ function DocumentStudio({
           </aside>
         ) : null}
         {sourcesOpen ? (
-          <aside className="spectra-document-sources">
+          <aside className="spectra-document-sources spectra-panel-enter">
             <header>
               <strong>Sources</strong>
               <button type="button" onClick={() => setSourcesOpen(false)}>
@@ -8084,8 +8210,7 @@ function FlashcardStudio({
   const [studyStates, setStudyStates] = useState<
     Map<string, SpectraFlashcardStudyState>
   >(() => new Map());
-  const [studyUpdate, setStudyUpdate] =
-    useState<SpectraFlashcardStudyUpdate>();
+  const [studyUpdate, setStudyUpdate] = useState<SpectraFlashcardStudyUpdate>();
   const [studyUpdateDismissed, setStudyUpdateDismissed] = useState(false);
   const [studyStateLoading, setStudyStateLoading] = useState(true);
   const [deckMenuOpen, setDeckMenuOpen] = useState(false);
@@ -9777,13 +9902,13 @@ function FlashcardStudio({
           <strong className="block font-display text-[16px] leading-5 text-[var(--text-primary)]">
             {cards.length}
           </strong>
-          <span className="text-[10px] text-[var(--text-tertiary)]">Cards</span>
+          <span className="text-micro text-[var(--text-tertiary)]">Cards</span>
         </div>
         <div className="border-l border-[var(--border-subtle)] px-3 py-2">
           <strong className="block font-display text-[16px] leading-5 text-[var(--text-primary)]">
             {sections.length}
           </strong>
-          <span className="text-[10px] text-[var(--text-tertiary)]">
+          <span className="text-micro text-[var(--text-tertiary)]">
             Sections
           </span>
         </div>
@@ -9791,7 +9916,7 @@ function FlashcardStudio({
           <strong className="block font-display text-[16px] leading-5 text-[var(--text-primary)]">
             {studyStateLoading ? "â€”" : `${personalMastery}%`}
           </strong>
-          <span className="text-[10px] text-[var(--text-tertiary)]">
+          <span className="text-micro text-[var(--text-tertiary)]">
             Personal mastery
           </span>
         </div>
@@ -9799,15 +9924,15 @@ function FlashcardStudio({
           <strong className="block font-display text-[16px] leading-5 text-[var(--text-primary)]">
             {studyStateLoading ? "â€”" : dueStudyCount}
           </strong>
-          <span className="text-[10px] text-[var(--text-tertiary)]">
+          <span className="text-micro text-[var(--text-tertiary)]">
             Due now
           </span>
         </div>
         <div className="border-l border-[var(--border-subtle)] px-3 py-2">
-          <strong className="block rounded-[5px] bg-[color-mix(in_oklab,var(--success)_10%,var(--bg-primary))] px-2 py-1 text-center text-[10px] font-semibold text-[var(--success)]">
+          <strong className="block rounded-[5px] bg-[color-mix(in_oklab,var(--success)_10%,var(--bg-primary))] px-2 py-1 text-center text-micro font-semibold text-[var(--success)]">
             Active
           </strong>
-          <span className="mt-0.5 block text-center text-[9px] text-[var(--text-tertiary)]">
+          <span className="mt-0.5 block text-center text-micro text-[var(--text-tertiary)]">
             Ready
           </span>
         </div>
@@ -10160,7 +10285,7 @@ function FlashcardStudio({
                   revealMode: event.target.value as "click" | "type",
                 })
               }
-              className="h-7 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-[10px] text-[var(--text-primary)] outline-none"
+              className="h-7 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-micro text-[var(--text-primary)] outline-none"
             >
               <option value="click">Reveal</option>
               <option value="type">Type answer</option>
@@ -10637,14 +10762,14 @@ function FlashcardStudio({
                     <strong className="block text-[12px] text-[var(--text-primary)]">
                       Image occlusion
                     </strong>
-                    <span className="text-[10px] leading-4 text-[var(--text-tertiary)]">
+                    <span className="text-micro leading-4 text-[var(--text-tertiary)]">
                       Drag over the image to hide a region. Each mask is
                       revealed with the answer.
                     </span>
                   </div>
                   <button
                     type="button"
-                    className="inline-flex h-8 items-center gap-1.5 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 text-[10px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                    className="inline-flex h-8 items-center gap-1.5 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 text-micro font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
                     disabled={deckMediaBusy}
                     onClick={() => deckMediaInputRef.current?.click()}
                   >
@@ -10689,7 +10814,7 @@ function FlashcardStudio({
                         <button
                           key={mask.id}
                           type="button"
-                          className="absolute grid place-items-center border border-white/65 bg-[#252a32]/90 text-[10px] font-bold text-white shadow-[0_2px_8px_rgba(0,0,0,0.24)] hover:bg-[var(--danger)]/90"
+                          className="absolute grid place-items-center border border-white/65 bg-[#252a32]/90 text-micro font-bold text-white shadow-[0_2px_8px_rgba(0,0,0,0.24)] hover:bg-[var(--danger)]/90"
                           style={{
                             left: `${mask.x * 100}%`,
                             top: `${mask.y * 100}%`,
@@ -10755,7 +10880,7 @@ function FlashcardStudio({
                             key={mask.id}
                             className="flex items-center gap-2 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-1.5"
                           >
-                            <span className="grid h-7 w-7 shrink-0 place-items-center rounded-[5px] bg-[#252a32] text-[10px] font-bold text-white">
+                            <span className="grid h-7 w-7 shrink-0 place-items-center rounded-[5px] bg-[#252a32] text-micro font-bold text-white">
                               {index + 1}
                             </span>
                             <input
@@ -10809,7 +10934,7 @@ function FlashcardStudio({
                       <strong className="block text-[12px] text-[var(--text-primary)]">
                         Add the diagram or image to study
                       </strong>
-                      <small className="mt-1 block text-[10px] text-[var(--text-tertiary)]">
+                      <small className="mt-1 block text-micro text-[var(--text-tertiary)]">
                         PNG, JPEG, WebP, or GIF
                       </small>
                     </span>
@@ -10817,7 +10942,7 @@ function FlashcardStudio({
                 )}
                 {deckMediaError ? (
                   <div
-                    className="mt-2 flex items-center gap-2 rounded-[7px] bg-[color-mix(in_oklab,var(--danger)_8%,var(--bg-primary))] px-2.5 py-2 text-[10px] text-[var(--danger)]"
+                    className="mt-2 flex items-center gap-2 rounded-[7px] bg-[color-mix(in_oklab,var(--danger)_8%,var(--bg-primary))] px-2.5 py-2 text-micro text-[var(--danger)]"
                     role="alert"
                   >
                     <AlertCircle className="h-3.5 w-3.5" />
@@ -10889,7 +11014,7 @@ function FlashcardStudio({
                 {(activeCard.tags ?? []).map((tag) => (
                   <span
                     key={tag}
-                    className="inline-flex h-7 items-center gap-1 rounded-[6px] border border-[color-mix(in_oklab,#8b6ff0_20%,var(--border-default))] bg-[color-mix(in_oklab,#8b6ff0_6%,var(--bg-elevated))] px-2 text-[10px] text-[var(--text-secondary)]"
+                    className="inline-flex h-7 items-center gap-1 rounded-[6px] border border-[color-mix(in_oklab,#8b6ff0_20%,var(--border-default))] bg-[color-mix(in_oklab,#8b6ff0_6%,var(--bg-elevated))] px-2 text-micro text-[var(--text-secondary)]"
                   >
                     {tag}
                     <button
@@ -10917,13 +11042,13 @@ function FlashcardStudio({
                       addActiveCardTag();
                     }
                   }}
-                  className="h-7 min-w-24 flex-1 bg-transparent px-1 text-[10px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
+                  className="h-7 min-w-24 flex-1 bg-transparent px-1 text-micro text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
                   placeholder="Add tag"
                   aria-label="Add card tag"
                 />
                 <button
                   type="button"
-                  className="inline-flex h-7 items-center gap-1 rounded-[6px] px-2 text-[10px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                  className="inline-flex h-7 items-center gap-1 rounded-[6px] px-2 text-micro text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
                   onClick={addActiveCardTag}
                 >
                   <Plus className="h-3 w-3" /> Add tag
@@ -11063,13 +11188,13 @@ function FlashcardStudio({
                         <strong className="block text-[11px] text-[var(--text-primary)]">
                           Card image
                         </strong>
-                        <span className="text-[10px] leading-4 text-[var(--text-tertiary)]">
+                        <span className="text-micro leading-4 text-[var(--text-tertiary)]">
                           Add a useful visual to the prompt or answer.
                         </span>
                       </div>
                       <button
                         type="button"
-                        className="inline-flex h-8 items-center gap-1.5 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 text-[10px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                        className="inline-flex h-8 items-center gap-1.5 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 text-micro font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
                         disabled={deckMediaBusy}
                         onClick={() => deckMediaInputRef.current?.click()}
                       >
@@ -11140,7 +11265,7 @@ function FlashcardStudio({
                       </div>
                     ) : null}
                     {deckMediaError ? (
-                      <p className="mt-2 text-[10px] text-[var(--danger)]">
+                      <p className="mt-2 text-micro text-[var(--danger)]">
                         {deckMediaError}
                       </p>
                     ) : null}
@@ -11335,7 +11460,10 @@ function FlashcardStudio({
                   reopenPreviousStudyCard();
                   return;
                 }
-                if (event.key === "?" || (event.shiftKey && event.key === "/")) {
+                if (
+                  event.key === "?" ||
+                  (event.shiftKey && event.key === "/")
+                ) {
                   event.preventDefault();
                   setStudyShortcutsOpen((current) => !current);
                 }
@@ -11357,7 +11485,7 @@ function FlashcardStudio({
                   aria-expanded={studyShortcutsOpen}
                   onClick={() => setStudyShortcutsOpen(!studyShortcutsOpen)}
                 >
-                  <kbd className="!px-1 !text-[10px]">?</kbd>
+                  <kbd className="!px-1 !text-micro">?</kbd>
                 </button>
                 <button
                   type="button"
@@ -11530,8 +11658,7 @@ function FlashcardStudio({
                       ) : null}
                       <div className="spectra-deck-study-note">
                         <label htmlFor="spectra-study-note">
-                          Your note{" "}
-                          <kbd>N</kbd>
+                          Your note <kbd>N</kbd>
                         </label>
                         <textarea
                           id="spectra-study-note"
@@ -11549,7 +11676,7 @@ function FlashcardStudio({
                     </section>
                   ) : deckSettings.revealMode === "type" ? (
                     <div className="spectra-deck-reveal flex-col !items-stretch gap-2">
-                      <label className="text-left text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
+                      <label className="text-left text-micro font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
                         Type your answer
                       </label>
                       <div className="flex gap-2">
@@ -11644,7 +11771,7 @@ function FlashcardStudio({
                             ? (card.occlusions ?? []).map((mask, index) => (
                                 <span
                                   key={mask.id}
-                                  className="absolute grid place-items-center border border-black bg-white text-[9px] font-bold text-black"
+                                  className="absolute grid place-items-center border border-black bg-white text-micro font-bold text-black"
                                   style={{
                                     left: `${mask.x * 100}%`,
                                     top: `${mask.y * 100}%`,
@@ -11742,7 +11869,7 @@ function QuizExperienceSection({
               <span className="block text-[12px] font-semibold text-[var(--text-primary)]">
                 {candidate.name}
               </span>
-              <span className="mt-1 block text-[10px] leading-4 text-[var(--text-secondary)]">
+              <span className="mt-1 block text-micro leading-4 text-[var(--text-secondary)]">
                 {candidate.summary}
               </span>
             </button>
@@ -11751,7 +11878,7 @@ function QuizExperienceSection({
       </div>
 
       {issues.length ? (
-        <ul className="mt-3 space-y-1 text-[10px] text-[var(--danger)]">
+        <ul className="mt-3 space-y-1 text-micro text-[var(--danger)]">
           {issues.map((issue) => (
             <li key={`${issue.field}:${issue.message}`}>{issue.message}</li>
           ))}
@@ -11769,7 +11896,7 @@ function QuizExperienceSection({
 
       {open ? (
         <div className="mt-3 grid gap-3 border-t border-[var(--border-subtle)] pt-3 sm:grid-cols-2">
-          <label className="text-[10px] font-semibold text-[var(--text-secondary)]">
+          <label className="text-micro font-semibold text-[var(--text-secondary)]">
             What is kept
             <select
               disabled={readOnly}
@@ -11782,13 +11909,15 @@ function QuizExperienceSection({
               }
               className={`${inputClass()} mt-1`}
             >
-              <option value="ephemeral">Nothing â€” answers clear on exit</option>
+              <option value="ephemeral">
+                Nothing â€” answers clear on exit
+              </option>
               <option value="personal">Their own attempts</option>
               <option value="submitted">Submitted attempts</option>
             </select>
           </label>
 
-          <label className="text-[10px] font-semibold text-[var(--text-secondary)]">
+          <label className="text-micro font-semibold text-[var(--text-secondary)]">
             Who can sit it
             <select
               disabled={readOnly}
@@ -11806,7 +11935,7 @@ function QuizExperienceSection({
             </select>
           </label>
 
-          <label className="text-[10px] font-semibold text-[var(--text-secondary)]">
+          <label className="text-micro font-semibold text-[var(--text-secondary)]">
             Time
             <select
               disabled={readOnly}
@@ -11825,14 +11954,16 @@ function QuizExperienceSection({
           </label>
 
           {experience.timing === "countdown" ? (
-            <label className="text-[10px] font-semibold text-[var(--text-secondary)]">
+            <label className="text-micro font-semibold text-[var(--text-secondary)]">
               Minutes per attempt
               <input
                 type="number"
                 min={1}
                 max={720}
                 disabled={readOnly}
-                value={Math.round((experience.countdownSeconds ?? 0) / 60) || ""}
+                value={
+                  Math.round((experience.countdownSeconds ?? 0) / 60) || ""
+                }
                 onChange={(event) =>
                   onChange({
                     countdownSeconds:
@@ -11846,14 +11977,17 @@ function QuizExperienceSection({
               />
             </label>
           ) : experience.timing === "deadline" ? (
-            <label className="text-[10px] font-semibold text-[var(--text-secondary)]">
+            <label className="text-micro font-semibold text-[var(--text-secondary)]">
               Closes
               <input
                 type="datetime-local"
                 disabled={readOnly}
                 value={
                   experience.deadlineAt
-                    ? new Date(experience.deadlineAt - new Date().getTimezoneOffset() * 60_000)
+                    ? new Date(
+                        experience.deadlineAt -
+                          new Date().getTimezoneOffset() * 60_000,
+                      )
                         .toISOString()
                         .slice(0, 16)
                     : ""
@@ -11872,7 +12006,7 @@ function QuizExperienceSection({
             <div />
           )}
 
-          <label className="text-[10px] font-semibold text-[var(--text-secondary)]">
+          <label className="text-micro font-semibold text-[var(--text-secondary)]">
             Attempts
             <input
               type="number"
@@ -11886,7 +12020,10 @@ function QuizExperienceSection({
               onChange={(event) =>
                 onChange({
                   attempts: event.target.value
-                    ? Math.max(1, Math.min(100, Number(event.target.value) || 1))
+                    ? Math.max(
+                        1,
+                        Math.min(100, Number(event.target.value) || 1),
+                      )
                     : "unlimited",
                 })
               }
@@ -11894,7 +12031,7 @@ function QuizExperienceSection({
             />
           </label>
 
-          <label className="text-[10px] font-semibold text-[var(--text-secondary)]">
+          <label className="text-micro font-semibold text-[var(--text-secondary)]">
             Answers shown
             <select
               disabled={readOnly}
@@ -11914,7 +12051,7 @@ function QuizExperienceSection({
             </select>
           </label>
 
-          <label className="text-[10px] font-semibold text-[var(--text-secondary)]">
+          <label className="text-micro font-semibold text-[var(--text-secondary)]">
             Results seen by
             <select
               disabled={readOnly}
@@ -12715,7 +12852,11 @@ function QuizStudio({
     practiceAutoSubmitted.current = practiceAttempt.attemptId;
     void submitPracticeAttempt();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [practiceSecondsRemaining, practiceAttempt?.attemptId, practiceAttempt?.status]);
+  }, [
+    practiceSecondsRemaining,
+    practiceAttempt?.attemptId,
+    practiceAttempt?.status,
+  ]);
 
   function questionCorrect(question: QuizQuestion) {
     if (practiceAttempt?.status === "submitted")
@@ -12893,7 +13034,7 @@ function QuizStudio({
     <div className="spectra-quiz-studio bg-transparent">
       <div className="flex min-h-10 flex-wrap items-center justify-between gap-1.5 border-b border-[var(--border-default)] bg-transparent px-2 py-1">
         <div
-          className="order-2 flex min-w-0 items-center rounded-[7px] bg-[var(--bg-secondary)] p-0.5 [&>button]:h-6 [&>button]:px-2 [&>button]:text-[10px]"
+          className="order-2 flex min-w-0 items-center rounded-[7px] bg-[var(--bg-secondary)] p-0.5 [&>button]:h-6 [&>button]:px-2 [&>button]:text-micro"
           role="tablist"
           aria-label="Quiz views"
         >
@@ -12969,7 +13110,7 @@ function QuizStudio({
             <>
               <button
                 type="button"
-                className={`order-2 h-7 rounded-[6px] px-2.5 text-[10.5px] font-semibold ${published ? "border border-[var(--success)] text-[var(--success)]" : "bg-[var(--text-primary)] text-[var(--bg-primary)]"}`}
+                className={`order-2 h-7 rounded-[6px] px-2.5 text-micro font-semibold ${published ? "border border-[var(--success)] text-[var(--success)]" : "bg-[var(--text-primary)] text-[var(--bg-primary)]"}`}
                 disabled={practiceBusy || (published && !synchronizationReady)}
                 onClick={() => {
                   if (published) {
@@ -13104,7 +13245,7 @@ function QuizStudio({
                       ? quizClockLabel(practiceSecondsRemaining)
                       : "0:00"}
                   </strong>
-                  <span className="text-[9px] text-[var(--text-tertiary)]">
+                  <span className="text-micro text-[var(--text-tertiary)]">
                     {practiceSecondsRemaining > 0
                       ? practiceExperience?.timing === "deadline"
                         ? "Until this quiz closes"
@@ -13145,7 +13286,7 @@ function QuizStudio({
                   <strong className="block text-[12px] text-[var(--text-primary)]">
                     Ready for a real practice run?
                   </strong>
-                  <span className="mt-1 block text-[10px] text-[var(--text-secondary)]">
+                  <span className="mt-1 block text-micro text-[var(--text-secondary)]">
                     Creates a private attempt pinned to this quiz version.
                   </span>
                 </div>
@@ -13176,7 +13317,7 @@ function QuizStudio({
                 <ChevronLeft className="h-4 w-4" />
               </button>
               <label className="grid min-w-0 flex-1 grid-cols-[auto_minmax(0,1fr)] items-center gap-2 px-1">
-                <span className="text-[9px] font-semibold uppercase tracking-[0.07em] text-[var(--text-tertiary)]">
+                <span className="text-micro font-semibold uppercase tracking-[0.07em] text-[var(--text-tertiary)]">
                   Question
                 </span>
                 <select
@@ -13196,7 +13337,7 @@ function QuizStudio({
                   ))}
                 </select>
               </label>
-              <span className="shrink-0 text-[10px] text-[var(--text-tertiary)]">
+              <span className="shrink-0 text-micro text-[var(--text-tertiary)]">
                 {activeDisplayedQuestionIndex + 1} of{" "}
                 {displayedQuestions.length}
               </span>
@@ -13246,7 +13387,7 @@ function QuizStudio({
                         className="mt-3 max-h-[320px] w-full rounded-[8px] border border-[var(--border-default)] object-contain"
                       />
                     ) : (
-                      <div className="mt-3 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4 text-[10px] text-[var(--text-tertiary)]">
+                      <div className="mt-3 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4 text-micro text-[var(--text-tertiary)]">
                         Question image unavailable
                       </div>
                     )
@@ -13525,13 +13666,13 @@ function QuizStudio({
               ))}
             <div className="flex justify-end gap-2 pt-3">
               {practiceSyncing.length ? (
-                <span className="mr-auto inline-flex items-center gap-2 text-[10px] text-[var(--text-tertiary)]">
+                <span className="mr-auto inline-flex items-center gap-2 text-micro text-[var(--text-tertiary)]">
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
                   Synchronizing {practiceSyncing.length} answer
                   {practiceSyncing.length === 1 ? "" : "s"}
                 </span>
               ) : practiceAttempt?.status === "in_progress" ? (
-                <span className="mr-auto inline-flex items-center gap-2 text-[10px] text-[var(--success)]">
+                <span className="mr-auto inline-flex items-center gap-2 text-micro text-[var(--success)]">
                   <CheckCircle2 className="h-3.5 w-3.5" />
                   Current answers synchronized
                 </span>
@@ -13665,7 +13806,7 @@ function QuizStudio({
                 <option value={1.5}>50% extra time</option>
                 <option value={2}>Double time</option>
               </select>
-              <p className="mt-2 text-[10px] leading-4 text-[var(--text-tertiary)]">
+              <p className="mt-2 text-micro leading-4 text-[var(--text-tertiary)]">
                 Applies on top of the time set above. Learner reduced-motion and
                 text-size preferences are always respected independently.
               </p>
@@ -13686,7 +13827,7 @@ function QuizStudio({
               <div className="mt-2 text-right font-display text-[20px] font-semibold text-[var(--text-primary)]">
                 {quizSettings.targetScore}%
               </div>
-              <p className="mt-2 text-[10px] leading-4 text-[var(--text-tertiary)]">
+              <p className="mt-2 text-micro leading-4 text-[var(--text-tertiary)]">
                 Guidance for formative practice only. It is not a grade or
                 pass/fail threshold.
               </p>
@@ -13753,7 +13894,10 @@ function QuizStudio({
                         ? "â€”"
                         : `${responseSummary.averagePercentage}%`,
                     ],
-                    ["Ran out of time", String(responseSummary.timeElapsedCount)],
+                    [
+                      "Ran out of time",
+                      String(responseSummary.timeElapsedCount),
+                    ],
                   ] as const
                 ).map(([label, value]) => (
                   <div
@@ -13763,7 +13907,7 @@ function QuizStudio({
                     <strong className="block font-display text-[20px] tabular-nums text-[var(--text-primary)]">
                       {value}
                     </strong>
-                    <span className="text-[9px] uppercase tracking-[0.07em] text-[var(--text-tertiary)]">
+                    <span className="text-micro uppercase tracking-[0.07em] text-[var(--text-tertiary)]">
                       {label}
                     </span>
                   </div>
@@ -13781,7 +13925,7 @@ function QuizStudio({
                     >
                       <div className="flex items-start justify-between gap-4">
                         <p className="min-w-0 text-[12px] leading-5 text-[var(--text-primary)]">
-                          <span className="mr-2 text-[10px] tabular-nums text-[var(--text-tertiary)]">
+                          <span className="mr-2 text-micro tabular-nums text-[var(--text-tertiary)]">
                             {index + 1}
                           </span>
                           {entry.prompt}
@@ -13804,7 +13948,7 @@ function QuizStudio({
                           }}
                         />
                       </div>
-                      <p className="mt-1.5 text-[10px] text-[var(--text-tertiary)]">
+                      <p className="mt-1.5 text-micro text-[var(--text-tertiary)]">
                         {entry.answered
                           ? `${entry.correct} of ${entry.answered} answered correctly`
                           : "Not answered yet"}
@@ -13814,7 +13958,7 @@ function QuizStudio({
                           {entry.commonResponses.map((response) => (
                             <li
                               key={response.response}
-                              className="rounded-full border border-[var(--border-default)] px-2 py-0.5 text-[10px] text-[var(--text-secondary)]"
+                              className="rounded-full border border-[var(--border-default)] px-2 py-0.5 text-micro text-[var(--text-secondary)]"
                             >
                               {response.response}
                               <em className="ml-1 not-italic tabular-nums text-[var(--text-tertiary)]">
@@ -13878,14 +14022,14 @@ function QuizStudio({
                         Practice {practiceAttempts.length - index}
                       </strong>
                       <span
-                        className={`rounded-full px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.06em] ${attempt.status === "submitted" ? "bg-[color-mix(in_oklab,var(--success)_10%,var(--bg-primary))] text-[var(--success)]" : "bg-[color-mix(in_oklab,var(--warning)_10%,var(--bg-primary))] text-[var(--warning)]"}`}
+                        className={`rounded-full px-2 py-0.5 text-micro font-semibold uppercase tracking-[0.06em] ${attempt.status === "submitted" ? "bg-[color-mix(in_oklab,var(--success)_10%,var(--bg-primary))] text-[var(--success)]" : "bg-[color-mix(in_oklab,var(--warning)_10%,var(--bg-primary))] text-[var(--warning)]"}`}
                       >
                         {attempt.status === "submitted"
                           ? "Reviewed"
                           : "In progress"}
                       </span>
                     </span>
-                    <span className="mt-1 block truncate text-[10px] text-[var(--text-tertiary)]">
+                    <span className="mt-1 block truncate text-micro text-[var(--text-tertiary)]">
                       Started {formatShortDate(attempt.startedAt)} Â· pinned
                       content {attempt.contentHash}
                     </span>
@@ -13896,7 +14040,7 @@ function QuizStudio({
                         ? `${attempt.percentage ?? 0}%`
                         : `${Object.keys(attempt.responses).length}/${attempt.questions.length}`}
                     </strong>
-                    <span className="text-[9px] text-[var(--text-tertiary)]">
+                    <span className="text-micro text-[var(--text-tertiary)]">
                       {attempt.status === "submitted"
                         ? `${Math.max(1, Math.round((attempt.elapsedMs ?? 0) / 60_000))} min Â· Review`
                         : "Resume safely"}
@@ -13951,7 +14095,7 @@ function QuizStudio({
                     <ChevronLeft className="h-3.5 w-3.5" />
                   </button>
                   <label className="grid min-w-0 flex-1 grid-cols-[auto_minmax(0,1fr)] items-center gap-2 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2">
-                    <span className="text-[9px] font-semibold uppercase tracking-[0.07em] text-[var(--text-tertiary)]">
+                    <span className="text-micro font-semibold uppercase tracking-[0.07em] text-[var(--text-tertiary)]">
                       Question
                     </span>
                     <select
@@ -13971,7 +14115,7 @@ function QuizStudio({
                       ))}
                     </select>
                   </label>
-                  <span className="shrink-0 text-[10px] text-[var(--text-tertiary)]">
+                  <span className="shrink-0 text-micro text-[var(--text-tertiary)]">
                     {activeQuestionIndex + 1} of {questions.length}
                   </span>
                   <button
@@ -14004,7 +14148,7 @@ function QuizStudio({
               ) : (
                 <button
                   type="button"
-                  className={`flex min-w-0 items-center gap-2 text-left text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)] ${mode === "tab" && !questionNavigatorOpen ? "w-full justify-center" : ""}`}
+                  className={`flex min-w-0 items-center gap-2 text-left text-micro font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)] ${mode === "tab" && !questionNavigatorOpen ? "w-full justify-center" : ""}`}
                   onClick={() => setQuestionNavigatorOpen((open) => !open)}
                   aria-expanded={questionNavigatorOpen}
                   aria-label={
@@ -14051,7 +14195,7 @@ function QuizStudio({
                     <span className="rounded-[6px] border border-[var(--border-default)] py-1 text-center text-[12px] text-[var(--text-secondary)]">
                       {index + 1}
                     </span>
-                    <span className="rounded-[5px] bg-[color-mix(in_oklab,#8b6ff0_8%,var(--bg-primary))] px-1.5 py-1 text-[9px] font-medium text-[#7560e8]">
+                    <span className="rounded-[5px] bg-[color-mix(in_oklab,#8b6ff0_8%,var(--bg-primary))] px-1.5 py-1 text-micro font-medium text-[#7560e8]">
                       {
                         {
                           multiple_choice: "MCQ",
@@ -14067,7 +14211,7 @@ function QuizStudio({
                       }
                     </span>
                     <span className="min-w-0">
-                      <span className="block truncate text-[10px] font-medium text-[var(--text-primary)]">
+                      <span className="block truncate text-micro font-medium text-[var(--text-primary)]">
                         {plannerDescriptionText(question.prompt) ||
                           "Untitled question"}
                       </span>
@@ -14088,7 +14232,7 @@ function QuizStudio({
                       `Question ${index + 1}`
                     }
                     onClick={() => setActiveQuestionId(question.id)}
-                    className={`h-8 rounded-[7px] text-[10px] font-semibold transition ${
+                    className={`h-8 rounded-[7px] text-micro font-semibold transition ${
                       activeQuestion?.id === question.id
                         ? "bg-[var(--text-primary)] text-[var(--bg-primary)]"
                         : "text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
@@ -14749,7 +14893,7 @@ function ArtifactRichTextEditor({
           }
           active={editor?.isActive("equation")}
         >
-          <span className="text-[9px] font-semibold">fx</span>
+          <span className="text-micro font-semibold">fx</span>
         </ToolbarTextButton>
         <span>Format</span>
       </div>
@@ -15273,7 +15417,7 @@ function QuestionEditor({
               </div>
             ))}
           </div>
-          <p className="mt-2 text-[9px] text-[var(--text-tertiary)]">
+          <p className="mt-2 text-micro text-[var(--text-tertiary)]">
             Matches are shuffled in each private practice attempt. The right
             side remains hidden from learners until feedback is released.
           </p>
@@ -15292,7 +15436,7 @@ function QuestionEditor({
               placeholder="What should a strong response include?"
             />
           </Field>
-          <p className="mt-2 text-[9px] leading-4 text-[var(--text-tertiary)]">
+          <p className="mt-2 text-micro leading-4 text-[var(--text-tertiary)]">
             Long responses are not auto-scored. Learners receive this guidance
             as advisory formative feedback.
           </p>
@@ -15689,7 +15833,7 @@ function StudioDetails({
                     <strong className="block font-sans text-[13px] font-semibold tracking-[-0.01em] text-[var(--text-primary)]">
                       {value}
                     </strong>
-                    <span className="text-[9px] text-[var(--text-tertiary)]">
+                    <span className="text-micro text-[var(--text-tertiary)]">
                       {label}
                     </span>
                   </div>
@@ -15704,7 +15848,7 @@ function StudioDetails({
                   <strong className="block font-display text-[14px] text-[var(--text-primary)]">
                     {detailDeckCards.length}
                   </strong>
-                  <span className="text-[9px] text-[var(--text-tertiary)]">
+                  <span className="text-micro text-[var(--text-tertiary)]">
                     Cards
                   </span>
                 </div>
@@ -15712,7 +15856,7 @@ function StudioDetails({
                   <strong className="block font-display text-[14px] text-[var(--text-primary)]">
                     {detailDeckSections}
                   </strong>
-                  <span className="text-[9px] text-[var(--text-tertiary)]">
+                  <span className="text-micro text-[var(--text-tertiary)]">
                     Sections
                   </span>
                 </div>
@@ -15721,7 +15865,7 @@ function StudioDetails({
                     ~{Math.max(1, Math.round(detailDeckCards.length * 0.75))}{" "}
                     min
                   </strong>
-                  <span className="text-[9px] text-[var(--text-tertiary)]">
+                  <span className="text-micro text-[var(--text-tertiary)]">
                     Study time
                   </span>
                 </div>
@@ -15742,7 +15886,7 @@ function StudioDetails({
                       <span className="min-w-0 flex-1 truncate font-medium">
                         {link.artifact.title}
                       </span>
-                      <span className="text-[9px] text-[var(--text-tertiary)]">
+                      <span className="text-micro text-[var(--text-tertiary)]">
                         {link.direction === "incoming" ? "â†" : "â†’"}{" "}
                         {link.relationType.replaceAll("_", " ")}
                       </span>
@@ -15783,7 +15927,7 @@ function StudioDetails({
               ) : null}
               <button
                 type="button"
-                className="inline-flex h-7 items-center gap-1.5 rounded-[6px] px-1.5 text-[10px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                className="inline-flex h-7 items-center gap-1.5 rounded-[6px] px-1.5 text-micro text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                 onClick={() => setLinkPickerOpen((open) => !open)}
                 aria-expanded={linkPickerOpen}
               >
@@ -15794,7 +15938,7 @@ function StudioDetails({
                   {suggestions.map(({ candidate }) => (
                     <div
                       key={candidate._id}
-                      className="flex items-center gap-2 rounded-[5px] px-1 py-1 text-[10px]"
+                      className="flex items-center gap-2 rounded-[5px] px-1 py-1 text-micro"
                     >
                       <span className="min-w-0 flex-1 truncate text-[var(--text-secondary)]">
                         {candidate.title}
@@ -15818,7 +15962,7 @@ function StudioDetails({
               open
               className="spectra-related-artifacts rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3"
             >
-              <summary className="text-[10px] font-semibold uppercase tracking-[.08em] text-[var(--text-tertiary)]">
+              <summary className="text-micro font-semibold uppercase tracking-[.08em] text-[var(--text-tertiary)]">
                 Related suggestions Â· {suggestions.length}
               </summary>
               <div className="space-y-1.5">
@@ -15834,7 +15978,7 @@ function StudioDetails({
                       type="button"
                       disabled={linkingId === candidate._id}
                       onClick={() => void confirmLink(candidate)}
-                      className="rounded-[5px] px-1.5 py-1 text-[9px] font-medium text-[var(--accent-cyan)] opacity-70 hover:bg-[var(--bg-hover)] group-hover:opacity-100"
+                      className="rounded-[5px] px-1.5 py-1 text-micro font-medium text-[var(--accent-cyan)] opacity-70 hover:bg-[var(--bg-hover)] group-hover:opacity-100"
                     >
                       {linkingId === candidate._id
                         ? "Linkingâ€¦"
@@ -15881,7 +16025,7 @@ function StudioDetails({
               {visibleTags.map((tag) => (
                 <span
                   key={tag}
-                  className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 py-1 text-[10px] font-medium text-[var(--text-secondary)]"
+                  className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 py-1 text-micro font-medium text-[var(--text-secondary)]"
                   data-artifact-tag={tag}
                 >
                   <span>{tag}</span>
@@ -15953,7 +16097,7 @@ function StudioDetails({
                 : "Activity"
             }
           >
-            <div className="space-y-2 text-[10px] text-[var(--text-secondary)]">
+            <div className="space-y-2 text-micro text-[var(--text-secondary)]">
               <div className="flex items-center justify-between">
                 <span>Last edited</span>
                 <strong className="font-medium text-[var(--text-primary)]">
@@ -16051,7 +16195,7 @@ function StudioDetails({
                       ? "Current saved version"
                       : version.summary || "Saved version"}
                   </div>
-                  <div className="mt-1 flex items-center justify-between text-[10px] text-[var(--text-tertiary)]">
+                  <div className="mt-1 flex items-center justify-between text-micro text-[var(--text-tertiary)]">
                     <span>
                       {version.source === "ai" ? "Spectra edit" : "Manual save"}
                     </span>
@@ -16132,7 +16276,7 @@ function CardFace({
             <button
               type="button"
               onClick={markCloze}
-              className="ml-auto inline-flex h-7 items-center gap-1.5 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 text-[10px] font-semibold normal-case tracking-normal text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+              className="ml-auto inline-flex h-7 items-center gap-1.5 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 text-micro font-semibold normal-case tracking-normal text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
               title="Select text, then create a cloze deletion"
             >
               <Focus className="h-3.5 w-3.5" />
@@ -16184,7 +16328,7 @@ function CardFace({
       </div>
       {clozeMode && clozeParts(value).length ? (
         <div className="mt-2 rounded-[7px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2">
-          <span className="mb-1 block text-[9px] font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
+          <span className="mb-1 block text-micro font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
             Study preview
           </span>
           <p className="font-serif text-[15px] leading-6 text-[var(--text-secondary)]">

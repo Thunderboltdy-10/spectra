@@ -313,7 +313,7 @@ svg.react-flow__connectionline {
       transform: translateY(-15px) translateY(-50%);
     }
 .react-flow__attribution {
-  font-size: 10px;
+  font-size: var(--text-micro);
   background: var(--xy-attribution-background-color, var(--xy-attribution-background-color-default));
   padding: 2px 3px;
   margin: 0;
@@ -444,7 +444,7 @@ svg.react-flow__connectionline {
       stroke: #777;
     }
 .react-flow__edge-text {
-    font-size: 10px;
+    font-size: var(--text-micro);
   }
 .react-flow__node.selectable:focus,
   .react-flow__node.selectable:focus-visible {

@@ -138,6 +138,14 @@ function subscribe(listener: () => void): () => void {
   return () => listeners.delete(listener);
 }
 
+/**
+ * Module-scope subscription for sibling stores (the generalized follow store)
+ * that must react when Follow AI is toggled outside their own API.
+ */
+export function subscribeFollowAi(listener: () => void): () => void {
+  return subscribe(listener);
+}
+
 const SERVER_SNAPSHOT: FollowSnapshot = { following: false, location: null };
 
 export function useFollowAi(): {

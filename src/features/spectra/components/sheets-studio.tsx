@@ -2422,7 +2422,7 @@ export function SheetsStudio({
             ),
           )}
           <span
-            className="ml-auto hidden items-center gap-1.5 text-[10px] text-[var(--text-secondary)] md:inline-flex"
+            className="ml-auto hidden items-center gap-1.5 text-micro text-[var(--text-secondary)] md:inline-flex"
             role="status"
             aria-live="polite"
           >
@@ -2436,7 +2436,7 @@ export function SheetsStudio({
             )}
             {syncMessage}
           </span>
-          <span className="text-[10px] text-[var(--text-tertiary)] md:ml-2">
+          <span className="text-micro text-[var(--text-tertiary)] md:ml-2">
             {filteredOutRows.size
               ? `${visibleRowIndices.length.toLocaleString()} of ${bounds.rows.toLocaleString()}`
               : bounds.rows.toLocaleString()}{" "}

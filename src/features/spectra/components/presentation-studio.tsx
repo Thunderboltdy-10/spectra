@@ -2469,7 +2469,7 @@ export function PresentationStudio({
         </div>
         <div className="flex items-center gap-2">
           <span
-            className="hidden items-center gap-1.5 text-[10px] text-[var(--text-secondary)] md:inline-flex"
+            className="hidden items-center gap-1.5 text-micro text-[var(--text-secondary)] md:inline-flex"
             role="status"
             aria-live="polite"
           >

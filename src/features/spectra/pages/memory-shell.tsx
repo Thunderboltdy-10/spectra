@@ -280,7 +280,7 @@ function MemoryCard({
           <span className="block text-[14px] font-medium leading-6 text-[var(--text-primary)]">
             {claim.proposition}
           </span>
-          <span className="mt-2 flex flex-wrap items-center gap-3 text-[10px] text-[var(--text-tertiary)]">
+          <span className="mt-2 flex flex-wrap items-center gap-3 text-micro text-[var(--text-tertiary)]">
             <span className="inline-flex items-center gap-1.5">
               <ScopeIcon scope={claim.scope} size={12} />
               {scopeLabels[claim.scope]}
@@ -377,7 +377,7 @@ function MemoryCard({
                     {claim.evidence.slice(0, 3).map((evidence) => (
                       <div
                         key={evidence._id}
-                        className="flex items-start justify-between gap-4 text-[10px] leading-4 text-[var(--text-tertiary)]"
+                        className="flex items-start justify-between gap-4 text-micro leading-4 text-[var(--text-tertiary)]"
                       >
                         <span>
                           {evidence.sourceType.replaceAll("_", " ")}
@@ -858,7 +858,7 @@ export function MemoryShell() {
                 <h2 className="text-[13px] font-semibold text-[var(--text-primary)]">
                   Memory
                 </h2>
-                <p className="mt-1 text-[10px] leading-4 text-[var(--text-tertiary)]">
+                <p className="mt-1 text-micro leading-4 text-[var(--text-tertiary)]">
                   Enabled by default. Turning it off also pauses retrieval.
                 </p>
               </div>
@@ -896,7 +896,7 @@ export function MemoryShell() {
                   ? "Capture paused"
                   : "Background capture on"}
               </span>
-              <span className="text-[10px] text-[var(--text-tertiary)]">
+              <span className="text-micro text-[var(--text-tertiary)]">
                 {preferences?.capturePaused ? "Resume" : "Pause"}
               </span>
             </button>
@@ -939,7 +939,7 @@ export function MemoryShell() {
               >
                 <Icon size={14} />
                 <span className="flex-1 text-left">{label}</span>
-                <span className="text-[10px] text-[var(--text-tertiary)]">
+                <span className="text-micro text-[var(--text-tertiary)]">
                   {count}
                 </span>
               </button>
@@ -949,7 +949,7 @@ export function MemoryShell() {
           <section className="rounded-[18px] border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-4">
             <div className="flex gap-2.5">
               <ShieldCheck className="mt-0.5 size-4 shrink-0 text-[var(--brand-primary)]" />
-              <p className="text-[10px] leading-5 text-[var(--text-tertiary)]">
+              <p className="text-micro leading-5 text-[var(--text-tertiary)]">
                 Your memory is private. Teachers, school admins, and platform
                 operators cannot read it. Shared conventions are separate from
                 private personal memory.
@@ -1012,7 +1012,7 @@ export function MemoryShell() {
                       <h3 className="text-[11px] font-semibold text-[var(--text-primary)]">
                         {option.label}
                       </h3>
-                      <p className="mt-1 text-[10px] leading-4 text-[var(--text-tertiary)]">
+                      <p className="mt-1 text-micro leading-4 text-[var(--text-tertiary)]">
                         {option.description}
                       </p>
                     </div>
@@ -1037,12 +1037,12 @@ export function MemoryShell() {
                   <h3 className="text-[11px] font-semibold text-[var(--text-primary)]">
                     Initial memory context
                   </h3>
-                  <p className="mt-1 text-[10px] leading-4 text-[var(--text-tertiary)]">
+                  <p className="mt-1 text-micro leading-4 text-[var(--text-tertiary)]">
                     A relevance target, not a hard ceiling. Spectra may retrieve
                     more when a task genuinely needs it.
                   </p>
                 </div>
-                <label className="flex shrink-0 items-center gap-2 text-[10px] text-[var(--text-secondary)]">
+                <label className="flex shrink-0 items-center gap-2 text-micro text-[var(--text-secondary)]">
                   <input
                     type="range"
                     min={500}

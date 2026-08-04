@@ -130,7 +130,7 @@ export function AnalyticsShell() {
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <div className="flex items-center gap-2.5">
-              <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[var(--text-tertiary)]">
+              <p className="text-micro font-bold uppercase tracking-[0.16em] text-[var(--text-tertiary)]">
                 Private account signals
               </p>
               <CapabilityTruthBadge state={overallState} />
@@ -167,7 +167,7 @@ export function AnalyticsShell() {
           </div>
         </div>
         {payload ? (
-          <p className="mt-3 text-[10px] text-[var(--text-tertiary)]">
+          <p className="mt-3 text-micro text-[var(--text-tertiary)]">
             {payload.range.fromDay} â†’ {payload.range.toDay} Â· computed {formatDate(payload.computedAt)}
           </p>
         ) : null}
@@ -226,7 +226,7 @@ export function AnalyticsShell() {
                     ["Cancelled", payload.runOutcomes.cancelled, "#64748b"],
                   ] as const).map(([label, value, color]) => (
                     <div key={label} className="bg-[var(--bg-elevated)] p-4">
-                      <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">{label}</p>
+                      <p className="text-micro font-bold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">{label}</p>
                       <p className="mt-2 font-display text-[26px] font-semibold tabular-nums" style={{ color }}>{value}</p>
                     </div>
                   ))}
@@ -245,7 +245,7 @@ export function AnalyticsShell() {
                 <div>
                   <h2 className="text-[13px] font-semibold text-[var(--text-primary)]">Privacy and source boundary</h2>
                   <p className="mt-1 max-w-3xl text-[12px] leading-6 text-[var(--text-secondary)]">{payload.privacy}</p>
-                  <p className="mt-2 text-[10px] text-[var(--text-tertiary)]">Indexed sources: work created, workspace activity, AI run metadata, and daily account usage meters.</p>
+                  <p className="mt-2 text-micro text-[var(--text-tertiary)]">Indexed sources: work created, workspace activity, AI run metadata, and daily account usage meters.</p>
                 </div>
               </div>
             </section>
@@ -260,12 +260,12 @@ function MetricCard({ definition, metric, icon, format }: { definition: SpectraM
   return (
     <article className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
       <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-2 text-[var(--text-secondary)]">{icon}<span className="text-[10px] font-bold uppercase tracking-[0.12em]">{definition.label}</span></div>
-        <CapabilityTruthBadge state={metric.state} className="min-h-5 px-2 text-[9px]" />
+        <div className="flex items-center gap-2 text-[var(--text-secondary)]">{icon}<span className="text-micro font-bold uppercase tracking-[0.12em]">{definition.label}</span></div>
+        <CapabilityTruthBadge state={metric.state} className="min-h-5 px-2 text-micro" />
       </div>
       <p className="mt-4 font-display text-[30px] font-semibold tabular-nums text-[var(--text-primary)]">{formatMetric(metric.value, format)}</p>
-      <p className="mt-2 truncate text-[10px] text-[var(--text-tertiary)]" title={`${definition.source} Â· ${definition.aggregation}`}>{definition.source}</p>
-      <p className="mt-1 text-[10px] leading-4 text-[var(--text-secondary)]">{metric.state.kind === "partial" ? metric.state.details : definition.zeroMeaning}</p>
+      <p className="mt-2 truncate text-micro text-[var(--text-tertiary)]" title={`${definition.source} Â· ${definition.aggregation}`}>{definition.source}</p>
+      <p className="mt-1 text-micro leading-4 text-[var(--text-secondary)]">{metric.state.kind === "partial" ? metric.state.details : definition.zeroMeaning}</p>
     </article>
   );
 }
@@ -275,7 +275,7 @@ function SectionHeading({ title, detail }: { title: string; detail: string }) {
 }
 
 function RecentList({ title, detail, empty, rows }: { title: string; detail: string; empty: string; rows: Array<{ id: string; title: string; detail: string; timestamp: number }> }) {
-  return <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5"><SectionHeading title={title} detail={detail} /><div className="mt-3 divide-y divide-[var(--border-subtle)]">{rows.length ? rows.map((row) => <div key={row.id} className="flex items-start gap-3 py-3"><Clock3 className="mt-0.5 size-3.5 shrink-0 text-[var(--text-tertiary)]" /><div className="min-w-0 flex-1"><p className="truncate text-[12px] font-semibold text-[var(--text-primary)]">{row.title}</p><p className="mt-1 text-[10px] capitalize text-[var(--text-tertiary)]">{row.detail} Â· {formatDate(row.timestamp)}</p></div></div>) : <EmptyLine label={empty} />}</div></section>;
+  return <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5"><SectionHeading title={title} detail={detail} /><div className="mt-3 divide-y divide-[var(--border-subtle)]">{rows.length ? rows.map((row) => <div key={row.id} className="flex items-start gap-3 py-3"><Clock3 className="mt-0.5 size-3.5 shrink-0 text-[var(--text-tertiary)]" /><div className="min-w-0 flex-1"><p className="truncate text-[12px] font-semibold text-[var(--text-primary)]">{row.title}</p><p className="mt-1 text-micro capitalize text-[var(--text-tertiary)]">{row.detail} Â· {formatDate(row.timestamp)}</p></div></div>) : <EmptyLine label={empty} />}</div></section>;
 }
 
 function EmptyLine({ label }: { label: string }) {

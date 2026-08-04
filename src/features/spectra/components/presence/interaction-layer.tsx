@@ -54,6 +54,10 @@ import {
 const STALE_AFTER_MS = 20_000;
 /** Settled chrome lingers this long, then fades out completely. */
 const SETTLE_FADE_MS = 480;
+/** Activity bucket that restarts the presence-label lifecycle while moving. */
+const PRESENCE_LABEL_BUCKET_MS = 800;
+/** Window in which the completion ring plays after an act completes. */
+const COMPLETION_RING_MS = 900;
 /** Above this pointer speed (px/ms) a journey leaves a short comet trail. */
 const TRAIL_SPEED_PX_PER_MS = 1.15;
 
@@ -73,6 +77,8 @@ type ActorVisual = {
   trail: Array<{ x: number; y: number; strength: number }>;
   /** True while the actor is leaving: chrome fades rather than vanishing. */
   departing: boolean;
+  /** Fires one completion ring on the finished target (completion grammar). */
+  justCompleted: boolean;
 };
 
 type TravelKind = FrameTravel["kind"];
@@ -83,6 +89,10 @@ type ActorRuntime = {
   trail: CometTrail;
   lastSignature: string;
   departingAt: number | null;
+  /** When the current act transitioned into a completed/settled lifecycle. */
+  completedAt: number | null;
+  /** Act signature for which `completedAt` was recorded. */
+  completedForSignature: string | null;
 };
 
 function usePrefersReducedMotion(): boolean {
@@ -96,6 +106,28 @@ function usePrefersReducedMotion(): boolean {
     return () => media.removeEventListener("change", sync);
   }, []);
   return reduced;
+}
+
+/**
+ * Coarse pointers and small viewports get the truthful bits of presence
+ * (identity, caret, selection) without velocity ornaments like trails/tilt.
+ */
+function useSimplifiedPresence(): boolean {
+  const [simplified, setSimplified] = useState(false);
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    const coarse = window.matchMedia("(pointer: coarse)");
+    const narrow = window.matchMedia("(max-width: 719px)");
+    const sync = () => setSimplified(coarse.matches || narrow.matches);
+    sync();
+    coarse.addEventListener("change", sync);
+    narrow.addEventListener("change", sync);
+    return () => {
+      coarse.removeEventListener("change", sync);
+      narrow.removeEventListener("change", sync);
+    };
+  }, []);
+  return simplified;
 }
 
 function placementRequest(state: InteractionState) {
@@ -151,8 +183,10 @@ export function InteractionLayer({
   const runtimesRef = useRef(new Map<string, ActorRuntime>());
   const [visuals, setVisuals] = useState<ActorVisual[]>([]);
   const reducedMotion = usePrefersReducedMotion();
+  const simplified = useSimplifiedPresence();
   const reducedRef = useRef(reducedMotion);
   const quietRef = useRef(quiet);
+  const effectsMutedRef = useRef(false);
   useEffect(() => {
     reducedRef.current = reducedMotion;
     quietRef.current = quiet;
@@ -168,6 +202,14 @@ export function InteractionLayer({
       }),
     [states, localClientId],
   );
+
+  /** Above this many visible actors, rooms shed velocity ornaments so a busy
+   *  workspace stays calm; identity, carets and selections stay exact. */
+  const PRESENCE_DENSITY_SOFT_LIMIT = 6;
+  const dense = actors.length > PRESENCE_DENSITY_SOFT_LIMIT;
+  useEffect(() => {
+    effectsMutedRef.current = simplified || dense;
+  }, [simplified, dense]);
 
   const signature = useMemo(
     () => actors.map(frameSignature).join("|"),
@@ -203,6 +245,8 @@ export function InteractionLayer({
             trail: new CometTrail(),
             lastSignature: "",
             departingAt: null,
+            completedAt: null,
+            completedForSignature: null,
           };
           runtimes.set(key, runtime);
         }
@@ -220,6 +264,15 @@ export function InteractionLayer({
           runtime.lane.push(state);
           runtime.lastSignature = signature;
           runtime.departingAt = null;
+          /* Completion signal: recorded once per act so the ring fires for the
+             transition into "completed", not repeatedly while settled. */
+          if (state.lifecycle === "completed") {
+            runtime.completedAt = now;
+            runtime.completedForSignature = signature;
+          } else if (runtime.completedForSignature === signature) {
+            runtime.completedAt = null;
+            runtime.completedForSignature = null;
+          }
         }
       }
 
@@ -286,7 +339,12 @@ export function InteractionLayer({
           const sample: TravelSample = runtime.travel.sample(now);
           point = { left: sample.x, top: sample.y };
           opacity *= runtime.travel.fadeOpacity(sample);
-          if (sample.travelling && sample.kind === "journey") {
+          if (effectsMutedRef.current) {
+            // Dense rooms and simplified environments keep travel honest but
+            // shed the trail/tilt ornaments — presence stays exact, never busy.
+            runtime.trail.push(point.left, point.top, now, false);
+            trailPoints = [];
+          } else if (sample.travelling && sample.kind === "journey") {
             // Lean into the direction of travel, capped and decayed.
             const position = runtime.travel.position;
             if (position) {
@@ -299,10 +357,11 @@ export function InteractionLayer({
               now,
               sample.speed > TRAIL_SPEED_PX_PER_MS,
             );
+            trailPoints = runtime.trail.sample(now);
           } else {
             runtime.trail.push(point.left, point.top, now, false);
+            trailPoints = runtime.trail.sample(now);
           }
-          trailPoints = runtime.trail.sample(now);
         } else {
           runtime.trail.push(0, 0, now, false);
         }
@@ -321,6 +380,9 @@ export function InteractionLayer({
           tilt,
           trail: trailPoints,
           departing: runtime.departingAt !== null,
+          justCompleted:
+            runtime.completedAt !== null &&
+            now - runtime.completedAt < COMPLETION_RING_MS,
         });
       }
 
@@ -372,6 +434,7 @@ function visualsEqual(left: ActorVisual[], right: ActorVisual[]): boolean {
     if (entry.description !== other.description) return false;
     if (entry.mode !== other.mode) return false;
     if (entry.departing !== other.departing) return false;
+    if (entry.justCompleted !== other.justCompleted) return false;
     if (!near(entry.opacity, other.opacity)) return false;
     if (
       !near(entry.point.left, other.point.left) ||
@@ -445,6 +508,7 @@ function ActorPresence({ visual }: { visual: ActorVisual }) {
     trail,
     travel,
     departing,
+    justCompleted,
   } = visual;
   const isAi = state.actor.kind === "ai";
 
@@ -508,6 +572,21 @@ function ActorPresence({ visual }: { visual: ActorVisual }) {
             }}
           />
         ))}
+
+      {/* Completion ring (completion grammar): one restrained settle pulse on
+          the finished target, fired once per act — never repeated while the
+          actor remains settled. */}
+      {justCompleted && (
+        <div
+          className="spectra-completion-ring"
+          style={{
+            left: placement.box.left - 4,
+            top: placement.box.top - 4,
+            width: placement.box.width + 8,
+            height: placement.box.height + 8,
+          }}
+        />
+      )}
 
       {/* Selection line boxes, drawn under all other chrome. */}
       {placement.selection?.map((box, index) => (
@@ -633,7 +712,10 @@ function ActorPresence({ visual }: { visual: ActorVisual }) {
         </div>
       )}
 
-      {/* Cursor and flag. */}
+      {/* Cursor and flag. The flag's key restarts its CSS lifecycle while the
+          actor is actively moving (new 800 ms activity bucket ⇒ restart), so a
+          working actor's label stays visible and a settled actor's label
+          decays away ~3.6 s after the last movement — no JS timer needed. */}
       <div
         className="spectra-presence-cursor"
         data-mode={mode}
@@ -649,6 +731,7 @@ function ActorPresence({ visual }: { visual: ActorVisual }) {
           <CursorGlyph mode={mode} pressed={pressing} />
         )}
         <span
+          key={Math.floor(state.at / PRESENCE_LABEL_BUCKET_MS)}
           className="spectra-presence-flag"
           data-ai={isAi ? "true" : undefined}
         >

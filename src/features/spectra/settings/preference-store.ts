@@ -14,7 +14,9 @@ import { spectraBus } from "../events";
 export const SPECTRA_PREFERENCES_STORAGE_KEY = "spectra:preferences:v2";
 const LEGACY_KEYS = ["spectra:preferences:v1", "spectra-preferences"];
 
-export function readDevicePreferences(storage: Pick<Storage, "getItem">): SpectraPreferences {
+export function readDevicePreferences(
+  storage: Pick<Storage, "getItem">,
+): SpectraPreferences {
   const resolveDevice = (value: unknown) => {
     const migrated = migratePreferences(value);
     const { version: _version, ...values } = migrated;
@@ -51,13 +53,21 @@ function applyDocumentPreferences(preferences: SpectraPreferences) {
   const root = document.documentElement;
   root.dataset.spectraDensity = preferences.appearance.density;
   root.dataset.spectraContrast =
-    preferences.appearance.contrast === "high" || preferences.accessibility.highContrast
+    preferences.appearance.contrast === "high" ||
+    preferences.accessibility.highContrast
       ? "high"
       : "standard";
   root.dataset.spectraMotion =
-    preferences.appearance.reducedMotion || preferences.accessibility.reducedMotion
+    preferences.appearance.reducedMotion ||
+    preferences.accessibility.reducedMotion
       ? "reduced"
       : preferences.appearance.motionLevel;
+  root.dataset.spectraStreamingReveal = preferences.appearance.streamingReveal
+    ? "true"
+    : "false";
+  root.dataset.spectraTailShimmer = preferences.appearance.activeTailShimmer
+    ? "true"
+    : "false";
   root.dataset.spectraEditorText = preferences.appearance.editorTextScale;
   root.dataset.spectraInterfaceText = preferences.appearance.interfaceTextScale;
   root.dataset.spectraFocus = preferences.accessibility.alwaysVisibleFocus
@@ -99,6 +109,9 @@ export function useSpectraPreferences() {
     [],
   );
 
-  const reset = useCallback(() => replace(DEFAULT_SPECTRA_PREFERENCES), [replace]);
+  const reset = useCallback(
+    () => replace(DEFAULT_SPECTRA_PREFERENCES),
+    [replace],
+  );
   return { preferences, hydrated, update, replace, reset };
 }

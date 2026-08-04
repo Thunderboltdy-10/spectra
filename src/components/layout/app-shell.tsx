@@ -540,7 +540,7 @@ function ShellNavigation() {
             if (!rows.length) return null;
             return (
               <section key={String(pinned)} className="mt-3">
-                <h2 className={cn("px-1 text-[10px] font-semibold uppercase tracking-[.1em] text-[var(--text-tertiary)]", sidebarCollapsed && "sr-only")}>
+                <h2 className={cn("px-1 text-micro font-semibold uppercase tracking-[.1em] text-[var(--text-tertiary)]", sidebarCollapsed && "sr-only")}>
                   {pinned ? "Pinned" : "Recents"}
                 </h2>
                 <div className="mt-1 space-y-0.5">
@@ -559,7 +559,7 @@ function ShellNavigation() {
                       <span className={cn("min-w-0 flex-1 truncate", sidebarCollapsed && "sr-only")}>
                         {thread.title}
                       </span>
-                      <span className={cn("shrink-0 text-[8.5px] tabular-nums text-[var(--text-tertiary)]", sidebarCollapsed && "hidden")}>
+                      <span className={cn("shrink-0 text-micro tabular-nums text-[var(--text-tertiary)]", sidebarCollapsed && "hidden")}>
                         {formatRelativeTime(
                           thread.lastMessageAt ?? thread.updatedAt,
                         )}
@@ -571,7 +571,7 @@ function ShellNavigation() {
             );
           })}
           <section className="mt-3" aria-label="Workspaces">
-            <h2 className={cn("px-1 text-[10px] font-semibold uppercase tracking-[.1em] text-[var(--text-tertiary)]", sidebarCollapsed && "sr-only")}>Workspaces</h2>
+            <h2 className={cn("px-1 text-micro font-semibold uppercase tracking-[.1em] text-[var(--text-tertiary)]", sidebarCollapsed && "sr-only")}>Workspaces</h2>
             <div className="mt-1 space-y-0.5">
               {workspaces.map((workspace, index) => {
                 const Icon = workspaceIcon(workspace);
@@ -594,7 +594,7 @@ function ShellNavigation() {
             <button
               type="button"
               onClick={() => void refreshWorkspaces(true)}
-              className="mt-3 w-full rounded-[6px] px-2 py-2 text-left text-[10px] text-[var(--danger)] hover:bg-[var(--bg-hover)]"
+              className="mt-3 w-full rounded-[6px] px-2 py-2 text-left text-micro text-[var(--danger)] hover:bg-[var(--bg-hover)]"
             >
               Workspaces unavailable · Retry
             </button>
@@ -623,7 +623,7 @@ function ShellNavigation() {
             >
               <Bell size={15} />
               {unreadCount ? (
-                <span className="absolute right-0 top-0 grid min-w-3.5 place-items-center rounded-full bg-[var(--danger)] px-0.5 text-[7px] leading-3.5 text-white">
+                <span className="absolute right-0 top-0 grid min-w-3.5 place-items-center rounded-full bg-[var(--danger)] px-0.5 text-micro leading-3.5 text-white">
                   {unreadCount}
                 </span>
               ) : null}
@@ -646,7 +646,7 @@ function ShellNavigation() {
               className="mt-2 flex w-full items-center gap-2 rounded-[7px] px-1 py-1 text-left hover:bg-[var(--bg-secondary)]"
               aria-label="Manage account"
             >
-              <span className="grid size-8 shrink-0 place-items-center overflow-hidden rounded-[7px] bg-[#d8d0fa] text-[10px] font-semibold text-[#3e327f]">
+              <span className="grid size-8 shrink-0 place-items-center overflow-hidden rounded-[7px] bg-[#d8d0fa] text-micro font-semibold text-[#3e327f]">
                 {administrationIdentity.account.avatarUrl ? (
                   // External Clerk avatar URLs; next/image would need a broad remotePatterns allowlist.
                   // eslint-disable-next-line @next/next/no-img-element
@@ -665,10 +665,10 @@ function ShellNavigation() {
                 )}
               </span>
               <span className={cn("min-w-0 flex-1", sidebarCollapsed && "sr-only")}>
-                <strong className="block truncate text-[10px] font-semibold text-[var(--text-primary)]">
+                <strong className="block truncate text-micro font-semibold text-[var(--text-primary)]">
                   {administrationIdentity.account.name}
                 </strong>
-                <span className="block truncate text-[8.5px] capitalize text-[var(--text-tertiary)]">
+                <span className="block truncate text-micro capitalize text-[var(--text-tertiary)]">
                   {administrationIdentity.membership.role.replace("_", " ")}
                 </span>
               </span>
@@ -679,7 +679,7 @@ function ShellNavigation() {
               <header className="flex items-center justify-between border-b border-[var(--border-subtle)] px-4 py-3">
                 <div>
                   <strong className="text-[12px]">Notifications</strong>
-                  <p className="text-[9px] text-[var(--text-tertiary)]">
+                  <p className="text-micro text-[var(--text-tertiary)]">
                     Shares, comments, tasks, and reminders
                   </p>
                 </div>
@@ -687,7 +687,7 @@ function ShellNavigation() {
                   type="button"
                   disabled={!unreadCount}
                   onClick={() => void markAllNotificationsRead()}
-                  className="flex h-7 items-center gap-1 rounded-[6px] px-2 text-[9px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-35"
+                  className="flex h-7 items-center gap-1 rounded-[6px] px-2 text-micro text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-35"
                 >
                   <CheckCheck size={12} />
                   Mark read
@@ -709,10 +709,10 @@ function ShellNavigation() {
                     className="flex gap-2.5 rounded-[7px] px-2.5 py-2 hover:bg-[var(--bg-hover)]"
                   >
                     <span className="min-w-0 flex-1">
-                      <strong className="block truncate text-[10px] font-semibold">
+                      <strong className="block truncate text-micro font-semibold">
                         {item.title}
                       </strong>
-                      <span className="mt-0.5 block line-clamp-2 text-[9px] leading-3.5 text-[var(--text-secondary)]">
+                      <span className="mt-0.5 block line-clamp-2 text-micro leading-3.5 text-[var(--text-secondary)]">
                         {item.detail}
                       </span>
                     </span>
@@ -722,7 +722,7 @@ function ShellNavigation() {
                   </Link>
                 ))}
                 {!notifications.length && !notificationsLoading ? (
-                  <p className="px-4 py-8 text-center text-[10px] text-[var(--text-tertiary)]">
+                  <p className="px-4 py-8 text-center text-micro text-[var(--text-tertiary)]">
                     You are all caught up.
                   </p>
                 ) : null}
@@ -779,7 +779,7 @@ function ShellNavigation() {
                 aria-label={label}
                 aria-current={active ? "page" : undefined}
                 className={cn(
-                  "group relative flex h-14 w-14 shrink-0 flex-col items-center justify-center gap-1 rounded-[8px] text-[10px] font-medium outline-none transition-[background,color,transform,box-shadow] duration-200",
+                  "group relative flex h-14 w-14 shrink-0 flex-col items-center justify-center gap-1 rounded-[8px] text-micro font-medium outline-none transition-[background,color,transform,box-shadow] duration-200",
                   active
                     ? "bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[0_2px_8px_rgba(27,20,12,.055)]"
                     : "text-[var(--text-secondary)] hover:-translate-y-px hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
@@ -820,7 +820,7 @@ function ShellNavigation() {
                   aria-label={workspace.title}
                   aria-current={active ? "page" : undefined}
                   className={cn(
-                    "group relative flex w-14 shrink-0 flex-col items-center gap-1 rounded-[8px] px-1 py-2 text-[10px] font-medium outline-none transition-[background,transform,box-shadow] duration-200",
+                    "group relative flex w-14 shrink-0 flex-col items-center gap-1 rounded-[8px] px-1 py-2 text-micro font-medium outline-none transition-[background,transform,box-shadow] duration-200",
                     active
                       ? "bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[0_2px_8px_rgba(27,20,12,.055)]"
                       : "text-[var(--text-secondary)] hover:-translate-y-px hover:bg-[var(--bg-hover)]",
@@ -900,7 +900,7 @@ function ShellNavigation() {
           >
             <Bell size={19} strokeWidth={1.7} />
             {unreadCount ? (
-              <span className="absolute right-1.5 top-1.5 grid min-w-4 place-items-center rounded-full bg-[var(--danger)] px-1 text-[8px] font-bold leading-4 text-white">
+              <span className="absolute right-1.5 top-1.5 grid min-w-4 place-items-center rounded-full bg-[var(--danger)] px-1 text-micro font-bold leading-4 text-white">
                 {unreadCount > 99 ? "99+" : unreadCount}
               </span>
             ) : null}
@@ -913,7 +913,7 @@ function ShellNavigation() {
                   <strong className="text-[13px] text-[var(--text-primary)]">
                     Notifications
                   </strong>
-                  <p className="text-[10px] text-[var(--text-tertiary)]">
+                  <p className="text-micro text-[var(--text-tertiary)]">
                     Shares, comments, tasks, and reminders
                   </p>
                 </div>
@@ -921,7 +921,7 @@ function ShellNavigation() {
                   type="button"
                   disabled={!unreadCount}
                   onClick={() => void markAllNotificationsRead()}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-[8px] px-2 text-[10px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-35"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-[8px] px-2 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-35"
                 >
                   <CheckCheck size={14} /> Mark read
                 </button>
@@ -962,11 +962,11 @@ function ShellNavigation() {
                             <i className="size-1.5 shrink-0 rounded-full bg-[var(--brand-primary)]" />
                           ) : null}
                         </span>
-                        <span className="mt-0.5 block line-clamp-2 text-[10px] leading-4 text-[var(--text-secondary)]">
+                        <span className="mt-0.5 block line-clamp-2 text-micro leading-4 text-[var(--text-secondary)]">
                           {item.detail}
                         </span>
                         <time
-                          className="mt-1 block text-[9px] text-[var(--text-tertiary)]"
+                          className="mt-1 block text-micro text-[var(--text-tertiary)]"
                           suppressHydrationWarning
                         >
                           {new Date(item.createdAt).toLocaleString("en-US")}
@@ -1175,7 +1175,7 @@ function ShellNavigation() {
               href={href}
               aria-current={active ? "page" : undefined}
               className={cn(
-                "flex min-w-[62px] flex-col items-center gap-1 rounded-xl px-2 py-2 text-[10px] font-semibold",
+                "flex min-w-[62px] flex-col items-center gap-1 rounded-xl px-2 py-2 text-micro font-semibold",
                 active
                   ? "text-[var(--brand-primary)]"
                   : "text-[var(--text-tertiary)]",
@@ -1191,7 +1191,7 @@ function ShellNavigation() {
           onClick={() => setMobileWorkspaceOpen((open) => !open)}
           aria-expanded={mobileWorkspaceOpen}
           className={cn(
-            "flex min-w-[62px] flex-col items-center gap-1 rounded-xl px-2 py-2 text-[10px] font-semibold",
+            "flex min-w-[62px] flex-col items-center gap-1 rounded-xl px-2 py-2 text-micro font-semibold",
             selectedWorkspaceId || mobileWorkspaceOpen
               ? "text-[var(--brand-primary)]"
               : "text-[var(--text-tertiary)]",
@@ -1209,7 +1209,7 @@ function ShellNavigation() {
           }}
           aria-expanded={notificationsOpen}
           className={cn(
-            "relative flex min-w-[62px] flex-col items-center gap-1 rounded-xl px-2 py-2 text-[10px] font-semibold",
+            "relative flex min-w-[62px] flex-col items-center gap-1 rounded-xl px-2 py-2 text-micro font-semibold",
             notificationsOpen
               ? "text-[var(--brand-primary)]"
               : "text-[var(--text-tertiary)]",
@@ -1217,7 +1217,7 @@ function ShellNavigation() {
         >
           <Bell size={19} strokeWidth={notificationsOpen ? 2.1 : 1.7} />
           {unreadCount ? (
-            <span className="absolute right-3 top-1 grid min-w-4 place-items-center rounded-full bg-[var(--danger)] px-1 text-[8px] font-bold leading-4 text-white">
+            <span className="absolute right-3 top-1 grid min-w-4 place-items-center rounded-full bg-[var(--danger)] px-1 text-micro font-bold leading-4 text-white">
               {unreadCount > 99 ? "99+" : unreadCount}
             </span>
           ) : null}

@@ -407,7 +407,7 @@ export function SettingsApplication({ initialSection = "general" }: { initialSec
         <aside className="lg:sticky lg:top-8 lg:self-start">
           <div className="mb-5 flex items-end justify-between gap-4 lg:block">
             <div>
-              <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[var(--accent)]">Spectra controls</div>
+              <div className="text-micro font-bold uppercase tracking-[0.18em] text-[var(--accent)]">Spectra controls</div>
               <h1 className="mt-2 font-display text-[28px] font-semibold tracking-[-0.02em] text-[var(--text-primary)]">Settings</h1>
               <p className="mt-2 max-w-[230px] text-[12px] leading-5 text-[var(--text-secondary)]">Simple choices on the surface, capable policies underneath.</p>
             </div>

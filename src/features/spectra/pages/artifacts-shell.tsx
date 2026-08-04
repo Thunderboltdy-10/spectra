@@ -81,6 +81,10 @@ import {
   disengageFollowAi,
   isProgrammaticOpen,
 } from "../collaboration/follow-ai";
+import {
+  disengageFollow,
+  isProgrammaticFollowOpen,
+} from "../collaboration/follow";
 import { ShareDialog } from "../components/share-dialog";
 import {
   artifactPlacements,
@@ -107,7 +111,11 @@ import {
   type SpectraShareInvitation,
 } from "../data/api";
 import type { ArtifactTypeKey } from "../artifacts/types";
-import { readSharedWorkbenchSession, updateWorkbenchSurface, writeSharedWorkbenchSession } from "../workbench";
+import {
+  readSharedWorkbenchSession,
+  updateWorkbenchSurface,
+  writeSharedWorkbenchSession,
+} from "../workbench";
 
 type ArtifactMode = "list" | "board" | "canvas";
 type ArtifactSort =
@@ -172,12 +180,18 @@ function useOutsideClick<T extends HTMLElement>(
   return ref;
 }
 
-export function ArtifactsShell({ initialArtifactId }: { initialArtifactId?: string } = {}) {
+export function ArtifactsShell({
+  initialArtifactId,
+}: { initialArtifactId?: string } = {}) {
   const searchParams = useSearchParams();
-  const requestedArtifactId = initialArtifactId ?? searchParams.get("artifactId");
+  const requestedArtifactId =
+    initialArtifactId ?? searchParams.get("artifactId");
   useEffect(() => {
     const session = readSharedWorkbenchSession(window.localStorage);
-    writeSharedWorkbenchSession(window.localStorage, updateWorkbenchSurface(session, "library"));
+    writeSharedWorkbenchSession(
+      window.localStorage,
+      updateWorkbenchSurface(session, "library"),
+    );
   }, []);
   const requestedCollection = searchParams.get("collection");
   const [allArtifacts, setAllArtifacts] = useState<SpectraArtifact[]>([]);
@@ -187,8 +201,16 @@ export function ArtifactsShell({ initialArtifactId }: { initialArtifactId?: stri
     "all",
   );
   const [collection, setCollection] = useState<ArtifactCollection>(
-    ["all", "unplaced", "shared", "recent", "favorites", "collections", "invitations"].includes(requestedCollection ?? "")
-      ? requestedCollection as ArtifactCollection
+    [
+      "all",
+      "unplaced",
+      "shared",
+      "recent",
+      "favorites",
+      "collections",
+      "invitations",
+    ].includes(requestedCollection ?? "")
+      ? (requestedCollection as ArtifactCollection)
       : "all",
   );
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
@@ -238,8 +260,13 @@ export function ArtifactsShell({ initialArtifactId }: { initialArtifactId?: stri
 
   useEffect(() => {
     try {
-      const value = JSON.parse(window.localStorage.getItem("spectra.library.favorites.v1") ?? "[]");
-      if (Array.isArray(value)) setFavoriteIds(new Set(value.filter((id): id is string => typeof id === "string")));
+      const value = JSON.parse(
+        window.localStorage.getItem("spectra.library.favorites.v1") ?? "[]",
+      );
+      if (Array.isArray(value))
+        setFavoriteIds(
+          new Set(value.filter((id): id is string => typeof id === "string")),
+        );
     } catch {
       setFavoriteIds(new Set());
     }
@@ -250,7 +277,10 @@ export function ArtifactsShell({ initialArtifactId }: { initialArtifactId?: stri
       const next = new Set(current);
       if (next.has(workId)) next.delete(workId);
       else next.add(workId);
-      window.localStorage.setItem("spectra.library.favorites.v1", JSON.stringify([...next]));
+      window.localStorage.setItem(
+        "spectra.library.favorites.v1",
+        JSON.stringify([...next]),
+      );
       return next;
     });
   }, []);
@@ -665,7 +695,10 @@ export function ArtifactsShell({ initialArtifactId }: { initialArtifactId?: stri
   const openArtifactSurface = useCallback(
     (artifact: SpectraArtifact) => {
       // A user-chosen open ends spectating; a follow-dispatched open does not.
-      if (!isProgrammaticOpen()) disengageFollowAi();
+      if (!isProgrammaticOpen() && !isProgrammaticFollowOpen()) {
+        disengageFollowAi();
+        disengageFollow("user_input");
+      }
       if (artifact.blueprintKey === "thread_reference") {
         const content =
           artifact.content && typeof artifact.content === "object"
@@ -823,11 +856,22 @@ export function ArtifactsShell({ initialArtifactId }: { initialArtifactId?: stri
     return allArtifacts
       .filter((artifact) => {
         if (collection === "invitations") return false;
-        if (collection === "shared" && artifact.ownership !== "shared") return false;
-        if (collection === "unplaced" && artifactPlacements(artifact).length > 0) return false;
-        if (collection === "recent" && Date.now() - artifact.updatedAt > 1000 * 60 * 60 * 24 * 30) return false;
-        if (collection === "favorites" && !favoriteIds.has(artifact._id)) return false;
-        if (collection === "collections" && artifact.tags.length === 0) return false;
+        if (collection === "shared" && artifact.ownership !== "shared")
+          return false;
+        if (
+          collection === "unplaced" &&
+          artifactPlacements(artifact).length > 0
+        )
+          return false;
+        if (
+          collection === "recent" &&
+          Date.now() - artifact.updatedAt > 1000 * 60 * 60 * 24 * 30
+        )
+          return false;
+        if (collection === "favorites" && !favoriteIds.has(artifact._id))
+          return false;
+        if (collection === "collections" && artifact.tags.length === 0)
+          return false;
         if (activeFilter !== "all" && artifact.blueprintKey !== activeFilter)
           return false;
         if (
@@ -941,11 +985,15 @@ export function ArtifactsShell({ initialArtifactId }: { initialArtifactId?: stri
 
   async function importLibraryFile(file: File) {
     const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
-    const blueprintKey: ArtifactTypeKey =
-      ["ppt", "pptx"].includes(extension) ? "presentation"
-        : ["xls", "xlsx", "csv", "tsv"].includes(extension) ? "sheets"
-          : ["js", "jsx", "ts", "tsx", "py", "html", "css", "json"].includes(extension) ? "code"
-            : "document";
+    const blueprintKey: ArtifactTypeKey = ["ppt", "pptx"].includes(extension)
+      ? "presentation"
+      : ["xls", "xlsx", "csv", "tsv"].includes(extension)
+        ? "sheets"
+        : ["js", "jsx", "ts", "tsx", "py", "html", "css", "json"].includes(
+              extension,
+            )
+          ? "code"
+          : "document";
     const fallback = createDefaultArtifactPayload(blueprintKey);
     const title = file.name.replace(/\.[^.]+$/, "") || fallback.title;
     let importJobId: string | null = null;
@@ -960,8 +1008,13 @@ export function ArtifactsShell({ initialArtifactId }: { initialArtifactId?: stri
         tags: ["imported"],
         source: "manual",
       });
-      const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
-      const sha256 = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+      const digest = await crypto.subtle.digest(
+        "SHA-256",
+        await file.arrayBuffer(),
+      );
+      const sha256 = [...new Uint8Array(digest)]
+        .map((byte) => byte.toString(16).padStart(2, "0"))
+        .join("");
       const beginning = await beginArtifactImportOriginal({
         artifactId: created.artifactId,
         typeKey: blueprintKey,
@@ -977,18 +1030,37 @@ export function ArtifactsShell({ initialArtifactId }: { initialArtifactId?: stri
         jobId: beginning.jobId,
         typeKey: blueprintKey,
         status: "imported",
-        fidelityReport: [{ scope: "original", level: "exact", message: "Original file preserved for the work editor import pipeline." }],
+        fidelityReport: [
+          {
+            scope: "original",
+            level: "exact",
+            message:
+              "Original file preserved for the work editor import pipeline.",
+          },
+        ],
         unsupportedFeatures: [],
         importedContent: fallback.content,
       });
-      await postSpectra({ action: "createArtifactImportVersion", artifactId: created.artifactId, importJobId: beginning.jobId });
+      await postSpectra({
+        action: "createArtifactImportVersion",
+        artifactId: created.artifactId,
+        importJobId: beginning.jobId,
+      });
       const refreshed = await load(true);
-      const imported = refreshed?.find((work) => work._id === created.artifactId);
+      const imported = refreshed?.find(
+        (work) => work._id === created.artifactId,
+      );
       if (imported) openArtifactSurface(imported);
       toast.success(`${title} imported to Library.`);
     } catch (error) {
-      if (importJobId) await abortArtifactImportUpload(importJobId, "Library import failed").catch(() => undefined);
-      toast.error(error instanceof Error ? error.message : "Could not import this file.");
+      if (importJobId)
+        await abortArtifactImportUpload(
+          importJobId,
+          "Library import failed",
+        ).catch(() => undefined);
+      toast.error(
+        error instanceof Error ? error.message : "Could not import this file.",
+      );
     } finally {
       setBusyKey(null);
       if (importInputRef.current) importInputRef.current.value = "";
@@ -1204,10 +1276,20 @@ export function ArtifactsShell({ initialArtifactId }: { initialArtifactId?: stri
         type="button"
         className={`flex h-8 w-8 items-center justify-center rounded-[7px] hover:bg-[var(--bg-hover)] ${favoriteIds.has(artifact._id) ? "text-[#b66c31]" : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"}`}
         onClick={() => toggleFavorite(artifact._id)}
-        aria-label={favoriteIds.has(artifact._id) ? "Remove from favorites" : "Add to favorites"}
-        title={favoriteIds.has(artifact._id) ? "Remove from favorites" : "Add to favorites"}
+        aria-label={
+          favoriteIds.has(artifact._id)
+            ? "Remove from favorites"
+            : "Add to favorites"
+        }
+        title={
+          favoriteIds.has(artifact._id)
+            ? "Remove from favorites"
+            : "Add to favorites"
+        }
       >
-        <Heart className={`h-3.5 w-3.5 ${favoriteIds.has(artifact._id) ? "fill-current" : ""}`} />
+        <Heart
+          className={`h-3.5 w-3.5 ${favoriteIds.has(artifact._id) ? "fill-current" : ""}`}
+        />
       </button>
     );
     if (!firstPlacement) {
@@ -1378,8 +1460,8 @@ export function ArtifactsShell({ initialArtifactId }: { initialArtifactId?: stri
                   Delete {artifactDeletePending.title}?
                 </h2>
                 <p className="mt-2 text-[13px] leading-5 text-[var(--text-secondary)]">
-                  This work item, its placements, version history, and linked run
-                  history will be permanently removed.
+                  This work item, its placements, version history, and linked
+                  run history will be permanently removed.
                 </p>
                 <div className="mt-5 flex justify-end gap-2">
                   <button
@@ -1480,11 +1562,21 @@ export function ArtifactsShell({ initialArtifactId }: { initialArtifactId?: stri
                         Library
                       </h1>
                       <p className="mt-3 text-[14px] text-[var(--text-secondary)]">
-                        Find, organize, receive, and open work across every workspace.
+                        Find, organize, receive, and open work across every
+                        workspace.
                       </p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
-                      <input ref={importInputRef} type="file" className="sr-only" accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.csv,.tsv,.txt,.md,.js,.jsx,.ts,.tsx,.py,.html,.css,.json" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importLibraryFile(file); }} />
+                      <input
+                        ref={importInputRef}
+                        type="file"
+                        className="sr-only"
+                        accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.csv,.tsv,.txt,.md,.js,.jsx,.ts,.tsx,.py,.html,.css,.json"
+                        onChange={(event) => {
+                          const file = event.target.files?.[0];
+                          if (file) void importLibraryFile(file);
+                        }}
+                      />
                       <div className="relative w-[280px] max-w-full">
                         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-tertiary)]" />
                         <input
@@ -1493,7 +1585,7 @@ export function ArtifactsShell({ initialArtifactId }: { initialArtifactId?: stri
                           className="h-9 w-full rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] pl-9 pr-12 text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
                           placeholder="Search work"
                         />
-                        <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-[var(--text-tertiary)]">
+                        <span className="absolute right-2 top-1/2 -translate-y-1/2 text-micro text-[var(--text-tertiary)]">
                           Filter
                         </span>
                       </div>
@@ -1521,8 +1613,17 @@ export function ArtifactsShell({ initialArtifactId }: { initialArtifactId?: stri
                         selectedWorkspaceId={selectedWorkspaceId}
                         onSelect={setSelectedWorkspaceId}
                       />
-                      <button type="button" className={buttonClass()} disabled={busyKey === "library:import"} onClick={() => importInputRef.current?.click()}>
-                        {busyKey === "library:import" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                      <button
+                        type="button"
+                        className={buttonClass()}
+                        disabled={busyKey === "library:import"}
+                        onClick={() => importInputRef.current?.click()}
+                      >
+                        {busyKey === "library:import" ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Upload className="h-4 w-4" />
+                        )}
                         Import
                       </button>
                       <div className="relative" ref={createMenuRef}>
@@ -1586,7 +1687,9 @@ export function ArtifactsShell({ initialArtifactId }: { initialArtifactId?: stri
                       {
                         key: "unplaced" as const,
                         label: "Unplaced",
-                        count: allArtifacts.filter((work) => artifactPlacements(work).length === 0).length,
+                        count: allArtifacts.filter(
+                          (work) => artifactPlacements(work).length === 0,
+                        ).length,
                         icon: FolderInput,
                       },
                       {
@@ -1600,7 +1703,11 @@ export function ArtifactsShell({ initialArtifactId }: { initialArtifactId?: stri
                       {
                         key: "recent" as const,
                         label: "Recent",
-                        count: allArtifacts.filter((work) => Date.now() - work.updatedAt <= 1000 * 60 * 60 * 24 * 30).length,
+                        count: allArtifacts.filter(
+                          (work) =>
+                            Date.now() - work.updatedAt <=
+                            1000 * 60 * 60 * 24 * 30,
+                        ).length,
                         icon: Clock3,
                       },
                       {
@@ -1612,7 +1719,9 @@ export function ArtifactsShell({ initialArtifactId }: { initialArtifactId?: stri
                       {
                         key: "collections" as const,
                         label: "Collections",
-                        count: new Set(allArtifacts.flatMap((work) => work.tags)).size,
+                        count: new Set(
+                          allArtifacts.flatMap((work) => work.tags),
+                        ).size,
                         icon: Tags,
                       },
                       {
@@ -1640,7 +1749,7 @@ export function ArtifactsShell({ initialArtifactId }: { initialArtifactId?: stri
                           <Icon className="h-3.5 w-3.5" />
                           <span>{item.label}</span>
                           {item.count > 0 ? (
-                            <span className="min-w-5 rounded-[5px] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-center text-[10px] text-[var(--text-secondary)]">
+                            <span className="min-w-5 rounded-[5px] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-center text-micro text-[var(--text-secondary)]">
                               {item.count}
                             </span>
                           ) : null}
@@ -1951,8 +2060,7 @@ export function ArtifactsShell({ initialArtifactId }: { initialArtifactId?: stri
                 artifacts={allArtifacts}
                 cards={runEngine.cards}
                 assistantContent={
-                  runEngine.liveExchange?.content ??
-                  runEngine.cards[0]?.summary
+                  runEngine.liveExchange?.content ?? runEngine.cards[0]?.summary
                 }
                 onOpen={(artifactId) => {
                   const artifact = allArtifacts.find(
@@ -2047,7 +2155,9 @@ export function ArtifactsShell({ initialArtifactId }: { initialArtifactId?: stri
                 busy={runEngine.submitting}
                 allowConcurrent={!composerThread}
                 onStop={runEngine.stop}
-                activeRunId={runEngine.liveExchange?.runId ?? composerThread?.runId}
+                activeRunId={
+                  runEngine.liveExchange?.runId ?? composerThread?.runId
+                }
                 onSteer={runEngine.steer}
                 onStartNewThread={() => setComposerThread(null)}
                 context={
@@ -2287,8 +2397,8 @@ function InvitationInbox({
             No pending invitations
           </h2>
           <p className="mt-2 text-[13px] leading-6 text-[var(--text-secondary)]">
-            New work and workspace invitations will wait here until you
-            accept or decline them.
+            New work and workspace invitations will wait here until you accept
+            or decline them.
           </p>
         </div>
       </div>
@@ -2335,7 +2445,7 @@ function InvitationInbox({
                     <h3 className="truncate font-display text-[18px] font-semibold text-[var(--text-primary)]">
                       {invitation.resource.title}
                     </h3>
-                    <span className="rounded-[5px] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--text-secondary)]">
+                    <span className="rounded-[5px] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-micro font-medium text-[var(--text-secondary)]">
                       {invitation.resourceType === "workspace"
                         ? "Workspace"
                         : (artifactMeta?.label ?? "Work")}
@@ -2712,7 +2822,7 @@ function ArtifactsCanvas({
         <button
           type="button"
           onClick={() => resetCanvas(1)}
-          className="flex h-8 items-center gap-1.5 rounded-[7px] px-2.5 text-[10px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+          className="flex h-8 items-center gap-1.5 rounded-[7px] px-2.5 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
         >
           <Sparkles className="h-3.5 w-3.5" />
           Auto arrange
@@ -2729,7 +2839,7 @@ function ArtifactsCanvas({
         >
           <Minus className="h-3.5 w-3.5" />
         </button>
-        <span className="w-11 text-center text-[10px] tabular-nums text-[var(--text-secondary)]">
+        <span className="w-11 text-center text-micro tabular-nums text-[var(--text-secondary)]">
           {Math.round(zoom * 100)}%
         </span>
         <button
@@ -2752,7 +2862,7 @@ function ArtifactsCanvas({
           <Maximize2 className="h-3.5 w-3.5" />
         </button>
         <span className="h-5 w-px bg-[var(--border-subtle)]" />
-        <span className="px-2 text-[10px] text-[var(--text-tertiary)]">
+        <span className="px-2 text-micro text-[var(--text-tertiary)]">
           Clustered by type
         </span>
       </div>
@@ -2778,7 +2888,7 @@ function ArtifactsCanvas({
             >
               <header className="mb-3 flex items-center gap-2 px-1">
                 <span
-                  className="flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-semibold"
+                  className="flex h-6 w-6 items-center justify-center rounded-full text-micro font-semibold"
                   style={{
                     color: cluster.color,
                     background: `color-mix(in oklab, ${cluster.color} 10%, var(--bg-elevated))`,
@@ -2809,7 +2919,7 @@ function ArtifactsCanvas({
                   />
                 ))}
                 {cluster.artifacts.length > 6 ? (
-                  <div className="col-span-full flex h-8 items-center justify-center rounded-[6px] border border-dashed border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_72%,transparent)] text-[10px] text-[var(--text-tertiary)]">
+                  <div className="col-span-full flex h-8 items-center justify-center rounded-[6px] border border-dashed border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_72%,transparent)] text-micro text-[var(--text-tertiary)]">
                     {cluster.artifacts.length - 6} more in this cluster
                   </div>
                 ) : null}

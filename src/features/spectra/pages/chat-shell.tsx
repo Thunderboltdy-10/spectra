@@ -25,6 +25,7 @@ import {
 import { toast } from "sonner";
 import { AnimatePresence, motion } from "framer-motion";
 import { useSpectraContextStore } from "@/stores/spectra-context-store";
+import { SpectraMark } from "@/components/spectra-mark";
 import { useSpectraRun } from "../ai/use-spectra-run";
 import { useSpectraContext } from "../hooks/use-spectra-context";
 import { ConversationSurface } from "../components/conversation-surface";
@@ -40,6 +41,10 @@ import {
   useArtifactStudioState,
 } from "../components/artifact-studio";
 import { LiveThreadPanel } from "../components/live-thread-panel";
+import {
+  disengageFollow,
+  isProgrammaticFollowOpen,
+} from "../collaboration/follow";
 import {
   disengageFollowAi,
   isProgrammaticOpen,
@@ -283,7 +288,10 @@ export function ChatShell() {
   const openArtifact = useCallback(
     (artifactId: string) => {
       // A user-chosen open ends spectating; a follow-dispatched open does not.
-      if (!isProgrammaticOpen()) disengageFollowAi();
+      if (!isProgrammaticOpen() && !isProgrammaticFollowOpen()) {
+        disengageFollowAi();
+        disengageFollow("user_input");
+      }
       const artifact = artifacts.find((item) => item._id === artifactId);
       if (!artifact) {
         // Result cards can arrive before the broad overview projection includes a
@@ -488,7 +496,12 @@ export function ChatShell() {
       activeRunId={
         runEngine.liveExchange?.runId ??
         detail?.traces.find((trace) =>
-          ["queued", "running", "awaiting_confirmation", "awaiting_resolution"].includes(trace.run.status),
+          [
+            "queued",
+            "running",
+            "awaiting_confirmation",
+            "awaiting_resolution",
+          ].includes(trace.run.status),
         )?.run._id
       }
       onSteer={runEngine.steer}
@@ -570,7 +583,7 @@ export function ChatShell() {
                 {visibleTitle}
               </motion.div>
             </AnimatePresence>
-            <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
+            <div className="text-micro uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
               Thread · Shared Spectra conversation
             </div>
           </div>
@@ -743,6 +756,9 @@ export function ChatShell() {
           onRetryRun={runEngine.retry}
           empty={
             <div className="mx-auto flex min-h-[clamp(420px,50vh,620px)] w-full max-w-[820px] flex-col justify-center py-8 text-left">
+              <div className="mb-7 flex h-12 w-12 items-center justify-center rounded-[14px] border border-[color-mix(in_oklab,var(--brand-primary)_14%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--brand-primary)_5%,var(--bg-elevated))] shadow-[0_10px_30px_color-mix(in_oklab,var(--brand-primary)_14%,transparent)]">
+                <SpectraMark size={28} />
+              </div>
               <h1 className="max-w-[820px] font-display text-[42px] font-semibold leading-[1.08] tracking-[-0.03em] text-[var(--text-primary)]">
                 {welcome}
               </h1>
@@ -793,7 +809,7 @@ export function ChatShell() {
                               {workspace.description ??
                                 `${count} objects ready as context`}
                             </span>
-                            <span className="mt-2 flex items-center gap-1 text-[10px] font-medium text-[var(--text-tertiary)]">
+                            <span className="mt-2 flex items-center gap-1 text-micro font-medium text-[var(--text-tertiary)]">
                               {selected
                                 ? "Context selected"
                                 : `Start here · ${count} objects`}
@@ -888,13 +904,13 @@ export function ChatShell() {
                 <span className="min-w-0 flex-1 truncate text-[11px] font-medium">
                   {thread.title}
                 </span>
-                <span className="text-[9px] text-[var(--text-tertiary)]">
+                <span className="text-micro text-[var(--text-tertiary)]">
                   {thread.messageCount ?? 0}
                 </span>
               </button>
             ))}
           </div>
-          <div className="border-t border-[var(--border-subtle)] pt-3 text-[10px] font-semibold uppercase tracking-[0.11em] text-[var(--text-tertiary)]">
+          <div className="border-t border-[var(--border-subtle)] pt-3 text-micro font-semibold uppercase tracking-[0.11em] text-[var(--text-tertiary)]">
             All runs
           </div>
           <div className="mt-2 space-y-1.5">
@@ -907,7 +923,7 @@ export function ChatShell() {
                   <Clock3 className="h-3 w-3" />
                   {card.title}
                 </div>
-                <div className="mt-1 line-clamp-2 text-[10px] leading-4 text-[var(--text-tertiary)]">
+                <div className="mt-1 line-clamp-2 text-micro leading-4 text-[var(--text-tertiary)]">
                   {card.summary}
                 </div>
               </div>

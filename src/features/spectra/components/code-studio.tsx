@@ -2102,7 +2102,7 @@ export function CodeStudio({
           <span
             className={`h-2 w-2 rounded-full ${runState === "ready" ? "bg-[var(--success)]" : runState === "error" || runState === "limited" ? "bg-[var(--danger)]" : runState === "loading" || runState === "running" || runState === "building" ? "animate-pulse bg-[var(--accent-cyan)] motion-reduce:animate-none" : "bg-[var(--text-tertiary)]"}`}
           />
-          <span className="truncate text-[10px] font-medium text-[var(--text-primary)]">
+          <span className="truncate text-micro font-medium text-[var(--text-primary)]">
             {runMessage}
           </span>
         </div>
@@ -2206,7 +2206,7 @@ export function CodeStudio({
           />
         )}
       </div>
-      <div className="flex min-h-10 shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-t border-[var(--border-subtle)] px-3 py-2 text-[9px] text-[var(--text-secondary)]">
+      <div className="flex min-h-10 shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-t border-[var(--border-subtle)] px-3 py-2 text-micro text-[var(--text-secondary)]">
         <span className="inline-flex items-center gap-1">
           <ShieldCheck className="h-3 w-3 text-[var(--success)]" />
           {workbook.runtime === "python" ||
@@ -2306,7 +2306,7 @@ export function CodeStudio({
         </div>
         <div className="flex items-center gap-1.5">
           <span
-            className="hidden items-center gap-1.5 text-[10px] text-[var(--text-secondary)] lg:inline-flex"
+            className="hidden items-center gap-1.5 text-micro text-[var(--text-secondary)] lg:inline-flex"
             role="status"
             aria-live="polite"
           >
@@ -2520,7 +2520,7 @@ export function CodeStudio({
       {importing ? (
         <div
           role="status"
-          className="flex items-center gap-2 border-b border-[color-mix(in_oklab,var(--accent-cyan)_20%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_5%,var(--bg-primary))] px-4 py-2.5 text-[9px] text-[var(--text-secondary)]"
+          className="flex items-center gap-2 border-b border-[color-mix(in_oklab,var(--accent-cyan)_20%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_5%,var(--bg-primary))] px-4 py-2.5 text-micro text-[var(--text-secondary)]"
         >
           <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-cyan)] motion-reduce:animate-none" />
           Retaining the exact original, then staging safe source into the live
@@ -2541,7 +2541,7 @@ export function CodeStudio({
       {exportJob ? (
         <div
           role="status"
-          className="flex items-center gap-2 border-b border-[color-mix(in_oklab,var(--accent-violet)_20%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-violet)_5%,var(--bg-primary))] px-4 py-2.5 text-[9px] text-[var(--text-secondary)]"
+          className="flex items-center gap-2 border-b border-[color-mix(in_oklab,var(--accent-violet)_20%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-violet)_5%,var(--bg-primary))] px-4 py-2.5 text-micro text-[var(--text-secondary)]"
         >
           <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-violet)] motion-reduce:animate-none" />
           Preparing a sanitized {exportJob.target.toUpperCase()} from the
@@ -2672,11 +2672,11 @@ export function CodeStudio({
                     <>
                       <span className="mx-1 h-4 w-px bg-[var(--border-subtle)]" />
                       <FileCode2 className="h-3.5 w-3.5 text-[var(--accent-cyan)]" />
-                      <span className="max-w-32 truncate text-[9px] font-semibold text-[var(--text-primary)]">
+                      <span className="max-w-32 truncate text-micro font-semibold text-[var(--text-primary)]">
                         {activeFile.path}
                       </span>
                       {workbook.entryFileId === activeFile.id ? (
-                        <span className="rounded-full bg-[color-mix(in_oklab,var(--success)_10%,transparent)] px-1.5 py-0.5 text-[7px] font-bold uppercase tracking-[.09em] text-[var(--success)]">
+                        <span className="rounded-full bg-[color-mix(in_oklab,var(--success)_10%,transparent)] px-1.5 py-0.5 text-micro font-bold uppercase tracking-[.09em] text-[var(--success)]">
                           Entry
                         </span>
                       ) : null}
@@ -2722,7 +2722,7 @@ export function CodeStudio({
                     ) : null}
                   </div>
                 ) : (
-                  <span className="text-[8px] text-[var(--text-tertiary)]">
+                  <span className="text-micro text-[var(--text-tertiary)]">
                     Updates stream into the running preview
                   </span>
                 )}
@@ -2753,7 +2753,7 @@ export function CodeStudio({
                               ? "Search all source files"
                               : "Filter files by path"
                           }
-                          className="h-7 min-w-0 flex-1 bg-transparent text-[9px] outline-none"
+                          className="h-7 min-w-0 flex-1 bg-transparent text-micro outline-none"
                         />
                       </div>
                       <button
@@ -2793,7 +2793,7 @@ export function CodeStudio({
                       </button>
                     </div>
                     <div className="min-h-0 flex-1 overflow-auto px-1.5 py-2">
-                      <div className="mb-1 flex items-center gap-1 px-1.5 py-1 text-[8px] font-bold uppercase tracking-[.1em] text-[var(--text-tertiary)]">
+                      <div className="mb-1 flex items-center gap-1 px-1.5 py-1 text-micro font-bold uppercase tracking-[.1em] text-[var(--text-tertiary)]">
                         {fileSearchMode === "content" ? (
                           <Search className="h-3 w-3" />
                         ) : (
@@ -2829,7 +2829,7 @@ export function CodeStudio({
                                     setFileRailOpen(false);
                                   }}
                                 >
-                                  <span className="flex items-center gap-1 text-[8px] font-semibold text-[var(--text-primary)]">
+                                  <span className="flex items-center gap-1 text-micro font-semibold text-[var(--text-primary)]">
                                     <FileCode2 className="h-3 w-3 shrink-0 text-[var(--accent-cyan)]" />
                                     <span className="min-w-0 flex-1 truncate">
                                       {result.path}
@@ -2838,13 +2838,13 @@ export function CodeStudio({
                                       {result.line}:{result.column + 1}
                                     </span>
                                   </span>
-                                  <span className="mt-0.5 block truncate font-mono text-[8px] leading-3 text-[var(--text-secondary)]">
+                                  <span className="mt-0.5 block truncate font-mono text-micro leading-3 text-[var(--text-secondary)]">
                                     {result.snippet || "Blank line"}
                                   </span>
                                 </button>
                               ))}
                               {projectSearchResults.length >= 250 ? (
-                                <p className="px-2 py-1 text-[8px] text-[var(--text-tertiary)]">
+                                <p className="px-2 py-1 text-micro text-[var(--text-tertiary)]">
                                   Showing the first 250 matches. Refine the
                                   search to locate a specific symbol or phrase.
                                 </p>
@@ -2854,7 +2854,7 @@ export function CodeStudio({
                             <EmptyOutput text="No source matches in this artifact." />
                           )
                         ) : (
-                          <p className="px-2 py-3 text-[8px] leading-4 text-[var(--text-tertiary)]">
+                          <p className="px-2 py-3 text-micro leading-4 text-[var(--text-tertiary)]">
                             Search every editable source file. Results open at
                             the exact line without changing the running preview.
                           </p>
@@ -2875,7 +2875,7 @@ export function CodeStudio({
                               key={file.id}
                               data-ai-region={aiRegionAttr(fileHasAiEffect)}
                               {...targetAttrs(`/files/${fileIndex}`)}
-                              className={`group flex min-h-7 items-center gap-1.5 rounded-[6px] px-1.5 text-[9px] ${selected ? "bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-[0_1px_4px_rgba(30,25,20,.06)]" : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}
+                              className={`group flex min-h-7 items-center gap-1.5 rounded-[6px] px-1.5 text-micro ${selected ? "bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-[0_1px_4px_rgba(30,25,20,.06)]" : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}
                             >
                               <button
                                 type="button"
@@ -2932,7 +2932,7 @@ export function CodeStudio({
                       )}
                       {fileSearchMode === "paths" && newFileOpen ? (
                         <div className="mt-2 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-2">
-                          <label className="text-[8px] font-semibold text-[var(--text-secondary)]">
+                          <label className="text-micro font-semibold text-[var(--text-secondary)]">
                             New path
                           </label>
                           <input
@@ -2946,7 +2946,7 @@ export function CodeStudio({
                               if (event.key === "Escape") setNewFileOpen(false);
                             }}
                             placeholder="src/chart.tsx"
-                            className="mt-1 h-7 w-full rounded-[5px] border border-[var(--border-default)] bg-transparent px-2 text-[9px] outline-none focus:border-[var(--accent-cyan)]"
+                            className="mt-1 h-7 w-full rounded-[5px] border border-[var(--border-default)] bg-transparent px-2 text-micro outline-none focus:border-[var(--accent-cyan)]"
                           />
                           <div className="mt-1.5 flex justify-end gap-1">
                             <button
@@ -2967,7 +2967,7 @@ export function CodeStudio({
                         </div>
                       ) : null}
                     </div>
-                    <div className="flex min-h-9 items-center justify-between border-t border-[var(--border-subtle)] px-2 text-[8px] text-[var(--text-tertiary)]">
+                    <div className="flex min-h-9 items-center justify-between border-t border-[var(--border-subtle)] px-2 text-micro text-[var(--text-tertiary)]">
                       <span>{formatBytes(sourceBytes)}</span>
                       <button
                         type="button"
@@ -3098,7 +3098,7 @@ export function CodeStudio({
                   <span>{workbook.tests.length}</span>
                 ) : null}
               </button>
-              <span className="ml-auto text-[8px] text-[var(--text-tertiary)]">
+              <span className="ml-auto text-micro text-[var(--text-tertiary)]">
                 {runtimeLabel(workbook.runtime)} · {runState}
               </span>
               <button
@@ -3111,7 +3111,7 @@ export function CodeStudio({
               </button>
             </div>
             {panel ? (
-              <div className="max-h-44 overflow-auto border-t border-[var(--border-subtle)] bg-[var(--bg-primary)] p-2 font-mono text-[9px] leading-4">
+              <div className="max-h-44 overflow-auto border-t border-[var(--border-subtle)] bg-[var(--bg-primary)] p-2 font-mono text-micro leading-4">
                 {panel === "problems" ? (
                   problems.length ? (
                     problems.map((problem) => (
@@ -3193,7 +3193,7 @@ export function CodeStudio({
                       key={entry.id}
                       className={`flex gap-2 border-b border-[var(--border-subtle)] px-2 py-1 last:border-0 ${entry.level === "error" ? "text-[var(--danger)]" : entry.level === "warn" ? "text-[var(--warning)]" : "text-[var(--text-secondary)]"}`}
                     >
-                      <span className="shrink-0 uppercase text-[7px] tracking-wide text-[var(--text-tertiary)]">
+                      <span className="shrink-0 uppercase text-micro tracking-wide text-[var(--text-tertiary)]">
                         {entry.level}
                       </span>
                       <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">
@@ -3232,7 +3232,7 @@ export function CodeStudio({
               <p className="text-[11px] font-semibold text-[var(--text-primary)]">
                 {workbook.visualisation.title || title}
               </p>
-              <p className="text-[8px] text-[var(--text-tertiary)]">
+              <p className="text-micro text-[var(--text-tertiary)]">
                 Isolated preview · {runtimeLabel(workbook.runtime)}
               </p>
             </div>
@@ -3282,7 +3282,7 @@ function CodeParameterPanel({
             <h3 className="text-[11px] font-semibold text-[var(--text-primary)]">
               Visualisation controls
             </h3>
-            <p className="mt-1 text-[8px] leading-4 text-[var(--text-secondary)]">
+            <p className="mt-1 text-micro leading-4 text-[var(--text-secondary)]">
               Give viewers understandable controls without exposing source.
               Browser and React code reads values with{" "}
               <code className="rounded bg-[var(--bg-secondary)] px-1 font-mono">
@@ -3415,7 +3415,7 @@ function CodeParameterPanel({
                   <label className="code-field-label m-0">
                     SDK key
                     <input
-                      className="code-field-control font-mono text-[9px]"
+                      className="code-field-control font-mono text-micro"
                       value={parameter.key}
                       disabled={readOnly}
                       onChange={(event) =>
@@ -3537,10 +3537,10 @@ function CodeParameterPanel({
                       </div>
                     </div>
                   ) : parameter.type === "boolean" ? (
-                    <label className="flex items-center justify-between gap-3 text-[10px] font-semibold text-[var(--text-primary)]">
+                    <label className="flex items-center justify-between gap-3 text-micro font-semibold text-[var(--text-primary)]">
                       <span>
                         {parameter.label}
-                        <span className="mt-0.5 block text-[8px] font-normal text-[var(--text-tertiary)]">
+                        <span className="mt-0.5 block text-micro font-normal text-[var(--text-tertiary)]">
                           {parameter.value ? "On" : "Off"}
                         </span>
                       </span>
@@ -3624,10 +3624,10 @@ function CodeParameterPanel({
           {parameters.length === 0 ? (
             <div className="rounded-[10px] border border-dashed border-[var(--border-default)] bg-[var(--bg-primary)] px-5 py-12 text-center">
               <SlidersHorizontal className="mx-auto h-5 w-5 text-[var(--text-tertiary)]" />
-              <p className="mt-2 text-[10px] font-semibold text-[var(--text-primary)]">
+              <p className="mt-2 text-micro font-semibold text-[var(--text-primary)]">
                 No viewer controls yet
               </p>
-              <p className="mx-auto mt-1 max-w-sm text-[8px] leading-4 text-[var(--text-tertiary)]">
+              <p className="mx-auto mt-1 max-w-sm text-micro leading-4 text-[var(--text-tertiary)]">
                 Add only the few controls that make the idea explorable.
                 Advanced configuration stays in source and Settings.
               </p>
@@ -3947,7 +3947,7 @@ function CodeSettings({
                   )}
                   {option.label}
                 </span>
-                <span className="mt-1 block text-[9px] leading-4 text-[var(--text-secondary)]">
+                <span className="mt-1 block text-micro leading-4 text-[var(--text-secondary)]">
                   {option.detail}
                 </span>
               </button>
@@ -3982,12 +3982,12 @@ function CodeSettings({
               ))}
             </select>
           </label>
-          <label className="mt-3 flex items-center justify-between gap-3 text-[10px] text-[var(--text-primary)]">
+          <label className="mt-3 flex items-center justify-between gap-3 text-micro text-[var(--text-primary)]">
             <span>
               <strong className="block font-semibold">
                 Auto-run safe browser changes
               </strong>
-              <span className="text-[8px] text-[var(--text-tertiary)]">
+              <span className="text-micro text-[var(--text-tertiary)]">
                 Python always requires an explicit run.
               </span>
             </span>
@@ -4039,12 +4039,12 @@ function CodeSettings({
         >
           <h3>Visualisation identity</h3>
           <p>Non-programmers see this framing in previews and embeds.</p>
-          <label className="mt-3 flex items-center justify-between gap-3 text-[10px] text-[var(--text-primary)]">
+          <label className="mt-3 flex items-center justify-between gap-3 text-micro text-[var(--text-primary)]">
             <span>
               <strong className="block font-semibold">
                 Rendered experience
               </strong>
-              <span className="text-[8px] text-[var(--text-tertiary)]">
+              <span className="text-micro text-[var(--text-tertiary)]">
                 Show the executable output as this artifact’s primary
                 experience.
               </span>
@@ -4164,17 +4164,17 @@ function CodeSettings({
           <div className="mt-4 border-t border-[var(--border-subtle)] pt-3">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h4 className="text-[9px] font-semibold text-[var(--text-primary)]">
+                <h4 className="text-micro font-semibold text-[var(--text-primary)]">
                   Read-only network access
                 </h4>
-                <p className="mt-1 text-[8px] leading-4 text-[var(--text-tertiary)]">
+                <p className="mt-1 text-micro leading-4 text-[var(--text-tertiary)]">
                   Browser and React runs may fetch GET or HEAD responses only
                   from exact approved HTTPS origins. Credentials, referrers,
                   redirects, sockets, and private-network targets remain
                   blocked.
                 </p>
               </div>
-              <label className="inline-flex shrink-0 items-center gap-2 text-[8px] font-semibold text-[var(--text-secondary)]">
+              <label className="inline-flex shrink-0 items-center gap-2 text-micro font-semibold text-[var(--text-secondary)]">
                 <input
                   type="checkbox"
                   checked={content.networkPolicy?.mode === "allowlist"}
@@ -4200,7 +4200,7 @@ function CodeSettings({
               </label>
             </div>
             {content.runtime === "python" ? (
-              <div className="mt-3 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[8px] leading-4 text-[var(--text-secondary)]">
+              <div className="mt-3 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-micro leading-4 text-[var(--text-secondary)]">
                 Python workers remain fully network-isolated. Use a permissioned
                 artifact resource for data needed by Python.
               </div>
@@ -4213,7 +4213,7 @@ function CodeSettings({
                       readOnly ||
                       approvedNetworkOrigins.length >= MAX_CODE_NETWORK_ORIGINS
                     }
-                    className="code-field-control min-w-0 flex-1 font-mono text-[9px]"
+                    className="code-field-control min-w-0 flex-1 font-mono text-micro"
                     placeholder="https://api.example.org"
                     aria-label="HTTPS origin to approve"
                     aria-invalid={Boolean(networkOriginError)}
@@ -4287,7 +4287,7 @@ function CodeSettings({
                 </div>
                 {networkOriginError ? (
                   <p
-                    className="mt-1.5 text-[8px] text-[var(--danger)]"
+                    className="mt-1.5 text-micro text-[var(--danger)]"
                     role="alert"
                   >
                     {networkOriginError}
@@ -4299,7 +4299,7 @@ function CodeSettings({
                       key={origin}
                       className="flex items-center justify-between gap-2 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 py-2"
                     >
-                      <span className="min-w-0 truncate font-mono text-[8px] text-[var(--text-secondary)]">
+                      <span className="min-w-0 truncate font-mono text-micro text-[var(--text-secondary)]">
                         {origin}
                       </span>
                       <button
@@ -4325,7 +4325,7 @@ function CodeSettings({
                     </div>
                   ))}
                   {approvedNetworkOrigins.length === 0 ? (
-                    <div className="rounded-[8px] border border-dashed border-[var(--border-default)] px-3 py-3 text-center text-[8px] text-[var(--text-tertiary)]">
+                    <div className="rounded-[8px] border border-dashed border-[var(--border-default)] px-3 py-3 text-center text-micro text-[var(--text-tertiary)]">
                       No origins approved. Network requests remain blocked.
                     </div>
                   ) : null}
@@ -4346,13 +4346,13 @@ function CodeSettings({
           </p>
           <div className="mt-3 grid gap-2 sm:grid-cols-2">
             <div className="flex items-center justify-between rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2.5">
-              <span className="text-[10px] font-semibold text-[var(--text-primary)]">
+              <span className="text-micro font-semibold text-[var(--text-primary)]">
                 React runtime
-                <span className="mt-0.5 block text-[8px] font-normal text-[var(--text-tertiary)]">
+                <span className="mt-0.5 block text-micro font-normal text-[var(--text-tertiary)]">
                   React 19 · locked by Spectra
                 </span>
               </span>
-              <span className="rounded-full bg-[color-mix(in_oklab,var(--success)_10%,transparent)] px-2 py-1 text-[8px] font-semibold text-[var(--success)]">
+              <span className="rounded-full bg-[color-mix(in_oklab,var(--success)_10%,transparent)] px-2 py-1 text-micro font-semibold text-[var(--success)]">
                 Included
               </span>
             </div>
@@ -4363,16 +4363,16 @@ function CodeSettings({
                   key={dependency.key}
                   className="flex items-center justify-between gap-3 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2.5"
                 >
-                  <span className="min-w-0 text-[10px] font-semibold text-[var(--text-primary)]">
+                  <span className="min-w-0 text-micro font-semibold text-[var(--text-primary)]">
                     {dependency.label}
-                    <span className="mt-0.5 block truncate text-[8px] font-normal text-[var(--text-tertiary)]">
+                    <span className="mt-0.5 block truncate text-micro font-normal text-[var(--text-tertiary)]">
                       {dependency.detail} · {dependency.version} · pinned
                     </span>
                   </span>
                   <button
                     type="button"
                     disabled={readOnly || content.runtime !== "react"}
-                    className={`rounded-[6px] px-2 py-1 text-[8px] font-semibold ${allowed ? "bg-[color-mix(in_oklab,var(--success)_10%,transparent)] text-[var(--success)]" : "border border-[var(--border-default)] text-[var(--text-secondary)]"}`}
+                    className={`rounded-[6px] px-2 py-1 text-micro font-semibold ${allowed ? "bg-[color-mix(in_oklab,var(--success)_10%,transparent)] text-[var(--success)]" : "border border-[var(--border-default)] text-[var(--text-secondary)]"}`}
                     onClick={() =>
                       onChange((draft) => {
                         const dependencies = { ...(draft.dependencies ?? {}) };
@@ -4404,7 +4404,7 @@ function CodeSettings({
                     styling.
                   </p>
                 </div>
-                <label className="inline-flex items-center gap-2 text-[8px] font-semibold text-[var(--text-secondary)]">
+                <label className="inline-flex items-center gap-2 text-micro font-semibold text-[var(--text-secondary)]">
                   <input
                     type="checkbox"
                     checked={content.accessibility?.reducedMotion === true}
@@ -4496,7 +4496,7 @@ function CodeSettings({
                     <input
                       value={variable.key}
                       disabled={readOnly}
-                      className="code-field-control font-mono text-[9px] uppercase"
+                      className="code-field-control font-mono text-micro uppercase"
                       aria-label="Environment setting name"
                       onChange={(event) =>
                         onChange((draft) => {
@@ -4524,7 +4524,7 @@ function CodeSettings({
                         })
                       }
                     />
-                    <label className="inline-flex items-center gap-1.5 text-[8px] text-[var(--text-secondary)]">
+                    <label className="inline-flex items-center gap-1.5 text-micro text-[var(--text-secondary)]">
                       <input
                         type="checkbox"
                         checked={variable.required === true}
@@ -4559,7 +4559,7 @@ function CodeSettings({
                   </div>
                 ))}
                 {(content.environmentSchema ?? []).length === 0 ? (
-                  <div className="rounded-[8px] border border-dashed border-[var(--border-default)] px-3 py-4 text-center text-[8px] text-[var(--text-tertiary)]">
+                  <div className="rounded-[8px] border border-dashed border-[var(--border-default)] px-3 py-4 text-center text-micro text-[var(--text-tertiary)]">
                     No environment settings declared.
                   </div>
                 ) : null}
@@ -4614,10 +4614,10 @@ function CodeSettings({
                 >
                   <FileImage className="h-4 w-4 shrink-0 text-[var(--accent-violet)]" />
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-[9px] font-semibold text-[var(--text-primary)]">
+                    <div className="truncate text-micro font-semibold text-[var(--text-primary)]">
                       {reference.path}
                     </div>
-                    <div className="mt-0.5 text-[8px] text-[var(--text-tertiary)]">
+                    <div className="mt-0.5 text-micro text-[var(--text-tertiary)]">
                       {reference.mediaType} · {formatBytes(reference.bytes)} ·{" "}
                       {available ? "available" : (stored?.status ?? "missing")}
                     </div>
@@ -4666,7 +4666,7 @@ function CodeSettings({
             })}
             {retainedUnlinkedAssets.length ? (
               <details className="rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2.5">
-                <summary className="cursor-pointer text-[8px] font-semibold text-[var(--text-primary)]">
+                <summary className="cursor-pointer text-micro font-semibold text-[var(--text-primary)]">
                   {retainedUnlinkedAssets.length} retained asset
                   {retainedUnlinkedAssets.length === 1 ? "" : "s"} from earlier
                   versions
@@ -4675,7 +4675,7 @@ function CodeSettings({
                   {retainedUnlinkedAssets.map((asset) => (
                     <div
                       key={asset.assetId}
-                      className="flex flex-wrap items-center gap-2 rounded-[7px] bg-[var(--bg-elevated)] px-2.5 py-2 text-[8px]"
+                      className="flex flex-wrap items-center gap-2 rounded-[7px] bg-[var(--bg-elevated)] px-2.5 py-2 text-micro"
                     >
                       <span className="min-w-0 flex-1 truncate font-medium text-[var(--text-secondary)]">
                         {asset.path || asset.name} ·{" "}
@@ -4763,30 +4763,30 @@ function CodeSettings({
               </details>
             ) : null}
             {assetLibraryState === "loading" ? (
-              <div className="flex items-center justify-center gap-2 rounded-[8px] border border-dashed border-[var(--border-default)] py-5 text-[8px] text-[var(--text-tertiary)]">
+              <div className="flex items-center justify-center gap-2 rounded-[8px] border border-dashed border-[var(--border-default)] py-5 text-micro text-[var(--text-tertiary)]">
                 <Loader2 className="h-3 w-3 animate-spin motion-reduce:animate-none" />
                 Checking permission-bound assets…
               </div>
             ) : null}
             {assetLibraryState === "error" ? (
-              <div className="rounded-[8px] border border-[color-mix(in_oklab,var(--danger)_22%,var(--border-default))] px-3 py-3 text-[8px] text-[var(--danger)]">
+              <div className="rounded-[8px] border border-[color-mix(in_oklab,var(--danger)_22%,var(--border-default))] px-3 py-3 text-micro text-[var(--danger)]">
                 Asset availability could not be checked. Source and references
                 are unchanged.
               </div>
             ) : null}
             {assetLibraryState === "ready" && !(content.assets ?? []).length ? (
-              <div className="rounded-[8px] border border-dashed border-[var(--border-default)] px-4 py-5 text-center text-[8px] text-[var(--text-tertiary)]">
+              <div className="rounded-[8px] border border-dashed border-[var(--border-default)] px-4 py-5 text-center text-micro text-[var(--text-tertiary)]">
                 No runtime assets. Add only media the rendered experience
                 actually uses.
               </div>
             ) : null}
             {assetUploadError ? (
-              <div className="rounded-[8px] border border-[color-mix(in_oklab,var(--danger)_22%,var(--border-default))] px-3 py-3 text-[8px] text-[var(--danger)]">
+              <div className="rounded-[8px] border border-[color-mix(in_oklab,var(--danger)_22%,var(--border-default))] px-3 py-3 text-micro text-[var(--danger)]">
                 {assetUploadError}
               </div>
             ) : null}
           </div>
-          <p className="mt-2 text-[8px] leading-4 text-[var(--text-tertiary)]">
+          <p className="mt-2 text-micro leading-4 text-[var(--text-tertiary)]">
             Use a path such as <code>assets/diagram.png</code> in HTML or CSS,
             or call <code>SpectraEmbed.getAsset(referenceId)</code>. Revocation
             is a security action and intentionally disables historical playback
@@ -4806,7 +4806,7 @@ function CodeSettings({
                 artifact metadata are never included.
               </p>
             </div>
-            <span className="rounded-full border border-[var(--border-default)] px-2 py-1 text-[8px] font-semibold text-[var(--text-tertiary)]">
+            <span className="rounded-full border border-[var(--border-default)] px-2 py-1 text-micro font-semibold text-[var(--text-tertiary)]">
               {(content.resourceBindings ?? []).length} bound
             </span>
           </div>
@@ -4821,12 +4821,12 @@ function CodeSettings({
                   className="grid gap-2 rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 sm:grid-cols-[minmax(0,1fr)_minmax(120px,.35fr)_32px] sm:items-center"
                 >
                   <div className="min-w-0">
-                    <div className="truncate text-[10px] font-semibold text-[var(--text-primary)]">
+                    <div className="truncate text-micro font-semibold text-[var(--text-primary)]">
                       {binding.label ||
                         artifact?.title ||
                         "Unavailable resource"}
                     </div>
-                    <div className="mt-0.5 truncate font-mono text-[8px] text-[var(--text-tertiary)]">
+                    <div className="mt-0.5 truncate font-mono text-micro text-[var(--text-tertiary)]">
                       {binding.id} ·{" "}
                       {artifact?.blueprintKey?.replaceAll("_", " ") ??
                         "access removed"}
@@ -4837,7 +4837,7 @@ function CodeSettings({
                       value={binding.range ?? ""}
                       disabled={readOnly}
                       aria-label={`Range for ${binding.label || artifact?.title || "resource"}`}
-                      className="code-field-control font-mono text-[9px]"
+                      className="code-field-control font-mono text-micro"
                       placeholder="Sheet 1!A1:J30"
                       onChange={(event) =>
                         onChange((draft) => {
@@ -4848,7 +4848,7 @@ function CodeSettings({
                       }
                     />
                   ) : (
-                    <span className="text-[8px] text-[var(--text-tertiary)]">
+                    <span className="text-micro text-[var(--text-tertiary)]">
                       Read-only artifact snapshot
                     </span>
                   )}
@@ -4871,7 +4871,7 @@ function CodeSettings({
               );
             })}
             {(content.resourceBindings ?? []).length === 0 ? (
-              <div className="rounded-[8px] border border-dashed border-[var(--border-default)] px-4 py-5 text-center text-[9px] leading-4 text-[var(--text-tertiary)]">
+              <div className="rounded-[8px] border border-dashed border-[var(--border-default)] px-4 py-5 text-center text-micro leading-4 text-[var(--text-tertiary)]">
                 No resources are exposed to this runtime. Importing an artifact
                 in the editor never grants code access automatically.
               </div>
@@ -4897,7 +4897,7 @@ function CodeSettings({
               <input
                 value={bindingRange}
                 disabled={readOnly}
-                className="code-field-control font-mono text-[9px]"
+                className="code-field-control font-mono text-micro"
                 aria-label="Sheets range to bind"
                 placeholder="Sheet 1!A1:J30"
                 onChange={(event) => setBindingRange(event.target.value)}
@@ -4934,7 +4934,7 @@ function CodeSettings({
               <FilePlus2 className="h-3 w-3" /> Bind resource
             </button>
           </div>
-          <p className="mt-2 text-[8px] leading-4 text-[var(--text-tertiary)]">
+          <p className="mt-2 text-micro leading-4 text-[var(--text-tertiary)]">
             Browser code uses <code>@spectra/sdk</code>{" "}
             getResource/listResources. Python uses{" "}
             <code>spectra.get_resource</code> and parses the returned JSON.
@@ -4953,7 +4953,7 @@ function CodeSettings({
                 independently of the adapted live file tree.
               </p>
             </div>
-            <span className="rounded-full border border-[var(--border-default)] px-2 py-1 text-[8px] font-semibold text-[var(--text-tertiary)]">
+            <span className="rounded-full border border-[var(--border-default)] px-2 py-1 text-micro font-semibold text-[var(--text-tertiary)]">
               {importHistory.length} retained
             </span>
           </div>
@@ -4965,10 +4965,10 @@ function CodeSettings({
               >
                 <FileArchive className="h-4 w-4 shrink-0 text-[var(--accent-cyan)]" />
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-[9px] font-semibold text-[var(--text-primary)]">
+                  <div className="truncate text-micro font-semibold text-[var(--text-primary)]">
                     {item.name || `Original ${item.format}`}
                   </div>
-                  <div className="mt-0.5 text-[8px] text-[var(--text-tertiary)]">
+                  <div className="mt-0.5 text-micro text-[var(--text-tertiary)]">
                     {item.bytes ? formatBytes(item.bytes) : "Size unavailable"}{" "}
                     · {item.status.replaceAll("_", " ")}
                     {item.status === "imported"
@@ -4991,12 +4991,12 @@ function CodeSettings({
                     Recover original
                   </a>
                 ) : (
-                  <span className="text-[8px] text-[var(--text-tertiary)]">
+                  <span className="text-micro text-[var(--text-tertiary)]">
                     Upload unavailable
                   </span>
                 )}
                 {item.fidelityReport?.length ? (
-                  <details className="w-full border-t border-[var(--border-subtle)] pt-2 text-[8px] text-[var(--text-secondary)]">
+                  <details className="w-full border-t border-[var(--border-subtle)] pt-2 text-micro text-[var(--text-secondary)]">
                     <summary className="cursor-pointer font-semibold text-[var(--text-primary)]">
                       Fidelity report
                     </summary>
@@ -5012,19 +5012,19 @@ function CodeSettings({
               </div>
             ))}
             {importHistoryState === "loading" ? (
-              <div className="flex items-center justify-center gap-2 rounded-[8px] border border-dashed border-[var(--border-default)] py-5 text-[8px] text-[var(--text-tertiary)]">
+              <div className="flex items-center justify-center gap-2 rounded-[8px] border border-dashed border-[var(--border-default)] py-5 text-micro text-[var(--text-tertiary)]">
                 <Loader2 className="h-3 w-3 animate-spin motion-reduce:animate-none" />
                 Loading retained originals…
               </div>
             ) : null}
             {importHistoryState === "error" ? (
-              <div className="rounded-[8px] border border-[color-mix(in_oklab,var(--danger)_22%,var(--border-default))] px-3 py-3 text-[8px] text-[var(--danger)]">
+              <div className="rounded-[8px] border border-[color-mix(in_oklab,var(--danger)_22%,var(--border-default))] px-3 py-3 text-micro text-[var(--danger)]">
                 Retained originals could not be listed. The live source is
                 unaffected.
               </div>
             ) : null}
             {importHistoryState === "ready" && importHistory.length === 0 ? (
-              <div className="rounded-[8px] border border-dashed border-[var(--border-default)] px-3 py-5 text-center text-[8px] text-[var(--text-tertiary)]">
+              <div className="rounded-[8px] border border-dashed border-[var(--border-default)] px-3 py-5 text-center text-micro text-[var(--text-tertiary)]">
                 No source has been imported into this artifact.
               </div>
             ) : null}
@@ -5102,7 +5102,7 @@ function CodeSettings({
                   aria-label={`${test.name} source`}
                   rows={2}
                   spellCheck={false}
-                  className="code-field-control resize-y py-2 font-mono text-[9px]"
+                  className="code-field-control resize-y py-2 font-mono text-micro"
                   onChange={(event) =>
                     onChange((draft) => {
                       if (draft.tests?.[index])
@@ -5128,7 +5128,7 @@ function CodeSettings({
               </div>
             ))}
             {content.tests?.length ? null : (
-              <div className="rounded-[8px] border border-dashed border-[var(--border-default)] px-4 py-5 text-center text-[9px] text-[var(--text-tertiary)]">
+              <div className="rounded-[8px] border border-dashed border-[var(--border-default)] px-4 py-5 text-center text-micro text-[var(--text-tertiary)]">
                 No checks yet. Add focused checks for the behavior that must
                 stay correct.
               </div>
@@ -5159,7 +5159,7 @@ function CodeSettings({
 
 function SecurityRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-[7px] bg-[var(--bg-secondary)] px-3 py-2 text-[9px]">
+    <div className="flex items-center justify-between gap-3 rounded-[7px] bg-[var(--bg-secondary)] px-3 py-2 text-micro">
       <span className="text-[var(--text-secondary)]">{label}</span>
       <span className="inline-flex items-center gap-1 font-semibold text-[var(--text-primary)]">
         <ShieldCheck className="h-3 w-3 text-[var(--success)]" />
@@ -5191,7 +5191,7 @@ function RuntimeWaiting({
         <h3 className="mt-4 font-display text-[18px] font-semibold text-[var(--text-primary)]">
           {title}
         </h3>
-        <p className="mt-1 text-[10px] leading-5 text-[var(--text-secondary)]">
+        <p className="mt-1 text-micro leading-5 text-[var(--text-secondary)]">
           {detail}
         </p>
       </div>
@@ -5219,7 +5219,7 @@ function Notice({
   return (
     <div
       role={tone === "error" ? "alert" : "status"}
-      className={`flex items-start gap-2 border-b px-4 py-2.5 text-[9px] leading-4 ${tone === "error" ? "border-[color-mix(in_oklab,var(--danger)_25%,var(--border-default))] bg-[color-mix(in_oklab,var(--danger)_6%,var(--bg-primary))] text-[var(--danger)]" : tone === "warning" ? "border-[color-mix(in_oklab,var(--warning)_25%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_6%,var(--bg-primary))] text-[var(--text-secondary)]" : "border-[color-mix(in_oklab,var(--success)_25%,var(--border-default))] bg-[color-mix(in_oklab,var(--success)_6%,var(--bg-primary))] text-[var(--text-secondary)]"}`}
+      className={`flex items-start gap-2 border-b px-4 py-2.5 text-micro leading-4 ${tone === "error" ? "border-[color-mix(in_oklab,var(--danger)_25%,var(--border-default))] bg-[color-mix(in_oklab,var(--danger)_6%,var(--bg-primary))] text-[var(--danger)]" : tone === "warning" ? "border-[color-mix(in_oklab,var(--warning)_25%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_6%,var(--bg-primary))] text-[var(--text-secondary)]" : "border-[color-mix(in_oklab,var(--success)_25%,var(--border-default))] bg-[color-mix(in_oklab,var(--success)_6%,var(--bg-primary))] text-[var(--text-secondary)]"}`}
     >
       <span className="min-w-0 flex-1">{children}</span>
       <button type="button" onClick={onClose} aria-label="Dismiss">
@@ -5297,7 +5297,7 @@ function ConfirmDialog({
         </h3>
         <p
           id={detailId}
-          className="mt-2 text-[10px] leading-5 text-[var(--text-secondary)]"
+          className="mt-2 text-micro leading-5 text-[var(--text-secondary)]"
         >
           {detail}
         </p>
@@ -5307,7 +5307,7 @@ function ConfirmDialog({
             ref={cancelRef}
             onClick={onCancel}
             disabled={disabled}
-            className="rounded-[7px] border border-[var(--border-default)] px-3 py-2 text-[10px] font-semibold"
+            className="rounded-[7px] border border-[var(--border-default)] px-3 py-2 text-micro font-semibold"
           >
             Cancel
           </button>
@@ -5315,7 +5315,7 @@ function ConfirmDialog({
             type="button"
             disabled={disabled}
             onClick={onConfirm}
-            className={`rounded-[7px] px-3 py-2 text-[10px] font-semibold text-white disabled:opacity-40 ${destructive ? "bg-[var(--danger)]" : "bg-[var(--text-primary)]"}`}
+            className={`rounded-[7px] px-3 py-2 text-micro font-semibold text-white disabled:opacity-40 ${destructive ? "bg-[var(--danger)]" : "bg-[var(--text-primary)]"}`}
           >
             {confirmLabel}
           </button>

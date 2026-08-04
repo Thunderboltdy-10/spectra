@@ -85,7 +85,7 @@ export function RunDetailPanel({ runId, card, onClose, onAction, onUseThread, on
 
   return <StudioSplitShell width={width} onWidthChange={setWidth} ariaLabel="Thread panel" cssWidthVariable="--spectra-run-panel-width"><div className="flex h-full min-h-0 flex-col">
     <header className="flex min-h-16 shrink-0 items-center justify-between border-b border-[var(--border-subtle)] px-5 py-3">
-      <div className="flex min-w-0 items-center gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] bg-[color-mix(in_oklab,#8b6ff0_10%,var(--bg-elevated))] text-[#8b6ff0]"><MessageSquare className="h-4 w-4" /></span><div className="min-w-0"><div className="truncate font-display text-[17px] font-semibold">{conversation?.thread.title ?? "Conversation"}</div><div className="text-[10px] uppercase tracking-[0.11em] text-[var(--text-tertiary)]">Thread · {displayCard?.status.replaceAll("_", " ") ?? "loading"}</div></div></div>
+      <div className="flex min-w-0 items-center gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] bg-[color-mix(in_oklab,#8b6ff0_10%,var(--bg-elevated))] text-[#8b6ff0]"><MessageSquare className="h-4 w-4" /></span><div className="min-w-0"><div className="truncate font-display text-[17px] font-semibold">{conversation?.thread.title ?? "Conversation"}</div><div className="text-micro uppercase tracking-[0.11em] text-[var(--text-tertiary)]">Thread · {displayCard?.status.replaceAll("_", " ") ?? "loading"}</div></div></div>
       <div className="flex items-center gap-1"><IconAction icon={busy === "continue" ? Loader2 : Maximize2} label="Open in Chat" disabled={busy !== null} className={busy === "continue" ? "animate-spin" : undefined} onClick={() => { if (detail?.run.threadId) router.push(`/chat?threadId=${encodeURIComponent(detail.run.threadId)}`); else void keep(false, true, false); }} /><IconAction icon={X} label="Close" onClick={onClose} /></div>
     </header>
     <div className="min-h-0 flex-1">{detail?.run.threadId ? <ThreadConversation threadId={detail.run.threadId} compact showComposer={false} /> : conversation ? <ConversationSurface detail={conversation} compact /> : <div className="flex h-full items-center justify-center gap-2 text-[12px] text-[var(--text-tertiary)]"><Loader2 className="h-4 w-4 animate-spin" />Loading conversation</div>}</div>
@@ -99,7 +99,7 @@ export function RunDetailPanel({ runId, card, onClose, onAction, onUseThread, on
           <div className="text-[11px] font-semibold text-[var(--text-primary)]">
             Proposed changes need approval
           </div>
-          <p className="mt-1 text-[10px] leading-4 text-[var(--text-secondary)]">
+          <p className="mt-1 text-micro leading-4 text-[var(--text-secondary)]">
             Accept only if the affected objects and workspace placement look right.
           </p>
           <div className="mt-2 flex gap-2">

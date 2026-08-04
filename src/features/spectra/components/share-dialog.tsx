@@ -544,7 +544,7 @@ export function ShareDialog({
                   >
                     Access requests
                   </h3>
-                  <p className="mt-0.5 text-[10px] leading-4 text-[var(--text-secondary)]">
+                  <p className="mt-0.5 text-micro leading-4 text-[var(--text-secondary)]">
                     People who encountered this artifact through a permitted
                     embed. Approval gives direct access immediately.
                   </p>
@@ -559,7 +559,7 @@ export function ShareDialog({
                       className="border-b border-[var(--border-subtle)] px-4 py-3 last:border-b-0"
                     >
                       <div className="flex items-start gap-3">
-                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--bg-elevated)] text-[10px] font-semibold text-[var(--text-secondary)]">
+                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--bg-elevated)] text-micro font-semibold text-[var(--text-secondary)]">
                           {request.requester?.name
                             .split(/\s+/)
                             .slice(0, 2)
@@ -571,7 +571,7 @@ export function ShareDialog({
                           <div className="truncate text-[12px] font-medium text-[var(--text-primary)]">
                             {request.requester?.name ?? "Unavailable member"}
                           </div>
-                          <div className="mt-0.5 text-[9px] text-[var(--text-tertiary)]">
+                          <div className="mt-0.5 text-micro text-[var(--text-tertiary)]">
                             Requested{" "}
                             {new Date(request.createdAt).toLocaleString()}
                             {request.context
@@ -579,7 +579,7 @@ export function ShareDialog({
                               : ""}
                           </div>
                           {request.message ? (
-                            <p className="mt-2 rounded-[6px] bg-[var(--bg-elevated)] px-2.5 py-2 text-[10px] leading-4 text-[var(--text-secondary)]">
+                            <p className="mt-2 rounded-[6px] bg-[var(--bg-elevated)] px-2.5 py-2 text-micro leading-4 text-[var(--text-secondary)]">
                               {request.message}
                             </p>
                           ) : null}
@@ -600,7 +600,7 @@ export function ShareDialog({
                             }))
                           }
                           aria-label={`Permission for ${request.requester?.name ?? "requester"}`}
-                          className="h-8 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 text-[10px] text-[var(--text-primary)]"
+                          className="h-8 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 text-micro text-[var(--text-primary)]"
                         >
                           <option value="read">Read-only</option>
                           <option value="modify">Can modify</option>
@@ -611,7 +611,7 @@ export function ShareDialog({
                           onClick={() =>
                             void resolveAccessRequest(request, "decline")
                           }
-                          className="h-8 rounded-[7px] px-2.5 text-[10px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-45"
+                          className="h-8 rounded-[7px] px-2.5 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-45"
                         >
                           Decline
                         </button>
@@ -621,7 +621,7 @@ export function ShareDialog({
                           onClick={() =>
                             void resolveAccessRequest(request, "approve")
                           }
-                          className="inline-flex h-8 items-center gap-1.5 rounded-[7px] bg-[var(--text-primary)] px-3 text-[10px] font-semibold text-[var(--bg-primary)] disabled:opacity-45"
+                          className="inline-flex h-8 items-center gap-1.5 rounded-[7px] bg-[var(--text-primary)] px-3 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-45"
                         >
                           {working ? (
                             <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -673,7 +673,7 @@ export function ShareDialog({
                     <div className="truncate text-[13px] font-medium text-[var(--text-primary)]">
                       {share.account?.name ?? "Unavailable member"}
                     </div>
-                    <div className="flex items-center gap-1.5 text-[10px] text-[var(--text-tertiary)]">
+                    <div className="flex items-center gap-1.5 text-micro text-[var(--text-tertiary)]">
                       {share.status === "pending" ? (
                         "Invitation pending"
                       ) : (
@@ -700,7 +700,7 @@ export function ShareDialog({
                       <option value="modify">Can modify</option>
                     </select>
                   ) : (
-                    <span className="rounded-[5px] bg-[var(--bg-secondary)] px-2 py-1 text-[10px] text-[var(--text-secondary)]">
+                    <span className="rounded-[5px] bg-[var(--bg-secondary)] px-2 py-1 text-micro text-[var(--text-secondary)]">
                       {share.level === "modify" ? "Can modify" : "Read-only"}
                     </span>
                   )}
@@ -759,7 +759,7 @@ export function ShareDialog({
                       key={entry.account.accountId}
                       className="flex items-center gap-3 border-b border-[var(--border-subtle)] px-3 py-3 last:border-b-0"
                     >
-                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--bg-secondary)] text-[10px] font-semibold text-[var(--text-secondary)]">
+                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--bg-secondary)] text-micro font-semibold text-[var(--text-secondary)]">
                         {entry.account.name
                           .split(/\s+/)
                           .slice(0, 2)
@@ -771,7 +771,7 @@ export function ShareDialog({
                         <div className="truncate text-[12px] font-medium text-[var(--text-primary)]">
                           {entry.account.name}
                         </div>
-                        <div className="mt-0.5 truncate text-[9px] text-[var(--text-tertiary)]">
+                        <div className="mt-0.5 truncate text-micro text-[var(--text-tertiary)]">
                           Through{" "}
                           {entry.sources
                             .map((source) => source.workspaceTitle)
@@ -793,7 +793,7 @@ export function ShareDialog({
                           )
                         }
                         aria-label={`Access to this artifact for ${entry.account.name}`}
-                        className="h-8 max-w-[160px] rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-[10px] text-[var(--text-primary)] outline-none"
+                        className="h-8 max-w-[160px] rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-micro text-[var(--text-primary)] outline-none"
                       >
                         <option value="default">
                           Workspace default (
@@ -830,7 +830,7 @@ export function ShareDialog({
                   >
                     Public access
                   </h3>
-                  <span className="rounded-full bg-[var(--bg-secondary)] px-2 py-0.5 text-[9px] font-medium text-[var(--text-tertiary)]">
+                  <span className="rounded-full bg-[var(--bg-secondary)] px-2 py-0.5 text-micro font-medium text-[var(--text-tertiary)]">
                     Explicit
                   </span>
                 </div>
@@ -842,7 +842,7 @@ export function ShareDialog({
             </div>
             {createdPublicUrl ? (
               <div className="mt-4 rounded-[8px] border border-[color-mix(in_oklab,var(--success)_30%,var(--border-default))] bg-[color-mix(in_oklab,var(--success)_5%,var(--bg-elevated))] p-3">
-                <div className="flex items-center gap-1.5 text-[10px] font-semibold text-[var(--success)]">
+                <div className="flex items-center gap-1.5 text-micro font-semibold text-[var(--success)]">
                   <ShieldCheck className="h-3.5 w-3.5" />
                   New link ready
                 </div>
@@ -857,13 +857,13 @@ export function ShareDialog({
                   <button
                     type="button"
                     onClick={() => void copyPublicLink()}
-                    className="inline-flex h-9 items-center gap-1.5 rounded-[7px] bg-[var(--text-primary)] px-3 text-[10px] font-semibold text-[var(--bg-primary)]"
+                    className="inline-flex h-9 items-center gap-1.5 rounded-[7px] bg-[var(--text-primary)] px-3 text-micro font-semibold text-[var(--bg-primary)]"
                   >
                     <Copy className="h-3.5 w-3.5" />
                     Copy
                   </button>
                 </div>
-                <p className="mt-2 text-[9px] leading-4 text-[var(--text-tertiary)]">
+                <p className="mt-2 text-micro leading-4 text-[var(--text-tertiary)]">
                   For security, Spectra shows the complete address only when it
                   is created.
                 </p>
@@ -881,7 +881,7 @@ export function ShareDialog({
                       <div className="text-[11px] font-medium text-[var(--text-primary)]">
                         Public read-only link
                       </div>
-                      <div className="text-[9px] text-[var(--text-tertiary)]">
+                      <div className="text-micro text-[var(--text-tertiary)]">
                         {link.expiresAt
                           ? `Expires ${new Date(link.expiresAt).toLocaleDateString()}`
                           : "Does not expire"}
@@ -891,7 +891,7 @@ export function ShareDialog({
                       type="button"
                       disabled={busyKey === `public:${link.linkId}`}
                       onClick={() => void revokePublicLink(link)}
-                      className="h-7 rounded-[6px] px-2 text-[10px] font-medium text-[var(--danger)] hover:bg-[color-mix(in_oklab,var(--danger)_7%,var(--bg-elevated))] disabled:opacity-45"
+                      className="h-7 rounded-[6px] px-2 text-micro font-medium text-[var(--danger)] hover:bg-[color-mix(in_oklab,var(--danger)_7%,var(--bg-elevated))] disabled:opacity-45"
                     >
                       {busyKey === `public:${link.linkId}` ? (
                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -903,14 +903,14 @@ export function ShareDialog({
                 ))}
               </div>
             ) : (
-              <div className="mt-4 rounded-[8px] border border-dashed border-[var(--border-default)] px-3 py-3 text-[10px] text-[var(--text-tertiary)]">
+              <div className="mt-4 rounded-[8px] border border-dashed border-[var(--border-default)] px-3 py-3 text-micro text-[var(--text-tertiary)]">
                 Public access is off. This item remains private unless you
                 explicitly create a link.
               </div>
             )}
             <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
               <label
-                className="text-[10px] text-[var(--text-tertiary)]"
+                className="text-micro text-[var(--text-tertiary)]"
                 htmlFor="public-expiry"
               >
                 Expiry
@@ -921,7 +921,7 @@ export function ShareDialog({
                 onChange={(event) =>
                   setPublicExpiry(event.target.value as typeof publicExpiry)
                 }
-                className="h-8 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 text-[10px] text-[var(--text-primary)]"
+                className="h-8 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 text-micro text-[var(--text-primary)]"
               >
                 <option value="never">Never</option>
                 <option value="7d">7 days</option>
@@ -931,7 +931,7 @@ export function ShareDialog({
                 type="button"
                 disabled={busyKey === "public:create"}
                 onClick={() => void createPublicLink()}
-                className="inline-flex h-8 items-center gap-1.5 rounded-[7px] border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-3 text-[10px] font-semibold text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-45"
+                className="inline-flex h-8 items-center gap-1.5 rounded-[7px] border border-[var(--border-strong)] bg-[var(--bg-elevated)] px-3 text-micro font-semibold text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-45"
               >
                 {busyKey === "public:create" ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />

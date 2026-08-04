@@ -199,7 +199,7 @@ function LibraryAvatar({ owner }: { owner: LibraryCard["owner"] }) {
       className="size-5 rounded-full object-cover"
     />
   ) : (
-    <span className="grid size-5 place-items-center rounded-full bg-[var(--bg-secondary)] text-[10px] font-bold text-[var(--text-secondary)]">
+    <span className="grid size-5 place-items-center rounded-full bg-[var(--bg-secondary)] text-micro font-bold text-[var(--text-secondary)]">
       {avatarFallback(owner.name)}
     </span>
   );
@@ -269,7 +269,7 @@ function AgentCard({
         <span className="mt-4 line-clamp-2 min-h-10 text-left text-[11px] leading-5 text-[var(--text-secondary)]">
           {card.summary}
         </span>
-        <span className="mt-4 flex items-center gap-2 text-[9.5px] text-[var(--text-tertiary)]">
+        <span className="mt-4 flex items-center gap-2 text-micro text-[var(--text-tertiary)]">
           <LibraryAvatar owner={card.owner} />
           <span className="min-w-0 truncate font-medium text-[var(--text-secondary)]">
             {card.owner.name}
@@ -297,7 +297,7 @@ function AgentCard({
             .map((capability) => (
               <span
                 key={capability}
-                className="max-w-[42%] truncate rounded-full bg-[var(--bg-secondary)] px-2 py-1 text-[8.5px] text-[var(--text-secondary)]"
+                className="max-w-[42%] truncate rounded-full bg-[var(--bg-secondary)] px-2 py-1 text-micro text-[var(--text-secondary)]"
               >
                 {capability}
               </span>
@@ -354,7 +354,7 @@ function LibrarySectionBlock({
           >
             {title}
           </h2>
-          <p className="mt-0.5 text-[10.5px] text-[var(--text-secondary)]">
+          <p className="mt-0.5 text-micro text-[var(--text-secondary)]">
             {description}
           </p>
         </div>
@@ -381,7 +381,7 @@ function LibrarySectionBlock({
             <p className="text-[12px] font-semibold text-[var(--text-primary)]">
               Nothing here yet
             </p>
-            <p className="mt-0.5 text-[10.5px] text-[var(--text-secondary)]">
+            <p className="mt-0.5 text-micro text-[var(--text-secondary)]">
               Create, accept, or explicitly add an agent to build this
               collection.
             </p>
@@ -813,7 +813,7 @@ export function AgentLibraryShell({ initialAgentId }: { initialAgentId?: string 
               <LibraryBig className="size-5" />
             </span>
             <div className="min-w-0">
-              <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-tertiary)]">
+              <span className="text-micro font-semibold uppercase tracking-[0.16em] text-[var(--text-tertiary)]">
                 Agent library
               </span>
               <h1 className="mt-1 font-display text-[31px] font-semibold leading-none text-[var(--text-primary)]">
@@ -1154,7 +1154,7 @@ export function AgentLibraryShell({ initialAgentId }: { initialAgentId?: string 
                 .map((item) => (
                   <span
                     key={item}
-                    className="rounded-full bg-[var(--bg-secondary)] px-2.5 py-1 text-[9.5px] text-[var(--text-secondary)]"
+                    className="rounded-full bg-[var(--bg-secondary)] px-2.5 py-1 text-micro text-[var(--text-secondary)]"
                   >
                     {item}
                   </span>

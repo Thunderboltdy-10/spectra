@@ -275,7 +275,7 @@ function OverviewSurface({
           />
           {data.groupWorkspaces.length ? (
             <div className="overflow-x-auto px-4 pb-4">
-              <table className="w-full min-w-[620px] text-left text-[10px]">
+              <table className="w-full min-w-[620px] text-left text-micro">
                 <thead className="text-[var(--text-tertiary)]">
                   <tr className="border-b border-[var(--border-subtle)]">
                     <th className="pb-2 font-normal">Workspace</th>
@@ -359,7 +359,7 @@ function OverviewSurface({
                       size={12}
                       className="-rotate-90 text-[var(--text-tertiary)]"
                     />
-                    <span className="min-w-0 flex-1 truncate text-[10px] text-[var(--text-primary)]">
+                    <span className="min-w-0 flex-1 truncate text-micro text-[var(--text-primary)]">
                       {item.subject}
                     </span>
                     <StatusBadge
@@ -367,7 +367,7 @@ function OverviewSurface({
                     >
                       {item.category.replaceAll("_", " ")}
                     </StatusBadge>
-                    <span className="text-[9px] text-[var(--text-tertiary)]">
+                    <span className="text-micro text-[var(--text-tertiary)]">
                       {formatRelative(item.createdAt)}
                     </span>
                   </button>
@@ -400,13 +400,13 @@ function OverviewSurface({
                   <span className="grid size-6 place-items-center rounded-[6px] bg-[#edf7f3] text-[#25846a]">
                     <Activity size={12} />
                   </span>
-                  <span className="min-w-0 flex-1 truncate text-[10px] text-[var(--text-primary)]">
+                  <span className="min-w-0 flex-1 truncate text-micro text-[var(--text-primary)]">
                     {actionLabel(event.action)}
                   </span>
                   {event.operator ? (
                     <StatusBadge tone="blue">Operator</StatusBadge>
                   ) : null}
-                  <span className="text-[9px] text-[var(--text-tertiary)]">
+                  <span className="text-micro text-[var(--text-tertiary)]">
                     {formatRelative(event.createdAt)}
                   </span>
                 </div>
@@ -424,13 +424,13 @@ function OverviewSurface({
               <h2 className="font-[var(--font-serif)] text-[15px] font-medium">
                 Usage
               </h2>
-              <p className="mt-1 text-[10px] text-[var(--text-tertiary)]">
+              <p className="mt-1 text-micro text-[var(--text-tertiary)]">
                 Privacy-safe meters for this school.
               </p>
             </div>
             <AdminButton onClick={() => onTab("usage")}>View usage</AdminButton>
           </div>
-          <div className="mt-4 space-y-2 text-[10px]">
+          <div className="mt-4 space-y-2 text-micro">
             {(
               [
                 ["Storage", data.usage.totals.storage_bytes, "bytes"],
@@ -463,7 +463,7 @@ function OverviewSurface({
               data.usage.totals.model_output_tokens,
               data.usage.totals.collaboration_bytes,
             ].every((value) => value === null || value === undefined) ? (
-              <p className="text-[10px] text-[var(--text-tertiary)]">
+              <p className="text-micro text-[var(--text-tertiary)]">
                 No metered usage has been recorded for this range yet.
               </p>
             ) : null}
@@ -484,13 +484,13 @@ function OverviewSurface({
               {data.integration?.status ?? "Not configured"}
             </StatusBadge>
           </div>
-          <div className="mt-3 flex justify-between text-[9px] text-[var(--text-tertiary)]">
+          <div className="mt-3 flex justify-between text-micro text-[var(--text-tertiary)]">
             <span>Last synced</span>
             <span>{formatRelative(data.integration?.lastSyncAt)}</span>
           </div>
           <Link
             href="/managebac"
-            className="mt-3 block text-[10px] font-medium text-[#16805f] hover:underline"
+            className="mt-3 block text-micro font-medium text-[#16805f] hover:underline"
           >
             Sync settings
           </Link>
@@ -514,7 +514,7 @@ function OverviewSurface({
                 type="button"
                 key={String(label)}
                 onClick={() => onTab(tab as Tab)}
-                className="flex w-full items-center gap-2 rounded-[6px] px-1 py-1.5 text-left text-[10px] text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
+                className="flex w-full items-center gap-2 rounded-[6px] px-1 py-1.5 text-left text-micro text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
               >
                 <Icon size={12} />
                 {label}
@@ -633,7 +633,7 @@ export function SchoolAdminShell() {
   return (
     <div className="spectra-wave-y spectra-admin-stage min-h-dvh bg-[var(--bg-primary)] pb-24">
       {overview.operatorSession ? (
-        <div className="sticky top-0 z-30 flex min-h-10 items-center justify-between gap-3 border-b border-[#d5e5f0] bg-[#eef7fc] px-5 py-2 text-[10px] text-[#315e78]">
+        <div className="sticky top-0 z-30 flex min-h-10 items-center justify-between gap-3 border-b border-[#d5e5f0] bg-[#eef7fc] px-5 py-2 text-micro text-[#315e78]">
           <span className="flex items-center gap-2">
             <KeyRound size={13} />
             <strong>{overview.operatorSession.label}</strong>
@@ -680,7 +680,7 @@ export function SchoolAdminShell() {
               <Building2 size={28} strokeWidth={1.7} />
             </span>
             <div>
-              <p className="text-[9px] font-semibold uppercase tracking-[.12em] text-[#16805f]">
+              <p className="text-micro font-semibold uppercase tracking-[.12em] text-[#16805f]">
                 School administration
               </p>
               <h1 className="mt-1 font-[var(--font-serif)] text-[32px] font-medium leading-none tracking-[-.03em]">
@@ -716,7 +716,7 @@ export function SchoolAdminShell() {
               key={key}
               onClick={() => setTab(key)}
               className={cn(
-                "flex h-8 shrink-0 items-center gap-1.5 rounded-[6px] px-2.5 text-[10px] font-medium",
+                "flex h-8 shrink-0 items-center gap-1.5 rounded-[6px] px-2.5 text-micro font-medium",
                 tab === key
                   ? "bg-[var(--text-primary)] text-[var(--bg-primary)]"
                   : "text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]",
@@ -979,7 +979,7 @@ function PeopleSurface({
           <LoadingPanel label="Loading members" />
         ) : (
           <div className="overflow-x-auto px-4 pb-4">
-            <table className="w-full min-w-[760px] text-left text-[10px]">
+            <table className="w-full min-w-[760px] text-left text-micro">
               <thead className="text-[var(--text-tertiary)]">
                 <tr className="border-b border-[var(--border-subtle)]">
                   <th className="pb-2 font-normal">Member</th>
@@ -997,7 +997,7 @@ function PeopleSurface({
                   >
                     <td className="py-2.5">
                       <div className="flex items-center gap-2">
-                        <span className="grid size-7 place-items-center rounded-full bg-[#eeeafd] text-[10px] font-semibold text-[#6f5bd4]">
+                        <span className="grid size-7 place-items-center rounded-full bg-[#eeeafd] text-micro font-semibold text-[#6f5bd4]">
                           {person.name
                             .split(/\s+/)
                             .slice(0, 2)
@@ -1009,7 +1009,7 @@ function PeopleSurface({
                           <strong className="block font-medium">
                             {person.name}
                           </strong>
-                          <span className="text-[9px] text-[var(--text-tertiary)]">
+                          <span className="text-micro text-[var(--text-tertiary)]">
                             {person.email}
                           </span>
                         </span>
@@ -1090,10 +1090,10 @@ function PeopleSurface({
               >
                 <Mail size={13} className="text-[var(--text-tertiary)]" />
                 <span className="min-w-0 flex-1">
-                  <strong className="block truncate text-[10px]">
+                  <strong className="block truncate text-micro">
                     {invite.email}
                   </strong>
-                  <span className="text-[9px] text-[var(--text-tertiary)]">
+                  <span className="text-micro text-[var(--text-tertiary)]">
                     {invite.role.replaceAll("_", " ")} · expires{" "}
                     {new Intl.DateTimeFormat(undefined, {
                       dateStyle: "medium",
@@ -1207,7 +1207,7 @@ function PeopleSurface({
           </>
         }
       >
-        <div className="break-all rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3 font-mono text-[10px] leading-5">
+        <div className="break-all rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3 font-mono text-micro leading-5">
           {manualInvitationUrl}
         </div>
       </AdminDialog>
@@ -1294,10 +1294,10 @@ function GroupsSurface({
                   </StatusBadge>
                 </div>
                 <h3 className="mt-4 text-[12px] font-semibold">{group.name}</h3>
-                <p className="mt-1 min-h-8 text-[10px] leading-4 text-[var(--text-tertiary)]">
+                <p className="mt-1 min-h-8 text-micro leading-4 text-[var(--text-tertiary)]">
                   {group.description || `${group.type} group`}
                 </p>
-                <div className="mt-4 flex items-center justify-between border-t border-[var(--border-subtle)] pt-3 text-[9px] text-[var(--text-secondary)]">
+                <div className="mt-4 flex items-center justify-between border-t border-[var(--border-subtle)] pt-3 text-micro text-[var(--text-secondary)]">
                   <span>{group.memberCount} members</span>
                   {group.source === "manual" ? (
                     <AdminButton
@@ -1387,14 +1387,14 @@ function GroupsSurface({
             ]}
           />
           <fieldset>
-            <legend className="mb-2 text-[10px] font-medium text-[var(--text-secondary)]">
+            <legend className="mb-2 text-micro font-medium text-[var(--text-secondary)]">
               Initial members
             </legend>
             <div className="max-h-48 space-y-1 overflow-y-auto rounded-[7px] border border-[var(--border-default)] p-2">
               {people.map((person) => (
                 <label
                   key={person.accountId}
-                  className="flex items-center gap-3 rounded-[6px] px-2 py-2 text-[10px] hover:bg-[var(--bg-secondary)]"
+                  className="flex items-center gap-3 rounded-[6px] px-2 py-2 text-micro hover:bg-[var(--bg-secondary)]"
                 >
                   <input
                     type="checkbox"
@@ -1409,7 +1409,7 @@ function GroupsSurface({
                   />
                   <span className="min-w-0 flex-1">
                     <strong className="block truncate">{person.name}</strong>
-                    <span className="truncate text-[9px] text-[var(--text-tertiary)]">
+                    <span className="truncate text-micro text-[var(--text-tertiary)]">
                       {person.email}
                     </span>
                   </span>
@@ -1487,7 +1487,7 @@ function CommunicationSurface({
           <LoadingPanel label="Loading announcements" />
         ) : rows.length ? (
           <div className="overflow-x-auto px-4 pb-4">
-            <table className="w-full min-w-[720px] text-left text-[10px]">
+            <table className="w-full min-w-[720px] text-left text-micro">
               <thead className="text-[var(--text-tertiary)]">
                 <tr className="border-b border-[var(--border-subtle)]">
                   <th className="pb-2 font-normal">Announcement</th>
@@ -1505,7 +1505,7 @@ function CommunicationSurface({
                   >
                     <td className="py-3">
                       <strong className="block font-medium">{row.title}</strong>
-                      <span className="text-[9px] text-[var(--text-tertiary)]">
+                      <span className="text-micro text-[var(--text-tertiary)]">
                         {row.sentAt
                           ? `Sent ${formatRelative(row.sentAt)}`
                           : row.scheduledAt
@@ -1552,7 +1552,7 @@ function CommunicationSurface({
                           Cancel
                         </AdminButton>
                       ) : (
-                        <span className="text-[9px] text-[var(--text-tertiary)]">
+                        <span className="text-micro text-[var(--text-tertiary)]">
                           Immutable
                         </span>
                       )}
@@ -1637,7 +1637,7 @@ function CommunicationSurface({
               {["student", "teacher", "school_admin"].map((role) => (
                 <label
                   key={role}
-                  className="flex items-center gap-2 rounded-[7px] border border-[var(--border-default)] p-3 text-[10px]"
+                  className="flex items-center gap-2 rounded-[7px] border border-[var(--border-default)] p-3 text-micro"
                 >
                   <input
                     type="checkbox"
@@ -1660,7 +1660,7 @@ function CommunicationSurface({
               {groups.map((group) => (
                 <label
                   key={group.groupId}
-                  className="flex items-center gap-2 rounded-[6px] px-2 py-2 text-[10px] hover:bg-[var(--bg-secondary)]"
+                  className="flex items-center gap-2 rounded-[6px] px-2 py-2 text-micro hover:bg-[var(--bg-secondary)]"
                 >
                   <input
                     type="checkbox"
@@ -1681,7 +1681,7 @@ function CommunicationSurface({
               ))}
             </div>
           ) : null}
-          <label className="flex items-center gap-2 text-[10px]">
+          <label className="flex items-center gap-2 text-micro">
             <input
               type="checkbox"
               checked={sendNow}
@@ -1773,7 +1773,7 @@ function UsageSurface({
                         height: `${Math.max(2, (total / maximum) * 100)}%`,
                       }}
                     />
-                    <span className="pointer-events-none absolute bottom-full left-1/2 mb-2 hidden -translate-x-1/2 whitespace-nowrap rounded bg-[var(--text-primary)] px-2 py-1 text-[9px] text-[var(--bg-primary)] group-hover:block">
+                    <span className="pointer-events-none absolute bottom-full left-1/2 mb-2 hidden -translate-x-1/2 whitespace-nowrap rounded bg-[var(--text-primary)] px-2 py-1 text-micro text-[var(--bg-primary)] group-hover:block">
                       {point.day} · {formatCompact(total)}
                     </span>
                   </div>
@@ -1916,7 +1916,7 @@ function AgentsResourcesSurface({
             detail="Operational quality only; private invocations and resource contents never appear."
           />
           <div className="overflow-x-auto px-4 pb-4">
-            <table className="w-full min-w-[760px] text-left text-[10px]">
+            <table className="w-full min-w-[760px] text-left text-micro">
               <thead className="text-[var(--text-tertiary)]">
                 <tr>
                   <th className="py-2">Agent</th>
@@ -1978,7 +1978,7 @@ function AgentsResourcesSurface({
             <strong className="mt-3 block text-[11px]">
               Permission inheritance
             </strong>
-            <p className="mt-1 text-[9px] leading-4 text-[var(--text-tertiary)]">
+            <p className="mt-1 text-micro leading-4 text-[var(--text-tertiary)]">
               Revoking a source artifact immediately removes agent retrieval
               access.
             </p>
@@ -1988,7 +1988,7 @@ function AgentsResourcesSurface({
             <strong className="mt-3 block text-[11px]">
               Evaluation health
             </strong>
-            <p className="mt-1 text-[9px] leading-4 text-[var(--text-tertiary)]">
+            <p className="mt-1 text-micro leading-4 text-[var(--text-tertiary)]">
               Published versions can require evaluation evidence without
               exposing user sessions.
             </p>
@@ -2045,12 +2045,12 @@ function IntegrationsSurface({
                 key={String(label)}
                 className="rounded-[7px] border border-[var(--border-subtle)] p-3"
               >
-                <span className="text-[9px] text-[var(--text-tertiary)]">
+                <span className="text-micro text-[var(--text-tertiary)]">
                   {label}
                 </span>
                 <strong className="mt-1 block text-[12px]">{value}</strong>
                 {detail ? (
-                  <span className="mt-0.5 block text-[9px] text-[var(--text-tertiary)]">
+                  <span className="mt-0.5 block text-micro text-[var(--text-tertiary)]">
                     {detail}
                   </span>
                 ) : null}
@@ -2070,7 +2070,7 @@ function IntegrationsSurface({
           title="Connector guarantees"
           detail="Operational contract"
         />
-        <div className="space-y-2 p-4 pt-1 text-[10px]">
+        <div className="space-y-2 p-4 pt-1 text-micro">
           {[
             "Read-only token, server-side only",
             "Verified tenant capability manifest",
@@ -2148,7 +2148,7 @@ function GovernanceSurface() {
                 <StatusBadge tone="good">Always available</StatusBadge>
               </div>
               <strong className="mt-3 block text-[11px]">{title}</strong>
-              <p className="mt-1 text-[9px] leading-4 text-[var(--text-tertiary)]">
+              <p className="mt-1 text-micro leading-4 text-[var(--text-tertiary)]">
                 {detail}
               </p>
             </div>
@@ -2160,7 +2160,7 @@ function GovernanceSurface() {
           <h2 className="font-[var(--font-serif)] text-[15px] font-medium">
             What administration can do
           </h2>
-          <p className="mt-2 text-[10px] leading-5 text-[var(--text-secondary)]">
+          <p className="mt-2 text-micro leading-5 text-[var(--text-secondary)]">
             Manage people, verified integrations, school profile, operational
             communications, privacy-safe usage, audit, legal lifecycle, and
             future commercial limits. Security isolation and permissions remain
@@ -2236,10 +2236,10 @@ function FeedbackSurface({
                   <strong className="block truncate text-[11px]">
                     {item.subject}
                   </strong>
-                  <span className="mt-1 block line-clamp-2 text-[9px] leading-4 text-[var(--text-tertiary)]">
+                  <span className="mt-1 block line-clamp-2 text-micro leading-4 text-[var(--text-tertiary)]">
                     {item.message}
                   </span>
-                  <span className="mt-1 block text-[9px] text-[var(--text-tertiary)]">
+                  <span className="mt-1 block text-micro text-[var(--text-tertiary)]">
                     {item.reporter?.name ?? "Unavailable reporter"} ·{" "}
                     {formatRelative(item.createdAt)}
                   </span>
@@ -2448,7 +2448,7 @@ function ProfileSurface({
             ].map(([label, checked, setter]) => (
               <label
                 key={String(label)}
-                className="flex items-center justify-between gap-3 text-[10px]"
+                className="flex items-center justify-between gap-3 text-micro"
               >
                 {label as string}
                 <input
@@ -2472,7 +2472,7 @@ function ProfileSurface({
             </span>
             <div>
               <strong className="text-[12px]">{name}</strong>
-              <p className="mt-1 text-[9px] text-[var(--text-tertiary)]">
+              <p className="mt-1 text-micro text-[var(--text-tertiary)]">
                 Live profile preview
               </p>
             </div>
@@ -2524,7 +2524,7 @@ function AuditSurface({
         <LoadingPanel label="Loading audit events" />
       ) : events.length ? (
         <div className="overflow-x-auto px-4 pb-4">
-          <table className="w-full min-w-[760px] text-left text-[10px]">
+          <table className="w-full min-w-[760px] text-left text-micro">
             <thead className="text-[var(--text-tertiary)]">
               <tr className="border-b border-[var(--border-subtle)]">
                 <th className="pb-2 font-normal">Event</th>
@@ -2546,7 +2546,7 @@ function AuditSurface({
                   <td className="py-2.5 text-[var(--text-secondary)]">
                     {event.targetType}
                   </td>
-                  <td className="py-2.5 font-mono text-[9px] text-[var(--text-tertiary)]">
+                  <td className="py-2.5 font-mono text-micro text-[var(--text-tertiary)]">
                     {event.actorAccountId?.slice(-10) ?? "System"}
                   </td>
                   <td className="py-2.5">

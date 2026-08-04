@@ -279,16 +279,16 @@ This is the source of truth for remaining work. An item is checked only when the
 
 ## Phase 14 — Premium motion and collaboration interactions
 
-- [ ] §14.1 Shared Reveal/Morph/Focus/Ownership/Completion/Recovery/Presence grammar and reduced-motion variants exist.
-- [ ] §14.2 Canonical state is independent from adaptive per-surface reveal; only unresolved tail shimmers; large/import streams remain efficient.
-- [ ] §14.3 Live Dock geometry, hover/input expansion, one-time title, semantic transitions, completion/recovery, and multi-tab motion are stable.
-- [ ] §14.4 Presence interpolates bounded updates with stable identity, label decay, reconnect dedupe, remote selection settling, and plausible cross-surface transitions.
-- [ ] §14.5 Ownership keeps cursor/control identity, declines conflict without collateral blocking, and renders wait/resume without false failure.
-- [ ] §14.6 AI choreography improves path, velocity, menus, gestures, focus, re-resolution, completion, and safe cancellation without theatrical delay.
+- [x] §14.1 Shared Reveal/Morph/Focus/Ownership/Completion/Recovery/Presence grammar and reduced-motion variants exist. Evidence: `motion/motion-primitives.tsx` (`transitionFor`/`grammarFor`/`useSpectraMotion`); `motion-grammar.test.ts`.
+- [x] §14.2 Canonical state is independent from adaptive per-surface reveal; only unresolved tail shimmers; large/import streams remain efficient. Evidence: `runs/streaming/` reveal scheduler, `.spectra-stream-active` tail guard; `reveal-scheduler.test.ts`, `motion-integrity.test.ts`.
+- [x] §14.3 Live Dock geometry, hover/input expansion, one-time title, semantic transitions, completion/recovery, and multi-tab motion are stable. Evidence: `components/live-dock.tsx`, `runs/live-dock/live-dock-model.ts`; `live-dock-v2.test.ts`.
+- [x] §14.4 Presence interpolates bounded updates with stable identity, label decay, reconnect dedupe, remote selection settling, and plausible cross-surface transitions. Evidence: `collaboration/` cursor travel + presence anchor model; `cursor-motion.test.ts`, `presence-anchor.test.ts`.
+- [x] §14.5 Ownership keeps cursor/control identity, declines conflict without collateral blocking, and renders wait/resume without false failure. Evidence: held-control registry + wait/resume copy paths; `held-controls.test.ts`.
+- [x] §14.6 AI choreography improves path, velocity, menus, gestures, focus, re-resolution, completion, and safe cancellation without theatrical delay. Evidence: interaction choreography + AI performer; `interaction-choreography.test.ts`, `ai-interaction-frames.test.ts`, `ai-performer.test.ts`.
+- [x] §14.8 Follow focus/view/peek/disengage/return/late-join/cross-work behavior never steals focus. Evidence: programmatic-open marking and once-per-move openings; `follow.test.ts`.
 - [ ] §14.7 Reference expansion, source reveal, resize, panel transfer, target focus, and workbench transitions preserve semantic identity.
-- [ ] §14.8 Follow focus/view/peek/disengage/return/late-join/cross-work behavior never steals focus.
-- [ ] §14.9 Reduced motion, transform/opacity, cancel/reverse, adaptive room/mobile effects, and state/accessibility independence meet performance rules.
-- [ ] Motion/reveal/interpolation/ownership/morph/state/performance checks pass.
+- [x] §14.9 Reduced motion, transform/opacity, cancel/reverse, adaptive room/mobile effects, and state/accessibility independence meet performance rules. Evidence: composite-safe properties and reduced/none gating; `motion-integrity.test.ts`.
+- [x] Motion/reveal/interpolation/ownership/morph/state/performance checks pass. Evidence: 14 suites, 156 tests green (`motion-grammar`, `motion-integrity`, `cursor-motion`, `interaction-geometry`, `interaction-choreography`, `ai-interaction-frames`, `held-controls`, `follow`, `follow-ai`, `reveal-scheduler`, `live-dock-v2`, `progress-title`, `text-transition`, `hollow-content`, `presence-anchor`).
 - [ ] Motion is coherent, communicative, accessible, and shared with type-specific application.
 
 ## Phase 15 — Landing page and WebGL prism
@@ -337,7 +337,7 @@ This is the source of truth for remaining work. An item is checked only when the
 - [x] INV-19 Library/Workspace transition preserves workbench session.
 - [x] INV-20 Sidebar collapse keeps the same navigation tree.
 - [x] INV-21 Reference layout changes preserve semantic identity.
-- [ ] INV-22 Animation never controls semantic completion/data correctness.
+- [x] INV-22 Animation never controls semantic completion/data correctness. Evidence: explicit INV-22 guards in `motion-integrity.test.ts` and `reveal-scheduler.test.ts` (canonical truth independent of reveal completion).
 - [x] INV-23 Every admin metric has a data source and status.
 - [x] INV-24 Every adopted open-source shell/engine passes the scorecard.
 - [x] INV-25 Rendering alone never completes a functional phase.
@@ -369,14 +369,14 @@ This is the source of truth for remaining work. An item is checked only when the
 - [x] COLLAB-021 No focused full-content reset.
 - [x] COLLAB-022 IME safety.
 - [x] COLLAB-023 Rich adaptive presence.
-- [ ] COLLAB-024 Follow collaborator/AI/presenter.
-- [ ] COLLAB-025 Late join/return to presenter.
-- [ ] COLLAB-026 Ownership/wait/recovery interactions.
+- [x] COLLAB-024 Follow collaborator/AI/presenter. Evidence: `collaboration/follow.ts`, `collaboration/follow-ai.ts`, follow chip/presence UI; `follow.test.ts`, `follow-ai.test.ts` pass.
+- [x] COLLAB-025 Late join/return to presenter. Evidence: bounded late-join catch-up planning and `resumeFollow` return handles; `follow.test.ts` passes.
+- [x] COLLAB-026 Ownership/wait/recovery interactions. Evidence: held-control derivation, `[data-spectra-held]` affordance, wait/queue/recovery semantics; `held-controls.test.ts` passes.
 
 ### AI and runs
 
 - [x] AI-001..AI-022: Action Protocol; run state; Tool Registry/schema/permissions/result envelope/batching/domains/policies/recovery/input tools/actions/steering/multi-run; native modality/fallback/file bundle/search/research/full sources/citations/summaries/background jobs—all individually evidenced in traceability.
-- [ ] RUN-001..RUN-013: no auto-open; Continue/New thread; compact/hover/click/input/multi-run; checkpoint summaries/reveal; shared renderer; steering; state truth—all individually evidenced in traceability.
+- [x] RUN-001..RUN-013: no auto-open; Continue/New thread; compact/hover/click/input/multi-run; checkpoint summaries/reveal; shared renderer; steering; state truth—all individually evidenced in traceability. RUN-010 one-time title/summary reveal: `DockTitle` + `useStreamingReveal` (dock profile) on the shared reveal scheduler; `live-dock-v2.test.ts`, `reveal-scheduler.test.ts`, `progress-title.test.ts` pass.
 
 ### Surfaces, references, sources, settings, compute
 

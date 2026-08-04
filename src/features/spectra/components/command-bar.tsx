@@ -168,7 +168,7 @@ function AttachmentBubbles({
       {attachments.map((attachment) => (
         <div
           key={attachment.id}
-          className={`flex max-w-[280px] items-center gap-2 overflow-hidden rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 py-1.5 text-[10px] shadow-[0_4px_14px_-10px_rgba(20,26,32,0.35)] ${attachment.error ? "text-[var(--danger)]" : "text-[var(--text-secondary)]"}`}
+          className={`flex max-w-[280px] items-center gap-2 overflow-hidden rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 py-1.5 text-micro shadow-[0_4px_14px_-10px_rgba(20,26,32,0.35)] ${attachment.error ? "text-[var(--danger)]" : "text-[var(--text-secondary)]"}`}
           title={attachment.error ?? attachment.name}
         >
           {attachment.handling === "image" &&
@@ -576,7 +576,7 @@ export function CommandBar({
       <div className="spectra-command-surface flex min-h-12 min-w-0 flex-1 flex-col rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 shadow-[0_3px_12px_rgba(27,20,12,0.08)]">
         {blockedAttempt ? (
           <div
-            className="mb-1 flex min-h-8 flex-wrap items-center gap-1.5 rounded-[8px] bg-[color-mix(in_oklab,var(--warning)_7%,var(--bg-primary))] px-2 py-1 text-[10px] text-[var(--text-secondary)]"
+            className="mb-1 flex min-h-8 flex-wrap items-center gap-1.5 rounded-[8px] bg-[color-mix(in_oklab,var(--warning)_7%,var(--bg-primary))] px-2 py-1 text-micro text-[var(--text-secondary)]"
             role="alert"
           >
             <span className="mr-auto font-medium text-[var(--text-primary)]">
@@ -610,21 +610,21 @@ export function CommandBar({
           <div className="mb-1 rounded-[8px] bg-[color-mix(in_oklab,var(--accent-cyan)_5%,var(--bg-primary))] px-2 py-1.5">
             <div className="flex items-center gap-1.5">
               <GitBranch className="h-3 w-3 text-[var(--accent-cyan)]" />
-              <span className="mr-auto text-[9px] font-medium text-[var(--text-secondary)]">
+              <span className="mr-auto text-micro font-medium text-[var(--text-secondary)]">
                 {steerQueued ? "Will apply after the current step" : "A run is active"}
               </span>
-              <button type="button" onClick={() => setSteering((current) => !current)} className="h-6 rounded-[5px] px-2 text-[9px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" aria-expanded={steering}>Steer</button>
+              <button type="button" onClick={() => setSteering((current) => !current)} className="h-6 rounded-[5px] px-2 text-micro font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" aria-expanded={steering}>Steer</button>
             </div>
             {steering ? (
               <div className="mt-1.5 flex flex-wrap gap-1.5">
-                <select value={steerMode} onChange={(event) => setSteerMode(event.target.value as typeof steerMode)} className="h-8 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 text-[9px] text-[var(--text-secondary)] outline-none">
+                <select value={steerMode} onChange={(event) => setSteerMode(event.target.value as typeof steerMode)} className="h-8 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 text-micro text-[var(--text-secondary)] outline-none">
                   <option value="refine_current_goal">Refine goal</option>
                   <option value="redirect_next_step">Redirect next step</option>
                   <option value="replace_goal">Replace goal</option>
                   <option value="cancel_current_action">Cancel current action</option>
                 </select>
-                <input value={steerText} onChange={(event) => setSteerText(event.target.value)} placeholder="What should change?" className="h-8 min-w-[160px] flex-1 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 text-[10px] outline-none focus:border-[var(--accent-cyan)]" />
-                <button type="button" disabled={!steerText.trim()} onClick={async () => { const text = steerText.trim(); if (!text) return; await onSteer(activeRunId, steerMode, text); setSteerText(""); setSteerQueued(true); setSteering(false); }} className="h-8 rounded-[6px] bg-[var(--text-primary)] px-2.5 text-[9px] font-semibold text-[var(--bg-primary)] disabled:opacity-40">Queue</button>
+                <input value={steerText} onChange={(event) => setSteerText(event.target.value)} placeholder="What should change?" className="h-8 min-w-[160px] flex-1 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 text-micro outline-none focus:border-[var(--accent-cyan)]" />
+                <button type="button" disabled={!steerText.trim()} onClick={async () => { const text = steerText.trim(); if (!text) return; await onSteer(activeRunId, steerMode, text); setSteerText(""); setSteerQueued(true); setSteering(false); }} className="h-8 rounded-[6px] bg-[var(--text-primary)] px-2.5 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-40">Queue</button>
               </div>
             ) : null}
           </div>

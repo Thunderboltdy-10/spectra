@@ -111,7 +111,7 @@ export function ComposerArtifactDock({
                     {artifact.title}
                   </div>
                 )}
-                <div className="truncate text-[10px] text-[var(--text-secondary)]">
+                <div className="truncate text-micro text-[var(--text-secondary)]">
                   {artifact.summary ??
                     meta?.label ??
                     artifact.blueprintKey.replaceAll("_", " ")}

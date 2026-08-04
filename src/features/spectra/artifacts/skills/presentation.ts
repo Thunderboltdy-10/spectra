@@ -29,10 +29,11 @@ export const presentationSkill = defineArtifactSkill({
     "Use the native layout vocabulary intentionally: title-content for a conventional explanation, title-visual-text for an evidence-led slide, visual-story for a dominant visual with supporting copy, three-ideas for three parallel points, statement for one memorable claim, two-column for comparison, and full-bleed only when the media can carry the slide.",
     "A layout is a starting constraint, not a finished design. After choosing it, adjust object geometry, type scale, crop, whitespace, alignment, and emphasis to fit the actual content; never leave generic placeholders or default cascaded coordinates.",
     "Generate charts from stable Sheets ranges and check overflow, contrast, hierarchy, alignment, reading order, sources, and presenter output.",
+    "Attach citations (label plus source URL from context) to each slide that draws on a source. Spectra rebuilds the References slides from slide citations after every write, so never hand-author a references slide and never copy one into outlines.",
   ],
   preservationRules: [
-    "Preserve unaffected slide/object identity, constraints, reading order, animations, notes, citations, source bindings, and live-versus-pinned source policy.",
-    "Never fabricate citations, reveal inaccessible source data, or flatten editable native objects unless a declared export format requires it.",
+    "Preserve unaffected slide/object identity, constraints, reading order, animations, notes, citations, source bindings, and live-versus-pinned source policy. Preserve generated References slides untouched; Spectra owns their content.",
+    "Never fabricate citations, reveal inaccessible source data, or flatten editable native objects unless a declared export format requires it. Every citation label must name a real source from context.",
   ],
   validation: [
     "Check canvas bounds, text overflow, missing media/fonts, contrast, type scale, alignment, alt text, reading order, citations, and unavailable live sources.",

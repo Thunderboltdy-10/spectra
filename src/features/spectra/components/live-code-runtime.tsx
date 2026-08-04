@@ -261,7 +261,7 @@ export function LiveCodeRuntime({
       return (
         <div className="space-y-2">
           {!allowInteraction ? (
-            <div className="flex items-center gap-1.5 px-1 text-[8px] font-semibold text-[var(--text-tertiary)]">
+            <div className="flex items-center gap-1.5 px-1 text-micro font-semibold text-[var(--text-tertiary)]">
               <LockKeyhole className="h-3 w-3" /> View-only live preview
             </div>
           ) : null}
@@ -291,7 +291,7 @@ export function LiveCodeRuntime({
     return (
       <div className="overflow-hidden rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-primary)]">
         <div className="flex min-h-10 items-center justify-between gap-3 border-b border-[var(--border-subtle)] px-3">
-          <span className="inline-flex items-center gap-1.5 text-[8px] font-semibold uppercase tracking-[.1em] text-[var(--text-tertiary)]">
+          <span className="inline-flex items-center gap-1.5 text-micro font-semibold uppercase tracking-[.1em] text-[var(--text-tertiary)]">
             <ShieldCheck className="h-3 w-3 text-[var(--success)]" /> Live
             Python source
           </span>
@@ -299,7 +299,7 @@ export function LiveCodeRuntime({
             type="button"
             onClick={runPython}
             disabled={!allowInteraction || busy}
-            className="inline-flex h-7 items-center gap-1.5 rounded-[6px] bg-[var(--text-primary)] px-2.5 text-[8px] font-semibold text-[var(--bg-primary)] disabled:opacity-40"
+            className="inline-flex h-7 items-center gap-1.5 rounded-[6px] bg-[var(--text-primary)] px-2.5 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-40"
           >
             {busy ? (
               <Loader2 className="h-3 w-3 animate-spin motion-reduce:animate-none" />
@@ -334,18 +334,18 @@ export function LiveCodeRuntime({
         ) : (
           <div className={`${compact ? "min-h-28" : "min-h-48"} p-4`}>
             {pythonOutput.length ? (
-              <pre className="max-h-64 overflow-auto whitespace-pre-wrap font-mono text-[9px] leading-4 text-[var(--text-secondary)]">
+              <pre className="max-h-64 overflow-auto whitespace-pre-wrap font-mono text-micro leading-4 text-[var(--text-secondary)]">
                 {pythonOutput.join("\n")}
               </pre>
             ) : (
-              <p className="mx-auto max-w-md py-8 text-center text-[9px] leading-4 text-[var(--text-tertiary)]">
+              <p className="mx-auto max-w-md py-8 text-center text-micro leading-4 text-[var(--text-tertiary)]">
                 {allowInteraction
                   ? "Run the current source in a fresh disposable worker. Network and ambient credentials remain unavailable."
                   : "This embed is view-only. Open the source artifact to inspect its Python files."}
               </p>
             )}
             {pythonState === "error" ? (
-              <p className="mt-2 rounded-[6px] border border-[color-mix(in_oklab,var(--danger)_24%,var(--border-default))] p-2 text-[8px] text-[var(--danger)]">
+              <p className="mt-2 rounded-[6px] border border-[color-mix(in_oklab,var(--danger)_24%,var(--border-default))] p-2 text-micro text-[var(--danger)]">
                 {message}
               </p>
             ) : null}
@@ -360,11 +360,11 @@ export function LiveCodeRuntime({
     content.files[0];
   return (
     <div className="overflow-hidden rounded-[8px] border border-[var(--border-default)] bg-[#151713] text-[#e8eadf]">
-      <div className="flex items-center gap-2 border-b border-white/10 px-3 py-2 text-[9px] text-white/55">
+      <div className="flex items-center gap-2 border-b border-white/10 px-3 py-2 text-micro text-white/55">
         <Code2 className="h-3 w-3" /> {entry?.path ?? "source"}
       </div>
       <pre
-        className={`overflow-auto p-3 font-mono text-[9px] leading-4 ${compact ? "max-h-32" : "max-h-72"}`}
+        className={`overflow-auto p-3 font-mono text-micro leading-4 ${compact ? "max-h-32" : "max-h-72"}`}
       >
         {entry?.source ?? ""}
       </pre>
@@ -391,17 +391,17 @@ function RuntimeNotice({
         <Icon
           className={`mx-auto h-5 w-5 text-[var(--text-tertiary)] ${spinning ? "animate-spin motion-reduce:animate-none" : ""}`}
         />
-        <p className="mt-2 text-[10px] font-semibold text-[var(--text-primary)]">
+        <p className="mt-2 text-micro font-semibold text-[var(--text-primary)]">
           {title}
         </p>
-        <p className="mt-1 text-[8px] leading-4 text-[var(--text-secondary)]">
+        <p className="mt-1 text-micro leading-4 text-[var(--text-secondary)]">
           {detail}
         </p>
         {action ? (
           <button
             type="button"
             onClick={action.onClick}
-            className="mt-3 h-7 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-[8px] font-semibold text-[var(--text-primary)]"
+            className="mt-3 h-7 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-micro font-semibold text-[var(--text-primary)]"
           >
             {action.label}
           </button>

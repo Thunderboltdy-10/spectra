@@ -1,371 +1,295 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Activity,
   BarChart3,
   Clock3,
-  FileText,
+  DatabaseZap,
   Layers3,
-  Sparkles,
+  RefreshCw,
+  ShieldCheck,
 } from "lucide-react";
-import {
-  getSpectraOverview,
-  type SpectraArtifact,
-  type SpectraOverview,
-  type SpectraResultCard,
-  type SpectraRun,
-} from "@/features/spectra/data/api";
 import { blueprintMeta } from "@/features/spectra/components/artifact-card";
+import type { CapabilityState } from "@/features/spectra/core/capability-truth";
+import {
+  CapabilityTruthBadge,
+  CapabilityTruthState,
+} from "@/features/spectra/integrations/status/capability-truth";
+import {
+  metricDefinition,
+  type SpectraMetricDefinition,
+} from "@/features/spectra/administration/metric-registry";
 
-type AnalyticsState = {
-  artifacts: SpectraArtifact[];
-  workspaces: SpectraOverview["workspaces"];
-  runs: SpectraRun[];
-  resultCards: SpectraResultCard[];
+type MetricValue = { value: number | null; state: CapabilityState };
+type AnalyticsPayload = {
+  range: { from: number; to: number; fromDay: string; toDay: string };
+  computedAt: number;
+  privacy: string;
+  metrics: {
+    workCreated: MetricValue;
+    activeWorkspaces: MetricValue;
+    aiRuns: MetricValue;
+    completionRate: MetricValue;
+    modelTokens: MetricValue;
+    collaborationBytes: MetricValue;
+  };
+  byType: Array<{ key: string; value: number }>;
+  runOutcomes: Record<"completed" | "active" | "failed" | "cancelled", number>;
+  recentWork: Array<{
+    id: string;
+    title: string;
+    blueprintKey: string;
+    status: string;
+    createdAt: number;
+  }>;
+  recentRuns: Array<{
+    id: string;
+    title: string;
+    status: string;
+    createdAt: number;
+  }>;
 };
 
+const WINDOWS = [7, 30, 90] as const;
+
+async function loadAnalytics(from: number, to: number) {
+  const response = await fetch(
+    `/api/spectra/analytics?from=${from}&to=${to}`,
+    { cache: "no-store" },
+  );
+  const payload = (await response.json().catch(() => null)) as
+    | { data?: AnalyticsPayload; message?: string; error?: { message?: string } }
+    | null;
+  if (!response.ok || !payload?.data)
+    throw new Error(
+      payload?.message ?? payload?.error?.message ?? "Could not load analytics.",
+    );
+  return payload.data;
+}
+
 export function AnalyticsShell() {
-  const [overview, setOverview] = useState<AnalyticsState | null>(null);
+  const [days, setDays] = useState<(typeof WINDOWS)[number]>(30);
+  const [payload, setPayload] = useState<AnalyticsPayload | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    const to = Date.now();
+    const from = to - days * 24 * 60 * 60_000;
+    try {
+      setPayload(await loadAnalytics(from, to));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not load analytics.");
+    } finally {
+      setLoading(false);
+    }
+  }, [days]);
+
   useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const payload = await getSpectraOverview(undefined, true);
-        if (cancelled) return;
-        setOverview({
-          artifacts: payload.artifacts ?? [],
-          workspaces: payload.workspaces ?? [],
-          runs: payload.runs ?? [],
-          resultCards: payload.resultCards ?? [],
-        });
-      } catch (loadError) {
-        if (!cancelled) {
-          setError(
-            loadError instanceof Error
-              ? loadError.message
-              : "Could not load analytics.",
-          );
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    void refresh();
+  }, [refresh]);
 
-  const byType = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const artifact of overview?.artifacts ?? []) {
-      counts.set(
-        artifact.blueprintKey,
-        (counts.get(artifact.blueprintKey) ?? 0) + 1,
-      );
-    }
-    return [...counts.entries()]
-      .map(([key, count]) => ({
-        key,
-        count,
+  const overallState: CapabilityState = error
+    ? { kind: "unavailable", retryable: true, message: error }
+    : loading && payload
+      ? { kind: "refreshing", previous: payload }
+      : payload
+        ? { kind: "available", updatedAt: payload.computedAt }
+        : { kind: "refreshing" };
+
+  const byType = useMemo(
+    () =>
+      (payload?.byType ?? []).map((row) => ({
+        ...row,
         label:
-          blueprintMeta[key as keyof typeof blueprintMeta]?.label ??
-          key.replaceAll("_", " "),
+          blueprintMeta[row.key as keyof typeof blueprintMeta]?.label ??
+          row.key.replaceAll("_", " "),
         color:
-          blueprintMeta[key as keyof typeof blueprintMeta]?.color ??
-          "var(--text-tertiary)",
-      }))
-      .sort((a, b) => b.count - a.count);
-  }, [overview?.artifacts]);
+          blueprintMeta[row.key as keyof typeof blueprintMeta]?.color ?? "#64748b",
+      })),
+    [payload?.byType],
+  );
 
-  const runStatus = useMemo(() => {
-    const counts = {
-      completed: 0,
-      failed: 0,
-      cancelled: 0,
-      active: 0,
-    };
-    for (const run of overview?.runs ?? []) {
-      if (run.status === "completed") counts.completed += 1;
-      else if (run.status === "failed") counts.failed += 1;
-      else if (run.status === "cancelled") counts.cancelled += 1;
-      else counts.active += 1;
-    }
-    return counts;
-  }, [overview?.runs]);
-
-  const recentCards = (overview?.resultCards ?? [])
-    .slice()
-    .sort((a, b) => b.updatedAt - a.updatedAt)
-    .slice(0, 8);
-
-  const recentRuns = (overview?.runs ?? [])
-    .slice()
-    .sort((a, b) => b.updatedAt - a.updatedAt)
-    .slice(0, 8);
+  const metricCards = payload
+    ? [
+        ["account.work_created", payload.metrics.workCreated, Layers3, "number"],
+        ["account.active_workspaces", payload.metrics.activeWorkspaces, BarChart3, "number"],
+        ["account.ai_runs", payload.metrics.aiRuns, Activity, "number"],
+        ["account.ai_completion_rate", payload.metrics.completionRate, ShieldCheck, "percent"],
+        ["account.model_tokens", payload.metrics.modelTokens, DatabaseZap, "compact"],
+        ["account.collaboration_bytes", payload.metrics.collaborationBytes, RefreshCw, "bytes"],
+      ] as const
+    : [];
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-[var(--bg-primary)]">
-      <header className="border-b border-[var(--border-default)] px-8 py-6">
-        <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--text-tertiary)]">
-          Personal signals
-        </p>
-        <h1 className="mt-1 font-display text-[28px] text-[var(--text-primary)]">
-          Analytics
-        </h1>
-        <p className="mt-2 max-w-2xl text-sm text-[var(--text-secondary)]">
-          A private overview of your Spectra activity — artifacts, runs, and
-          recent results. School and platform operators never see private
-          prompts, threads, or memory here.
-        </p>
+      <header className="border-b border-[var(--border-default)] px-6 py-5 lg:px-9">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2.5">
+              <p className="text-micro font-bold uppercase tracking-[0.16em] text-[var(--text-tertiary)]">
+                Private account signals
+              </p>
+              <CapabilityTruthBadge state={overallState} />
+            </div>
+            <h1 className="mt-2 font-display text-[28px] font-semibold tracking-[-0.025em] text-[var(--text-primary)]">
+              Analytics
+            </h1>
+            <p className="mt-1 max-w-2xl text-[13px] leading-6 text-[var(--text-secondary)]">
+              An exact, date-bounded view of work and AI activity. Every number names its source and collection state.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="flex rounded-lg border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1">
+              {WINDOWS.map((windowDays) => (
+                <button
+                  key={windowDays}
+                  type="button"
+                  onClick={() => setDays(windowDays)}
+                  className={`h-7 rounded-md px-3 text-[11px] font-semibold ${days === windowDays ? "bg-[#173d33] text-white" : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}
+                >
+                  {windowDays}d
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={() => void refresh()}
+              disabled={loading}
+              className="inline-flex h-9 items-center gap-2 rounded-lg border border-[var(--border-default)] px-3 text-[11px] font-semibold disabled:opacity-45"
+            >
+              <RefreshCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
+              Refresh
+            </button>
+          </div>
+        </div>
+        {payload ? (
+          <p className="mt-3 text-micro text-[var(--text-tertiary)]">
+            {payload.range.fromDay} â†’ {payload.range.toDay} Â· computed {formatDate(payload.computedAt)}
+          </p>
+        ) : null}
       </header>
 
-      <div className="overflow-y-auto px-8 py-6">
+      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6 lg:px-9">
         {error ? (
-          <div className="rounded-[10px] border border-[var(--border-default)] px-5 py-4 text-sm text-[var(--text-secondary)]">
-            {error}
-          </div>
-        ) : (
-          <>
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <MetricCard
-                icon={<Layers3 size={16} />}
-                label="Artifacts"
-                value={overview?.artifacts.length}
-              />
-              <MetricCard
-                icon={<BarChart3 size={16} />}
-                label="Workspaces"
-                value={overview?.workspaces.length}
-              />
-              <MetricCard
-                icon={<Activity size={16} />}
-                label="Recent runs"
-                value={overview?.runs.length}
-              />
-              <MetricCard
-                icon={<Sparkles size={16} />}
-                label="Result cards"
-                value={overview?.resultCards.length}
-              />
-            </div>
+          <CapabilityTruthState state={overallState} title="Personal analytics" onRetry={() => void refresh()} />
+        ) : null}
 
-            <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
-              <section>
-                <SectionHeading
-                  title="Artifacts by type"
-                  detail="Your library composition across blueprints"
-                />
-                <div className="mt-3 space-y-2">
-                  {byType.length === 0 ? (
-                    <EmptyLine label="No artifacts yet." />
-                  ) : (
-                    byType.map((row) => {
-                      const max = byType[0]?.count ?? 1;
-                      const width = Math.max(8, Math.round((row.count / max) * 100));
-                      return (
-                        <div
-                          key={row.key}
-                          className="flex items-center gap-3 py-1.5"
-                        >
-                          <span
-                            className="w-28 shrink-0 truncate text-[13px] text-[var(--text-secondary)]"
-                            title={row.label}
-                          >
-                            {row.label}
-                          </span>
-                          <div className="h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-[var(--bg-secondary)]">
-                            <div
-                              className="h-full rounded-full"
-                              style={{
-                                width: `${width}%`,
-                                background: row.color,
-                              }}
-                            />
-                          </div>
-                          <span className="w-8 text-right text-[13px] tabular-nums text-[var(--text-primary)]">
-                            {row.count}
-                          </span>
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {metricCards.map(([id, metric, Icon, format]) => (
+            <MetricCard
+              key={id}
+              definition={metricDefinition(id)}
+              metric={metric}
+              icon={<Icon className="size-4" />}
+              format={format}
+            />
+          ))}
+          {!payload
+            ? Array.from({ length: 6 }, (_, index) => (
+                <div key={index} className="h-36 animate-pulse rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)]" />
+              ))
+            : null}
+        </div>
+
+        {payload ? (
+          <>
+            <div className="mt-7 grid gap-7 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,.85fr)]">
+              <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5">
+                <SectionHeading title="Work created by type" detail="New work in this account and date range" />
+                <div className="mt-5 space-y-3">
+                  {byType.length ? byType.map((row) => {
+                    const maximum = byType[0]?.value ?? 1;
+                    return (
+                      <div key={row.key} className="grid grid-cols-[112px_1fr_32px] items-center gap-3">
+                        <span className="truncate text-[12px] font-medium text-[var(--text-secondary)]">{row.label}</span>
+                        <div className="h-2 overflow-hidden rounded-full bg-[var(--bg-secondary)]">
+                          <div className="h-full rounded-full" style={{ width: `${Math.max(5, (row.value / maximum) * 100)}%`, background: row.color }} />
                         </div>
-                      );
-                    })
-                  )}
+                        <span className="text-right text-[12px] font-semibold tabular-nums">{row.value}</span>
+                      </div>
+                    );
+                  }) : <EmptyLine label="No work was created in this range." />}
                 </div>
               </section>
 
-              <section>
-                <SectionHeading
-                  title="Run outcomes"
-                  detail="Status mix across recent AI runs"
-                />
-                <div className="mt-3 grid grid-cols-2 gap-3">
-                  {(
-                    [
-                      ["Completed", runStatus.completed, "#15916c"],
-                      ["Active", runStatus.active, "#3b82f6"],
-                      ["Failed", runStatus.failed, "#c2410c"],
-                      ["Cancelled", runStatus.cancelled, "#78716c"],
-                    ] as const
-                  ).map(([label, value, color]) => (
-                    <div
-                      key={label}
-                      className="border border-[var(--border-subtle)] px-4 py-3"
-                    >
-                      <p className="text-[11px] uppercase tracking-[0.1em] text-[var(--text-tertiary)]">
-                        {label}
-                      </p>
-                      <p
-                        className="mt-1 font-display text-2xl tabular-nums"
-                        style={{ color }}
-                      >
-                        {overview ? value : "—"}
-                      </p>
+              <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5">
+                <SectionHeading title="AI run outcomes" detail="Settled and still-active runs remain distinct" />
+                <div className="mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-xl bg-[var(--border-subtle)]">
+                  {([
+                    ["Completed", payload.runOutcomes.completed, "#14795c"],
+                    ["Active", payload.runOutcomes.active, "#2563eb"],
+                    ["Failed", payload.runOutcomes.failed, "#b45309"],
+                    ["Cancelled", payload.runOutcomes.cancelled, "#64748b"],
+                  ] as const).map(([label, value, color]) => (
+                    <div key={label} className="bg-[var(--bg-elevated)] p-4">
+                      <p className="text-micro font-bold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">{label}</p>
+                      <p className="mt-2 font-display text-[26px] font-semibold tabular-nums" style={{ color }}>{value}</p>
                     </div>
                   ))}
                 </div>
               </section>
             </div>
 
-            <div className="mt-8 grid gap-6 xl:grid-cols-2">
-              <section>
-                <SectionHeading
-                  title="Recent results"
-                  detail="Cards kept from your latest runs"
-                />
-                <div className="mt-3 divide-y divide-[var(--border-subtle)]">
-                  {recentCards.length === 0 ? (
-                    <EmptyLine label="No result cards yet." />
-                  ) : (
-                    recentCards.map((card) => (
-                      <div key={card._id} className="flex gap-3 py-3">
-                        <FileText
-                          size={15}
-                          className="mt-0.5 shrink-0 text-[var(--text-tertiary)]"
-                        />
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-[13px] font-medium text-[var(--text-primary)]">
-                            {card.title}
-                          </p>
-                          {card.summary ? (
-                            <p className="mt-0.5 line-clamp-2 text-[12px] leading-5 text-[var(--text-secondary)]">
-                              {card.summary}
-                            </p>
-                          ) : null}
-                          <p className="mt-1 text-[11px] text-[var(--text-tertiary)]">
-                            {card.variant} · {formatRelative(card.updatedAt)}
-                          </p>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </section>
-
-              <section>
-                <SectionHeading
-                  title="Recent runs"
-                  detail="Latest prompts and outcomes"
-                />
-                <div className="mt-3 divide-y divide-[var(--border-subtle)]">
-                  {recentRuns.length === 0 ? (
-                    <EmptyLine label="No runs yet." />
-                  ) : (
-                    recentRuns.map((run) => (
-                      <div key={run._id} className="flex gap-3 py-3">
-                        <Clock3
-                          size={15}
-                          className="mt-0.5 shrink-0 text-[var(--text-tertiary)]"
-                        />
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-[13px] font-medium text-[var(--text-primary)]">
-                            {run.finalSummary?.trim() ||
-                              run.userPrompt.slice(0, 120) ||
-                              "Untitled run"}
-                          </p>
-                          <p className="mt-1 text-[11px] text-[var(--text-tertiary)]">
-                            {run.status}
-                            {run.decision ? ` · ${run.decision}` : ""}
-                            {" · "}
-                            {formatRelative(run.updatedAt)}
-                          </p>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </section>
+            <div className="mt-7 grid gap-7 xl:grid-cols-2">
+              <RecentList title="Recent work" detail="Created in this range" empty="No recent work." rows={payload.recentWork.map((item) => ({ id: item.id, title: item.title, detail: `${item.blueprintKey.replaceAll("_", " ")} Â· ${item.status}`, timestamp: item.createdAt }))} />
+              <RecentList title="Recent AI runs" detail="Titles and status only; prompts are not queried" empty="No recent AI runs." rows={payload.recentRuns.map((item) => ({ id: item.id, title: item.title, detail: item.status, timestamp: item.createdAt }))} />
             </div>
-          </>
-        )}
 
-        <section className="mt-8 border-t border-[var(--border-subtle)] pt-5">
-          <h2 className="text-sm font-semibold text-[var(--text-primary)]">
-            What stays private
-          </h2>
-          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[var(--text-secondary)]">
-            Prompt text, thread transcripts, memory claims, and unrelated
-            artifacts are excluded from school and platform analytics. This page
-            only summarizes your own accessible work.
-          </p>
-        </section>
+            <section className="mt-7 rounded-2xl border border-emerald-800/15 bg-emerald-950/[0.025] p-5">
+              <div className="flex items-start gap-3">
+                <ShieldCheck className="mt-0.5 size-5 shrink-0 text-emerald-800" />
+                <div>
+                  <h2 className="text-[13px] font-semibold text-[var(--text-primary)]">Privacy and source boundary</h2>
+                  <p className="mt-1 max-w-3xl text-[12px] leading-6 text-[var(--text-secondary)]">{payload.privacy}</p>
+                  <p className="mt-2 text-micro text-[var(--text-tertiary)]">Indexed sources: work created, workspace activity, AI run metadata, and daily account usage meters.</p>
+                </div>
+              </div>
+            </section>
+          </>
+        ) : null}
       </div>
     </div>
   );
 }
 
-function SectionHeading({
-  title,
-  detail,
-}: {
-  title: string;
-  detail: string;
-}) {
+function MetricCard({ definition, metric, icon, format }: { definition: SpectraMetricDefinition; metric: MetricValue; icon: React.ReactNode; format: "number" | "percent" | "compact" | "bytes" }) {
   return (
-    <div>
-      <h2 className="text-sm font-semibold text-[var(--text-primary)]">
-        {title}
-      </h2>
-      <p className="mt-0.5 text-[12px] text-[var(--text-tertiary)]">{detail}</p>
-    </div>
+    <article className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-2 text-[var(--text-secondary)]">{icon}<span className="text-micro font-bold uppercase tracking-[0.12em]">{definition.label}</span></div>
+        <CapabilityTruthBadge state={metric.state} className="min-h-5 px-2 text-micro" />
+      </div>
+      <p className="mt-4 font-display text-[30px] font-semibold tabular-nums text-[var(--text-primary)]">{formatMetric(metric.value, format)}</p>
+      <p className="mt-2 truncate text-micro text-[var(--text-tertiary)]" title={`${definition.source} Â· ${definition.aggregation}`}>{definition.source}</p>
+      <p className="mt-1 text-micro leading-4 text-[var(--text-secondary)]">{metric.state.kind === "partial" ? metric.state.details : definition.zeroMeaning}</p>
+    </article>
   );
+}
+
+function SectionHeading({ title, detail }: { title: string; detail: string }) {
+  return <div><h2 className="font-display text-[17px] font-semibold text-[var(--text-primary)]">{title}</h2><p className="mt-1 text-[11px] text-[var(--text-tertiary)]">{detail}</p></div>;
+}
+
+function RecentList({ title, detail, empty, rows }: { title: string; detail: string; empty: string; rows: Array<{ id: string; title: string; detail: string; timestamp: number }> }) {
+  return <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5"><SectionHeading title={title} detail={detail} /><div className="mt-3 divide-y divide-[var(--border-subtle)]">{rows.length ? rows.map((row) => <div key={row.id} className="flex items-start gap-3 py-3"><Clock3 className="mt-0.5 size-3.5 shrink-0 text-[var(--text-tertiary)]" /><div className="min-w-0 flex-1"><p className="truncate text-[12px] font-semibold text-[var(--text-primary)]">{row.title}</p><p className="mt-1 text-micro capitalize text-[var(--text-tertiary)]">{row.detail} Â· {formatDate(row.timestamp)}</p></div></div>) : <EmptyLine label={empty} />}</div></section>;
 }
 
 function EmptyLine({ label }: { label: string }) {
-  return (
-    <p className="py-4 text-[13px] text-[var(--text-tertiary)]">{label}</p>
-  );
+  return <p className="py-6 text-center text-[11px] text-[var(--text-tertiary)]">{label}</p>;
 }
 
-function MetricCard({
-  icon,
-  label,
-  value,
-  valueLabel,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value?: number;
-  valueLabel?: string;
-}) {
-  return (
-    <div className="border border-[var(--border-default)] px-5 py-4">
-      <div className="flex items-center gap-2 text-[var(--text-secondary)]">
-        {icon}
-        <span className="text-[11px] font-medium uppercase tracking-[0.12em]">
-          {label}
-        </span>
-      </div>
-      <p className="mt-3 font-display text-3xl tabular-nums text-[var(--text-primary)]">
-        {valueLabel ?? (value === undefined ? "—" : String(value))}
-      </p>
-    </div>
-  );
+function formatMetric(value: number | null, format: "number" | "percent" | "compact" | "bytes") {
+  if (value === null) return "Not measured";
+  if (format === "percent") return `${value}%`;
+  if (format === "bytes") return value < 1_024 ? `${value} B` : value < 1_048_576 ? `${(value / 1_024).toFixed(1)} KB` : `${(value / 1_048_576).toFixed(1)} MB`;
+  if (format === "compact") return new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(value);
+  return value.toLocaleString();
 }
 
-function formatRelative(timestamp: number) {
-  const delta = Date.now() - timestamp;
-  if (delta < 60_000) return "Just now";
-  if (delta < 3_600_000) return `${Math.round(delta / 60_000)} min ago`;
-  if (delta < 86_400_000) return `${Math.round(delta / 3_600_000)} hr ago`;
-  return `${Math.round(delta / 86_400_000)} d ago`;
+function formatDate(timestamp: number) {
+  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(timestamp);
 }

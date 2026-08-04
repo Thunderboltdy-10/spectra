@@ -86,7 +86,7 @@ export function ErrorToast({ code, message, requestId }: { code: string; message
             </button>
           )}
           {expanded && requestId && (
-            <div className="mt-2 rounded border border-[var(--border-default)] bg-[var(--bg-primary)] p-2 font-mono text-[10px] text-[var(--text-secondary)]">
+            <div className="mt-2 rounded border border-[var(--border-default)] bg-[var(--bg-primary)] p-2 font-mono text-micro text-[var(--text-secondary)]">
               <div>Code: {code}</div>
               <div>Request ID: {requestId}</div>
               <div className="mt-1 text-[var(--text-secondary)] opacity-70">

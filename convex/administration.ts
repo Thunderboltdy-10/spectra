@@ -340,6 +340,15 @@ export const schoolOverview = mutation({
         (account?.lastSeenAt ?? 0) >= Date.now() - 30 * 24 * 60 * 60_000,
     ).length;
     const classWorkspaces = workspaces;
+    const computedAt = Date.now();
+    const directMetricState = { kind: "available" as const, updatedAt: computedAt };
+    const counterMetricState = counters.length
+      ? directMetricState
+      : ({
+          kind: "partial" as const,
+          details:
+            "No operational counter rows exist in this range, so disabled collection is not shown as zero.",
+        });
     await writeAuditEvent(ctx, {
       actorAccountId: actor.accountId,
       schoolId: school._id,
@@ -399,6 +408,19 @@ export const schoolOverview = mutation({
               .reduce((sum, item) => sum + item.quantity, 0)
           : null,
       },
+      metricStates: {
+        members: directMetricState,
+        active30d: directMetricState,
+        invitations: directMetricState,
+        pendingApprovals: directMetricState,
+        groups: directMetricState,
+        classWorkspaces: directMetricState,
+        feedbackNew: directMetricState,
+        artifactsCreated: counterMetricState,
+        messages: counterMetricState,
+        aiRuns: counterMetricState,
+      },
+      computedAt,
       usage,
       limits: limitPolicy
         ? {
@@ -1902,31 +1924,83 @@ export const platformOverview = mutation({
   },
   handler: async (ctx, args) => {
     const actor = await platformOperator(ctx);
+    const now = Date.now();
+    const integrationStatuses = [
+      "disconnected",
+      "validating",
+      "connected",
+      "degraded",
+      "blocked",
+      "revoked",
+    ] as const;
     const [
       schools,
       accounts,
-      integrations,
+      activeAccounts30d,
+      integrationGroups,
       feedback,
-      incidents,
-      requests,
-      meters,
-      operationalCounters,
+      incidentGroups,
+      requestGroups,
+      selectedMeters,
+      selectedCounters,
+      failedRunCounters,
     ] = await Promise.all([
-      ctx.db.query("schools").collect(),
-      ctx.db.query("accounts").collect(),
-      ctx.db.query("schoolIntegrations").collect(),
-      ctx.db.query("feedbackReports").collect(),
-      ctx.db.query("platformIncidents").collect(),
-      ctx.db.query("schoolRequests").collect(),
-      ctx.db.query("usageMeters").collect(),
-      ctx.db.query("operationalCounters").collect(),
+      ctx.db.query("schools").withIndex("by_status", (q) => q.eq("status", "active")).collect(),
+      ctx.db.query("accounts").withIndex("by_status", (q) => q.eq("status", "active")).collect(),
+      ctx.db
+        .query("accounts")
+        .withIndex("by_status_last_seen", (q) =>
+          q.eq("status", "active").gte("lastSeenAt", now - 30 * 24 * 60 * 60_000),
+        )
+        .collect(),
+      Promise.all(
+        integrationStatuses.map((status) =>
+          ctx.db
+            .query("schoolIntegrations")
+            .withIndex("by_status_next_sync", (q) => q.eq("status", status))
+            .collect(),
+        ),
+      ),
+      ctx.db
+        .query("feedbackReports")
+        .withIndex("by_created", (q) =>
+          q
+            .gte("createdAt", Date.parse(`${args.fromDay}T00:00:00.000Z`))
+            .lte("createdAt", Date.parse(`${args.toDay}T23:59:59.999Z`)),
+        )
+        .collect(),
+      Promise.all(
+        (["investigating", "identified", "monitoring"] as const).map((status) =>
+          ctx.db
+            .query("platformIncidents")
+            .withIndex("by_status_updated", (q) => q.eq("status", status))
+            .collect(),
+        ),
+      ),
+      Promise.all(
+        (["open", "acknowledged", "in_progress"] as const).map((status) =>
+          ctx.db
+            .query("schoolRequests")
+            .withIndex("by_status_priority", (q) => q.eq("status", status))
+            .collect(),
+        ),
+      ),
+      ctx.db
+        .query("usageMeters")
+        .withIndex("by_day", (q) => q.gte("day", args.fromDay).lte("day", args.toDay))
+        .collect(),
+      ctx.db
+        .query("operationalCounters")
+        .withIndex("by_day", (q) => q.gte("day", args.fromDay).lte("day", args.toDay))
+        .collect(),
+      ctx.db
+        .query("operationalCounters")
+        .withIndex("by_day", (q) => q.gte("day", day(now - 24 * 60 * 60_000)).lte("day", day(now)))
+        .collect(),
     ]);
-    const selectedMeters = meters.filter(
-      (meter) => meter.day >= args.fromDay && meter.day <= args.toDay,
-    );
-    const selectedCounters = operationalCounters.filter(
-      (counter) => counter.day >= args.fromDay && counter.day <= args.toDay,
-    );
+    const integrations = integrationGroups.flat();
+    const incidents = incidentGroups.flat();
+    const requests = requestGroups.flat();
     const counterTotal = (category: Doc<"operationalCounters">["category"]) =>
       selectedCounters
         .filter((counter) => counter.category === category)
@@ -1955,12 +2029,23 @@ export const platformOverview = mutation({
     const schoolMap = new Map(
       schools.map((school) => [String(school._id), school]),
     );
-    const now = Date.now();
-    const activeAccounts = accounts.filter(
-      (account) =>
-        account.status === "active" &&
-        (account.lastSeenAt ?? 0) >= now - 30 * 24 * 60 * 60_000,
-    );
+    const activeAccounts = activeAccounts30d;
+    const computedAt = Date.now();
+    const directMetricState = { kind: "available" as const, updatedAt: computedAt };
+    const counterMetricState = selectedCounters.length
+      ? directMetricState
+      : ({
+          kind: "partial" as const,
+          details:
+            "No operational counters exist in this range, so uninstrumented activity is not shown as zero.",
+        });
+    const meterMetricState = selectedMeters.length
+      ? directMetricState
+      : ({
+          kind: "partial" as const,
+          details:
+            "No usage meters exist in this range, so disabled metering is not shown as zero.",
+        });
     const serviceHealth = [
       {
         service: "Model metering",
@@ -1984,8 +2069,9 @@ export const platformOverview = mutation({
       },
       {
         service: "Collaboration",
-        status:
-          (totals.collaboration_bytes ?? 0) >= 0 ? "operational" : "unknown",
+        status: selectedMeters.some((meter) => meter.category === "collaboration_bytes")
+          ? "operational"
+          : "unknown",
       },
     ];
     await writeAuditEvent(ctx, {
@@ -1998,10 +2084,8 @@ export const platformOverview = mutation({
     });
     return {
       metrics: {
-        activeSchools: schools.filter((school) => school.status === "active")
-          .length,
-        totalUsers: accounts.filter((account) => account.status === "active")
-          .length,
+        activeSchools: schools.length,
+        totalUsers: accounts.length,
         activeUsers30d: activeAccounts.length,
         artifactsCreated: selectedCounters.length
           ? counterTotal("artifact_created")
@@ -2013,6 +2097,22 @@ export const platformOverview = mutation({
           ? Math.round((activeAccounts.length / accounts.length) * 100)
           : 0,
       },
+      metricStates: {
+        activeSchools: directMetricState,
+        totalUsers: directMetricState,
+        activeUsers30d: directMetricState,
+        artifactsCreated: counterMetricState,
+        messages: counterMetricState,
+        retentionPercent: directMetricState,
+        storageBytes: meterMetricState,
+        integrationHealth: directMetricState,
+        feedback: directMetricState,
+        failedRuns24h: failedRunCounters.length
+          ? directMetricState
+          : counterMetricState,
+        openRequests: directMetricState,
+      },
+      computedAt,
       usage: {
         totals,
         series: Object.entries(usageByDay)
@@ -2052,17 +2152,11 @@ export const platformOverview = mutation({
           name: schoolMap.get(schoolId)?.name ?? "Unavailable school",
           usage,
         })),
-      incidents: incidents
-        .filter((item) => item.status !== "resolved")
-        .sort((left, right) => right.updatedAt - left.updatedAt)
-        .slice(0, 20),
-      requests: requests
-        .filter((item) => !["resolved", "closed"].includes(item.status))
-        .sort((left, right) => right.createdAt - left.createdAt)
-        .slice(0, 20),
+      incidents: incidents.sort((left, right) => right.updatedAt - left.updatedAt).slice(0, 20),
+      requests: requests.sort((left, right) => right.createdAt - left.createdAt).slice(0, 20),
       queues: {
-        failedRuns24h: operationalCounters.length
-          ? operationalCounters
+        failedRuns24h: failedRunCounters.length
+          ? failedRunCounters
               .filter(
                 (counter) =>
                   counter.category === "ai_run_failed" &&

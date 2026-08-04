@@ -5,6 +5,7 @@ import {
   BookOpen,
   Bot,
   Check,
+  Crosshair,
   Files,
   FileText,
   FolderPlus,
@@ -28,6 +29,7 @@ import {
 } from "../data/api";
 import { useSpectraContextStore } from "@/stores/spectra-context-store";
 import { toast } from "sonner";
+import { spectraBus } from "../events";
 
 export type ComposerFocusMode =
   "global" | "workspace" | "artifact" | "selection" | "thread";
@@ -349,7 +351,7 @@ export function ContextFocusControl({
         <TriggerIcon className="h-4 w-4" strokeWidth={2} />
         {contextCount > 0 ? (
           <span
-            className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--text-primary)] px-1 text-[9px] font-semibold leading-none text-[var(--bg-primary)]"
+            className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--text-primary)] px-1 text-micro font-semibold leading-none text-[var(--bg-primary)]"
             aria-hidden
           >
             {contextCount > 99 ? "99+" : contextCount}
@@ -407,6 +409,22 @@ export function ContextFocusControl({
                 <div className="mx-1 mb-1 border-t border-[var(--border-subtle)] px-1 pb-1.5 pt-2 text-[11px] font-semibold text-[var(--text-secondary)]">
                   Also use
                 </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpen(false);
+                    void spectraBus.command("context.beginPicking", {
+                      source: "composer",
+                    });
+                  }}
+                  className="mx-1 mb-1.5 flex min-h-10 w-[calc(100%-8px)] items-center gap-2 rounded-[8px] border border-[var(--border-default)] px-2.5 text-left text-[11px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
+                >
+                  <Crosshair className="h-3.5 w-3.5 text-[var(--accent-cyan)]" />
+                  Pick from page
+                  <span className="ml-auto text-micro font-normal text-[var(--text-tertiary)]">
+                    Semantic targets
+                  </span>
+                </button>
                 <div className="mx-1 mb-1.5 flex h-10 items-center gap-2 rounded-[8px] bg-[var(--bg-primary)] px-2.5 shadow-[inset_0_0_0_1px_var(--border-default)]">
                   <Search className="h-3.5 w-3.5 text-[var(--text-tertiary)]" />
                   <input
@@ -419,16 +437,16 @@ export function ContextFocusControl({
                 </div>
                 {explicit.length || includedVisible.length ? (
                   <div className="mx-1 mb-1.5 rounded-[8px] border border-[var(--border-subtle)] p-2">
-                    <div className="mb-1.5 text-[10px] font-medium text-[var(--text-tertiary)]">
+                    <div className="mb-1.5 text-micro font-medium text-[var(--text-tertiary)]">
                       Included
                     </div>
                     <div className="flex flex-wrap gap-1">
                       {explicit.map((item) => (
                         <button
-                          key={`explicit:${item.type}:${item.id}`}
+                          key={`explicit:${item.type}:${item.id}:${item.semanticTargetId ?? "root"}`}
                           type="button"
                           onClick={() => removeExplicit(item.type, item.id)}
-                          className={`inline-flex max-w-full items-center gap-1 rounded-[6px] px-1.5 py-1 text-[10px] ${item.stale ? "bg-[color-mix(in_oklab,var(--danger)_8%,var(--bg-secondary))] text-[var(--danger)]" : "bg-[var(--bg-secondary)] text-[var(--text-secondary)]"}`}
+                          className={`inline-flex max-w-full items-center gap-1 rounded-[6px] px-1.5 py-1 text-micro ${item.stale ? "bg-[color-mix(in_oklab,var(--danger)_8%,var(--bg-secondary))] text-[var(--danger)]" : "bg-[var(--bg-secondary)] text-[var(--text-secondary)]"}`}
                           title={
                             item.stale
                               ? "This object is no longer available. Remove from context."
@@ -452,7 +470,7 @@ export function ContextFocusControl({
                         .map((item) => (
                           <span
                             key={`visible:${item.type}:${item.id}`}
-                            className="inline-flex max-w-full items-center gap-1 rounded-[6px] bg-[color-mix(in_oklab,var(--accent-cyan)_9%,var(--bg-secondary))] px-1.5 py-1 text-[10px] font-medium text-[var(--text-secondary)]"
+                            className="inline-flex max-w-full items-center gap-1 rounded-[6px] bg-[color-mix(in_oklab,var(--accent-cyan)_9%,var(--bg-secondary))] px-1.5 py-1 text-micro font-medium text-[var(--text-secondary)]"
                             title="Included because it is visible"
                           >
                             <span className="max-w-[240px] truncate">
@@ -487,7 +505,7 @@ export function ContextFocusControl({
                         <span className="min-w-0 flex-1 truncate text-[11px]">
                           {item.title}
                         </span>
-                        <span className="text-[9px] text-[var(--text-tertiary)]">
+                        <span className="text-micro text-[var(--text-tertiary)]">
                           Add context
                         </span>
                       </button>
@@ -528,7 +546,7 @@ export function ContextFocusControl({
                         <span className="min-w-0 flex-1 truncate text-[11px]">
                           {item.title}
                         </span>
-                        <span className="text-[9px] text-[var(--text-tertiary)]">
+                        <span className="text-micro text-[var(--text-tertiary)]">
                           {isAgent ? "Add agent" : "Add context"}
                         </span>
                       </button>
@@ -564,7 +582,7 @@ export function ContextFocusControl({
                             <span className="min-w-0 flex-1 truncate text-[11px]">
                               {item.title}
                             </span>
-                            <span className="text-[9px] text-[var(--text-tertiary)]">
+                            <span className="text-micro text-[var(--text-tertiary)]">
                               Use as context
                             </span>
                           </button>
@@ -578,7 +596,7 @@ export function ContextFocusControl({
                                 runId: item.lastRunId,
                               })
                             }
-                            className="mr-1 rounded-[6px] px-2 py-1 text-[9px] font-semibold text-[var(--accent-cyan)] hover:bg-[var(--bg-secondary)]"
+                            className="mr-1 rounded-[6px] px-2 py-1 text-micro font-semibold text-[var(--accent-cyan)] hover:bg-[var(--bg-secondary)]"
                           >
                             Continue
                           </button>
@@ -821,7 +839,7 @@ export function GlobalSearch({
                   placeholder="Search titles, summaries, types, workspaces, and stored text…"
                   className="h-14 min-w-0 flex-1 bg-transparent text-[15px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
                 />
-                <span className="rounded-[5px] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[10px] text-[var(--text-tertiary)]">
+                <span className="rounded-[5px] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-micro text-[var(--text-tertiary)]">
                   ESC
                 </span>
               </div>
@@ -843,7 +861,7 @@ export function GlobalSearch({
                 ) : null}
                 {results.workspaces.length ? (
                   <section>
-                    <div className="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.09em] text-[var(--text-tertiary)]">
+                    <div className="px-2 py-1.5 text-micro font-semibold uppercase tracking-[0.09em] text-[var(--text-tertiary)]">
                       Workspaces
                     </div>
                     {results.workspaces.map((workspace) => (
@@ -861,7 +879,7 @@ export function GlobalSearch({
                           <span className="block text-[12px] font-medium text-[var(--text-primary)]">
                             {workspace.title}
                           </span>
-                          <span className="line-clamp-1 text-[10px] text-[var(--text-tertiary)]">
+                          <span className="line-clamp-1 text-micro text-[var(--text-tertiary)]">
                             {workspace.description}
                           </span>
                         </span>
@@ -871,7 +889,7 @@ export function GlobalSearch({
                 ) : null}
                 {results.artifacts.length ? (
                   <section className="mt-2">
-                    <div className="px-2 py-1.5 text-[10px] font-semibold uppercase tracking-[0.09em] text-[var(--text-tertiary)]">
+                    <div className="px-2 py-1.5 text-micro font-semibold uppercase tracking-[0.09em] text-[var(--text-tertiary)]">
                       Artifacts
                     </div>
                     {results.artifacts.map((artifact) => {
@@ -899,7 +917,7 @@ export function GlobalSearch({
                               <span className="block truncate text-[12px] font-medium text-[var(--text-primary)]">
                                 {artifact.title}
                               </span>
-                              <span className="block truncate text-[10px] text-[var(--text-tertiary)]">
+                              <span className="block truncate text-micro text-[var(--text-tertiary)]">
                                 {meta.label} · {artifact.summary}
                               </span>
                             </span>
@@ -923,7 +941,7 @@ export function GlobalSearch({
                           <button
                             type="button"
                             onClick={() => onToggleSelected(artifact)}
-                            className={`mr-2 flex h-7 shrink-0 items-center gap-1.5 rounded-[6px] px-2 text-[10px] font-medium ${selected ? "bg-[var(--text-primary)] text-[var(--bg-primary)]" : "text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]"}`}
+                            className={`mr-2 flex h-7 shrink-0 items-center gap-1.5 rounded-[6px] px-2 text-micro font-medium ${selected ? "bg-[var(--text-primary)] text-[var(--bg-primary)]" : "text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]"}`}
                             title={
                               selected
                                 ? "Remove from context"

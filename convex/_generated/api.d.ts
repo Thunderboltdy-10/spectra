@@ -10,6 +10,7 @@
 
 import type * as administration from "../administration.js";
 import type * as agents from "../agents.js";
+import type * as analytics from "../analytics.js";
 import type * as artifactAccessRequests from "../artifactAccessRequests.js";
 import type * as artifactAssets from "../artifactAssets.js";
 import type * as artifactComments from "../artifactComments.js";
@@ -21,6 +22,8 @@ import type * as audit from "../audit.js";
 import type * as auditShared from "../auditShared.js";
 import type * as authority from "../authority.js";
 import type * as authorityShared from "../authorityShared.js";
+import type * as calendar from "../calendar.js";
+import type * as calendarShared from "../calendarShared.js";
 import type * as changeGroups from "../changeGroups.js";
 import type * as collaboration from "../collaboration.js";
 import type * as collaborationGatewayBridge from "../collaborationGatewayBridge.js";
@@ -66,6 +69,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   administration: typeof administration;
   agents: typeof agents;
+  analytics: typeof analytics;
   artifactAccessRequests: typeof artifactAccessRequests;
   artifactAssets: typeof artifactAssets;
   artifactComments: typeof artifactComments;
@@ -77,6 +81,8 @@ declare const fullApi: ApiFromModules<{
   auditShared: typeof auditShared;
   authority: typeof authority;
   authorityShared: typeof authorityShared;
+  calendar: typeof calendar;
+  calendarShared: typeof calendarShared;
   changeGroups: typeof changeGroups;
   collaboration: typeof collaboration;
   collaborationGatewayBridge: typeof collaborationGatewayBridge;

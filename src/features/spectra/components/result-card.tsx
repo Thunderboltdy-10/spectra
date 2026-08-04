@@ -58,11 +58,11 @@ function ProvenanceLine({ card }: { card: ResultCardView }) {
     }
   }
 
-  return <div className="col-start-2 col-end-[-1] -mt-1 mb-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-[var(--text-tertiary)]">
+  return <div className="col-start-2 col-end-[-1] -mt-1 mb-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-micro text-[var(--text-tertiary)]">
     {hasAgent ? <span className="inline-flex min-w-0 items-center gap-1 rounded-[6px] bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-secondary))] px-1.5 py-0.5 text-[var(--text-secondary)]" title={provenance.agentRoutingReason}>
       <Bot className="h-3 w-3 shrink-0 text-[var(--accent-cyan)]" />
       <span className="truncate">Using {provenance.agentTitle}</span>
-      <span className="text-[9px] text-[var(--text-tertiary)]">{provenance.agentRoutingSource === "continued" ? "retained" : provenance.agentRoutingSource === "explicit" ? "selected" : "auto"}</span>
+      <span className="text-micro text-[var(--text-tertiary)]">{provenance.agentRoutingSource === "continued" ? "retained" : provenance.agentRoutingSource === "explicit" ? "selected" : "auto"}</span>
       <button type="button" disabled={clearingAgent || ordinaryNext} className="ml-0.5 inline-flex items-center gap-0.5 rounded-[4px] px-1 py-0.5 font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)] disabled:opacity-65" onClick={(event) => { event.stopPropagation(); void switchToOrdinarySpectra(); }} title="Stop retaining this agent for the thread">
         {clearingAgent ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : ordinaryNext ? <Check className="h-2.5 w-2.5" /> : <Undo2 className="h-2.5 w-2.5" />}
         {ordinaryNext ? "Ordinary next" : "Use ordinary Spectra"}
@@ -170,26 +170,26 @@ export function ResultCardStack({
                   className="mt-1.5 flex flex-wrap items-center gap-1.5 rounded-[7px] border border-[color-mix(in_oklab,var(--warning)_22%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_5%,var(--bg-primary))] px-2 py-1"
                   onClick={(event) => event.stopPropagation()}
                 >
-                  <span className="mr-1 text-[10px] font-medium text-[var(--text-secondary)]">
+                  <span className="mr-1 text-micro font-medium text-[var(--text-secondary)]">
                     Review these changes before they are saved.
                   </span>
                   <button
                     type="button"
-                    className="rounded-[6px] bg-[var(--text-primary)] px-2 py-1 text-[10px] font-semibold text-[var(--bg-primary)] hover:opacity-90"
+                    className="rounded-[6px] bg-[var(--text-primary)] px-2 py-1 text-micro font-semibold text-[var(--bg-primary)] hover:opacity-90"
                     onClick={() => onAction?.(card, "confirm", card.runId)}
                   >
                     Apply changes
                   </button>
                   {onRevise || onAction ? <button
                     type="button"
-                    className="rounded-[6px] px-2 py-1 text-[10px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                    className="rounded-[6px] px-2 py-1 text-micro font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
                     onClick={() => setRevisingCardId((current) => current === card.id ? null : card.id)}
                   >
                     Ask for changes
                   </button> : null}
                   <button
                     type="button"
-                    className="rounded-[6px] px-2 py-1 text-[10px] font-semibold text-[var(--danger)] hover:bg-[color-mix(in_oklab,var(--danger)_8%,transparent)]"
+                    className="rounded-[6px] px-2 py-1 text-micro font-semibold text-[var(--danger)] hover:bg-[color-mix(in_oklab,var(--danger)_8%,transparent)]"
                     onClick={() => onAction?.(card, "cancel", card.runId)}
                   >
                     Reject
@@ -203,7 +203,7 @@ export function ResultCardStack({
                       setRevision("");
                       setRevisingCardId(null);
                     });
-                  }}><input autoFocus value={revision} onChange={(event) => setRevision(event.target.value)} placeholder="What should Spectra change?" className="h-8 min-w-0 flex-1 rounded-[6px] bg-[var(--bg-elevated)] px-2.5 text-[11px] text-[var(--text-primary)] outline-none" /><button type="submit" disabled={!revision.trim()} className="h-8 rounded-[6px] bg-[var(--text-primary)] px-2.5 text-[10px] font-semibold text-[var(--bg-primary)] disabled:opacity-35">Send</button></form> : null}
+                  }}><input autoFocus value={revision} onChange={(event) => setRevision(event.target.value)} placeholder="What should Spectra change?" className="h-8 min-w-0 flex-1 rounded-[6px] bg-[var(--bg-elevated)] px-2.5 text-[11px] text-[var(--text-primary)] outline-none" /><button type="submit" disabled={!revision.trim()} className="h-8 rounded-[6px] bg-[var(--text-primary)] px-2.5 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-35">Send</button></form> : null}
                 </div>
               ) : null}
             </div>

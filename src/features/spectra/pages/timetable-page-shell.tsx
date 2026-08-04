@@ -42,7 +42,7 @@ export function TimetablePageShell() {
             .sort((left, right) => right.updatedAt - left.updatedAt)[0];
           if (!existing)
             throw new Error(
-              "Your personal timetable is not available yet. Refresh and try again.",
+              "Your Calendar is not available yet. Refresh and try again.",
             );
           artifactId = existing._id;
         }
@@ -54,7 +54,7 @@ export function TimetablePageShell() {
         setError(
           loadError instanceof Error
             ? loadError.message
-            : "Could not open your timetable.",
+            : "Could not open your Calendar.",
         );
       } finally {
         if (!cancelled) setLoading(false);
@@ -83,7 +83,7 @@ export function TimetablePageShell() {
             General
           </p>
           <h1 className="mt-1 font-display text-[28px] font-semibold tracking-[-0.02em] text-[var(--text-primary)]">
-            Timetable
+            Calendar
           </h1>
           <p className="mt-1 max-w-xl text-[14px] leading-6 text-[var(--text-secondary)]">
             Layered school, class, task, and personal time. Always available in
@@ -96,7 +96,7 @@ export function TimetablePageShell() {
         {loading ? (
           <div className="flex h-full items-center justify-center gap-2 text-[13px] text-[var(--text-secondary)]">
             <Loader2 className="h-4 w-4 animate-spin" />
-            Opening your timetable…
+            Opening your Calendar…
           </div>
         ) : error ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
@@ -131,7 +131,7 @@ export function TimetablePageShell() {
       <div className="pointer-events-none absolute bottom-0 left-0 right-0 z-50 px-4 pb-5 pt-2 sm:px-8">
         <div className="pointer-events-auto mx-auto max-w-[820px]">
           <CommandBar
-            placeholder="Ask Spectra anything about this timetable…"
+            placeholder="Ask Spectra anything about this Calendar…"
             onSubmit={(prompt) => {
               void runEngine.run(prompt).catch((runError) =>
                 toast.error(

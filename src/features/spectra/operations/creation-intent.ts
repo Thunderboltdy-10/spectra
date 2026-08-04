@@ -1,7 +1,7 @@
-import type { ArtifactTypeKey } from "../artifacts/types";
+import type { WorkTypeKey } from "../artifacts/types";
 
 export type SpectraCreationIntent = {
-  blueprintKey: ArtifactTypeKey;
+  blueprintKey: WorkTypeKey;
   label: string;
 };
 
@@ -21,7 +21,7 @@ export function matchSpectraCreationShorthand(
     );
   const shorthand: Array<{
     pattern: RegExp;
-    blueprintKey: ArtifactTypeKey;
+    blueprintKey: WorkTypeKey;
     label: string;
   }> = [
     {
@@ -65,12 +65,6 @@ export function matchSpectraCreationShorthand(
         /\bpresentation\b|\bslide\s*deck\b|\bslides?\s+(?:on|for|about|introducing)\b/i,
       blueprintKey: "presentation",
       label: "Presentation",
-    },
-    {
-      pattern:
-        /\b(?:timetable|study\s+schedule|revision\s+schedule|weekly\s+schedule)\b|\bschedule\s+(?:for|of|my)\b/i,
-      blueprintKey: "timetable",
-      label: "Timetable",
     },
     {
       pattern:

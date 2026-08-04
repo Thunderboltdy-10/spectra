@@ -1,6 +1,8 @@
 import type { ArtifactTypeKey } from "../artifacts/types";
+import type { CompilerStageState as FoundryCompilerStageState } from "../agents/foundry/compiler";
 import type { ArtifactCardView } from "../components/artifact-card";
 import type { PublishedCodeBuildProjection } from "../code/published-build";
+import type { QuizExperience } from "../quiz/experience";
 import type { TimetablePersonalState } from "../timetable/model";
 
 export type SpectraBlueprintKey = ArtifactTypeKey | "thread_reference";
@@ -229,6 +231,17 @@ export type SpectraManageBacOverview = {
     /** True when MANAGEBAC_API_KEY is present server-side for temporary testing. */
     envTokenAvailable?: boolean;
     school?: { _id: string; name: string } | null;
+    periodMaps?: Array<{
+      _id: string;
+      periodKey: string;
+      label: string;
+      startMinutes: number;
+      endMinutes: number;
+      timezone: string;
+      weekdays: number[];
+      verifiedAt: number;
+      source: "school_admin" | "provider_contract";
+    }>;
     mapping?: {
       status: "pending" | "verified" | "no_match" | "ambiguous" | "revoked";
       matchCount?: number;
@@ -672,6 +685,15 @@ export type SpectraRunTab = {
   run: SpectraRun;
   thread: SpectraThread;
   card?: SpectraResultCard | null;
+  inputRequest?:
+    | {
+        kind: "choice";
+        prompt: string;
+        options: Array<{ title: string; description?: string | null }>;
+      }
+    | null;
+  checkpointSummary?: string;
+  recentSteps?: string[];
 };
 
 export type SpectraArtifactComment = {
@@ -683,6 +705,16 @@ export type SpectraArtifactComment = {
   body: string;
   anchor: {
     regionId: string;
+    semanticAnchor?: {
+      workId: string;
+      workType: ArtifactTypeKey;
+      kind: string;
+      path: string[];
+      stableIds?: Record<string, string>;
+      fallbackExcerpt?: string;
+      schemaVersion: number;
+    };
+    relativePosition?: ArrayBuffer;
     fallbackExcerpt?: string;
     geometry?: unknown;
   };
@@ -1218,6 +1250,27 @@ export async function disconnectSpectraManageBac() {
   });
 }
 
+export async function upsertSpectraCalendarPeriodMap(input: {
+  periodKey: string;
+  label: string;
+  startMinutes: number;
+  endMinutes: number;
+  timezone: string;
+  weekdays: number[];
+}) {
+  return postManageBac<{ periodMapId: string; verifiedAt: number }>({
+    action: "upsertPeriodMap",
+    ...input,
+  });
+}
+
+export async function removeSpectraCalendarPeriodMap(periodMapId: string) {
+  return postManageBac<{ removed: true }>({
+    action: "removePeriodMap",
+    periodMapId,
+  });
+}
+
 export type SpectraFlashcardRating = "again" | "hard" | "good" | "easy";
 
 export type SpectraFlashcardStudyState = {
@@ -1234,10 +1287,22 @@ export type SpectraFlashcardStudyState = {
   lapses: number;
   nextDueAt: number;
   lastReviewedAt?: number;
+  /** The learner's private note on this card. */
+  note?: string;
+  /** The card was rewritten since this was last studied, so it is due again. */
+  changedSinceStudied?: boolean;
   previews: Record<
     SpectraFlashcardRating,
     { nextDueAt: number; label: string }
   >;
+};
+
+/** What the deck's edits did to this person's progress (§11B). */
+export type SpectraFlashcardStudyUpdate = {
+  changedCardIds: string[];
+  /** Cards the deck no longer offers whose progress is kept for their return. */
+  retainedCardIds: string[];
+  studiedCardIds: string[];
 };
 
 export async function getSpectraFlashcardStudy(artifactId: string) {
@@ -1245,7 +1310,21 @@ export async function getSpectraFlashcardStudy(artifactId: string) {
   return readJson<{
     states: SpectraFlashcardStudyState[];
     dueCount: number;
+    update: SpectraFlashcardStudyUpdate;
   }>(await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }));
+}
+
+export async function setSpectraFlashcardNote(input: {
+  artifactId: string;
+  cardId: string;
+  direction: "forward" | "reverse";
+  note: string;
+}) {
+  return postSpectra<{
+    cardId: string;
+    direction: "forward" | "reverse";
+    note: string;
+  }>({ action: "setFlashcardNote", ...input });
 }
 
 export async function reviewSpectraFlashcard(input: {
@@ -1312,6 +1391,18 @@ export type SpectraQuizPracticeAttempt = {
   results?: SpectraQuizPracticeResult[];
   instructions?: string;
   settings?: Record<string, unknown>;
+  /** How this quiz is used, resolved server-side (§11C). */
+  experience?: QuizExperience;
+  /**
+   * Milliseconds left, counted from the server's own `startedAt` rather than
+   * from anything the tab remembers, so a refresh resumes the same clock and
+   * cannot extend it. `null` means this quiz is untimed.
+   */
+  timeRemainingMs?: number | null;
+  /** Whether the reveal policy has released answers to this learner yet. */
+  answersRevealed?: boolean;
+  /** Set when the attempt was submitted after its clock ran out. */
+  timeElapsed?: boolean;
 };
 
 export async function getSpectraQuizPracticeAttempts(
@@ -1324,6 +1415,38 @@ export async function getSpectraQuizPracticeAttempts(
     limit: String(limit),
   });
   return readJson<{ attempts: SpectraQuizPracticeAttempt[] }>(
+    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+  );
+}
+
+export type SpectraQuizResponseSummary =
+  | { available: false; reason: string }
+  | {
+      available: true;
+      attemptCount: number;
+      submittedCount: number;
+      inProgressCount: number;
+      timeElapsedCount: number;
+      averagePercentage?: number;
+      questions: Array<{
+        questionId: string;
+        prompt: string;
+        answered: number;
+        correct: number;
+        commonResponses: Array<{ response: string; count: number }>;
+      }>;
+    };
+
+/**
+ * Cohort-level results for the quiz's owner. No account is named and no single
+ * response is returned, so the same call is safe for an anonymous quiz (§11C).
+ */
+export async function getSpectraQuizResponseSummary(artifactId: string) {
+  const qs = new URLSearchParams({
+    action: "quizResponseSummary",
+    artifactId,
+  });
+  return readJson<SpectraQuizResponseSummary>(
     await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
   );
 }
@@ -1347,6 +1470,8 @@ export async function saveSpectraQuizPracticeResponse(input: {
   return postSpectra<{
     responseId: string;
     reused: boolean;
+    /** The server's own remaining time, used to re-anchor the countdown. */
+    timeRemainingMs?: number | null;
     result?: SpectraQuizPracticeResult;
   }>({
     action: "saveQuizPracticeResponse",
@@ -1816,6 +1941,34 @@ export async function getSpectraPublicAgents(params?: {
   );
 }
 
+export type SpectraInstalledAgent = SpectraPublicAgent & {
+  installedAt: number;
+  pinnedReleaseId?: string;
+  ownedByViewer: boolean;
+};
+
+/** Agents installed from Discover — a reference to a published release. */
+export async function getSpectraInstalledAgents() {
+  const qs = new URLSearchParams({ action: "installedAgents" });
+  return readJson<{ agents: SpectraInstalledAgent[] }>(
+    await fetch(`/api/spectra?${qs.toString()}`, { cache: "no-store" }),
+  );
+}
+
+/** Install or uninstall a published agent release. */
+export async function setSpectraAgentInstalled(
+  agentId: string,
+  installed: boolean,
+  pinnedReleaseId?: string,
+) {
+  return postSpectra<{ followId: string; following: boolean }>({
+    action: "followAgent",
+    agentId,
+    following: installed,
+    pinnedReleaseId,
+  });
+}
+
 export async function addSpectraPublicAgent(agentId: string) {
   return postSpectra<{ grantId: string; added: boolean }>({
     action: "addPublicAgent",
@@ -1861,6 +2014,93 @@ export async function verifySpectraAgentManifest(manifest: unknown) {
       body: JSON.stringify({ action: "verify", manifest }),
     }),
   );
+}
+
+/* ------------------------------------------------------------------ */
+/* Agent Foundry (Phase 10)                                            */
+/* ------------------------------------------------------------------ */
+
+async function foundryRequest<T>(body: Record<string, unknown>) {
+  return readJson<{ ok: true } & T>(
+    await fetch("/api/spectra/agents/foundry", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  );
+}
+
+export async function compileSpectraAgentFoundation(input: {
+  agentId: string;
+  objective: string;
+  interaction: string;
+}) {
+  return foundryRequest<{
+    mission: unknown;
+    title?: string;
+    summary?: string;
+    securityConcerns: unknown[];
+  }>({ operation: "foundation", ...input });
+}
+
+export async function nextSpectraFoundrySection(agentId: string) {
+  return foundryRequest<{
+    sufficient: boolean;
+    sufficiency: unknown;
+    section: unknown;
+    archetypes?: string[];
+  }>({ operation: "next", agentId });
+}
+
+export async function extractSpectraFoundryEvidence(input: {
+  agentId: string;
+  sourceId: string;
+  kind: string;
+  text: string;
+}) {
+  return foundryRequest<{ extraction: unknown }>({
+    operation: "extract",
+    ...input,
+  });
+}
+
+export type SpectraFoundryCompilerJob = {
+  jobId: string;
+  runId: string;
+  status: "queued" | "running" | "completed" | "failed" | "cancelled";
+  stages: FoundryCompilerStageState[];
+  diagnostics?: Array<{
+    severity: string;
+    stage: string;
+    message: string;
+    subjectId?: string;
+  }>;
+  startedAt: number;
+  updatedAt: number;
+  completedAt?: number;
+  stale: boolean;
+};
+
+export async function compileSpectraFoundrySkills(agentId: string) {
+  return foundryRequest<{
+    skills: unknown[];
+    routing: {
+      description: string;
+      examples: string[];
+      negativeExamples: string[];
+    };
+    releaseNotes: string;
+    jobId?: string;
+    diagnostics?: SpectraFoundryCompilerJob["diagnostics"];
+  }>({ operation: "compile", agentId });
+}
+
+/** Latest background compilation, shown inside Foundry rather than the Live Dock. */
+export async function getSpectraFoundryCompilerJob(agentId: string) {
+  return foundryRequest<{ job: SpectraFoundryCompilerJob | null }>({
+    operation: "compileStatus",
+    agentId,
+  });
 }
 
 export async function getSpectraArtifactComments(

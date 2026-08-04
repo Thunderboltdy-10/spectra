@@ -26,23 +26,26 @@ const plexMono = IBM_Plex_Mono({
 
 export const metadata: Metadata = {
   title: "Spectra — The AI School Platform",
-  description: "Spectra is a collaborative AI studio for connected school workspaces and artifacts.",
+  description:
+    "Spectra is a collaborative AI workspace for connected work, people, and evidence.",
   icons: {
     icon: [
+      { url: "/icon.svg", type: "image/svg+xml" },
       { url: "/favicon.png", type: "image/png", sizes: "64x64" },
     ],
-    apple: [
-      { url: "/icon-192.png", sizes: "192x192" },
-    ],
+    apple: [{ url: "/icon-192.png", sizes: "192x192" }],
   },
   openGraph: {
     title: "Spectra — The AI School Platform",
-    description: "Spectra is a collaborative AI studio for connected school workspaces and artifacts.",
+    description:
+      "Spectra is a collaborative AI workspace for connected work, people, and evidence.",
     siteName: "Spectra",
   },
 };
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+export default function RootLayout({
+  children,
+}: Readonly<{ children: React.ReactNode }>) {
   const publishableKey = getClerkPublishableKey();
 
   const content = (
@@ -51,10 +54,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <meta name="color-scheme" content="light dark" />
       </head>
       <body className={`${manrope.variable} ${plexMono.variable} antialiased`}>
-        <a
-          href="#main-content"
-          className="skip-link sr-only focus:not-sr-only"
-        >
+        <a href="#main-content" className="skip-link sr-only focus:not-sr-only">
           Skip to content
         </a>
         <div id="main-content" tabIndex={-1}>
@@ -68,5 +68,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     return content;
   }
 
-  return <ClerkProvider publishableKey={publishableKey}>{content}</ClerkProvider>;
+  return (
+    <ClerkProvider publishableKey={publishableKey}>{content}</ClerkProvider>
+  );
 }

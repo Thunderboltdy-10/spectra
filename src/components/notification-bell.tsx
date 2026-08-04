@@ -157,7 +157,7 @@ export function NotificationBell({
         >
           <Bell className="h-4 w-4" />
           {unreadCount > 0 ? (
-            <span className="absolute -right-1 -top-1 inline-flex min-w-[1.1rem] items-center justify-center rounded-full bg-[var(--danger)] px-1 text-[10px] font-semibold text-white">
+            <span className="absolute -right-1 -top-1 inline-flex min-w-[1.1rem] items-center justify-center rounded-full bg-[var(--danger)] px-1 text-micro font-semibold text-white">
               {unreadCount > 9 ? "9+" : unreadCount}
             </span>
           ) : null}
@@ -231,7 +231,7 @@ export function NotificationBell({
                       {!notification.read ? (
                         <button
                           type="button"
-                          className="inline-flex rounded-full border border-[var(--border-default)] px-1.5 py-0.5 text-[10px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
+                          className="inline-flex rounded-full border border-[var(--border-default)] px-1.5 py-0.5 text-micro text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)]"
                           onClick={(event) => {
                             event.stopPropagation();
                             void markRead(notification._id);

@@ -6,13 +6,14 @@ import {
   CheckCircle2,
   ChevronDown,
   Bot,
-  CalendarDays,
+  Clock3,
   Code2,
   ExternalLink,
   FileText,
   Files,
   FolderInput,
   FolderPlus,
+  Heart,
   HelpCircle,
   LayoutGrid,
   List,
@@ -27,7 +28,9 @@ import {
   Share2,
   Sparkles,
   Table2,
+  Tags,
   Trash2,
+  Upload,
   Presentation,
   Workflow,
   X,
@@ -78,6 +81,10 @@ import {
   disengageFollowAi,
   isProgrammaticOpen,
 } from "../collaboration/follow-ai";
+import {
+  disengageFollow,
+  isProgrammaticFollowOpen,
+} from "../collaboration/follow";
 import { ShareDialog } from "../components/share-dialog";
 import {
   artifactPlacements,
@@ -88,11 +95,15 @@ import {
   workspaceAccent,
 } from "../components/spectra-view-model";
 import {
+  abortArtifactImportUpload,
+  beginArtifactImportOriginal,
+  completeArtifactImport,
   getSpectraArtifacts,
   getSpectraOverview,
   getSpectraShareInvitations,
   getSpectraThread,
   postSpectra,
+  uploadArtifactImportOriginal,
   type SpectraArtifact,
   type SpectraBlueprintKey,
   type SpectraWorkspace,
@@ -100,11 +111,23 @@ import {
   type SpectraShareInvitation,
 } from "../data/api";
 import type { ArtifactTypeKey } from "../artifacts/types";
+import {
+  readSharedWorkbenchSession,
+  updateWorkbenchSurface,
+  writeSharedWorkbenchSession,
+} from "../workbench";
 
 type ArtifactMode = "list" | "board" | "canvas";
 type ArtifactSort =
   "updated" | "created" | "title" | "type" | "workspace" | "activity";
-type ArtifactCollection = "mine" | "shared" | "invitations";
+type ArtifactCollection =
+  | "all"
+  | "unplaced"
+  | "shared"
+  | "recent"
+  | "favorites"
+  | "collections"
+  | "invitations";
 type ArtifactHubTab = { id: string; label: string };
 
 function artifactHubTab(): ArtifactHubTab {
@@ -125,7 +148,6 @@ const filters: Array<{
   { key: "quiz", label: "Quizzes", icon: HelpCircle },
   { key: "planner_task", label: "Tasks", icon: CalendarCheck2 },
   { key: "agent", label: "Agents", icon: Bot },
-  { key: "timetable", label: "Timetables", icon: CalendarDays },
   { key: "presentation", label: "Presentations", icon: Presentation },
   { key: "sheets", label: "Sheets", icon: Table2 },
   { key: "code", label: "Code", icon: Code2 },
@@ -158,9 +180,19 @@ function useOutsideClick<T extends HTMLElement>(
   return ref;
 }
 
-export function ArtifactsShell() {
+export function ArtifactsShell({
+  initialArtifactId,
+}: { initialArtifactId?: string } = {}) {
   const searchParams = useSearchParams();
-  const requestedArtifactId = searchParams.get("artifactId");
+  const requestedArtifactId =
+    initialArtifactId ?? searchParams.get("artifactId");
+  useEffect(() => {
+    const session = readSharedWorkbenchSession(window.localStorage);
+    writeSharedWorkbenchSession(
+      window.localStorage,
+      updateWorkbenchSurface(session, "library"),
+    );
+  }, []);
   const requestedCollection = searchParams.get("collection");
   const [allArtifacts, setAllArtifacts] = useState<SpectraArtifact[]>([]);
   const [workspaces, setWorkspaces] = useState<SpectraWorkspace[]>([]);
@@ -169,10 +201,19 @@ export function ArtifactsShell() {
     "all",
   );
   const [collection, setCollection] = useState<ArtifactCollection>(
-    requestedCollection === "shared" || requestedCollection === "invitations"
-      ? requestedCollection
-      : "mine",
+    [
+      "all",
+      "unplaced",
+      "shared",
+      "recent",
+      "favorites",
+      "collections",
+      "invitations",
+    ].includes(requestedCollection ?? "")
+      ? (requestedCollection as ArtifactCollection)
+      : "all",
   );
+  const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
   const [shareInvitations, setShareInvitations] = useState<
     SpectraShareInvitation[]
   >([]);
@@ -209,12 +250,40 @@ export function ArtifactsShell() {
   const metadataLoadedRef = useRef(false);
   const loadSequenceRef = useRef(0);
   const openedQueryArtifactRef = useRef<string | null>(null);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
   const [placementAnchor, setPlacementAnchor] = useState<DOMRect | null>(null);
   const [pendingCreateType, setPendingCreateType] =
     useState<ArtifactTypeKey | null>(null);
   const [artifactDeletePending, setArtifactDeletePending] =
     useState<SpectraArtifact | null>(null);
   const [shareTarget, setShareTarget] = useState<SpectraArtifact | null>(null);
+
+  useEffect(() => {
+    try {
+      const value = JSON.parse(
+        window.localStorage.getItem("spectra.library.favorites.v1") ?? "[]",
+      );
+      if (Array.isArray(value))
+        setFavoriteIds(
+          new Set(value.filter((id): id is string => typeof id === "string")),
+        );
+    } catch {
+      setFavoriteIds(new Set());
+    }
+  }, []);
+
+  const toggleFavorite = useCallback((workId: string) => {
+    setFavoriteIds((current) => {
+      const next = new Set(current);
+      if (next.has(workId)) next.delete(workId);
+      else next.add(workId);
+      window.localStorage.setItem(
+        "spectra.library.favorites.v1",
+        JSON.stringify([...next]),
+      );
+      return next;
+    });
+  }, []);
   const createMenuRef = useOutsideClick<HTMLDivElement>(createMenuOpen, () =>
     setCreateMenuOpen(false),
   );
@@ -255,9 +324,13 @@ export function ArtifactsShell() {
       (object) =>
         object.type === "thread" && object.presentation === "thread-panel",
     ) ?? null;
-  const liveThread = threadPanelObject
-    ? { id: threadPanelObject.id, title: threadPanelObject.label }
-    : null;
+  const liveThread = useMemo(
+    () =>
+      threadPanelObject
+        ? { id: threadPanelObject.id, title: threadPanelObject.label }
+        : null,
+    [threadPanelObject],
+  );
   const {
     composerThread,
     setComposerThread,
@@ -341,6 +414,7 @@ export function ArtifactsShell() {
       disposed = true;
     };
   }, [
+    composerThread,
     composerThread?.artifactId,
     composerThread?.id,
     setComposerThread,
@@ -435,7 +509,7 @@ export function ArtifactsShell() {
       .filter((id) => allArtifacts.some((artifact) => artifact._id === id))
       .slice(0, 24);
     if (selectedIds.length === 0) {
-      toast.message("Select one or more artifacts first.");
+      toast.message("Select one or more work items first.");
       return;
     }
     setTileObjects(
@@ -594,7 +668,7 @@ export function ArtifactsShell() {
     } catch (error) {
       if (sequence !== loadSequenceRef.current) return [];
       toast.error(
-        error instanceof Error ? error.message : "Could not load artifacts.",
+        error instanceof Error ? error.message : "Could not load your library.",
       );
       return [];
     } finally {
@@ -621,7 +695,10 @@ export function ArtifactsShell() {
   const openArtifactSurface = useCallback(
     (artifact: SpectraArtifact) => {
       // A user-chosen open ends spectating; a follow-dispatched open does not.
-      if (!isProgrammaticOpen()) disengageFollowAi();
+      if (!isProgrammaticOpen() && !isProgrammaticFollowOpen()) {
+        disengageFollowAi();
+        disengageFollow("user_input");
+      }
       if (artifact.blueprintKey === "thread_reference") {
         const content =
           artifact.content && typeof artifact.content === "object"
@@ -665,13 +742,6 @@ export function ArtifactsShell() {
                 : {}),
             },
       );
-      setLiveThread({
-        id: threadId,
-        title:
-          liveThread?.id === threadId
-            ? liveThread.title
-            : "Current conversation",
-      });
       setActiveRunPanelId(null);
       window.dispatchEvent(new Event("spectra:threads-changed"));
     },
@@ -752,7 +822,7 @@ export function ArtifactsShell() {
       else if (next.size < 24) next.add(artifact._id);
       else
         toast.message(
-          "Context can include up to 24 explicitly selected artifacts.",
+          "Context can include up to 24 explicitly selected work items.",
         );
       window.localStorage.setItem(
         "spectra.artifacts.latest-selection.v1",
@@ -788,7 +858,19 @@ export function ArtifactsShell() {
         if (collection === "invitations") return false;
         if (collection === "shared" && artifact.ownership !== "shared")
           return false;
-        if (collection === "mine" && artifact.ownership === "shared")
+        if (
+          collection === "unplaced" &&
+          artifactPlacements(artifact).length > 0
+        )
+          return false;
+        if (
+          collection === "recent" &&
+          Date.now() - artifact.updatedAt > 1000 * 60 * 60 * 24 * 30
+        )
+          return false;
+        if (collection === "favorites" && !favoriteIds.has(artifact._id))
+          return false;
+        if (collection === "collections" && artifact.tags.length === 0)
           return false;
         if (activeFilter !== "all" && artifact.blueprintKey !== activeFilter)
           return false;
@@ -824,6 +906,7 @@ export function ArtifactsShell() {
     activeFilter,
     allArtifacts,
     collection,
+    favoriteIds,
     search,
     selectedWorkspaceId,
     sortMode,
@@ -883,8 +966,8 @@ export function ArtifactsShell() {
       });
       toast.success(
         targetWorkspaceId
-          ? "Artifact created in workspace."
-          : "Artifact created in General.",
+          ? "Work created in workspace."
+          : "Work created in Library.",
       );
       const refreshed = await load(true);
       const created = refreshed.find(
@@ -893,10 +976,94 @@ export function ArtifactsShell() {
       if (created) studio.openSplit(created);
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : "Could not create artifact.",
+        error instanceof Error ? error.message : "Could not create this work.",
       );
     } finally {
       setBusyKey(null);
+    }
+  }
+
+  async function importLibraryFile(file: File) {
+    const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
+    const blueprintKey: ArtifactTypeKey = ["ppt", "pptx"].includes(extension)
+      ? "presentation"
+      : ["xls", "xlsx", "csv", "tsv"].includes(extension)
+        ? "sheets"
+        : ["js", "jsx", "ts", "tsx", "py", "html", "css", "json"].includes(
+              extension,
+            )
+          ? "code"
+          : "document";
+    const fallback = createDefaultArtifactPayload(blueprintKey);
+    const title = file.name.replace(/\.[^.]+$/, "") || fallback.title;
+    let importJobId: string | null = null;
+    setBusyKey("library:import");
+    try {
+      const created = await postSpectra<{ artifactId: string }>({
+        action: "createArtifact",
+        blueprintKey,
+        title,
+        summary: `Imported from ${file.name}`,
+        content: fallback.content,
+        tags: ["imported"],
+        source: "manual",
+      });
+      const digest = await crypto.subtle.digest(
+        "SHA-256",
+        await file.arrayBuffer(),
+      );
+      const sha256 = [...new Uint8Array(digest)]
+        .map((byte) => byte.toString(16).padStart(2, "0"))
+        .join("");
+      const beginning = await beginArtifactImportOriginal({
+        artifactId: created.artifactId,
+        typeKey: blueprintKey,
+        format: extension || file.type || "binary",
+        name: file.name,
+        mimeType: file.type || "application/octet-stream",
+        bytes: file.size,
+        sha256,
+      });
+      importJobId = beginning.jobId;
+      await uploadArtifactImportOriginal(beginning.jobId, file);
+      await completeArtifactImport({
+        jobId: beginning.jobId,
+        typeKey: blueprintKey,
+        status: "imported",
+        fidelityReport: [
+          {
+            scope: "original",
+            level: "exact",
+            message:
+              "Original file preserved for the work editor import pipeline.",
+          },
+        ],
+        unsupportedFeatures: [],
+        importedContent: fallback.content,
+      });
+      await postSpectra({
+        action: "createArtifactImportVersion",
+        artifactId: created.artifactId,
+        importJobId: beginning.jobId,
+      });
+      const refreshed = await load(true);
+      const imported = refreshed?.find(
+        (work) => work._id === created.artifactId,
+      );
+      if (imported) openArtifactSurface(imported);
+      toast.success(`${title} imported to Library.`);
+    } catch (error) {
+      if (importJobId)
+        await abortArtifactImportUpload(
+          importJobId,
+          "Library import failed",
+        ).catch(() => undefined);
+      toast.error(
+        error instanceof Error ? error.message : "Could not import this file.",
+      );
+    } finally {
+      setBusyKey(null);
+      if (importInputRef.current) importInputRef.current.value = "";
     }
   }
 
@@ -907,12 +1074,12 @@ export function ArtifactsShell() {
         action: "archiveArtifact",
         artifactId: artifact._id,
       });
-      toast.success("Artifact archived.");
+      toast.success("Work archived.");
       returnToAllHub();
       await load(true);
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : "Could not archive artifact.",
+        error instanceof Error ? error.message : "Could not archive this work.",
       );
     } finally {
       setBusyKey(null);
@@ -930,13 +1097,13 @@ export function ArtifactsShell() {
     setBusyKey(`delete:${artifact._id}`);
     try {
       await postSpectra({ action: "deleteArtifact", artifactId: artifact._id });
-      toast.success("Artifact permanently deleted.");
+      toast.success("Work permanently deleted.");
       setArtifactDeletePending(null);
       if (studio.activeArtifact?._id === artifact._id) returnToAllHub();
       await load(true);
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : "Could not delete artifact.",
+        error instanceof Error ? error.message : "Could not delete this work.",
       );
     } finally {
       setBusyKey(null);
@@ -960,7 +1127,7 @@ export function ArtifactsShell() {
       await load(true);
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : "Could not place artifact.",
+        error instanceof Error ? error.message : "Could not place this work.",
       );
     } finally {
       setBusyKey(null);
@@ -971,7 +1138,7 @@ export function ArtifactsShell() {
     setBusyKey(`remove:${workspaceItemId}`);
     try {
       await postSpectra({ action: "hideWorkspaceItem", workspaceItemId });
-      toast.success("Removed from workspace. Artifact remains in library.");
+      toast.success("Removed from workspace. The work remains in Library.");
       await load(true);
     } catch (error) {
       toast.error(
@@ -1098,23 +1265,45 @@ export function ArtifactsShell() {
         type="button"
         className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
         onClick={() => openArtifactSurface(artifact)}
-        aria-label="Open artifact"
-        title="Open artifact"
+        aria-label="Open work"
+        title="Open work"
       >
         <ExternalLink className="h-3.5 w-3.5" />
+      </button>
+    );
+    const favoriteButton = (
+      <button
+        type="button"
+        className={`flex h-8 w-8 items-center justify-center rounded-[7px] hover:bg-[var(--bg-hover)] ${favoriteIds.has(artifact._id) ? "text-[#b66c31]" : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"}`}
+        onClick={() => toggleFavorite(artifact._id)}
+        aria-label={
+          favoriteIds.has(artifact._id)
+            ? "Remove from favorites"
+            : "Add to favorites"
+        }
+        title={
+          favoriteIds.has(artifact._id)
+            ? "Remove from favorites"
+            : "Add to favorites"
+        }
+      >
+        <Heart
+          className={`h-3.5 w-3.5 ${favoriteIds.has(artifact._id) ? "fill-current" : ""}`}
+        />
       </button>
     );
     if (!firstPlacement) {
       return (
         <div className="flex items-center gap-2">
           {openButton}
+          {favoriteButton}
           {artifact.ownership !== "shared" ? (
             <button
               type="button"
               className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
               onClick={() => setShareTarget(artifact)}
-              aria-label="Share artifact"
-              title="Share artifact"
+              aria-label="Share work"
+              title="Share work"
             >
               <Share2 className="h-3.5 w-3.5" />
             </button>
@@ -1136,13 +1325,14 @@ export function ArtifactsShell() {
     return (
       <div className="flex items-center gap-2">
         {openButton}
+        {favoriteButton}
         {artifact.ownership !== "shared" ? (
           <button
             type="button"
             className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
             onClick={() => setShareTarget(artifact)}
-            aria-label="Share artifact"
-            title="Share artifact"
+            aria-label="Share work"
+            title="Share work"
           >
             <Share2 className="h-3.5 w-3.5" />
           </button>
@@ -1270,8 +1460,8 @@ export function ArtifactsShell() {
                   Delete {artifactDeletePending.title}?
                 </h2>
                 <p className="mt-2 text-[13px] leading-5 text-[var(--text-secondary)]">
-                  The artifact, placements, version history, and linked run
-                  history will be permanently removed.
+                  This work item, its placements, version history, and linked
+                  run history will be permanently removed.
                 </p>
                 <div className="mt-5 flex justify-end gap-2">
                   <button
@@ -1328,7 +1518,7 @@ export function ArtifactsShell() {
                   ? busyKey.replace("artifact:update:", "")
                   : null
               }
-              sourceLabel="Artifacts"
+              sourceLabel="Library"
               continuedThreadId={composerThread?.id}
               onCloseArtifact={closeTileArtifact}
               onCloseAll={closeTileSet}
@@ -1349,7 +1539,7 @@ export function ArtifactsShell() {
               tabs={studio.tabs}
               dirtyIds={studio.dirtyIds}
               busy={busyKey === `artifact:update:${studio.activeArtifact._id}`}
-              sourceLabel="Artifacts"
+              sourceLabel="Library"
               onClose={returnToAllHub}
               onExpand={studio.openTab}
               onActivateTab={studio.activateTab}
@@ -1369,23 +1559,33 @@ export function ArtifactsShell() {
                   <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
                     <div>
                       <h1 className="font-display text-[34px] font-semibold leading-none text-[var(--text-primary)]">
-                        Artifacts
+                        Library
                       </h1>
                       <p className="mt-3 text-[14px] text-[var(--text-secondary)]">
-                        All your documents, decks, quizzes, tasks, and threads —
-                        in one place.
+                        Find, organize, receive, and open work across every
+                        workspace.
                       </p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
+                      <input
+                        ref={importInputRef}
+                        type="file"
+                        className="sr-only"
+                        accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.csv,.tsv,.txt,.md,.js,.jsx,.ts,.tsx,.py,.html,.css,.json"
+                        onChange={(event) => {
+                          const file = event.target.files?.[0];
+                          if (file) void importLibraryFile(file);
+                        }}
+                      />
                       <div className="relative w-[280px] max-w-full">
                         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-tertiary)]" />
                         <input
                           value={search}
                           onChange={(event) => setSearch(event.target.value)}
                           className="h-9 w-full rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] pl-9 pr-12 text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
-                          placeholder="Search artifacts"
+                          placeholder="Search work"
                         />
-                        <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-[var(--text-tertiary)]">
+                        <span className="absolute right-2 top-1/2 -translate-y-1/2 text-micro text-[var(--text-tertiary)]">
                           Filter
                         </span>
                       </div>
@@ -1413,6 +1613,19 @@ export function ArtifactsShell() {
                         selectedWorkspaceId={selectedWorkspaceId}
                         onSelect={setSelectedWorkspaceId}
                       />
+                      <button
+                        type="button"
+                        className={buttonClass()}
+                        disabled={busyKey === "library:import"}
+                        onClick={() => importInputRef.current?.click()}
+                      >
+                        {busyKey === "library:import" ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Upload className="h-4 w-4" />
+                        )}
+                        Import
+                      </button>
                       <div className="relative" ref={createMenuRef}>
                         <button
                           type="button"
@@ -1420,7 +1633,7 @@ export function ArtifactsShell() {
                           onClick={() => setCreateMenuOpen((open) => !open)}
                         >
                           <Plus className="h-4 w-4" />
-                          New artifact
+                          New work
                         </button>
                         {createMenuOpen ? (
                           <div className="absolute right-0 top-[calc(100%+8px)] z-30 w-[230px] rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[0_6px_18px_rgba(0,0,0,0.10)]">
@@ -1462,24 +1675,54 @@ export function ArtifactsShell() {
                   </div>
                   <nav
                     className="mt-7 flex items-end gap-6 border-b border-[var(--border-default)]"
-                    aria-label="Artifact collections"
+                    aria-label="Library collections"
                   >
                     {[
                       {
-                        key: "mine" as const,
-                        label: "My work",
-                        count: allArtifacts.filter(
-                          (artifact) => artifact.ownership !== "shared",
-                        ).length,
+                        key: "all" as const,
+                        label: "All work",
+                        count: allArtifacts.length,
                         icon: Files,
                       },
                       {
+                        key: "unplaced" as const,
+                        label: "Unplaced",
+                        count: allArtifacts.filter(
+                          (work) => artifactPlacements(work).length === 0,
+                        ).length,
+                        icon: FolderInput,
+                      },
+                      {
                         key: "shared" as const,
-                        label: "Shared",
+                        label: "Shared with me",
                         count: allArtifacts.filter(
                           (artifact) => artifact.ownership === "shared",
                         ).length,
                         icon: Share2,
+                      },
+                      {
+                        key: "recent" as const,
+                        label: "Recent",
+                        count: allArtifacts.filter(
+                          (work) =>
+                            Date.now() - work.updatedAt <=
+                            1000 * 60 * 60 * 24 * 30,
+                        ).length,
+                        icon: Clock3,
+                      },
+                      {
+                        key: "favorites" as const,
+                        label: "Favorites",
+                        count: favoriteIds.size,
+                        icon: Heart,
+                      },
+                      {
+                        key: "collections" as const,
+                        label: "Collections",
+                        count: new Set(
+                          allArtifacts.flatMap((work) => work.tags),
+                        ).size,
+                        icon: Tags,
                       },
                       {
                         key: "invitations" as const,
@@ -1506,7 +1749,7 @@ export function ArtifactsShell() {
                           <Icon className="h-3.5 w-3.5" />
                           <span>{item.label}</span>
                           {item.count > 0 ? (
-                            <span className="min-w-5 rounded-[5px] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-center text-[10px] text-[var(--text-secondary)]">
+                            <span className="min-w-5 rounded-[5px] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-center text-micro text-[var(--text-secondary)]">
                               {item.count}
                             </span>
                           ) : null}
@@ -1545,7 +1788,7 @@ export function ArtifactsShell() {
                                 <div
                                   className="absolute left-0 top-[calc(100%+7px)] z-40 grid w-[300px] grid-cols-2 gap-1 rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 shadow-[0_18px_44px_rgba(27,20,12,.14)]"
                                   role="menu"
-                                  aria-label="Filter by artifact type"
+                                  aria-label="Filter by work type"
                                 >
                                   {filters.map((filter) => {
                                     const Icon = filter.icon;
@@ -1597,7 +1840,7 @@ export function ArtifactsShell() {
                           aria-label={
                             multiSelectMode
                               ? "Finish selecting"
-                              : "Select multiple artifacts"
+                              : "Select multiple work items"
                           }
                           aria-pressed={multiSelectMode}
                         >
@@ -1619,7 +1862,7 @@ export function ArtifactsShell() {
                                 : sortMode === "title"
                                   ? "Title A–Z"
                                   : sortMode === "type"
-                                    ? "Artifact type"
+                                    ? "Work type"
                                     : sortMode === "workspace"
                                       ? "Workspace"
                                       : "Activity"}
@@ -1632,7 +1875,7 @@ export function ArtifactsShell() {
                                   ["updated", "Recently updated"],
                                   ["created", "Recently created"],
                                   ["title", "Title A–Z"],
-                                  ["type", "Artifact type"],
+                                  ["type", "Work type"],
                                   ["workspace", "Workspace"],
                                   ["activity", "Activity"],
                                 ] as Array<[ArtifactSort, string]>
@@ -1710,12 +1953,22 @@ export function ArtifactsShell() {
                     rowActions={rowActions}
                     onOpen={openArtifactSurface}
                     landingTitle={
-                      collection === "shared" ? "Shared with you" : "General"
+                      collection === "shared"
+                        ? "Shared with you"
+                        : collection === "favorites"
+                          ? "Favorites"
+                          : collection === "collections"
+                            ? "Tagged collections"
+                            : "Unplaced work"
                     }
                     landingDescription={
                       collection === "shared"
-                        ? "Accepted artifacts that you have not placed in a workspace yet."
-                        : "Artifacts not yet placed in a workspace."
+                        ? "Received work that you have not placed in a workspace yet."
+                        : collection === "favorites"
+                          ? "Work you marked for quick return."
+                          : collection === "collections"
+                            ? "Work organized with collection tags."
+                            : "Work not yet placed in a workspace."
                     }
                   />
                 ) : null}
@@ -1752,7 +2005,7 @@ export function ArtifactsShell() {
                     busyKey === `artifact:update:${studio.activeArtifact._id}`
                   }
                   panelWidth={studioPanelWidth}
-                  sourceLabel="Artifacts"
+                  sourceLabel="Library"
                   onPanelWidthChange={setStudioPanelWidth}
                   onClose={returnToAllHub}
                   onExpand={studio.openTab}
@@ -1777,7 +2030,7 @@ export function ArtifactsShell() {
                       ? busyKey.replace("artifact:update:", "")
                       : null
                   }
-                  sourceLabel="Artifacts"
+                  sourceLabel="Library"
                   continuedThreadId={composerThread?.id}
                   onCloseArtifact={closeTileArtifact}
                   onCloseAll={closeTileSet}
@@ -1807,8 +2060,7 @@ export function ArtifactsShell() {
                 artifacts={allArtifacts}
                 cards={runEngine.cards}
                 assistantContent={
-                  runEngine.liveExchange?.content ??
-                  runEngine.cards[0]?.summary
+                  runEngine.liveExchange?.content ?? runEngine.cards[0]?.summary
                 }
                 onOpen={(artifactId) => {
                   const artifact = allArtifacts.find(
@@ -1851,6 +2103,12 @@ export function ArtifactsShell() {
                 onRevise={(card, revision) =>
                   void runEngine.revise(card, revision)
                 }
+                onInput={(threadId, response, attachments) =>
+                  runEngine.run(response, attachments ?? [], { threadId })
+                }
+                onSteer={(runId, mode, text) =>
+                  runEngine.steer(runId, mode, text)
+                }
               />
               {multiSelectMode ? (
                 <SelectionActionBar
@@ -1888,7 +2146,7 @@ export function ArtifactsShell() {
                     studio.dirtyIds.has(studio.activeArtifact._id)
                   ) {
                     toast.message(
-                      "Save this artifact before asking Spectra to update it.",
+                      "Save this work before asking Spectra to update it.",
                     );
                     return false;
                   }
@@ -1897,6 +2155,10 @@ export function ArtifactsShell() {
                 busy={runEngine.submitting}
                 allowConcurrent={!composerThread}
                 onStop={runEngine.stop}
+                activeRunId={
+                  runEngine.liveExchange?.runId ?? composerThread?.runId
+                }
+                onSteer={runEngine.steer}
                 onStartNewThread={() => setComposerThread(null)}
                 context={
                   <ContextFocusControl
@@ -1914,7 +2176,7 @@ export function ArtifactsShell() {
                       <MessageSquare className="h-4 w-4" />
                       New chat
                     </CommandBarMenuItem>
-                    <CommandBarSubmenu label="New artifact" icon={Plus}>
+                    <CommandBarSubmenu label="New work" icon={Plus}>
                       {filters
                         .filter(
                           (filter) =>
@@ -2135,8 +2397,8 @@ function InvitationInbox({
             No pending invitations
           </h2>
           <p className="mt-2 text-[13px] leading-6 text-[var(--text-secondary)]">
-            New artifact and workspace invitations will wait here until you
-            accept or decline them.
+            New work and workspace invitations will wait here until you accept
+            or decline them.
           </p>
         </div>
       </div>
@@ -2183,10 +2445,10 @@ function InvitationInbox({
                     <h3 className="truncate font-display text-[18px] font-semibold text-[var(--text-primary)]">
                       {invitation.resource.title}
                     </h3>
-                    <span className="rounded-[5px] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--text-secondary)]">
+                    <span className="rounded-[5px] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-micro font-medium text-[var(--text-secondary)]">
                       {invitation.resourceType === "workspace"
                         ? "Workspace"
-                        : (artifactMeta?.label ?? "Artifact")}
+                        : (artifactMeta?.label ?? "Work")}
                     </span>
                   </div>
                   <p className="mt-1 text-[12px] text-[var(--text-secondary)]">
@@ -2278,7 +2540,7 @@ function GroupedList({
           ))}
           {inbox.length === 0 ? (
             <div className="rounded-[8px] border border-dashed border-[var(--border-default)] px-4 py-8 text-[13px] text-[var(--text-secondary)]">
-              No General artifacts in this scope.
+              No unplaced work in this scope.
             </div>
           ) : null}
         </div>
@@ -2299,7 +2561,7 @@ function GroupedList({
               In workspaces
             </h2>
             <p className="mt-1 text-[13px] text-[var(--text-secondary)]">
-              Artifacts that have been added to your workspaces.
+              Work that has been added to your workspaces.
             </p>
           </div>
           <span className="text-[12px] text-[var(--text-secondary)]">
@@ -2560,7 +2822,7 @@ function ArtifactsCanvas({
         <button
           type="button"
           onClick={() => resetCanvas(1)}
-          className="flex h-8 items-center gap-1.5 rounded-[7px] px-2.5 text-[10px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+          className="flex h-8 items-center gap-1.5 rounded-[7px] px-2.5 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
         >
           <Sparkles className="h-3.5 w-3.5" />
           Auto arrange
@@ -2577,7 +2839,7 @@ function ArtifactsCanvas({
         >
           <Minus className="h-3.5 w-3.5" />
         </button>
-        <span className="w-11 text-center text-[10px] tabular-nums text-[var(--text-secondary)]">
+        <span className="w-11 text-center text-micro tabular-nums text-[var(--text-secondary)]">
           {Math.round(zoom * 100)}%
         </span>
         <button
@@ -2600,7 +2862,7 @@ function ArtifactsCanvas({
           <Maximize2 className="h-3.5 w-3.5" />
         </button>
         <span className="h-5 w-px bg-[var(--border-subtle)]" />
-        <span className="px-2 text-[10px] text-[var(--text-tertiary)]">
+        <span className="px-2 text-micro text-[var(--text-tertiary)]">
           Clustered by type
         </span>
       </div>
@@ -2626,7 +2888,7 @@ function ArtifactsCanvas({
             >
               <header className="mb-3 flex items-center gap-2 px-1">
                 <span
-                  className="flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-semibold"
+                  className="flex h-6 w-6 items-center justify-center rounded-full text-micro font-semibold"
                   style={{
                     color: cluster.color,
                     background: `color-mix(in oklab, ${cluster.color} 10%, var(--bg-elevated))`,
@@ -2657,7 +2919,7 @@ function ArtifactsCanvas({
                   />
                 ))}
                 {cluster.artifacts.length > 6 ? (
-                  <div className="col-span-full flex h-8 items-center justify-center rounded-[6px] border border-dashed border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_72%,transparent)] text-[10px] text-[var(--text-tertiary)]">
+                  <div className="col-span-full flex h-8 items-center justify-center rounded-[6px] border border-dashed border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_72%,transparent)] text-micro text-[var(--text-tertiary)]">
                     {cluster.artifacts.length - 6} more in this cluster
                   </div>
                 ) : null}
@@ -2719,7 +2981,7 @@ function EmptyArtifactsState() {
           <Search className="h-4 w-4" />
         </div>
         <h2 className="mt-4 font-display text-[20px] font-semibold text-[var(--text-primary)]">
-          No artifacts match
+          No work matches
         </h2>
         <p className="mt-2 text-[13px] leading-6 text-[var(--text-secondary)]">
           Adjust the search, type, or workspace scope.

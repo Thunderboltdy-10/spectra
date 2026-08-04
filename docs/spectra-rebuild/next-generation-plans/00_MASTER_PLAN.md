@@ -1,3 +1,5 @@
+> Historical plan: superseded by `SPECTRA_DEFINITIVE_TRANSFORMATION_PLAN.md`. Retained as implementation evidence only.
+
 # Spectra next-generation master plan
 
 Status: active implementation contract. The persistent goal remains active until every Implemented and Verified checkbox in this plan set is genuinely complete.

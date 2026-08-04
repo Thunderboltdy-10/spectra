@@ -54,8 +54,8 @@ describe("vague sheets create intent", () => {
     expect(
       matchSpectraCreationShorthand(
         "make a timetable for enzyme revision this week",
-      )?.blueprintKey,
-    ).toBe("timetable");
+      ),
+    ).toBeNull();
     expect(
       matchSpectraCreationShorthand(
         "draft a tutor agent for cell biology",

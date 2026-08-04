@@ -108,9 +108,7 @@ describe("runSpectraAgentLoop", () => {
     ).rejects.toThrow(/reliability context budget/i);
   });
 
-  it("feeds tool_timeout back to the model instead of hanging forever", async () => {
-    vi.useFakeTimers();
-    try {
+  it("feeds a tool-specific recoverable duration result back to the model", async () => {
       const requestTurn = vi
         .fn()
         .mockResolvedValueOnce({
@@ -133,29 +131,24 @@ describe("runSpectraAgentLoop", () => {
             },
           ],
         });
-      const executeTool = vi.fn(
-        () =>
-          new Promise(() => {
-            /* intentionally hung */
-          }),
-      );
-      const pending = runSpectraAgentLoop({
+      const executeTool = vi.fn(async () => ({
+        ok: false,
+        code: "provider_unavailable",
+        retryable: true,
+        message: "The read policy degraded to the existing context.",
+      }));
+      const result = await runSpectraAgentLoop({
         messages: [{ role: "user", content: "Read notes" }],
         requestTurn,
         executeTool,
         isTerminalTool: (call) => call.name === "submit_plan",
       });
-      await vi.advanceTimersByTimeAsync(20_000);
-      const result = await pending;
       expect(result.terminalTool?.id).toBe("plan-1");
       expect(requestTurn.mock.calls[1]?.[0]).toContainEqual(
         expect.objectContaining({
           role: "tool",
-          content: expect.stringContaining("tool_timeout"),
+          content: expect.stringContaining("provider_unavailable"),
         }),
       );
-    } finally {
-      vi.useRealTimers();
-    }
   });
 });

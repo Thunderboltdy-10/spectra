@@ -1,5 +1,5 @@
 import type { SpectraBlueprintKey } from "../data/api";
-import { normalizeAgentContent } from "../agents/model";
+import { normalizeFoundryContent } from "../agents/foundry/foundry-document";
 import { normalizeCodeContent } from "../code/model";
 import { normalizePresentationContent } from "../presentation/model";
 import { normalizeSheetsContent } from "../sheets/model";
@@ -147,6 +147,14 @@ export function normalizeFlashcardDeckContent(value: unknown) {
         card.hint = card.cue;
       if (typeof card.section !== "string" && typeof card.group === "string")
         card.section = card.group;
+      // Progress belongs to each learner, not to the deck. A model that hands
+      // back a whole card object can carry a scheduling block with it, and
+      // saving that would rewrite everyone's revision at once. `review` is the
+      // pre-separation field that stored progress on the shared card; it is
+      // superseded by per-account study state and dropped on write (§11B).
+      delete card.review;
+      delete card.studyState;
+      delete card.progress;
       return card;
     }),
     "id",
@@ -454,7 +462,10 @@ export function normalizeArtifactContent(
     return normalizeCodeContent(value) as unknown as Row;
   if (blueprintKey === "whiteboard")
     return normalizeWhiteboardContent(value) as unknown as Row;
+  // Agents normalize through the Foundry document so mission, sections,
+  // evidence and skills survive every server-side save alongside the legacy
+  // projection the runtime reads.
   if (blueprintKey === "agent")
-    return normalizeAgentContent(value) as unknown as Row;
+    return normalizeFoundryContent(value) as unknown as Row;
   return row(value);
 }

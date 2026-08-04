@@ -89,6 +89,35 @@ export const quizContentSchema = z
         defaultTimeMultiplier: z.number().min(1).max(3).optional(),
         passingScore: z.number().min(0).max(100).optional(),
         targetScore: z.number().min(0).max(100).optional(),
+        // How this quiz is used (§11C). One coherent contract rather than a
+        // pile of booleans whose combinations nobody has thought through. The
+        // legacy booleans above remain readable so quizzes authored before this
+        // contract keep working.
+        experience: z
+          .object({
+            persistence: z.enum(["ephemeral", "personal", "submitted"]),
+            identity: z.enum(["anonymous", "signed_in", "assigned"]),
+            timing: z.enum(["untimed", "countdown", "deadline"]),
+            attempts: z.union([
+              z.literal("unlimited"),
+              z.number().int().min(1).max(100),
+            ]),
+            revealAnswers: z.enum([
+              "immediate",
+              "after_submit",
+              "after_deadline",
+              "never",
+            ]),
+            resultsVisibility: z.enum(["learner", "teacher", "both"]),
+            countdownSeconds: z
+              .number()
+              .int()
+              .min(30)
+              .max(12 * 60 * 60)
+              .optional(),
+            deadlineAt: z.number().optional(),
+          })
+          .optional(),
       })
       .passthrough()
       .optional(),
@@ -132,6 +161,15 @@ export const quizBlueprint: ArtifactBlueprint = {
       allowResume: true,
       defaultTimeMultiplier: 1,
       targetScore: 70,
+      // Practice: unlimited tries, answers as you go, nothing submitted.
+      experience: {
+        persistence: "personal",
+        identity: "signed_in",
+        timing: "untimed",
+        attempts: "unlimited",
+        revealAnswers: "immediate",
+        resultsVisibility: "learner",
+      },
     },
     published: false,
   },

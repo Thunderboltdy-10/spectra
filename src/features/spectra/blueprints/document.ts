@@ -22,6 +22,36 @@ export const documentContentSchema = z.object({
     level: z.number(),
   }).passthrough()).optional(),
   tiptap: z.unknown().optional(),
+  // The sources this document's citations point at (§11A). They live with the
+  // document rather than in a side table so a copy, an export or a conversion
+  // carries its evidence with it instead of leaving citations dangling.
+  sources: z
+    .array(
+      z
+        .object({
+          id: z.string().trim().min(1),
+          title: z.string().max(2_000),
+          canonicalUrl: z.string().max(4_000).optional(),
+          authors: z.array(z.string().max(400)).max(50).optional(),
+          publishedAt: z.string().max(80).optional(),
+          accessedAt: z.string().max(80),
+          sourceType: z.enum([
+            "paper",
+            "book",
+            "web",
+            "dataset",
+            "school",
+            "uploaded_file",
+            "linked_work",
+          ]),
+          authority: z.enum(["primary", "secondary", "unknown"]),
+          verified: z.literal(true),
+        })
+        .passthrough(),
+    )
+    .max(500)
+    .optional(),
+  bibliographyStyle: z.enum(["numeric", "author_date"]).optional(),
 }).passthrough();
 
 export const documentBlueprint: ArtifactBlueprint = {

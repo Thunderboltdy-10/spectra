@@ -592,7 +592,7 @@ export function WhiteboardStudio({
 
   useEffect(() => {
     setViewport(board.viewport);
-  }, [artifactId]);
+  }, [artifactId, board.viewport]);
 
   useEffect(() => {
     let active = true;
@@ -1945,7 +1945,7 @@ export function WhiteboardStudio({
         <span />
         <div>
           <span
-            className="hidden items-center gap-1.5 px-1 text-[10px] text-[var(--text-secondary)] xl:inline-flex"
+            className="hidden items-center gap-1.5 px-1 text-micro text-[var(--text-secondary)] xl:inline-flex"
             role="status"
             aria-live="polite"
           >

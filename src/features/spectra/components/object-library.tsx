@@ -667,7 +667,7 @@ export function ObjectLibrary({
               fallback={meta.label}
               className="mt-0.5 block truncate text-[11px]"
             />
-            <span className="mt-1 block text-[10px] text-[var(--text-tertiary)]">
+            <span className="mt-1 block text-micro text-[var(--text-tertiary)]">
               {meta.label} · {formatRelativeTime(objectUpdatedAt(entry))}
             </span>
           </div>
@@ -952,7 +952,7 @@ export function ObjectLibrary({
                   {formatRelativeTime(objectUpdatedAt(entry))}
                 </span>
                 <span className="flex items-center gap-1.5 text-[13px] text-[var(--text-primary)]">
-                  <span className="grid size-6 place-items-center rounded-full bg-[color-mix(in_oklab,var(--brand-primary)_18%,var(--bg-secondary))] text-[10px] font-semibold text-[var(--brand-primary)]">
+                  <span className="grid size-6 place-items-center rounded-full bg-[color-mix(in_oklab,var(--brand-primary)_18%,var(--bg-secondary))] text-micro font-semibold text-[var(--brand-primary)]">
                     You
                   </span>
                   You
@@ -1242,10 +1242,10 @@ export function ObjectLibrary({
                               <CompactSummary
                                 value={objectSummary(entry)}
                                 fallback={meta.label}
-                                className="block truncate text-[10px]"
+                                className="block truncate text-micro"
                               />
                             </div>
-                            <span className="shrink-0 text-[10px] text-[var(--text-tertiary)]">
+                            <span className="shrink-0 text-micro text-[var(--text-tertiary)]">
                               {formatRelativeTime(objectUpdatedAt(entry))}
                             </span>
                           </button>

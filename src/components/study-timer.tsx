@@ -550,7 +550,7 @@ export function StudyTimer({ chatId, className, open, onClose, onOpen }: StudyTi
       {/* Duration adjusters */}
       <div className="mt-4 grid grid-cols-2 gap-2">
         <label className="rounded-xl bg-[var(--bg-secondary)] px-2.5 py-2">
-          <span className="mb-0.5 block text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">Focus</span>
+          <span className="mb-0.5 block text-micro uppercase tracking-[0.12em] text-[var(--text-secondary)]">Focus</span>
           <div className="flex items-center gap-2">
             <input
               type="number"
@@ -570,7 +570,7 @@ export function StudyTimer({ chatId, className, open, onClose, onOpen }: StudyTi
           </div>
         </label>
         <label className="rounded-xl bg-[var(--bg-secondary)] px-2.5 py-2">
-          <span className="mb-0.5 block text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">Break</span>
+          <span className="mb-0.5 block text-micro uppercase tracking-[0.12em] text-[var(--text-secondary)]">Break</span>
           <div className="flex items-center gap-2">
             <input
               type="number"
@@ -591,7 +591,7 @@ export function StudyTimer({ chatId, className, open, onClose, onOpen }: StudyTi
         </label>
       </div>
       {isRunning ? (
-        <p className="mt-2 text-[10px] text-[var(--text-secondary)]">Duration updates apply after reset or next phase.</p>
+        <p className="mt-2 text-micro text-[var(--text-secondary)]">Duration updates apply after reset or next phase.</p>
       ) : null}
     </div>
   );

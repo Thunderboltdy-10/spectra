@@ -621,6 +621,65 @@ function publicAgentProjection(
   };
 }
 
+/**
+ * Agents this account has explicitly installed from Discover (§10.13).
+ * Installing references a published release; it never copies the agent, so an
+ * installed agent stays owned by whoever built it.
+ */
+export const listInstalledAgents = query({
+  args: {},
+  handler: async (ctx) => {
+    const actor = await requireSpectraActor(ctx);
+    const follows = await ctx.db
+      .query("agentFollows")
+      .withIndex("by_account_status", (q) =>
+        q.eq("accountId", actor.accountId).eq("status", "following"),
+      )
+      .order("desc")
+      .take(200);
+
+    const rows = [];
+    for (const follow of follows) {
+      const artifact = await ctx.db.get(follow.agentId);
+      if (
+        !artifact ||
+        artifact.schoolId !== actor.schoolId ||
+        artifact.blueprintKey !== "agent" ||
+        artifact.status !== "active"
+      )
+        continue;
+      // An installed agent the owner has since unpublished is no longer usable.
+      const pinned = follow.pinnedReleaseId
+        ? await ctx.db.get(follow.pinnedReleaseId)
+        : null;
+      const release =
+        pinned && pinned.status === "published"
+          ? pinned
+          : await latestPublishedAgentRelease(ctx, artifact._id);
+      if (!release) continue;
+      const version = await ctx.db.get(release.versionId);
+      if (!version) continue;
+
+      const owner = await ctx.db.get(artifact.ownerAccountId);
+      rows.push({
+        agentId: artifact._id,
+        ...publicAgentProjection(await loadVersionAfter(ctx, version), artifact),
+        owner: owner
+          ? { name: owner.name, avatarUrl: owner.avatarUrl }
+          : { name: "Spectra creator" },
+        releaseNumber: release.releaseNumber,
+        publishedAt: release.publishedAt,
+        installedAt: follow.createdAt,
+        pinnedReleaseId: follow.pinnedReleaseId ?? undefined,
+        ownedByViewer: artifact.ownerAccountId === actor.accountId,
+        rating: null,
+        ratingCount: 0,
+      });
+    }
+    return rows.sort((left, right) => right.installedAt - left.installedAt);
+  },
+});
+
 export const listPublicAgents = query({
   args: { search: v.optional(v.string()), limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
@@ -1306,6 +1365,9 @@ export const listAgentRoutingDescriptors = query({
               .filter((value): value is string => typeof value === "string")
               .slice(0, 30)
           : [],
+        // Compiled competence for competence-aware routing (§10.11). Carried
+        // as published-release data so a draft edit cannot change routing.
+        foundry: content.foundry ?? null,
         updatedAt: release.publishedAt,
       });
     }
@@ -1534,6 +1596,10 @@ export const getAgentRuntime = query({
           ? routing.negativeExamples
           : [],
       },
+      // The compiled Foundry package. The run route resolves only the skills,
+      // evidence and contracts one request activates (§10.14), rather than
+      // flattening the whole agent into a prompt.
+      foundry: content.foundry ?? null,
     };
   },
 });
@@ -1559,7 +1625,7 @@ export const create = mutation({
     const actor = await requireSpectraActor(ctx);
     if (args.blueprintKey === "timetable") {
       throw new Error(
-        "Every account already has a Timetable. Open Timetable to edit it instead of creating another.",
+        "Calendar is an application surface, not creatable work. Open Calendar to schedule tasks, work blocks, or personal events.",
       );
     }
     if (args.runId) {

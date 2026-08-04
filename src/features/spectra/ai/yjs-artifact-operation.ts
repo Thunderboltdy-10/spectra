@@ -5,7 +5,10 @@ import { HocuspocusProvider } from "@hocuspocus/provider";
 import WebSocket from "ws";
 import * as Y from "yjs";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
-import { signCollaborationSession } from "@/lib/collaboration-token";
+import {
+  collaborationProtocolVersion,
+  signCollaborationSession,
+} from "@/lib/collaboration-token";
 import {
   planArtifactYjsMutation,
   readArtifactYjsDocument,
@@ -28,6 +31,12 @@ import {
   type ArtifactTypeKey,
 } from "@/features/spectra/artifacts/types";
 import { validateArtifactContent } from "@/features/spectra/artifacts/registry";
+import {
+  applyBibliographySlides,
+  collectDeckCitations,
+  removeBibliographySlides,
+} from "@/features/spectra/presentation/bibliography";
+import type { PresentationContent } from "@/features/spectra/presentation/model";
 import { normalizeArtifactContent } from "@/features/spectra/ai/content-normalization";
 import {
   aiInteractionFrame,
@@ -37,6 +46,13 @@ import type {
   ActorIdentity as FabricActor,
   InteractionAct,
 } from "@/features/spectra/collaboration/interaction-model";
+import {
+  planNativeArtifactYjsMutation,
+  readNativeArtifactYjsDocument,
+} from "@/features/spectra/work/models/yjs/native-artifact-model";
+import { CloudflareRealtimeProvider } from "@/features/spectra/realtime/providers";
+import { realtimeProviderForWorkType } from "@/features/spectra/realtime/providers/provider-factory";
+import type { CollaborationPresence } from "@/features/spectra/collaboration/types";
 
 type ArtifactRecord = {
   _id: string;
@@ -61,7 +77,220 @@ type CollaborationSession = {
   documentName: string;
   token: string;
   url: string;
+  providerKind: "cloudflare" | "hocuspocus";
+  level: "read" | "modify";
 };
+
+type AiRealtimeProvider = {
+  readonly document: Y.Doc;
+  readonly synced: boolean;
+  readonly isAuthenticated: boolean;
+  readonly hasUnsyncedChanges: boolean;
+  awareness?: {
+    getLocalState(): { user?: unknown } | null;
+    getStates(): Map<unknown, { user?: unknown }>;
+  };
+  setAwarenessField(field: string, value: unknown): void;
+  flushPendingUpdates(): void;
+  subscribeState(listener: () => void): () => void;
+  destroy(): void;
+};
+
+class CloudflareAiRealtimeProvider implements AiRealtimeProvider {
+  private localUser: unknown;
+
+  constructor(readonly transport: CloudflareRealtimeProvider) {}
+
+  readonly awareness = {
+    getLocalState: () =>
+      this.localUser === undefined ? null : { user: this.localUser },
+    getStates: () =>
+      new Map(
+        this.transport
+          .getSnapshot()
+          .presence.map((presence) => [presence.clientId, { user: presence }]),
+      ),
+  };
+
+  get document() {
+    return this.transport.document;
+  }
+
+  get synced() {
+    return this.transport.getSnapshot().state === "synchronized";
+  }
+
+  get isAuthenticated() {
+    return this.transport.getSnapshot().level !== null;
+  }
+
+  get hasUnsyncedChanges() {
+    return this.transport.getSnapshot().unsynchronizedChanges > 0;
+  }
+
+  setAwarenessField(field: string, value: unknown) {
+    if (field !== "user") return;
+    this.localUser = value;
+    this.transport.setPresence(
+      (value && typeof value === "object" ? value : {}) as Omit<
+        CollaborationPresence,
+        "clientId"
+      >,
+    );
+  }
+
+  flushPendingUpdates() {
+    // Local Yjs updates are sent synchronously by the transport; durable ack is
+    // observed through hasUnsyncedChanges below.
+  }
+
+  subscribeState(listener: () => void) {
+    return this.transport.subscribe(listener);
+  }
+
+  destroy() {
+    this.transport.destroy();
+  }
+}
+
+class HocuspocusAiRealtimeProvider implements AiRealtimeProvider {
+  constructor(readonly transport: HocuspocusProvider) {}
+
+  get document() {
+    return this.transport.document;
+  }
+
+  get synced() {
+    return this.transport.synced;
+  }
+
+  get isAuthenticated() {
+    return this.transport.isAuthenticated;
+  }
+
+  get hasUnsyncedChanges() {
+    return this.transport.hasUnsyncedChanges;
+  }
+
+  get awareness() {
+    return this.transport.awareness as AiRealtimeProvider["awareness"];
+  }
+
+  setAwarenessField(field: string, value: unknown) {
+    this.transport.setAwarenessField(field, value);
+  }
+
+  flushPendingUpdates() {
+    this.transport.flushPendingUpdates();
+  }
+
+  subscribeState(listener: () => void) {
+    const awareness = this.transport.awareness;
+    if (!awareness) return () => undefined;
+    awareness.on("change", listener);
+    return () => awareness.off("change", listener);
+  }
+
+  destroy() {
+    this.transport.destroy();
+  }
+}
+
+type AiConnectionObserver = {
+  onOpen?: () => void;
+  onStatus?: (status: string) => void;
+  onAuthenticated?: () => void;
+  onSynced?: () => void;
+  onError?: (error: Error) => void;
+};
+
+async function createAiRealtimeProvider(params: {
+  session: CollaborationSession;
+  document: Y.Doc;
+  observer?: AiConnectionObserver;
+}): Promise<AiRealtimeProvider> {
+  const { session, document, observer } = params;
+  if (session.providerKind === "cloudflare") {
+    const transport = new CloudflareRealtimeProvider({
+      workId: session.artifact._id,
+      partitionKey: "root",
+      schemaVersion: session.artifact.schemaVersion ?? 1,
+      document,
+      clientId: session.clientId,
+      actorKind: "ai",
+      fetch: async () =>
+        Response.json({
+          token: session.token,
+          url: session.url,
+          level: session.level,
+          accountId: session.actor.accountId,
+          displayName: session.actor.name,
+        }),
+      createSocket: (url) =>
+        new WebSocket(url) as unknown as globalThis.WebSocket,
+    });
+    const provider = new CloudflareAiRealtimeProvider(transport);
+    let lastState = transport.getSnapshot().state;
+    transport.subscribe(() => {
+      const snapshot = transport.getSnapshot();
+      observer?.onStatus?.(snapshot.state);
+      if (lastState === "connecting" && snapshot.state !== "connecting")
+        observer?.onOpen?.();
+      if (snapshot.level) observer?.onAuthenticated?.();
+      if (snapshot.state === "synchronized") observer?.onSynced?.();
+      if (snapshot.state === "permission_lost")
+        observer?.onError?.(
+          new Error(
+            "AI_ARTIFACT_PERMISSION_REVOKED: Collaboration access was removed.",
+          ),
+        );
+      else if (snapshot.state === "unsynchronized" && snapshot.error)
+        observer?.onError?.(
+          new Error(`AI_ARTIFACT_CONNECTION_CLOSED: ${snapshot.error}`),
+        );
+      lastState = snapshot.state;
+    });
+    await transport.connect();
+    return provider;
+  }
+
+  let rawProvider!: HocuspocusProvider;
+  rawProvider = new HocuspocusProvider({
+    url: session.url,
+    WebSocketPolyfill: WebSocket,
+    name: session.documentName,
+    document,
+    token: session.token,
+    flushDelay: 40,
+    onOpen: () => observer?.onOpen?.(),
+    onStatus: ({ status }) => observer?.onStatus?.(status),
+    onAuthenticated: () => observer?.onAuthenticated?.(),
+    onSynced: () => observer?.onSynced?.(),
+    onAuthenticationFailed: ({ reason }) =>
+      observer?.onError?.(
+        new Error(
+          `AI_ARTIFACT_PERMISSION_REVOKED: ${reason || "Collaboration access was rejected."}`,
+        ),
+      ),
+    onDisconnect: ({ event }) => {
+      if (event.code === 4403)
+        observer?.onError?.(
+          new Error(
+            `AI_ARTIFACT_PERMISSION_REVOKED: ${event.reason || "Access was removed."}`,
+          ),
+        );
+      else if (!rawProvider.synced)
+        observer?.onError?.(
+          new Error(
+            `AI_ARTIFACT_CONNECTION_CLOSED: The collaboration gateway closed before synchronization (${event.code}${event.reason ? `: ${event.reason}` : ""}).`,
+          ),
+        );
+    },
+  } as ConstructorParameters<typeof HocuspocusProvider>[0] & {
+    WebSocketPolyfill: typeof WebSocket;
+  });
+  return new HocuspocusAiRealtimeProvider(rawProvider);
+}
 
 /**
  * A live-preview beat already describes the native gesture being performed.
@@ -160,6 +389,25 @@ function requireArtifactType(value: string): ArtifactTypeKey {
   return value as ArtifactTypeKey;
 }
 
+function readLiveYjsDocument(document: Y.Doc, typeKey: ArtifactTypeKey) {
+  return (
+    readNativeArtifactYjsDocument(document, typeKey) ??
+    readArtifactYjsDocument(document, typeKey)
+  );
+}
+
+function planLiveYjsMutation(
+  document: Y.Doc,
+  typeKey: ArtifactTypeKey,
+  value: ArtifactLiveValue,
+) {
+  return planNativeArtifactYjsMutation(document, typeKey, value, {
+    clientId: "spectra-ai-runtime",
+    kind: "ai",
+    name: "Spectra AI",
+  });
+}
+
 function stateVectorHash(document: Y.Doc) {
   return createHash("sha256")
     .update(Y.encodeStateVector(document))
@@ -226,14 +474,30 @@ async function createCollaborationSession(
     level,
     policyVersion: room.policyVersion,
     schemaVersion: room.schemaVersion ?? artifact.schemaVersion ?? 1,
+    protocolVersion: collaborationProtocolVersion(),
+    permissionEpoch: room.policyVersion,
+    actorKind: "ai",
+    access: level === "modify" ? "edit" : "read_only",
+    internalCapabilities:
+      level === "modify"
+        ? ["view", "edit", "interact", "ai_mutate"]
+        : ["view", "interact"],
   });
+  const providerKind = realtimeProviderForWorkType(typeKey);
   return {
     actor,
     artifact,
     clientId,
     documentName,
     token,
-    url: process.env.NEXT_PUBLIC_SPECTRA_COLLAB_URL ?? "ws://localhost:1234",
+    providerKind,
+    level,
+    url:
+      providerKind === "cloudflare"
+        ? (process.env.SPECTRA_CLOUDFLARE_COLLAB_URL ??
+          process.env.NEXT_PUBLIC_SPECTRA_COLLAB_URL ??
+          "ws://localhost:8787")
+        : (process.env.NEXT_PUBLIC_SPECTRA_COLLAB_URL ?? "ws://localhost:1234"),
   };
 }
 
@@ -383,7 +647,7 @@ async function acquirePlanClaims(params: {
   return claims;
 }
 
-function humanHeldRegions(provider: HocuspocusProvider): Set<string> {
+function humanHeldRegions(provider: AiRealtimeProvider): Set<string> {
   const held = new Set<string>();
   for (const state of provider.awareness?.getStates().values() ?? []) {
     const user =
@@ -430,7 +694,7 @@ function humanHeldRegions(provider: HocuspocusProvider): Set<string> {
 }
 
 async function waitForHumanRegions(params: {
-  provider: HocuspocusProvider;
+  provider: AiRealtimeProvider;
   plan: ArtifactYjsMutationPlan;
   signal?: AbortSignal;
   onConflict?: (conflict: {
@@ -454,26 +718,45 @@ async function waitForHumanRegions(params: {
     queuePosition: 1,
     actorKind: "human",
   });
-  let freeSince = 0;
-  while (occupied || !freeSince || Date.now() - freeSince < 1_200) {
-    const aborted = abortError(params.signal);
-    if (aborted) throw aborted;
-    // A human edit is not an AI failure. Keep the same operation queued for
-    // as long as the run remains alive; the worker heartbeat and abort signal
-    // already provide the correct lifecycle boundaries. The old 75s deadline
-    // turned an entirely healthy collaboration session into a raw red error
-    // while the person was still using the control.
-    await new Promise<void>((resolve) => setTimeout(resolve, 90));
-    occupied = firstHeld();
-    if (occupied) freeSince = 0;
-    else if (!freeSince) freeSince = Date.now();
-  }
+  await new Promise<void>((resolve, reject) => {
+    let idleTimer: ReturnType<typeof setTimeout> | null = null;
+    let settled = false;
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      if (idleTimer) clearTimeout(idleTimer);
+      unsubscribe();
+      params.signal?.removeEventListener("abort", onAbort);
+      if (error) reject(error);
+      else resolve();
+    };
+    const evaluate = () => {
+      occupied = firstHeld();
+      if (occupied) {
+        if (idleTimer) clearTimeout(idleTimer);
+        idleTimer = null;
+        return;
+      }
+      if (idleTimer) return;
+      // The short idle threshold is deliberately a single debounce after the
+      // release event. It is not a polling loop and lets a finishing human
+      // transaction/blur settle before semantic target re-resolution.
+      idleTimer = setTimeout(() => finish(), 1_200);
+    };
+    const onAbort = () =>
+      finish(
+        abortError(params.signal) ?? new DOMException("Aborted", "AbortError"),
+      );
+    const unsubscribe = params.provider.subscribeState(evaluate);
+    params.signal?.addEventListener("abort", onAbort, { once: true });
+    evaluate();
+  });
   await params.onConflictResolved?.();
 }
 
 async function synchronizeMutation(params: {
   document: Y.Doc;
-  provider: HocuspocusProvider;
+  provider: AiRealtimeProvider;
   session: CollaborationSession;
   runId: string;
   executionId: string;
@@ -511,8 +794,7 @@ async function synchronizeMutation(params: {
   let streamBeats = params.streamBeats;
   let baseSnapshot = params.baseSnapshot;
   let proposedSnapshot = params.proposedSnapshot;
-  if (plan.regions.length === 0)
-    return { changedRegionIds: [] as string[] };
+  if (plan.regions.length === 0) return { changedRegionIds: [] as string[] };
   const presence = params.provider.awareness?.getLocalState()?.user;
   const presenceRecord =
     presence && typeof presence === "object"
@@ -1003,32 +1285,17 @@ export async function readLiveArtifactValue(params: {
   const typeKey = requireArtifactType(session.artifact.blueprintKey);
   const document = new Y.Doc();
   let connectionError: Error | null = null;
-  const provider = new HocuspocusProvider({
-    url: session.url,
-    WebSocketPolyfill: WebSocket,
-    name: session.documentName,
-    document,
-    token: session.token,
-    flushDelay: 40,
-    onAuthenticationFailed: ({ reason }) => {
-      connectionError = new Error(
-        `AI_ARTIFACT_PERMISSION_REVOKED: ${reason || "Collaboration access was rejected."}`,
-      );
-    },
-    onDisconnect: ({ event }) => {
-      if (event.code === 4403) {
-        connectionError = new Error(
-          `AI_ARTIFACT_PERMISSION_REVOKED: ${event.reason || "Access was removed."}`,
-        );
-      } else if (!provider.synced) {
-        connectionError = new Error(
-          `AI_ARTIFACT_CONNECTION_CLOSED: The collaboration gateway closed before synchronization (${event.code}${event.reason ? `: ${event.reason}` : ""}).`,
-        );
-      }
-    },
-  } as ConstructorParameters<typeof HocuspocusProvider>[0] & {
-    WebSocketPolyfill: typeof WebSocket;
-  });
+  let provider: AiRealtimeProvider;
+  try {
+    provider = await createAiRealtimeProvider({
+      session,
+      document,
+      observer: { onError: (error) => (connectionError = error) },
+    });
+  } catch {
+    document.destroy();
+    return null;
+  }
   try {
     await waitUntil(
       () => provider.synced && provider.isAuthenticated,
@@ -1038,7 +1305,7 @@ export async function readLiveArtifactValue(params: {
         `AI_ARTIFACT_CONNECT_TIMEOUT: Live artifact read timed out after ${timeoutMs}ms.`,
     );
     try {
-      return readArtifactYjsDocument(document, typeKey);
+      return readLiveYjsDocument(document, typeKey);
     } catch {
       // Invalid / sparse live state — fall back to Convex baseline.
       return null;
@@ -1049,6 +1316,29 @@ export async function readLiveArtifactValue(params: {
     provider.destroy();
     document.destroy();
   }
+}
+
+/**
+ * Deterministic per-type content policy applied to every AI write after
+ * schema validation. The model can only produce create/update payloads, so
+ * derived structure that must stay honest lives here rather than in the
+ * prompt: for presentations the References slides are rebuilt from actual
+ * slide citations on every write (build_bibliography), which means a deck
+ * with citations always carries a truthful, current references trail and a
+ * deck whose citations were removed loses its stale generated slides. This is
+ * the execution half of INV-09 for decks — the AI can never hand-author or
+ * forget a bibliography.
+ */
+function enforceAiContentPolicy(typeKey: ArtifactTypeKey, content: unknown) {
+  if (typeKey !== "presentation") return content;
+  const deck = content as PresentationContent;
+  if (!Array.isArray(deck.slides)) return content;
+  if (collectDeckCitations(deck).length > 0) {
+    applyBibliographySlides(deck);
+  } else {
+    removeBibliographySlides(deck);
+  }
+  return deck;
 }
 
 export async function applyAiArtifactMutation(params: {
@@ -1090,43 +1380,26 @@ export async function applyAiArtifactMutation(params: {
   let authenticated = false;
   let syncEventReceived = false;
 
-  const provider = new HocuspocusProvider({
-    url: session.url,
-    WebSocketPolyfill: WebSocket,
-    name: session.documentName,
+  const provider = await createAiRealtimeProvider({
+    session,
     document,
-    token: session.token,
-    flushDelay: 40,
-    onOpen: () => {
-      opened = true;
+    observer: {
+      onOpen: () => {
+        opened = true;
+      },
+      onStatus: (status) => {
+        connectionStatus = status;
+      },
+      onAuthenticated: () => {
+        authenticated = true;
+      },
+      onSynced: () => {
+        syncEventReceived = true;
+      },
+      onError: (error) => {
+        connectionError = error;
+      },
     },
-    onStatus: ({ status }) => {
-      connectionStatus = status;
-    },
-    onAuthenticated: () => {
-      authenticated = true;
-    },
-    onSynced: () => {
-      syncEventReceived = true;
-    },
-    onAuthenticationFailed: ({ reason }) => {
-      connectionError = new Error(
-        `AI_ARTIFACT_PERMISSION_REVOKED: ${reason || "Collaboration access was rejected."}`,
-      );
-    },
-    onDisconnect: ({ event }) => {
-      if (event.code === 4403) {
-        connectionError = new Error(
-          `AI_ARTIFACT_PERMISSION_REVOKED: ${event.reason || "Access was removed."}`,
-        );
-      } else if (!provider.synced) {
-        connectionError = new Error(
-          `AI_ARTIFACT_CONNECTION_CLOSED: The collaboration gateway closed before synchronization (${event.code}${event.reason ? `: ${event.reason}` : ""}).`,
-        );
-      }
-    },
-  } as ConstructorParameters<typeof HocuspocusProvider>[0] & {
-    WebSocketPolyfill: typeof WebSocket;
   });
   const connectStartedAt = Date.now();
   try {
@@ -1185,7 +1458,7 @@ export async function applyAiArtifactMutation(params: {
     // before a fast Yjs transaction can finish and tear down the provider.
     await new Promise<void>((resolve) => setTimeout(resolve, 350));
 
-    let current = readArtifactYjsDocument(document, typeKey);
+    let current = readLiveYjsDocument(document, typeKey);
     if (!current) {
       const baselineContent = normalizeArtifactContent(
         typeKey,
@@ -1213,7 +1486,7 @@ export async function applyAiArtifactMutation(params: {
         tags: session.artifact.tags,
         content: baselineValidation.data,
       };
-      const baselinePlan = planArtifactYjsMutation(document, typeKey, baseline);
+      const baselinePlan = planLiveYjsMutation(document, typeKey, baseline);
       await synchronizeMutation({
         document,
         provider,
@@ -1237,7 +1510,7 @@ export async function applyAiArtifactMutation(params: {
           baselinePlan.regions.map((region) => region.regionId),
         ),
       });
-      current = readArtifactYjsDocument(document, typeKey);
+      current = readLiveYjsDocument(document, typeKey);
     }
     if (!current)
       throw new Error(
@@ -1266,11 +1539,11 @@ export async function applyAiArtifactMutation(params: {
         tags: [
           ...new Set(desired.tags.map((tag) => tag.trim()).filter(Boolean)),
         ].slice(0, 80),
-        content: validated.data,
+        content: enforceAiContentPolicy(typeKey, validated.data),
       };
     };
     const normalizedDesired = resolveValidatedValue(current);
-    const initialPlan = planArtifactYjsMutation(
+    const initialPlan = planLiveYjsMutation(
       document,
       typeKey,
       normalizedDesired,
@@ -1302,10 +1575,10 @@ export async function applyAiArtifactMutation(params: {
     // the synchronized Y.Doc so a just-finished non-overlapping human edit is
     // preserved by field-level patch operations rather than overwritten from
     // an earlier database projection.
-    const refreshed = readArtifactYjsDocument(document, typeKey);
+    const refreshed = readLiveYjsDocument(document, typeKey);
     if (!refreshed) throw new Error("AI_ARTIFACT_LIVE_STATE_LOST");
     const refreshedValue = resolveValidatedValue(refreshed);
-    const refreshedPlan = planArtifactYjsMutation(
+    const refreshedPlan = planLiveYjsMutation(
       document,
       typeKey,
       refreshedValue,
@@ -1342,17 +1615,11 @@ export async function applyAiArtifactMutation(params: {
         changedRegionIds,
       ),
       rebaseAfterHumanWait: () => {
-        const liveBase = readArtifactYjsDocument(document, typeKey);
+        const liveBase = readLiveYjsDocument(document, typeKey);
         if (!liveBase) throw new Error("AI_ARTIFACT_LIVE_STATE_LOST");
         const liveDesired = resolveValidatedValue(liveBase);
-        const livePlan = planArtifactYjsMutation(
-          document,
-          typeKey,
-          liveDesired,
-        );
-        const liveRegionIds = livePlan.regions.map(
-          (region) => region.regionId,
-        );
+        const livePlan = planLiveYjsMutation(document, typeKey, liveDesired);
+        const liveRegionIds = livePlan.regions.map((region) => region.regionId);
         return {
           plan: livePlan,
           streamBase: liveBase,

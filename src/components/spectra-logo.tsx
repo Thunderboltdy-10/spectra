@@ -1,381 +1,141 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
+import { MARK, SpectraMark } from "@/components/spectra-mark";
 
-// ── Asset paths ────────────────────────────────────────────────────────────────
-const MASK_URL = "/brand/ribbon-mask.png";
-const SHADOW_URL = "/brand/ribbon-shadow.png";
-const HIGHLIGHT_URL = "/brand/ribbon-highlight.png";
+// ── Brand colours ────────────────────────────────────────────────────────────
+const DEFAULT_PRIMARY = "#7b5cf5";
+const DEFAULT_ACCENT = "#2e8fd4";
 
-const DEFAULT_PRIMARY = "#2c92eb";
-const DEFAULT_ACCENT = "#67dacc";
-
-// Ribbon bounding box (fraction of container)
-const RX = 0.2041;
-const RY = 0.1279;
-const RW = 0.6084;
-const RH = 0.7363;
-
-// ── Color utilities ────────────────────────────────────────────────────────────
-function clamp(v: number, lo = 0, hi = 255) {
-  return Math.max(lo, Math.min(hi, v));
-}
-function hexToRgb(hex: string) {
-  const n = hex.replace("#", "").trim();
-  const x = n.length === 3 ? n.split("").map((c) => c + c).join("") : n;
-  if (!/^[0-9a-fA-F]{6}$/.test(x)) return { r: 44, g: 146, b: 235 };
-  const i = parseInt(x, 16);
-  return { r: (i >> 16) & 255, g: (i >> 8) & 255, b: i & 255 };
-}
-function rgbHex(r: number, g: number, b: number) {
-  return (
-    "#" +
-    [r, g, b]
-      .map((v) => clamp(Math.round(v)).toString(16).padStart(2, "0"))
-      .join("")
-  );
-}
-function mixC(a: string, b: string, t: number) {
-  const c1 = hexToRgb(a),
-    c2 = hexToRgb(b);
-  return rgbHex(
-    c1.r + (c2.r - c1.r) * t,
-    c1.g + (c2.g - c1.g) * t,
-    c1.b + (c2.b - c1.b) * t,
-  );
-}
-function rgbaS(hex: string, alpha: number) {
-  const { r, g, b } = hexToRgb(hex);
-  return `rgba(${r},${g},${b},${alpha})`;
+function readBrandColors() {
+  if (typeof window === "undefined")
+    return { primary: DEFAULT_PRIMARY, accent: DEFAULT_ACCENT };
+  const styles = getComputedStyle(document.documentElement);
+  return {
+    primary:
+      styles.getPropertyValue("--brand-primary").trim() || DEFAULT_PRIMARY,
+    accent: styles.getPropertyValue("--brand-accent").trim() || DEFAULT_ACCENT,
+  };
 }
 
-// ── Image loading (module-level cache) ─────────────────────────────────────────
-type Images = {
-  mask: HTMLImageElement;
-  shadow: HTMLImageElement;
-  highlight: HTMLImageElement;
-};
-
-let _cache: Images | null = null;
-let _promise: Promise<Images> | null = null;
-
-function loadImg(src: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.onload = () => resolve(img);
-    img.onerror = reject;
-    img.src = src;
-  });
-}
-
-function loadAllImages(): Promise<Images> {
-  if (_cache) return Promise.resolve(_cache);
-  if (_promise) return _promise;
-  _promise = Promise.all([
-    loadImg(MASK_URL),
-    loadImg(SHADOW_URL),
-    loadImg(HIGHLIGHT_URL),
-  ]).then(([mask, shadow, highlight]) => {
-    _cache = { mask, shadow, highlight };
-    return _cache;
-  }).catch((error) => {
-    _promise = null;
-    throw error;
-  });
-  return _promise;
-}
-
-// ── Grayscale-as-alpha masking ─────────────────────────────────────────────────
-// The mask PNGs are 8-bit grayscale: white = visible, black = hidden.
-// Canvas compositing only uses the alpha channel, but grayscale PNGs render as
-// RGBA(V,V,V,255) — fully opaque everywhere. So we manually read the mask's
-// luminance (R channel) and apply it as the source canvas's alpha channel.
-
-function applyGrayscaleMask(
-  srcCtx: CanvasRenderingContext2D,
-  maskImg: HTMLImageElement,
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-) {
-  // Draw the mask into a temp canvas at the target size
-  const mC = document.createElement("canvas");
-  mC.width = w;
-  mC.height = h;
-  const mCtx = mC.getContext("2d")!;
-  mCtx.drawImage(maskImg, 0, 0, w, h);
-  const maskData = mCtx.getImageData(0, 0, w, h);
-
-  // Read the source region
-  const srcData = srcCtx.getImageData(x, y, w, h);
-
-  // Multiply source alpha by mask luminance (R channel)
-  for (let i = 0; i < srcData.data.length; i += 4) {
-    const maskLuminance = maskData.data[i]; // R = G = B for grayscale
-    srcData.data[i + 3] = (srcData.data[i + 3] * maskLuminance) / 255;
-  }
-
-  // Write back
-  srcCtx.putImageData(srcData, x, y);
-}
-
-// ── Canvas rendering ───────────────────────────────────────────────────────────
-function roundedRect(
+// ── Canvas rendering (favicon) ───────────────────────────────────────────────
+// Mirrors the SVG geometry in spectra-mark.tsx exactly (viewBox 0 0 64 64).
+function face(
   ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  r: number,
+  S: number,
+  points: ReadonlyArray<readonly [number, number]>,
 ) {
+  const k = S / 64;
   ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.lineTo(x + w - r, y);
-  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-  ctx.lineTo(x + w, y + h - r);
-  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-  ctx.lineTo(x + r, y + h);
-  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-  ctx.lineTo(x, y + r);
-  ctx.quadraticCurveTo(x, y, x + r, y);
+  points.forEach(([x, y], i) => {
+    if (i === 0) ctx.moveTo(x * k, y * k);
+    else ctx.lineTo(x * k, y * k);
+  });
   ctx.closePath();
 }
 
-function renderIcon(
+function drawMark(
   ctx: CanvasRenderingContext2D,
   S: number,
   primary: string,
-  secondary: string,
-  images: Images,
-  showTile: boolean,
+  accent: string,
 ) {
-  ctx.clearRect(0, 0, S, S);
+  const k = S / 64;
+  const g = (x1: number, y1: number, x2: number, y2: number) =>
+    ctx.createLinearGradient(x1 * k, y1 * k, x2 * k, y2 * k);
 
-  // ── Tile background ──
-  if (showTile) {
-    ctx.save();
-    roundedRect(ctx, 0, 0, S, S, S * 0.166);
-    ctx.clip();
-    const tileGrad = ctx.createLinearGradient(0, 0, S, S);
-    tileGrad.addColorStop(0, "#f6f2eb");
-    tileGrad.addColorStop(1, "#f3eee6");
-    ctx.fillStyle = tileGrad;
-    ctx.fillRect(0, 0, S, S);
-    const glow = ctx.createRadialGradient(
-      S * 0.5, S * 0.45, 0,
-      S * 0.5, S * 0.45, S * 0.7,
-    );
-    glow.addColorStop(0, "rgba(255,255,255,0.18)");
-    glow.addColorStop(1, "rgba(255,255,255,0)");
-    ctx.fillStyle = glow;
-    ctx.fillRect(0, 0, S, S);
-    ctx.restore();
-  }
+  // upper-right sloped face (turned from the light)
+  const top = g(MARK.A1[0], MARK.A1[1], MARK.C2[0], MARK.C2[1]);
+  top.addColorStop(0, "#b49df8");
+  top.addColorStop(1, "#6b50e6");
+  face(ctx, S, [MARK.A1, MARK.C1, MARK.C2, MARK.A2]);
+  ctx.fillStyle = top;
+  ctx.fill();
 
-  // ── Ribbon position ──
-  const rx = Math.round(S * RX);
-  const ry = Math.round(S * RY);
-  const rw = Math.round(S * RW);
-  const rh = Math.round(S * RH);
+  // long left face, receding (environment-lit glass)
+  const left = g(MARK.A2[0], MARK.A2[1], MARK.B1[0], MARK.B1[1]);
+  left.addColorStop(0, "#fdfbff");
+  left.addColorStop(1, "#e0d7fb");
+  face(ctx, S, [MARK.A1, MARK.B1, MARK.B2, MARK.A2]);
+  ctx.fillStyle = left;
+  ctx.fill();
 
-  // ── Derived colors ──
-  const pMid = mixC(primary, secondary, 0.32);
-  const aMid = mixC(primary, secondary, 0.56);
-  const pBright = mixC(primary, "#ffffff", 0.12);
-  const sBright = mixC(secondary, "#ffffff", 0.18);
-  const shadowColor = mixC("#031f39", primary, 0.08);
+  // dominant front triangular face with the dispersion gradient
+  const front = g(MARK.A1[0], MARK.A1[1], MARK.B1[0] + 6, MARK.B1[1]);
+  front.addColorStop(0, "#f7f3ff");
+  front.addColorStop(0.52, "#c4b3fb");
+  front.addColorStop(1, primary);
+  face(ctx, S, [MARK.A1, MARK.B1, MARK.C1]);
+  ctx.fillStyle = front;
+  ctx.fill();
 
-  // ── Main ribbon layer ──
-  const ribbonC = document.createElement("canvas");
-  ribbonC.width = S;
-  ribbonC.height = S;
-  const rCtx = ribbonC.getContext("2d")!;
-
-  // 150° gradient
-  const ang = (150 * Math.PI) / 180;
-  const cx = rx + rw / 2;
-  const cy = ry + rh / 2;
-  const d = Math.max(rw, rh);
-  const grad = rCtx.createLinearGradient(
-    cx - Math.cos(ang) * (d / 2),
-    cy - Math.sin(ang) * (d / 2),
-    cx + Math.cos(ang) * (d / 2),
-    cy + Math.sin(ang) * (d / 2),
-  );
-  grad.addColorStop(0, primary);
-  grad.addColorStop(0.4, pMid);
-  grad.addColorStop(0.67, aMid);
-  grad.addColorStop(1, secondary);
-  rCtx.fillStyle = grad;
-  rCtx.fillRect(rx, ry, rw, rh);
-
-  // Radial highlights
-  const rg1 = rCtx.createRadialGradient(
-    rx + rw * 0.64, ry + rh * 0.1, 0,
-    rx + rw * 0.64, ry + rh * 0.1, rw * 0.42,
-  );
-  rg1.addColorStop(0, rgbaS(pBright, 0.35));
-  rg1.addColorStop(1, "rgba(0,0,0,0)");
-  rCtx.fillStyle = rg1;
-  rCtx.fillRect(rx, ry, rw, rh);
-
-  const rg2 = rCtx.createRadialGradient(
-    rx + rw * 0.26, ry + rh * 0.82, 0,
-    rx + rw * 0.26, ry + rh * 0.82, rw * 0.36,
-  );
-  rg2.addColorStop(0, rgbaS(sBright, 0.4));
-  rg2.addColorStop(1, "rgba(0,0,0,0)");
-  rCtx.fillStyle = rg2;
-  rCtx.fillRect(rx, ry, rw, rh);
-
-  // Apply grayscale mask → alpha
-  applyGrayscaleMask(rCtx, images.mask, rx, ry, rw, rh);
-
-  ctx.drawImage(ribbonC, 0, 0);
-
-  // ── Shadow layer ──
-  const shadowC = document.createElement("canvas");
-  shadowC.width = S;
-  shadowC.height = S;
-  const sCtx = shadowC.getContext("2d")!;
-  sCtx.fillStyle = shadowColor;
-  sCtx.fillRect(rx, ry, rw, rh);
-  applyGrayscaleMask(sCtx, images.shadow, rx, ry, rw, rh);
-
-  ctx.globalAlpha = 0.4;
-  ctx.drawImage(shadowC, 0, 0);
+  // dispersion accent along the front base edge
+  const disp = g(MARK.B1[0], MARK.B1[1], MARK.C1[0], MARK.C1[1]);
+  disp.addColorStop(0, primary);
+  disp.addColorStop(1, accent);
+  ctx.strokeStyle = disp;
+  ctx.lineWidth = 1.6 * k;
+  ctx.lineCap = "round";
+  ctx.globalAlpha = 0.55;
+  ctx.beginPath();
+  ctx.moveTo(MARK.B1[0] * k, MARK.B1[1] * k);
+  ctx.lineTo(MARK.C1[0] * k, MARK.C1[1] * k);
+  ctx.stroke();
   ctx.globalAlpha = 1;
 
-  // ── Highlight layer ──
-  const hlC = document.createElement("canvas");
-  hlC.width = S;
-  hlC.height = S;
-  const hCtx = hlC.getContext("2d")!;
-  hCtx.fillStyle = "#ffffff";
-  hCtx.fillRect(rx, ry, rw, rh);
-  applyGrayscaleMask(hCtx, images.highlight, rx, ry, rw, rh);
-
-  ctx.globalAlpha = 0.18;
-  ctx.drawImage(hlC, 0, 0);
-  ctx.globalAlpha = 1;
+  // glass edges
+  ctx.lineJoin = "round";
+  ctx.strokeStyle = "rgba(76,52,186,0.34)";
+  ctx.lineWidth = 1.3 * k;
+  face(ctx, S, [MARK.A1, MARK.B1, MARK.C1]);
+  ctx.stroke();
+  ctx.strokeStyle = "rgba(255,255,255,0.75)";
+  ctx.lineWidth = 1.15 * k;
+  ctx.beginPath();
+  ctx.moveTo(MARK.B1[0] * k, MARK.B1[1] * k);
+  ctx.lineTo(MARK.A1[0] * k, MARK.A1[1] * k);
+  ctx.lineTo(MARK.C1[0] * k, MARK.C1[1] * k);
+  ctx.stroke();
 }
 
-// ── SpectraLogo ────────────────────────────────────────────────────────────────
-type SpectraLogoProps = {
-  size?: number;
-  className?: string;
-  showTile?: boolean;
-  style?: React.CSSProperties;
-};
-
+// ── SpectraLogo ──────────────────────────────────────────────────────────────
+/** The prism mark. Kept API-compatible with the previous ribbon logo. */
 export function SpectraLogo({
   size = 32,
   className,
   showTile = false,
   style,
-}: SpectraLogoProps) {
-  const ref = useRef<HTMLCanvasElement>(null);
-
-  useEffect(() => {
-    const canvas = ref.current;
-    if (!canvas) return;
-
-    const dpr = window.devicePixelRatio || 1;
-    const S = Math.round(size * dpr);
-    canvas.width = S;
-    canvas.height = S;
-
-    let cancelled = false;
-
-    function paint() {
-      loadAllImages().then((images) => {
-        if (cancelled) return;
-        const ctx = canvas!.getContext("2d")!;
-
-        const styles = getComputedStyle(document.documentElement);
-        const primary =
-          styles.getPropertyValue("--brand-primary").trim() || DEFAULT_PRIMARY;
-        const accent =
-          styles.getPropertyValue("--brand-accent").trim() || DEFAULT_ACCENT;
-
-        renderIcon(ctx, S, primary, accent, images, showTile);
-      }).catch(() => {
-        // Leave canvas empty; next paint attempt can retry image loading.
-      });
-    }
-
-    paint();
-
-    // Re-paint when brand colors change (school branding applied/removed)
-    const observer = new MutationObserver((mutations) => {
-      for (const m of mutations) {
-        if (
-          m.type === "attributes" &&
-          (m.attributeName === "style" ||
-            m.attributeName === "data-theme-palette")
-        ) {
-          paint();
-          break;
-        }
-      }
-    });
-    observer.observe(document.documentElement, { attributes: true });
-
-    return () => {
-      cancelled = true;
-      observer.disconnect();
-    };
-  }, [size, showTile]);
-
+}: {
+  size?: number;
+  className?: string;
+  showTile?: boolean;
+  style?: React.CSSProperties;
+}) {
   return (
-    <canvas
-      ref={ref}
+    <SpectraMark
+      size={size}
+      tile={showTile}
+      title="Spectra"
       className={className}
-      role="img"
-      aria-label="Spectra"
-      style={{
-        width: size,
-        height: size,
-        flexShrink: 0,
-        display: "block",
-        ...style,
-      }}
+      style={style}
     />
   );
 }
 
-// ── DynamicFavicon ─────────────────────────────────────────────────────────────
+// ── DynamicFavicon ───────────────────────────────────────────────────────────
 export function DynamicFavicon() {
   useEffect(() => {
-    let cancelled = false;
-
-    async function update() {
-      let images: Images;
-      try {
-        images = await loadAllImages();
-      } catch {
-        return;
-      }
-      if (cancelled) return;
-
-      const styles = getComputedStyle(document.documentElement);
-      const primary =
-        styles.getPropertyValue("--brand-primary").trim() || DEFAULT_PRIMARY;
-      const accent =
-        styles.getPropertyValue("--brand-accent").trim() || DEFAULT_ACCENT;
-
+    function update() {
+      const { primary, accent } = readBrandColors();
       const S = 64;
       const canvas = document.createElement("canvas");
       canvas.width = S;
       canvas.height = S;
-      const ctx = canvas.getContext("2d")!;
-
-      renderIcon(ctx, S, primary, accent, images, false);
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      drawMark(ctx, S, primary, accent);
 
       const url = canvas.toDataURL("image/png");
-
       let link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
       if (!link) {
         link = document.createElement("link");
@@ -387,13 +147,13 @@ export function DynamicFavicon() {
     }
 
     update();
-
     const observer = new MutationObserver((mutations) => {
       for (const m of mutations) {
         if (
           m.type === "attributes" &&
           (m.attributeName === "style" ||
-            m.attributeName === "data-theme-palette")
+            m.attributeName === "class" ||
+            m.attributeName === "data-spectra-brand")
         ) {
           update();
           break;
@@ -401,10 +161,7 @@ export function DynamicFavicon() {
       }
     });
     observer.observe(document.documentElement, { attributes: true });
-    return () => {
-      cancelled = true;
-      observer.disconnect();
-    };
+    return () => observer.disconnect();
   }, []);
 
   return null;

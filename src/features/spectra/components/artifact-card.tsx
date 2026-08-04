@@ -288,7 +288,7 @@ export function ArtifactCard({
         <CardTypeIcon icon={Icon} color={meta.color} />
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-1.5 pr-5">
-            <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
+            <span className="text-micro font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
               {meta.label}
             </span>
             {/* The generic chip is only for work we cannot yet describe. Once a
@@ -298,7 +298,7 @@ export function ArtifactCard({
             (liveAiActivity ||
               liveAiState === "creating" ||
               liveAiState === "updating") ? (
-              <span className="spectra-card-ai-activity inline-flex shrink-0 items-center gap-1 rounded-full border border-[color-mix(in_oklab,var(--accent-cyan)_28%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-elevated))] px-1.5 py-0.5 text-[8px] font-semibold text-[var(--accent-cyan)]">
+              <span className="spectra-card-ai-activity inline-flex shrink-0 items-center gap-1 rounded-full border border-[color-mix(in_oklab,var(--accent-cyan)_28%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-elevated))] px-1.5 py-0.5 text-micro font-semibold text-[var(--accent-cyan)]">
                 <Sparkles className="h-2.5 w-2.5" aria-hidden="true" />
                 AI {liveAiState === "creating" ? "building" : "editing"}
               </span>
@@ -320,7 +320,7 @@ export function ArtifactCard({
                 <Share2 className="h-3 w-3" aria-hidden="true" />
               </span>
             ) : null}
-            <span className="text-[10px] text-[var(--text-tertiary)]">•</span>
+            <span className="text-micro text-[var(--text-tertiary)]">•</span>
             <span className="min-w-0 truncate text-[11px] text-[var(--text-tertiary)]">
               {artifact.meta}
             </span>
@@ -363,7 +363,7 @@ export function ArtifactCard({
             {artifact.summary}
           </p>
           {artifact.accessExplanation ? (
-            <div className="mt-2 flex min-w-0 items-center gap-1.5 text-[10px] text-[var(--text-tertiary)]">
+            <div className="mt-2 flex min-w-0 items-center gap-1.5 text-micro text-[var(--text-tertiary)]">
               <Building2 className="h-3 w-3 shrink-0" />
               <span className="truncate">{artifact.accessExplanation}</span>
             </div>
@@ -410,7 +410,7 @@ export function ArtifactCard({
                   <div className="font-sans text-[12px] font-normal text-[var(--text-primary)]">
                     {value}
                   </div>
-                  <div className="text-[9px] text-[var(--text-tertiary)]">
+                  <div className="text-micro text-[var(--text-tertiary)]">
                     {label}
                   </div>
                 </div>

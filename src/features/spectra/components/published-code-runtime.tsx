@@ -277,11 +277,11 @@ export function PublishedCodeRuntime({
     return (
       <div className="space-y-2">
         {!allowInteraction ? (
-          <div className="flex items-center gap-1.5 px-1 text-[8px] font-semibold text-[var(--text-tertiary)]">
+          <div className="flex items-center gap-1.5 px-1 text-micro font-semibold text-[var(--text-tertiary)]">
             <LockKeyhole className="h-3 w-3" /> View-only published preview
           </div>
         ) : null}
-        <div className="flex items-center justify-between gap-3 px-1 text-[8px] text-[var(--text-tertiary)]">
+        <div className="flex items-center justify-between gap-3 px-1 text-micro text-[var(--text-tertiary)]">
           <span className="inline-flex items-center gap-1.5 font-semibold uppercase tracking-[.1em]">
             <ShieldCheck className="h-3 w-3 text-[var(--success)]" />
             Verified published build
@@ -317,7 +317,7 @@ export function PublishedCodeRuntime({
   return (
     <div className="overflow-hidden rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-primary)]">
       <div className="flex min-h-10 items-center justify-between gap-3 border-b border-[var(--border-subtle)] px-3">
-        <span className="inline-flex items-center gap-1.5 text-[8px] font-semibold uppercase tracking-[.1em] text-[var(--text-tertiary)]">
+        <span className="inline-flex items-center gap-1.5 text-micro font-semibold uppercase tracking-[.1em] text-[var(--text-tertiary)]">
           <ShieldCheck className="h-3 w-3 text-[var(--success)]" />
           Isolated Python build
         </span>
@@ -325,7 +325,7 @@ export function PublishedCodeRuntime({
           type="button"
           onClick={runPython}
           disabled={busy || !allowInteraction}
-          className="inline-flex h-7 items-center gap-1.5 rounded-[6px] bg-[var(--text-primary)] px-2.5 text-[8px] font-semibold text-[var(--bg-primary)] disabled:opacity-45"
+          className="inline-flex h-7 items-center gap-1.5 rounded-[6px] bg-[var(--text-primary)] px-2.5 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-45"
         >
           {busy ? (
             <Loader2 className="h-3 w-3 animate-spin motion-reduce:animate-none" />
@@ -370,23 +370,23 @@ export function PublishedCodeRuntime({
           className={`${compact ? "min-h-32" : "min-h-56"} flex flex-col justify-center p-4`}
         >
           {pythonOutput.length ? (
-            <pre className="max-h-64 overflow-auto whitespace-pre-wrap font-mono text-[9px] leading-4 text-[var(--text-secondary)]">
+            <pre className="max-h-64 overflow-auto whitespace-pre-wrap font-mono text-micro leading-4 text-[var(--text-secondary)]">
               {pythonOutput.join("\n")}
             </pre>
           ) : (
             <div className="text-center">
               <TerminalSquare className="mx-auto h-5 w-5 text-[var(--text-tertiary)]" />
-              <p className="mt-2 text-[10px] font-semibold text-[var(--text-primary)]">
+              <p className="mt-2 text-micro font-semibold text-[var(--text-primary)]">
                 Run the retained Python source
               </p>
-              <p className="mt-1 text-[8px] leading-4 text-[var(--text-tertiary)]">
+              <p className="mt-1 text-micro leading-4 text-[var(--text-tertiary)]">
                 Execution happens in a disposable browser worker with network
                 access disabled.
               </p>
             </div>
           )}
           {error ? (
-            <p className="mt-3 rounded-[6px] border border-[color-mix(in_oklab,var(--danger)_25%,var(--border-default))] bg-[color-mix(in_oklab,var(--danger)_6%,var(--bg-primary))] p-2 text-[8px] text-[var(--danger)]">
+            <p className="mt-3 rounded-[6px] border border-[color-mix(in_oklab,var(--danger)_25%,var(--border-default))] bg-[color-mix(in_oklab,var(--danger)_6%,var(--bg-primary))] p-2 text-micro text-[var(--danger)]">
               {error}
             </p>
           ) : null}
@@ -415,17 +415,17 @@ function RuntimeState({
         <Icon
           className={`mx-auto h-5 w-5 text-[var(--text-tertiary)] ${spinning ? "animate-spin motion-reduce:animate-none" : ""}`}
         />
-        <p className="mt-2 text-[10px] font-semibold text-[var(--text-primary)]">
+        <p className="mt-2 text-micro font-semibold text-[var(--text-primary)]">
           {title}
         </p>
-        <p className="mx-auto mt-1 max-w-sm text-[8px] leading-4 text-[var(--text-secondary)]">
+        <p className="mx-auto mt-1 max-w-sm text-micro leading-4 text-[var(--text-secondary)]">
           {detail}
         </p>
         {action ? (
           <button
             type="button"
             onClick={action.onClick}
-            className="mt-3 h-7 rounded-[6px] border border-[var(--border-default)] px-2.5 text-[8px] font-semibold text-[var(--text-primary)]"
+            className="mt-3 h-7 rounded-[6px] border border-[var(--border-default)] px-2.5 text-micro font-semibold text-[var(--text-primary)]"
           >
             {action.label}
           </button>

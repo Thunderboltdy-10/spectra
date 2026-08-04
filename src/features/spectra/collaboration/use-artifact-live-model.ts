@@ -14,11 +14,12 @@ import {
 } from "../artifacts/registry";
 import { ArtifactRegionController } from "./region-controller";
 import {
-  ArtifactYjsModel,
   type ArtifactLiveModelSnapshot,
   type ArtifactLiveValue,
 } from "./artifact-yjs-model";
+import { NativeArtifactYjsModel } from "../work/models/yjs/native-artifact-model";
 import { useArtifactCollaboration } from "./use-artifact-collaboration";
+import { realtimeProviderForWorkType } from "../realtime/providers/provider-factory";
 
 const EMPTY_MODEL_SNAPSHOT: ArtifactLiveModelSnapshot = {
   initialized: false,
@@ -42,11 +43,12 @@ export function useArtifactLiveModel(
     supported && connect ? artifactId : null,
     "root",
     manifest?.schemas.currentVersion ?? 1,
+    realtimeProviderForWorkType(typeKey),
   );
   const model = useMemo(
     () =>
       supported && collaboration.transport
-        ? new ArtifactYjsModel(typeKey, collaboration.transport)
+        ? new NativeArtifactYjsModel(typeKey, collaboration.transport)
         : null,
     [collaboration.transport, supported, typeKey],
   );
@@ -74,7 +76,6 @@ export function useArtifactLiveModel(
       !controller ||
       modelSnapshot.initialized ||
       initializingRef.current ||
-      collaboration.state !== "synchronized" ||
       collaboration.level !== "modify"
     )
       return;
@@ -101,7 +102,6 @@ export function useArtifactLiveModel(
       });
   }, [
     collaboration.level,
-    collaboration.state,
     controller,
     initialValue,
     model,

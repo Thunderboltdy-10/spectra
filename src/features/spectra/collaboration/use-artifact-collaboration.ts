@@ -7,8 +7,17 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import { HocuspocusArtifactTransport } from "./hocuspocus-transport";
-import type { CollaborationTransportSnapshot } from "./types";
+import type {
+  ArtifactCollaborationTransport,
+  CollaborationTransportSnapshot,
+} from "./types";
+import { createArtifactCollaborationTransport } from "../realtime/providers/provider-factory";
+import type { RealtimeProviderKind } from "../realtime/providers/provider-factory";
+import {
+  BoundedYjsLocalPersistence,
+  type LocalDurabilitySnapshot,
+} from "../realtime/persistence";
+import { leaseReleaseSubscriptions } from "../realtime/policies";
 
 const CLOSED_SNAPSHOT: CollaborationTransportSnapshot = {
   state: "closed" as const,
@@ -19,11 +28,19 @@ const CLOSED_SNAPSHOT: CollaborationTransportSnapshot = {
 
 const subscribeClosed = () => () => undefined;
 const getClosedSnapshot = () => CLOSED_SNAPSHOT;
+const CLOSED_DURABILITY: LocalDurabilitySnapshot = {
+  state: "closed",
+  bytes: 0,
+  pendingRemoteSync: false,
+  restored: false,
+};
+const getClosedDurability = () => CLOSED_DURABILITY;
 
 export function useArtifactCollaboration(
   artifactId: string | null | undefined,
   partitionKey = "root",
   schemaVersion = 1,
+  providerKind?: RealtimeProviderKind,
 ) {
   const [generation, setGeneration] = useState(0);
   // The transport is created inside the effect rather than in useMemo so that
@@ -31,31 +48,72 @@ export function useArtifactCollaboration(
   // transport: the cleanup destroys the instance, and the re-run builds a
   // fresh one instead of resurrecting a destroyed Y.Doc.
   const [transport, setTransport] =
-    useState<HocuspocusArtifactTransport | null>(null);
+    useState<ArtifactCollaborationTransport | null>(null);
+  const [localPersistence, setLocalPersistence] =
+    useState<BoundedYjsLocalPersistence | null>(null);
   const recoveringRef = useRef(false);
   const recoveryAttemptRef = useRef(0);
   useEffect(() => {
     if (!artifactId) {
       setTransport(null);
+      setLocalPersistence(null);
       return;
     }
-    const next = new HocuspocusArtifactTransport(
+    const next = createArtifactCollaborationTransport(
       artifactId,
       partitionKey,
       schemaVersion,
+      providerKind,
     );
+    const persistence = new BoundedYjsLocalPersistence({
+      key: `work:${artifactId}:${partitionKey}`,
+      document: next.document,
+      modelVersion: schemaVersion,
+    });
     setTransport(next);
-    void next.connect().catch(() => undefined);
+    setLocalPersistence(persistence);
+    // Restore the bounded local Yjs state before joining the room. The room's
+    // state-vector handshake then merges the offline branch rather than
+    // replacing it or requiring React to replay a stale full snapshot.
+    void persistence
+      .initialize()
+      .then(() => next.connect())
+      .catch(() => next.connect())
+      .catch(() => undefined);
     return () => {
+      void persistence.persistNow();
+      persistence.destroy();
       next.destroy();
       setTransport(null);
+      setLocalPersistence(null);
     };
-  }, [artifactId, generation, partitionKey, schemaVersion]);
+  }, [artifactId, generation, partitionKey, providerKind, schemaVersion]);
   const snapshot = useSyncExternalStore(
     transport?.subscribe ?? subscribeClosed,
     transport?.getSnapshot ?? getClosedSnapshot,
     getClosedSnapshot,
   );
+  const localDurability = useSyncExternalStore(
+    localPersistence?.subscribe ?? subscribeClosed,
+    localPersistence?.getSnapshot ?? getClosedDurability,
+    getClosedDurability,
+  );
+  useEffect(() =>
+    transport?.subscribeLeaseReleases?.((event) => {
+      leaseReleaseSubscriptions.release({
+        targetId: event.target,
+        leaseId: event.leaseId,
+        releasedAt: event.releasedAt,
+        reason: event.reason,
+      });
+    }), [transport]);
+  useEffect(() => {
+    if (
+      snapshot.state === "synchronized" &&
+      snapshot.unsynchronizedChanges === 0
+    )
+      localPersistence?.markRemoteDurable();
+  }, [localPersistence, snapshot.state, snapshot.unsynchronizedChanges]);
   useEffect(() => {
     if (
       snapshot.unsynchronizedChanges === 0 &&
@@ -104,6 +162,7 @@ export function useArtifactCollaboration(
   return {
     transport,
     ...snapshot,
+    localDurability,
     recoverAuthoritative,
     // Only hard-lock when access is known read-only or revoked. Connecting,
     // closed, reconnecting, and unsynchronized must not freeze the editor —

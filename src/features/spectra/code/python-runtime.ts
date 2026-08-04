@@ -7,11 +7,33 @@ export type PythonRuntimeEvent =
   | { type: "chart"; spec: unknown }
   | { type: "complete"; result?: string }
   | { type: "error"; message: string; traceback?: string }
-  | { type: "limit"; message: string };
+  | { type: "limit"; message: string }
+  | { type: "telemetry"; startupMs: number; durationMs: number; sourceBytes: number; fileCount: number };
 
 const MAX_OUTPUT_CHARACTERS = 120_000;
 const MAX_RENDER_CHARACTERS = 700_000;
 const DEFAULT_TIMEOUT_MS = 12_000;
+const MAX_SOURCE_BYTES = 1_500_000;
+const MAX_PROJECT_FILES = 120;
+const MAX_REUSE_RUNS = 4;
+export const APPROVED_PYODIDE_PACKAGES = new Set([
+  "numpy",
+  "pandas",
+  "matplotlib",
+  "micropip",
+  "scipy",
+  "scikit-learn",
+  "sympy",
+]);
+
+type RuntimeSlot = {
+  worker: Worker;
+  url: string;
+  busy: boolean;
+  runs: number;
+};
+
+let reusableRuntimeSlot: RuntimeSlot | null = null;
 
 function workerSource(assetBase: string) {
   return `
@@ -20,7 +42,9 @@ function workerSource(assetBase: string) {
     const MAX_OUTPUT = ${MAX_OUTPUT_CHARACTERS};
     const MAX_RENDER = ${MAX_RENDER_CHARACTERS};
     let outputCharacters = 0;
-    const send = (value) => self.postMessage(value);
+    let requestId = '';
+    let pyodidePromise;
+    const send = (value) => self.postMessage({ ...value, requestId });
     const write = (type, value) => {
       const text = String(value ?? '');
       outputCharacters += text.length;
@@ -33,12 +57,19 @@ function workerSource(assetBase: string) {
     self.onmessage = async (event) => {
       if (!event.data || event.data.type !== 'run') return;
       try {
+        requestId = String(event.data.requestId || 'run');
+        outputCharacters = 0;
+        const startedAt = performance.now();
         send({ type: 'status', status: 'loading' });
-        const pyodide = await loadPyodide({ indexURL: ASSET_BASE });
+        pyodidePromise ||= loadPyodide({ indexURL: ASSET_BASE });
+        const pyodide = await pyodidePromise;
+        const startupMs = performance.now() - startedAt;
         pyodide.setStdout({ batched: (value) => write('stdout', value) });
         pyodide.setStderr({ batched: (value) => write('stderr', value) });
         const resources = event.data.resources && typeof event.data.resources === 'object' ? event.data.resources : {};
         const parameters = event.data.parameters && typeof event.data.parameters === 'object' ? event.data.parameters : {};
+        try { pyodide.unregisterJsModule('spectra'); } catch {}
+        try { pyodide.unregisterJsModule('spectra_assets'); } catch {}
         pyodide.registerJsModule('spectra', Object.freeze({
           render(html) {
             const value = String(html ?? '');
@@ -85,10 +116,12 @@ function workerSource(assetBase: string) {
         try { self.RTCPeerConnection = class { constructor() { throw new Error('Peer connections are disabled in the Spectra Python runtime.'); } }; } catch {}
         try { Object.defineProperty(self, 'indexedDB', { value: undefined, configurable: false }); } catch {}
         try { Object.defineProperty(self, 'caches', { value: undefined, configurable: false }); } catch {}
-        pyodide.FS.mkdirTree('/home/pyodide/project');
+        if (event.data.packages?.length) await pyodide.loadPackage(event.data.packages);
+        const projectRoot = '/home/pyodide/project/' + requestId.replace(/[^a-z0-9_-]/gi, '').slice(0, 80);
+        pyodide.FS.mkdirTree(projectRoot);
         const assetPaths = {};
         for (const asset of event.data.assets || []) {
-          const path = '/home/pyodide/project/' + asset.path;
+          const path = projectRoot + '/' + asset.path;
           const parent = path.slice(0, path.lastIndexOf('/'));
           const marker = ';base64,';
           const split = asset.dataUrl.indexOf(marker);
@@ -106,12 +139,12 @@ function workerSource(assetBase: string) {
           list_assets() { return JSON.stringify(assetPaths); },
         }));
         for (const file of event.data.files) {
-          const path = '/home/pyodide/project/' + file.path;
+          const path = projectRoot + '/' + file.path;
           const parent = path.slice(0, path.lastIndexOf('/'));
           pyodide.FS.mkdirTree(parent);
           pyodide.FS.writeFile(path, file.source, { encoding: 'utf8' });
         }
-        pyodide.FS.chdir('/home/pyodide/project');
+        pyodide.FS.chdir(projectRoot);
         send({ type: 'status', status: 'running' });
         const result = await pyodide.runPythonAsync(event.data.source, { filename: event.data.entryPath });
         let serialized;
@@ -119,6 +152,7 @@ function workerSource(assetBase: string) {
           try { serialized = String(result).slice(0, 20_000); } catch { serialized = '[result unavailable]'; }
           try { result.destroy?.(); } catch {}
         }
+        send({ type: 'telemetry', startupMs, durationMs: performance.now() - startedAt, sourceBytes: event.data.sourceBytes, fileCount: event.data.files.length });
         send({ type: 'complete', ...(serialized ? { result: serialized } : {}) });
       } catch (error) {
         const message = String(error && error.message || error || 'Python execution failed.');
@@ -138,6 +172,8 @@ export function runPythonInIsolatedWorker({
   resources = {},
   parameters = {},
   assets = [],
+  packages = [],
+  reuseWorker = true,
 }: {
   files: CodeFile[];
   entryFileId: string;
@@ -152,6 +188,8 @@ export function runPythonInIsolatedWorker({
     mediaType: string;
     dataUrl: string;
   }>;
+  packages?: string[];
+  reuseWorker?: boolean;
 }) {
   const entry =
     files.find((file) => file.id === entryFileId) ??
@@ -160,24 +198,52 @@ export function runPythonInIsolatedWorker({
     );
   if (!entry)
     throw new Error("Choose a Python entry file before running this artifact.");
-  const blob = new Blob([workerSource("/api/spectra/runtime/python/")], {
-    type: "text/javascript",
-  });
-  const url = URL.createObjectURL(blob);
-  const worker = new Worker(url, {
-    name: "spectra-python-runtime",
-    type: "module",
-  });
+  if (files.length > MAX_PROJECT_FILES)
+    throw new Error(`Python projects may contain at most ${MAX_PROJECT_FILES} files locally.`);
+  const sourceBytes = files.reduce((total, file) => total + new TextEncoder().encode(file.source).byteLength, 0);
+  if (sourceBytes > MAX_SOURCE_BYTES)
+    throw new Error("Python source exceeds the 1.5 MB local runtime budget.");
+  const approvedPackages = [...new Set(packages)];
+  const deniedPackage = approvedPackages.find((name) => !APPROVED_PYODIDE_PACKAGES.has(name));
+  if (deniedPackage)
+    throw new Error(`${deniedPackage} is not in Spectra's approved local Python package set.`);
+  const createSlot = (): RuntimeSlot => {
+    const blob = new Blob([workerSource("/api/spectra/runtime/python/")], { type: "text/javascript" });
+    const url = URL.createObjectURL(blob);
+    return { worker: new Worker(url, { name: "spectra-python-runtime", type: "module" }), url, busy: false, runs: 0 };
+  };
+  const slot = reuseWorker && reusableRuntimeSlot && !reusableRuntimeSlot.busy && reusableRuntimeSlot.runs < MAX_REUSE_RUNS
+    ? reusableRuntimeSlot
+    : createSlot();
+  if (reuseWorker && slot !== reusableRuntimeSlot) {
+    if (reusableRuntimeSlot && !reusableRuntimeSlot.busy) {
+      reusableRuntimeSlot.worker.terminate();
+      URL.revokeObjectURL(reusableRuntimeSlot.url);
+    }
+    reusableRuntimeSlot = slot;
+  }
+  slot.busy = true;
+  slot.runs += 1;
+  const worker = slot.worker;
+  const requestId = crypto.randomUUID();
   let settled = false;
-  const finish = () => {
+  const finish = (forceTerminate = false) => {
     if (settled) return;
     settled = true;
     clearTimeout(timer);
-    worker.terminate();
-    URL.revokeObjectURL(url);
+    worker.onmessage = null;
+    worker.onerror = null;
+    if (forceTerminate || !reuseWorker || slot.runs >= MAX_REUSE_RUNS) {
+      worker.terminate();
+      URL.revokeObjectURL(slot.url);
+      if (reusableRuntimeSlot === slot) reusableRuntimeSlot = null;
+    } else {
+      slot.busy = false;
+    }
   };
-  worker.onmessage = (event: MessageEvent<PythonRuntimeEvent>) => {
+  worker.onmessage = (event: MessageEvent<PythonRuntimeEvent & { requestId?: string }>) => {
     const value = event.data;
+    if (value.requestId !== requestId) return;
     if (!value || typeof value !== "object" || typeof value.type !== "string")
       return;
     onEvent(value);
@@ -194,14 +260,14 @@ export function runPythonInIsolatedWorker({
       message:
         event.message || "The isolated Python worker stopped unexpectedly.",
     });
-    finish();
+    finish(true);
   };
   const timer = window.setTimeout(() => {
     onEvent({
       type: "limit",
       message: `Python execution exceeded the ${Math.round(timeoutMs / 1000)} second runtime limit and was stopped.`,
     });
-    finish();
+    finish(true);
   }, timeoutMs);
   let safeResources: Record<string, unknown> = {};
   let safeParameters: Record<string, string | number | boolean> = {};
@@ -237,12 +303,36 @@ export function runPythonInIsolatedWorker({
   } catch {}
   worker.postMessage({
     type: "run",
+    requestId,
     files: files.map((file) => ({ path: file.path, source: file.source })),
     entryPath: entry.path,
     source: `${entry.source}${additionalSource}`,
     resources: safeResources,
     parameters: safeParameters,
     assets: safeAssets,
+    packages: approvedPackages,
+    sourceBytes,
   });
-  return { cancel: finish };
+  return { cancel: () => finish(true), execution: "local_worker" as const };
+}
+
+export function pythonRuntimeFallback({
+  worker,
+  wasm,
+  sourceBytes,
+}: {
+  worker: boolean;
+  wasm: boolean;
+  sourceBytes: number;
+}) {
+  return worker && wasm && sourceBytes <= MAX_SOURCE_BYTES
+    ? { path: "local_worker" as const, reason: "device_ready" }
+    : { path: "server" as const, reason: "unsupported_or_large" };
+}
+
+export function disposeReusablePythonWorker() {
+  if (!reusableRuntimeSlot) return;
+  reusableRuntimeSlot.worker.terminate();
+  URL.revokeObjectURL(reusableRuntimeSlot.url);
+  reusableRuntimeSlot = null;
 }

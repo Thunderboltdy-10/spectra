@@ -14,11 +14,16 @@ import {
   Send,
   X,
 } from "lucide-react";
-import { useState, type CSSProperties } from "react";
+import { useRef, useState, type CSSProperties } from "react";
+import { motion } from "framer-motion";
 import type { SpectraArtifactEmbed } from "../data/api";
 import { blueprintMeta } from "./artifact-card";
 import { LiveCodeRuntime } from "./live-code-runtime";
 import { PublishedCodeRuntime } from "./published-code-runtime";
+import { isArtifactTypeKey } from "../artifacts/registry";
+import { getWorkReferenceContract, validateReferenceView } from "../references";
+import { useSpectraMotion } from "../motion/motion-level";
+import { transitionFor } from "../motion/grammar";
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -59,7 +64,21 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
   const canInteract =
     embed.effectiveInteraction === "interact" ||
     embed.effectiveInteraction === "edit";
-  if (!type || !source) return null;
+  if (!type || !source || !isArtifactTypeKey(type)) return null;
+  const contract = getWorkReferenceContract(type);
+  const requestedView =
+    typeof embed.displayPreferences?.view === "string"
+      ? embed.displayPreferences.view
+      : undefined;
+  const targetKind =
+    contract.targets.find(
+      (target) =>
+        !requestedView ||
+        (target.views as readonly string[]).includes(requestedView),
+    )?.kind ?? contract.targets[0]!.kind;
+  const activeView = validateReferenceView(type, targetKind, requestedView)
+    ? requestedView
+    : contract.targets[0]!.views[0];
 
   if (type === "document") {
     const blocks = records(content.blocks).slice(
@@ -100,7 +119,7 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
               key={String(entry.id ?? index)}
               className="min-h-[112px] rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-3.5"
             >
-              <span className="text-[8px] font-semibold uppercase tracking-[.11em] text-[var(--text-tertiary)]">
+              <span className="text-micro font-semibold uppercase tracking-[.11em] text-[var(--text-tertiary)]">
                 {index % 2 === 0 ? "Front" : "Back"}
               </span>
               <p className="mt-2 font-display text-[13px] leading-5 text-[var(--text-primary)]">
@@ -126,14 +145,14 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
           className="flex min-h-[116px] w-full items-center justify-center rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-5 text-center disabled:cursor-default"
         >
           <span>
-            <span className="block text-[9px] font-semibold uppercase tracking-[.12em] text-[var(--text-tertiary)]">
+            <span className="block text-micro font-semibold uppercase tracking-[.12em] text-[var(--text-tertiary)]">
               {revealed ? "Answer" : "Prompt"}
             </span>
             <span className="mt-2 block text-[15px] font-medium leading-6 text-[var(--text-primary)]">
               {textFrom(revealed ? card?.back : card?.front) || "Empty card"}
             </span>
             {!canInteract ? (
-              <span className="mt-2 block text-[8px] text-[var(--text-tertiary)]">
+              <span className="mt-2 block text-micro text-[var(--text-tertiary)]">
                 Read-only preview
               </span>
             ) : null}
@@ -152,7 +171,7 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
             >
               <ChevronLeft className="h-4 w-4" />
             </button>
-            <span className="text-[9px] text-[var(--text-tertiary)]">
+            <span className="text-micro text-[var(--text-tertiary)]">
               {activeIndex + 1} / {cards.length}
             </span>
             <button
@@ -198,11 +217,11 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
               {questions.length}{" "}
               {questions.length === 1 ? "question" : "questions"}
             </div>
-            <p className="mt-0.5 text-[9px] text-[var(--text-tertiary)]">
+            <p className="mt-0.5 text-micro text-[var(--text-tertiary)]">
               Formative practice · responses stay separate
             </p>
           </div>
-          <span className="rounded-[6px] border border-[var(--border-default)] px-2 py-1 text-[9px] font-medium text-[var(--text-secondary)]">
+          <span className="rounded-[6px] border border-[var(--border-default)] px-2 py-1 text-micro font-medium text-[var(--text-secondary)]">
             Preview
           </span>
         </div>
@@ -223,7 +242,7 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
                 onClick={() => setSelected(id)}
                 className={`flex w-full items-center gap-2 rounded-[7px] border px-3 py-2 text-left text-[11px] disabled:cursor-default ${selected === id ? "border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_7%,var(--bg-primary))] text-[var(--text-primary)]" : "border-[var(--border-subtle)] text-[var(--text-secondary)] enabled:hover:border-[var(--border-default)]"}`}
               >
-                <span className="flex h-5 w-5 items-center justify-center rounded-full border border-current text-[8px]">
+                <span className="flex h-5 w-5 items-center justify-center rounded-full border border-current text-micro">
                   {String.fromCharCode(65 + index)}
                 </span>
                 {option.text}
@@ -231,7 +250,7 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
             );
           })}
         </div>
-        <p className="mt-2 text-[8px] text-[var(--text-tertiary)]">
+        <p className="mt-2 text-micro text-[var(--text-tertiary)]">
           Practice only · responses are separate from artifact content
         </p>
       </div>
@@ -245,10 +264,10 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
           <span className="text-[11px] font-semibold capitalize text-[var(--text-primary)]">
             {String(content.status ?? "todo").replaceAll("_", " ")}
           </span>
-          <span className="text-[9px] capitalize text-[var(--text-tertiary)]">
+          <span className="text-micro capitalize text-[var(--text-tertiary)]">
             {String(content.priority ?? "medium")} priority
           </span>
-          <span className="ml-auto text-[9px] text-[var(--text-secondary)]">
+          <span className="ml-auto text-micro text-[var(--text-secondary)]">
             {typeof content.dueAt === "number"
               ? new Date(content.dueAt).toLocaleString()
               : "No due date"}
@@ -283,7 +302,7 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
           <h4 className="font-display text-[clamp(15px,2vw,26px)] font-semibold text-[var(--text-primary)]">
             {textFrom(slide?.title) || "Untitled slide"}
           </h4>
-          <p className="mt-3 max-w-[76%] text-[10px] leading-4 text-[var(--text-secondary)]">
+          <p className="mt-3 max-w-[76%] text-micro leading-4 text-[var(--text-secondary)]">
             {textFrom(slide?.objects, 220)}
           </p>
         </div>
@@ -297,7 +316,7 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
             >
               <ChevronLeft className="h-4 w-4" />
             </button>
-            <span className="text-[9px] text-[var(--text-tertiary)]">
+            <span className="text-micro text-[var(--text-tertiary)]">
               Slide {activeIndex + 1} of {slides.length}
             </span>
             <button
@@ -327,7 +346,7 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
     );
     return (
       <div className="overflow-hidden rounded-[8px] border border-[var(--border-default)]">
-        <div className="border-b border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-1.5 text-[9px] font-semibold text-[var(--text-secondary)]">
+        <div className="border-b border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-1.5 text-micro font-semibold text-[var(--text-secondary)]">
           {String(sheet?.name ?? "Sheet 1")}
         </div>
         <div className="grid grid-cols-4 gap-px bg-[var(--border-subtle)]">
@@ -336,16 +355,16 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
               key={address}
               className="min-h-9 bg-[var(--bg-primary)] px-2 py-1"
             >
-              <span className="block text-[7px] text-[var(--text-tertiary)]">
+              <span className="block text-micro text-[var(--text-tertiary)]">
                 {address}
               </span>
-              <span className="block truncate text-[10px] text-[var(--text-primary)]">
+              <span className="block truncate text-micro text-[var(--text-primary)]">
                 {textFrom(record(value).value ?? value, 40)}
               </span>
             </div>
           ))}
           {entries.length === 0 ? (
-            <div className="col-span-4 p-6 text-center text-[10px] text-[var(--text-tertiary)]">
+            <div className="col-span-4 p-6 text-center text-micro text-[var(--text-tertiary)]">
               Empty range
             </div>
           ) : null}
@@ -388,7 +407,7 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
         {nodes.map((node, index) => (
           <div
             key={String(node.id ?? index)}
-            className="absolute max-w-[120px] rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 py-1.5 text-[8px] text-[var(--text-primary)] shadow-sm"
+            className="absolute max-w-[120px] rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 py-1.5 text-micro text-[var(--text-primary)] shadow-sm"
             style={{
               left: `${8 + ((index * 23) % 70)}%`,
               top: `${10 + ((index * 31) % 68)}%`,
@@ -418,7 +437,7 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
               <div className="truncate text-[11px] font-semibold text-[var(--text-primary)]">
                 {textFrom(event.title) || "Event"}
               </div>
-              <div className="text-[8px] text-[var(--text-tertiary)]">
+              <div className="text-micro text-[var(--text-tertiary)]">
                 {typeof event.start === "string"
                   ? new Date(event.start).toLocaleString()
                   : typeof event.startAt === "number"
@@ -429,7 +448,7 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
           </div>
         ))}
         {events.length === 0 ? (
-          <p className="text-[10px] text-[var(--text-tertiary)]">
+          <p className="text-micro text-[var(--text-tertiary)]">
             No events in this view.
           </p>
         ) : null}
@@ -437,18 +456,39 @@ function ContentAdapter({ embed }: { embed: SpectraArtifactEmbed }) {
     );
   }
 
-  return (
-    <div className="rounded-[8px] border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-4 text-[11px] leading-5 text-[var(--text-secondary)]">
-      {textFrom(content, embed.mode === "compact" ? 260 : 900) ||
-        "No preview content"}
-    </div>
-  );
+  if (type === "agent") {
+    const mission = record(content.mission);
+    const skills = records(content.skills);
+    const evidence = records(content.evidenceBindings ?? content.evidence);
+    return (
+      <div className="grid gap-2 sm:grid-cols-3">
+        <div className="sm:col-span-3 rounded-[8px] border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-3">
+          <div className="text-micro uppercase tracking-[.1em] text-[var(--text-tertiary)]">
+            Mission
+          </div>
+          <p className="mt-1 text-[11px] leading-5 text-[var(--text-primary)]">
+            {textFrom(mission.objective ?? content.objective, 420) ||
+              "Mission is still being shaped."}
+          </p>
+        </div>
+        <Metric label="Skills" value={String(skills.length)} />
+        <Metric label="Evidence" value={String(evidence.length)} />
+        <Metric
+          label="Release"
+          value={String(content.releaseStatus ?? content.status ?? "draft")}
+        />
+      </div>
+    );
+  }
+
+  void activeView;
+  return null;
 }
 
 function Metric({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-[8px] bg-[var(--bg-primary)] p-3">
-      <div className="text-[8px] uppercase tracking-[.1em] text-[var(--text-tertiary)]">
+      <div className="text-micro uppercase tracking-[.1em] text-[var(--text-tertiary)]">
         {label}
       </div>
       <div className="mt-1 text-[12px] font-semibold capitalize text-[var(--text-primary)]">
@@ -464,6 +504,7 @@ export function ArtifactEmbed({
   onOpenSource,
   onRetry,
   onModeChange,
+  onResize,
   onRequestAccess,
   onCancelAccessRequest,
   onUseLiveVersion,
@@ -473,10 +514,13 @@ export function ArtifactEmbed({
   onOpenSource?: (artifactId: string) => void;
   onRetry?: () => void;
   onModeChange?: (mode: "compact" | "expanded") => void;
+  onResize?: (size: { width: number; height: number }) => void;
   onRequestAccess?: () => void;
   onCancelAccessRequest?: (requestId: string) => void;
   onUseLiveVersion?: () => void;
 }) {
+  const rootRef = useRef<HTMLElement | null>(null);
+  const motionLevel = useSpectraMotion();
   const meta = embed.source ? blueprintMeta[embed.source.blueprintKey] : null;
   const Icon = meta?.icon ?? FileQuestion;
   const status =
@@ -485,7 +529,7 @@ export function ArtifactEmbed({
           icon: Send,
           title: "Access requested",
           detail:
-            "The source owner will decide whether to grant access. This embed unlocks automatically after approval.",
+            "The source owner will decide whether to grant access. This reference unlocks automatically after approval.",
         }
       : embed.state === "no_access"
         ? {
@@ -499,7 +543,7 @@ export function ArtifactEmbed({
               icon: AlertCircle,
               title: "Source was deleted",
               detail:
-                "The surrounding artifact is unchanged, but this projection is no longer available.",
+                "The surrounding work is unchanged, but this reference is no longer available.",
             }
           : embed.state === "version_unavailable"
             ? {
@@ -522,7 +566,7 @@ export function ArtifactEmbed({
             <div className="text-[12px] font-semibold text-[var(--text-primary)]">
               {status.title}
             </div>
-            <p className="mt-0.5 max-w-[620px] text-[10px] leading-4 text-[var(--text-secondary)]">
+            <p className="mt-0.5 max-w-[620px] text-micro leading-4 text-[var(--text-secondary)]">
               {status.detail}
             </p>
           </div>
@@ -534,7 +578,7 @@ export function ArtifactEmbed({
                 type="button"
                 disabled={busy}
                 onClick={onRequestAccess}
-                className="inline-flex h-8 items-center gap-1.5 rounded-[7px] bg-[var(--text-primary)] px-3 text-[9px] font-semibold text-[var(--bg-primary)] disabled:opacity-45"
+                className="inline-flex h-8 items-center gap-1.5 rounded-[7px] bg-[var(--text-primary)] px-3 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-45"
               >
                 <Send className="h-3 w-3" />
                 Request access
@@ -549,7 +593,7 @@ export function ArtifactEmbed({
                 onClick={() =>
                   onCancelAccessRequest(embed.accessRequest!.requestId)
                 }
-                className="inline-flex h-8 items-center gap-1.5 rounded-[7px] border border-[var(--border-default)] px-2.5 text-[9px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-45"
+                className="inline-flex h-8 items-center gap-1.5 rounded-[7px] border border-[var(--border-default)] px-2.5 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-45"
               >
                 <X className="h-3 w-3" />
                 Cancel request
@@ -562,7 +606,7 @@ export function ArtifactEmbed({
                 type="button"
                 disabled={busy}
                 onClick={onUseLiveVersion}
-                className="h-8 rounded-[7px] bg-[var(--text-primary)] px-3 text-[9px] font-semibold text-[var(--bg-primary)] disabled:opacity-45"
+                className="h-8 rounded-[7px] bg-[var(--text-primary)] px-3 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-45"
               >
                 Use live source
               </button>
@@ -585,7 +629,57 @@ export function ArtifactEmbed({
   }
   if (!embed.source || !meta) return null;
   return (
-    <section className="overflow-hidden rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[0_1px_2px_rgba(28,24,18,0.025)]">
+    <motion.section
+      layout={!motionLevel.disabled}
+      transition={
+        motionLevel.disabled
+          ? undefined
+          : transitionFor("morph", motionLevel.level)
+      }
+      ref={rootRef}
+      data-reference-id={embed.embedId}
+      className="overflow-hidden rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[0_1px_2px_rgba(28,24,18,0.025)]"
+      style={
+        embed.mode === "expanded"
+          ? {
+              width:
+                typeof embed.displayPreferences?.width === "number"
+                  ? embed.displayPreferences.width
+                  : undefined,
+              height:
+                typeof embed.displayPreferences?.height === "number"
+                  ? embed.displayPreferences.height
+                  : undefined,
+              maxWidth: "100%",
+              maxHeight: "min(720px, 80vh)",
+              minWidth: 240,
+              minHeight: 160,
+              resize: onResize ? "both" : undefined,
+              overflow: "auto",
+            }
+          : undefined
+      }
+      onPointerUp={() => {
+        if (!onResize || embed.mode !== "expanded" || !rootRef.current) return;
+        const bounds = rootRef.current.getBoundingClientRect();
+        const priorWidth =
+          typeof embed.displayPreferences?.width === "number"
+            ? embed.displayPreferences.width
+            : 0;
+        const priorHeight =
+          typeof embed.displayPreferences?.height === "number"
+            ? embed.displayPreferences.height
+            : 0;
+        if (
+          Math.abs(bounds.width - priorWidth) > 3 ||
+          Math.abs(bounds.height - priorHeight) > 3
+        )
+          onResize({
+            width: Math.round(bounds.width),
+            height: Math.round(bounds.height),
+          });
+      }}
+    >
       <header className="flex flex-wrap items-center gap-2 border-b border-[var(--border-subtle)] px-3 py-2.5 sm:px-4">
         <span
           className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] bg-[color-mix(in_oklab,var(--embed-accent)_9%,var(--bg-secondary))]"
@@ -599,12 +693,20 @@ export function ArtifactEmbed({
           <div className="truncate text-[12px] font-semibold text-[var(--text-primary)]">
             {embed.source.title}
           </div>
-          <div className="mt-0.5 flex items-center gap-1.5 text-[8px] uppercase tracking-[.1em] text-[var(--text-tertiary)]">
+          <div className="mt-0.5 flex items-center gap-1.5 text-micro uppercase tracking-[.1em] text-[var(--text-tertiary)]">
             <span>{meta.label}</span>
             <span>·</span>
             <span>{embed.mode === "compact" ? "Compact" : "Expanded"}</span>
             <span>·</span>
             <span>{embed.versionPolicy === "pinned" ? "Pinned" : "Live"}</span>
+            {typeof embed.displayPreferences?.view === "string" ? (
+              <>
+                <span>Â·</span>
+                <span>
+                  {embed.displayPreferences.view.replaceAll("_", " ")}
+                </span>
+              </>
+            ) : null}
             {embed.state === "archived" ? (
               <>
                 <span>·</span>
@@ -626,9 +728,11 @@ export function ArtifactEmbed({
             onClick={() =>
               onModeChange(embed.mode === "compact" ? "expanded" : "compact")
             }
-            className="flex h-8 items-center gap-1.5 rounded-[7px] px-2 text-[9px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-45"
+            className="flex h-8 items-center gap-1.5 rounded-[7px] px-2 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-45"
             aria-label={
-              embed.mode === "compact" ? "Expand embed" : "Collapse embed"
+              embed.mode === "compact"
+                ? "Expand reference"
+                : "Collapse reference"
             }
           >
             {embed.mode === "compact" ? (
@@ -648,21 +752,48 @@ export function ArtifactEmbed({
           <button
             type="button"
             onClick={() => onOpenSource(embed.source!.artifactId)}
-            className="flex h-8 items-center gap-1.5 rounded-[7px] px-2 text-[9px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+            className="flex h-8 items-center gap-1.5 rounded-[7px] px-2 text-micro font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
           >
             Open source
             <ArrowUpRight className="h-3 w-3" />
           </button>
         ) : null}
       </header>
-      <div className={embed.mode === "compact" ? "p-3.5" : "p-4 sm:p-5"}>
+      <motion.div
+        key={embed.mode}
+        initial={motionLevel.disabled ? false : { opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={
+          motionLevel.disabled
+            ? undefined
+            : {
+                ...transitionFor("reveal", motionLevel.level),
+                // Let the shell start settling before the arriving content
+                // declares itself — geometry first, then content.
+                delay: motionLevel.reduced ? 0 : 0.09,
+              }
+        }
+        className={embed.mode === "compact" ? "p-3.5" : "p-4 sm:p-5"}
+      >
         <ContentAdapter embed={embed} />
-      </div>
+      </motion.div>
       {embed.source.summary && embed.mode === "expanded" ? (
-        <footer className="border-t border-[var(--border-subtle)] px-4 py-2 text-[9px] leading-4 text-[var(--text-tertiary)]">
+        <motion.footer
+          initial={motionLevel.disabled ? false : { opacity: 0, y: 3 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={
+            motionLevel.disabled
+              ? undefined
+              : {
+                  ...transitionFor("reveal", motionLevel.level),
+                  delay: motionLevel.reduced ? 0 : 0.14,
+                }
+          }
+          className="border-t border-[var(--border-subtle)] px-4 py-2 text-micro leading-4 text-[var(--text-tertiary)]"
+        >
           {embed.source.summary}
-        </footer>
+        </motion.footer>
       ) : null}
-    </section>
+    </motion.section>
   );
 }

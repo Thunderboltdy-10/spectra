@@ -10,6 +10,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import type { CapabilityState } from "@/features/spectra/core/capability-truth";
+import { CapabilityTruthBadge } from "@/features/spectra/integrations/status/capability-truth";
 import {
   Select,
   SelectContent,
@@ -53,7 +55,7 @@ export function AdminSectionHeader({
           {title}
         </h2>
         {detail ? (
-          <p className="mt-0.5 text-[10px] leading-4 text-[var(--text-tertiary)]">
+          <p className="mt-0.5 text-micro leading-4 text-[var(--text-tertiary)]">
             {detail}
           </p>
         ) : null}
@@ -70,6 +72,8 @@ export function MetricCard({
   detail,
   tone = "green",
   action,
+  state,
+  source,
 }: {
   icon: LucideIcon;
   label: string;
@@ -77,6 +81,8 @@ export function MetricCard({
   detail: string;
   tone?: "green" | "violet" | "orange" | "blue";
   action?: ReactNode;
+  state?: CapabilityState;
+  source?: string;
 }) {
   const toneClass = {
     green: "bg-[#e9f6f0] text-[#15906b]",
@@ -88,13 +94,16 @@ export function MetricCard({
     <AdminCard className="min-w-0 p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-[11px] text-[var(--text-secondary)]">{label}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-[11px] text-[var(--text-secondary)]">{label}</p>
+            {state ? <CapabilityTruthBadge state={state} className="min-h-5 px-2 text-micro" /> : null}
+          </div>
           <strong className="mt-2 block truncate font-sans text-[26px] font-normal leading-none tracking-[-.02em] text-[var(--text-primary)]">
             {value}
           </strong>
           <p
             className={cn(
-              "mt-2 text-[10px]",
+              "mt-2 text-micro",
               tone === "orange"
                 ? "text-[#d96f24]"
                 : "text-[var(--success,#27876b)]",
@@ -102,6 +111,11 @@ export function MetricCard({
           >
             {detail}
           </p>
+          {source ? (
+            <p className="mt-1 truncate text-micro text-[var(--text-tertiary)]" title={source}>
+              {source}
+            </p>
+          ) : null}
         </div>
         <span
           className={cn(
@@ -127,7 +141,7 @@ export function StatusBadge({
   return (
     <span
       className={cn(
-        "inline-flex min-h-5 items-center rounded-[5px] px-2 text-[9px] font-semibold capitalize",
+        "inline-flex min-h-5 items-center rounded-[5px] px-2 text-micro font-semibold capitalize",
         tone === "good" && "bg-[#e5f5ee] text-[#278066]",
         tone === "warn" && "bg-[#fff3df] text-[#a9651f]",
         tone === "danger" && "bg-[#fff0ed] text-[#b54a3d]",
@@ -196,7 +210,7 @@ export function TextField({
 }) {
   return (
     <label className="block">
-      <span className="mb-1.5 block text-[10px] font-medium text-[var(--text-secondary)]">
+      <span className="mb-1.5 block text-micro font-medium text-[var(--text-secondary)]">
         {label}
       </span>
       <input
@@ -226,7 +240,7 @@ export function TextAreaField({
 }) {
   return (
     <label className="block">
-      <span className="mb-1.5 block text-[10px] font-medium text-[var(--text-secondary)]">
+      <span className="mb-1.5 block text-micro font-medium text-[var(--text-secondary)]">
         {label}
       </span>
       <textarea
@@ -416,7 +430,7 @@ export function InlineLink({
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex items-center gap-1 text-[10px] font-medium text-[#705df2] hover:underline"
+      className="inline-flex items-center gap-1 text-micro font-medium text-[#705df2] hover:underline"
     >
       {children}
       <ArrowUpRight size={11} />
@@ -426,7 +440,7 @@ export function InlineLink({
 
 export function PrivacyNotice({ children }: { children: ReactNode }) {
   return (
-    <div className="flex items-start gap-2 rounded-[7px] border border-[#dbeae4] bg-[#f2faf6] px-3 py-2.5 text-[10px] leading-4 text-[#3b705f]">
+    <div className="flex items-start gap-2 rounded-[7px] border border-[#dbeae4] bg-[#f2faf6] px-3 py-2.5 text-micro leading-4 text-[#3b705f]">
       <CheckCircle2 size={13} className="mt-0.5 shrink-0" />
       <span>{children}</span>
     </div>

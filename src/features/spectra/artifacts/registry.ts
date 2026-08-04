@@ -53,8 +53,7 @@ const regionAdapters: Record<
       ...rows(root.blocks).flatMap((block, index) => {
         const blockId = stringValue(block.id, `block-${index + 1}`);
         const blockType = stringValue(block.type, "block");
-        const rawText =
-          typeof block.text === "string" ? block.text.trim() : "";
+        const rawText = typeof block.text === "string" ? block.text.trim() : "";
         const firstLine = rawText.split("\n")[0]?.trim() ?? "";
         const excerpt =
           firstLine.length > 48 ? `${firstLine.slice(0, 45)}…` : firstLine;
@@ -70,7 +69,9 @@ const regionAdapters: Record<
                 : blockType === "paragraph"
                   ? "Paragraph"
                   : "Block";
-        const label = excerpt ? `${typeLabel}: ${excerpt}` : `${typeLabel} ${index + 1}`;
+        const label = excerpt
+          ? `${typeLabel}: ${excerpt}`
+          : `${typeLabel} ${index + 1}`;
         return [
           region(
             blockId,
@@ -1136,6 +1137,7 @@ const operations: Record<ArtifactTypeKey, readonly string[]> = {
     "check_contrast",
     "check_reading_order",
     "check_source_coverage",
+    "build_bibliography",
     "prepare_presenter_output",
   ],
   sheets: [

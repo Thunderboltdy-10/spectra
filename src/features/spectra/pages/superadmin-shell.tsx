@@ -49,6 +49,7 @@ import {
   mutateAdministration,
   type PlatformAdministrationOverview,
 } from "@/features/spectra/administration/api";
+import { metricDefinition } from "@/features/spectra/administration/metric-registry";
 import {
   AdminButton,
   AdminCard,
@@ -235,10 +236,10 @@ function PlatformUsageChart({
               className="size-2 rounded-[2px]"
               style={{ backgroundColor: color }}
             />
-            <span className="flex-1 text-[9px] text-[var(--text-secondary)]">
+            <span className="flex-1 text-micro text-[var(--text-secondary)]">
               {label}
             </span>
-            <strong className="text-[10px]">
+            <strong className="text-micro">
               {formatCompact(data.usage.totals[key])}
             </strong>
           </div>
@@ -275,7 +276,7 @@ function PlatformUsageChart({
           );
         })}
       </div>
-      <div className="mt-2 flex justify-between text-[8px] text-[var(--text-tertiary)]">
+      <div className="mt-2 flex justify-between text-micro text-[var(--text-tertiary)]">
         <span>{data.usage.series[0]?.day ?? "No completed range"}</span>
         <span>
           {data.usage.series.at(-1)?.day ?? data.usage.completeThrough}
@@ -308,6 +309,8 @@ function PlatformOverviewSurface({
           value={formatCompact(data.metrics.activeSchools)}
           detail="Current operational tenants"
           tone="green"
+          state={data.metricStates.activeSchools}
+          source={metricDefinition("platform.active_schools").source}
         />
         <MetricCard
           icon={Users}
@@ -315,6 +318,8 @@ function PlatformOverviewSurface({
           value={formatCompact(data.metrics.totalUsers)}
           detail={`${formatCompact(data.metrics.activeUsers30d)} active in 30 days`}
           tone="violet"
+          state={data.metricStates.totalUsers}
+          source={metricDefinition("platform.total_users").source}
         />
         <MetricCard
           icon={Database}
@@ -322,6 +327,8 @@ function PlatformOverviewSurface({
           value={formatCompact(data.metrics.artifactsCreated)}
           detail="Unknown until metadata counters are complete"
           tone="orange"
+          state={data.metricStates.artifactsCreated}
+          source={metricDefinition("platform.work_created").source}
         />
         <MetricCard
           icon={MessageCircle}
@@ -329,6 +336,8 @@ function PlatformOverviewSurface({
           value={formatCompact(data.metrics.messages)}
           detail="Never inferred by reading private threads"
           tone="blue"
+          state={data.metricStates.messages}
+          source={metricDefinition("platform.messages").source}
         />
         <MetricCard
           icon={Activity}
@@ -336,6 +345,8 @@ function PlatformOverviewSurface({
           value={`${data.metrics.retentionPercent}%`}
           detail="Account activity, not private content"
           tone="green"
+          state={data.metricStates.retentionPercent}
+          source={metricDefinition("platform.retention").source}
         />
       </div>
 
@@ -352,7 +363,7 @@ function PlatformOverviewSurface({
           <h2 className="font-[var(--font-serif)] text-[15px] font-medium">
             Storage & compute
           </h2>
-          <p className="mt-1 text-[9px] text-[var(--text-tertiary)]">
+          <p className="mt-1 text-micro text-[var(--text-tertiary)]">
             Metered platform consumption for the selected range
           </p>
           <div className="mt-5 space-y-3 text-[11px]">
@@ -362,11 +373,11 @@ function PlatformOverviewSurface({
                 {formatBytes(data.storageBytes)}
               </strong>
             </div>
-            <div className="flex justify-between gap-3 text-[9px]">
+            <div className="flex justify-between gap-3 text-micro">
               <span className="text-[var(--text-secondary)]">Model tokens</span>
               <strong>{formatCompact(totalTokens)}</strong>
             </div>
-            <div className="flex justify-between gap-3 text-[9px]">
+            <div className="flex justify-between gap-3 text-micro">
               <span className="text-[var(--text-secondary)]">
                 Operational units
               </span>
@@ -381,13 +392,13 @@ function PlatformOverviewSurface({
           <h2 className="font-[var(--font-serif)] text-[15px] font-medium">
             Seats & access
           </h2>
-          <p className="mt-1 text-[9px] text-[var(--text-tertiary)]">
+          <p className="mt-1 text-micro text-[var(--text-tertiary)]">
             No commercial seat enforcement
           </p>
           <strong className="mt-6 block font-sans text-[28px] font-normal">
             {formatCompact(data.metrics.totalUsers)}
           </strong>
-          <span className="text-[9px] text-[var(--text-tertiary)]">
+          <span className="text-micro text-[var(--text-tertiary)]">
             active accounts across schools
           </span>
           <div className="mt-5 h-1.5 rounded-full bg-[var(--bg-secondary)]">
@@ -398,7 +409,7 @@ function PlatformOverviewSurface({
               }}
             />
           </div>
-          <div className="mt-4 space-y-2 text-[9px]">
+          <div className="mt-4 space-y-2 text-micro">
             <div className="flex justify-between">
               <span className="text-[var(--text-secondary)]">
                 Active in 30 days
@@ -428,7 +439,7 @@ function PlatformOverviewSurface({
               {data.serviceHealth.map((service) => (
                 <div
                   key={service.service}
-                  className="flex items-center gap-2 text-[9px]"
+                  className="flex items-center gap-2 text-micro"
                 >
                   <span
                     className={cn(
@@ -454,10 +465,10 @@ function PlatformOverviewSurface({
             <h2 className="font-[var(--font-serif)] text-[15px] font-medium">
               Feedback overview
             </h2>
-            <p className="mt-1 text-[9px] text-[var(--text-tertiary)]">
+            <p className="mt-1 text-micro text-[var(--text-tertiary)]">
               Operational sentiment · all cohort sizes
             </p>
-            <div className="mt-3 space-y-2 text-[9px]">
+            <div className="mt-3 space-y-2 text-micro">
               {[
                 ["Positive", data.feedback.positive, "#26a47c"],
                 ["Neutral", data.feedback.neutral, "#ee9b3b"],
@@ -486,7 +497,7 @@ function PlatformOverviewSurface({
             title="Model & agent usage"
             detail="Aggregate operational meters"
           />
-          <div className="space-y-3 px-4 pb-4 text-[9px]">
+          <div className="space-y-3 px-4 pb-4 text-micro">
             {[
               ["Model input tokens", data.usage.totals.model_input_tokens],
               ["Model output tokens", data.usage.totals.model_output_tokens],
@@ -530,7 +541,7 @@ function PlatformOverviewSurface({
                       : "operations",
                   )
                 }
-                className="flex w-full items-center justify-between rounded-[6px] border border-[var(--border-subtle)] px-3 py-2 text-[9px] hover:bg-[var(--bg-secondary)]"
+                className="flex w-full items-center justify-between rounded-[6px] border border-[var(--border-subtle)] px-3 py-2 text-micro hover:bg-[var(--bg-secondary)]"
               >
                 <span>{label}</span>
                 <StatusBadge
@@ -550,7 +561,7 @@ function PlatformOverviewSurface({
               <InlineLink onClick={() => onTab("schools")}>View all</InlineLink>
             }
           />
-          <div className="space-y-2 px-4 pb-4 text-[9px]">
+          <div className="space-y-2 px-4 pb-4 text-micro">
             {data.topSchools.slice(0, 6).map((school, index) => (
               <div key={school.schoolId} className="flex items-center gap-2">
                 <span className="w-4 text-[var(--text-tertiary)]">
@@ -567,7 +578,7 @@ function PlatformOverviewSurface({
             title="Platform insights"
             detail="Directly derived operational signals"
           />
-          <div className="space-y-3 px-4 pb-4 text-[9px] leading-4">
+          <div className="space-y-3 px-4 pb-4 text-micro leading-4">
             <div className="flex gap-2">
               <Sparkles size={13} className="mt-0.5 text-[#7b63ef]" />
               {formatCompact(totalTokens)} model tokens were metered this
@@ -597,7 +608,7 @@ function PlatformOverviewSurface({
           }
         />
         <div className="overflow-x-auto px-4 pb-4">
-          <table className="w-full min-w-[720px] text-left text-[10px]">
+          <table className="w-full min-w-[720px] text-left text-micro">
             <thead className="text-[var(--text-tertiary)]">
               <tr className="border-b border-[var(--border-subtle)]">
                 <th className="pb-2 font-normal">Event</th>
@@ -743,8 +754,8 @@ export function SuperadminShell() {
     <div className="spectra-wave-y spectra-admin-stage min-h-dvh bg-[var(--bg-primary)] pb-24">
       <header className="border-b border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--bg-elevated)_88%,transparent)]">
         <div className="flex min-h-12 items-center justify-end gap-4 px-5 lg:px-8">
-          <div className="flex items-center gap-2 text-[9px] text-[var(--text-tertiary)]">
-            <span className="hidden items-center gap-1.5 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 py-1.5 text-[10px] font-medium text-[var(--text-secondary)] sm:inline-flex">
+          <div className="flex items-center gap-2 text-micro text-[var(--text-tertiary)]">
+            <span className="hidden items-center gap-1.5 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 py-1.5 text-micro font-medium text-[var(--text-secondary)] sm:inline-flex">
               <CalendarDays size={12} />
               {rangeLabel}
             </span>
@@ -760,7 +771,7 @@ export function SuperadminShell() {
       </header>
       <div className="w-full px-4 py-5 sm:px-6 lg:px-8 xl:px-10">
         <div className="mb-5">
-          <p className="text-[9px] font-semibold uppercase tracking-[.12em] text-[var(--text-tertiary)]">
+          <p className="text-micro font-semibold uppercase tracking-[.12em] text-[var(--text-tertiary)]">
             Superadmin
           </p>
           <h1 className="mt-1 font-[var(--font-serif)] text-[34px] font-medium leading-none tracking-[-.035em]">
@@ -780,7 +791,7 @@ export function SuperadminShell() {
               type="button"
               onClick={() => setTab(key)}
               className={cn(
-                "flex h-8 shrink-0 items-center gap-1.5 rounded-[6px] px-2.5 text-[10px] font-medium",
+                "flex h-8 shrink-0 items-center gap-1.5 rounded-[6px] px-2.5 text-micro font-medium",
                 tab === key
                   ? "bg-[var(--text-primary)] text-[var(--bg-primary)]"
                   : "text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]",
@@ -1119,12 +1130,12 @@ function SchoolsSurface({
                         {saga.status}
                       </StatusBadge>
                     </div>
-                    <p className="mt-1 text-[9px] text-[var(--text-tertiary)]">
+                    <p className="mt-1 text-micro text-[var(--text-tertiary)]">
                       {saga.initialAdminEmail} · {saga.completedSteps.length}{" "}
                       setup steps · {formatRelative(saga.updatedAt)}
                     </p>
                     {saga.errorSummary ? (
-                      <p className="mt-1 text-[9px] text-[#a24538]">
+                      <p className="mt-1 text-micro text-[#a24538]">
                         {saga.errorSummary}
                       </p>
                     ) : null}
@@ -1173,7 +1184,7 @@ function SchoolsSurface({
           <LoadingPanel label="Loading schools" />
         ) : schools.length ? (
           <div className="overflow-x-auto px-4 pb-4">
-            <table className="w-full min-w-[900px] text-left text-[10px]">
+            <table className="w-full min-w-[900px] text-left text-micro">
               <thead className="text-[var(--text-tertiary)]">
                 <tr className="border-b border-[var(--border-subtle)]">
                   <th className="pb-2 font-normal">School</th>
@@ -1199,7 +1210,7 @@ function SchoolsSurface({
                           <strong className="block font-medium">
                             {school.name}
                           </strong>
-                          <span className="text-[9px] text-[var(--text-tertiary)]">
+                          <span className="text-micro text-[var(--text-tertiary)]">
                             {school.slug} · {school.timezone}
                           </span>
                         </span>
@@ -1350,7 +1361,7 @@ function SchoolsSurface({
           </>
         }
       >
-        <div className="break-all rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3 font-mono text-[10px] leading-5">
+        <div className="break-all rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3 font-mono text-micro leading-5">
           {manualInvitationUrl}
         </div>
       </AdminDialog>
@@ -1538,14 +1549,14 @@ function SchoolsSurface({
           </div>
           {limitSimulation ? (
             <div className="rounded-[8px] border border-[var(--border-default)] p-3">
-              <p className="mb-2 text-[10px] font-semibold">
+              <p className="mb-2 text-micro font-semibold">
                 Current policy impact
               </p>
               <div className="space-y-2">
                 {limitSimulation.evaluations.map((item, index) => (
                   <div
                     key={`${item.category}-${index}`}
-                    className="flex items-center justify-between text-[10px]"
+                    className="flex items-center justify-between text-micro"
                   >
                     <span>
                       {item.category.replaceAll("_", " ")} · {item.period}
@@ -1797,10 +1808,10 @@ function OperationsSurface({
                     <strong className="block text-[11px]">
                       {incident.title}
                     </strong>
-                    <span className="mt-1 block text-[9px] leading-4 text-[var(--text-tertiary)]">
+                    <span className="mt-1 block text-micro leading-4 text-[var(--text-tertiary)]">
                       {incident.summary}
                     </span>
-                    <span className="mt-1 block text-[9px] text-[var(--text-tertiary)]">
+                    <span className="mt-1 block text-micro text-[var(--text-tertiary)]">
                       {incident.affectedServices.join(", ")} ·{" "}
                       {formatRelative(incident.updatedAt)}
                     </span>
@@ -1857,7 +1868,7 @@ function OperationsSurface({
             {overview.serviceHealth.map((service) => (
               <div
                 key={service.service}
-                className="flex items-center justify-between gap-3 rounded-[7px] border border-[var(--border-subtle)] px-3 py-2.5 text-[10px]"
+                className="flex items-center justify-between gap-3 rounded-[7px] border border-[var(--border-subtle)] px-3 py-2.5 text-micro"
               >
                 <span>{service.service}</span>
                 <StatusBadge tone={toneForStatus(service.status)}>
@@ -1961,7 +1972,7 @@ function PlatformUsageSurface({
             {rows.map(([category, quantity]) => (
               <div
                 key={category}
-                className="flex items-center justify-between gap-3 rounded-[7px] border border-[var(--border-subtle)] px-3 py-2.5 text-[10px]"
+                className="flex items-center justify-between gap-3 rounded-[7px] border border-[var(--border-subtle)] px-3 py-2.5 text-micro"
               >
                 <span className="capitalize">
                   {category.replaceAll("_", " ")}
@@ -2046,10 +2057,10 @@ function RequestsSurface({
                   <strong className="block truncate text-[11px]">
                     {request.subject}
                   </strong>
-                  <span className="mt-1 block line-clamp-2 text-[9px] leading-4 text-[var(--text-tertiary)]">
+                  <span className="mt-1 block line-clamp-2 text-micro leading-4 text-[var(--text-tertiary)]">
                     {request.detail}
                   </span>
-                  <span className="mt-1 block text-[9px] text-[var(--text-tertiary)]">
+                  <span className="mt-1 block text-micro text-[var(--text-tertiary)]">
                     {request.school?.name ?? "Platform"} ·{" "}
                     {request.requester?.name ?? "Unavailable requester"} · due{" "}
                     {request.responseDueAt
@@ -2197,7 +2208,7 @@ function PlatformGovernanceSurface() {
                 <StatusBadge tone="good">Platform guarantee</StatusBadge>
               </div>
               <strong className="mt-3 block text-[11px]">{title}</strong>
-              <p className="mt-1 text-[9px] leading-4 text-[var(--text-tertiary)]">
+              <p className="mt-1 text-micro leading-4 text-[var(--text-tertiary)]">
                 {detail}
               </p>
             </div>
@@ -2209,7 +2220,7 @@ function PlatformGovernanceSurface() {
           <h2 className="font-[var(--font-serif)] text-[15px] font-medium">
             Operational boundaries
           </h2>
-          <p className="mt-2 text-[10px] leading-5 text-[var(--text-secondary)]">
+          <p className="mt-2 text-micro leading-5 text-[var(--text-secondary)]">
             Platform operators manage availability, incidents, tenancy,
             credentials, legal lifecycle, metering, provider health, and future
             commercial limits. Permissions, privacy, and sandboxing remain hard
@@ -2315,7 +2326,7 @@ function SecuritySurface({
           <LoadingPanel label="Loading lifecycle jobs" />
         ) : jobs.length ? (
           <div className="overflow-x-auto px-4 pb-4">
-            <table className="w-full min-w-[900px] text-left text-[10px]">
+            <table className="w-full min-w-[900px] text-left text-micro">
               <thead className="text-[var(--text-tertiary)]">
                 <tr className="border-b border-[var(--border-subtle)]">
                   <th className="pb-2 font-normal">Operation</th>
@@ -2334,7 +2345,7 @@ function SecuritySurface({
                   >
                     <td className="py-3">
                       <strong className="block capitalize">{job.type}</strong>
-                      <span className="text-[9px] text-[var(--text-tertiary)]">
+                      <span className="text-micro text-[var(--text-tertiary)]">
                         {formatRelative(job.createdAt)}
                       </span>
                     </td>
@@ -2430,7 +2441,7 @@ function SecuritySurface({
                           Download export
                         </AdminButton>
                       ) : (
-                        <span className="text-[9px] text-[var(--text-tertiary)]">
+                        <span className="text-micro text-[var(--text-tertiary)]">
                           {job.errorSummary ?? "No action required"}
                         </span>
                       )}
@@ -2465,10 +2476,10 @@ function SecuritySurface({
                     className="flex items-center justify-between gap-3 py-3"
                   >
                     <div className="min-w-0">
-                      <strong className="block truncate text-[10px] font-medium">
+                      <strong className="block truncate text-micro font-medium">
                         {session.label}
                       </strong>
-                      <span className="block truncate text-[9px] text-[var(--text-tertiary)]">
+                      <span className="block truncate text-micro text-[var(--text-tertiary)]">
                         {session.operator?.email ?? "Unavailable operator"} ·{" "}
                         {session.school.name}
                       </span>
@@ -2501,10 +2512,10 @@ function SecuritySurface({
                   className="flex items-center justify-between gap-3 py-3"
                 >
                   <div className="min-w-0">
-                    <strong className="block truncate text-[10px] font-medium">
+                    <strong className="block truncate text-micro font-medium">
                       {event.action.replaceAll(".", " ")}
                     </strong>
-                    <span className="block truncate text-[9px] text-[var(--text-tertiary)]">
+                    <span className="block truncate text-micro text-[var(--text-tertiary)]">
                       {event.actor?.email ?? "System"} ·{" "}
                       {event.school?.name ?? "Platform"} ·{" "}
                       {formatRelative(event.createdAt)}
@@ -2615,7 +2626,7 @@ function SecuritySurface({
           />
           {type === "offboard" || type === "purge" ? (
             <>
-              <div className="rounded-[7px] border border-[#efc0b8] bg-[#fff5f3] p-3 text-[10px] leading-4 text-[#8d3d34]">
+              <div className="rounded-[7px] border border-[#efc0b8] bg-[#fff5f3] p-3 text-micro leading-4 text-[#8d3d34]">
                 This operation affects school access, integrations, and retained
                 data. It remains blocked until a different platform operator
                 approves it.

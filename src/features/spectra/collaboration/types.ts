@@ -15,7 +15,7 @@ export type CollaborationPresence = {
   accountId?: string;
   name?: string;
   color?: string;
-  actorKind?: "human" | "ai";
+  actorKind?: "human" | "ai" | "system";
   runId?: string;
   operationId?: string;
   activeRegionId?: string;
@@ -95,6 +95,12 @@ export type CollaborationSelection = {
   collapsed: boolean;
   text?: string;
   ranges: CollaborationSelectionRange[];
+  /** Native Yjs-relative positions survive concurrent insert/delete edits. */
+  relative?: {
+    blockId: string;
+    anchor: Uint8Array;
+    head: Uint8Array;
+  };
 };
 
 export type CollaborationCursor = {
@@ -143,6 +149,58 @@ export type CollaborationTransportSnapshot = {
   error?: string;
 };
 
+export type CollaborationActorIdentity = {
+  accountId: string;
+  clientId: string;
+  actorKind: "human" | "ai" | "system";
+  displayName: string;
+};
+
+export type CollaborationInteractionLease = {
+  id: string;
+  target: string;
+  scope: "control" | "field" | "object" | "gesture";
+  owner: CollaborationActorIdentity;
+  operationId?: string;
+  acquiredAt: number;
+  expiresAt: number;
+  releaseCondition: "blur" | "close" | "pointer_up" | "commit" | "explicit";
+  sequence: number;
+};
+
+export type CollaborationLeaseResult =
+  | { ok: true; lease: CollaborationInteractionLease }
+  | { ok: false; conflict: CollaborationInteractionLease };
+
+export type CollaborationLeaseRelease = {
+  leaseId: string;
+  target: string;
+  releasedAt: number;
+  reason:
+    | "commit"
+    | "blur"
+    | "close"
+    | "pointer_up"
+    | "disconnect"
+    | "expiry"
+    | "explicit";
+};
+
+export type CollaborationStructuralClaim = {
+  id: string;
+  target: string;
+  owner: CollaborationActorIdentity;
+  operationId?: string;
+  acquiredAt: number;
+  expiresAt: number;
+  state: "active" | "queued";
+};
+
+export type CollaborationClaimRelease = {
+  claimId: string;
+  resumed: CollaborationStructuralClaim | null;
+};
+
 export type ArtifactCollaborationTransport = {
   readonly document: Y.Doc;
   readonly clientId: string;
@@ -154,5 +212,25 @@ export type ArtifactCollaborationTransport = {
   destroy(): void;
   setPresence(fields: Omit<CollaborationPresence, "clientId">): void;
   transact(regionId: string, change: () => void): void;
+  acquireInteractionLease?(
+    lease: Omit<CollaborationInteractionLease, "owner">,
+    signal?: AbortSignal,
+  ): Promise<CollaborationLeaseResult>;
+  renewInteractionLease?(leaseId: string, expiresAt: number): void;
+  releaseInteractionLease?(
+    leaseId: string,
+    reason?: CollaborationLeaseRelease["reason"],
+  ): void;
+  subscribeLeaseReleases?(
+    listener: (event: CollaborationLeaseRelease) => void,
+  ): () => void;
+  acquireStructuralClaim?(
+    claim: Omit<CollaborationStructuralClaim, "owner" | "state">,
+    signal?: AbortSignal,
+  ): Promise<CollaborationStructuralClaim>;
+  releaseStructuralClaim?(claimId: string): void;
+  subscribeClaimReleases?(
+    listener: (event: CollaborationClaimRelease) => void,
+  ): () => void;
   flush(): Promise<void>;
 };

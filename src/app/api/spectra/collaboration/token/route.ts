@@ -1,7 +1,10 @@
 import { NextRequest } from "next/server";
 import { requireActor } from "@/lib/auth-server";
 import { convexMutation, convexQuery } from "@/lib/convex-server";
-import { signCollaborationSession } from "@/lib/collaboration-token";
+import {
+  collaborationProtocolVersion,
+  signCollaborationSession,
+} from "@/lib/collaboration-token";
 import { ok } from "@/lib/http";
 import { withRouteErrorHandling } from "@/lib/route-handler";
 
@@ -65,12 +68,32 @@ export async function POST(request: NextRequest) {
       level: access.level,
       policyVersion: room.policyVersion,
       schemaVersion: room.schemaVersion ?? schemaVersion,
+      protocolVersion: collaborationProtocolVersion(),
+      permissionEpoch: room.policyVersion,
+      actorKind: "human",
+      access: access.level === "modify" ? "edit" : "read_only",
+      internalCapabilities:
+        access.level === "modify"
+          ? ["view", "edit", "interact", "ai_mutate"]
+          : ["view", "interact"],
     });
+    const requestedProvider =
+      body.realtimeProvider === "cloudflare" ||
+      body.realtimeProvider === "hocuspocus"
+        ? body.realtimeProvider
+        : null;
+    const cloudflareRealtime = requestedProvider
+      ? requestedProvider === "cloudflare"
+      : process.env.NEXT_PUBLIC_SPECTRA_CLOUDFLARE_REALTIME === "true";
     return ok({
       token,
       documentName,
-      provider: "self_hosted_yjs",
-      url: process.env.NEXT_PUBLIC_SPECTRA_COLLAB_URL ?? "ws://localhost:1234",
+      provider: cloudflareRealtime ? "cloudflare_durable_object" : "self_hosted_yjs",
+      url: cloudflareRealtime
+        ? process.env.SPECTRA_CLOUDFLARE_COLLAB_URL ??
+          process.env.NEXT_PUBLIC_SPECTRA_COLLAB_URL ??
+          "ws://localhost:8787"
+        : process.env.NEXT_PUBLIC_SPECTRA_COLLAB_URL ?? "ws://localhost:1234",
       expiresInMs: 600_000,
       level: access.level,
       accountId: actor.accountId,

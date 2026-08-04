@@ -34,17 +34,17 @@ describe("matchSpectraCreationShorthand", () => {
     ).toBe("presentation");
   });
 
-  it("routes timetable and agent shorthand to single creation", () => {
+  it("keeps Calendar requests out of work creation and still creates agents", () => {
     expect(
       matchSpectraCreationShorthand(
         "make a timetable for enzyme revision this week",
-      )?.blueprintKey,
-    ).toBe("timetable");
+      ),
+    ).toBeNull();
     expect(
       matchSpectraCreationShorthand(
         "build a study schedule for enzyme revision",
-      )?.blueprintKey,
-    ).toBe("timetable");
+      ),
+    ).toBeNull();
     expect(
       matchSpectraCreationShorthand(
         "create a tutor agent for enzyme kinetics",

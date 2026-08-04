@@ -75,6 +75,7 @@ export async function runSpectraAgentLoop(input: {
     turn: number,
   ) => Promise<OpenRouterAgentTurn>;
   executeTool: (call: OpenRouterAgentToolCall) => Promise<unknown>;
+  isParallelSafeTool?: (call: OpenRouterAgentToolCall) => boolean;
   isTerminalTool: (call: OpenRouterAgentToolCall) => boolean;
   isCompleteAfterTool?: (
     call: OpenRouterAgentToolCall,
@@ -177,7 +178,7 @@ export async function runSpectraAgentLoop(input: {
       })),
     });
 
-    for (const call of turn.toolCalls) {
+    const executeOne = async (call: OpenRouterAgentToolCall) => {
       toolCalls += 1;
       if (toolCalls > maxToolCalls)
         throw new Error(
@@ -190,53 +191,29 @@ export async function runSpectraAgentLoop(input: {
         throw new Error(
           `Spectra stopped after the agent repeated the identical ${call.name} request without making progress.`,
         );
-      const result =
-        repetition === 2
-          ? {
-              ok: false,
-              code: "identical_tool_call_repeated",
-              message:
-                "This exact tool request already returned a result. Use that result, change the request, or finish the task.",
-            }
-          : await (async () => {
-              let timer: ReturnType<typeof setTimeout> | undefined;
-              try {
-                return await Promise.race([
-                  input.executeTool(call),
-                  new Promise<never>((_, reject) => {
-                    timer = setTimeout(() => {
-                      reject(
-                        Object.assign(
-                          new Error(
-                            `Spectra paused because ${call.name} took too long. Continue with what you already have, or finish the plan now.`,
-                          ),
-                          { code: "tool_timeout" },
-                        ),
-                      );
-                    }, 20_000);
-                  }),
-                ]);
-              } catch (error) {
-                if (
-                  error &&
-                  typeof error === "object" &&
-                  "code" in error &&
-                  (error as { code?: string }).code === "tool_timeout"
-                ) {
-                  return {
-                    ok: false,
-                    code: "tool_timeout",
-                    message:
-                      error instanceof Error
-                        ? error.message
-                        : `${call.name} timed out.`,
-                  };
-                }
-                throw error;
-              } finally {
-                if (timer) clearTimeout(timer);
-              }
-            })();
+      return repetition === 2
+        ? {
+            ok: false,
+            code: "identical_tool_call_repeated",
+            message:
+              "This exact tool request already returned a result. Use that result, change the request, or finish the task.",
+          }
+        : input.executeTool(call);
+    };
+    let mutationChain = Promise.resolve<unknown>(undefined);
+    const results = await Promise.all(
+      turn.toolCalls.map((call) => {
+        if (input.isParallelSafeTool?.(call)) return executeOne(call);
+        const queued = mutationChain.then(() => executeOne(call));
+        mutationChain = queued.then(
+          () => undefined,
+          () => undefined,
+        );
+        return queued;
+      }),
+    );
+    for (const [index, call] of turn.toolCalls.entries()) {
+      const result = results[index];
       messages.push({
         role: "tool",
         tool_call_id: call.id,

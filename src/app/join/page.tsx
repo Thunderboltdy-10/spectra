@@ -85,7 +85,7 @@ function JoinSchoolContent() {
               ? "Checking invitation"
               : "Accept invitation"}
         </button>
-        <div className="mt-5 border-t border-[var(--border-subtle)] pt-4 text-[10px] leading-4 text-[var(--text-tertiary)]">
+        <div className="mt-5 border-t border-[var(--border-subtle)] pt-4 text-micro leading-4 text-[var(--text-tertiary)]">
           If Spectra asks you to sign in, use the invited address and return to
           this page.{" "}
           <Link

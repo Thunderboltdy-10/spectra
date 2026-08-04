@@ -2,6 +2,10 @@ import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
 import { requireArtifactCapability } from "./spectraShared";
+import {
+  cardMeaningFingerprint,
+  type StudyCardShape,
+} from "@/features/spectra/flashcards/study-separation";
 
 const rating = v.union(
   v.literal("again"),
@@ -108,10 +112,20 @@ function intervalLabel(milliseconds: number) {
   return `${Math.max(1, Math.round(milliseconds / (365 * DAY)))} yr`;
 }
 
-function projection(state: Doc<"flashcardStudyStates">, now: number) {
+function projection(
+  state: Doc<"flashcardStudyStates">,
+  now: number,
+  fingerprint?: string,
+) {
+  // A card whose question changed after this state was last touched is due now,
+  // whatever the schedule said. The stored record is left alone until the
+  // learner reviews or reconciles, so nothing is lost by simply reading (§11B).
+  const changed = Boolean(
+    fingerprint && state.meaningFingerprint && state.meaningFingerprint !== fingerprint,
+  );
   const previews = Object.fromEntries(
     (["again", "hard", "good", "easy"] as const).map((candidate) => {
-      const next = schedule(state, candidate, now);
+      const next = schedule(changed ? null : state, candidate, now);
       return [
         candidate,
         {
@@ -130,16 +144,24 @@ function projection(state: Doc<"flashcardStudyStates">, now: number) {
     algorithmVersion: state.algorithmVersion,
     attempts: state.attempts,
     ease: state.ease,
-    stabilityDays: state.stabilityDays,
+    stabilityDays: changed ? 0 : state.stabilityDays,
     difficulty: state.difficulty,
     lapses: state.lapses,
-    nextDueAt: state.nextDueAt,
+    nextDueAt: changed ? now : state.nextDueAt,
     lastReviewedAt: state.lastReviewedAt,
+    note: state.note,
+    /** The card was rewritten since this was last studied. */
+    changedSinceStudied: changed,
     previews,
   };
 }
 
-function cardDirections(artifact: Doc<"spectraArtifacts">) {
+/**
+ * The deck's cards as this module needs them: which directions each offers and
+ * what each is currently asking. Anything else on a card is deck presentation
+ * and has no bearing on someone's progress.
+ */
+function deckCardIndex(artifact: Doc<"spectraArtifacts">) {
   const content =
     artifact.content &&
     typeof artifact.content === "object" &&
@@ -156,9 +178,35 @@ function cardDirections(artifact: Doc<"spectraArtifacts">) {
         return [];
       const card = candidate as Record<string, unknown>;
       const id = card.id;
-      return typeof id === "string" && id.trim()
-        ? [[id.trim(), card.bidirectional === true] as const]
-        : [];
+      if (typeof id !== "string" || !id.trim()) return [];
+      const shape: StudyCardShape = {
+        id: id.trim(),
+        front: typeof card.front === "string" ? card.front : "",
+        back: typeof card.back === "string" ? card.back : "",
+        ...(typeof card.variant === "string" ? { variant: card.variant } : {}),
+        ...(Array.isArray(card.acceptedAlternatives)
+          ? {
+              acceptedAlternatives: card.acceptedAlternatives.filter(
+                (entry): entry is string => typeof entry === "string",
+              ),
+            }
+          : {}),
+        ...(card.media && typeof card.media === "object"
+          ? { media: card.media as StudyCardShape["media"] }
+          : {}),
+        ...(Array.isArray(card.occlusions)
+          ? { occlusions: card.occlusions as StudyCardShape["occlusions"] }
+          : {}),
+      };
+      return [
+        [
+          shape.id,
+          {
+            bidirectional: card.bidirectional === true,
+            fingerprint: cardMeaningFingerprint(shape),
+          },
+        ] as const,
+      ];
     }),
   );
 }
@@ -176,7 +224,7 @@ export const list = query({
       artifact.status !== "active"
     )
       throw new Error("FLASHCARD_DECK_UNAVAILABLE");
-    const activeCards = cardDirections(artifact);
+    const index = deckCardIndex(artifact);
     const states = await ctx.db
       .query("flashcardStudyStates")
       .withIndex("by_account_artifact", (q) =>
@@ -184,22 +232,28 @@ export const list = query({
       )
       .collect();
     const now = Date.now();
+    const studiable = (state: Doc<"flashcardStudyStates">) => {
+      const card = index.get(state.cardId);
+      if (!card) return false;
+      return (state.direction ?? "forward") === "forward" || card.bidirectional;
+    };
+    const active = states.filter(studiable);
+    const projected = active.map((state) =>
+      projection(state, now, index.get(state.cardId)?.fingerprint),
+    );
+    // Progress for cards the deck no longer offers is kept, not deleted, so
+    // restoring a card or turning reverse study back on restores the history
+    // with it. It is reported separately rather than counted as due (§11B).
+    const retired = states.filter((state) => !studiable(state));
+    const changed = projected.filter((entry) => entry.changedSinceStudied);
     return {
-      states: states
-        .filter(
-          (state) =>
-            activeCards.has(state.cardId) &&
-            ((state.direction ?? "forward") === "forward" ||
-              activeCards.get(state.cardId) === true),
-        )
-        .map((state) => projection(state, now)),
-      dueCount: states.filter(
-        (state) =>
-          activeCards.has(state.cardId) &&
-          ((state.direction ?? "forward") === "forward" ||
-            activeCards.get(state.cardId) === true) &&
-          state.nextDueAt <= now,
-      ).length,
+      states: projected,
+      dueCount: projected.filter((entry) => entry.nextDueAt <= now).length,
+      update: {
+        changedCardIds: [...new Set(changed.map((entry) => entry.cardId))],
+        retainedCardIds: [...new Set(retired.map((state) => state.cardId))],
+        studiedCardIds: [...new Set(active.map((state) => state.cardId))],
+      },
     };
   },
 });
@@ -226,12 +280,9 @@ export const review = mutation({
       throw new Error("FLASHCARD_DECK_UNAVAILABLE");
     const cardId = args.cardId.trim();
     const direction: StudyDirection = args.direction ?? "forward";
-    const activeCards = cardDirections(artifact);
-    if (
-      !cardId ||
-      !activeCards.has(cardId) ||
-      (direction === "reverse" && activeCards.get(cardId) !== true)
-    )
+    const index = deckCardIndex(artifact);
+    const card = index.get(cardId);
+    if (!cardId || !card || (direction === "reverse" && !card.bidirectional))
       throw new Error("FLASHCARD_CARD_UNAVAILABLE");
     const clientReviewId = args.clientReviewId.trim().slice(0, 180);
     if (clientReviewId.length < 8)
@@ -255,18 +306,29 @@ export const review = mutation({
       (state) => (state.direction ?? "forward") === direction,
     );
     if (duplicate && existing)
-      return { state: projection(existing, Date.now()), reused: true };
+      return {
+        state: projection(existing, Date.now(), card.fingerprint),
+        reused: true,
+      };
     const now = Date.now();
-    const next = schedule(existing ?? null, args.rating, now);
+    // The card was rewritten since this person last saw it, so it is scheduled
+    // from first sight rather than from a history that described a different
+    // question. Their lifetime counts still carry across (§11B).
+    const rewritten = Boolean(
+      existing?.meaningFingerprint &&
+        existing.meaningFingerprint !== card.fingerprint,
+    );
+    const next = schedule(rewritten ? null : (existing ?? null), args.rating, now);
     const fields = {
       cardVersionId: artifact.currentVersionId,
+      meaningFingerprint: card.fingerprint,
       algorithm: "spectra_scheduler",
       algorithmVersion: 1,
-      attempts: next.attempts,
+      attempts: rewritten ? (existing?.attempts ?? 0) + 1 : next.attempts,
       ease: next.ease,
       stabilityDays: next.stabilityDays,
       difficulty: next.difficulty,
-      lapses: next.lapses,
+      lapses: rewritten ? (existing?.lapses ?? 0) : next.lapses,
       nextDueAt: next.nextDueAt,
       lastReviewedAt: now,
       updatedAt: now,
@@ -300,6 +362,75 @@ export const review = mutation({
     });
     const state = await ctx.db.get(stateId);
     if (!state) throw new Error("FLASHCARD_STUDY_STATE_UNAVAILABLE");
-    return { state: projection(state, now), reused: false };
+    return { state: projection(state, now, card.fingerprint), reused: false };
+  },
+});
+
+/**
+ * A learner's own note on a card. It lives with their study state, never in the
+ * deck, so writing one changes nothing for anyone else studying the same deck.
+ */
+export const setNote = mutation({
+  args: {
+    artifactId: v.id("spectraArtifacts"),
+    cardId: v.string(),
+    direction: v.optional(v.union(v.literal("forward"), v.literal("reverse"))),
+    note: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const { actor, artifact } = await requireArtifactCapability(
+      ctx,
+      args.artifactId,
+      "use",
+    );
+    if (
+      artifact.blueprintKey !== "flashcard_deck" ||
+      artifact.status !== "active"
+    )
+      throw new Error("FLASHCARD_DECK_UNAVAILABLE");
+    const cardId = args.cardId.trim();
+    const direction: StudyDirection = args.direction ?? "forward";
+    const card = deckCardIndex(artifact).get(cardId);
+    if (!card || (direction === "reverse" && !card.bidirectional))
+      throw new Error("FLASHCARD_CARD_UNAVAILABLE");
+    const note = args.note.slice(0, 4_000);
+    const now = Date.now();
+    const existing = (
+      await ctx.db
+        .query("flashcardStudyStates")
+        .withIndex("by_account_artifact_card", (q) =>
+          q
+            .eq("accountId", actor.accountId)
+            .eq("artifactId", artifact._id)
+            .eq("cardId", cardId),
+        )
+        .collect()
+    ).find((state) => (state.direction ?? "forward") === direction);
+    if (existing) {
+      await ctx.db.patch(existing._id, { note, updatedAt: now });
+      return { cardId, direction, note };
+    }
+    // A note can precede the first review, so the state is created unstudied
+    // and due now rather than the note being dropped.
+    await ctx.db.insert("flashcardStudyStates", {
+      accountId: actor.accountId,
+      schoolId: actor.schoolId,
+      artifactId: artifact._id,
+      cardId,
+      direction,
+      meaningFingerprint: card.fingerprint,
+      note,
+      algorithm: "spectra_scheduler",
+      algorithmVersion: 1,
+      attempts: 0,
+      ease: 2.5,
+      stabilityDays: 0,
+      difficulty: 5,
+      lapses: 0,
+      nextDueAt: now,
+      createdAt: now,
+      updatedAt: now,
+    });
+    return { cardId, direction, note };
   },
 });

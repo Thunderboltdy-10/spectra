@@ -718,13 +718,9 @@ function normalizeProviderPage(
           const years = atPath(payload, "timetable.academic_years");
           if (!Array.isArray(years)) return [];
           const rows: Array<Record<string, unknown>> = [];
-          const today = new Date();
-          const horizon = new Date(today.getTime() + 8 * 7 * 24 * 60 * 60_000);
           for (const yearValue of years) {
             const year = object(yearValue);
             const yearId = String(year.id ?? "current");
-            const starts = timestamp(year.start_date ?? year.starts_on);
-            const ends = timestamp(year.end_date ?? year.ends_on);
             const slots = Array.isArray(year.slots) ? year.slots : [];
             for (const slotValue of slots) {
               const slot = object(slotValue);
@@ -732,30 +728,39 @@ function normalizeProviderPage(
               const day = Number(slot.day);
               const period = Number(slot.period);
               if (!Number.isInteger(day) || day < 1 || day > 7) continue;
-              const cursor = new Date(today);
-              const currentIsoDay = cursor.getUTCDay() || 7;
-              cursor.setUTCDate(cursor.getUTCDate() + ((day - currentIsoDay + 7) % 7));
-              cursor.setUTCHours(8 + Math.max(0, period - 1), 0, 0, 0);
-              for (
-                let occurrence = new Date(cursor);
-                occurrence <= horizon;
-                occurrence = new Date(occurrence.getTime() + 7 * 24 * 60 * 60_000)
-              ) {
-                if (starts && occurrence.getTime() < starts) continue;
-                if (ends && occurrence.getTime() > ends) continue;
-                rows.push({
-                  id: `${yearId}:${day}:${period}:${occurrence.toISOString().slice(0, 10)}`,
-                  title: `Class period ${period}`,
-                  day,
-                  period,
-                  location: slot.location,
-                  start_at: occurrence.toISOString(),
-                  end_at: new Date(
-                    occurrence.getTime() + 50 * 60_000,
-                  ).toISOString(),
-                  academic_year_id: yearId,
-                });
-              }
+              const explicitStart = timestamp(
+                slot.starts_at ?? slot.start_at ?? slot.start,
+              );
+              const explicitEnd = timestamp(
+                slot.ends_at ?? slot.end_at ?? slot.end,
+              );
+              rows.push({
+                id: `${yearId}:${day}:${period}`,
+                title:
+                  string(slot.title ?? slot.class_name ?? slot.subject, 300) ||
+                  `Class period ${period}`,
+                day,
+                period,
+                periodKey: String(period),
+                location: slot.location,
+                academic_year_id: yearId,
+                academic_year_starts_on: year.start_date ?? year.starts_on,
+                academic_year_ends_on: year.end_date ?? year.ends_on,
+                ...(explicitStart !== undefined
+                  ? { start_at: new Date(explicitStart).toISOString() }
+                  : {}),
+                ...(explicitEnd !== undefined
+                  ? { end_at: new Date(explicitEnd).toISOString() }
+                  : {}),
+                timePrecision:
+                  explicitStart !== undefined ? "exact" : "unknown",
+                ...(explicitStart === undefined
+                  ? {
+                      partialReason:
+                        "The provider supplied a weekday/period but no verified clock time or occurrence date.",
+                    }
+                  : {}),
+              });
             }
           }
           return rows.slice(0, 500);
@@ -1599,6 +1604,32 @@ export async function POST(request: NextRequest) {
     }
     const actor = await requireActor();
 
+    if (action === "upsertPeriodMap") {
+      if (actor.schoolRole !== "school_admin")
+        throw new Error("AUTH_SCHOOL_ADMIN_REQUIRED: School administrator access is required.");
+      return ok(
+        await convexMutation("managebac:upsertCalendarPeriodMap", {
+          periodKey: string(body.periodKey, 120),
+          label: string(body.label, 160),
+          startMinutes: Number(body.startMinutes),
+          endMinutes: Number(body.endMinutes),
+          timezone: string(body.timezone, 100),
+          weekdays: Array.isArray(body.weekdays)
+            ? body.weekdays.filter((value): value is number => typeof value === "number")
+            : [],
+        }),
+      );
+    }
+    if (action === "removePeriodMap") {
+      if (actor.schoolRole !== "school_admin")
+        throw new Error("AUTH_SCHOOL_ADMIN_REQUIRED: School administrator access is required.");
+      return ok(
+        await convexMutation("managebac:removeCalendarPeriodMap", {
+          periodMapId: string(body.periodMapId, 200),
+        }),
+      );
+    }
+
     if (action === "configure") {
       if (actor.schoolRole !== "school_admin")
         throw new Error(
@@ -1637,7 +1668,9 @@ export async function POST(request: NextRequest) {
             })
           : null;
       const result = await convexMutation("managebac:configure", {
-        baseUrl: normalizeManageBacBaseUrl(string(body.baseUrl, 2_000)),
+        baseUrl: normalizeManageBacBaseUrl(
+          process.env.MANAGEBAC_BASE_URL?.trim() || "https://api.managebac.com",
+        ),
         authHeaderName: "auth-token",
         authScheme: "raw",
         credentialFingerprint: secret?.fingerprint,

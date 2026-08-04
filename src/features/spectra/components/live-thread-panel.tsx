@@ -50,7 +50,7 @@ export function LiveThreadPanel({
             <div className="truncate font-display text-[16px] font-semibold text-[var(--text-primary)]">
               {title || "Live thread"}
             </div>
-            <div className="text-[9px] font-semibold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
+            <div className="text-micro font-semibold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
               Live conversation
             </div>
           </div>

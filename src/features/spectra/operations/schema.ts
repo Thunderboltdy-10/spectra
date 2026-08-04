@@ -13,10 +13,11 @@ import {
   timetableContentSchema,
   whiteboardContentSchema,
 } from "../artifacts/schemas";
-import { ARTIFACT_TYPE_KEYS } from "../artifacts/types";
+import { ARTIFACT_TYPE_KEYS, WORK_TYPE_KEYS } from "../artifacts/types";
 import { coerceCommonPlanSchemaSlips } from "./plan-diagnostics";
 
 export const SPECTRA_BLUEPRINT_KEYS = ARTIFACT_TYPE_KEYS;
+export const SPECTRA_CREATABLE_BLUEPRINT_KEYS = WORK_TYPE_KEYS;
 
 export const OPERATION_TYPES = [
   "artifact.create",
@@ -155,19 +156,6 @@ const artifactCreateInputSchema = z.discriminatedUnion("blueprintKey", [
       title: shortText,
       summary: summaryText.nullable(),
       content: agentContentSchema,
-      tags: tagsSchema,
-      workspaceId: idText.nullable(),
-      placement: z.enum(["context", "inbox"]),
-      pinned: z.boolean().default(false),
-      exclusivePin: z.boolean().default(false),
-    })
-    .strict(),
-  z
-    .object({
-      blueprintKey: z.literal("timetable"),
-      title: shortText,
-      summary: summaryText.nullable(),
-      content: timetableContentSchema,
       tags: tagsSchema,
       workspaceId: idText.nullable(),
       placement: z.enum(["context", "inbox"]),
@@ -474,6 +462,38 @@ function preprocessModelOperationContent(value: unknown) {
     ) &&
     input.content != null
   ) {
+    if (
+      input.blueprintKey === "quiz" &&
+      typeof input.content === "object" &&
+      !Array.isArray(input.content)
+    ) {
+      const questions = (input.content as Record<string, unknown>).questions;
+      if (Array.isArray(questions)) {
+        for (const [index, rawQuestion] of questions.entries()) {
+          if (!rawQuestion || typeof rawQuestion !== "object") continue;
+          const question = rawQuestion as Record<string, unknown>;
+          if (question.type !== "multiple_choice") continue;
+          const options = Array.isArray(question.options)
+            ? question.options.filter(
+                (option): option is string =>
+                  typeof option === "string" && option.trim().length > 0,
+              )
+            : [];
+          const correctAnswer =
+            typeof question.correctAnswer === "string"
+              ? question.correctAnswer.trim()
+              : "";
+          if (
+            options.length < 2 ||
+            !correctAnswer ||
+            !options.includes(correctAnswer)
+          )
+            throw new Error(
+              `Invalid quiz content at questions.${index}: multiple-choice options must include a non-empty correctAnswer.`,
+            );
+        }
+      }
+    }
     input.content = normalizeArtifactContent(
       input.blueprintKey as (typeof SPECTRA_BLUEPRINT_KEYS)[number],
       input.content,
@@ -514,6 +534,33 @@ export function parseModelOperation(value: unknown) {
       content.questions.length > 100
     )
       throw new Error("A generated quiz may contain at most 100 questions.");
+    if (
+      operation.input.blueprintKey === "quiz" &&
+      Array.isArray(content.questions)
+    ) {
+      for (const [index, rawQuestion] of content.questions.entries()) {
+        const question = rawQuestion as Record<string, unknown>;
+        if (question.type !== "multiple_choice") continue;
+        const options = Array.isArray(question.options)
+          ? question.options.filter(
+              (option): option is string =>
+                typeof option === "string" && option.trim().length > 0,
+            )
+          : [];
+        const correctAnswer =
+          typeof question.correctAnswer === "string"
+            ? question.correctAnswer.trim()
+            : "";
+        if (
+          options.length < 2 ||
+          !correctAnswer ||
+          !options.includes(correctAnswer)
+        )
+          throw new Error(
+            `Invalid quiz content at questions.${index}: multiple-choice options must include a non-empty correctAnswer.`,
+          );
+      }
+    }
     if (
       operation.input.blueprintKey === "document" &&
       Array.isArray(content.blocks) &&
@@ -1186,7 +1233,7 @@ export const SPECTRA_PLAN_JSON_SCHEMA = {
       type: "array",
       items: {
         oneOf: [
-          ...SPECTRA_BLUEPRINT_KEYS.map((typeKey) =>
+          ...SPECTRA_CREATABLE_BLUEPRINT_KEYS.map((typeKey) =>
             artifactCreateVariant(
               typeKey,
               SPECTRA_ARTIFACT_CONTENT_JSON_SCHEMAS[typeKey],

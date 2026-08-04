@@ -1,12 +1,12 @@
-"use client";
+﻿"use client";
 
 import {
   AlertCircle,
   Archive,
-  ArrowUpRight,
   AlignCenter,
   AlignLeft,
   AlignRight,
+  BarChart3,
   Bold,
   BookOpen,
   CalendarCheck2,
@@ -44,6 +44,7 @@ import {
   Plus,
   Radio,
   Play,
+  RefreshCw,
   RotateCcw,
   Search,
   Shuffle,
@@ -74,6 +75,8 @@ import { TaskItem } from "@tiptap/extension-task-item";
 import { Image } from "@tiptap/extension-image";
 import TextAlign from "@tiptap/extension-text-align";
 import Highlight from "@tiptap/extension-highlight";
+import Collaboration from "@tiptap/extension-collaboration";
+import type * as Y from "yjs";
 import {
   Children,
   cloneElement,
@@ -92,10 +95,8 @@ import { createPortal } from "react-dom";
 import { currentTimeMs, shuffleInPlace, uniqueToken } from "@/lib/unique-token";
 import { SlashCommand } from "../editor/slash-command-extension";
 import { createSlashCommandRenderer } from "../editor/slash-command-renderer";
-import {
-  spectraObjectKey,
-  useSpectraContextStore,
-} from "@/stores/spectra-context-store";
+import { useSpectraContextStore } from "@/stores/spectra-context-store";
+import { projectLegacyWorkSession } from "../work/session/session-controller";
 import { Callout } from "../editor/callout-node";
 import { DragHandle } from "../editor/drag-handle";
 import { StableBlockId } from "../editor/stable-block-id";
@@ -105,6 +106,26 @@ import {
   type AiRegionDecorationTarget,
 } from "../editor/ai-region-decoration";
 import { Equation, InlineEquation } from "../editor/equation-node";
+import {
+  SpectraCitationNode,
+  SpectraReferenceNode,
+} from "../editor/reference-citation-nodes";
+import {
+  bibliographyFromNavigator,
+  bibliographyNode,
+  documentFindPattern,
+  groupCitationUses,
+  outlineEntryAt,
+  type BibliographyStyle,
+  type DocumentCitationUse,
+  type DocumentMatch,
+  type DocumentOutlineEntry,
+  type FindOptions,
+} from "../editor/document-navigation";
+import type { SourceRecord } from "../sources/records/source-record";
+import { PlanStudio } from "./plan-studio";
+import { SpectraTiptapAutocomplete } from "../compute/autocomplete";
+import { useSpectraPreferences } from "../settings/preference-store";
 import {
   aiRegionAttr,
   contentDerivedHighlightPaths,
@@ -129,13 +150,14 @@ import {
   getArtifactAssets,
   getSpectraFlashcardStudy,
   getSpectraQuizPracticeAttempts,
+  getSpectraQuizResponseSummary,
   getSpectraArtifactLinks,
   getSpectraArtifactVersions,
   postSpectra,
   reviewSpectraFlashcard,
   saveSpectraQuizPracticeResponse,
   revokeArtifactAsset,
-  searchSpectraSchoolMembers,
+  setSpectraFlashcardNote,
   startSpectraQuizPractice,
   submitSpectraQuizPractice,
   uploadArtifactAsset,
@@ -146,8 +168,9 @@ import {
   type SpectraArtifactVersion,
   type SpectraFlashcardRating,
   type SpectraFlashcardStudyState,
+  type SpectraFlashcardStudyUpdate,
   type SpectraQuizPracticeAttempt,
-  type SpectraSchoolMember,
+  type SpectraQuizResponseSummary,
 } from "../data/api";
 import { ThreadConversation } from "./conversation-surface";
 import { Tooltip } from "@/components/ui/tooltip";
@@ -182,7 +205,13 @@ import {
   noteAiLocation,
   useFollowAi,
 } from "../collaboration/follow-ai";
+import {
+  disengageFollow,
+  noteFollowLocation,
+  useFollow,
+} from "../collaboration/follow";
 import { revealTarget } from "../collaboration/interaction-geometry";
+import { resolveTargetElement } from "../collaboration/interaction-geometry";
 import { useJoinLateArrival } from "../collaboration/presentation-lane";
 import {
   HELD_DECLINED_EVENT,
@@ -192,12 +221,21 @@ import {
 import type { ArtifactTypeKey } from "../artifacts/types";
 import { changedArtifactRegionIds } from "../collaboration/artifact-yjs-model";
 import { isArtifactTypeKey } from "../artifacts/registry";
+import { getWorkDefinition } from "../work/registry";
+import { ContextSourceBoundary } from "./context-source-boundary";
+import { contextSourceRegistry } from "../context";
+import { spectraBus } from "../events";
+import { parseSpectraWorkUrl } from "../references";
+import {
+  createDocumentRelativeSelection,
+  encodeDocumentRelativeSelection,
+} from "../work/models/yjs";
 import { SheetsStudio } from "./sheets-studio";
 import { CodeStudio } from "./code-studio";
 import { PresentationStudio } from "./presentation-studio";
 import { WhiteboardStudio } from "./whiteboard-studio";
 import { TimetableStudio } from "./timetable-studio";
-import { AgentStudio } from "./agent-studio";
+import { AgentFoundry } from "./agent-foundry";
 import { SandboxedArtifactRuntime } from "./sandboxed-artifact-runtime";
 import {
   codeParameterSnapshot,
@@ -228,6 +266,17 @@ import {
   validateQuizForPublishing,
   type PortableQuizQuestion,
 } from "../quiz/interchange";
+import {
+  QUIZ_PRESETS,
+  availableQuizModes,
+  describeQuizExperience,
+  finalizeQuizExperience,
+  matchQuizPreset,
+  normalizeQuizExperience,
+  validateQuizExperience,
+  type QuizExperience,
+  type QuizMode,
+} from "../quiz/experience";
 
 const WAVE_C_BLUEPRINTS = new Set([
   "presentation",
@@ -415,7 +464,7 @@ function clozePrompt(value: string) {
   return value.replace(
     /\{\{c\d+::([\s\S]*?)(?:::(.*?))?\}\}/gi,
     (_source, _answer: string, hint: string | undefined) =>
-      hint?.trim() ? `[${hint.trim()}]` : "[…]",
+      hint?.trim() ? `[${hint.trim()}]` : "[â€¦]",
   );
 }
 
@@ -479,26 +528,25 @@ type QuizSettings = {
   maxAttempts?: number;
   allowResume: boolean;
   defaultTimeMultiplier: number;
+  /** How this quiz is used (Â§11C). Presets set all of it at once. */
+  experience: QuizExperience;
 };
 
 function quizSettingsFromContent(content: unknown): QuizSettings {
   const settings = record(record(content).settings);
+  const experience = normalizeQuizExperience(settings);
   const feedbackRelease =
-    settings.feedbackRelease === "on_each_response"
+    experience.revealAnswers === "immediate"
       ? "on_each_response"
-      : settings.feedbackRelease === "after_submission"
-        ? "after_submission"
-        : settings.showAnswersImmediately === true
-          ? "on_each_response"
-          : "after_submission";
+      : "after_submission";
   return {
     instructions:
       typeof settings.instructions === "string" ? settings.instructions : "",
-    showAnswersImmediately:
-      feedbackRelease === "on_each_response" ||
-      settings.showAnswersImmediately === true,
+    // The legacy booleans stay in sync with the contract so anything still
+    // reading them sees the same answer the contract gives.
+    showAnswersImmediately: experience.revealAnswers === "immediate",
     feedbackRelease,
-    timed: settings.timed === true,
+    timed: experience.timing !== "untimed",
     shuffleQuestions: settings.shuffleQuestions === true,
     shuffleOptions: settings.shuffleOptions === true,
     targetScore:
@@ -508,83 +556,15 @@ function quizSettingsFromContent(content: unknown): QuizSettings {
           ? settings.passingScore
           : 70,
     maxAttempts:
-      typeof settings.maxAttempts === "number"
-        ? Math.max(1, Math.min(100, Math.floor(settings.maxAttempts)))
-        : undefined,
+      experience.attempts === "unlimited" ? undefined : experience.attempts,
     allowResume: settings.allowResume !== false,
     defaultTimeMultiplier:
       typeof settings.defaultTimeMultiplier === "number"
         ? Math.max(1, Math.min(3, settings.defaultTimeMultiplier))
         : 1,
+    experience,
   };
 }
-
-type PlannerSubtask = { id: string; title: string; done: boolean };
-type PlannerAttachment = {
-  id: string;
-  name: string;
-  meta?: string;
-  assetId: string;
-  mediaType: string;
-  bytes: number;
-};
-
-type PlannerReminder = {
-  id: string;
-  minutesBefore: number;
-  enabled: boolean;
-};
-
-type PlannerRecurrence = {
-  frequency: "none" | "daily" | "weekly" | "monthly" | "yearly";
-  interval: number;
-  weekdays: number[];
-  untilAt?: number;
-  exceptions: number[];
-};
-
-type PlannerSource = {
-  provider: "managebac" | "import" | "spectra";
-  externalId: string;
-  version?: string;
-  hash?: string;
-  status: "active" | "changed" | "removed" | "detached";
-  lockedFields: string[];
-};
-
-type PlannerPerson = {
-  accountId: string;
-  name: string;
-  email: string;
-};
-
-type PlannerTask = {
-  taskTitle?: string;
-  description?: string;
-  status: "todo" | "doing" | "done";
-  priority: "low" | "medium" | "high";
-  dueAt?: number;
-  startAt?: number;
-  endAt?: number;
-  allDay?: boolean;
-  subtasks: PlannerSubtask[];
-  attachments: PlannerAttachment[];
-  linkedArtifactIds: string[];
-  linkedThreadIds: string[];
-  reminders: PlannerReminder[];
-  estimateMinutes?: number;
-  progressNote?: string;
-  sourceRefs: string[];
-  timezone: string;
-  recurrence: PlannerRecurrence;
-  assignees: PlannerPerson[];
-  watchers: PlannerPerson[];
-  source?: PlannerSource;
-  personalOverlay?: {
-    targetDueAt?: number;
-    note?: string;
-  };
-};
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object"
@@ -714,36 +694,6 @@ function id(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
-function dateInputValue(value?: number) {
-  if (!value) return "";
-  const date = new Date(value);
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-}
-
-function timeInputValue(value?: number) {
-  if (!value) return "";
-  const date = new Date(value);
-  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
-}
-
-function dateTimeValue(date: string, time: string) {
-  if (!date) return undefined;
-  const normalizedTime = time || "09:00";
-  return new Date(`${date}T${normalizedTime}:00`).getTime();
-}
-
-function formatScheduleDateTime(value?: number) {
-  if (!value) return "Not set";
-  return new Intl.DateTimeFormat("en-GB", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(new Date(value));
-}
-
 function tagsFromDraft(value: string) {
   return value
     .split(",")
@@ -792,8 +742,8 @@ function ReadonlyCodeSnapshot({
       setState("building");
       setMessage(
         event.status === "loading"
-          ? "Loading the isolated Python runtime…"
-          : "Running this historical checkpoint…",
+          ? "Loading the isolated Python runtimeâ€¦"
+          : "Running this historical checkpointâ€¦",
       );
     } else if (event.type === "stdout" || event.type === "stderr") {
       setConsoleLines((current) => [...current, event.text].slice(-80));
@@ -839,7 +789,9 @@ function ReadonlyCodeSnapshot({
     pythonRef.current?.cancel();
     pythonRef.current = null;
     setState("building");
-    setMessage("Rebuilding this checkpoint with its recorded runtime profile…");
+    setMessage(
+      "Rebuilding this checkpoint with its recorded runtime profileâ€¦",
+    );
     setConsoleLines([]);
     setPreviewFiles(null);
     setHistoricalAssets([]);
@@ -1025,7 +977,7 @@ function ReadonlyCodeSnapshot({
                 type="button"
                 key={file.id}
                 onClick={() => setActiveFileId(file.id)}
-                className={`flex w-full items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-[9px] ${file.id === activeFile.id ? "bg-[var(--bg-elevated)] font-semibold text-[var(--text-primary)]" : "text-[var(--text-secondary)]"}`}
+                className={`flex w-full items-center gap-2 rounded-[6px] px-2 py-1.5 text-left text-micro ${file.id === activeFile.id ? "bg-[var(--bg-elevated)] font-semibold text-[var(--text-primary)]" : "text-[var(--text-secondary)]"}`}
               >
                 <FileText className="h-3 w-3" />
                 <span className="truncate">{file.path}</span>
@@ -1033,10 +985,10 @@ function ReadonlyCodeSnapshot({
             ))}
           </aside>
           <div className="min-w-0 bg-[#151713] text-[#e8eadf]">
-            <div className="border-b border-white/10 px-3 py-2 text-[8px] text-white/55">
-              {activeFile.path} · {activeFile.language}
+            <div className="border-b border-white/10 px-3 py-2 text-micro text-white/55">
+              {activeFile.path} Â· {activeFile.language}
             </div>
-            <pre className="max-h-[520px] overflow-auto p-4 font-mono text-[9px] leading-4">
+            <pre className="max-h-[520px] overflow-auto p-4 font-mono text-micro leading-4">
               {activeFile.source}
             </pre>
           </div>
@@ -1044,7 +996,7 @@ function ReadonlyCodeSnapshot({
       ) : (
         <div className="p-2">
           <p
-            className={`mb-2 rounded-[6px] px-2 py-1.5 text-[8px] ${state === "error" ? "bg-[color-mix(in_oklab,var(--danger)_7%,var(--bg-primary))] text-[var(--danger)]" : "bg-[var(--bg-secondary)] text-[var(--text-secondary)]"}`}
+            className={`mb-2 rounded-[6px] px-2 py-1.5 text-micro ${state === "error" ? "bg-[color-mix(in_oklab,var(--danger)_7%,var(--bg-primary))] text-[var(--danger)]" : "bg-[var(--bg-secondary)] text-[var(--text-secondary)]"}`}
           >
             {message}
           </p>
@@ -1070,11 +1022,11 @@ function ReadonlyCodeSnapshot({
               }
             />
           ) : consoleLines.length ? (
-            <pre className="max-h-[360px] overflow-auto rounded-[8px] bg-[#151713] p-4 font-mono text-[9px] leading-4 text-[#e8eadf]">
+            <pre className="max-h-[360px] overflow-auto rounded-[8px] bg-[#151713] p-4 font-mono text-micro leading-4 text-[#e8eadf]">
               {consoleLines.join("\n")}
             </pre>
           ) : (
-            <div className="flex min-h-[360px] items-center justify-center text-center text-[9px] text-[var(--text-tertiary)]">
+            <div className="flex min-h-[360px] items-center justify-center text-center text-micro text-[var(--text-tertiary)]">
               Choose Rebuild safely to render this inert checkpoint.
             </div>
           )}
@@ -1160,8 +1112,8 @@ function ReadonlyArtifactSnapshot({
               key={card.id}
               className="rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4"
             >
-              <div className="text-[9px] font-semibold uppercase tracking-[.1em] text-[#7560e8]">
-                Card {index + 1} · {card.section}
+              <div className="text-micro font-semibold uppercase tracking-[.1em] text-[#7560e8]">
+                Card {index + 1} Â· {card.section}
               </div>
               <div className="mt-2 font-display text-[17px] font-semibold">
                 {card.front}
@@ -1185,7 +1137,7 @@ function ReadonlyArtifactSnapshot({
               key={question.id}
               className="rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4"
             >
-              <div className="text-[9px] font-semibold uppercase tracking-[.1em] text-[var(--accent-mint)]">
+              <div className="text-micro font-semibold uppercase tracking-[.1em] text-[var(--accent-mint)]">
                 Question {index + 1}
               </div>
               <div className="mt-2 font-display text-[17px] font-semibold">
@@ -1250,7 +1202,7 @@ function ReadonlyArtifactSnapshot({
               className="overflow-hidden rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)]"
             >
               <header className="border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2">
-                <span className="text-[8px] font-semibold uppercase tracking-[.1em] text-[var(--text-tertiary)]">
+                <span className="text-micro font-semibold uppercase tracking-[.1em] text-[var(--text-tertiary)]">
                   Slide {index + 1}
                 </span>
                 <h4 className="mt-1 font-display text-[15px] font-semibold leading-tight">
@@ -1271,16 +1223,16 @@ function ReadonlyArtifactSnapshot({
                       key={String(object.id ?? objectIndex)}
                       className="rounded-[7px] border border-[var(--border-subtle)] px-2.5 py-2"
                     >
-                      <span className="block text-[7px] font-semibold uppercase tracking-[.08em] text-[var(--text-tertiary)]">
+                      <span className="block text-micro font-semibold uppercase tracking-[.08em] text-[var(--text-tertiary)]">
                         {humanizeKey(String(object.type ?? "object"))}
                       </span>
-                      <p className="mt-1 whitespace-pre-wrap text-[9px] leading-4 text-[var(--text-secondary)]">
+                      <p className="mt-1 whitespace-pre-wrap text-micro leading-4 text-[var(--text-secondary)]">
                         {historyPresentationObjectSummary(object)}
                       </p>
                     </div>
                   ))}
                 {arrayOfRecords(slide.objects).length === 0 ? (
-                  <p className="py-3 text-[9px] text-[var(--text-tertiary)]">
+                  <p className="py-3 text-micro text-[var(--text-tertiary)]">
                     Empty slide
                   </p>
                 ) : null}
@@ -1311,7 +1263,7 @@ function ReadonlyArtifactSnapshot({
                 key={String(sheet.id ?? index)}
                 className="overflow-hidden rounded-[9px] border border-[var(--border-default)]"
               >
-                <header className="border-b border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-[10px] font-semibold">
+                <header className="border-b border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2 text-micro font-semibold">
                   {String(sheet.name ?? `Sheet ${index + 1}`)}
                 </header>
                 <div className="grid grid-cols-4 gap-px bg-[var(--border-subtle)]">
@@ -1320,10 +1272,10 @@ function ReadonlyArtifactSnapshot({
                       key={address}
                       className="min-h-10 bg-[var(--bg-elevated)] px-2 py-1"
                     >
-                      <span className="block text-[7px] text-[var(--text-tertiary)]">
+                      <span className="block text-micro text-[var(--text-tertiary)]">
                         {address}
                       </span>
-                      <span className="block truncate text-[9px]">
+                      <span className="block truncate text-micro">
                         {humanValue(
                           record(value).value ?? record(value).formula ?? value,
                         )}
@@ -1331,7 +1283,7 @@ function ReadonlyArtifactSnapshot({
                     </div>
                   ))}
                   {visibleCells.length === 0 ? (
-                    <div className="col-span-4 p-8 text-center text-[10px] text-[var(--text-tertiary)]">
+                    <div className="col-span-4 p-8 text-center text-micro text-[var(--text-tertiary)]">
                       Empty sheet
                     </div>
                   ) : null}
@@ -1363,7 +1315,7 @@ function ReadonlyArtifactSnapshot({
           {nodes.map((node, index) => (
             <div
               key={String(node.id ?? index)}
-              className="absolute max-w-[150px] rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2 text-[9px] shadow-sm"
+              className="absolute max-w-[150px] rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2 text-micro shadow-sm"
               style={{
                 left: `${8 + ((index * 27) % 72)}%`,
                 top: `${10 + ((index * 31) % 72)}%`,
@@ -1375,7 +1327,7 @@ function ReadonlyArtifactSnapshot({
             </div>
           ))}
           {nodes.length === 0 ? (
-            <div className="flex min-h-[430px] items-center justify-center text-[10px] text-[var(--text-tertiary)]">
+            <div className="flex min-h-[430px] items-center justify-center text-micro text-[var(--text-tertiary)]">
               Empty canvas
             </div>
           ) : null}
@@ -1393,23 +1345,23 @@ function ReadonlyArtifactSnapshot({
                 <div className="truncate text-[11px] font-semibold">
                   {String(event.title ?? "Untitled event")}
                 </div>
-                <div className="mt-0.5 text-[8px] text-[var(--text-tertiary)]">
+                <div className="mt-0.5 text-micro text-[var(--text-tertiary)]">
                   {typeof event.start === "string"
                     ? new Date(event.start).toLocaleString()
                     : typeof event.startAt === "number"
                       ? new Date(event.startAt).toLocaleString()
                       : "Time not set"}
                   {typeof event.end === "string"
-                    ? ` – ${new Date(event.end).toLocaleString()}`
+                    ? ` â€“ ${new Date(event.end).toLocaleString()}`
                     : typeof event.endAt === "number"
-                      ? ` – ${new Date(event.endAt).toLocaleString()}`
+                      ? ` â€“ ${new Date(event.endAt).toLocaleString()}`
                       : ""}
                 </div>
               </div>
             </section>
           ))}
           {events.length === 0 ? (
-            <p className="text-[10px] text-[var(--text-tertiary)]">
+            <p className="text-micro text-[var(--text-tertiary)]">
               No calendar events.
             </p>
           ) : null}
@@ -1418,7 +1370,7 @@ function ReadonlyArtifactSnapshot({
       {blueprintKey === "agent" ? (
         <div className="mt-6 grid gap-4">
           <section className="rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
-            <div className="text-[8px] font-semibold uppercase tracking-[.1em] text-[var(--accent-cyan)]">
+            <div className="text-micro font-semibold uppercase tracking-[.1em] text-[var(--accent-cyan)]">
               Instructions
             </div>
             <p className="mt-2 whitespace-pre-wrap text-[12px] leading-6 text-[var(--text-primary)]">
@@ -1454,7 +1406,7 @@ function historyPresentationObjectSummary(
       .slice(0, 4)
       .map((row) =>
         Array.isArray(row)
-          ? row.map((cell) => String(cell ?? "")).join(" · ")
+          ? row.map((cell) => String(cell ?? "")).join(" Â· ")
           : String(row ?? ""),
       )
       .join("\n")
@@ -1462,7 +1414,7 @@ function historyPresentationObjectSummary(
   }
   if (Array.isArray(content.labels)) {
     const chartType = humanizeKey(String(content.chartType ?? "chart"));
-    return `${chartType} · ${content.labels.slice(0, 6).map(String).join(", ")}`;
+    return `${chartType} Â· ${content.labels.slice(0, 6).map(String).join(", ")}`;
   }
   if (typeof value.altText === "string" && value.altText.trim())
     return value.altText.trim();
@@ -1481,13 +1433,13 @@ function MetricSnapshot({
 }) {
   return (
     <section className="rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3">
-      <div className="text-[8px] font-semibold uppercase tracking-[.1em] text-[var(--text-tertiary)]">
+      <div className="text-micro font-semibold uppercase tracking-[.1em] text-[var(--text-tertiary)]">
         {label}
       </div>
       <div className="mt-2 text-[18px] font-semibold text-[var(--text-primary)]">
         {values.length}
       </div>
-      <p className="mt-1 line-clamp-3 text-[9px] leading-4 text-[var(--text-secondary)]">
+      <p className="mt-1 line-clamp-3 text-micro leading-4 text-[var(--text-secondary)]">
         {values
           .slice(0, 4)
           .map((value) =>
@@ -1604,7 +1556,7 @@ function HistoryComparisonOverlay({
           </span>
           {selected ? (
             <span className="truncate rounded-[6px] bg-[color-mix(in_oklab,#8b6ff0_8%,var(--bg-secondary))] px-2 py-1 text-[12px] font-medium text-[#6f59cf]">
-              Previewing v{selected.versionNumber ?? "—"} from{" "}
+              Previewing v{selected.versionNumber ?? "â€”"} from{" "}
               {new Date(selected.createdAt).toLocaleString()}
             </span>
           ) : null}
@@ -1625,7 +1577,7 @@ function HistoryComparisonOverlay({
               <h2 className="truncate font-display text-[16px] font-semibold text-[var(--text-primary)]">
                 {artifact.title}
               </h2>
-              <p className="mt-0.5 text-[9px] text-[var(--text-tertiary)]">
+              <p className="mt-0.5 text-micro text-[var(--text-tertiary)]">
                 Historical state is inert; the current artifact remains live and
                 editable after comparison closes.
               </p>
@@ -1633,7 +1585,7 @@ function HistoryComparisonOverlay({
             <button
               type="button"
               onClick={() => setShowChanges((value) => !value)}
-              className={`h-8 rounded-[7px] border px-3 text-[10px] font-medium ${showChanges ? "border-[color-mix(in_oklab,var(--accent-cyan)_35%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_6%,var(--bg-primary))] text-[var(--text-primary)]" : "border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}
+              className={`h-8 rounded-[7px] border px-3 text-micro font-medium ${showChanges ? "border-[color-mix(in_oklab,var(--accent-cyan)_35%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_6%,var(--bg-primary))] text-[var(--text-primary)]" : "border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}
             >
               {showChanges
                 ? "Show artifact comparison"
@@ -1649,7 +1601,7 @@ function HistoryComparisonOverlay({
                     className="overflow-hidden rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)]"
                   >
                     <header className="border-b border-[var(--border-subtle)] px-3 py-2">
-                      <label className="flex cursor-pointer items-center gap-2 text-[10px] font-semibold text-[var(--text-primary)]">
+                      <label className="flex cursor-pointer items-center gap-2 text-micro font-semibold text-[var(--text-primary)]">
                         <input
                           type="checkbox"
                           disabled={!change.regionId || readOnly}
@@ -1671,18 +1623,18 @@ function HistoryComparisonOverlay({
                     </header>
                     <div className="grid md:grid-cols-2">
                       <div className="border-b border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--danger)_3%,var(--bg-primary))] p-3 md:border-b-0 md:border-r">
-                        <div className="mb-1.5 text-[8px] font-semibold uppercase tracking-[.1em] text-[var(--danger)]">
+                        <div className="mb-1.5 text-micro font-semibold uppercase tracking-[.1em] text-[var(--danger)]">
                           Selected version
                         </div>
-                        <pre className="whitespace-pre-wrap break-words font-sans text-[10px] leading-4 text-[var(--text-secondary)]">
+                        <pre className="whitespace-pre-wrap break-words font-sans text-micro leading-4 text-[var(--text-secondary)]">
                           {change.before}
                         </pre>
                       </div>
                       <div className="bg-[color-mix(in_oklab,var(--accent-cyan)_3%,var(--bg-primary))] p-3">
-                        <div className="mb-1.5 text-[8px] font-semibold uppercase tracking-[.1em] text-[var(--accent-cyan)]">
+                        <div className="mb-1.5 text-micro font-semibold uppercase tracking-[.1em] text-[var(--accent-cyan)]">
                           Current live
                         </div>
-                        <pre className="whitespace-pre-wrap break-words font-sans text-[10px] leading-4 text-[var(--text-primary)]">
+                        <pre className="whitespace-pre-wrap break-words font-sans text-micro leading-4 text-[var(--text-primary)]">
                           {change.after}
                         </pre>
                       </div>
@@ -1703,10 +1655,10 @@ function HistoryComparisonOverlay({
               >
                 <section className="min-h-0 overflow-auto">
                   <div className="sticky top-0 z-10 flex items-center justify-between border-b border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--bg-primary)_94%,transparent)] px-4 py-2 backdrop-blur">
-                    <span className="text-[9px] font-semibold text-[var(--text-primary)]">
-                      Version v{selected.versionNumber ?? "—"}
+                    <span className="text-micro font-semibold text-[var(--text-primary)]">
+                      Version v{selected.versionNumber ?? "â€”"}
                     </span>
-                    <span className="rounded-[5px] bg-[color-mix(in_oklab,#8b6ff0_8%,var(--bg-secondary))] px-1.5 py-0.5 text-[8px] font-medium text-[#6f59cf]">
+                    <span className="rounded-[5px] bg-[color-mix(in_oklab,#8b6ff0_8%,var(--bg-secondary))] px-1.5 py-0.5 text-micro font-medium text-[#6f59cf]">
                       Preview only
                     </span>
                   </div>
@@ -1736,10 +1688,10 @@ function HistoryComparisonOverlay({
                 </button>
                 <section className="min-h-0 overflow-auto">
                   <div className="sticky top-0 z-10 flex items-center justify-between border-b border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--bg-primary)_94%,transparent)] px-4 py-2 backdrop-blur">
-                    <span className="text-[9px] font-semibold text-[var(--text-primary)]">
+                    <span className="text-micro font-semibold text-[var(--text-primary)]">
                       Current live version
                     </span>
-                    <span className="rounded-[5px] bg-[color-mix(in_oklab,var(--success)_8%,var(--bg-secondary))] px-1.5 py-0.5 text-[8px] font-medium text-[var(--success)]">
+                    <span className="rounded-[5px] bg-[color-mix(in_oklab,var(--success)_8%,var(--bg-secondary))] px-1.5 py-0.5 text-micro font-medium text-[var(--success)]">
                       Live
                     </span>
                   </div>
@@ -1758,7 +1710,7 @@ function HistoryComparisonOverlay({
                 <h4 className="mt-3 text-[11px] font-semibold text-[var(--text-primary)]">
                   This version cannot be rendered
                 </h4>
-                <p className="mt-1 text-[9px] leading-4 text-[var(--text-secondary)]">
+                <p className="mt-1 text-micro leading-4 text-[var(--text-secondary)]">
                   Its retained snapshot is{" "}
                   {selected.snapshotState === "corrupt"
                     ? "damaged"
@@ -1775,10 +1727,10 @@ function HistoryComparisonOverlay({
           )}
           <footer className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-[var(--border-default)] bg-[var(--bg-elevated)] px-4 py-3">
             <div>
-              <div className="text-[10px] font-semibold text-[var(--text-primary)]">
+              <div className="text-micro font-semibold text-[var(--text-primary)]">
                 Restore creates a new version
               </div>
-              <p className="mt-0.5 text-[9px] text-[var(--text-tertiary)]">
+              <p className="mt-0.5 text-micro text-[var(--text-tertiary)]">
                 Nothing in the later timeline is overwritten or deleted.
               </p>
             </div>
@@ -1794,7 +1746,7 @@ function HistoryComparisonOverlay({
                 onClick={() =>
                   selected?.after && onRestore(selected, [...selectedRegions])
                 }
-                className="h-8 rounded-[7px] border border-[var(--border-default)] px-3 text-[9px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-35"
+                className="h-8 rounded-[7px] border border-[var(--border-default)] px-3 text-micro font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-35"
               >
                 Restore {selectedRegions.size} selected
               </button>
@@ -1804,7 +1756,7 @@ function HistoryComparisonOverlay({
                   !selected?.after || readOnly || Boolean(busyVersionId)
                 }
                 onClick={() => selected?.after && onRestore(selected)}
-                className="inline-flex h-8 items-center gap-1.5 rounded-[7px] bg-[#7658ed] px-3 text-[9px] font-semibold text-white disabled:opacity-35"
+                className="inline-flex h-8 items-center gap-1.5 rounded-[7px] bg-[#7658ed] px-3 text-micro font-semibold text-white disabled:opacity-35"
               >
                 {busyVersionId ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -1822,7 +1774,7 @@ function HistoryComparisonOverlay({
               <h3 className="text-[12px] font-semibold text-[var(--text-primary)]">
                 Version history
               </h3>
-              <p className="mt-0.5 text-[9px] text-[var(--text-tertiary)]">
+              <p className="mt-0.5 text-micro text-[var(--text-tertiary)]">
                 {versions.length} meaningful versions
               </p>
             </div>
@@ -1833,7 +1785,7 @@ function HistoryComparisonOverlay({
                   setCheckpointOpen((value) => !value);
                   setCheckpointError(null);
                 }}
-                className="flex h-7 items-center gap-1 rounded-[6px] px-2 text-[9px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                className="flex h-7 items-center gap-1 rounded-[6px] px-2 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
               >
                 <Plus className="h-3 w-3" />
                 Checkpoint
@@ -1843,7 +1795,7 @@ function HistoryComparisonOverlay({
           {checkpointOpen ? (
             <div className="border-b border-[var(--border-subtle)] bg-[var(--bg-primary)] p-3">
               <label
-                className="text-[8px] font-semibold uppercase tracking-[.08em] text-[var(--text-tertiary)]"
+                className="text-micro font-semibold uppercase tracking-[.08em] text-[var(--text-tertiary)]"
                 htmlFor="history-checkpoint-name"
               >
                 Checkpoint name
@@ -1861,13 +1813,13 @@ function HistoryComparisonOverlay({
                   }}
                   autoFocus
                   placeholder="e.g. Before teacher review"
-                  className="h-8 min-w-0 flex-1 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 text-[9px] text-[var(--text-primary)] outline-none focus:border-[var(--border-strong)]"
+                  className="h-8 min-w-0 flex-1 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 text-micro text-[var(--text-primary)] outline-none focus:border-[var(--border-strong)]"
                 />
                 <button
                   type="button"
                   disabled={!checkpointName.trim() || checkpointBusy}
                   onClick={() => void createCheckpoint()}
-                  className="h-8 rounded-[7px] bg-[var(--text-primary)] px-2.5 text-[9px] font-semibold text-[var(--bg-primary)] disabled:opacity-35"
+                  className="h-8 rounded-[7px] bg-[var(--text-primary)] px-2.5 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-35"
                 >
                   {checkpointBusy ? (
                     <Loader2 className="h-3 w-3 animate-spin" />
@@ -1879,7 +1831,7 @@ function HistoryComparisonOverlay({
               {checkpointError ? (
                 <p
                   role="alert"
-                  className="mt-2 text-[9px] leading-4 text-[var(--danger)]"
+                  className="mt-2 text-micro leading-4 text-[var(--danger)]"
                 >
                   {checkpointError}
                 </p>
@@ -1892,14 +1844,14 @@ function HistoryComparisonOverlay({
               <div className="absolute bottom-[-8px] left-[18px] top-5 w-px bg-[var(--border-default)]" />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-[10px] font-semibold text-[var(--text-primary)]">
+                  <span className="text-micro font-semibold text-[var(--text-primary)]">
                     Live
                   </span>
-                  <span className="text-[8px] text-[var(--text-tertiary)]">
+                  <span className="text-micro text-[var(--text-tertiary)]">
                     Now
                   </span>
                 </div>
-                <p className="mt-0.5 text-[8px] text-[var(--text-tertiary)]">
+                <p className="mt-0.5 text-micro text-[var(--text-tertiary)]">
                   Current synchronized state
                 </p>
               </div>
@@ -1926,10 +1878,10 @@ function HistoryComparisonOverlay({
                   ) : null}
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center justify-between gap-2">
-                      <span className="truncate text-[10px] font-semibold text-[var(--text-primary)]">
+                      <span className="truncate text-micro font-semibold text-[var(--text-primary)]">
                         v{version.versionNumber ?? versions.length - index}
                       </span>
-                      <span className="shrink-0 text-[8px] text-[var(--text-tertiary)]">
+                      <span className="shrink-0 text-micro text-[var(--text-tertiary)]">
                         {new Date(version.createdAt).toLocaleString([], {
                           day: "2-digit",
                           month: "short",
@@ -1939,15 +1891,15 @@ function HistoryComparisonOverlay({
                       </span>
                     </span>
                     <span className="mt-0.5 flex flex-wrap items-center gap-1.5">
-                      <span className="rounded-[4px] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[7px] font-medium text-[var(--text-secondary)]">
+                      <span className="rounded-[4px] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-micro font-medium text-[var(--text-secondary)]">
                         {historyKind(version)}
                       </span>
-                      <span className="truncate text-[8px] text-[var(--text-tertiary)]">
+                      <span className="truncate text-micro text-[var(--text-tertiary)]">
                         {creator}
                       </span>
                     </span>
                     {version.summary ? (
-                      <span className="mt-1 block line-clamp-2 text-[8px] leading-3.5 text-[var(--text-tertiary)]">
+                      <span className="mt-1 block line-clamp-2 text-micro leading-3.5 text-[var(--text-tertiary)]">
                         {version.summary}
                       </span>
                     ) : null}
@@ -1956,7 +1908,7 @@ function HistoryComparisonOverlay({
               );
             })}
             {versions.length === 0 ? (
-              <div className="px-4 py-10 text-center text-[10px] leading-5 text-[var(--text-tertiary)]">
+              <div className="px-4 py-10 text-center text-micro leading-5 text-[var(--text-tertiary)]">
                 Meaningful human and AI editing sessions will appear here.
               </div>
             ) : null}
@@ -1998,14 +1950,14 @@ function humanValue(value: unknown) {
 function humanFieldLabel(path: string[]) {
   const clean = path[0] === "content" ? path.slice(1) : path;
   if (clean[0] === "cards" && /^\d+$/.test(clean[1] ?? ""))
-    return `Card ${Number(clean[1]) + 1} · ${clean.slice(2).map(humanizeKey).join(" · ") || "Content"}`;
+    return `Card ${Number(clean[1]) + 1} Â· ${clean.slice(2).map(humanizeKey).join(" Â· ") || "Content"}`;
   if (clean[0] === "questions" && /^\d+$/.test(clean[1] ?? ""))
-    return `Question ${Number(clean[1]) + 1} · ${clean.slice(2).map(humanizeKey).join(" · ") || "Content"}`;
+    return `Question ${Number(clean[1]) + 1} Â· ${clean.slice(2).map(humanizeKey).join(" Â· ") || "Content"}`;
   if (clean[0] === "blocks" && /^\d+$/.test(clean[1] ?? ""))
-    return `Document block ${Number(clean[1]) + 1} · ${clean.slice(2).map(humanizeKey).join(" · ") || "Content"}`;
+    return `Document block ${Number(clean[1]) + 1} Â· ${clean.slice(2).map(humanizeKey).join(" Â· ") || "Content"}`;
   if (clean[0] === "subtasks" && /^\d+$/.test(clean[1] ?? ""))
-    return `Subtask ${Number(clean[1]) + 1} · ${clean.slice(2).map(humanizeKey).join(" · ") || "Content"}`;
-  return clean.map(humanizeKey).join(" · ") || "Artifact";
+    return `Subtask ${Number(clean[1]) + 1} Â· ${clean.slice(2).map(humanizeKey).join(" Â· ") || "Content"}`;
+  return clean.map(humanizeKey).join(" Â· ") || "Artifact";
 }
 
 function humanDiff(
@@ -2100,12 +2052,12 @@ function humanDiff(
       );
       if (!before || !after) {
         changes.push({
-          label: `${path} · ${before ? "File removed" : "File added"}`,
+          label: `${path} Â· ${before ? "File removed" : "File added"}`,
           before: before
-            ? `${String(before.file.language ?? "text")} · ${String(before.file.source ?? "").split("\n").length} lines`
+            ? `${String(before.file.language ?? "text")} Â· ${String(before.file.source ?? "").split("\n").length} lines`
             : "Not present",
           after: after
-            ? `${String(after.file.language ?? "text")} · ${String(after.file.source ?? "").split("\n").length} lines`
+            ? `${String(after.file.language ?? "text")} Â· ${String(after.file.source ?? "").split("\n").length} lines`
             : "Not present",
           path: [
             "content",
@@ -2119,7 +2071,7 @@ function humanDiff(
       for (const key of ["path", "language", "mediaType"] as const) {
         if (before.file[key] === after.file[key]) continue;
         changes.push({
-          label: `${path} · ${humanizeKey(key)}`,
+          label: `${path} Â· ${humanizeKey(key)}`,
           before: humanValue(before.file[key]),
           after: humanValue(after.file[key]),
           path: ["content", "files", String(after.index), key],
@@ -2152,7 +2104,7 @@ function humanDiff(
         if (oldLine?.text === newLine?.text) continue;
         const lineNumber = (newLine?.index ?? oldLine?.index ?? 0) + 1;
         changes.push({
-          label: `${path} · Line ${lineNumber}${!oldLine ? " added" : !newLine ? " removed" : ""}`,
+          label: `${path} Â· Line ${lineNumber}${!oldLine ? " added" : !newLine ? " removed" : ""}`,
           before: oldLine ? oldLine.text || "Blank line" : "Not present",
           after: newLine ? newLine.text || "Blank line" : "Not present",
           path: [
@@ -2360,7 +2312,7 @@ function documentJsonFromContent(content: unknown, title: string): JSONContent {
             const items = text
               .split(/\r?\n/)
               .map((line) =>
-                line.replace(/^\s*(?:[-*•]|\d+[.)])\s+/, "").trim(),
+                line.replace(/^\s*(?:[-*â€¢]|\d+[.)])\s+/, "").trim(),
               )
               .filter(Boolean);
             return {
@@ -2755,212 +2707,6 @@ function quizQuestions(content: unknown): QuizQuestion[] {
       ];
 }
 
-function plannerTask(content: unknown): PlannerTask {
-  const task = record(content);
-  const recurrence = record(task.recurrence);
-  const source = record(task.source);
-  const personalOverlay = record(task.personalOverlay);
-  const fallbackTimezone =
-    Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-  const timezone =
-    typeof task.timezone === "string" && task.timezone.trim()
-      ? task.timezone.trim()
-      : fallbackTimezone;
-  const recurrenceFrequency =
-    recurrence.frequency === "daily" ||
-    recurrence.frequency === "weekly" ||
-    recurrence.frequency === "monthly" ||
-    recurrence.frequency === "yearly"
-      ? recurrence.frequency
-      : "none";
-  return {
-    taskTitle: typeof task.taskTitle === "string" ? task.taskTitle : "",
-    description: typeof task.description === "string" ? task.description : "",
-    status:
-      task.status === "doing" || task.status === "done" ? task.status : "todo",
-    priority:
-      task.priority === "low" || task.priority === "high"
-        ? task.priority
-        : "medium",
-    dueAt: typeof task.dueAt === "number" ? task.dueAt : undefined,
-    startAt: typeof task.startAt === "number" ? task.startAt : undefined,
-    endAt: typeof task.endAt === "number" ? task.endAt : undefined,
-    allDay: task.allDay === true,
-    subtasks: arrayOfRecords(task.subtasks).map((subtask, index) => ({
-      id: typeof subtask.id === "string" ? subtask.id : `subtask-${index + 1}`,
-      title: typeof subtask.title === "string" ? subtask.title : "",
-      done: subtask.done === true,
-    })),
-    attachments: arrayOfRecords(task.attachments).map((attachment, index) => ({
-      id:
-        typeof attachment.id === "string"
-          ? attachment.id
-          : `attachment-${index + 1}`,
-      name: typeof attachment.name === "string" ? attachment.name : "",
-      meta: typeof attachment.meta === "string" ? attachment.meta : "",
-      assetId: typeof attachment.assetId === "string" ? attachment.assetId : "",
-      mediaType:
-        typeof attachment.mediaType === "string"
-          ? attachment.mediaType
-          : "application/octet-stream",
-      bytes:
-        typeof attachment.bytes === "number" &&
-        Number.isFinite(attachment.bytes)
-          ? Math.max(0, attachment.bytes)
-          : 0,
-    })),
-    linkedArtifactIds: Array.isArray(task.linkedArtifactIds)
-      ? task.linkedArtifactIds.filter(
-          (item): item is string => typeof item === "string",
-        )
-      : [],
-    linkedThreadIds: Array.isArray(task.linkedThreadIds)
-      ? task.linkedThreadIds.filter(
-          (item): item is string => typeof item === "string",
-        )
-      : [],
-    reminders: Array.isArray(task.reminders)
-      ? task.reminders.flatMap((candidate, index): PlannerReminder[] => {
-          if (typeof candidate === "string") {
-            const number = Number(candidate.match(/\d+/)?.[0] ?? 30);
-            return [
-              {
-                id: `reminder-${index + 1}`,
-                minutesBefore: Math.max(0, Math.min(525_600, number)),
-                enabled: true,
-              },
-            ];
-          }
-          const reminder = record(candidate);
-          if (!Number.isFinite(reminder.minutesBefore)) return [];
-          return [
-            {
-              id:
-                typeof reminder.id === "string"
-                  ? reminder.id
-                  : `reminder-${index + 1}`,
-              minutesBefore: Math.max(
-                0,
-                Math.min(525_600, Number(reminder.minutesBefore)),
-              ),
-              enabled: reminder.enabled !== false,
-            },
-          ];
-        })
-      : [],
-    estimateMinutes:
-      typeof task.estimateMinutes === "number"
-        ? task.estimateMinutes
-        : undefined,
-    progressNote:
-      typeof task.progressNote === "string" ? task.progressNote : "",
-    sourceRefs: Array.isArray(task.sourceRefs)
-      ? task.sourceRefs.filter(
-          (item): item is string => typeof item === "string",
-        )
-      : [],
-    timezone,
-    recurrence: {
-      frequency: recurrenceFrequency,
-      interval:
-        typeof recurrence.interval === "number"
-          ? Math.max(1, Math.min(365, Math.round(recurrence.interval)))
-          : 1,
-      weekdays: Array.isArray(recurrence.weekdays)
-        ? recurrence.weekdays
-            .filter(
-              (item): item is number =>
-                typeof item === "number" && item >= 0 && item <= 6,
-            )
-            .slice(0, 7)
-        : [],
-      untilAt:
-        typeof recurrence.untilAt === "number" ? recurrence.untilAt : undefined,
-      exceptions: Array.isArray(recurrence.exceptions)
-        ? recurrence.exceptions
-            .filter((item): item is number => typeof item === "number")
-            .slice(0, 500)
-        : [],
-    },
-    assignees: (arrayOfRecords(task.assignees).length
-      ? arrayOfRecords(task.assignees)
-      : Array.isArray(task.assigneeIds)
-        ? task.assigneeIds.map((accountId) => ({ accountId }))
-        : []
-    ).map((person, index) => {
-      const profile = record(person);
-      return {
-        accountId:
-          typeof profile.accountId === "string"
-            ? profile.accountId
-            : Array.isArray(task.assigneeIds) &&
-                typeof task.assigneeIds[index] === "string"
-              ? task.assigneeIds[index]
-              : `legacy-assignee-${index + 1}`,
-        name: typeof profile.name === "string" ? profile.name : "School member",
-        email: typeof profile.email === "string" ? profile.email : "",
-      };
-    }),
-    watchers: (arrayOfRecords(task.watchers).length
-      ? arrayOfRecords(task.watchers)
-      : Array.isArray(task.watcherIds)
-        ? task.watcherIds.map((accountId) => ({ accountId }))
-        : []
-    ).map((person, index) => {
-      const profile = record(person);
-      return {
-        accountId:
-          typeof profile.accountId === "string"
-            ? profile.accountId
-            : Array.isArray(task.watcherIds) &&
-                typeof task.watcherIds[index] === "string"
-              ? task.watcherIds[index]
-              : `legacy-watcher-${index + 1}`,
-        name: typeof profile.name === "string" ? profile.name : "School member",
-        email: typeof profile.email === "string" ? profile.email : "",
-      };
-    }),
-    ...(typeof source.externalId === "string" && source.externalId
-      ? {
-          source: {
-            provider:
-              source.provider === "managebac" || source.provider === "import"
-                ? source.provider
-                : ("spectra" as const),
-            externalId: source.externalId,
-            ...(typeof source.version === "string"
-              ? { version: source.version }
-              : {}),
-            ...(typeof source.hash === "string" ? { hash: source.hash } : {}),
-            status:
-              source.status === "changed" ||
-              source.status === "removed" ||
-              source.status === "detached"
-                ? source.status
-                : "active",
-            lockedFields: Array.isArray(source.lockedFields)
-              ? source.lockedFields.filter(
-                  (item): item is string => typeof item === "string",
-                )
-              : [],
-          },
-        }
-      : {}),
-    ...(Object.keys(personalOverlay).length
-      ? {
-          personalOverlay: {
-            ...(typeof personalOverlay.targetDueAt === "number"
-              ? { targetDueAt: personalOverlay.targetDueAt }
-              : {}),
-            ...(typeof personalOverlay.note === "string"
-              ? { note: personalOverlay.note }
-              : {}),
-          },
-        }
-      : {}),
-  };
-}
-
 function artifactEditorSnapshot(artifact: SpectraArtifact) {
   return {
     title: artifact.title,
@@ -3201,40 +2947,28 @@ export function useArtifactStudioState(
       ),
     [artifacts, synchronizedSnapshots],
   );
-  const studioObjects = useMemo(
+  const session = useMemo(
     () =>
-      openObjects.filter(
-        (object) =>
-          object.type === "artifact" &&
-          (object.presentation === "split" || object.presentation === "tab") &&
-          artifactById.has(object.id),
+      projectLegacyWorkSession(
+        artifactById,
+        openObjects,
+        activeOpenObjectKey,
+        dirtyArtifactIds,
       ),
-    [artifactById, openObjects],
+    [activeOpenObjectKey, artifactById, dirtyArtifactIds, openObjects],
   );
-  const activeObject =
-    studioObjects.find(
-      (object) => spectraObjectKey(object) === activeOpenObjectKey,
-    ) ?? null;
-  const mode: StudioMode =
-    activeObject?.presentation === "split" ||
-    activeObject?.presentation === "tab"
-      ? activeObject.presentation
-      : "closed";
-  const activeArtifactId = activeObject?.id ?? null;
-  const activeArtifact = activeArtifactId
-    ? (artifactById.get(activeArtifactId) ?? null)
-    : null;
+  const mode: StudioMode = session.mode;
+  const activeArtifactId = session.activeWorkId;
+  const activeArtifact = session.activeWork;
   const tabs = useMemo<StudioTab[]>(
     () =>
-      studioObjects
-        .filter((object) => object.presentation === "tab")
-        .map((object, index) => ({ artifactId: object.id, openedAt: index })),
-    [studioObjects],
+      session.tabs.map((tab) => ({
+        artifactId: tab.workId,
+        openedAt: tab.openedAt,
+      })),
+    [session.tabs],
   );
-  const dirtyIds = useMemo(
-    () => new Set(dirtyArtifactIds.filter((id) => artifactById.has(id))),
-    [artifactById, dirtyArtifactIds],
-  );
+  const dirtyIds = session.dirtyIds;
 
   const openSplit = useCallback(
     (artifact: SpectraArtifact) => {
@@ -3361,6 +3095,87 @@ export function ArtifactStudio({
     [artifact._id, onDirtyChange],
   );
 
+  const contextRegistration = useMemo(() => {
+    if (!isArtifactTypeKey(artifact.blueprintKey)) return null;
+    const definition = getWorkDefinition(artifact.blueprintKey);
+    const summary =
+      artifact.summary?.trim() ||
+      `${definition.userFacingName} named ${artifact.title}`;
+    return {
+      id: `work:${artifact._id}:root`,
+      anchor: {
+        workId: artifact._id,
+        workType: artifact.blueprintKey,
+        kind: "work:root",
+        path: ["work", "root"],
+        stableIds: { workId: artifact._id },
+        fallbackExcerpt: summary.slice(0, 240),
+        schemaVersion: definition.model.schemaVersion,
+      },
+      label: artifact.title,
+      type: `${definition.userFacingName} root`,
+      workspaceId: artifact.placements?.[0]?.workspaceId,
+      permissions: "allowed" as const,
+      contextSummary: async () => ({
+        title: artifact.title,
+        text: summary,
+        provenance: [`work:${artifact._id}`],
+      }),
+    };
+  }, [
+    artifact._id,
+    artifact.blueprintKey,
+    artifact.placements,
+    artifact.summary,
+    artifact.title,
+  ]);
+
+  useEffect(
+    () =>
+      spectraBus.handle("work.revealAnchor", ({ anchor, focus }) => {
+        if (anchor.workId !== artifact._id) return;
+        const host = contextSourceRegistry
+          .get(`work:${artifact._id}:root`)
+          ?.element?.();
+        if (!host) return;
+        const regionId =
+          anchor.stableIds?.regionId ??
+          (anchor.path[0] === "region" ? anchor.path.at(-1) : undefined);
+        const revealed =
+          anchor.kind === "work:root"
+            ? false
+            : revealTarget(host, {
+                artifactId: artifact._id,
+                path: `/${anchor.path.join("/")}`,
+                primitive: "richtext",
+                ...(regionId ? { regionId } : {}),
+              });
+        if (!revealed)
+          host.scrollIntoView({
+            block: "center",
+            inline: "nearest",
+            behavior: "smooth",
+          });
+        if (focus) {
+          // One restrained target pulse on the revealed control itself —
+          // attention lands where the comment points, then settles.
+          const pulseHost =
+            (resolveTargetElement(host, {
+              artifactId: artifact._id,
+              path: `/${anchor.path.join("/")}`,
+              primitive: "richtext",
+              ...(regionId ? { regionId } : {}),
+            })?.element as HTMLElement | null) ?? host;
+          pulseHost.dataset.anchorFocus = "true";
+          window.setTimeout(() => {
+            if (pulseHost.dataset.anchorFocus === "true")
+              delete pulseHost.dataset.anchorFocus;
+          }, 1_200);
+        }
+      }),
+    [artifact._id],
+  );
+
   const threadId =
     artifact.blueprintKey === "thread_reference" &&
     typeof record(artifact.content).threadId === "string"
@@ -3378,8 +3193,8 @@ export function ArtifactStudio({
               <div className="truncate font-display text-[20px] font-semibold text-[var(--text-primary)]">
                 {artifact.title}
               </div>
-              <div className="mt-0.5 text-[10px] uppercase tracking-[0.11em] text-[var(--text-tertiary)]">
-                Conversation · {sourceLabel}
+              <div className="mt-0.5 text-micro uppercase tracking-[0.11em] text-[var(--text-tertiary)]">
+                Conversation Â· {sourceLabel}
               </div>
             </div>
           </div>
@@ -3457,10 +3272,21 @@ export function ArtifactStudio({
       </div>
     );
 
+  const contextualBody = contextRegistration ? (
+    <ContextSourceBoundary
+      registration={contextRegistration}
+      className="h-full min-h-0"
+    >
+      {body}
+    </ContextSourceBoundary>
+  ) : (
+    body
+  );
+
   if (mode === "tab") {
     return (
       <section className="min-w-0 flex-1 border-l border-[var(--border-default)]">
-        {body}
+        {contextualBody}
       </section>
     );
   }
@@ -3473,7 +3299,7 @@ export function ArtifactStudio({
       cssWidthVariable="--spectra-studio-width"
       minWidth={560}
     >
-      {body}
+      {contextualBody}
     </StudioSplitShell>
   );
 }
@@ -3916,6 +3742,8 @@ function ArtifactStudioEditor({
   const [historyOpen, setHistoryOpen] = useState(false);
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [activeCommentRegionId, setActiveCommentRegionId] = useState<string>();
+  const [commentRelativePosition, setCommentRelativePosition] =
+    useState<Uint8Array>();
   const [embedsOpen, setEmbedsOpen] = useState(false);
   const detailsEligible =
     artifact.blueprintKey !== "planner_task" &&
@@ -4380,7 +4208,7 @@ function ArtifactStudioEditor({
   const catchUpActive = joinLateArrival.active;
   // Pending creates often attach an empty aiPreview / aiEffects shell for
   // progress chrome before any concrete changedPaths arrive. Do not let that
-  // empty shell suppress the create fallback — otherwise mid-open whiteboard
+  // empty shell suppress the create fallback â€” otherwise mid-open whiteboard
   // (and peers) show rich content with 0 `data-ai-region` attributes.
   // Focused updates stay visually quiet until an exact region arrives. A
   // whole-artifact fallback reads as a refresh and obscures the real edit.
@@ -4544,7 +4372,7 @@ function ArtifactStudioEditor({
     if (semanticInteractionTargetPaths.length > 0)
       return semanticInteractionTargetPaths;
     if (activeAiCollaborator?.interactionState) return [];
-    // During live streaming, light only the active region — completed fields
+    // During live streaming, light only the active region â€” completed fields
     // stay visible via content patches without stacking blue traces on every
     // previously touched control.
     if (activeAiCollaborator?.previewPhase === "streaming") {
@@ -4795,6 +4623,73 @@ function ArtifactStudioEditor({
     return () => window.clearTimeout(timer);
   }, [followAi.following, aiInteractionState, artifact._id]);
 
+  /* ---------------------------------------------------------------- *
+   * Follow collaborator / presenter (generalized spectator mode)
+   * ---------------------------------------------------------------- */
+
+  const followState = useFollow();
+  const followedClientId =
+    followState.target && followState.target.kind !== "ai"
+      ? followState.target.clientId
+      : null;
+
+  /** The followed person's own frame, when they are in this artifact. */
+  const followedInteractionState = useMemo(
+    () =>
+      followedClientId
+        ? (remoteInteractionStates.find(
+            (state) => state.actor.clientId === followedClientId,
+          ) ?? null)
+        : null,
+    [followedClientId, remoteInteractionStates],
+  );
+
+  // Publish the followed actor's location and keep their working target on
+  // screen — the same contract as Follow AI, without touching focus.
+  const lastFollowRevealRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!followedClientId) {
+      lastFollowRevealRef.current = null;
+      return;
+    }
+    const state = followedInteractionState;
+    if (!state?.target) return;
+    const followTarget = state.target;
+    noteFollowLocation({
+      clientId: followedClientId,
+      artifactId: artifact._id,
+      path: followTarget.path,
+      note: describeState(state),
+    });
+    if (lastFollowRevealRef.current === followTarget.path) return;
+    lastFollowRevealRef.current = followTarget.path;
+    const timer = window.setTimeout(() => {
+      const surface = presenceSurfaceRef.current;
+      if (surface) revealTarget(surface, followTarget);
+    }, 120);
+    return () => window.clearTimeout(timer);
+  }, [followedClientId, followedInteractionState, artifact._id]);
+
+  // Local input always wins: the first gesture ends spectating immediately
+  // and leaves the "Return to …" affordance offered by the header cluster.
+  useEffect(() => {
+    if (!followedClientId) return;
+    const surface = presenceSurfaceRef.current;
+    if (!surface) return;
+    const disengage = () => disengageFollow("user_input");
+    surface.addEventListener("pointerdown", disengage, true);
+    surface.addEventListener("keydown", disengage, true);
+    surface.addEventListener("wheel", disengage, {
+      capture: true,
+      passive: true,
+    });
+    return () => {
+      surface.removeEventListener("pointerdown", disengage, true);
+      surface.removeEventListener("keydown", disengage, true);
+      surface.removeEventListener("wheel", disengage, true);
+    };
+  }, [followedClientId]);
+
   useInteractionPresence({
     artifactId: artifact._id,
     typeKey: artifact.blueprintKey as ArtifactTypeKey,
@@ -5015,7 +4910,7 @@ function ArtifactStudioEditor({
     // Any direct input returns control of the viewport to the user instantly.
     disengageFollowAi();
   }, []);
-  // Never steal the peer's viewport for AI edits — they may be reading or
+  // Never steal the peer's viewport for AI edits â€” they may be reading or
   // typing elsewhere. Cyan ink and the AI caret are the only locators.
   const handlePresencePointerMove = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
@@ -5032,7 +4927,7 @@ function ArtifactStudioEditor({
           active.tagName === "SELECT")
       ) {
         // While typing/focusing a control, never overwrite the caret with a
-        // hover pointer — peers should only see the action cursor.
+        // hover pointer â€” peers should only see the action cursor.
         return;
       }
       const anchor = resolvePresenceAnchorFromPoint(
@@ -5098,6 +4993,10 @@ function ArtifactStudioEditor({
         Number.isFinite(detail.caretOffset)
           ? Math.max(0, Math.floor(detail.caretOffset))
           : (detail.ranges?.[0]?.startOffset ?? 0);
+      if (detail.relative)
+        setCommentRelativePosition(
+          encodeDocumentRelativeSelection(detail.relative),
+        );
       live.transport?.setPresence({
         actorKind: "human",
         selection: {
@@ -5107,6 +5006,7 @@ function ArtifactStudioEditor({
             ? { text: detail.text.slice(0, 280) }
             : {}),
           ranges: Array.isArray(detail.ranges) ? detail.ranges : [],
+          ...(detail.relative ? { relative: detail.relative } : {}),
         },
         interaction: {
           kind: collapsed ? "typing" : "selecting",
@@ -5586,9 +5486,9 @@ function ArtifactStudioEditor({
     setDismissedRemoteKey(null);
   }
 
-  // Planner tasks already provide the purpose-built schedule/links sidebar
-  // shown in their source-of-truth layout. Nesting the generic artifact
-  // details rail beside it creates an unusable three-column editor.
+  // Plans provide their own List/Board/Timeline surface with a task detail
+  // panel; nesting the generic details rail beside it creates an unusable
+  // three-column editor.
   const showDetails =
     detailsOpen && !compact && artifact.blueprintKey !== "planner_task";
   const contentMode = compact ? ("split" as const) : mode;
@@ -5618,10 +5518,11 @@ function ArtifactStudioEditor({
       };
     });
     return [
-      { regionId: "metadata:title", label: "Artifact title", kind: "metadata" },
+      { regionId: "work:root", label: "General comment", kind: "root" },
+      { regionId: "metadata:title", label: "Work title", kind: "metadata" },
       {
         regionId: "metadata:summary",
-        label: "Artifact summary",
+        label: "Work summary",
         kind: "metadata",
       },
       ...semantic,
@@ -5649,7 +5550,7 @@ function ArtifactStudioEditor({
                 ? "Needs attention"
                 : "Live"
         : syncBusy || dirty
-          ? "Saving…"
+          ? "Savingâ€¦"
           : "Saved";
   const visibleIdentityTags = tagDraft
     .split(",")
@@ -5724,7 +5625,7 @@ function ArtifactStudioEditor({
                 }}
                 aria-label="Expand summary"
               >
-                …
+                â€¦
               </button>
             ) : null}
           </div>
@@ -5734,7 +5635,7 @@ function ArtifactStudioEditor({
             {visibleIdentityTags.map((tag) => (
               <span
                 key={tag}
-                className="rounded-[6px] bg-[#eaf8f2] px-2 py-1 text-[10px] font-medium text-[#27836a]"
+                className="rounded-[6px] bg-[#eaf8f2] px-2 py-1 text-micro font-medium text-[#27836a]"
               >
                 {tag}
               </span>
@@ -5856,7 +5757,7 @@ function ArtifactStudioEditor({
               )}
               {syncLabel}
               {isCollaborativeArtifact && collaboratorCount > 0
-                ? ` · ${collaboratorCount} here`
+                ? ` Â· ${collaboratorCount} here`
                 : ""}
             </span>
             {isCollaborativeArtifact || collaboratorCount > 0 ? (
@@ -5939,7 +5840,7 @@ function ArtifactStudioEditor({
               icon={MessageSquare}
             />
             <IconButton
-              label="Embedded artifacts"
+              label="References"
               onClick={() => setEmbedsOpen(true)}
               icon={Link2}
             />
@@ -5988,13 +5889,13 @@ function ArtifactStudioEditor({
       </header>
       {readOnly && !livePermissionLost ? (
         <div className="shrink-0 border-y border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-5 py-2 text-[11px] text-[var(--text-secondary)]">
-          Read-only access{accessExplanation ? ` · ${accessExplanation}` : ""} ·
-          You can inspect, comment, and place this artifact, but only a
+          Read-only access{accessExplanation ? ` Â· ${accessExplanation}` : ""}{" "}
+          Â· You can inspect, comment, and place this artifact, but only a
           collaborator with modify access can change it.
         </div>
       ) : accessExplanation ? (
         <div className="shrink-0 border-y border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-5 py-2 text-[11px] text-[var(--text-secondary)]">
-          {accessExplanation} · You can modify this artifact.
+          {accessExplanation} Â· You can modify this artifact.
         </div>
       ) : null}
       {livePermissionLost ? (
@@ -6026,21 +5927,21 @@ function ArtifactStudioEditor({
           >
             <span className="min-w-0 flex-1">
               {liveConflict.message}
-              {liveConflictLabel ? ` · ${liveConflictLabel}` : ""}
+              {liveConflictLabel ? ` Â· ${liveConflictLabel}` : ""}
               {liveConflict.queuePosition
-                ? ` · Waiting ${liveConflict.queuePosition === 1 ? "next" : `at position ${liveConflict.queuePosition}`}`
+                ? ` Â· Waiting ${liveConflict.queuePosition === 1 ? "next" : `at position ${liveConflict.queuePosition}`}`
                 : ""}
             </span>
             <button
               type="button"
-              className="shrink-0 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 py-1 text-[10px] font-medium"
+              className="shrink-0 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 py-1 text-micro font-medium"
               onClick={() => void synchronizeDraft(currentSnapshotRef.current)}
             >
               Retry
             </button>
             <button
               type="button"
-              className="shrink-0 rounded-[6px] px-2 py-1 text-[10px] font-medium text-[var(--text-tertiary)]"
+              className="shrink-0 rounded-[6px] px-2 py-1 text-micro font-medium text-[var(--text-tertiary)]"
               onClick={() => void discardQueuedDraft()}
             >
               Use latest
@@ -6118,7 +6019,13 @@ function ArtifactStudioEditor({
                 onChange={editorChange}
                 aiChangedPaths={highlightPaths}
                 readOnly={readOnly}
+                collaborationDocument={
+                  live.modelSnapshot.initialized
+                    ? live.transport?.document
+                    : undefined
+                }
                 header={null}
+                mode={contentMode}
               />
             ) : null}
             {artifact.blueprintKey === "flashcard_deck" ? (
@@ -6146,20 +6053,14 @@ function ArtifactStudioEditor({
               />
             ) : null}
             {artifact.blueprintKey === "planner_task" ? (
-              <PlannerStudio
-                key={`${artifact._id}:planner`}
+              <PlanStudio
+                key={`${artifact._id}:plan`}
                 mode={contentMode}
-                artifact={artifact}
-                artifacts={artifacts}
-                tagDraft={tagDraft}
-                onTagDraftChange={(value) => changeBase({ tagDraft: value })}
+                title={title}
                 content={editorContent}
                 onChange={editorChange}
-                aiChangedPaths={highlightPaths}
-                onArchive={onArchive}
-                onOpenArtifact={onOpenArtifact}
                 readOnly={readOnly}
-                onActiveRegionChange={handleActiveRegionChange}
+                onOpenArtifact={onOpenArtifact}
               />
             ) : null}
             {artifact.blueprintKey === "sheets" ? (
@@ -6170,6 +6071,7 @@ function ArtifactStudioEditor({
                 onChange={editorChange}
                 aiChangedPaths={highlightPaths}
                 readOnly={readOnly}
+                mode={contentMode}
                 synchronizationReady={isSyncReady(syncLabel)}
                 syncMessage={artifactSyncMessage}
                 onActiveRegionChange={handleActiveRegionChange}
@@ -6185,6 +6087,11 @@ function ArtifactStudioEditor({
                 onChange={editorChange}
                 aiChangedPaths={highlightPaths}
                 readOnly={readOnly}
+                collaborationDocument={
+                  live.modelSnapshot.initialized
+                    ? live.transport?.document
+                    : undefined
+                }
                 synchronizationReady={isSyncReady(syncLabel)}
                 syncMessage={artifactSyncMessage}
                 onActiveRegionChange={handleActiveRegionChange}
@@ -6233,7 +6140,7 @@ function ArtifactStudioEditor({
               />
             ) : null}
             {artifact.blueprintKey === "agent" ? (
-              <AgentStudio
+              <AgentFoundry
                 key={`${artifact._id}:agent`}
                 artifactId={artifact._id}
                 artifactTitle={title || artifact.title}
@@ -6281,6 +6188,7 @@ function ArtifactStudioEditor({
         regions={commentRegions}
         preferredRegionId={activeCommentRegionId}
         currentAccountId={currentAccountId}
+        relativePosition={commentRelativePosition}
         onClose={() => setCommentsOpen(false)}
       />
       <ArtifactEmbedsPanel
@@ -6349,199 +6257,6 @@ async function artifactBlobSha256(blob: Blob) {
   return Array.from(new Uint8Array(digest))
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
-}
-
-function plannerAssetMediaType(file: File) {
-  if (file.type) return file.type.toLowerCase();
-  const extension = file.name.split(".").pop()?.toLowerCase();
-  return (
-    {
-      pdf: "application/pdf",
-      txt: "text/plain",
-      md: "text/markdown",
-      csv: "text/csv",
-      tsv: "text/tab-separated-values",
-      json: "application/json",
-      docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-      xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-      odt: "application/vnd.oasis.opendocument.text",
-      ods: "application/vnd.oasis.opendocument.spreadsheet",
-      odp: "application/vnd.oasis.opendocument.presentation",
-    } as Record<string, string>
-  )[extension ?? ""];
-}
-
-function plannerBytesLabel(bytes: number) {
-  if (bytes >= 1_000_000)
-    return `${(bytes / 1_000_000).toFixed(bytes >= 10_000_000 ? 0 : 1)} MB`;
-  if (bytes >= 1_000) return `${Math.round(bytes / 1_000)} KB`;
-  return `${bytes} B`;
-}
-
-function escapePlannerIcs(value: string) {
-  return value
-    .replaceAll("\\", "\\\\")
-    .replaceAll("\n", "\\n")
-    .replaceAll(",", "\\,")
-    .replaceAll(";", "\\;");
-}
-
-function plannerIcsDate(timestamp: number, allDay = false) {
-  const value = new Date(timestamp).toISOString();
-  return allDay
-    ? value.slice(0, 10).replaceAll("-", "")
-    : value.replaceAll("-", "").replaceAll(":", "").replace(".000", "");
-}
-
-function plannerRecurrenceRrule(recurrence: PlannerRecurrence) {
-  if (recurrence.frequency === "none") return undefined;
-  const weekdays = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"];
-  return [
-    `FREQ=${recurrence.frequency.toUpperCase()}`,
-    `INTERVAL=${recurrence.interval}`,
-    recurrence.frequency === "weekly" && recurrence.weekdays.length
-      ? `BYDAY=${recurrence.weekdays.map((day) => weekdays[day]).join(",")}`
-      : "",
-    recurrence.untilAt ? `UNTIL=${plannerIcsDate(recurrence.untilAt)}` : "",
-  ]
-    .filter(Boolean)
-    .join(";");
-}
-
-function exportPlannerTaskIcs(task: PlannerTask, fallbackTitle: string) {
-  const start = task.startAt ?? task.dueAt ?? Date.now();
-  const due = task.dueAt ?? task.endAt ?? start;
-  const lines = [
-    "BEGIN:VCALENDAR",
-    "VERSION:2.0",
-    "PRODID:-//Spectra//Planner//EN",
-    "BEGIN:VTODO",
-    `UID:${escapePlannerIcs(task.source?.externalId || `spectra-${start}`)}@spectra`,
-    `DTSTAMP:${plannerIcsDate(Date.now())}`,
-    `SUMMARY:${escapePlannerIcs(task.taskTitle || fallbackTitle)}`,
-    `STATUS:${task.status === "done" ? "COMPLETED" : task.status === "doing" ? "IN-PROCESS" : "NEEDS-ACTION"}`,
-    `PRIORITY:${task.priority === "high" ? "1" : task.priority === "low" ? "9" : "5"}`,
-  ];
-  if (task.description)
-    lines.push(
-      `DESCRIPTION:${escapePlannerIcs(plannerDescriptionText(task.description))}`,
-    );
-  if (task.startAt)
-    lines.push(
-      `DTSTART${task.allDay ? ";VALUE=DATE" : ""}:${plannerIcsDate(task.startAt, task.allDay)}`,
-    );
-  if (task.dueAt)
-    lines.push(
-      `DUE${task.allDay ? ";VALUE=DATE" : ""}:${plannerIcsDate(due, task.allDay)}`,
-    );
-  const rrule = plannerRecurrenceRrule(task.recurrence);
-  if (rrule) lines.push(`RRULE:${rrule}`);
-  task.reminders
-    .filter((reminder) => reminder.enabled)
-    .forEach((reminder) =>
-      lines.push(
-        "BEGIN:VALARM",
-        `TRIGGER:-PT${reminder.minutesBefore}M`,
-        "ACTION:DISPLAY",
-        `DESCRIPTION:${escapePlannerIcs(task.taskTitle || fallbackTitle)}`,
-        "END:VALARM",
-      ),
-    );
-  lines.push("END:VTODO", "END:VCALENDAR");
-  return lines.join("\r\n");
-}
-
-function plannerCsvValue(value: unknown) {
-  const text = value == null ? "" : String(value);
-  return /[",\r\n\t]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
-}
-
-function plannerDelimitedRows(source: string, delimiter: "," | "\t") {
-  const rows: string[][] = [];
-  let row: string[] = [];
-  let cell = "";
-  let quoted = false;
-  for (let index = 0; index < source.length; index += 1) {
-    const character = source[index]!;
-    if (character === '"') {
-      if (quoted && source[index + 1] === '"') {
-        cell += '"';
-        index += 1;
-      } else quoted = !quoted;
-    } else if (character === delimiter && !quoted) {
-      row.push(cell);
-      cell = "";
-    } else if ((character === "\n" || character === "\r") && !quoted) {
-      if (character === "\r" && source[index + 1] === "\n") index += 1;
-      row.push(cell);
-      if (row.some((value) => value.trim())) rows.push(row);
-      row = [];
-      cell = "";
-    } else cell += character;
-  }
-  row.push(cell);
-  if (row.some((value) => value.trim())) rows.push(row);
-  if (quoted) throw new Error("The delimited file has an unclosed quote.");
-  return rows;
-}
-
-function parsePlannerIcsDate(value: string) {
-  const clean = value.trim();
-  if (/^\d{8}$/.test(clean))
-    return new Date(
-      `${clean.slice(0, 4)}-${clean.slice(4, 6)}-${clean.slice(6, 8)}T00:00:00`,
-    ).getTime();
-  const match = clean.match(
-    /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(Z?)$/,
-  );
-  if (!match) return new Date(clean).getTime();
-  const [, year, month, day, hour, minute, second, utc] = match;
-  return new Date(
-    `${year}-${month}-${day}T${hour}:${minute}:${second}${utc || ""}`,
-  ).getTime();
-}
-
-function parsePlannerRrule(value: string): PlannerRecurrence {
-  const pairs = new Map(
-    value.split(";").map((part) => {
-      const [key, ...rest] = part.split("=");
-      return [key?.toUpperCase() ?? "", rest.join("=")];
-    }),
-  );
-  const frequencyValue = pairs.get("FREQ")?.toLowerCase();
-  const frequency =
-    frequencyValue === "daily" ||
-    frequencyValue === "weekly" ||
-    frequencyValue === "monthly" ||
-    frequencyValue === "yearly"
-      ? frequencyValue
-      : "none";
-  const weekdayMap: Record<string, number> = {
-    SU: 0,
-    MO: 1,
-    TU: 2,
-    WE: 3,
-    TH: 4,
-    FR: 5,
-    SA: 6,
-  };
-  const interval = Number(pairs.get("INTERVAL") || 1);
-  const untilAt = pairs.get("UNTIL")
-    ? parsePlannerIcsDate(pairs.get("UNTIL")!)
-    : undefined;
-  return {
-    frequency,
-    interval: Number.isFinite(interval)
-      ? Math.max(1, Math.min(365, Math.round(interval)))
-      : 1,
-    weekdays: (pairs.get("BYDAY") ?? "")
-      .split(",")
-      .map((day) => weekdayMap[day])
-      .filter((day): day is number => typeof day === "number"),
-    ...(untilAt && Number.isFinite(untilAt) ? { untilAt } : {}),
-    exceptions: [],
-  };
 }
 
 function sanitizeDocumentHtml(source: string) {
@@ -6660,6 +6375,15 @@ function documentMarkdown(json: JSONContent) {
   return render(json).trim();
 }
 
+type DocumentMode = "write" | "read" | "review" | "focus";
+
+const DOCUMENT_MODE_LABELS: Record<DocumentMode, string> = {
+  write: "Write",
+  read: "Read",
+  review: "Review",
+  focus: "Focus",
+};
+
 function DocumentStudio({
   artifactId,
   title,
@@ -6667,7 +6391,9 @@ function DocumentStudio({
   onChange,
   aiChangedPaths = [],
   readOnly = false,
+  collaborationDocument,
   header,
+  mode = "tab",
 }: {
   artifactId: string;
   title: string;
@@ -6675,8 +6401,11 @@ function DocumentStudio({
   onChange: (content: unknown) => void;
   aiChangedPaths?: string[];
   readOnly?: boolean;
+  collaborationDocument?: Y.Doc;
   header: ReactNode;
+  mode?: "split" | "tab";
 }) {
+  const { preferences } = useSpectraPreferences();
   const [initialContent] = useState(() =>
     documentJsonFromContent(content, title),
   );
@@ -6688,9 +6417,26 @@ function DocumentStudio({
   const [outlineOpen, setOutlineOpen] = useState(false);
   const [findOpen, setFindOpen] = useState(false);
   const [findDraft, setFindDraft] = useState("");
+  const [findOptions, setFindOptions] = useState<FindOptions>({});
+  const [sourcesOpen, setSourcesOpen] = useState(false);
   const [replaceDraft, setReplaceDraft] = useState("");
   const [findCursor, setFindCursor] = useState(0);
-  const [focusMode, setFocusMode] = useState(false);
+  /**
+   * The four ways of being in a document (Â§11A). Write is authoring, Read is
+   * the document as a reader meets it, Review is reading with the apparatus â€”
+   * outline, sources, comments â€” in view, and Focus is the text and nothing
+   * else. A reader who cannot edit is never offered Write, and a side panel
+   * opens on Read: a third of the width is a poor place to write.
+   */
+  const [docMode, setDocMode] = useState<DocumentMode>(
+    readOnly || mode === "split" ? "read" : "write",
+  );
+  const focusMode = docMode === "focus";
+  const documentModes: readonly DocumentMode[] = readOnly
+    ? ["read", "review"]
+    : mode === "split"
+      ? ["write", "read", "review"]
+      : ["write", "read", "review", "focus"];
   const [pageLayout, setPageLayout] = useState<"page" | "continuous">(
     "continuous",
   );
@@ -6706,115 +6452,218 @@ function DocumentStudio({
       if (event.key !== "Escape") return;
       event.preventDefault();
       event.stopPropagation();
-      setFocusMode(false);
+      setDocMode("write");
     }
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [focusMode]);
-  const editor = useEditor({
-    extensions: [
-      StarterKit.configure({
-        heading: { levels: [1, 2, 3] },
-        link: false,
-        underline: false,
-      }),
-      Underline,
-      TiptapLink.configure({ openOnClick: false, autolink: true }),
-      Table.configure({ resizable: true, lastColumnResizable: true }),
-      TableRow,
-      TableCell,
-      TableHeader,
-      TaskList,
-      TaskItem.configure({ nested: true }),
-      Image.configure({ allowBase64: true, inline: false }),
-      TextAlign.configure({ types: ["heading", "paragraph"] }),
-      Highlight.configure({ multicolor: true }),
-      Callout,
-      Equation,
-      InlineEquation,
-      DragHandle,
-      StableBlockId,
-      AiRegionDecoration,
-      Placeholder.configure({ placeholder: "Type / for commands" }),
-      SlashCommand.configure({
-        suggestion: {
-          char: "/",
-          startOfLine: false,
-          render: createSlashCommandRenderer,
-        },
-      }),
-      // TipTap packages resolve through mixed @tiptap/core versions in this
-      // workspace; cast keeps the editor API usable under production typecheck.
-    ] as never[],
-    content: initialContent,
-    editable: !readOnly,
-    immediatelyRender: false,
-    editorProps: {
-      attributes: {
-        class:
-          "min-h-[620px] px-2 pb-24 pt-2 outline-none font-serif text-[19px] leading-8 text-[var(--text-primary)]",
-      },
-    },
-    onUpdate: ({ editor }) => {
-      const nextJson = editor.getJSON();
-      editorJsonKeyRef.current = JSON.stringify(nextJson);
-      refreshToolbar((value) => value + 1);
-      // Extension normalization can emit an update during the editor's mount
-      // frame even when the user changed nothing. Treat that frame as editor
-      // hydration; genuine input begins immediately afterward.
-      if (!editorReadyForUserChanges.current || readOnly) return;
-      onChange(documentContentFromJson(nextJson, content));
-    },
-    onSelectionUpdate: ({ editor }) => {
-      refreshToolbar((value) => value + 1);
-      const { from, to, empty } = editor.state.selection;
-      const ranges: Array<{
-        blockId: string;
-        startOffset: number;
-        endOffset: number;
-      }> = [];
-      let primaryBlockId: string | undefined;
-      let caretOffset = 0;
-      editor.state.doc.nodesBetween(from, Math.max(from, to), (node, pos) => {
-        if (typeof node.attrs?.blockId !== "string" || !node.attrs.blockId)
-          return;
-        const blockStart = pos + 1;
-        const blockEnd = pos + node.nodeSize - 1;
-        const startOffset = Math.max(0, Math.min(from, to) - blockStart);
-        const endOffset = Math.max(
-          startOffset,
-          Math.min(blockEnd, Math.max(from, to)) - blockStart,
-        );
-        if (!primaryBlockId) {
-          primaryBlockId = node.attrs.blockId;
-          caretOffset = startOffset;
-        }
-        ranges.push({
-          blockId: node.attrs.blockId,
-          startOffset,
-          endOffset,
-        });
-      });
-      const text = empty ? "" : editor.state.doc.textBetween(from, to, "\n");
-      editor.view.dom.dispatchEvent(
-        new CustomEvent("spectra-presence-selection", {
-          bubbles: true,
-          detail: {
-            kind: "text",
-            collapsed: empty,
-            ...(text ? { text: text.slice(0, 280) } : {}),
-            ranges,
-            caretOffset,
-            primaryBlockId,
-          },
-        }),
-      );
-    },
-  });
 
   useEffect(() => {
-    editor?.setEditable(!readOnly);
-  }, [editor, readOnly]);
+    // Losing edit access mid-session drops the surface to Read rather than
+    // leaving a writing UI that no longer writes.
+    if (readOnly)
+      setDocMode((current) => (current === "review" ? current : "read"));
+  }, [readOnly]);
+  const editor = useEditor(
+    {
+      extensions: [
+        StarterKit.configure({
+          heading: { levels: [1, 2, 3] },
+          link: false,
+          underline: false,
+          undoRedo: collaborationDocument ? false : undefined,
+        }),
+        ...(collaborationDocument
+          ? [
+              Collaboration.configure({
+                fragment: collaborationDocument.getXmlFragment(
+                  "spectra:document-v2",
+                ),
+              }),
+            ]
+          : []),
+        Underline,
+        TiptapLink.configure({ openOnClick: false, autolink: true }),
+        Table.configure({ resizable: true, lastColumnResizable: true }),
+        TableRow,
+        TableCell,
+        TableHeader,
+        TaskList,
+        TaskItem.configure({ nested: true }),
+        Image.configure({ allowBase64: true, inline: false }),
+        TextAlign.configure({ types: ["heading", "paragraph"] }),
+        Highlight.configure({ multicolor: true }),
+        Callout,
+        Equation,
+        InlineEquation,
+        SpectraReferenceNode,
+        SpectraCitationNode,
+        DragHandle,
+        StableBlockId,
+        AiRegionDecoration,
+        SpectraTiptapAutocomplete.configure({
+          enabled:
+            preferences.writing.smartCompletion &&
+            preferences.writing.longFormSuggestions &&
+            !readOnly,
+          delayMs: preferences.writing.delayMs,
+        }),
+        Placeholder.configure({ placeholder: "Type / for commands" }),
+        SlashCommand.configure({
+          suggestion: {
+            char: "/",
+            startOfLine: false,
+            render: createSlashCommandRenderer,
+          },
+        }),
+        // TipTap packages resolve through mixed @tiptap/core versions in this
+        // workspace; cast keeps the editor API usable under production typecheck.
+      ] as never[],
+      content: collaborationDocument ? undefined : initialContent,
+      editable: !readOnly,
+      immediatelyRender: false,
+      editorProps: {
+        attributes: {
+          "data-work-id": artifactId,
+          class:
+            "min-h-[620px] px-2 pb-24 pt-2 outline-none font-serif text-[19px] leading-8 text-[var(--text-primary)]",
+        },
+        handlePaste: (view, event) => {
+          const target = parseSpectraWorkUrl(
+            event.clipboardData?.getData("text/plain") ?? "",
+          );
+          const nodeType = view.state.schema.nodes.spectraReference;
+          if (!target || !nodeType) return false;
+          const node = nodeType.create({
+            id: uniqueToken(),
+            workId: target.workId,
+            anchor: target.fragment
+              ? { kind: "fragment", path: [target.fragment], schemaVersion: 1 }
+              : null,
+            state: "collapsed",
+            versionPolicy: "live",
+            label: "Referenced work",
+          });
+          view.dispatch(
+            view.state.tr.replaceSelectionWith(node).scrollIntoView(),
+          );
+          return true;
+        },
+      },
+      onUpdate: ({ editor }) => {
+        const nextJson = editor.getJSON();
+        editorJsonKeyRef.current = JSON.stringify(nextJson);
+        refreshToolbar((value) => value + 1);
+        // Extension normalization can emit an update during the editor's mount
+        // frame even when the user changed nothing. Treat that frame as editor
+        // hydration; genuine input begins immediately afterward.
+        if (
+          !editorReadyForUserChanges.current ||
+          readOnly ||
+          collaborationDocument
+        )
+          return;
+        // Native collaboration already committed this transaction directly to
+        // the bound XmlFragment. Mirroring it through React/onChange would turn
+        // each keystroke back into a full projected document replacement.
+        onChange(documentContentFromJson(nextJson, content));
+      },
+      onSelectionUpdate: ({ editor }) => {
+        refreshToolbar((value) => value + 1);
+        const { from, to, empty } = editor.state.selection;
+        const ranges: Array<{
+          blockId: string;
+          startOffset: number;
+          endOffset: number;
+        }> = [];
+        let primaryBlockId: string | undefined;
+        let caretOffset = 0;
+        editor.state.doc.nodesBetween(from, Math.max(from, to), (node, pos) => {
+          if (typeof node.attrs?.blockId !== "string" || !node.attrs.blockId)
+            return;
+          const blockStart = pos + 1;
+          const blockEnd = pos + node.nodeSize - 1;
+          const startOffset = Math.max(0, Math.min(from, to) - blockStart);
+          const endOffset = Math.max(
+            startOffset,
+            Math.min(blockEnd, Math.max(from, to)) - blockStart,
+          );
+          if (!primaryBlockId) {
+            primaryBlockId = node.attrs.blockId;
+            caretOffset = startOffset;
+          }
+          ranges.push({
+            blockId: node.attrs.blockId,
+            startOffset,
+            endOffset,
+          });
+        });
+        const text = empty ? "" : editor.state.doc.textBetween(from, to, "\n");
+        const firstRange = ranges[0];
+        const relative =
+          collaborationDocument && firstRange
+            ? createDocumentRelativeSelection(
+                collaborationDocument,
+                firstRange.blockId,
+                firstRange.startOffset,
+                firstRange.endOffset,
+              )
+            : null;
+        editor.view.dom.dispatchEvent(
+          new CustomEvent("spectra-presence-selection", {
+            bubbles: true,
+            detail: {
+              kind: "text",
+              collapsed: empty,
+              ...(text ? { text: text.slice(0, 280) } : {}),
+              ranges,
+              ...(relative ? { relative } : {}),
+              caretOffset,
+              primaryBlockId,
+            },
+          }),
+        );
+      },
+    },
+    [collaborationDocument],
+  );
+
+  useEffect(
+    () =>
+      spectraBus.handle("reference.insert", ({ hostWorkId, target }) => {
+        if (hostWorkId !== artifactId || !editor || readOnly) return;
+        editor
+          .chain()
+          .focus()
+          .insertContent({
+            type: "spectraReference",
+            attrs: {
+              id: uniqueToken(),
+              workId: target.workId,
+              anchor: {
+                workId: target.workId,
+                workType: target.workType,
+                kind: target.kind,
+                path: [...target.path],
+                stableIds: target.stableIds,
+                fallbackExcerpt: target.fallbackExcerpt,
+                schemaVersion: target.schemaVersion,
+              },
+              state: "collapsed",
+              versionPolicy: "live",
+              label: target.fallbackExcerpt ?? "Referenced work",
+            },
+          })
+          .run();
+      }),
+    [artifactId, editor, readOnly],
+  );
+
+  useEffect(() => {
+    // Read is a mode, not a permission: it puts the document down without
+    // pretending the reader lost access to it.
+    editor?.setEditable(!readOnly && docMode !== "read");
+  }, [docMode, editor, readOnly]);
 
   useEffect(() => {
     if (!editor) return;
@@ -6858,7 +6707,7 @@ function DocumentStudio({
       if (/^\d+$/.test(raw)) return [{ index: Number(raw), line }];
       return [{ blockId: raw, line }];
     });
-    // Line-scoped paths must never also paint the whole block / whole doc —
+    // Line-scoped paths must never also paint the whole block / whole doc â€”
     // that is the mid-stream cyan wash that fails G-01/G-02 Excellent.
     const hasLineScope = lineTargets.length > 0;
     const target: AiRegionDecorationTarget | null = aiChangedPaths.length
@@ -6900,12 +6749,15 @@ function DocumentStudio({
     // and cancelling the preceding callback for every 112 ms presence beat can
     // starve TipTap indefinitely, leaving a peer on a provisional prefix.
     if (editor.isDestroyed) return;
-    if (contentChanged)
+    // Native Y.XmlFragment collaboration is already bound directly to the
+    // editor. Reapplying a projected JSON snapshot here would reset selection,
+    // corrupt IME composition, and turn a remote delta into a full replace.
+    if (contentChanged && !collaborationDocument)
       editor.commands.setContent(incomingEditorJson, { emitUpdate: false });
     editor.view.dispatch(
       editor.state.tr.setMeta(aiRegionDecorationKey, target),
     );
-  }, [aiChangedPaths, editor, incomingEditorJson]);
+  }, [aiChangedPaths, collaborationDocument, editor, incomingEditorJson]);
 
   const equationActive = editor?.isActive("equation") ?? false;
   const equationAttrs = equationActive
@@ -6917,39 +6769,114 @@ function DocumentStudio({
     ? editorText.trim().split(/\s+/).length
     : 0;
   const readingMinutes = Math.max(1, Math.ceil(wordCount / 220));
+  // Outline, find and the source navigator all read the live ProseMirror
+  // document rather than a JSON copy, so their positions are the editor's own
+  // and stay correct through collaborative edits (Â§11A).
   const outlineEntries = (() => {
-    const entries: Array<{ title: string; level: number; position: number }> =
-      [];
+    const entries: DocumentOutlineEntry[] = [];
+    const wordsAfter: number[] = [];
     editor?.state.doc.descendants((node, position) => {
-      if (node.type.name === "heading")
+      if (node.type.name === "heading") {
         entries.push({
-          title: node.textContent || "Untitled section",
+          title: node.textContent.trim() || "Untitled section",
           level: Number(node.attrs.level) || 2,
-          position: position + 1,
+          position,
+          ...(typeof node.attrs.blockId === "string"
+            ? { blockId: node.attrs.blockId }
+            : {}),
+          wordCount: 0,
         });
+        wordsAfter.push(0);
+        return false;
+      }
+      if (node.isText && node.text?.trim() && wordsAfter.length)
+        wordsAfter[wordsAfter.length - 1]! += node.text
+          .trim()
+          .split(/\s+/).length;
+      return true;
     });
-    return entries;
+    return entries.map((entry, index) => ({
+      ...entry,
+      wordCount: wordsAfter[index] ?? 0,
+    }));
   })();
+  const activeOutlineEntry = editor
+    ? outlineEntryAt(outlineEntries, editor.state.selection.from)
+    : undefined;
   const findMatches = (() => {
-    const matches: Array<{ from: number; to: number }> = [];
-    const query = findDraft.trim().toLocaleLowerCase();
+    const matches: DocumentMatch[] = [];
+    const query = findDraft.trim();
     if (!editor || !query) return matches;
+    const pattern = documentFindPattern(query, findOptions);
+    if (!pattern) return matches;
     editor.state.doc.descendants((node, position) => {
       if (!node.isText || !node.text) return;
-      const source = node.text.toLocaleLowerCase();
-      let cursor = 0;
-      while (cursor < source.length) {
-        const index = source.indexOf(query, cursor);
-        if (index < 0) break;
-        matches.push({
-          from: position + index,
-          to: position + index + query.length,
-        });
-        cursor = index + Math.max(1, query.length);
+      const text = node.text;
+      pattern.lastIndex = 0;
+      let match = pattern.exec(text);
+      while (match) {
+        if (match[0].length === 0) {
+          pattern.lastIndex += 1;
+        } else {
+          matches.push({
+            from: position + match.index,
+            to: position + match.index + match[0].length,
+            preview: text
+              .slice(
+                Math.max(0, match.index - 24),
+                Math.min(text.length, match.index + match[0].length + 24),
+              )
+              .trim(),
+          });
+        }
+        match = pattern.exec(text);
       }
     });
     return matches;
   })();
+  const documentCitationUses = (() => {
+    const uses: DocumentCitationUse[] = [];
+    editor?.state.doc.descendants((node, position) => {
+      if (node.type.name !== "spectraCitation") return;
+      const sourceId = node.attrs.sourceId;
+      if (typeof sourceId !== "string" || !sourceId) return;
+      const section = outlineEntryAt(outlineEntries, position)?.title;
+      uses.push({
+        citationId:
+          typeof node.attrs.id === "string" && node.attrs.id
+            ? node.attrs.id
+            : `citation:${position}`,
+        sourceId,
+        ...(typeof node.attrs.evidenceSpanId === "string" &&
+        node.attrs.evidenceSpanId
+          ? { evidenceSpanId: node.attrs.evidenceSpanId }
+          : {}),
+        label:
+          typeof node.attrs.label === "string" && node.attrs.label
+            ? node.attrs.label
+            : "Citation",
+        position,
+        ...(section ? { section } : {}),
+      });
+    });
+    return uses;
+  })();
+  const sourceNavigator = groupCitationUses(
+    documentCitationUses,
+    // Sources travel with the document, so the navigator reflects what this
+    // copy actually carries rather than what a side table happens to hold.
+    ((record(content).sources ?? []) as SourceRecord[]).filter(
+      (source) => source && typeof source.id === "string",
+    ),
+  );
+  const bibliographyStyle: BibliographyStyle =
+    record(content).bibliographyStyle === "author_date"
+      ? "author_date"
+      : "numeric";
+  const bibliography = bibliographyFromNavigator(
+    sourceNavigator,
+    bibliographyStyle,
+  );
 
   function selectFindMatch(direction = 1) {
     if (!editor || !findMatches.length) return;
@@ -6960,23 +6887,62 @@ function DocumentStudio({
     editor.chain().focus().setTextSelection(match).scrollIntoView().run();
   }
 
+  /**
+   * Replaces every match as ranged edits in one transaction, working backwards
+   * so earlier positions stay valid. A full `setContent` would rewrite the whole
+   * document and clobber a collaborator mid-sentence (Â§11A).
+   */
   function replaceAllMatches() {
-    if (!editor || !findDraft || readOnly) return;
-    const expression = new RegExp(
-      findDraft.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
-      "gi",
-    );
-    const transform = (node: JSONContent): JSONContent => ({
-      ...node,
-      ...(node.type === "text" && typeof node.text === "string"
-        ? { text: node.text.replace(expression, replaceDraft) }
-        : {}),
-      ...(Array.isArray(node.content)
-        ? { content: node.content.map(transform) }
-        : {}),
+    if (!editor || !findDraft || readOnly || !findMatches.length) return;
+    editorReadyForUserChanges.current = true;
+    const transaction = editor.state.tr;
+    for (const match of [...findMatches].reverse()) {
+      if (replaceDraft)
+        transaction.replaceWith(
+          match.from,
+          match.to,
+          editor.state.schema.text(replaceDraft),
+        );
+      else transaction.delete(match.from, match.to);
+    }
+    editor.view.dispatch(transaction);
+    setFindCursor(0);
+  }
+
+  /**
+   * Replaces the References section with one built from the citations in the
+   * text right now. It is regenerated rather than hand-edited, so it can never
+   * claim a source the document does not actually cite (Â§11A).
+   */
+  function insertBibliography() {
+    if (!editor || readOnly) return;
+    const block = bibliographyNode(bibliography);
+    const existing: { from: number; to: number }[] = [];
+    let inReferences = false;
+    editor.state.doc.forEach((node, offset) => {
+      if (node.type.name === "heading") {
+        inReferences = node.textContent.trim().toLowerCase() === "references";
+        if (inReferences)
+          existing.push({ from: offset, to: offset + node.nodeSize });
+        return;
+      }
+      if (inReferences)
+        existing.push({ from: offset, to: offset + node.nodeSize });
     });
     editorReadyForUserChanges.current = true;
-    editor.commands.setContent(transform(editor.getJSON()));
+    const chain = editor.chain().focus();
+    if (existing.length)
+      chain.deleteRange({
+        from: existing[0]!.from,
+        to: existing[existing.length - 1]!.to,
+      });
+    chain
+      .insertContentAt(
+        existing.length ? existing[0]!.from : editor.state.doc.content.size,
+        block.content ?? [],
+      )
+      .scrollIntoView()
+      .run();
   }
 
   function applyDocumentTemplate(kind: "notes" | "essay" | "lab") {
@@ -7304,11 +7270,68 @@ function DocumentStudio({
     <div
       className="spectra-document-studio bg-[var(--bg-primary)]"
       data-focus={focusMode || undefined}
+      data-doc-mode={docMode}
+      data-compact={mode === "split" || undefined}
       data-layout={pageLayout}
     >
       {!focusMode ? header : null}
       <div className="spectra-document-toolbar sticky top-0 z-30 mx-5 flex min-h-11 flex-wrap items-center gap-1 rounded-[8px] border border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_96%,transparent)] px-2 py-1.5 shadow-[0_8px_24px_-22px_rgba(27,20,12,.5)] backdrop-blur sm:mx-8">
-        <fieldset disabled={readOnly} className="contents">
+        <div
+          className="spectra-document-modes"
+          role="tablist"
+          aria-label="Document modes"
+        >
+          {documentModes.map((entry) => (
+            <button
+              key={entry}
+              type="button"
+              role="tab"
+              aria-selected={docMode === entry}
+              onClick={() => {
+                setDocMode(entry);
+                // Review is reading with the apparatus out. It opens what a
+                // reviewer needs rather than making them find it.
+                if (entry === "review") setSourcesOpen(true);
+                if (entry === "focus") {
+                  setOutlineOpen(false);
+                  setSourcesOpen(false);
+                  setFindOpen(false);
+                  setToolsOpen(false);
+                }
+              }}
+            >
+              {DOCUMENT_MODE_LABELS[entry]}
+            </button>
+          ))}
+        </div>
+        {docMode !== "write" ? (
+          <>
+            <Divider />
+            <ToolbarButton
+              label="Outline"
+              icon={FileText}
+              active={outlineOpen}
+              onClick={() => setOutlineOpen((open) => !open)}
+            />
+            <ToolbarButton
+              label="Find"
+              icon={Search}
+              active={findOpen}
+              onClick={() => setFindOpen((open) => !open)}
+            />
+            <ToolbarButton
+              label="Sources"
+              icon={BookOpen}
+              active={sourcesOpen}
+              onClick={() => setSourcesOpen((open) => !open)}
+            />
+          </>
+        ) : null}
+        {docMode === "write" ? <Divider /> : null}
+        <fieldset
+          disabled={readOnly || docMode !== "write"}
+          className={docMode === "write" ? "contents" : "hidden"}
+        >
           <select
             aria-label="Text style"
             value={
@@ -7490,21 +7513,25 @@ function DocumentStudio({
             if (file) void importDocument(file);
           }}
         />
-        <button
-          type="button"
-          onClick={() => importRef.current?.click()}
-          disabled={importing || readOnly}
-          className="inline-flex h-8 items-center gap-1.5 rounded-[6px] px-2.5 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-45"
-        >
-          {importing ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <Import className="h-3.5 w-3.5" />
-          )}
-          Import
-        </button>
+        {docMode === "write" ? (
+          <button
+            type="button"
+            onClick={() => importRef.current?.click()}
+            disabled={importing || readOnly}
+            className="inline-flex h-8 items-center gap-1.5 rounded-[6px] px-2.5 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-45"
+          >
+            {importing ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Import className="h-3.5 w-3.5" />
+            )}
+            Import
+          </button>
+        ) : null}
         <ToolbarButton
-          label="More formatting options"
+          label={
+            docMode === "write" ? "More formatting options" : "More options"
+          }
           icon={SlidersHorizontal}
           active={toolsOpen}
           onClick={() => setToolsOpen((open) => !open)}
@@ -7543,14 +7570,18 @@ function DocumentStudio({
             <button
               type="button"
               onClick={() => {
-                setFocusMode(!focusMode);
+                setSourcesOpen(!sourcesOpen);
                 setToolsOpen(false);
               }}
             >
-              <Focus className="h-4 w-4" />
+              <BookOpen className="h-4 w-4" />
               <span>
-                <strong>{focusMode ? "Exit focus mode" : "Focus mode"}</strong>
-                <small>Hide surrounding controls</small>
+                <strong>Sources</strong>
+                <small>
+                  {sourceNavigator.unresolved.length
+                    ? `${sourceNavigator.unresolved.length} citation${sourceNavigator.unresolved.length === 1 ? "" : "s"} to resolve`
+                    : `${sourceNavigator.entries.length} cited`}
+                </small>
               </span>
             </button>
           </section>
@@ -7735,10 +7766,44 @@ function DocumentStudio({
               {findMatches.length
                 ? `${Math.min(findCursor + 1, findMatches.length)} of ${findMatches.length}`
                 : findDraft
-                  ? "No matches"
+                  ? findOptions.regex &&
+                    !documentFindPattern(findDraft, findOptions)
+                    ? "Not a valid pattern"
+                    : "No matches"
                   : ""}
             </small>
           </label>
+          <div
+            className="spectra-document-find-options"
+            role="group"
+            aria-label="Match options"
+          >
+            {(
+              [
+                ["caseSensitive", "Aa", "Match case"],
+                ["wholeWord", "W", "Whole word"],
+                ["regex", ".*", "Regular expression"],
+              ] as const
+            ).map(([option, glyph, label]) => (
+              <button
+                key={option}
+                type="button"
+                aria-pressed={findOptions[option] === true}
+                data-active={findOptions[option] === true || undefined}
+                title={label}
+                aria-label={label}
+                onClick={() => {
+                  setFindOptions((current) => ({
+                    ...current,
+                    [option]: !current[option],
+                  }));
+                  setFindCursor(0);
+                }}
+              >
+                {glyph}
+              </button>
+            ))}
+          </div>
           <button
             type="button"
             disabled={!findMatches.length}
@@ -7930,18 +7995,23 @@ function DocumentStudio({
               <button
                 key={`${entry.position}:${index}`}
                 type="button"
+                data-current={
+                  activeOutlineEntry?.position === entry.position || undefined
+                }
                 style={{ paddingLeft: 11 + (entry.level - 1) * 12 }}
                 onClick={() =>
                   editor
                     ?.chain()
                     .focus()
-                    .setTextSelection(entry.position)
+                    // A heading's content starts one past the node itself.
+                    .setTextSelection(entry.position + 1)
                     .scrollIntoView()
                     .run()
                 }
               >
                 <span>{index + 1}</span>
                 <strong>{entry.title}</strong>
+                {entry.wordCount ? <em>{entry.wordCount}</em> : null}
               </button>
             ))}
             {!outlineEntries.length ? (
@@ -7949,22 +8019,99 @@ function DocumentStudio({
             ) : null}
           </aside>
         ) : null}
+        {sourcesOpen ? (
+          <aside className="spectra-document-sources spectra-panel-enter">
+            <header>
+              <strong>Sources</strong>
+              <button type="button" onClick={() => setSourcesOpen(false)}>
+                <X className="h-4 w-4" />
+              </button>
+            </header>
+            {sourceNavigator.unresolved.length ? (
+              <div className="spectra-document-sources-problem" role="alert">
+                <AlertCircle className="h-3.5 w-3.5" />
+                <p>
+                  {sourceNavigator.unresolved.length} citation
+                  {sourceNavigator.unresolved.length === 1 ? "" : "s"} point at
+                  a source this document does not carry. Attach the source or
+                  remove the citation.
+                </p>
+              </div>
+            ) : null}
+            {sourceNavigator.entries.map((entry, index) => (
+              <button
+                key={entry.source.id}
+                type="button"
+                onClick={() =>
+                  editor
+                    ?.chain()
+                    .focus()
+                    .setTextSelection(entry.uses[0]!.position)
+                    .scrollIntoView()
+                    .run()
+                }
+              >
+                <span>{bibliography[index]?.marker ?? `[${index + 1}]`}</span>
+                <strong>{entry.source.title || "Untitled source"}</strong>
+                <em>
+                  {entry.uses.length} citation
+                  {entry.uses.length === 1 ? "" : "s"}
+                  {entry.sections.length
+                    ? ` Â· ${entry.sections.slice(0, 2).join(", ")}`
+                    : ""}
+                </em>
+              </button>
+            ))}
+            {sourceNavigator.uncited.length ? (
+              <p className="spectra-document-sources-uncited">
+                {sourceNavigator.uncited.length} attached source
+                {sourceNavigator.uncited.length === 1 ? "" : "s"} nothing cites
+                yet.
+              </p>
+            ) : null}
+            {!sourceNavigator.entries.length &&
+            !sourceNavigator.unresolved.length ? (
+              <p>
+                Cite a source in the text and it appears here, with every place
+                it is used.
+              </p>
+            ) : null}
+            {readOnly ? null : (
+              <button
+                type="button"
+                className="spectra-document-sources-action"
+                onClick={insertBibliography}
+              >
+                <ListOrdered className="h-3.5 w-3.5" />
+                Insert references
+              </button>
+            )}
+          </aside>
+        ) : null}
         <main>
           {focusMode ? (
             <button
               type="button"
               className="spectra-document-exit-focus"
-              onClick={() => setFocusMode(false)}
+              onClick={() => setDocMode("write")}
             >
               <X className="h-3.5 w-3.5" /> Exit focus
             </button>
           ) : null}
           <div className="spectra-document-editor-hint">
             <span>
-              Type <kbd>/</kbd> for commands
+              {docMode === "read" ? (
+                "Reading"
+              ) : docMode === "review" ? (
+                `${sourceNavigator.entries.length} source${sourceNavigator.entries.length === 1 ? "" : "s"} cited`
+              ) : (
+                <>
+                  Type <kbd>/</kbd> for commands
+                </>
+              )}
             </span>
             <span>
-              {wordCount.toLocaleString()} words · {readingMinutes} min read
+              {wordCount.toLocaleString()} words Â· {readingMinutes} min read
             </span>
           </div>
           <EditorContent
@@ -7983,7 +8130,7 @@ function FlashcardStudio({
   content,
   onChange,
   aiChangedPaths = [],
-  readOnly: _readOnly = false,
+  readOnly = false,
   onActiveRegionChange,
 }: {
   artifactId: string;
@@ -8004,7 +8151,16 @@ function FlashcardStudio({
   );
   const [deckSearch, setDeckSearch] = useState("");
   const [deckFilter, setDeckFilter] = useState<
-    "all" | "incomplete" | "duplicate" | "easy" | "medium" | "hard"
+    | "all"
+    | "incomplete"
+    | "duplicate"
+    | "easy"
+    | "medium"
+    | "hard"
+    | "due"
+    | "unstudied"
+    | "struggling"
+    | "changed"
   >("all");
   const [railView, setRailView] = useState<"list" | "grid">("list");
   const [selectedCardIds, setSelectedCardIds] = useState<Set<string>>(
@@ -8015,7 +8171,22 @@ function FlashcardStudio({
   const [sectionNameDraft, setSectionNameDraft] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [deckTagDraft, setDeckTagDraft] = useState("");
-  const [studioView, setStudioView] = useState<"edit" | "view">("edit");
+  // The four ways of being in a deck (Â§11B). Build authors it, Browse reads it,
+  // Progress reports on your own recall, and Study is the session itself.
+  // Without Edit access Build is absent rather than shown disabled â€” offering a
+  // door that cannot open is worse than not mentioning the room.
+  const deckViews = (
+    [
+      ["build", "Build", Pencil],
+      ["browse", "Browse", Eye],
+      ["progress", "Progress", BarChart3],
+    ] as const
+  ).filter(([view]) => view !== "build" || !readOnly);
+  const [studioView, setStudioView] = useState<"build" | "browse" | "progress">(
+    // A side panel opens on Browse: it is a reading surface, and a builder
+    // squeezed into a third of the width is worse at both jobs (Â§11B).
+    readOnly || mode === "split" ? "browse" : "build",
+  );
   const [previewRevealed, setPreviewRevealed] = useState(false);
   const [railCollapsed, setRailCollapsed] = useState(mode === "split");
   const [studyOpen, setStudyOpen] = useState(false);
@@ -8029,12 +8200,18 @@ function FlashcardStudio({
   const [studyError, setStudyError] = useState<string>();
   const [studyTypedAnswer, setStudyTypedAnswer] = useState("");
   const [studyTypedCorrect, setStudyTypedCorrect] = useState<boolean>();
+  const [studyNoteDraft, setStudyNoteDraft] = useState("");
+  const [studyNoteSaving, setStudyNoteSaving] = useState(false);
+  const [studyShortcutsOpen, setStudyShortcutsOpen] = useState(false);
+  const studyNoteRef = useRef<HTMLTextAreaElement>(null);
   const [studyRatings, setStudyRatings] = useState<
     Record<SpectraFlashcardRating, number>
   >({ again: 0, hard: 0, good: 0, easy: 0 });
   const [studyStates, setStudyStates] = useState<
     Map<string, SpectraFlashcardStudyState>
   >(() => new Map());
+  const [studyUpdate, setStudyUpdate] = useState<SpectraFlashcardStudyUpdate>();
+  const [studyUpdateDismissed, setStudyUpdateDismissed] = useState(false);
   const [studyStateLoading, setStudyStateLoading] = useState(true);
   const [deckMenuOpen, setDeckMenuOpen] = useState(false);
   const [deckImportReport, setDeckImportReport] = useState<string>();
@@ -8125,7 +8302,7 @@ function FlashcardStudio({
     const query = deckSearch.trim().toLocaleLowerCase();
     if (
       query &&
-      !`${card.front} ${card.back} ${card.hint ?? ""} ${(card.tags ?? []).join(" ")}`
+      !`${card.front} ${card.back} ${card.hint ?? ""} ${card.explanation ?? ""} ${card.section ?? ""} ${(card.tags ?? []).join(" ")}`
         .toLocaleLowerCase()
         .includes(query)
     )
@@ -8135,6 +8312,23 @@ function FlashcardStudio({
     if (deckFilter === "duplicate")
       return duplicateKeys.has(
         `${card.front.trim().toLocaleLowerCase()}|${card.back.trim().toLocaleLowerCase()}`,
+      );
+    // Progress filters read personal study state and never the card's own
+    // fields, so filtering by "due" says something about this person rather
+    // than about the deck everyone shares (Â§11B).
+    if (deckFilter === "due") {
+      const state = studyStates.get(deckStudyKey(card.id, "forward"));
+      return !state || state.nextDueAt <= (studyClock || currentTimeMs());
+    }
+    if (deckFilter === "unstudied")
+      return !studyStates.has(deckStudyKey(card.id, "forward"));
+    if (deckFilter === "struggling") {
+      const state = studyStates.get(deckStudyKey(card.id, "forward"));
+      return Boolean(state && (state.lapses > 1 || state.ease < 2.1));
+    }
+    if (deckFilter === "changed")
+      return Boolean(
+        studyStates.get(deckStudyKey(card.id, "forward"))?.changedSinceStudied,
       );
     if (
       deckFilter === "easy" ||
@@ -8181,11 +8375,96 @@ function FlashcardStudio({
           100,
       )
     : 0;
+  // What the deck's edits did to this person's progress, in their terms. Cards
+  // whose answer changed are due again; progress for cards that left the deck is
+  // kept in case they come back (Â§11B).
+  const deckUpdateNotice = (() => {
+    if (studyUpdateDismissed || studyStateLoading || !studyUpdate) return "";
+    const changed = studyUpdate.changedCardIds.length;
+    const retained = studyUpdate.retainedCardIds.length;
+    if (!changed && !retained) return "";
+    const parts: string[] = [];
+    if (changed)
+      parts.push(
+        `${changed} card${changed === 1 ? "" : "s"} you studied changed answer, so ${changed === 1 ? "it is" : "they are"} due again`,
+      );
+    if (retained)
+      parts.push(
+        `${retained} card${retained === 1 ? "" : "s"} left the deck â€” your progress is kept in case ${retained === 1 ? "it returns" : "they return"}`,
+      );
+    return `${parts.join(". ")}.`;
+  })();
+  /**
+   * Progress mode reads only personal study state. A card's own difficulty
+   * label is the author's opinion; these bands are the learner's own record.
+   */
+  const deckProgressRows = studyItems
+    .map((item) => {
+      const state = studyStates.get(deckStudyKey(item.cardId, item.direction));
+      const card = studyCards.find((entry) => entry.id === item.cardId);
+      const now = studyClock || currentTimeMs();
+      const band = !state
+        ? "new"
+        : state.changedSinceStudied
+          ? "changed"
+          : state.lapses > 1 || state.ease < 2.1
+            ? "shaky"
+            : state.stabilityDays >= 21
+              ? "known"
+              : "learning";
+      const dueIn = (state?.nextDueAt ?? now) - now;
+      return {
+        cardId: item.cardId,
+        direction: item.direction,
+        band,
+        prompt:
+          (item.direction === "reverse" ? card?.back : card?.front)?.trim() ||
+          "Untitled card",
+        dueLabel:
+          band === "changed"
+            ? "Answer changed"
+            : !state
+              ? "Not studied"
+              : dueIn <= 0
+                ? "Due now"
+                : dueIn < 3_600_000
+                  ? `${Math.max(1, Math.round(dueIn / 60_000))} min`
+                  : dueIn < 86_400_000
+                    ? `${Math.round(dueIn / 3_600_000)} hr`
+                    : `${Math.round(dueIn / 86_400_000)} d`,
+        sortKey: state?.nextDueAt ?? 0,
+      };
+    })
+    .sort((left, right) => left.sortKey - right.sortKey);
+  const deckProgressBands = (
+    [
+      ["new", "Not studied"],
+      ["learning", "Learning"],
+      ["shaky", "Shaky"],
+      ["known", "Known"],
+      ["changed", "Answer changed"],
+    ] as const
+  ).map(([key, label]) => ({
+    key,
+    label,
+    count: deckProgressRows.filter((entry) => entry.band === key).length,
+  }));
   const activeStudyItem = studyQueue[studyIndex];
   const activeStudyCard = activeStudyItem
     ? studyCards.find((card) => card.id === activeStudyItem.cardId)
     : undefined;
   const deckImportRef = useRef<HTMLInputElement>(null);
+
+  // The note follows the card, not the session, so moving between cards shows
+  // the note that belongs to the one on screen.
+  const activeStudyNote = activeStudyItem
+    ? (studyStates.get(
+        deckStudyKey(activeStudyItem.cardId, activeStudyItem.direction),
+      )?.note ?? "")
+    : "";
+  useEffect(() => {
+    setStudyNoteDraft(activeStudyNote);
+  }, [activeStudyNote]);
 
   useEffect(() => {
     const nextCards = deckCards(content);
@@ -8217,6 +8496,7 @@ function FlashcardStudio({
             ]),
           ),
         );
+        setStudyUpdate(result.update);
         setStudyError(undefined);
       })
       .catch((error) => {
@@ -9051,7 +9331,7 @@ function FlashcardStudio({
                   labelled.bidirectional || "",
                 ];
               }
-              const explicitPair = block.split(/\s+(?:::|=>|→)\s+/);
+              const explicitPair = block.split(/\s+(?:::|=>|â†’)\s+/);
               if (explicitPair.length >= 2)
                 return [
                   explicitPair[0]!.trim(),
@@ -9214,7 +9494,7 @@ function FlashcardStudio({
         importedContent: { cards: unique },
       });
       setDeckImportReport(
-        `${unique.length} cards imported as editable content · ${rows.length - unique.length} invalid or duplicate rows left unchanged.`,
+        `${unique.length} cards imported as editable content Â· ${rows.length - unique.length} invalid or duplicate rows left unchanged.`,
       );
     } catch (error) {
       const message =
@@ -9352,7 +9632,7 @@ function FlashcardStudio({
           );
           if (!asset?.downloadUrl)
             throw new Error(
-              `The image for “${card.front || card.media.name}” is unavailable. Restore or replace it before exporting.`,
+              `The image for â€œ${card.front || card.media.name}â€ is unavailable. Restore or replace it before exporting.`,
             );
           const response = await fetch(asset.downloadUrl, {
             cache: "no-store",
@@ -9492,6 +9772,73 @@ function FlashcardStudio({
           deckStudyKey(activeStudyCard.id, activeStudyItem.direction),
         )?.previews
       : undefined;
+  const activeStudyState =
+    activeStudyCard && activeStudyItem
+      ? studyStates.get(
+          deckStudyKey(activeStudyCard.id, activeStudyItem.direction),
+        )
+      : undefined;
+
+  /**
+   * A note lives with the learner's study state, so saving one changes nothing
+   * about the deck and needs no edit access (Â§11B).
+   */
+  async function saveStudyNote() {
+    if (!activeStudyCard || !activeStudyItem) return;
+    const note = studyNoteDraft.trim();
+    if (note === (activeStudyState?.note ?? "").trim()) return;
+    setStudyNoteSaving(true);
+    try {
+      const result = await setSpectraFlashcardNote({
+        artifactId,
+        cardId: activeStudyCard.id,
+        direction: activeStudyItem.direction,
+        note,
+      });
+      setStudyStates((current) => {
+        const key = deckStudyKey(result.cardId, result.direction);
+        const existing = current.get(key);
+        if (!existing) return current;
+        const next = new Map(current);
+        next.set(key, { ...existing, note: result.note });
+        return next;
+      });
+    } catch (error) {
+      setStudyError(
+        error instanceof Error ? error.message : "Your note was not saved.",
+      );
+    } finally {
+      setStudyNoteSaving(false);
+    }
+  }
+
+  /**
+   * Move on without grading. The card returns at the end of this session and
+   * its schedule is untouched â€” not answering is not the same as answering
+   * badly, so it must not cost the learner an interval.
+   */
+  function skipStudyCard() {
+    if (studyComplete || studyQueue.length < 2) return;
+    setStudyQueue((current) => {
+      const item = current[studyIndex];
+      if (!item) return current;
+      return [...current.filter((_, index) => index !== studyIndex), item];
+    });
+    setStudyRevealed(false);
+    setStudyTypedAnswer("");
+    setStudyTypedCorrect(undefined);
+    setStudyCardStartedAt(currentTimeMs());
+  }
+
+  /** Step back to the card just graded, to read the answer again. */
+  function reopenPreviousStudyCard() {
+    if (studyIndex === 0) return;
+    setStudyIndex((current) => current - 1);
+    setStudyRevealed(true);
+    setStudyTypedAnswer("");
+    setStudyTypedCorrect(undefined);
+  }
+
   const studyIntervalLabels: Record<SpectraFlashcardRating, string> = {
     again: activeStudyPreviews?.again.label ?? "1 min",
     hard: activeStudyPreviews?.hard.label ?? "6 min",
@@ -9555,41 +9902,53 @@ function FlashcardStudio({
           <strong className="block font-display text-[16px] leading-5 text-[var(--text-primary)]">
             {cards.length}
           </strong>
-          <span className="text-[10px] text-[var(--text-tertiary)]">Cards</span>
+          <span className="text-micro text-[var(--text-tertiary)]">Cards</span>
         </div>
         <div className="border-l border-[var(--border-subtle)] px-3 py-2">
           <strong className="block font-display text-[16px] leading-5 text-[var(--text-primary)]">
             {sections.length}
           </strong>
-          <span className="text-[10px] text-[var(--text-tertiary)]">
+          <span className="text-micro text-[var(--text-tertiary)]">
             Sections
           </span>
         </div>
         <div className="border-l border-[var(--border-subtle)] px-3 py-2">
           <strong className="block font-display text-[16px] leading-5 text-[var(--text-primary)]">
-            {studyStateLoading ? "—" : `${personalMastery}%`}
+            {studyStateLoading ? "â€”" : `${personalMastery}%`}
           </strong>
-          <span className="text-[10px] text-[var(--text-tertiary)]">
+          <span className="text-micro text-[var(--text-tertiary)]">
             Personal mastery
           </span>
         </div>
         <div className="border-l border-[var(--border-subtle)] px-3 py-2">
           <strong className="block font-display text-[16px] leading-5 text-[var(--text-primary)]">
-            {studyStateLoading ? "—" : dueStudyCount}
+            {studyStateLoading ? "â€”" : dueStudyCount}
           </strong>
-          <span className="text-[10px] text-[var(--text-tertiary)]">
+          <span className="text-micro text-[var(--text-tertiary)]">
             Due now
           </span>
         </div>
         <div className="border-l border-[var(--border-subtle)] px-3 py-2">
-          <strong className="block rounded-[5px] bg-[color-mix(in_oklab,var(--success)_10%,var(--bg-primary))] px-2 py-1 text-center text-[10px] font-semibold text-[var(--success)]">
+          <strong className="block rounded-[5px] bg-[color-mix(in_oklab,var(--success)_10%,var(--bg-primary))] px-2 py-1 text-center text-micro font-semibold text-[var(--success)]">
             Active
           </strong>
-          <span className="mt-0.5 block text-center text-[9px] text-[var(--text-tertiary)]">
+          <span className="mt-0.5 block text-center text-micro text-[var(--text-tertiary)]">
             Ready
           </span>
         </div>
       </div>
+      {deckUpdateNotice ? (
+        <div
+          className={`spectra-deck-update-notice ${mode === "tab" ? "lg:col-span-2" : ""}`}
+          role="status"
+        >
+          <RefreshCw className="h-3.5 w-3.5" />
+          <p>{deckUpdateNotice}</p>
+          <button type="button" onClick={() => setStudyUpdateDismissed(true)}>
+            Got it
+          </button>
+        </div>
+      ) : null}
       <div
         className={`spectra-deck-toolbar flex min-w-0 flex-wrap items-center gap-2 ${mode === "tab" ? "lg:col-span-2" : ""}`}
       >
@@ -9640,13 +9999,13 @@ function FlashcardStudio({
           className="spectra-deck-study-trigger inline-flex h-9 items-center gap-2 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-primary)] disabled:opacity-40"
           aria-label={
             !studyStateLoading && dueStudyCount
-              ? `Present flashcards, ${dueStudyCount} cards due`
-              : "Present flashcards"
+              ? `Study flashcards, ${dueStudyCount} cards due`
+              : "Study flashcards"
           }
         >
           <Play className="h-4 w-4" />
-          Present
-          {!studyStateLoading && dueStudyCount ? ` · ${dueStudyCount}` : ""}
+          Study
+          {!studyStateLoading && dueStudyCount ? ` Â· ${dueStudyCount}` : ""}
         </button>
         <button
           type="button"
@@ -9659,7 +10018,7 @@ function FlashcardStudio({
           <LayoutTemplate className="h-4 w-4" />
           <span className="hidden sm:inline">Templates</span>
         </button>
-        {studioView === "edit" ? (
+        {studioView === "build" ? (
           <button
             type="button"
             className="spectra-deck-rail-toggle"
@@ -9675,26 +10034,19 @@ function FlashcardStudio({
           role="tablist"
           aria-label="Flashcard views"
         >
-          <button
-            type="button"
-            role="tab"
-            aria-selected={studioView === "edit"}
-            data-active={studioView === "edit" || undefined}
-            onClick={() => setStudioView("edit")}
-          >
-            <Pencil className="h-3.5 w-3.5" />
-            Edit
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={studioView === "view"}
-            data-active={studioView === "view" || undefined}
-            onClick={() => setStudioView("view")}
-          >
-            <Eye className="h-3.5 w-3.5" />
-            View
-          </button>
+          {deckViews.map(([view, label, Icon]) => (
+            <button
+              key={view}
+              type="button"
+              role="tab"
+              aria-selected={studioView === view}
+              data-active={studioView === view || undefined}
+              onClick={() => setStudioView(view)}
+            >
+              <Icon className="h-3.5 w-3.5" />
+              {label}
+            </button>
+          ))}
         </div>
         <div
           className={`spectra-deck-pagination ${mode === "split" ? "w-full justify-between border-t border-[var(--border-subtle)] pt-2" : ""} flex min-w-0 items-center gap-1 text-[11px] text-[var(--text-secondary)]`}
@@ -9723,7 +10075,7 @@ function FlashcardStudio({
           >
             {cards.map((card, index) => (
               <option key={card.id} value={card.id}>
-                {index + 1} ·{" "}
+                {index + 1} Â·{" "}
                 {plannerDescriptionText(card.front) || "Untitled card"}
               </option>
             ))}
@@ -9770,7 +10122,7 @@ function FlashcardStudio({
           </button>
         </div>
       </div>
-      {studioView === "view" && activeCard ? (
+      {studioView === "browse" && activeCard ? (
         <section
           className="spectra-deck-viewer"
           aria-label={`Flashcard ${activeCardIndex + 1} of ${cards.length}`}
@@ -9808,6 +10160,84 @@ function FlashcardStudio({
             ) : null}
             <em>{previewRevealed ? "Show prompt" : "Reveal answer"}</em>
           </button>
+        </section>
+      ) : null}
+      {studioView === "progress" ? (
+        <section className="spectra-deck-progress" aria-label="Your progress">
+          <header>
+            <div>
+              <h3>Your progress</h3>
+              <p>
+                Only you can see this. Editing the deck does not change it, and
+                other people studying the same deck have their own.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => beginStudySession()}
+              disabled={!studyCards.length}
+            >
+              <Play className="h-3.5 w-3.5" />
+              Study {dueStudyCount ? `${dueStudyCount} due` : "ahead"}
+            </button>
+          </header>
+          {studyStateLoading ? (
+            <p className="spectra-deck-progress-empty">
+              Loading your progressâ€¦
+            </p>
+          ) : !studyItems.length ? (
+            <div className="spectra-deck-progress-empty">
+              <strong>Nothing to study yet</strong>
+              <p>
+                A card needs a prompt and an answer before it can be studied.
+                {readOnly
+                  ? " Ask whoever maintains this deck to finish its cards."
+                  : " Finish a card in Build and it appears here."}
+              </p>
+              {readOnly ? null : (
+                <button type="button" onClick={() => setStudioView("build")}>
+                  Go to Build
+                </button>
+              )}
+            </div>
+          ) : (
+            <>
+              <div className="spectra-deck-progress-bands">
+                {deckProgressBands.map((band) => (
+                  <div key={band.key} data-band={band.key}>
+                    <strong>{band.count}</strong>
+                    <span>{band.label}</span>
+                    <i
+                      style={{
+                        width: `${studyItems.length ? (band.count / studyItems.length) * 100 : 0}%`,
+                      }}
+                    />
+                  </div>
+                ))}
+              </div>
+              <ol className="spectra-deck-progress-list">
+                {deckProgressRows.slice(0, 60).map((entry) => (
+                  <li key={`${entry.cardId}:${entry.direction}`}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveCardId(entry.cardId);
+                        setStudioView("browse");
+                      }}
+                    >
+                      <span>{entry.prompt}</span>
+                      <small data-band={entry.band}>{entry.dueLabel}</small>
+                    </button>
+                  </li>
+                ))}
+              </ol>
+              {deckProgressRows.length > 60 ? (
+                <p className="spectra-deck-progress-more">
+                  Showing the 60 cards due soonest of {deckProgressRows.length}.
+                </p>
+              ) : null}
+            </>
+          )}
         </section>
       ) : null}
       {deckMenuOpen ? (
@@ -9855,7 +10285,7 @@ function FlashcardStudio({
                   revealMode: event.target.value as "click" | "type",
                 })
               }
-              className="h-7 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-[10px] text-[var(--text-primary)] outline-none"
+              className="h-7 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-micro text-[var(--text-primary)] outline-none"
             >
               <option value="click">Reveal</option>
               <option value="type">Type answer</option>
@@ -9955,6 +10385,12 @@ function FlashcardStudio({
               <option value="easy">Easy</option>
               <option value="medium">Medium</option>
               <option value="hard">Hard</option>
+              <optgroup label="Your progress">
+                <option value="due">Due now</option>
+                <option value="unstudied">Not studied yet</option>
+                <option value="struggling">Giving you trouble</option>
+                <option value="changed">Changed since you studied</option>
+              </optgroup>
             </select>
           </label>
           <button
@@ -9983,7 +10419,7 @@ function FlashcardStudio({
                 if (event.target.value) moveSelectedCards(event.target.value);
               }}
             >
-              <option value="">Move to…</option>
+              <option value="">Move toâ€¦</option>
               {sections.map((section) => (
                 <option key={section} value={section}>
                   {section}
@@ -10002,7 +10438,7 @@ function FlashcardStudio({
                   setSelectedDifficulty(event.target.value);
               }}
             >
-              <option value="">Difficulty…</option>
+              <option value="">Difficultyâ€¦</option>
               <option value="easy">Easy</option>
               <option value="medium">Medium</option>
               <option value="hard">Hard</option>
@@ -10326,14 +10762,14 @@ function FlashcardStudio({
                     <strong className="block text-[12px] text-[var(--text-primary)]">
                       Image occlusion
                     </strong>
-                    <span className="text-[10px] leading-4 text-[var(--text-tertiary)]">
+                    <span className="text-micro leading-4 text-[var(--text-tertiary)]">
                       Drag over the image to hide a region. Each mask is
                       revealed with the answer.
                     </span>
                   </div>
                   <button
                     type="button"
-                    className="inline-flex h-8 items-center gap-1.5 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 text-[10px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                    className="inline-flex h-8 items-center gap-1.5 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 text-micro font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
                     disabled={deckMediaBusy}
                     onClick={() => deckMediaInputRef.current?.click()}
                   >
@@ -10378,7 +10814,7 @@ function FlashcardStudio({
                         <button
                           key={mask.id}
                           type="button"
-                          className="absolute grid place-items-center border border-white/65 bg-[#252a32]/90 text-[10px] font-bold text-white shadow-[0_2px_8px_rgba(0,0,0,0.24)] hover:bg-[var(--danger)]/90"
+                          className="absolute grid place-items-center border border-white/65 bg-[#252a32]/90 text-micro font-bold text-white shadow-[0_2px_8px_rgba(0,0,0,0.24)] hover:bg-[var(--danger)]/90"
                           style={{
                             left: `${mask.x * 100}%`,
                             top: `${mask.y * 100}%`,
@@ -10444,7 +10880,7 @@ function FlashcardStudio({
                             key={mask.id}
                             className="flex items-center gap-2 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-1.5"
                           >
-                            <span className="grid h-7 w-7 shrink-0 place-items-center rounded-[5px] bg-[#252a32] text-[10px] font-bold text-white">
+                            <span className="grid h-7 w-7 shrink-0 place-items-center rounded-[5px] bg-[#252a32] text-micro font-bold text-white">
                               {index + 1}
                             </span>
                             <input
@@ -10498,7 +10934,7 @@ function FlashcardStudio({
                       <strong className="block text-[12px] text-[var(--text-primary)]">
                         Add the diagram or image to study
                       </strong>
-                      <small className="mt-1 block text-[10px] text-[var(--text-tertiary)]">
+                      <small className="mt-1 block text-micro text-[var(--text-tertiary)]">
                         PNG, JPEG, WebP, or GIF
                       </small>
                     </span>
@@ -10506,7 +10942,7 @@ function FlashcardStudio({
                 )}
                 {deckMediaError ? (
                   <div
-                    className="mt-2 flex items-center gap-2 rounded-[7px] bg-[color-mix(in_oklab,var(--danger)_8%,var(--bg-primary))] px-2.5 py-2 text-[10px] text-[var(--danger)]"
+                    className="mt-2 flex items-center gap-2 rounded-[7px] bg-[color-mix(in_oklab,var(--danger)_8%,var(--bg-primary))] px-2.5 py-2 text-micro text-[var(--danger)]"
                     role="alert"
                   >
                     <AlertCircle className="h-3.5 w-3.5" />
@@ -10578,7 +11014,7 @@ function FlashcardStudio({
                 {(activeCard.tags ?? []).map((tag) => (
                   <span
                     key={tag}
-                    className="inline-flex h-7 items-center gap-1 rounded-[6px] border border-[color-mix(in_oklab,#8b6ff0_20%,var(--border-default))] bg-[color-mix(in_oklab,#8b6ff0_6%,var(--bg-elevated))] px-2 text-[10px] text-[var(--text-secondary)]"
+                    className="inline-flex h-7 items-center gap-1 rounded-[6px] border border-[color-mix(in_oklab,#8b6ff0_20%,var(--border-default))] bg-[color-mix(in_oklab,#8b6ff0_6%,var(--bg-elevated))] px-2 text-micro text-[var(--text-secondary)]"
                   >
                     {tag}
                     <button
@@ -10606,13 +11042,13 @@ function FlashcardStudio({
                       addActiveCardTag();
                     }
                   }}
-                  className="h-7 min-w-24 flex-1 bg-transparent px-1 text-[10px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
+                  className="h-7 min-w-24 flex-1 bg-transparent px-1 text-micro text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
                   placeholder="Add tag"
                   aria-label="Add card tag"
                 />
                 <button
                   type="button"
-                  className="inline-flex h-7 items-center gap-1 rounded-[6px] px-2 text-[10px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                  className="inline-flex h-7 items-center gap-1 rounded-[6px] px-2 text-micro text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
                   onClick={addActiveCardTag}
                 >
                   <Plus className="h-3 w-3" /> Add tag
@@ -10752,13 +11188,13 @@ function FlashcardStudio({
                         <strong className="block text-[11px] text-[var(--text-primary)]">
                           Card image
                         </strong>
-                        <span className="text-[10px] leading-4 text-[var(--text-tertiary)]">
+                        <span className="text-micro leading-4 text-[var(--text-tertiary)]">
                           Add a useful visual to the prompt or answer.
                         </span>
                       </div>
                       <button
                         type="button"
-                        className="inline-flex h-8 items-center gap-1.5 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 text-[10px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                        className="inline-flex h-8 items-center gap-1.5 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 text-micro font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
                         disabled={deckMediaBusy}
                         onClick={() => deckMediaInputRef.current?.click()}
                       >
@@ -10829,7 +11265,7 @@ function FlashcardStudio({
                       </div>
                     ) : null}
                     {deckMediaError ? (
-                      <p className="mt-2 text-[10px] text-[var(--danger)]">
+                      <p className="mt-2 text-micro text-[var(--danger)]">
                         {deckMediaError}
                       </p>
                     ) : null}
@@ -10944,7 +11380,7 @@ function FlashcardStudio({
                     : !activeCard.front.trim() || !activeCard.back.trim()
                       ? "Add both sides before studying this card"
                       : activeCardDirty
-                        ? "Syncing changes…"
+                        ? "Syncing changesâ€¦"
                         : "Synchronized"}
               </span>
               {activeCardDirty ? (
@@ -10995,12 +11431,41 @@ function FlashcardStudio({
                   revealStudyAnswer();
                   return;
                 }
+                if (typing) return;
+                // Study runs entirely from the keyboard: reveal, grade, note,
+                // skip and undo all have a key, so a session never needs a
+                // pointer (Â§11B).
                 if (studyRevealed && ["1", "2", "3", "4"].includes(event.key)) {
                   event.preventDefault();
                   const selected = (["again", "hard", "good", "easy"] as const)[
                     Number(event.key) - 1
                   ];
                   if (selected) void rateStudyCard(selected);
+                  return;
+                }
+                if (studyRevealed && event.key.toLowerCase() === "n") {
+                  event.preventDefault();
+                  studyNoteRef.current?.focus();
+                  return;
+                }
+                if (event.key === "ArrowRight" || event.key === "s") {
+                  // Skipping leaves the schedule untouched: not answering is not
+                  // the same as answering badly.
+                  event.preventDefault();
+                  skipStudyCard();
+                  return;
+                }
+                if (event.key === "ArrowLeft") {
+                  event.preventDefault();
+                  reopenPreviousStudyCard();
+                  return;
+                }
+                if (
+                  event.key === "?" ||
+                  (event.shiftKey && event.key === "/")
+                ) {
+                  event.preventDefault();
+                  setStudyShortcutsOpen((current) => !current);
                 }
               }}
             >
@@ -11016,12 +11481,41 @@ function FlashcardStudio({
                 </span>
                 <button
                   type="button"
+                  aria-label="Keyboard shortcuts"
+                  aria-expanded={studyShortcutsOpen}
+                  onClick={() => setStudyShortcutsOpen(!studyShortcutsOpen)}
+                >
+                  <kbd className="!px-1 !text-micro">?</kbd>
+                </button>
+                <button
+                  type="button"
                   aria-label="Close study session"
                   onClick={closeStudySession}
                 >
                   <X className="h-4 w-4" />
                 </button>
               </header>
+              {studyShortcutsOpen ? (
+                <dl className="spectra-deck-study-shortcuts">
+                  {(
+                    [
+                      ["Space", "Reveal the answer"],
+                      ["1 â€“ 4", "Grade: again, hard, good, easy"],
+                      ["N", "Write a private note"],
+                      ["S or â†’", "Skip without grading"],
+                      ["â†", "Go back a card"],
+                      ["Esc", "Leave the session"],
+                    ] as const
+                  ).map(([keys, meaning]) => (
+                    <div key={keys}>
+                      <dt>
+                        <kbd>{keys}</kbd>
+                      </dt>
+                      <dd>{meaning}</dd>
+                    </div>
+                  ))}
+                </dl>
+              ) : null}
               {studyError ? (
                 <div className="spectra-deck-study-error" role="alert">
                   <AlertCircle className="h-4 w-4" />
@@ -11065,7 +11559,7 @@ function FlashcardStudio({
                     <span>
                       Prompt
                       {activeStudyItem?.direction === "reverse"
-                        ? " · reverse"
+                        ? " Â· reverse"
                         : ""}
                     </span>
                     <strong>{activeStudyPrompt}</strong>
@@ -11162,10 +11656,27 @@ function FlashcardStudio({
                             : `Your answer: ${studyTypedAnswer}`}
                         </small>
                       ) : null}
+                      <div className="spectra-deck-study-note">
+                        <label htmlFor="spectra-study-note">
+                          Your note <kbd>N</kbd>
+                        </label>
+                        <textarea
+                          id="spectra-study-note"
+                          ref={studyNoteRef}
+                          rows={2}
+                          value={studyNoteDraft}
+                          placeholder="Only you can see this."
+                          onChange={(event) =>
+                            setStudyNoteDraft(event.target.value)
+                          }
+                          onBlur={() => void saveStudyNote()}
+                        />
+                        {studyNoteSaving ? <small>Savingâ€¦</small> : null}
+                      </div>
                     </section>
                   ) : deckSettings.revealMode === "type" ? (
                     <div className="spectra-deck-reveal flex-col !items-stretch gap-2">
-                      <label className="text-left text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
+                      <label className="text-left text-micro font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
                         Type your answer
                       </label>
                       <div className="flex gap-2">
@@ -11228,7 +11739,7 @@ function FlashcardStudio({
         <header>
           <strong>Flashcard deck</strong>
           <span>
-            {cards.length} cards · {sections.length} sections
+            {cards.length} cards Â· {sections.length} sections
           </span>
         </header>
         {sections.map((section) => (
@@ -11260,7 +11771,7 @@ function FlashcardStudio({
                             ? (card.occlusions ?? []).map((mask, index) => (
                                 <span
                                   key={mask.id}
-                                  className="absolute grid place-items-center border border-black bg-white text-[9px] font-bold text-black"
+                                  className="absolute grid place-items-center border border-black bg-white text-micro font-bold text-black"
                                   style={{
                                     left: `${mask.x * 100}%`,
                                     top: `${mask.y * 100}%`,
@@ -11307,10 +11818,296 @@ function FlashcardStudio({
   );
 }
 
+/**
+ * How this quiz is used (Â§11C).
+ *
+ * Three presets carry the whole contract, because almost every quiz is one of
+ * them. The six fields underneath stay folded away until someone wants a
+ * combination the presets do not cover â€” advanced power without a wall of
+ * dropdowns on the way in.
+ */
+function QuizExperienceSection({
+  experience,
+  onChange,
+  readOnly,
+}: {
+  experience: QuizExperience;
+  onChange: (patch: Partial<QuizExperience>) => void;
+  readOnly: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const preset = matchQuizPreset(experience);
+  const issues = validateQuizExperience(experience);
+
+  return (
+    <section className="rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className="text-[13px] font-semibold text-[var(--text-primary)]">
+          How this quiz is used
+        </h3>
+        <p className="text-[11px] text-[var(--text-secondary)]">
+          {describeQuizExperience(experience)}
+        </p>
+      </div>
+
+      <div className="mt-3 grid gap-2 sm:grid-cols-3">
+        {QUIZ_PRESETS.map((candidate) => {
+          const active = preset?.id === candidate.id;
+          return (
+            <button
+              key={candidate.id}
+              type="button"
+              disabled={readOnly}
+              aria-pressed={active}
+              onClick={() => onChange(candidate.experience)}
+              className={`rounded-[10px] border p-3 text-left transition-colors disabled:opacity-45 ${
+                active
+                  ? "border-[var(--border-strong)] bg-[var(--bg-elevated)]"
+                  : "border-[var(--border-default)] hover:border-[var(--border-strong)]"
+              }`}
+            >
+              <span className="block text-[12px] font-semibold text-[var(--text-primary)]">
+                {candidate.name}
+              </span>
+              <span className="mt-1 block text-micro leading-4 text-[var(--text-secondary)]">
+                {candidate.summary}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {issues.length ? (
+        <ul className="mt-3 space-y-1 text-micro text-[var(--danger)]">
+          {issues.map((issue) => (
+            <li key={`${issue.field}:${issue.message}`}>{issue.message}</li>
+          ))}
+        </ul>
+      ) : null}
+
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        className="mt-3 text-[11px] font-semibold text-[var(--text-secondary)] underline-offset-2 hover:underline"
+      >
+        {open ? "Hide detailed settings" : "Change individual settings"}
+      </button>
+
+      {open ? (
+        <div className="mt-3 grid gap-3 border-t border-[var(--border-subtle)] pt-3 sm:grid-cols-2">
+          <label className="text-micro font-semibold text-[var(--text-secondary)]">
+            What is kept
+            <select
+              disabled={readOnly}
+              value={experience.persistence}
+              onChange={(event) =>
+                onChange({
+                  persistence: event.target
+                    .value as QuizExperience["persistence"],
+                })
+              }
+              className={`${inputClass()} mt-1`}
+            >
+              <option value="ephemeral">
+                Nothing â€” answers clear on exit
+              </option>
+              <option value="personal">Their own attempts</option>
+              <option value="submitted">Submitted attempts</option>
+            </select>
+          </label>
+
+          <label className="text-micro font-semibold text-[var(--text-secondary)]">
+            Who can sit it
+            <select
+              disabled={readOnly}
+              value={experience.identity}
+              onChange={(event) =>
+                onChange({
+                  identity: event.target.value as QuizExperience["identity"],
+                })
+              }
+              className={`${inputClass()} mt-1`}
+            >
+              <option value="anonymous">Anyone with the link</option>
+              <option value="signed_in">Anyone signed in</option>
+              <option value="assigned">People it is assigned to</option>
+            </select>
+          </label>
+
+          <label className="text-micro font-semibold text-[var(--text-secondary)]">
+            Time
+            <select
+              disabled={readOnly}
+              value={experience.timing}
+              onChange={(event) =>
+                onChange({
+                  timing: event.target.value as QuizExperience["timing"],
+                })
+              }
+              className={`${inputClass()} mt-1`}
+            >
+              <option value="untimed">No time limit</option>
+              <option value="countdown">A countdown per attempt</option>
+              <option value="deadline">Closes at a deadline</option>
+            </select>
+          </label>
+
+          {experience.timing === "countdown" ? (
+            <label className="text-micro font-semibold text-[var(--text-secondary)]">
+              Minutes per attempt
+              <input
+                type="number"
+                min={1}
+                max={720}
+                disabled={readOnly}
+                value={
+                  Math.round((experience.countdownSeconds ?? 0) / 60) || ""
+                }
+                onChange={(event) =>
+                  onChange({
+                    countdownSeconds:
+                      Math.max(
+                        1,
+                        Math.min(720, Number(event.target.value) || 1),
+                      ) * 60,
+                  })
+                }
+                className={`${inputClass()} mt-1`}
+              />
+            </label>
+          ) : experience.timing === "deadline" ? (
+            <label className="text-micro font-semibold text-[var(--text-secondary)]">
+              Closes
+              <input
+                type="datetime-local"
+                disabled={readOnly}
+                value={
+                  experience.deadlineAt
+                    ? new Date(
+                        experience.deadlineAt -
+                          new Date().getTimezoneOffset() * 60_000,
+                      )
+                        .toISOString()
+                        .slice(0, 16)
+                    : ""
+                }
+                onChange={(event) =>
+                  onChange({
+                    deadlineAt: event.target.value
+                      ? new Date(event.target.value).getTime()
+                      : undefined,
+                  })
+                }
+                className={`${inputClass()} mt-1`}
+              />
+            </label>
+          ) : (
+            <div />
+          )}
+
+          <label className="text-micro font-semibold text-[var(--text-secondary)]">
+            Attempts
+            <input
+              type="number"
+              min={1}
+              max={100}
+              disabled={readOnly}
+              value={
+                experience.attempts === "unlimited" ? "" : experience.attempts
+              }
+              placeholder="Unlimited"
+              onChange={(event) =>
+                onChange({
+                  attempts: event.target.value
+                    ? Math.max(
+                        1,
+                        Math.min(100, Number(event.target.value) || 1),
+                      )
+                    : "unlimited",
+                })
+              }
+              className={`${inputClass()} mt-1`}
+            />
+          </label>
+
+          <label className="text-micro font-semibold text-[var(--text-secondary)]">
+            Answers shown
+            <select
+              disabled={readOnly}
+              value={experience.revealAnswers}
+              onChange={(event) =>
+                onChange({
+                  revealAnswers: event.target
+                    .value as QuizExperience["revealAnswers"],
+                })
+              }
+              className={`${inputClass()} mt-1`}
+            >
+              <option value="immediate">As they answer</option>
+              <option value="after_submit">After they submit</option>
+              <option value="after_deadline">After the deadline</option>
+              <option value="never">Never</option>
+            </select>
+          </label>
+
+          <label className="text-micro font-semibold text-[var(--text-secondary)]">
+            Results seen by
+            <select
+              disabled={readOnly}
+              value={experience.resultsVisibility}
+              onChange={(event) =>
+                onChange({
+                  resultsVisibility: event.target
+                    .value as QuizExperience["resultsVisibility"],
+                })
+              }
+              className={`${inputClass()} mt-1`}
+            >
+              <option value="learner">The learner</option>
+              <option value="teacher">The owner</option>
+              <option value="both">Both</option>
+            </select>
+          </label>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+/** The five ways of being in a quiz (Â§11C), in the order they are offered. */
+const QUIZ_MODE_LABELS: Record<QuizMode, string> = {
+  build: "Build",
+  preview: "Preview",
+  attempt: "Attempt",
+  responses: "Responses",
+  results: "Results",
+};
+
+/** `1:04:09` for anything over an hour, `4:09` otherwise. */
+function quizClockLabel(totalSeconds: number) {
+  const hours = Math.floor(totalSeconds / 3_600);
+  const minutes = Math.floor((totalSeconds % 3_600) / 60);
+  const seconds = totalSeconds % 60;
+  const paddedSeconds = String(seconds).padStart(2, "0");
+  return hours
+    ? `${hours}:${String(minutes).padStart(2, "0")}:${paddedSeconds}`
+    : `${minutes}:${paddedSeconds}`;
+}
+
 function quizPracticeErrorMessage(error: unknown, fallback: string) {
   const message = error instanceof Error ? error.message : "";
+  if (message.includes("QUIZ_ATTEMPT_TIME_ELAPSED"))
+    return "Time ran out, so this answer was not recorded. Submit to see how you did.";
+  if (message.includes("QUIZ_PRACTICE_UNAVAILABLE")) {
+    // The server already phrases why an attempt cannot start â€” a deadline that
+    // has passed, an attempt allowance that is used up â€” so pass its own words
+    // through rather than guessing at a second explanation.
+    const reason = message.split("QUIZ_PRACTICE_UNAVAILABLE:")[1]?.trim();
+    return reason || "This quiz is not open for attempts right now.";
+  }
   if (message.includes("QUIZ_PRACTICE_ATTEMPT_LIMIT_REACHED"))
-    return "You have reached this quiz’s configured practice-attempt limit.";
+    return "You have reached this quizâ€™s configured practice-attempt limit.";
   if (message.includes("QUIZ_PRACTICE_NOT_PUBLISHED"))
     return "This practice version is no longer available. The author may be preparing an updated draft.";
   if (message.includes("QUIZ_ATTEMPT_NOT_EDITABLE"))
@@ -11344,8 +12141,13 @@ function QuizStudio({
     questions[0]?.id ?? "",
   );
   const [view, setView] = useState<
-    "builder" | "settings" | "preview" | "responses"
-  >(readOnly ? "preview" : "builder");
+    "builder" | "settings" | "preview" | "responses" | "summary"
+  >(
+    // A side panel opens on the quiz itself, not on the builder: a third of the
+    // width is a poor place to author questions and a fine place to read or
+    // answer them (Â§11C).
+    readOnly || mode === "split" ? "preview" : "builder",
+  );
   const [quizSettings, setQuizSettings] = useState<QuizSettings>(() =>
     quizSettingsFromContent(content),
   );
@@ -11381,6 +12183,9 @@ function QuizStudio({
   const [questionDetailsOpen, setQuestionDetailsOpen] = useState(
     mode === "tab",
   );
+  const [responseSummary, setResponseSummary] =
+    useState<SpectraQuizResponseSummary>();
+  const [responseSummaryError, setResponseSummaryError] = useState<string>();
 
   useEffect(() => {
     const reveal = (event: Event) => {
@@ -11409,6 +12214,12 @@ function QuizStudio({
   const quizImportRef = useRef<HTMLInputElement>(null);
   const quizWasReadOnly = useRef(readOnly);
   const [practiceClockNow, setPracticeClockNow] = useState(0);
+  // The last thing the server said about the clock, and when it said it.
+  const [practiceClock, setPracticeClock] = useState<{
+    remainingMs: number;
+    at: number;
+  }>();
+  const practiceAutoSubmitted = useRef<string | undefined>(undefined);
   const activeQuestion =
     questions.find((question) => question.id === activeQuestionId) ??
     questions[0];
@@ -11468,18 +12279,14 @@ function QuizStudio({
   }, [artifactId]);
 
   useEffect(() => {
-    if (
-      practiceAttempt?.status !== "in_progress" ||
-      record(practiceAttempt.settings).timed !== true
-    )
-      return;
+    if (practiceAttempt?.status !== "in_progress" || !practiceClock) return;
     setPracticeClockNow(Date.now());
     const timer = window.setInterval(
       () => setPracticeClockNow(Date.now()),
       1_000,
     );
     return () => window.clearInterval(timer);
-  }, [practiceAttempt]);
+  }, [practiceAttempt, practiceClock]);
 
   useEffect(() => {
     let active = true;
@@ -11504,6 +12311,29 @@ function QuizStudio({
     };
   }, [artifactId]);
 
+  useEffect(() => {
+    // Cohort results are only fetched when the owner actually opens them, so a
+    // quiz nobody is reporting on costs nothing to keep open.
+    if (view !== "summary" || readOnly) return;
+    let active = true;
+    setResponseSummaryError(undefined);
+    void getSpectraQuizResponseSummary(artifactId)
+      .then((result) => {
+        if (active) setResponseSummary(result);
+      })
+      .catch((error: unknown) => {
+        if (active)
+          setResponseSummaryError(
+            error instanceof Error
+              ? error.message
+              : "Responses are unavailable right now.",
+          );
+      });
+    return () => {
+      active = false;
+    };
+  }, [artifactId, readOnly, view]);
+
   const quizAssetMap = new Map(
     quizAssets.map((asset) => [asset.assetId, asset]),
   );
@@ -11522,7 +12352,22 @@ function QuizStudio({
   }
 
   function commitSettings(patch: Partial<QuizSettings>) {
-    const next = { ...quizSettings, ...patch };
+    const merged = { ...quizSettings, ...patch };
+    // The contract is the source of truth; the older booleans are kept in step
+    // with it so nothing still reading them can disagree (Â§11C).
+    const experience = finalizeQuizExperience(merged.experience);
+    const next: QuizSettings = {
+      ...merged,
+      experience,
+      showAnswersImmediately: experience.revealAnswers === "immediate",
+      feedbackRelease:
+        experience.revealAnswers === "immediate"
+          ? "on_each_response"
+          : "after_submission",
+      timed: experience.timing !== "untimed",
+      maxAttempts:
+        experience.attempts === "unlimited" ? undefined : experience.attempts,
+    };
     setQuizSettings(next);
     setPublished(false);
     setPublishIssues([]);
@@ -11531,6 +12376,16 @@ function QuizStudio({
       questions,
       settings: next,
       published: false,
+    });
+  }
+
+  /** Applies one coherent change to the experience contract. */
+  function commitExperience(patch: Partial<QuizExperience>) {
+    commitSettings({
+      experience: finalizeQuizExperience({
+        ...quizSettings.experience,
+        ...patch,
+      }),
     });
   }
 
@@ -11751,37 +12606,94 @@ function QuizStudio({
       (result) => [result.questionId, result] as const,
     ),
   ]);
-  const practiceTimeBudgetSeconds = practiceAttempt
-    ? Math.max(
-        1,
-        Math.round(
-          practiceAttempt.questions.reduce(
-            (total, question) => total + (question.timeLimitSeconds ?? 90),
-            0,
-          ) *
-            Math.max(
-              1,
-              Number(
-                record(practiceAttempt.settings).defaultTimeMultiplier ?? 1,
-              ) || 1,
-            ),
-        ),
-      )
-    : 0;
-  const practiceSecondsRemaining = practiceAttempt
+  /**
+   * The countdown belongs to the server. The tab only interpolates between
+   * anchors, so a refresh, a sleeping laptop or a clock that is minutes off
+   * cannot buy extra time â€” the next anchor snaps the display back (Â§11C).
+   */
+  const practiceSecondsRemaining = practiceClock
     ? Math.max(
         0,
         Math.ceil(
-          (practiceAttempt.startedAt +
-            practiceTimeBudgetSeconds * 1_000 -
-            practiceClockNow) /
+          (practiceClock.remainingMs -
+            Math.max(0, practiceClockNow - practiceClock.at)) /
             1_000,
         ),
       )
-    : 0;
+    : null;
+  const practiceExperience = practiceAttempt?.experience;
+  const practiceAnswersRevealed = practiceAttempt?.answersRevealed !== false;
+  const resumableAttempt = practiceAttempts.find(
+    (attempt) => attempt.status === "in_progress",
+  );
+  const latestSubmittedAttempt = practiceAttempts.find(
+    (attempt) => attempt.status === "submitted",
+  );
+  /**
+   * The modes this person can actually use (Â§11C). A learner never sees Build,
+   * and Responses only exists on a quiz that keeps them â€” an unusable tab is
+   * worse than a missing one, so unavailable modes are absent rather than
+   * disabled.
+   */
+  const quizModes = availableQuizModes(quizSettings.experience, {
+    canEdit: !readOnly,
+    viewer: readOnly ? "learner" : "teacher",
+    hasSubmittedAttempt: Boolean(latestSubmittedAttempt),
+  });
+  const activeQuizMode: QuizMode =
+    view === "builder" || view === "settings"
+      ? "build"
+      : view === "summary"
+        ? "responses"
+        : view === "responses"
+          ? "results"
+          : practiceAttempt
+            ? "attempt"
+            : "preview";
+
+  function openQuizMode(next: QuizMode) {
+    if (next === "build") {
+      setView("builder");
+      return;
+    }
+    if (next === "preview") {
+      setPracticeAttempt(undefined);
+      setPracticeClock(undefined);
+      setAnswers({});
+      setSubmitted(false);
+      setPracticeFeedback({});
+      setView("preview");
+      return;
+    }
+    if (next === "attempt") {
+      // Resuming beats starting: a half-finished attempt is the learner's
+      // work, and a second one would quietly spend an allowance.
+      if (practiceAttempt?.status === "in_progress") setView("preview");
+      else if (resumableAttempt) hydratePracticeAttempt(resumableAttempt);
+      else void beginPractice();
+      return;
+    }
+    if (next === "responses") {
+      setView("summary");
+      return;
+    }
+    if (latestSubmittedAttempt) hydratePracticeAttempt(latestSubmittedAttempt);
+    else setView("responses");
+  }
+
+  function anchorPracticeClock(remainingMs: number | null | undefined) {
+    setPracticeClock(
+      typeof remainingMs === "number"
+        ? { remainingMs, at: currentTimeMs() }
+        : undefined,
+    );
+  }
 
   function hydratePracticeAttempt(attempt: SpectraQuizPracticeAttempt) {
     setPracticeAttempt(attempt);
+    anchorPracticeClock(
+      attempt.status === "in_progress" ? attempt.timeRemainingMs : undefined,
+    );
     setAnswers(
       Object.fromEntries(
         Object.entries(attempt.responses).map(([questionId, response]) => [
@@ -11856,6 +12768,8 @@ function QuizStudio({
           ...current,
           [questionId]: synchronized.result!,
         }));
+      if (synchronized.timeRemainingMs !== undefined)
+        anchorPracticeClock(synchronized.timeRemainingMs);
       setPracticeAttempt((current) =>
         current
           ? {
@@ -11889,12 +12803,18 @@ function QuizStudio({
     setPracticeError(undefined);
     try {
       for (const [questionId, value] of Object.entries(answers)) {
-        await saveSpectraQuizPracticeResponse({
-          attemptId: practiceAttempt.attemptId,
-          questionId,
-          response: value.startsWith("[") ? answerValueArray(value) : value,
-          clientMutationId: crypto.randomUUID(),
-        });
+        try {
+          await saveSpectraQuizPracticeResponse({
+            attemptId: practiceAttempt.attemptId,
+            questionId,
+            response: value.startsWith("[") ? answerValueArray(value) : value,
+            clientMutationId: crypto.randomUUID(),
+          });
+        } catch {
+          // Each answer was already saved as it was written; this pass is a
+          // final flush. A rejected save â€” most often a clock that has just run
+          // out â€” must not stand between the learner and their submission.
+        }
       }
       const submittedAttempt = await submitSpectraQuizPractice({
         attemptId: practiceAttempt.attemptId,
@@ -11918,6 +12838,25 @@ function QuizStudio({
       setPracticeBusy(false);
     }
   }
+
+  useEffect(() => {
+    // A countdown that reaches zero submits what the learner has, once. The
+    // server is the authority on expiry; this only saves them from staring at
+    // 0:00 wondering whether their work was kept (Â§11C).
+    if (
+      practiceSecondsRemaining !== 0 ||
+      practiceAttempt?.status !== "in_progress" ||
+      practiceAutoSubmitted.current === practiceAttempt.attemptId
+    )
+      return;
+    practiceAutoSubmitted.current = practiceAttempt.attemptId;
+    void submitPracticeAttempt();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    practiceSecondsRemaining,
+    practiceAttempt?.attemptId,
+    practiceAttempt?.status,
+  ]);
 
   function questionCorrect(question: QuizQuestion) {
     if (practiceAttempt?.status === "submitted")
@@ -12004,7 +12943,7 @@ function QuizStudio({
       questions,
       settings: quizSettings,
       published: true,
-      publishedAt: Date.now(),
+      publishedAt: currentTimeMs(),
     });
   }
 
@@ -12095,32 +13034,23 @@ function QuizStudio({
     <div className="spectra-quiz-studio bg-transparent">
       <div className="flex min-h-10 flex-wrap items-center justify-between gap-1.5 border-b border-[var(--border-default)] bg-transparent px-2 py-1">
         <div
-          className="order-2 flex min-w-0 items-center rounded-[7px] bg-[var(--bg-secondary)] p-0.5 [&>button]:h-6 [&>button]:px-2 [&>button]:text-[10px]"
+          className="order-2 flex min-w-0 items-center rounded-[7px] bg-[var(--bg-secondary)] p-0.5 [&>button]:h-6 [&>button]:px-2 [&>button]:text-micro"
           role="tablist"
           aria-label="Quiz views"
         >
-          {!readOnly ? (
+          {quizModes.map((quizMode) => (
             <button
+              key={quizMode}
               type="button"
               role="tab"
-              aria-selected={view === "builder" || view === "settings"}
-              className={tabButtonClass(
-                view === "builder" || view === "settings",
-              )}
-              onClick={() => setView("builder")}
+              aria-selected={activeQuizMode === quizMode}
+              className={tabButtonClass(activeQuizMode === quizMode)}
+              onClick={() => openQuizMode(quizMode)}
+              disabled={quizMode === "attempt" && practiceBusy}
             >
-              Edit
+              {QUIZ_MODE_LABELS[quizMode]}
             </button>
-          ) : null}
-          <button
-            type="button"
-            role="tab"
-            aria-selected={view === "preview"}
-            className={tabButtonClass(view === "preview")}
-            onClick={() => setView("preview")}
-          >
-            View
-          </button>
+          ))}
         </div>
         <div className="order-1 ml-auto flex shrink-0 items-center gap-1.5">
           {!readOnly ? (
@@ -12157,7 +13087,7 @@ function QuizStudio({
                     onClick={() => setView("responses")}
                   >
                     <History className="h-3.5 w-3.5" />
-                    Practice history
+                    Your attempts
                   </button>
                   <button
                     type="button"
@@ -12180,7 +13110,7 @@ function QuizStudio({
             <>
               <button
                 type="button"
-                className={`order-2 h-7 rounded-[6px] px-2.5 text-[10.5px] font-semibold ${published ? "border border-[var(--success)] text-[var(--success)]" : "bg-[var(--text-primary)] text-[var(--bg-primary)]"}`}
+                className={`order-2 h-7 rounded-[6px] px-2.5 text-micro font-semibold ${published ? "border border-[var(--success)] text-[var(--success)]" : "bg-[var(--text-primary)] text-[var(--bg-primary)]"}`}
                 disabled={practiceBusy || (published && !synchronizationReady)}
                 onClick={() => {
                   if (published) {
@@ -12191,7 +13121,7 @@ function QuizStudio({
                 }}
               >
                 {practiceBusy
-                  ? "Opening…"
+                  ? "Openingâ€¦"
                   : published
                     ? "Open practice"
                     : "Publish"}
@@ -12271,38 +13201,56 @@ function QuizStudio({
             <div className="mb-5 flex items-end justify-between">
               <div>
                 <h3 className="font-display text-[24px] font-semibold text-[var(--text-primary)]">
-                  {practiceAttempt ? "Private practice" : "Quiz preview"}
+                  {practiceAttempt
+                    ? practiceAttempt.status === "submitted"
+                      ? "Your result"
+                      : "Your attempt"
+                    : "Quiz preview"}
                 </h3>
                 <p className="mt-1 text-[12px] text-[var(--text-secondary)]">
                   {practiceAttempt
                     ? practiceAttempt.status === "submitted"
-                      ? "Your version-pinned formative result is private to you."
-                      : "Answers synchronize as you work. Reconnect before submitting if synchronization is interrupted."
-                    : "Author preview stays local and does not create a practice response."}
+                      ? practiceAttempt.timeElapsed
+                        ? "Submitted when the clock ran out. Everything you had answered was kept."
+                        : "This result is yours. It is pinned to the version you answered."
+                      : "Answers save as you write them. Reconnect before submitting if that is interrupted."
+                    : "Preview stays local. It does not create an attempt or spend one of yours."}
+                </p>
+                <p className="mt-1 text-[11px] text-[var(--text-tertiary)]">
+                  {describeQuizExperience(
+                    practiceExperience ?? quizSettings.experience,
+                  )}
                 </p>
               </div>
               {submitted ? (
                 <div className="rounded-[8px] bg-[color-mix(in_oklab,var(--success)_9%,var(--bg-primary))] px-3 py-2 text-[12px] font-semibold text-[var(--success)]">
                   {practiceAttempt?.status === "submitted"
-                    ? `${practiceAttempt.score ?? 0}/${practiceAttempt.maxScore ?? 0} points · ${practiceAttempt.percentage ?? 0}%`
+                    ? `${practiceAttempt.score ?? 0}/${practiceAttempt.maxScore ?? 0} points Â· ${practiceAttempt.percentage ?? 0}%`
                     : `${displayedQuestions.filter((question) => questionCorrect(question)).length}/${displayedQuestions.length} correct`}
                 </div>
-              ) : practiceAttempt &&
-                record(practiceAttempt.settings).timed === true ? (
+              ) : practiceSecondsRemaining !== null ? (
                 <div
                   className={`rounded-[8px] border px-3 py-2 text-right ${
-                    practiceSecondsRemaining
+                    practiceSecondsRemaining > 60
                       ? "border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-primary)]"
-                      : "border-[color-mix(in_oklab,var(--warning)_40%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_6%,var(--bg-primary))] text-[var(--warning)]"
+                      : practiceSecondsRemaining > 0
+                        ? "border-[color-mix(in_oklab,var(--warning)_40%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_6%,var(--bg-primary))] text-[var(--warning)]"
+                        : "border-[color-mix(in_oklab,var(--danger)_40%,var(--border-default))] bg-[color-mix(in_oklab,var(--danger)_6%,var(--bg-primary))] text-[var(--danger)]"
                   }`}
+                  role="timer"
+                  aria-live="off"
                 >
-                  <strong className="block font-display text-[16px]">
-                    {practiceSecondsRemaining
-                      ? `${Math.floor(practiceSecondsRemaining / 60)}:${String(practiceSecondsRemaining % 60).padStart(2, "0")}`
-                      : "Time reached"}
+                  <strong className="block font-display text-[16px] tabular-nums">
+                    {practiceSecondsRemaining > 0
+                      ? quizClockLabel(practiceSecondsRemaining)
+                      : "0:00"}
                   </strong>
-                  <span className="text-[9px] text-[var(--text-tertiary)]">
-                    Formative guidance
+                  <span className="text-micro text-[var(--text-tertiary)]">
+                    {practiceSecondsRemaining > 0
+                      ? practiceExperience?.timing === "deadline"
+                        ? "Until this quiz closes"
+                        : "Left on this attempt"
+                      : "Submitting your answers"}
                   </span>
                 </div>
               ) : null}
@@ -12313,6 +13261,17 @@ function QuizStudio({
                   Before you begin:
                 </strong>
                 {practiceAttempt?.instructions || quizSettings.instructions}
+              </div>
+            ) : null}
+            {practiceAttempt?.status === "submitted" &&
+            !practiceAnswersRevealed ? (
+              <div className="rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-4 py-3 text-[11px] leading-5 text-[var(--text-secondary)]">
+                <strong className="mr-1 text-[var(--text-primary)]">
+                  Answers are not shown yet.
+                </strong>
+                {practiceExperience?.revealAnswers === "after_deadline"
+                  ? "They open once this quiz closes."
+                  : "This quiz keeps its answer key."}
               </div>
             ) : null}
             {practiceError ? (
@@ -12327,7 +13286,7 @@ function QuizStudio({
                   <strong className="block text-[12px] text-[var(--text-primary)]">
                     Ready for a real practice run?
                   </strong>
-                  <span className="mt-1 block text-[10px] text-[var(--text-secondary)]">
+                  <span className="mt-1 block text-micro text-[var(--text-secondary)]">
                     Creates a private attempt pinned to this quiz version.
                   </span>
                 </div>
@@ -12337,7 +13296,7 @@ function QuizStudio({
                   onClick={() => void beginPractice()}
                   className="rounded-[8px] bg-[var(--text-primary)] px-3 py-2 text-[11px] font-semibold text-[var(--bg-primary)]"
                 >
-                  {practiceBusy ? "Starting…" : "Start private practice"}
+                  {practiceBusy ? "Startingâ€¦" : "Start private practice"}
                 </button>
               </div>
             ) : null}
@@ -12358,7 +13317,7 @@ function QuizStudio({
                 <ChevronLeft className="h-4 w-4" />
               </button>
               <label className="grid min-w-0 flex-1 grid-cols-[auto_minmax(0,1fr)] items-center gap-2 px-1">
-                <span className="text-[9px] font-semibold uppercase tracking-[0.07em] text-[var(--text-tertiary)]">
+                <span className="text-micro font-semibold uppercase tracking-[0.07em] text-[var(--text-tertiary)]">
                   Question
                 </span>
                 <select
@@ -12371,14 +13330,14 @@ function QuizStudio({
                 >
                   {displayedQuestions.map((question, index) => (
                     <option key={question.id} value={question.id}>
-                      {index + 1} ·{" "}
+                      {index + 1} Â·{" "}
                       {plannerDescriptionText(question.prompt) ||
                         "Untitled question"}
                     </option>
                   ))}
                 </select>
               </label>
-              <span className="shrink-0 text-[10px] text-[var(--text-tertiary)]">
+              <span className="shrink-0 text-micro text-[var(--text-tertiary)]">
                 {activeDisplayedQuestionIndex + 1} of{" "}
                 {displayedQuestions.length}
               </span>
@@ -12428,7 +13387,7 @@ function QuizStudio({
                         className="mt-3 max-h-[320px] w-full rounded-[8px] border border-[var(--border-default)] object-contain"
                       />
                     ) : (
-                      <div className="mt-3 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4 text-[10px] text-[var(--text-tertiary)]">
+                      <div className="mt-3 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-secondary)] p-4 text-micro text-[var(--text-tertiary)]">
                         Question image unavailable
                       </div>
                     )
@@ -12560,7 +13519,7 @@ function QuizStudio({
                                 {pair.left || "Untitled prompt"}
                               </span>
                               <span className="text-center text-[var(--text-tertiary)]">
-                                →
+                                â†’
                               </span>
                               <select
                                 disabled={submitted}
@@ -12651,7 +13610,7 @@ function QuizStudio({
                                 revealedPracticeResultByQuestion.get(
                                   question.id,
                                 )?.expected as string[]
-                              ).join(" · ")
+                              ).join(" Â· ")
                             : String(
                                 revealedPracticeResultByQuestion.get(
                                   question.id,
@@ -12661,16 +13620,16 @@ function QuizStudio({
                             ? (question.matchingPairs ?? [])
                                 .map(
                                   (pair) =>
-                                    `${pair.left} → ${pair.right ?? ""}`,
+                                    `${pair.left} â†’ ${pair.right ?? ""}`,
                                 )
-                                .join(" · ")
+                                .join(" Â· ")
                             : question.type === "long_response"
-                              ? "Advisory review — no single auto-scored answer"
+                              ? "Advisory review â€” no single auto-scored answer"
                               : question.type === "select_all" ||
                                   question.type === "ordering"
                                 ? (
                                     question.correctAnswers ?? question.options
-                                  ).join(" · ")
+                                  ).join(" Â· ")
                                 : question.correctAnswer}
                       </div>
                       {(
@@ -12698,7 +13657,7 @@ function QuizStudio({
                       ) : null}
                       {question.sourceRefs?.length ? (
                         <div className="mt-1 text-[var(--text-tertiary)]">
-                          Sources: {question.sourceRefs.join(" · ")}
+                          Sources: {question.sourceRefs.join(" Â· ")}
                         </div>
                       ) : null}
                     </div>
@@ -12707,13 +13666,13 @@ function QuizStudio({
               ))}
             <div className="flex justify-end gap-2 pt-3">
               {practiceSyncing.length ? (
-                <span className="mr-auto inline-flex items-center gap-2 text-[10px] text-[var(--text-tertiary)]">
+                <span className="mr-auto inline-flex items-center gap-2 text-micro text-[var(--text-tertiary)]">
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
                   Synchronizing {practiceSyncing.length} answer
                   {practiceSyncing.length === 1 ? "" : "s"}
                 </span>
               ) : practiceAttempt?.status === "in_progress" ? (
-                <span className="mr-auto inline-flex items-center gap-2 text-[10px] text-[var(--success)]">
+                <span className="mr-auto inline-flex items-center gap-2 text-micro text-[var(--success)]">
                   <CheckCircle2 className="h-3.5 w-3.5" />
                   Current answers synchronized
                 </span>
@@ -12742,7 +13701,7 @@ function QuizStudio({
                       : setSubmitted(true)
                   }
                 >
-                  {practiceBusy ? "Submitting safely…" : "Submit answers"}
+                  {practiceBusy ? "Submitting safelyâ€¦" : "Submit answers"}
                 </button>
               )}
             </div>
@@ -12750,6 +13709,13 @@ function QuizStudio({
         </div>
       ) : view === "settings" ? (
         <div className="mx-auto grid max-w-[900px] gap-4 p-6 md:grid-cols-2">
+          <div className="md:col-span-2">
+            <QuizExperienceSection
+              experience={quizSettings.experience}
+              onChange={commitExperience}
+              readOnly={readOnly}
+            />
+          </div>
           <div className="md:col-span-2">
             <Field label="Learner instructions">
               <textarea
@@ -12762,48 +13728,6 @@ function QuizStudio({
               />
             </Field>
           </div>
-          <Field label="Feedback release">
-            <div className="rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-4">
-              <select
-                value={quizSettings.feedbackRelease}
-                onChange={(event) => {
-                  const feedbackRelease = event.target.value as
-                    "after_submission" | "on_each_response";
-                  commitSettings({
-                    feedbackRelease,
-                    showAnswersImmediately:
-                      feedbackRelease === "on_each_response",
-                  });
-                }}
-                className={inputClass()}
-              >
-                <option value="after_submission">After submission</option>
-                <option value="on_each_response">After each response</option>
-              </select>
-              <p className="mt-2 text-[10px] leading-4 text-[var(--text-tertiary)]">
-                Answer keys and explanations remain hidden until the selected
-                formative feedback moment.
-              </p>
-            </div>
-          </Field>
-          <button
-            type="button"
-            onClick={() => commitSettings({ timed: !quizSettings.timed })}
-            className="flex items-center justify-between rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-4 text-left"
-          >
-            <span>
-              <span className="block text-[13px] font-semibold text-[var(--text-primary)]">
-                Timed guidance
-              </span>
-              <span className="mt-1 block text-[11px] text-[var(--text-secondary)]">
-                Show an adjusted practice countdown without punitive
-                auto-submit.
-              </span>
-            </span>
-            <CheckCircle2
-              className={`h-5 w-5 ${quizSettings.timed ? "text-[var(--success)]" : "text-[var(--text-tertiary)]"}`}
-            />
-          </button>
           <button
             type="button"
             onClick={() =>
@@ -12866,35 +13790,6 @@ function QuizStudio({
               className={`h-5 w-5 ${quizSettings.allowResume ? "text-[var(--success)]" : "text-[var(--text-tertiary)]"}`}
             />
           </button>
-          <Field label="Attempt policy">
-            <div className="rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-4">
-              <label className="text-[10px] font-semibold text-[var(--text-secondary)]">
-                Maximum private attempts
-                <input
-                  type="number"
-                  min={1}
-                  max={100}
-                  value={quizSettings.maxAttempts ?? ""}
-                  onChange={(event) =>
-                    commitSettings({
-                      maxAttempts: event.target.value
-                        ? Math.max(
-                            1,
-                            Math.min(100, Number(event.target.value) || 1),
-                          )
-                        : undefined,
-                    })
-                  }
-                  className={`${inputClass()} mt-2`}
-                  placeholder="No limit"
-                />
-              </label>
-              <p className="mt-2 text-[10px] leading-4 text-[var(--text-tertiary)]">
-                Leave blank for unlimited formative practice. Limits are never
-                treated as grades or punitive assessment.
-              </p>
-            </div>
-          </Field>
           <Field label="Timing accommodation">
             <div className="rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-4">
               <select
@@ -12911,8 +13806,8 @@ function QuizStudio({
                 <option value={1.5}>50% extra time</option>
                 <option value={2}>Double time</option>
               </select>
-              <p className="mt-2 text-[10px] leading-4 text-[var(--text-tertiary)]">
-                Timing remains guidance for practice. Learner reduced-motion and
+              <p className="mt-2 text-micro leading-4 text-[var(--text-tertiary)]">
+                Applies on top of the time set above. Learner reduced-motion and
                 text-size preferences are always respected independently.
               </p>
             </div>
@@ -12932,24 +13827,165 @@ function QuizStudio({
               <div className="mt-2 text-right font-display text-[20px] font-semibold text-[var(--text-primary)]">
                 {quizSettings.targetScore}%
               </div>
-              <p className="mt-2 text-[10px] leading-4 text-[var(--text-tertiary)]">
+              <p className="mt-2 text-micro leading-4 text-[var(--text-tertiary)]">
                 Guidance for formative practice only. It is not a grade or
                 pass/fail threshold.
               </p>
             </div>
           </Field>
         </div>
+      ) : view === "summary" ? (
+        <div className="mx-auto max-w-[760px] p-6">
+          <div className="mb-5">
+            <h3 className="font-display text-[24px] font-semibold text-[var(--text-primary)]">
+              Responses
+            </h3>
+            <p className="mt-1 max-w-[540px] text-[11px] leading-5 text-[var(--text-secondary)]">
+              How the group did, question by question. Nobody is named and no
+              individual response is shown here.
+            </p>
+          </div>
+          {responseSummaryError ? (
+            <div className="flex items-start gap-2 rounded-[9px] border border-[color-mix(in_oklab,var(--danger)_35%,var(--border-default))] p-3 text-[11px] text-[var(--danger)]">
+              <AlertCircle className="h-4 w-4 shrink-0" />
+              {responseSummaryError}
+            </div>
+          ) : !responseSummary ? (
+            <div className="flex min-h-[180px] items-center justify-center gap-2 text-[11px] text-[var(--text-tertiary)]">
+              <Loader2 className="h-4 w-4 animate-spin" /> Reading responses
+            </div>
+          ) : !responseSummary.available ? (
+            <div data-spectra-card="result" className="p-6 text-center">
+              <h3 className="font-display text-[20px] font-semibold text-[var(--text-primary)]">
+                Nothing to report
+              </h3>
+              <p className="mx-auto mt-2 max-w-[440px] text-[12px] leading-5 text-[var(--text-secondary)]">
+                {responseSummary.reason}
+              </p>
+              <button
+                type="button"
+                onClick={() => setView("settings")}
+                className="mt-4 rounded-[8px] bg-[var(--text-primary)] px-3 py-2 text-[11px] font-medium text-[var(--bg-primary)]"
+              >
+                Open quiz settings
+              </button>
+            </div>
+          ) : !responseSummary.submittedCount ? (
+            <div data-spectra-card="result" className="p-6 text-center">
+              <h3 className="font-display text-[20px] font-semibold text-[var(--text-primary)]">
+                No submissions yet
+              </h3>
+              <p className="mx-auto mt-2 max-w-[440px] text-[12px] leading-5 text-[var(--text-secondary)]">
+                {responseSummary.inProgressCount
+                  ? `${responseSummary.inProgressCount} ${responseSummary.inProgressCount === 1 ? "attempt is" : "attempts are"} still open. Results appear as they are submitted.`
+                  : "Share this quiz to start collecting responses."}
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {(
+                  [
+                    ["Submitted", String(responseSummary.submittedCount)],
+                    ["In progress", String(responseSummary.inProgressCount)],
+                    [
+                      "Average",
+                      responseSummary.averagePercentage === undefined
+                        ? "â€”"
+                        : `${responseSummary.averagePercentage}%`,
+                    ],
+                    [
+                      "Ran out of time",
+                      String(responseSummary.timeElapsedCount),
+                    ],
+                  ] as const
+                ).map(([label, value]) => (
+                  <div
+                    key={label}
+                    className="rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2.5"
+                  >
+                    <strong className="block font-display text-[20px] tabular-nums text-[var(--text-primary)]">
+                      {value}
+                    </strong>
+                    <span className="text-micro uppercase tracking-[0.07em] text-[var(--text-tertiary)]">
+                      {label}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <div className="space-y-2">
+                {responseSummary.questions.map((entry, index) => {
+                  const share = entry.answered
+                    ? Math.round((entry.correct / entry.answered) * 100)
+                    : 0;
+                  return (
+                    <div
+                      key={entry.questionId}
+                      className="rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-4"
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <p className="min-w-0 text-[12px] leading-5 text-[var(--text-primary)]">
+                          <span className="mr-2 text-micro tabular-nums text-[var(--text-tertiary)]">
+                            {index + 1}
+                          </span>
+                          {entry.prompt}
+                        </p>
+                        <strong className="shrink-0 font-display text-[16px] tabular-nums text-[var(--text-primary)]">
+                          {entry.answered ? `${share}%` : "â€”"}
+                        </strong>
+                      </div>
+                      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--bg-secondary)]">
+                        <div
+                          className="h-full rounded-full"
+                          style={{
+                            width: `${share}%`,
+                            background:
+                              share >= 70
+                                ? "var(--success)"
+                                : share >= 40
+                                  ? "#d88922"
+                                  : "var(--danger)",
+                          }}
+                        />
+                      </div>
+                      <p className="mt-1.5 text-micro text-[var(--text-tertiary)]">
+                        {entry.answered
+                          ? `${entry.correct} of ${entry.answered} answered correctly`
+                          : "Not answered yet"}
+                      </p>
+                      {entry.commonResponses.length ? (
+                        <ul className="mt-2 flex flex-wrap gap-1.5">
+                          {entry.commonResponses.map((response) => (
+                            <li
+                              key={response.response}
+                              className="rounded-full border border-[var(--border-default)] px-2 py-0.5 text-micro text-[var(--text-secondary)]"
+                            >
+                              {response.response}
+                              <em className="ml-1 not-italic tabular-nums text-[var(--text-tertiary)]">
+                                Ã—{response.count}
+                              </em>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
       ) : view === "responses" ? (
         <div className="mx-auto max-w-[760px] p-6">
           <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
             <div>
               <h3 className="font-display text-[24px] font-semibold text-[var(--text-primary)]">
-                Your practice history
+                Your results
               </h3>
               <p className="mt-1 max-w-[520px] text-[11px] leading-5 text-[var(--text-secondary)]">
-                Only your own private formative attempts appear here. Authors
-                and collaborators do not receive peer answers or private
-                response content through this view.
+                Every attempt you have made on this quiz, newest first. Only you
+                can open them â€” authors and collaborators see the group, not
+                your answers.
               </p>
             </div>
             <button
@@ -12986,15 +14022,15 @@ function QuizStudio({
                         Practice {practiceAttempts.length - index}
                       </strong>
                       <span
-                        className={`rounded-full px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.06em] ${attempt.status === "submitted" ? "bg-[color-mix(in_oklab,var(--success)_10%,var(--bg-primary))] text-[var(--success)]" : "bg-[color-mix(in_oklab,var(--warning)_10%,var(--bg-primary))] text-[var(--warning)]"}`}
+                        className={`rounded-full px-2 py-0.5 text-micro font-semibold uppercase tracking-[0.06em] ${attempt.status === "submitted" ? "bg-[color-mix(in_oklab,var(--success)_10%,var(--bg-primary))] text-[var(--success)]" : "bg-[color-mix(in_oklab,var(--warning)_10%,var(--bg-primary))] text-[var(--warning)]"}`}
                       >
                         {attempt.status === "submitted"
                           ? "Reviewed"
                           : "In progress"}
                       </span>
                     </span>
-                    <span className="mt-1 block truncate text-[10px] text-[var(--text-tertiary)]">
-                      Started {formatShortDate(attempt.startedAt)} · pinned
+                    <span className="mt-1 block truncate text-micro text-[var(--text-tertiary)]">
+                      Started {formatShortDate(attempt.startedAt)} Â· pinned
                       content {attempt.contentHash}
                     </span>
                   </span>
@@ -13004,9 +14040,9 @@ function QuizStudio({
                         ? `${attempt.percentage ?? 0}%`
                         : `${Object.keys(attempt.responses).length}/${attempt.questions.length}`}
                     </strong>
-                    <span className="text-[9px] text-[var(--text-tertiary)]">
+                    <span className="text-micro text-[var(--text-tertiary)]">
                       {attempt.status === "submitted"
-                        ? `${Math.max(1, Math.round((attempt.elapsedMs ?? 0) / 60_000))} min · Review`
+                        ? `${Math.max(1, Math.round((attempt.elapsedMs ?? 0) / 60_000))} min Â· Review`
                         : "Resume safely"}
                     </span>
                   </span>
@@ -13059,7 +14095,7 @@ function QuizStudio({
                     <ChevronLeft className="h-3.5 w-3.5" />
                   </button>
                   <label className="grid min-w-0 flex-1 grid-cols-[auto_minmax(0,1fr)] items-center gap-2 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2">
-                    <span className="text-[9px] font-semibold uppercase tracking-[0.07em] text-[var(--text-tertiary)]">
+                    <span className="text-micro font-semibold uppercase tracking-[0.07em] text-[var(--text-tertiary)]">
                       Question
                     </span>
                     <select
@@ -13072,14 +14108,14 @@ function QuizStudio({
                     >
                       {questions.map((question, index) => (
                         <option key={question.id} value={question.id}>
-                          {index + 1} ·{" "}
+                          {index + 1} Â·{" "}
                           {plannerDescriptionText(question.prompt) ||
                             "Untitled question"}
                         </option>
                       ))}
                     </select>
                   </label>
-                  <span className="shrink-0 text-[10px] text-[var(--text-tertiary)]">
+                  <span className="shrink-0 text-micro text-[var(--text-tertiary)]">
                     {activeQuestionIndex + 1} of {questions.length}
                   </span>
                   <button
@@ -13112,7 +14148,7 @@ function QuizStudio({
               ) : (
                 <button
                   type="button"
-                  className={`flex min-w-0 items-center gap-2 text-left text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)] ${mode === "tab" && !questionNavigatorOpen ? "w-full justify-center" : ""}`}
+                  className={`flex min-w-0 items-center gap-2 text-left text-micro font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)] ${mode === "tab" && !questionNavigatorOpen ? "w-full justify-center" : ""}`}
                   onClick={() => setQuestionNavigatorOpen((open) => !open)}
                   aria-expanded={questionNavigatorOpen}
                   aria-label={
@@ -13159,7 +14195,7 @@ function QuizStudio({
                     <span className="rounded-[6px] border border-[var(--border-default)] py-1 text-center text-[12px] text-[var(--text-secondary)]">
                       {index + 1}
                     </span>
-                    <span className="rounded-[5px] bg-[color-mix(in_oklab,#8b6ff0_8%,var(--bg-primary))] px-1.5 py-1 text-[9px] font-medium text-[#7560e8]">
+                    <span className="rounded-[5px] bg-[color-mix(in_oklab,#8b6ff0_8%,var(--bg-primary))] px-1.5 py-1 text-micro font-medium text-[#7560e8]">
                       {
                         {
                           multiple_choice: "MCQ",
@@ -13175,7 +14211,7 @@ function QuizStudio({
                       }
                     </span>
                     <span className="min-w-0">
-                      <span className="block truncate text-[10px] font-medium text-[var(--text-primary)]">
+                      <span className="block truncate text-micro font-medium text-[var(--text-primary)]">
                         {plannerDescriptionText(question.prompt) ||
                           "Untitled question"}
                       </span>
@@ -13196,7 +14232,7 @@ function QuizStudio({
                       `Question ${index + 1}`
                     }
                     onClick={() => setActiveQuestionId(question.id)}
-                    className={`h-8 rounded-[7px] text-[10px] font-semibold transition ${
+                    className={`h-8 rounded-[7px] text-micro font-semibold transition ${
                       activeQuestion?.id === question.id
                         ? "bg-[var(--text-primary)] text-[var(--bg-primary)]"
                         : "text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
@@ -13520,7 +14556,7 @@ function QuizStudio({
                         {uploadingQuizMedia ? (
                           <>
                             <Loader2 className="mx-auto mb-2 h-4 w-4 animate-spin" />
-                            Uploading image…
+                            Uploading imageâ€¦
                           </>
                         ) : (
                           <>
@@ -13594,7 +14630,7 @@ function QuizStudio({
                 <ul>
                   {question.options.map((option, index) => (
                     <li key={`${question.id}-print-${index}`}>
-                      {String.fromCharCode(65 + index)}. {option || "—"}
+                      {String.fromCharCode(65 + index)}. {option || "â€”"}
                     </li>
                   ))}
                 </ul>
@@ -13606,12 +14642,12 @@ function QuizStudio({
                   <strong>Answer / review guidance:</strong>{" "}
                   {question.type === "matching"
                     ? (question.matchingPairs ?? [])
-                        .map((pair) => `${pair.left} → ${pair.right ?? ""}`)
-                        .join(" · ")
+                        .map((pair) => `${pair.left} â†’ ${pair.right ?? ""}`)
+                        .join(" Â· ")
                     : question.type === "select_all" ||
                         question.type === "ordering"
                       ? (question.correctAnswers ?? question.options).join(
-                          " · ",
+                          " Â· ",
                         )
                       : question.type === "long_response"
                         ? question.rubric || "Advisory review"
@@ -13654,7 +14690,7 @@ function ArtifactRichTextEditor({
   onChange,
   onFocus,
   path,
-  placeholder = "Write something…",
+  placeholder = "Write somethingâ€¦",
   variant = "compact",
   collapsible = false,
 }: {
@@ -13857,7 +14893,7 @@ function ArtifactRichTextEditor({
           }
           active={editor?.isActive("equation")}
         >
-          <span className="text-[9px] font-semibold">fx</span>
+          <span className="text-micro font-semibold">fx</span>
         </ToolbarTextButton>
         <span>Format</span>
       </div>
@@ -13893,1301 +14929,6 @@ function ArtifactRichTextEditor({
         </form>
       ) : null}
       <EditorContent editor={editor} />
-    </div>
-  );
-}
-
-function PlannerStudio({
-  mode,
-  artifact,
-  artifacts,
-  tagDraft,
-  onTagDraftChange,
-  content,
-  onChange,
-  aiChangedPaths = [],
-  onArchive,
-  onOpenArtifact,
-  readOnly,
-  onActiveRegionChange,
-}: {
-  mode: "split" | "tab";
-  artifact: SpectraArtifact;
-  artifacts: SpectraArtifact[];
-  tagDraft: string;
-  onTagDraftChange: (value: string) => void;
-  content: unknown;
-  onChange: (content: unknown) => void;
-  aiChangedPaths?: string[];
-  onArchive?: () => Promise<void> | void;
-  onOpenArtifact: (artifactId: string) => void;
-  readOnly: boolean;
-  onActiveRegionChange?: (regionId: string) => void;
-}) {
-  const [task, setTask] = useState(() => plannerTask(content));
-  const [dueDate, setDueDate] = useState(dateInputValue(task.dueAt));
-  const [dueTime, setDueTime] = useState(timeInputValue(task.dueAt));
-  const [startDate, setStartDate] = useState(dateInputValue(task.startAt));
-  const [startTime, setStartTime] = useState(timeInputValue(task.startAt));
-  const [endDate, setEndDate] = useState(dateInputValue(task.endAt));
-  const [endTime, setEndTime] = useState(timeInputValue(task.endAt));
-  const scheduleDraftRef = useRef({
-    dueDate,
-    dueTime,
-    startDate,
-    startTime,
-    endDate,
-    endTime,
-  });
-  const plannerImportRef = useRef<HTMLInputElement>(null);
-  const [newPlannerTag, setNewPlannerTag] = useState("");
-  const [newSourceRef, setNewSourceRef] = useState("");
-  const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [scheduleOpen, setScheduleOpen] = useState(false);
-  const [inspectorOpen, setInspectorOpen] = useState(false);
-  const [importingTask, setImportingTask] = useState(false);
-  const [taskToolReport, setTaskToolReport] = useState<string>();
-
-  useEffect(() => {
-    const nextTask = plannerTask(content);
-    const nextDates = {
-      dueDate: dateInputValue(nextTask.dueAt),
-      dueTime: timeInputValue(nextTask.dueAt),
-      startDate: dateInputValue(nextTask.startAt),
-      startTime: timeInputValue(nextTask.startAt),
-      endDate: dateInputValue(nextTask.endAt),
-      endTime: timeInputValue(nextTask.endAt),
-    };
-    setTask(nextTask);
-    setDueDate(nextDates.dueDate);
-    setDueTime(nextDates.dueTime);
-    setStartDate(nextDates.startDate);
-    setStartTime(nextDates.startTime);
-    setEndDate(nextDates.endDate);
-    setEndTime(nextDates.endTime);
-    scheduleDraftRef.current = nextDates;
-  }, [content]);
-
-  function commit(
-    next: PlannerTask,
-    nextDates = { dueDate, dueTime, startDate, startTime, endDate, endTime },
-  ) {
-    if (readOnly) return;
-    const dueAt = nextDates.dueDate
-      ? dateTimeValue(nextDates.dueDate, nextDates.dueTime || "12:00")
-      : undefined;
-    const startAt = dateTimeValue(nextDates.startDate, nextDates.startTime);
-    const endAt = dateTimeValue(nextDates.endDate, nextDates.endTime);
-    const full = { ...next, dueAt, startAt, endAt };
-    setTask(full);
-    onChange({ ...record(content), ...full });
-  }
-
-  function updateSchedule(patch: Partial<typeof scheduleDraftRef.current>) {
-    if (readOnly) return;
-    const nextDates = { ...scheduleDraftRef.current, ...patch };
-    scheduleDraftRef.current = nextDates;
-    setDueDate(nextDates.dueDate);
-    setDueTime(nextDates.dueTime);
-    setStartDate(nextDates.startDate);
-    setStartTime(nextDates.startTime);
-    setEndDate(nextDates.endDate);
-    setEndTime(nextDates.endTime);
-    commit(task, nextDates);
-  }
-
-  function exportTask(format: "json" | "csv" | "ics") {
-    const safeName = (task.taskTitle || artifact.title || "task")
-      .replace(/[^a-z0-9-_]+/gi, "-")
-      .replace(/^-+|-+$/g, "")
-      .toLowerCase();
-    if (format === "json") {
-      downloadDocumentText(
-        `${safeName || "task"}.json`,
-        "application/json",
-        JSON.stringify(
-          {
-            format: "spectra.planner-task",
-            version: 1,
-            exportedAt: new Date().toISOString(),
-            task,
-          },
-          null,
-          2,
-        ),
-      );
-      setTaskToolReport("Exported a portable Spectra task with full fidelity.");
-      return;
-    }
-    if (format === "ics") {
-      downloadDocumentText(
-        `${safeName || "task"}.ics`,
-        "text/calendar",
-        exportPlannerTaskIcs(task, artifact.title),
-      );
-      setTaskToolReport(
-        "Exported ICS VTODO. Spectra-only links, provenance overlays, and attachments remain in Spectra.",
-      );
-      return;
-    }
-    const headers = [
-      "TYPE",
-      "CONTENT",
-      "DESCRIPTION",
-      "PRIORITY",
-      "STATUS",
-      "DATE",
-      "TIME",
-      "TIMEZONE",
-      "DURATION",
-      "TAGS",
-    ];
-    const due = task.dueAt ? new Date(task.dueAt) : undefined;
-    const row = [
-      "task",
-      task.taskTitle || artifact.title,
-      plannerDescriptionText(task.description || ""),
-      task.priority === "high" ? 1 : task.priority === "low" ? 4 : 2,
-      task.status,
-      due?.toISOString().slice(0, 10) ?? "",
-      due?.toISOString().slice(11, 16) ?? "",
-      task.timezone,
-      task.estimateMinutes ?? "",
-      tagsFromDraft(tagDraft).join(","),
-    ];
-    downloadDocumentText(
-      `${safeName || "task"}.csv`,
-      "text/csv",
-      `${headers.join(",")}\r\n${row.map(plannerCsvValue).join(",")}\r\n`,
-    );
-    setTaskToolReport(
-      "Exported Todoist-friendly CSV. Recurrence exceptions, attachments, and source overlays are not represented by that format.",
-    );
-  }
-
-  async function importTaskFile(file: File) {
-    if (readOnly) return;
-    if (file.size > 20 * 1024 * 1024) {
-      setTaskToolReport(
-        "Import quarantined: the file exceeds the 20 MB parsing safety ceiling.",
-      );
-      return;
-    }
-    setImportingTask(true);
-    setTaskToolReport(undefined);
-    let jobId: string | undefined;
-    const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
-    try {
-      const beginning = await beginArtifactImportOriginal({
-        artifactId: artifact._id,
-        typeKey: "planner_task",
-        format: extension || "unknown",
-        name: file.name,
-        mimeType: file.type || "application/octet-stream",
-        bytes: file.size,
-        sha256: await artifactBlobSha256(file),
-      });
-      jobId = beginning.jobId;
-      await uploadArtifactImportOriginal(jobId, file);
-      const source = await file.text();
-      const importedTasks: PlannerTask[] = [];
-      const warnings: string[] = [];
-
-      if (extension === "json") {
-        const parsed = JSON.parse(source) as unknown;
-        const payload = record(parsed).task ?? parsed;
-        importedTasks.push(plannerTask(payload));
-      } else if (extension === "ics" || source.includes("BEGIN:VCALENDAR")) {
-        if (/BEGIN:VEVENT/i.test(source))
-          throw new Error(
-            "This is an event calendar, not a task list. Import it into Timetable instead.",
-          );
-        const blocks = source
-          .replace(/\r?\n[ \t]/g, "")
-          .match(/BEGIN:VTODO[\s\S]*?END:VTODO/gi);
-        if (!blocks?.length) throw new Error("No ICS VTODO tasks were found.");
-        blocks.slice(0, 200).forEach((block, index) => {
-          const properties = new Map<string, string>();
-          block.split(/\r?\n/).forEach((line) => {
-            const separator = line.indexOf(":");
-            if (separator < 0) return;
-            properties.set(
-              line.slice(0, separator).toUpperCase(),
-              line.slice(separator + 1),
-            );
-          });
-          const entry = (prefix: string) =>
-            [...properties.entries()].find(([key]) => key.startsWith(prefix));
-          const title = properties.get("SUMMARY")?.trim();
-          if (!title) {
-            warnings.push(`Task ${index + 1} had no title and was skipped.`);
-            return;
-          }
-          const dueEntry = entry("DUE");
-          const startEntry = entry("DTSTART");
-          const dueAt = dueEntry ? parsePlannerIcsDate(dueEntry[1]) : undefined;
-          const startAt = startEntry
-            ? parsePlannerIcsDate(startEntry[1])
-            : undefined;
-          const status = properties.get("STATUS")?.toUpperCase();
-          const priority = Number(properties.get("PRIORITY") || 5);
-          importedTasks.push(
-            plannerTask({
-              taskTitle: title.replaceAll("\\,", ",").replaceAll("\\n", "\n"),
-              description: (properties.get("DESCRIPTION") || "")
-                .replaceAll("\\n", "\n")
-                .replaceAll("\\,", ","),
-              dueAt: dueAt && Number.isFinite(dueAt) ? dueAt : undefined,
-              startAt:
-                startAt && Number.isFinite(startAt) ? startAt : undefined,
-              allDay: Boolean(dueEntry?.[0].includes("VALUE=DATE")),
-              status:
-                status === "COMPLETED"
-                  ? "done"
-                  : status === "IN-PROCESS"
-                    ? "doing"
-                    : "todo",
-              priority:
-                priority <= 3 ? "high" : priority >= 7 ? "low" : "medium",
-              timezone: task.timezone,
-              recurrence: properties.get("RRULE")
-                ? parsePlannerRrule(properties.get("RRULE")!)
-                : undefined,
-              source: {
-                provider: "import",
-                externalId:
-                  properties.get("UID") || `${file.name}-${index + 1}`,
-                status: "active",
-                lockedFields: [],
-              },
-            }),
-          );
-        });
-        if (blocks.length > 200)
-          warnings.push(
-            `${blocks.length - 200} tasks exceeded the 200-record safety batch and remain recoverable from the retained original.`,
-          );
-      } else if (extension === "csv" || extension === "tsv") {
-        const delimiter = extension === "tsv" ? "\t" : ",";
-        const rows = plannerDelimitedRows(source, delimiter);
-        const header = (rows.shift() ?? []).map((value) =>
-          value.trim().toLowerCase(),
-        );
-        const indexOf = (...names: string[]) =>
-          names
-            .map((name) => header.indexOf(name))
-            .find((index) => index >= 0) ?? -1;
-        const titleIndex = indexOf("content", "title", "task", "name");
-        if (titleIndex < 0)
-          throw new Error(
-            "CSV/TSV needs a Content, Title, Task, or Name column.",
-          );
-        const descriptionIndex = indexOf("description", "notes");
-        const dueIndex = indexOf("date", "due", "due date", "deadline");
-        const timeIndex = indexOf("time", "due time");
-        const priorityIndex = indexOf("priority");
-        const statusIndex = indexOf("status");
-        const durationIndex = indexOf(
-          "duration",
-          "estimate",
-          "estimate minutes",
-        );
-        const timezoneIndex = indexOf("timezone", "time zone");
-        rows.slice(0, 200).forEach((row, index) => {
-          const title = row[titleIndex]?.trim();
-          if (!title) {
-            warnings.push(`Row ${index + 2} had no title and was skipped.`);
-            return;
-          }
-          const dateText = dueIndex >= 0 ? row[dueIndex]?.trim() : "";
-          const timeText = timeIndex >= 0 ? row[timeIndex]?.trim() : "";
-          const dueAt = dateText
-            ? new Date(
-                `${dateText}${timeText ? `T${timeText}` : "T12:00"}`,
-              ).getTime()
-            : undefined;
-          const priorityText =
-            priorityIndex >= 0 ? row[priorityIndex]?.trim().toLowerCase() : "";
-          const statusText =
-            statusIndex >= 0 ? row[statusIndex]?.trim().toLowerCase() : "";
-          const estimate = Number(
-            durationIndex >= 0 ? row[durationIndex]?.trim() : "",
-          );
-          importedTasks.push(
-            plannerTask({
-              taskTitle: title,
-              description:
-                descriptionIndex >= 0 ? row[descriptionIndex] || "" : "",
-              dueAt: dueAt && Number.isFinite(dueAt) ? dueAt : undefined,
-              status:
-                statusText === "done" || statusText === "completed"
-                  ? "done"
-                  : statusText === "doing" || statusText === "in progress"
-                    ? "doing"
-                    : "todo",
-              priority:
-                priorityText === "1" || priorityText === "high"
-                  ? "high"
-                  : priorityText === "4" || priorityText === "low"
-                    ? "low"
-                    : "medium",
-              estimateMinutes:
-                Number.isFinite(estimate) && estimate > 0
-                  ? estimate
-                  : undefined,
-              timezone:
-                timezoneIndex >= 0 && row[timezoneIndex]?.trim()
-                  ? row[timezoneIndex].trim()
-                  : task.timezone,
-              source: {
-                provider: "import",
-                externalId: `${file.name}:${index + 2}`,
-                status: "active",
-                lockedFields: [],
-              },
-            }),
-          );
-        });
-        if (rows.length > 200)
-          warnings.push(
-            `${rows.length - 200} rows exceeded the 200-record safety batch and remain recoverable from the retained original.`,
-          );
-      } else {
-        throw new Error("Choose JSON, CSV, TSV, or ICS VTODO.");
-      }
-
-      if (!importedTasks.length)
-        throw new Error("No valid tasks were found; nothing was changed.");
-      const [first, ...additional] = importedTasks;
-      commit(first!);
-      const workspaceId = artifact.placements?.[0]?.workspaceId;
-      let created = 0;
-      for (const imported of additional) {
-        await postSpectra({
-          action: "createArtifact",
-          blueprintKey: "planner_task",
-          title: imported.taskTitle || "Imported task",
-          summary: plannerDescriptionText(imported.description || "").slice(
-            0,
-            240,
-          ),
-          content: imported,
-          tags: [],
-          ...(workspaceId ? { workspaceId } : {}),
-          source: "manual",
-        });
-        created += 1;
-      }
-      await completeArtifactImport({
-        jobId,
-        typeKey: "planner_task",
-        status: "imported",
-        fidelityReport: [
-          {
-            scope: "task fields",
-            level: "exact",
-            message: `${importedTasks.length} task${importedTasks.length === 1 ? "" : "s"} imported with the original retained.`,
-          },
-          ...(warnings.length
-            ? [
-                {
-                  scope: "unsupported or invalid records",
-                  level: "adapted" as const,
-                  message: warnings.join(" "),
-                },
-              ]
-            : []),
-        ],
-        unsupportedFeatures:
-          extension === "ics"
-            ? ["external alarm delivery mechanisms", "calendar-server ACLs"]
-            : [],
-        importedContent: first,
-      });
-      setTaskToolReport(
-        `${importedTasks.length} task${importedTasks.length === 1 ? "" : "s"} imported; ${created} additional artifact${created === 1 ? "" : "s"} created${warnings.length ? `. ${warnings.join(" ")}` : "."}`,
-      );
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Import failed.";
-      if (jobId) {
-        await completeArtifactImport({
-          jobId,
-          typeKey: "planner_task",
-          status: "quarantined",
-          fidelityReport: [{ scope: "import", level: "unsupported", message }],
-          unsupportedFeatures: [],
-          quarantineReason: message,
-        }).catch(async () => {
-          await abortArtifactImportUpload(jobId!, message).catch(
-            () => undefined,
-          );
-        });
-      }
-      setTaskToolReport(`Import quarantined: ${message}`);
-    } finally {
-      setImportingTask(false);
-    }
-  }
-
-  const linked = task.linkedArtifactIds
-    .map((artifactId) => artifacts.find((item) => item._id === artifactId))
-    .filter((item): item is SpectraArtifact => Boolean(item));
-  const sourceLocked = (field: string) =>
-    task.source?.status !== "detached" &&
-    task.source?.lockedFields.includes(field) === true;
-  let timezoneValid = true;
-  try {
-    new Intl.DateTimeFormat("en", { timeZone: task.timezone }).format();
-  } catch {
-    timezoneValid = false;
-  }
-  const scheduleError =
-    task.startAt && task.endAt && task.endAt <= task.startAt
-      ? "End must be after start."
-      : task.startAt && task.dueAt && task.dueAt < task.startAt
-        ? "Due time cannot be before the task starts."
-        : undefined;
-  const inspectorAiPath = aiChangedPaths.find((path) =>
-    ["/startAt", "/endAt", "/allDay", "/linkedArtifactIds", "/reminders"].some(
-      (prefix) => pathTouches([path], prefix),
-    ),
-  );
-
-  return (
-    <div
-      data-inspector-open={inspectorOpen || undefined}
-      className={`spectra-planner-studio grid gap-2 ${
-        mode === "tab" && inspectorOpen
-          ? "lg:grid-cols-[minmax(0,1fr)_minmax(300px,360px)]"
-          : "grid-cols-1"
-      }`}
-    >
-      <fieldset className="contents" disabled={readOnly}>
-        <section className="min-w-0 px-1 py-2 sm:px-2">
-          {mode === "tab" ? (
-            <div className="mb-2 flex justify-end">
-              <button
-                type="button"
-                className="inline-flex h-8 items-center gap-1.5 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 text-[11px] font-medium text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-                onClick={() => setInspectorOpen((value) => !value)}
-                aria-expanded={inspectorOpen}
-                {...targetAttrs(inspectorAiPath ?? "/view/taskDetails")}
-              >
-                <PanelRight className="h-3.5 w-3.5" />
-                {inspectorOpen ? "Hide task details" : "Task details"}
-              </button>
-            </div>
-          ) : null}
-          <Field
-            label="Description"
-            aiActive={pathTouches(aiChangedPaths, "/description")}
-            path="/description"
-          >
-            <ArtifactRichTextEditor
-              value={task.description ?? ""}
-              disabled={readOnly || sourceLocked("description")}
-              onChange={(description) => commit({ ...task, description })}
-              placeholder="What needs to happen?"
-              variant="planner"
-              collapsible
-            />
-          </Field>
-          <div
-            className={`mt-4 grid gap-3 ${mode === "tab" ? "md:grid-cols-4" : "grid-cols-1"}`}
-          >
-            <Field
-              label="Status"
-              aiActive={pathTouches(aiChangedPaths, "/status")}
-              path="/status"
-            >
-              <label className="flex h-10 cursor-pointer items-center gap-2.5 rounded-[8px] border border-[var(--border-default)] bg-transparent px-3 text-[13px] text-[var(--text-primary)]">
-                <input
-                  type="checkbox"
-                  checked={task.status === "done"}
-                  onFocus={() => onActiveRegionChange?.("task:status")}
-                  onChange={(event) =>
-                    commit({
-                      ...task,
-                      status: event.target.checked ? "done" : "todo",
-                    })
-                  }
-                  className="h-4 w-4 rounded border-[var(--border-default)] accent-[var(--success)]"
-                />
-                <span>{task.status === "done" ? "Done" : "Todo"}</span>
-              </label>
-            </Field>
-            <Field
-              label="Priority"
-              aiActive={pathTouches(aiChangedPaths, "/priority")}
-
-              path="/priority"
-            >
-              <select
-                value={task.priority}
-                onFocus={() => onActiveRegionChange?.("task:priority")}
-                onMouseDown={() => onActiveRegionChange?.("task:priority")}
-                onChange={(event) =>
-                  commit({
-                    ...task,
-                    priority: event.target.value as PlannerTask["priority"],
-                  })
-                }
-                className={inputClass()}
-              >
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-              </select>
-            </Field>
-            <Field
-              label="Due date"
-              aiActive={pathTouches(aiChangedPaths, "/dueAt")}
-
-              path="/dueAt"
-            >
-              <input
-                type="datetime-local"
-                value={
-                  dueDate
-                    ? `${dueDate}T${dueTime || "12:00"}`
-                    : ""
-                }
-                disabled={sourceLocked("dueAt")}
-                onInput={(event) => {
-                  const raw = event.currentTarget.value;
-                  if (!raw) {
-                    updateSchedule({ dueDate: "", dueTime: "" });
-                    return;
-                  }
-                  const [nextDate = "", nextTime = "12:00"] = raw.split("T");
-                  updateSchedule({
-                    dueDate: nextDate,
-                    dueTime: nextTime.slice(0, 5),
-                  });
-                }}
-                className={inputClass()}
-                aria-label="Due date and time"
-              />
-            </Field>
-            <Field
-              label="Time estimate"
-              aiActive={pathTouches(aiChangedPaths, "/estimateMinutes")}
-
-              path="/estimateMinutes"
-            >
-              <select
-                value={task.estimateMinutes ?? ""}
-                onChange={(event) =>
-                  commit({
-                    ...task,
-                    estimateMinutes: event.target.value
-                      ? Number(event.target.value)
-                      : undefined,
-                  })
-                }
-                className={inputClass()}
-              >
-                <option value="">No estimate</option>
-                <option value="15">15 min</option>
-                <option value="30">30 min</option>
-                <option value="45">45 min</option>
-                <option value="60">1 hour</option>
-                <option value="90">1h 30m</option>
-                <option value="120">2 hours</option>
-                <option value="180">3 hours</option>
-              </select>
-            </Field>
-          </div>
-          <div className="mt-4">
-            <Field label="Tags" path="/tags">
-              <div className="flex min-h-10 flex-wrap items-center gap-1.5 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 py-1.5">
-                {tagsFromDraft(tagDraft).map((tag) => (
-                  <button
-                    key={tag}
-                    type="button"
-                    onClick={() =>
-                      onTagDraftChange(
-                        tagsFromDraft(tagDraft)
-                          .filter((item) => item !== tag)
-                          .join(", "),
-                      )
-                    }
-                    className="rounded-[7px] border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-2 py-1 text-[11px] text-[var(--text-secondary)]"
-                    title={`Remove ${tag}`}
-                  >
-                    {tag} <span aria-hidden="true">×</span>
-                  </button>
-                ))}
-                <input
-                  value={newPlannerTag}
-                  onChange={(event) => setNewPlannerTag(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key !== "Enter" || !newPlannerTag.trim()) return;
-                    event.preventDefault();
-                    onTagDraftChange(
-                      Array.from(
-                        new Set([
-                          ...tagsFromDraft(tagDraft),
-                          newPlannerTag.trim(),
-                        ]),
-                      ).join(", "),
-                    );
-                    setNewPlannerTag("");
-                  }}
-                  className="h-7 min-w-[100px] flex-1 bg-transparent px-1 text-[11px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
-                  placeholder="Add tag"
-                  aria-label="New task tag"
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!newPlannerTag.trim()) return;
-                    onTagDraftChange(
-                      Array.from(
-                        new Set([
-                          ...tagsFromDraft(tagDraft),
-                          newPlannerTag.trim(),
-                        ]),
-                      ).join(", "),
-                    );
-                    setNewPlannerTag("");
-                  }}
-                  className="rounded-[6px] px-2 py-1 text-[11px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]"
-                >
-                  Add
-                </button>
-              </div>
-            </Field>
-          </div>
-          {scheduleError ? (
-            <div
-              className="mt-3 flex items-center gap-2 rounded-[8px] border border-[color-mix(in_oklab,var(--danger)_26%,var(--border-default))] bg-[color-mix(in_oklab,var(--danger)_6%,var(--bg-primary))] px-3 py-2 text-[11px] text-[var(--danger)]"
-              role="status"
-            >
-              <AlertCircle className="h-3.5 w-3.5" /> {scheduleError}
-            </div>
-          ) : null}
-          {task.source ? (
-            <div className="mt-3 flex flex-wrap items-center gap-2 rounded-[8px] border border-[color-mix(in_oklab,#d88922_22%,var(--border-default))] bg-[color-mix(in_oklab,#d88922_5%,var(--bg-primary))] px-3 py-2 text-[11px] text-[var(--text-secondary)]">
-              <Link2 className="h-3.5 w-3.5 text-[#d88922]" />
-              Source-linked from {task.source.provider}
-              <span className="rounded-full bg-[var(--bg-elevated)] px-2 py-0.5 text-[10px] capitalize">
-                {task.source.status}
-              </span>
-              {task.source.lockedFields.length ? (
-                <span>
-                  {task.source.lockedFields.length} source field
-                  {task.source.lockedFields.length === 1 ? "" : "s"} protected
-                </span>
-              ) : null}
-            </div>
-          ) : null}
-          <div className="spectra-planner-advanced mt-4 rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-primary)]">
-            <button
-              type="button"
-              {...targetAttrs("/recurrence")}
-              className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left text-[12px] font-semibold text-[var(--text-secondary)]"
-              onClick={() => setAdvancedOpen((value) => !value)}
-              aria-expanded={advancedOpen}
-            >
-              Recurrence, timezone & people
-              <ChevronDown
-                className={`h-4 w-4 transition ${advancedOpen ? "rotate-180" : ""}`}
-              />
-            </button>
-            {advancedOpen ? (
-              <div className="grid gap-4 border-t border-[var(--border-subtle)] p-3 md:grid-cols-2">
-                <Field
-                  label="Progress note"
-                  aiActive={pathTouches(aiChangedPaths, "/progressNote")}
-
-                  path="/progressNote"
-                >
-                  <input
-                    value={task.progressNote ?? ""}
-                    onChange={(event) =>
-                      commit({ ...task, progressNote: event.target.value })
-                    }
-                    className={inputClass()}
-                    placeholder="Current blocker or next concrete step"
-                  />
-                </Field>
-                <Field label="Timezone">
-                  <input
-                    value={task.timezone}
-                    onChange={(event) =>
-                      commit({ ...task, timezone: event.target.value })
-                    }
-                    className={inputClass()}
-                    list="spectra-planner-timezones"
-                    aria-invalid={!timezoneValid}
-                    placeholder="Europe/Madrid"
-                  />
-                  <datalist id="spectra-planner-timezones">
-                    {Array.from(
-                      new Set(
-                        [
-                          Intl.DateTimeFormat().resolvedOptions().timeZone,
-                          "UTC",
-                          "Europe/London",
-                          "Europe/Madrid",
-                          "America/New_York",
-                          "America/Chicago",
-                          "America/Los_Angeles",
-                          "Asia/Dubai",
-                          "Asia/Singapore",
-                          "Asia/Tokyo",
-                          "Australia/Sydney",
-                        ].filter(Boolean),
-                      ),
-                    ).map((zone) => (
-                      <option key={zone} value={zone} />
-                    ))}
-                  </datalist>
-                  {!timezoneValid ? (
-                    <p className="mt-1 text-[10px] text-[var(--danger)]">
-                      Enter a valid IANA timezone.
-                    </p>
-                  ) : null}
-                </Field>
-                <Field label="Repeats">
-                  <div className="grid grid-cols-[1fr_90px] gap-2">
-                    <select
-                      value={task.recurrence.frequency}
-                      onChange={(event) =>
-                        commit({
-                          ...task,
-                          recurrence: {
-                            ...task.recurrence,
-                            frequency: event.target
-                              .value as PlannerRecurrence["frequency"],
-                          },
-                        })
-                      }
-                      className={inputClass()}
-                    >
-                      <option value="none">Does not repeat</option>
-                      <option value="daily">Daily</option>
-                      <option value="weekly">Weekly</option>
-                      <option value="monthly">Monthly</option>
-                      <option value="yearly">Yearly</option>
-                    </select>
-                    <input
-                      type="number"
-                      min={1}
-                      max={365}
-                      value={task.recurrence.interval}
-                      disabled={task.recurrence.frequency === "none"}
-                      onChange={(event) =>
-                        commit({
-                          ...task,
-                          recurrence: {
-                            ...task.recurrence,
-                            interval: Math.max(
-                              1,
-                              Math.min(365, Number(event.target.value) || 1),
-                            ),
-                          },
-                        })
-                      }
-                      className={inputClass()}
-                      aria-label="Repeat interval"
-                    />
-                  </div>
-                </Field>
-                {task.recurrence.frequency === "weekly" ? (
-                  <Field label="Repeat on">
-                    <div className="flex flex-wrap gap-1.5">
-                      {["S", "M", "T", "W", "T", "F", "S"].map((label, day) => {
-                        const active = task.recurrence.weekdays.includes(day);
-                        return (
-                          <button
-                            key={`${label}-${day}`}
-                            type="button"
-                            className={`h-8 w-8 rounded-full border text-[11px] font-semibold ${active ? "border-[#d88922] bg-[color-mix(in_oklab,#d88922_10%,var(--bg-primary))] text-[#b96c0b]" : "border-[var(--border-default)] text-[var(--text-secondary)]"}`}
-                            onClick={() =>
-                              commit({
-                                ...task,
-                                recurrence: {
-                                  ...task.recurrence,
-                                  weekdays: active
-                                    ? task.recurrence.weekdays.filter(
-                                        (value) => value !== day,
-                                      )
-                                    : [...task.recurrence.weekdays, day].sort(),
-                                },
-                              })
-                            }
-                            aria-pressed={active}
-                          >
-                            {label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </Field>
-                ) : null}
-                {task.recurrence.frequency !== "none" ? (
-                  <Field label="Repeat until">
-                    <input
-                      type="date"
-                      value={dateInputValue(task.recurrence.untilAt)}
-                      min={dueDate || startDate || undefined}
-                      onChange={(event) =>
-                        commit({
-                          ...task,
-                          recurrence: {
-                            ...task.recurrence,
-                            untilAt: event.target.value
-                              ? dateTimeValue(event.target.value, "23:59")
-                              : undefined,
-                          },
-                        })
-                      }
-                      className={inputClass()}
-                    />
-                  </Field>
-                ) : null}
-                <PlannerPeopleEditor
-                  label="Assignees"
-                  people={task.assignees}
-                  onChange={(assignees) => commit({ ...task, assignees })}
-                />
-                <PlannerPeopleEditor
-                  label="Watchers"
-                  people={task.watchers}
-                  onChange={(watchers) => commit({ ...task, watchers })}
-                />
-                {task.source ? (
-                  <div className="md:col-span-2 rounded-[8px] border border-[var(--border-default)] p-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <div className="text-[11px] font-semibold text-[var(--text-primary)]">
-                          Source authority
-                        </div>
-                        <div className="mt-0.5 text-[10px] text-[var(--text-tertiary)]">
-                          {task.source.externalId}
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        className={smallActionClass()}
-                        onClick={() =>
-                          commit({
-                            ...task,
-                            source: task.source
-                              ? {
-                                  ...task.source,
-                                  status: "detached",
-                                  lockedFields: [],
-                                }
-                              : undefined,
-                          })
-                        }
-                      >
-                        Detach source
-                      </button>
-                    </div>
-                    <Field label="Private planning note">
-                      <textarea
-                        value={task.personalOverlay?.note ?? ""}
-                        onChange={(event) =>
-                          commit({
-                            ...task,
-                            personalOverlay: {
-                              ...task.personalOverlay,
-                              note: event.target.value,
-                            },
-                          })
-                        }
-                        className={`${inputClass()} min-h-20 py-2`}
-                        placeholder="Your private overlay is not written back to the source."
-                      />
-                    </Field>
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
-          <TaskListEditor
-            task={task}
-            commit={commit}
-            aiChangedPaths={aiChangedPaths}
-          />
-          <AttachmentEditor
-            artifactId={artifact._id}
-            task={task}
-            commit={commit}
-            aiChangedPaths={aiChangedPaths}
-            readOnly={readOnly}
-          />
-          <div className="mt-5">
-            <Field label="Sources / provenance" path="/sourceRefs">
-              <div className="flex min-h-10 flex-wrap items-center gap-1.5 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 py-1.5">
-                {task.sourceRefs.map((sourceRef) => {
-                  const sourceArtifact = artifacts.find(
-                    (item) => item._id === sourceRef,
-                  );
-                  const label = sourceArtifact?.title ?? sourceRef;
-                  return (
-                    <button
-                      key={sourceRef}
-                      type="button"
-                      onClick={() =>
-                        commit({
-                          ...task,
-                          sourceRefs: task.sourceRefs.filter(
-                            (item) => item !== sourceRef,
-                          ),
-                        })
-                      }
-                      className="inline-flex max-w-full items-center gap-1 rounded-[7px] border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-2 py-1 text-[11px] text-[var(--text-secondary)]"
-                      title={`Remove source ${label}`}
-                    >
-                      <span className="truncate">{label}</span>
-                      <span aria-hidden="true">×</span>
-                    </button>
-                  );
-                })}
-                <input
-                  value={newSourceRef}
-                  onChange={(event) => setNewSourceRef(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key !== "Enter" || !newSourceRef.trim()) return;
-                    event.preventDefault();
-                    commit({
-                      ...task,
-                      sourceRefs: Array.from(
-                        new Set([...task.sourceRefs, newSourceRef.trim()]),
-                      ),
-                    });
-                    setNewSourceRef("");
-                  }}
-                  className="h-7 min-w-[150px] flex-1 bg-transparent px-1 text-[11px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
-                  placeholder="Add a source or linked artifact"
-                  aria-label="Add source"
-                />
-              </div>
-            </Field>
-          </div>
-        </section>
-      </fieldset>
-      {mode === "tab" && inspectorOpen ? (
-        <aside className="space-y-4">
-          <SideCard title="Task blueprint">
-            <div className="flex items-center gap-3">
-              <span className="flex h-8 w-8 items-center justify-center rounded-[8px] bg-[color-mix(in_oklab,#d88922_10%,var(--bg-primary))] text-[#d88922]">
-                <CalendarCheck2 className="h-4 w-4" />
-              </span>
-              <div>
-                <div className="text-[13px] font-semibold text-[var(--text-primary)]">
-                  Planner task
-                </div>
-                <div className="mt-0.5 text-[10px] text-[var(--text-tertiary)]">
-                  Active blueprint
-                </div>
-              </div>
-              <span className="ml-auto rounded-[6px] bg-[color-mix(in_oklab,var(--success)_11%,var(--bg-primary))] px-2 py-1 text-[10px] text-[var(--success)]">
-                Active
-              </span>
-            </div>
-            <div className="-mt-1 grid grid-cols-2 gap-2">
-              <div className="rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2">
-                <strong className="block text-[12px] font-semibold text-[var(--text-primary)]">
-                  {task.status === "done"
-                    ? "Completed"
-                    : task.status === "doing"
-                      ? "In progress"
-                      : "Active"}
-                </strong>
-                <span className="text-[10px] text-[var(--text-tertiary)]">
-                  State
-                </span>
-              </div>
-              <div className="rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2">
-                <strong className="block text-[12px] font-semibold text-[var(--text-primary)]">
-                  Task
-                </strong>
-                <span className="text-[10px] text-[var(--text-tertiary)]">
-                  Type
-                </span>
-              </div>
-            </div>
-          </SideCard>
-          <fieldset className="contents" disabled={readOnly}>
-            <SideCard title="Schedule">
-              {scheduleOpen ? (
-                <div className="spectra-planner-schedule-editor">
-                  <Field
-                    label="Starts"
-                    aiActive={pathTouches(aiChangedPaths, "/startAt")}
-
-                    path="/startAt"
-                  >
-                    <div className="grid grid-cols-[minmax(0,1fr)_88px] gap-1.5">
-                      <input
-                        type="date"
-                        value={startDate}
-                        disabled={sourceLocked("startAt")}
-                        onInput={(event) =>
-                          updateSchedule({
-                            startDate: event.currentTarget.value,
-                          })
-                        }
-                        className={inputClass()}
-                      />
-                      <input
-                        type="time"
-                        value={startTime}
-                        disabled={task.allDay || sourceLocked("startAt")}
-                        onInput={(event) =>
-                          updateSchedule({
-                            startTime: event.currentTarget.value,
-                          })
-                        }
-                        className={inputClass()}
-                        aria-label="Start time"
-                      />
-                    </div>
-                  </Field>
-                  <div className="mt-3">
-                    <Field
-                      label="Ends"
-                      aiActive={pathTouches(aiChangedPaths, "/endAt")}
-
-                      path="/endAt"
-                    >
-                      <div className="grid grid-cols-[minmax(0,1fr)_88px] gap-1.5">
-                        <input
-                          type="date"
-                          value={endDate}
-                          disabled={sourceLocked("endAt")}
-                          onInput={(event) =>
-                            updateSchedule({
-                              endDate: event.currentTarget.value,
-                            })
-                          }
-                          className={inputClass()}
-                        />
-                        <input
-                          type="time"
-                          value={endTime}
-                          disabled={task.allDay || sourceLocked("endAt")}
-                          onInput={(event) =>
-                            updateSchedule({
-                              endTime: event.currentTarget.value,
-                            })
-                          }
-                          className={inputClass()}
-                          aria-label="End time"
-                        />
-                      </div>
-                    </Field>
-                  </div>
-                </div>
-              ) : (
-                <div className="spectra-planner-schedule-summary">
-                  <button type="button" onClick={() => setScheduleOpen(true)}>
-                    <span>Starts</span>
-                    <strong>{formatScheduleDateTime(task.startAt)}</strong>
-                  </button>
-                  <button type="button" onClick={() => setScheduleOpen(true)}>
-                    <span>Ends</span>
-                    <strong>{formatScheduleDateTime(task.endAt)}</strong>
-                  </button>
-                </div>
-              )}
-              <button
-                type="button"
-                className="mt-3 flex h-9 w-full items-center justify-between rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-[11px] text-[var(--text-secondary)]"
-                onClick={() => commit({ ...task, allDay: !task.allDay })}
-                aria-pressed={task.allDay}
-              >
-                All day
-                <span
-                  className={`h-5 w-9 rounded-full p-0.5 transition ${task.allDay ? "bg-[var(--success)]" : "bg-[var(--bg-secondary)]"}`}
-                >
-                  <span
-                    className={`block h-4 w-4 rounded-full bg-white transition ${task.allDay ? "translate-x-4" : ""}`}
-                  />
-                </span>
-              </button>
-              {scheduleOpen ? (
-                <button
-                  type="button"
-                  className="mt-2 w-full text-center text-[10px] text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
-                  onClick={() => setScheduleOpen(false)}
-                >
-                  Done editing schedule
-                </button>
-              ) : null}
-            </SideCard>
-          </fieldset>
-          <div className="contents">
-            <SideCard title="Linked to">
-              <div className="space-y-2">
-                {linked.map((item) => {
-                  const meta = blueprintMeta[item.blueprintKey];
-                  const Icon = meta.icon;
-                  return (
-                    <div
-                      key={item._id}
-                      className="flex items-center gap-1 rounded-[7px] hover:bg-[var(--bg-hover)]"
-                    >
-                      <button
-                        type="button"
-                        className="flex min-w-0 flex-1 items-center gap-2 px-1 py-1 text-left text-[12px] text-[var(--text-primary)]"
-                        onClick={() => onOpenArtifact(item._id)}
-                      >
-                        <Icon
-                          className="h-4 w-4"
-                          style={{ color: meta.color }}
-                        />
-                        <span className="min-w-0 flex-1 truncate">
-                          {item.title}
-                        </span>
-                        <ArrowUpRight className="h-3.5 w-3.5 text-[var(--text-tertiary)]" />
-                      </button>
-                      <button
-                        type="button"
-                        className="flex h-7 w-7 items-center justify-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--danger)]"
-                        onClick={() =>
-                          commit({
-                            ...task,
-                            linkedArtifactIds: task.linkedArtifactIds.filter(
-                              (artifactId) => artifactId !== item._id,
-                            ),
-                          })
-                        }
-                        aria-label={`Unlink ${item.title}`}
-                        disabled={readOnly}
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  );
-                })}
-                {linked.length === 0 ? (
-                  <div className="text-[12px] text-[var(--text-secondary)]">
-                    No linked artifacts.
-                  </div>
-                ) : null}
-                <select
-                  className={inputClass()}
-                  value=""
-                  disabled={readOnly}
-                  onChange={(event) => {
-                    if (!event.target.value) return;
-                    commit({
-                      ...task,
-                      linkedArtifactIds: Array.from(
-                        new Set([
-                          ...task.linkedArtifactIds,
-                          event.target.value,
-                        ]),
-                      ),
-                    });
-                  }}
-                >
-                  <option value="">Link artifact</option>
-                  {artifacts
-                    .filter(
-                      (item) =>
-                        item._id !== artifact._id &&
-                        !task.linkedArtifactIds.includes(item._id),
-                    )
-                    .map((item) => (
-                      <option key={item._id} value={item._id}>
-                        {item.title}
-                      </option>
-                    ))}
-                </select>
-              </div>
-            </SideCard>
-          </div>
-          <fieldset className="contents" disabled={readOnly}>
-            <SideCard title="Reminders">
-              <ReminderEditor task={task} commit={commit} />
-            </SideCard>
-          </fieldset>
-          <SideCard title="Import & export">
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                className={`${smallActionClass()} justify-center`}
-                onClick={() => plannerImportRef.current?.click()}
-                disabled={readOnly || importingTask}
-              >
-                {importingTask ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Import className="h-3.5 w-3.5" />
-                )}
-                Import
-              </button>
-              <button
-                type="button"
-                className={`${smallActionClass()} justify-center`}
-                onClick={() => exportTask("json")}
-              >
-                <FileDown className="h-3.5 w-3.5" /> JSON
-              </button>
-              <button
-                type="button"
-                className={`${smallActionClass()} justify-center`}
-                onClick={() => exportTask("csv")}
-              >
-                <FileDown className="h-3.5 w-3.5" /> CSV
-              </button>
-              <button
-                type="button"
-                className={`${smallActionClass()} justify-center`}
-                onClick={() => exportTask("ics")}
-              >
-                <CalendarCheck2 className="h-3.5 w-3.5" /> ICS
-              </button>
-            </div>
-            <input
-              ref={plannerImportRef}
-              type="file"
-              accept=".json,.csv,.tsv,.ics,application/json,text/csv,text/tab-separated-values,text/calendar"
-              hidden
-              onChange={(event) => {
-                const file = event.currentTarget.files?.[0];
-                if (file) void importTaskFile(file);
-                event.currentTarget.value = "";
-              }}
-            />
-            {taskToolReport ? (
-              <p
-                className="mt-2 text-[10px] leading-4 text-[var(--text-secondary)]"
-                role="status"
-              >
-                {taskToolReport}
-              </p>
-            ) : null}
-          </SideCard>
-          <SideCard title="Created">
-            <MetricRow
-              label="Created"
-              value={formatShortDate(artifact.createdAt)}
-            />
-            <MetricRow
-              label="Updated"
-              value={formatShortDate(artifact.updatedAt)}
-            />
-          </SideCard>
-          <button
-            type="button"
-            className="flex h-10 w-full items-center justify-center gap-2 rounded-[8px] border border-[color-mix(in_oklab,var(--danger)_28%,var(--border-default))] text-[13px] font-medium text-[var(--danger)] hover:bg-[color-mix(in_oklab,var(--danger)_7%,var(--bg-elevated))]"
-            onClick={() => (onArchive ? void onArchive() : undefined)}
-            disabled={readOnly || !onArchive}
-          >
-            <Archive className="h-4 w-4" />
-            Move to trash
-          </button>
-        </aside>
-      ) : null}
     </div>
   );
 }
@@ -15636,7 +15377,7 @@ function QuestionEditor({
                   placeholder={`Prompt ${index + 1}`}
                 />
                 <span className="text-center text-[var(--text-tertiary)]">
-                  →
+                  â†’
                 </span>
                 <input
                   value={pair.right ?? ""}
@@ -15676,7 +15417,7 @@ function QuestionEditor({
               </div>
             ))}
           </div>
-          <p className="mt-2 text-[9px] text-[var(--text-tertiary)]">
+          <p className="mt-2 text-micro text-[var(--text-tertiary)]">
             Matches are shuffled in each private practice attempt. The right
             side remains hidden from learners until feedback is released.
           </p>
@@ -15695,7 +15436,7 @@ function QuestionEditor({
               placeholder="What should a strong response include?"
             />
           </Field>
-          <p className="mt-2 text-[9px] leading-4 text-[var(--text-tertiary)]">
+          <p className="mt-2 text-micro leading-4 text-[var(--text-tertiary)]">
             Long responses are not auto-scored. Learners receive this guidance
             as advisory formative feedback.
           </p>
@@ -15718,7 +15459,7 @@ function QuestionEditor({
             />
           </Field>
           <Field
-            label="Accepted tolerance (±)"
+            label="Accepted tolerance (Â±)"
             aiActive={aiField("numericTolerance")}
             path={`${qPath}/numericTolerance`}
           >
@@ -15883,623 +15624,6 @@ function QuestionEditor({
           </Field>
         </div>
       </details>
-    </div>
-  );
-}
-
-function TaskListEditor({
-  task,
-  commit,
-  aiChangedPaths = [],
-}: {
-  task: PlannerTask;
-  commit: (task: PlannerTask) => void;
-  aiChangedPaths?: string[];
-}) {
-  return (
-    <section className="mt-5">
-      <div className="mb-2 flex items-center justify-between">
-        <h4 className="text-[12px] font-semibold text-[var(--text-secondary)]">
-          Subtasks {task.subtasks.filter((item) => item.done).length}/
-          {task.subtasks.length}
-        </h4>
-        <button
-          type="button"
-          className={smallActionClass()}
-          {...targetAttrs("/subtasks")}
-          onClick={() =>
-            commit({
-              ...task,
-              subtasks: [
-                ...task.subtasks,
-                { id: id("subtask"), title: "", done: false },
-              ],
-            })
-          }
-        >
-          <Plus className="h-3.5 w-3.5" />
-          Add subtask
-        </button>
-      </div>
-      <div className="overflow-hidden rounded-[8px] border border-[var(--border-default)]">
-        {(task.subtasks.length > 0
-          ? task.subtasks
-          : [{ id: "empty", title: "", done: false }]
-        ).map((subtask, index) => (
-          <div
-            key={subtask.id}
-            className="grid grid-cols-[32px_minmax(0,1fr)_34px] items-center gap-2 border-b border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 last:border-b-0"
-          >
-            <button
-              type="button"
-              {...targetAttrs(`/subtasks/${index}/done`)}
-              disabled={subtask.id === "empty"}
-              aria-label={
-                subtask.id === "empty"
-                  ? "New subtask"
-                  : subtask.done
-                    ? `Mark ${subtask.title || "subtask"} incomplete`
-                    : `Mark ${subtask.title || "subtask"} complete`
-              }
-              className="text-[var(--text-secondary)] disabled:opacity-35"
-              data-ai-region={aiRegionAttr(
-                pathTouches(aiChangedPaths, `/subtasks/${index}/done`) ||
-                  pathTouches(aiChangedPaths, `/subtasks/${index}`),
-              )}
-              onClick={() =>
-                commit({
-                  ...task,
-                  subtasks: task.subtasks.map((item) =>
-                    item.id === subtask.id
-                      ? { ...item, done: !item.done }
-                      : item,
-                  ),
-                })
-              }
-            >
-              {subtask.done ? (
-                <CheckCircle2 className="h-4 w-4 text-[var(--success)]" />
-              ) : (
-                <Circle className="h-4 w-4" />
-              )}
-            </button>
-            <input
-              {...targetAttrs(`/subtasks/${index}/title`)}
-              value={subtask.title}
-              onChange={(event) =>
-                commit({
-                  ...task,
-                  subtasks:
-                    subtask.id === "empty"
-                      ? [
-                          {
-                            id: id("subtask"),
-                            title: event.target.value,
-                            done: false,
-                          },
-                        ]
-                      : task.subtasks.map((item) =>
-                          item.id === subtask.id
-                            ? { ...item, title: event.target.value }
-                            : item,
-                        ),
-                })
-              }
-              data-ai-region={aiRegionAttr(
-                pathTouches(aiChangedPaths, `/subtasks/${index}/title`) ||
-                  pathTouches(aiChangedPaths, `/subtasks/${index}`),
-              )}
-              className="h-8 bg-transparent text-[13px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
-              placeholder="Add the first subtask"
-              aria-label="Subtask"
-            />
-            <button
-              type="button"
-              {...targetAttrs(`/subtasks/${index}`)}
-              disabled={subtask.id === "empty"}
-              aria-label={`Remove ${subtask.title || "subtask"}`}
-              className="text-[var(--text-tertiary)] hover:text-[var(--danger)] disabled:opacity-0"
-              onClick={() =>
-                commit({
-                  ...task,
-                  subtasks: task.subtasks.filter(
-                    (item) => item.id !== subtask.id,
-                  ),
-                })
-              }
-            >
-              <Trash2 className="h-4 w-4" />
-            </button>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function PlannerPeopleEditor({
-  label,
-  people,
-  onChange,
-}: {
-  label: string;
-  people: PlannerPerson[];
-  onChange: (people: PlannerPerson[]) => void;
-}) {
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState<SpectraSchoolMember[]>([]);
-  const [searching, setSearching] = useState(false);
-  const [error, setError] = useState<string>();
-
-  useEffect(() => {
-    if (query.trim().length < 2) {
-      setResults([]);
-      setSearching(false);
-      setError(undefined);
-      return;
-    }
-    let active = true;
-    setSearching(true);
-    const timeout = window.setTimeout(() => {
-      void searchSpectraSchoolMembers(query.trim(), 8)
-        .then((response) => {
-          if (!active) return;
-          setResults(
-            response.members.filter(
-              (member) =>
-                !people.some((person) => person.accountId === member.accountId),
-            ),
-          );
-          setError(undefined);
-        })
-        .catch((searchError: unknown) => {
-          if (!active) return;
-          setResults([]);
-          setError(
-            searchError instanceof Error
-              ? searchError.message
-              : "School member search failed.",
-          );
-        })
-        .finally(() => {
-          if (active) setSearching(false);
-        });
-    }, 280);
-    return () => {
-      active = false;
-      window.clearTimeout(timeout);
-    };
-  }, [people, query]);
-
-  return (
-    <Field label={label}>
-      <div className="rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2">
-        <div className="flex flex-wrap gap-1.5">
-          {people.map((person) => (
-            <button
-              key={person.accountId}
-              type="button"
-              className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 py-1 text-[10px] text-[var(--text-primary)]"
-              onClick={() =>
-                onChange(
-                  people.filter((item) => item.accountId !== person.accountId),
-                )
-              }
-              title={`Remove ${person.name}`}
-            >
-              <span className="flex h-4 w-4 items-center justify-center rounded-full bg-[color-mix(in_oklab,#d88922_12%,var(--bg-primary))] text-[8px] font-semibold text-[#b96c0b]">
-                {person.name.slice(0, 1).toUpperCase()}
-              </span>
-              {person.name}
-              <X className="h-2.5 w-2.5" />
-            </button>
-          ))}
-          {!people.length ? (
-            <span className="px-1 py-1 text-[10px] text-[var(--text-tertiary)]">
-              No one selected
-            </span>
-          ) : null}
-        </div>
-        <div className="relative mt-2">
-          <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-[var(--text-tertiary)]" />
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            className={`${inputClass()} pl-8`}
-            placeholder="Search school members"
-            aria-label={`Search ${label.toLowerCase()}`}
-          />
-          {searching ? (
-            <Loader2 className="absolute right-2.5 top-2.5 h-3.5 w-3.5 animate-spin text-[var(--text-tertiary)]" />
-          ) : null}
-        </div>
-        {results.length ? (
-          <div className="mt-1 overflow-hidden rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-primary)] shadow-sm">
-            {results.map((member) => (
-              <button
-                key={member.accountId}
-                type="button"
-                className="flex w-full items-center gap-2 border-b border-[var(--border-subtle)] px-2.5 py-2 text-left last:border-b-0 hover:bg-[var(--bg-hover)]"
-                onClick={() => {
-                  onChange([
-                    ...people,
-                    {
-                      accountId: member.accountId,
-                      name: member.name,
-                      email: member.email,
-                    },
-                  ]);
-                  setQuery("");
-                  setResults([]);
-                }}
-              >
-                <span className="min-w-0">
-                  <span className="block truncate text-[11px] font-medium text-[var(--text-primary)]">
-                    {member.name}
-                  </span>
-                  <span className="block truncate text-[9px] text-[var(--text-tertiary)]">
-                    {member.email}
-                  </span>
-                </span>
-                <span className="ml-auto text-[9px] capitalize text-[var(--text-tertiary)]">
-                  {member.role.replace("_", " ")}
-                </span>
-              </button>
-            ))}
-          </div>
-        ) : query.trim().length >= 2 && !searching && !error ? (
-          <p className="mt-1.5 text-[10px] text-[var(--text-tertiary)]">
-            No matching school members.
-          </p>
-        ) : null}
-        {error ? (
-          <p className="mt-1.5 text-[10px] text-[var(--danger)]" role="status">
-            {error}
-          </p>
-        ) : null}
-      </div>
-    </Field>
-  );
-}
-
-function AttachmentEditor({
-  artifactId,
-  task,
-  commit,
-  aiChangedPaths = [],
-  readOnly,
-}: {
-  artifactId: string;
-  task: PlannerTask;
-  commit: (task: PlannerTask) => void;
-  aiChangedPaths?: string[];
-  readOnly: boolean;
-}) {
-  const [assets, setAssets] = useState<SpectraArtifactAsset[]>([]);
-  const [uploading, setUploading] = useState(false);
-  const [dragActive, setDragActive] = useState(false);
-  const [error, setError] = useState<string>();
-
-  useEffect(() => {
-    let active = true;
-    void getArtifactAssets(artifactId)
-      .then((response) => {
-        if (active) setAssets(response.assets);
-      })
-      .catch((loadError: unknown) => {
-        if (active)
-          setError(
-            loadError instanceof Error
-              ? loadError.message
-              : "Attachments are unavailable.",
-          );
-      });
-    return () => {
-      active = false;
-    };
-  }, [artifactId]);
-
-  const assetsById = new Map(assets.map((asset) => [asset.assetId, asset]));
-
-  async function addFiles(files: File[]) {
-    if (!files.length || readOnly) return;
-    setUploading(true);
-    setError(undefined);
-    const additions: PlannerAttachment[] = [];
-    const failures: string[] = [];
-    for (const file of files.slice(0, 30 - task.attachments.length)) {
-      const mediaType = plannerAssetMediaType(file);
-      if (!mediaType) {
-        failures.push(`${file.name}: unsupported or unidentifiable file type`);
-        continue;
-      }
-      if (file.size < 1 || file.size > 100 * 1024 * 1024) {
-        failures.push(
-          `${file.name}: outside the 100 MB technical safety ceiling`,
-        );
-        continue;
-      }
-      try {
-        const uploaded = await uploadArtifactAsset({
-          artifactId,
-          path: `planner/attachments/${Date.now().toString(36)}-${id("file")}-${file.name}`,
-          name: file.name,
-          mediaType,
-          sha256: await artifactBlobSha256(file),
-          blob: file,
-        });
-        additions.push({
-          id: id("attachment"),
-          assetId: uploaded.assetId,
-          name: file.name,
-          mediaType,
-          bytes: file.size,
-          meta: `${plannerBytesLabel(file.size)} · ${mediaType}`,
-        });
-      } catch (uploadError) {
-        failures.push(
-          `${file.name}: ${uploadError instanceof Error ? uploadError.message : "upload failed"}`,
-        );
-      }
-    }
-    if (additions.length)
-      commit({ ...task, attachments: [...task.attachments, ...additions] });
-    try {
-      const refreshed = await getArtifactAssets(artifactId);
-      setAssets(refreshed.assets);
-    } catch {
-      // References are already durable; the next refresh recovers metadata.
-    }
-    setError(failures.length ? failures.join(" · ") : undefined);
-    setUploading(false);
-  }
-
-  async function removeAttachment(attachment: PlannerAttachment) {
-    if (readOnly) return;
-    setError(undefined);
-    try {
-      if (attachment.assetId) await revokeArtifactAsset(attachment.assetId);
-      commit({
-        ...task,
-        attachments: task.attachments.filter(
-          (item) => item.id !== attachment.id,
-        ),
-      });
-      setAssets((current) =>
-        current.map((asset) =>
-          asset.assetId === attachment.assetId
-            ? { ...asset, status: "revoked", downloadUrl: null }
-            : asset,
-        ),
-      );
-    } catch (removeError) {
-      setError(
-        removeError instanceof Error
-          ? removeError.message
-          : "The attachment could not be removed.",
-      );
-    }
-  }
-
-  return (
-    <section className="mt-5">
-      <div className="mb-2 flex items-center justify-between">
-        <h4 className="text-[12px] font-semibold text-[var(--text-secondary)]">
-          Attachments
-        </h4>
-        <label
-          className={`${smallActionClass()} cursor-pointer ${uploading ? "pointer-events-none opacity-55" : ""}`}
-        >
-          {uploading ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <Plus className="h-3.5 w-3.5" />
-          )}
-          {uploading ? "Uploading" : "Attach"}
-          <input
-            type="file"
-            multiple
-            hidden
-            disabled={readOnly || uploading}
-            accept="image/*,audio/*,video/*,.pdf,.txt,.md,.csv,.tsv,.json,.docx,.xlsx,.pptx,.odt,.ods,.odp"
-            onChange={(event) => {
-              const files = Array.from(event.currentTarget.files ?? []);
-              if (files.length) void addFiles(files);
-              event.currentTarget.value = "";
-            }}
-          />
-        </label>
-      </div>
-      <div className="space-y-2">
-        {task.attachments.map((attachment, index) => (
-          <div
-            key={attachment.id}
-            className="flex items-center gap-3 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2.5"
-            data-ai-region={
-              pathTouches(aiChangedPaths, `/attachments/${index}`) || undefined
-            }
-          >
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] bg-[color-mix(in_oklab,#e34d44_10%,var(--bg-elevated))] text-[#d94a42]">
-              <FileText className="h-4 w-4" />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-[12px] font-semibold text-[var(--text-primary)]">
-                {attachment.name}
-              </span>
-              <span className="block truncate text-[10px] text-[var(--text-tertiary)]">
-                {attachment.bytes
-                  ? `${plannerBytesLabel(attachment.bytes)} · ${attachment.mediaType}`
-                  : attachment.meta || "Legacy reference"}
-              </span>
-            </span>
-            {assetsById.get(attachment.assetId)?.status === "active" &&
-            assetsById.get(attachment.assetId)?.downloadUrl ? (
-              <a
-                href={assetsById.get(attachment.assetId)!.downloadUrl!}
-                className={iconButtonClass()}
-                target="_blank"
-                rel="noreferrer"
-                aria-label={`Open ${attachment.name}`}
-              >
-                <FileDown className="h-4 w-4" />
-              </a>
-            ) : (
-              <span className="rounded-[6px] bg-[var(--bg-secondary)] px-2 py-1 text-[9px] text-[var(--text-tertiary)]">
-                {assetsById.get(attachment.assetId)?.status === "quarantined"
-                  ? "Quarantined"
-                  : assetsById.get(attachment.assetId)?.status === "revoked"
-                    ? "Removed"
-                    : "Unavailable"}
-              </span>
-            )}
-            <button
-              type="button"
-              className={iconButtonClass()}
-              onClick={() => void removeAttachment(attachment)}
-              aria-label="Remove attachment"
-            >
-              <Trash2 className="h-4 w-4" />
-            </button>
-          </div>
-        ))}
-        <label
-          className={`block rounded-[8px] border border-dashed px-4 py-5 text-center text-[12px] transition ${readOnly ? "cursor-default opacity-60" : "cursor-pointer"} ${dragActive ? "border-[#d88922] bg-[color-mix(in_oklab,#d88922_7%,var(--bg-primary))] text-[#b96c0b]" : "border-[var(--border-default)] text-[var(--text-secondary)] hover:border-[color-mix(in_oklab,#d88922_45%,var(--border-default))] hover:bg-[var(--bg-hover)]"}`}
-          onDragEnter={(event) => {
-            event.preventDefault();
-            setDragActive(true);
-          }}
-          onDragOver={(event) => event.preventDefault()}
-          onDragLeave={() => setDragActive(false)}
-          onDrop={(event) => {
-            event.preventDefault();
-            setDragActive(false);
-            if (!readOnly && !uploading)
-              void addFiles(Array.from(event.dataTransfer.files));
-          }}
-        >
-          {uploading
-            ? "Securing attachments…"
-            : "Drop files here or click to attach"}
-          <input
-            type="file"
-            multiple
-            hidden
-            disabled={readOnly || uploading}
-            accept="image/*,audio/*,video/*,.pdf,.txt,.md,.csv,.tsv,.json,.docx,.xlsx,.pptx,.odt,.ods,.odp"
-            onChange={(event) => {
-              const files = Array.from(event.currentTarget.files ?? []);
-              if (files.length) void addFiles(files);
-              event.currentTarget.value = "";
-            }}
-          />
-        </label>
-        {error ? (
-          <p
-            className="text-[10px] leading-4 text-[var(--danger)]"
-            role="status"
-          >
-            {error}
-          </p>
-        ) : null}
-      </div>
-    </section>
-  );
-}
-
-function ReminderEditor({
-  task,
-  commit,
-}: {
-  task: PlannerTask;
-  commit: (task: PlannerTask) => void;
-}) {
-  const [draft, setDraft] = useState("30");
-  return (
-    <div className="space-y-2">
-      {task.reminders.map((reminder) => (
-        <div
-          key={reminder.id}
-          className="flex items-center justify-between gap-2 rounded-[7px] border border-[var(--border-default)] px-2 py-2 text-[12px] text-[var(--text-primary)]"
-        >
-          <button
-            type="button"
-            className={`h-4 w-7 rounded-full p-0.5 ${reminder.enabled ? "bg-[var(--success)]" : "bg-[var(--bg-secondary)]"}`}
-            onClick={() =>
-              commit({
-                ...task,
-                reminders: task.reminders.map((item) =>
-                  item.id === reminder.id
-                    ? { ...item, enabled: !item.enabled }
-                    : item,
-                ),
-              })
-            }
-            aria-label={`${reminder.enabled ? "Disable" : "Enable"} reminder`}
-            aria-pressed={reminder.enabled}
-          >
-            <span
-              className={`block h-3 w-3 rounded-full bg-white transition ${reminder.enabled ? "translate-x-3" : ""}`}
-            />
-          </button>
-          <span className="min-w-0 flex-1 truncate">
-            {reminder.minutesBefore === 0
-              ? "At due time"
-              : reminder.minutesBefore < 60
-                ? `${reminder.minutesBefore} min before`
-                : reminder.minutesBefore % 1_440 === 0
-                  ? `${reminder.minutesBefore / 1_440} day${reminder.minutesBefore === 1_440 ? "" : "s"} before`
-                  : `${Math.round((reminder.minutesBefore / 60) * 10) / 10} hr before`}
-          </span>
-          <button
-            type="button"
-            onClick={() =>
-              commit({
-                ...task,
-                reminders: task.reminders.filter(
-                  (item) => item.id !== reminder.id,
-                ),
-              })
-            }
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      ))}
-      <div className="grid grid-cols-[1fr_34px] gap-2">
-        <input
-          type="number"
-          min={0}
-          max={525600}
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          className={inputClass()}
-          placeholder="Minutes before"
-          aria-label="Reminder minutes before"
-        />
-        <button
-          type="button"
-          className={iconButtonClass()}
-          onClick={() => {
-            const minutes = Number(draft);
-            if (!Number.isFinite(minutes) || minutes < 0) return;
-            commit({
-              ...task,
-              reminders: [
-                ...task.reminders,
-                {
-                  id: id("reminder"),
-                  minutesBefore: Math.min(525_600, Math.round(minutes)),
-                  enabled: true,
-                },
-              ],
-            });
-            setDraft("30");
-          }}
-          aria-label="Add reminder"
-        >
-          <Plus className="h-4 w-4" />
-        </button>
-      </div>
     </div>
   );
 }
@@ -16709,7 +15833,7 @@ function StudioDetails({
                     <strong className="block font-sans text-[13px] font-semibold tracking-[-0.01em] text-[var(--text-primary)]">
                       {value}
                     </strong>
-                    <span className="text-[9px] text-[var(--text-tertiary)]">
+                    <span className="text-micro text-[var(--text-tertiary)]">
                       {label}
                     </span>
                   </div>
@@ -16724,7 +15848,7 @@ function StudioDetails({
                   <strong className="block font-display text-[14px] text-[var(--text-primary)]">
                     {detailDeckCards.length}
                   </strong>
-                  <span className="text-[9px] text-[var(--text-tertiary)]">
+                  <span className="text-micro text-[var(--text-tertiary)]">
                     Cards
                   </span>
                 </div>
@@ -16732,7 +15856,7 @@ function StudioDetails({
                   <strong className="block font-display text-[14px] text-[var(--text-primary)]">
                     {detailDeckSections}
                   </strong>
-                  <span className="text-[9px] text-[var(--text-tertiary)]">
+                  <span className="text-micro text-[var(--text-tertiary)]">
                     Sections
                   </span>
                 </div>
@@ -16741,7 +15865,7 @@ function StudioDetails({
                     ~{Math.max(1, Math.round(detailDeckCards.length * 0.75))}{" "}
                     min
                   </strong>
-                  <span className="text-[9px] text-[var(--text-tertiary)]">
+                  <span className="text-micro text-[var(--text-tertiary)]">
                     Study time
                   </span>
                 </div>
@@ -16762,8 +15886,8 @@ function StudioDetails({
                       <span className="min-w-0 flex-1 truncate font-medium">
                         {link.artifact.title}
                       </span>
-                      <span className="text-[9px] text-[var(--text-tertiary)]">
-                        {link.direction === "incoming" ? "←" : "→"}{" "}
+                      <span className="text-micro text-[var(--text-tertiary)]">
+                        {link.direction === "incoming" ? "â†" : "â†’"}{" "}
                         {link.relationType.replaceAll("_", " ")}
                       </span>
                       <button
@@ -16803,7 +15927,7 @@ function StudioDetails({
               ) : null}
               <button
                 type="button"
-                className="inline-flex h-7 items-center gap-1.5 rounded-[6px] px-1.5 text-[10px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                className="inline-flex h-7 items-center gap-1.5 rounded-[6px] px-1.5 text-micro text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                 onClick={() => setLinkPickerOpen((open) => !open)}
                 aria-expanded={linkPickerOpen}
               >
@@ -16814,7 +15938,7 @@ function StudioDetails({
                   {suggestions.map(({ candidate }) => (
                     <div
                       key={candidate._id}
-                      className="flex items-center gap-2 rounded-[5px] px-1 py-1 text-[10px]"
+                      className="flex items-center gap-2 rounded-[5px] px-1 py-1 text-micro"
                     >
                       <span className="min-w-0 flex-1 truncate text-[var(--text-secondary)]">
                         {candidate.title}
@@ -16825,7 +15949,7 @@ function StudioDetails({
                         className="text-[var(--accent-cyan)]"
                         onClick={() => void confirmLink(candidate)}
                       >
-                        {linkingId === candidate._id ? "Linking…" : "Add"}
+                        {linkingId === candidate._id ? "Linkingâ€¦" : "Add"}
                       </button>
                     </div>
                   ))}
@@ -16838,8 +15962,8 @@ function StudioDetails({
               open
               className="spectra-related-artifacts rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3"
             >
-              <summary className="text-[10px] font-semibold uppercase tracking-[.08em] text-[var(--text-tertiary)]">
-                Related suggestions · {suggestions.length}
+              <summary className="text-micro font-semibold uppercase tracking-[.08em] text-[var(--text-tertiary)]">
+                Related suggestions Â· {suggestions.length}
               </summary>
               <div className="space-y-1.5">
                 {suggestions.map(({ candidate }) => (
@@ -16854,10 +15978,10 @@ function StudioDetails({
                       type="button"
                       disabled={linkingId === candidate._id}
                       onClick={() => void confirmLink(candidate)}
-                      className="rounded-[5px] px-1.5 py-1 text-[9px] font-medium text-[var(--accent-cyan)] opacity-70 hover:bg-[var(--bg-hover)] group-hover:opacity-100"
+                      className="rounded-[5px] px-1.5 py-1 text-micro font-medium text-[var(--accent-cyan)] opacity-70 hover:bg-[var(--bg-hover)] group-hover:opacity-100"
                     >
                       {linkingId === candidate._id
-                        ? "Linking…"
+                        ? "Linkingâ€¦"
                         : "Confirm link"}
                     </button>
                   </div>
@@ -16901,7 +16025,7 @@ function StudioDetails({
               {visibleTags.map((tag) => (
                 <span
                   key={tag}
-                  className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 py-1 text-[10px] font-medium text-[var(--text-secondary)]"
+                  className="inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 py-1 text-micro font-medium text-[var(--text-secondary)]"
                   data-artifact-tag={tag}
                 >
                   <span>{tag}</span>
@@ -16973,7 +16097,7 @@ function StudioDetails({
                 : "Activity"
             }
           >
-            <div className="space-y-2 text-[10px] text-[var(--text-secondary)]">
+            <div className="space-y-2 text-micro text-[var(--text-secondary)]">
               <div className="flex items-center justify-between">
                 <span>Last edited</span>
                 <strong className="font-medium text-[var(--text-primary)]">
@@ -17031,7 +16155,7 @@ function StudioDetails({
                 >
                   <Copy className="h-3.5 w-3.5" />
                   {duplicating
-                    ? "Duplicating…"
+                    ? "Duplicatingâ€¦"
                     : `Duplicate ${artifact.blueprintKey === "quiz" ? "quiz" : "deck"}`}
                 </button>
                 <button
@@ -17071,7 +16195,7 @@ function StudioDetails({
                       ? "Current saved version"
                       : version.summary || "Saved version"}
                   </div>
-                  <div className="mt-1 flex items-center justify-between text-[10px] text-[var(--text-tertiary)]">
+                  <div className="mt-1 flex items-center justify-between text-micro text-[var(--text-tertiary)]">
                     <span>
                       {version.source === "ai" ? "Spectra edit" : "Manual save"}
                     </span>
@@ -17152,7 +16276,7 @@ function CardFace({
             <button
               type="button"
               onClick={markCloze}
-              className="ml-auto inline-flex h-7 items-center gap-1.5 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 text-[10px] font-semibold normal-case tracking-normal text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+              className="ml-auto inline-flex h-7 items-center gap-1.5 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 text-micro font-semibold normal-case tracking-normal text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
               title="Select text, then create a cloze deletion"
             >
               <Focus className="h-3.5 w-3.5" />
@@ -17204,7 +16328,7 @@ function CardFace({
       </div>
       {clozeMode && clozeParts(value).length ? (
         <div className="mt-2 rounded-[7px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2">
-          <span className="mb-1 block text-[9px] font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
+          <span className="mb-1 block text-micro font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
             Study preview
           </span>
           <p className="font-serif text-[15px] leading-6 text-[var(--text-secondary)]">
@@ -17290,17 +16414,6 @@ function Field({
       </span>
       {control}
     </label>
-  );
-}
-
-function MetricRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between py-1 text-[13px]">
-      <span className="text-[var(--text-secondary)]">{label}</span>
-      <strong className="font-medium text-[var(--text-primary)]">
-        {value}
-      </strong>
-    </div>
   );
 }
 

@@ -52,6 +52,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { createPortal } from "react-dom";
+import { LocalAutocompleteTextarea } from "../compute/autocomplete";
 import {
   createPresentationObject,
   createPresentationSlide,
@@ -63,6 +64,11 @@ import {
   type PresentationObjectType,
   type PresentationSlide,
 } from "../presentation/model";
+import {
+  applyBibliographySlides,
+  BIBLIOGRAPHY_SLIDE_MARKER,
+  collectDeckCitations,
+} from "../presentation/bibliography";
 import {
   abortArtifactImportUpload,
   beginArtifactImportOriginal,
@@ -415,8 +421,9 @@ function PresentationObjectView({
       onPointerDown={onPointerDown}
     >
       {object.type === "text" ? (
-        <textarea
+        <LocalAutocompleteTextarea
           ref={textAreaRef}
+          surface="slide_text"
           data-text-preset={textPreset}
           data-ai-region={aiRegionAttr(aiActive)}
           {...(path ? targetAttrs(`${path}/text`) : {})}
@@ -424,7 +431,7 @@ function PresentationObjectView({
           readOnly={readOnly || object.locked || compact}
           onFocus={onTextFocus}
           onBlur={onTextBlur}
-          onChange={(event) => onTextChange(event.target.value)}
+          onValueChange={onTextChange}
           onPointerDown={(event) => event.stopPropagation()}
           style={{
             color: String(styleValue(object, "color", "#173f35")),
@@ -446,7 +453,8 @@ function PresentationObjectView({
             textAlign: String(styleValue(object, "align", "left")) as
               "left" | "center" | "right",
           }}
-          className="presentation-object-text"
+          className="size-full"
+          textareaClassName="presentation-object-text"
           aria-label="Slide text"
         />
       ) : object.type === "shape" ? (
@@ -662,6 +670,22 @@ function SlideCanvas({
           {deck.slides.findIndex((candidate) => candidate.id === slide.id) + 1}
         </span>
       ) : null}
+      {slide.citations?.length ? (
+        <span
+          className="presentation-citation-footer"
+          aria-label={`Sources on this slide: ${slide.citations
+            .map((citation) => citation.label)
+            .join(", ")}`}
+        >
+          {slide.citations
+            .slice(0, 3)
+            .map((citation) => citation.label)
+            .join(" · ")}
+          {slide.citations.length > 3
+            ? ` · +${slide.citations.length - 3}`
+            : ""}
+        </span>
+      ) : null}
       {guides?.x !== undefined ? (
         <span
           className="presentation-guide presentation-guide--vertical"
@@ -807,15 +831,17 @@ function PresentationObjectInspector({
       {["image", "chart", "video"].includes(object.type) ? (
         <label>
           Alternative text
-          <textarea
+          <LocalAutocompleteTextarea
+            surface="description"
             value={object.altText ?? ""}
             disabled={readOnly}
             placeholder="Describe the meaning, not only the appearance."
-            onChange={(event) =>
+            onValueChange={(altText) =>
               onUpdate((candidate) => {
-                candidate.altText = event.target.value;
+                candidate.altText = altText;
               })
             }
+            textareaClassName="w-full"
           />
         </label>
       ) : null}
@@ -1117,6 +1143,11 @@ export function PresentationStudio({
   const activeSlide =
     deck.slides.find((slide) => slide.id === activeSlideId) ?? deck.slides[0]!;
   const activeSlideIndex = deck.slides.indexOf(activeSlide);
+  const deckCitations = useMemo(() => collectDeckCitations(deck), [deck]);
+  const deckCitationCount = deckCitations.length;
+  const deckHasBibliography = deck.slides.some(
+    (slide) => slide.accessibility?.label === BIBLIOGRAPHY_SLIDE_MARKER,
+  );
   const selectedObject = activeSlide.objects.find(
     (object) => object.id === selectedObjectId,
   );
@@ -2438,7 +2469,7 @@ export function PresentationStudio({
         </div>
         <div className="flex items-center gap-2">
           <span
-            className="hidden items-center gap-1.5 text-[10px] text-[var(--text-secondary)] md:inline-flex"
+            className="hidden items-center gap-1.5 text-micro text-[var(--text-secondary)] md:inline-flex"
             role="status"
             aria-live="polite"
           >
@@ -2997,19 +3028,21 @@ export function PresentationStudio({
                 </button>
                 {notesOpen ? (
                   <>
-                    <textarea
+                    <LocalAutocompleteTextarea
+                      surface="slide_text"
                       value={activeSlide.speakerNotes ?? ""}
                       readOnly={readOnly}
                       placeholder="Add private speaking prompts, source reminders, or rehearsal cues."
                       onFocus={() =>
                         onActiveRegionChange?.(`${activeSlide.id}:notes`)
                       }
-                      onChange={(event) =>
+                      onValueChange={(speakerNotes) =>
                         mutate((draft) => {
                           draft.slides[activeSlideIndex]!.speakerNotes =
-                            event.target.value;
+                            speakerNotes;
                         })
                       }
+                      textareaClassName="w-full"
                     />
                     <span>
                       {(activeSlide.speakerNotes ?? "").length} characters
@@ -3480,25 +3513,49 @@ export function PresentationStudio({
                     AI checks, history, and export.
                   </p>
                 </div>
-                <button
-                  type="button"
-                  disabled={readOnly}
-                  onClick={() =>
-                    mutate((draft) => {
-                      const slide = draft.slides[activeSlideIndex]!;
-                      slide.citations = [
-                        ...(slide.citations ?? []),
-                        {
-                          id: `citation-${Date.now().toString(36)}`,
-                          label: "New source",
-                        },
-                      ];
-                    })
-                  }
-                >
-                  <Plus className="h-3.5 w-3.5" /> Add citation
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={readOnly}
+                    onClick={() =>
+                      mutate((draft) => {
+                        const slide = draft.slides[activeSlideIndex]!;
+                        slide.citations = [
+                          ...(slide.citations ?? []),
+                          {
+                            id: `citation-${Date.now().toString(36)}`,
+                            label: "New source",
+                          },
+                        ];
+                      })
+                    }
+                  >
+                    <Plus className="h-3.5 w-3.5" /> Add citation
+                  </button>
+                  <button
+                    type="button"
+                    disabled={readOnly}
+                    title="Collect every slide citation onto a References slide"
+                    onClick={() =>
+                      mutate((draft) => {
+                        applyBibliographySlides(draft);
+                      })
+                    }
+                  >
+                    <List className="h-3.5 w-3.5" />{" "}
+                    {deckHasBibliography
+                      ? "Update references slide"
+                      : "Build references slide"}
+                  </button>
+                </div>
               </div>
+              {deckCitationCount > 0 && !deckHasBibliography ? (
+                <p className="presentation-empty-copy">
+                  {deckCitationCount}{" "}
+                  {deckCitationCount === 1 ? "citation" : "citations"} across
+                  the deck — build a references slide to close it.
+                </p>
+              ) : null}
               {activeSlide.citations?.length ? (
                 <div className="presentation-citation-list">
                   {activeSlide.citations.map((citation, citationIndex) => (

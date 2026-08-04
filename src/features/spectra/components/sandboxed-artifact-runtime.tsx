@@ -247,14 +247,14 @@ export function SandboxedArtifactRuntime({
       ) : null}
       {toolbar ? (
         <div className="flex h-8 items-center justify-between border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3">
-          <span className="inline-flex items-center gap-1.5 text-[8px] font-semibold uppercase tracking-[.09em] text-[var(--text-tertiary)]">
+          <span className="inline-flex items-center gap-1.5 text-micro font-semibold uppercase tracking-[.09em] text-[var(--text-tertiary)]">
             <ShieldCheck className="h-3 w-3 text-[var(--success)]" />
             Isolated Spectra preview
           </span>
           <button
             type="button"
             onClick={() => setGeneration((value) => value + 1)}
-            className="flex h-6 items-center gap-1 rounded-[5px] px-1.5 text-[8px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+            className="flex h-6 items-center gap-1 rounded-[5px] px-1.5 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
             aria-label="Restart interactive preview"
           >
             <RotateCw className="h-3 w-3" />
@@ -279,7 +279,7 @@ export function SandboxedArtifactRuntime({
         <div
           className={`pointer-events-none absolute inset-x-0 bottom-0 ${toolbar ? "top-8" : "top-0"} flex items-center justify-center bg-[color-mix(in_oklab,var(--bg-primary)_90%,transparent)]`}
         >
-          <span className="inline-flex items-center gap-2 text-[10px] text-[var(--text-secondary)]">
+          <span className="inline-flex items-center gap-2 text-micro text-[var(--text-secondary)]">
             <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" />
             Starting isolated preview
           </span>
@@ -290,12 +290,12 @@ export function SandboxedArtifactRuntime({
           <div className="flex items-start gap-2">
             <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--warning)]" />
             <div className="min-w-0 flex-1">
-              <p className="text-[9px] font-semibold text-[var(--text-primary)]">
+              <p className="text-micro font-semibold text-[var(--text-primary)]">
                 {status === "limited"
                   ? "Preview safety limit reached"
                   : "Preview stopped"}
               </p>
-              <p className="mt-0.5 text-[8px] leading-3.5 text-[var(--text-secondary)]">
+              <p className="mt-0.5 text-micro leading-3.5 text-[var(--text-secondary)]">
                 {message ??
                   "The source is intact. Restart the preview after correcting the runtime issue."}
               </p>
@@ -303,7 +303,7 @@ export function SandboxedArtifactRuntime({
             <button
               type="button"
               onClick={() => setGeneration((value) => value + 1)}
-              className="h-7 rounded-[6px] border border-[var(--border-default)] px-2 text-[8px] font-semibold text-[var(--text-primary)]"
+              className="h-7 rounded-[6px] border border-[var(--border-default)] px-2 text-micro font-semibold text-[var(--text-primary)]"
             >
               Restart
             </button>
@@ -326,17 +326,17 @@ function RuntimeFailure({
       <div className="flex items-start gap-2">
         <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[var(--warning)]" />
         <div className="min-w-0 flex-1">
-          <p className="text-[10px] font-semibold text-[var(--text-primary)]">
+          <p className="text-micro font-semibold text-[var(--text-primary)]">
             Interactive preview unavailable
           </p>
-          <p className="mt-1 text-[9px] leading-4 text-[var(--text-secondary)]">
+          <p className="mt-1 text-micro leading-4 text-[var(--text-secondary)]">
             {message} The artifact source has not been changed.
           </p>
         </div>
         <button
           type="button"
           onClick={onRetry}
-          className="h-7 rounded-[6px] border border-[var(--border-default)] px-2 text-[8px] font-semibold text-[var(--text-primary)]"
+          className="h-7 rounded-[6px] border border-[var(--border-default)] px-2 text-micro font-semibold text-[var(--text-primary)]"
         >
           Retry
         </button>

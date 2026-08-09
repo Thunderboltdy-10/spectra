@@ -6384,7 +6384,12 @@ const DOCUMENT_MODE_LABELS: Record<DocumentMode, string> = {
   focus: "Focus",
 };
 
-function DocumentStudio({
+/**
+ * Exported as a leaf so surfaces outside the studio shell — the landing story
+ * among them — render the one real document view rather than a lookalike.
+ * It takes its content as a prop and owns no data acquisition.
+ */
+export function DocumentStudio({
   artifactId,
   title,
   content,
@@ -12119,7 +12124,11 @@ function quizPracticeErrorMessage(error: unknown, fallback: string) {
   return message || fallback;
 }
 
-function QuizStudio({
+/**
+ * Exported as a leaf, on the same terms as `DocumentStudio`: the landing story
+ * shows the real quiz view, not a rebuild of it.
+ */
+export function QuizStudio({
   artifactId,
   mode,
   content,

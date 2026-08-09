@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { PrismFallback } from "./prism-fallback";
 import type { PrismSceneState } from "./prism-scene";
 import type { PrismQuality } from "../prism3d/Prism";
+import { heroState } from "../scene/heroState";
 
 /**
  * Progressive-enhancement stage: a static SVG prism composes immediately
@@ -42,14 +43,85 @@ function canUseWebGL(): boolean {
   }
 }
 
+/* Where the glass sits inside the fallback's 900×520 viewBox, as fractions of
+   the artboard. The static renderer must land on the same slot as the engine,
+   or the crossfade between them would be a jump. */
+const FALLBACK_GLASS_W = 240 / 900;
+const FALLBACK_GLASS_CX = 530 / 900;
+const FALLBACK_GLASS_CY = 240 / 520;
+const FALLBACK_ASPECT = 520 / 900;
+
+/**
+ * Story-mode placement for the static renderer.
+ *
+ * The engine is placed in world space by `PlacementRig`; this puts the SVG on
+ * the same published slot in CSS pixels, so a machine without WebGL sees the
+ * object travel through exactly the same compositions.
+ */
+function SlotFallback({ children }: { children: React.ReactNode }) {
+  const boxRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let raf = 0;
+    const tick = () => {
+      const node = boxRef.current;
+      if (node) {
+        const slot = heroState.slot;
+        if (slot.w > 0) {
+          const width = slot.w / FALLBACK_GLASS_W;
+          const height = width * FALLBACK_ASPECT;
+          node.style.width = `${width}px`;
+          node.style.height = `${height}px`;
+          node.style.transform = `translate3d(${
+            slot.x - FALLBACK_GLASS_CX * width
+          }px, ${slot.y - FALLBACK_GLASS_CY * height}px, 0)`;
+          node.style.opacity = "1";
+        } else {
+          node.style.opacity = "0";
+        }
+      }
+      raf = window.requestAnimationFrame(tick);
+    };
+    raf = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(raf);
+  }, []);
+
+  return (
+    <div
+      ref={boxRef}
+      style={{
+        position: "absolute",
+        left: 0,
+        top: 0,
+        opacity: 0,
+        willChange: "transform",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
 export function PrismStage({
   scene,
   sceneRef,
   className,
+  staged = false,
+  active = true,
 }: {
   scene: PrismSceneState;
   sceneRef?: RefObject<PrismSceneState>;
   className?: string;
+  /**
+   * Story mode: the object is placed by published slots rather than by the
+   * scroll-derived camera curve, and the host spans the whole viewport.
+   */
+  staged?: boolean;
+  /**
+   * External render gate. A page-wide fixed canvas always intersects, so in
+   * story mode the caller decides when the GPU may rest.
+   */
+  active?: boolean;
 }) {
   const [ready, setReady] = useState(false);
   const [supported, setSupported] = useState(false);
@@ -84,17 +156,18 @@ export function PrismStage({
   }, []);
 
   useEffect(() => {
-    if (!rootRef.current || reduced) return;
+    if (!rootRef.current || reduced || staged) return;
     const observer = new IntersectionObserver(
       (entries) => setVisible(entries[0]?.isIntersecting ?? true),
       { rootMargin: "80px" },
     );
     observer.observe(rootRef.current);
     return () => observer.disconnect();
-  }, [reduced]);
+  }, [reduced, staged]);
 
   const quality = useMemo(() => detectQuality(reduced), [reduced]);
   const showCanvas = supported;
+  const paused = staged ? !active : !visible;
 
   // The fallback composes from the live progress too, but polled at a calm
   // cadence into state — refs stay out of render.
@@ -114,19 +187,18 @@ export function PrismStage({
     return () => window.cancelAnimationFrame(raf);
   }, [progressRef, scene.progress]);
 
+  const fallback = (
+    <PrismFallback progress={fallbackProgress} className="h-full w-full" />
+  );
+
   return (
-    <div
-      ref={rootRef}
-      data-prism-stage
-      aria-hidden="true"
-      className={className}
-    >
+    <div ref={rootRef} data-prism-stage aria-hidden="true" className={className}>
       <div
         className={`absolute inset-0 transition-opacity duration-1000 ${
           ready ? "opacity-0" : "opacity-100"
         }`}
       >
-        <PrismFallback progress={fallbackProgress} className="h-full w-full" />
+        {staged ? <SlotFallback>{fallback}</SlotFallback> : fallback}
       </div>
       {showCanvas ? (
         <div
@@ -138,7 +210,8 @@ export function PrismStage({
             progressRef={progressRef}
             quality={quality}
             reduced={reduced}
-            paused={!visible}
+            paused={paused}
+            staged={staged}
             onFirstFrame={() => setReady(true)}
           />
         </div>

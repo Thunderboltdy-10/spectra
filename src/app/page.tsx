@@ -5,8 +5,9 @@ import { LandingClient } from "./landing/landing-client";
 import { hasClerkServerConfig } from "@/lib/clerk-config";
 
 export const metadata: Metadata = {
-  title: "Spectra — Connected learning work",
-  description: "Create, connect, and collaborate across school workspaces and artifacts with an adaptive AI partner.",
+  title: "Spectra: connected learning work",
+  description:
+    "One place where documents, sources, plans and conversations stay aware of one another, so students, teachers and AI can work on the same thing at the same time.",
 };
 
 function toQueryString(searchParams: Record<string, string | string[] | undefined>) {

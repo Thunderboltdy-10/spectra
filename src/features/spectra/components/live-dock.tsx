@@ -19,6 +19,9 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNow } from "@/hooks/use-now";
 import { useSpectraContextStore } from "@/stores/spectra-context-store";
+import { PrismRunMark } from "@/components/spectra-prism-optic";
+import { SurfaceField, type FieldInfluence } from "../field/surface-field";
+import { targetAttrs } from "../collaboration/target-attributes";
 import type { ResultCardStreamView } from "../ai/stream-events";
 import type { CommandAttachment } from "./command-bar";
 import {
@@ -128,16 +131,15 @@ const stateCopy: Record<LiveDockTruthState, string> = {
 
 function StateIcon({ state }: { state: LiveDockTruthState }) {
   const className = "h-3.5 w-3.5 shrink-0";
-  if (state === "working" || state === "completing")
-    return (
-      <Loader2
-        className={`${className} animate-spin text-[var(--accent-cyan)] motion-reduce:animate-none`}
-      />
-    );
+  /* Working and checking are the run's own optical state, so they use the
+     product prism: the same silhouette the landing's real glass docks into. */
+  if (state === "working")
+    return <PrismRunMark size={14} optics="working" />;
+  if (state === "completing")
+    return <PrismRunMark size={14} optics="working" />;
   if (state === "needs_input")
     return <CircleHelp className={`${className} text-[var(--warning)]`} />;
-  if (state === "waiting")
-    return <PauseCircle className={`${className} text-[var(--warning)]`} />;
+  if (state === "waiting") return <PrismRunMark size={14} optics="waiting" />;
   if (state === "reconnecting")
     return <Unplug className={`${className} text-[var(--warning)]`} />;
   if (state === "paused")
@@ -284,7 +286,64 @@ export type LiveDockProps = {
     text: string,
   ) => void | Promise<unknown>;
   openThreadId?: string;
+  /**
+   * Deterministic tabs for story mode (the landing page).
+   *
+   * When provided the dock renders exactly these runs and performs no fetching,
+   * polling or mutation. Markup, styling, animation and semantics stay
+   * identical: this is the same component, reading a different truth.
+   */
+  storyTabs?: SpectraRunTab[];
 };
+
+/** How a run's truth state reads in the surface field beneath its tab. */
+const FIELD_STATE_FOR_RUN: Partial<
+  Record<LiveDockTruthState, FieldInfluence["state"]>
+> = {
+  working: "typing",
+  completing: "typing",
+  waiting: "waiting",
+  needs_input: "waiting",
+  reconnecting: "waiting",
+  completed: "success",
+  completed_limited: "success",
+  failed_terminal: "failure",
+};
+
+/**
+ * The field under one run tab.
+ *
+ * A dock tab is a bounded surface like any other, so it carries the same
+ * ambient field. The influence sits low and right, where the run's work is
+ * conceptually accumulating, and takes the state's own colour rather than a
+ * decorative one.
+ */
+function DockTabField({ state }: { state: LiveDockTruthState }) {
+  const influences = useMemo<FieldInfluence[]>(() => {
+    const fieldState = FIELD_STATE_FOR_RUN[state];
+    if (!fieldState) return [];
+    const hue =
+      fieldState === "success"
+        ? "var(--success)"
+        : fieldState === "failure"
+          ? "var(--danger)"
+          : fieldState === "waiting"
+            ? "var(--warning)"
+            : "var(--accent-cyan)";
+    return [
+      {
+        id: state,
+        x: 0.28,
+        y: 0.62,
+        radius: 0.72,
+        strength: fieldState === "typing" ? 0.85 : 0.6,
+        hue,
+        state: fieldState,
+      },
+    ];
+  }, [state]);
+  return <SurfaceField influences={influences} scale="panel" grain="wave" />;
+}
 
 export function LiveDock({
   workspaceId,
@@ -298,8 +357,12 @@ export function LiveDock({
   onInput,
   onSteer,
   openThreadId,
+  storyTabs,
 }: LiveDockProps) {
-  const [tabs, setTabs] = useState(sharedTabs);
+  const [fetchedTabs, setFetchedTabs] = useState(sharedTabs);
+  /* Story mode is a state source, not a second dock. */
+  const story = storyTabs !== undefined;
+  const tabs = storyTabs ?? fetchedTabs;
   const [disclosedRunId, setDisclosedRunId] = useState<string | null>(null);
   const [expandedInputRunId, setExpandedInputRunId] = useState<string | null>(
     null,
@@ -325,21 +388,25 @@ export function LiveDock({
   const setContinuation = useSpectraContextStore(
     (state) => state.setContinuation,
   );
-  const refresh = useCallback((force = false) => refreshRunTabs(force), []);
+  const refresh = useCallback(
+    (force = false) => (story ? Promise.resolve() : refreshRunTabs(force)),
+    [story],
+  );
 
   useEffect(() => {
-    listeners.add(setTabs);
+    if (story) return;
+    listeners.add(setFetchedTabs);
     void refresh();
     const changed = () => void refresh(true);
     window.addEventListener("spectra:threads-changed", changed);
     return () => {
-      listeners.delete(setTabs);
+      listeners.delete(setFetchedTabs);
       window.removeEventListener("spectra:threads-changed", changed);
     };
-  }, [refresh]);
+  }, [refresh, story]);
 
   useEffect(() => {
-    if (!continuation) return;
+    if (!continuation || story) return;
     const canonical = tabs.find((tab) => tab.threadId === continuation.id);
     if (
       canonical &&
@@ -347,17 +414,24 @@ export function LiveDock({
       canonical.thread.title !== continuation.title
     )
       setContinuation({ ...continuation, title: canonical.thread.title });
-  }, [continuation, setContinuation, tabs]);
+  }, [continuation, setContinuation, story, tabs]);
 
   useEffect(() => {
-    if (!optimistic || !["starting", "streaming"].includes(optimistic.status))
+    if (
+      story ||
+      !optimistic ||
+      !["starting", "streaming"].includes(optimistic.status)
+    )
       return;
     void refresh(true);
     const timer = window.setInterval(() => void refresh(true), 900);
     return () => window.clearInterval(timer);
-  }, [optimistic, optimistic?.runId, optimistic?.status, refresh]);
+  }, [optimistic, optimistic?.runId, optimistic?.status, refresh, story]);
 
   const visible = useMemo(() => {
+    /* Story mode shows exactly the runs the story declares, in the order it
+       declares them: recency filtering would quietly drop fixture tabs. */
+    if (story) return tabs;
     return tabs
       .filter(
         (tab) =>
@@ -384,7 +458,7 @@ export function LiveDock({
             ? 1
             : -1;
       });
-  }, [continuation?.id, now, openThreadId, tabs, workspaceId]);
+  }, [continuation?.id, now, openThreadId, story, tabs, workspaceId]);
 
   const sources = useMemo(() => visible.map(tabSource), [visible]);
   const expandableSources = useMemo(
@@ -411,7 +485,10 @@ export function LiveDock({
   );
 
   const hasActive = visible.some((tab) => activeStatuses.has(tab.run.status));
-  useEffect(() => (hasActive ? beginPolling() : undefined), [hasActive]);
+  useEffect(
+    () => (hasActive && !story ? beginPolling() : undefined),
+    [hasActive, story],
+  );
 
   const durableHasOptimistic = Boolean(
     optimistic?.runId && visible.some((tab) => tab.runId === optimistic.runId),
@@ -424,6 +501,17 @@ export function LiveDock({
   if (!showOptimistic && visible.length === 0) return null;
 
   async function selectTab(tab: SpectraRunTab) {
+    if (story) {
+      /* The story owns navigation. Opening is still a real call the host can
+         answer; it simply never mutates a run that does not exist. */
+      onOpen?.(
+        tab.runId,
+        tab.threadId,
+        tab.thread.title,
+        tab.run.artifactId ?? tab.card?.provenance?.artifactIds?.[0],
+      );
+      return;
+    }
     setContinuation({
       id: tab.threadId,
       title: tab.thread.title,
@@ -442,6 +530,9 @@ export function LiveDock({
   }
 
   async function hideTab(tab: SpectraRunTab) {
+    /* Story runs are required by later scenes, so closing one is refused the
+       same way the product refuses to destroy required work. */
+    if (story) return;
     await postSpectra({ action: "hideRunTab", runId: tab.runId });
     if (continuation?.id === tab.threadId) {
       setContinuation(null);
@@ -527,8 +618,10 @@ export function LiveDock({
                 data-run-status={model.state}
                 data-input-expanded={expanded || undefined}
                 data-mobile-sheet={expanded || undefined}
+                {...targetAttrs(`live-dock/tab/${tab.runId}`)}
               >
-                <div className="flex h-12 min-w-0 items-center gap-1 pl-3 pr-1">
+                <DockTabField state={model.state} />
+                <div className="relative flex h-12 min-w-0 items-center gap-1 pl-3 pr-1">
                   <AnimatedStateIcon state={model.state} />
                   <button
                     type="button"

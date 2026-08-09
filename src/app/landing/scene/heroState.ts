@@ -113,4 +113,53 @@ export const heroState = {
   /** Current world orientation / center of the prism, for the currents. */
   quat: new THREE.Quaternion(),
   center: new THREE.Vector3(),
+
+  /* ---------------------------------------------------------------- *
+   * Story channel — one object, moved through the page
+   * ---------------------------------------------------------------- */
+
+  /**
+   * Where the prism should be right now, in **viewport CSS pixels**: the
+   * centre of a slot and how wide the object should read there. Any element
+   * on the page can publish a slot, so the prism is placed by composition
+   * rather than by a hard-coded camera curve.
+   *
+   * `w <= 0` means nothing is claiming it; the object holds its last pose.
+   */
+  slot: { x: 0, y: 0, w: 0, lambda: 3.4 },
+  /** Set once the first slot has been published, so there is never a fly-in from origin. */
+  slotSeeded: false,
+
+  /**
+   * Whether the object currently reads in front of the page or behind it.
+   * Declared by the slot: ambient scenes let the work sit over the glass, the
+   * final dock puts the glass in the visitor's hand, on top of everything.
+   */
+  front: false,
+
+  /**
+   * Story ownership. While an actor holds the prism the visitor cannot
+   * counter-drag it — the same scoped, temporary claim the product uses for
+   * any contended control.
+   */
+  owned: false,
+
+  /**
+   * A stable authored orientation. `weight` blends the procedural idle drift
+   * toward `euler` and simultaneously relaxes any rotation the visitor
+   * applied, so a takeover settles rather than snapping.
+   */
+  pose: {
+    weight: 0,
+    euler: new THREE.Euler(0.1, -0.62, 0.03, "YXZ"),
+  },
+
+  /**
+   * Authored ingestion, one weight per wavelength. While `authored > 0` these
+   * override the progress-derived schedule, which is what lets a real card be
+   * carried into the glass at the moment an actor releases it.
+   */
+  authored: 0,
+  authoredEntry: [0, 0, 0, 0, 0, 0] as number[],
 };
+

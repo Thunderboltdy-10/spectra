@@ -349,6 +349,8 @@ export function Prism({ quality }: Props) {
   const tmpQ = useMemo(() => new THREE.Quaternion(), []);
   const axis = useMemo(() => new THREE.Vector3(), []);
   const euler = useMemo(() => new THREE.Euler(0, 0, 0, "YXZ"), []);
+  const poseQ = useMemo(() => new THREE.Quaternion(), []);
+  const IDENTITY = useMemo(() => new THREE.Quaternion(), []);
   const invModel = useMemo(() => new THREE.Matrix4(), []);
   const yawV = useRef(0);
   const yawA = useRef(0);
@@ -368,6 +370,7 @@ export function Prism({ quality }: Props) {
     };
     const onMove = (e: PointerEvent) => {
       if (!last.current.down) return;
+      if (heroState.owned) return;
       const dx = e.clientX - last.current.x;
       const dy = e.clientY - last.current.y;
       last.current.x = e.clientX;
@@ -415,7 +418,10 @@ export function Prism({ quality }: Props) {
 
     /* ingestion schedule: wavelengths make contact in staggered order as the
        narrative ignites, remain held through the living field, and hand back
-       once the output channel has resolved */
+       once the output channel has resolved. While the story is authoring an
+       ingestion (a real card carried into the glass) its weights take over,
+       so what the glass holds is exactly what an actor put there. */
+    const authored = heroState.authored;
     for (let i = 0; i < 6; i++) {
       const landing = smoothstep(
         T.contact * 0.7 + i * 0.02,
@@ -423,7 +429,12 @@ export function Prism({ quality }: Props) {
         p,
       );
       const handoff = 1 - smoothstep(T.output - 0.04, 0.995, p) * 0.8;
-      heroState.entryPower[i] = clamp01(landing * handoff);
+      const scrolled = clamp01(landing * handoff);
+      heroState.entryPower[i] =
+        authored > 0
+          ? scrolled * (1 - authored) +
+            clamp01(heroState.authoredEntry[i] ?? 0) * authored
+          : scrolled;
     }
 
     /* ingestion weights persist through routing/consolidation so the
@@ -487,6 +498,24 @@ export function Prism({ quality }: Props) {
       drift.current.setFromEuler(euler);
     }
 
+    /* Authored pose: an actor rotates the object into a readable working
+       orientation. The idle drift bends toward it and any rotation the
+       visitor applied relaxes at the same rate, so a takeover reads as the
+       object settling under someone's hand — never as a snap. */
+    const poseWeight = clamp01(heroState.pose.weight);
+    if (poseWeight > 0.001) {
+      poseQ.setFromEuler(heroState.pose.euler);
+      /* Frame-rate independent approach. At full weight the object reaches
+         the authored angle over roughly a second — long enough to read as a
+         hand turning it, short enough that the next beat lands composed. */
+      const settle = 1 - Math.exp(-poseWeight * 3.1 * d);
+      drift.current.slerp(poseQ, settle);
+      drag.current.slerp(IDENTITY, 1 - Math.exp(-poseWeight * 4.2 * d));
+      const bleed = 1 - poseWeight * 1.6 * d;
+      spinVel.current.multiplyScalar(bleed);
+      momentum.current.multiplyScalar(bleed);
+    }
+
     if (
       spinVel.current.lengthSq() > 1e-5 ||
       momentum.current.lengthSq() > 1e-5
@@ -532,13 +561,17 @@ export function Prism({ quality }: Props) {
         geometry={shell}
         onPointerOver={() => {
           hoverT.current = 1;
-          gl.domElement.style.cursor = "grab";
+          /* While a story actor holds the object the visitor is shown that it
+             is claimed, not that it is broken — the same scoped, temporary
+             ownership any contended control uses. */
+          gl.domElement.style.cursor = heroState.owned ? "default" : "grab";
         }}
         onPointerOut={() => {
           hoverT.current = 0;
           gl.domElement.style.cursor = "";
         }}
         onPointerDown={(e) => {
+          if (heroState.owned) return;
           last.current = { x: e.clientX, y: e.clientY, moved: 0, down: true };
           heroState.dragging = true;
           gl.domElement.style.cursor = "grabbing";

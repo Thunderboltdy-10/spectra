@@ -174,10 +174,20 @@ export function InteractionLayer({
   localClientId,
   /** Set while the local user has scrolled; suppresses travel to avoid smearing. */
   quiet = false,
+  anchor = "sticky",
 }: {
   states: readonly InteractionState[];
   localClientId?: string;
   quiet?: boolean;
+  /**
+   * How the layer anchors to its surface.
+   *
+   * `sticky` (the default) pins it to the top of the scrollport, which is what
+   * an editor scrolling inside a pane needs. `static` leaves it at its natural
+   * position in the surface, for surfaces that do not scroll under the layer:
+   * a transformed canvas, a fixed panel, a pinned stage.
+   */
+  anchor?: "sticky" | "static";
 }) {
   const anchorRef = useRef<HTMLDivElement>(null);
   const runtimesRef = useRef(new Map<string, ActorRuntime>());
@@ -404,6 +414,7 @@ export function InteractionLayer({
       <div
         ref={anchorRef}
         className="spectra-presence-layer"
+        data-anchor={anchor}
         data-quiet={quiet ? "true" : undefined}
         aria-hidden="true"
       />
@@ -414,6 +425,7 @@ export function InteractionLayer({
     <div
       ref={anchorRef}
       className="spectra-presence-layer"
+      data-anchor={anchor}
       data-quiet={quiet ? "true" : undefined}
       aria-hidden="true"
     >

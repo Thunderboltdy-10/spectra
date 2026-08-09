@@ -6325,6 +6325,10 @@ button:not(:disabled),
   height: 82%;
   pointer-events: none;
   opacity: var(--card-texture-opacity);
+  /* The corner rings and the diagonal sheen are the card's material. The dot
+     lattice that used to live here is now the surface field (`.spectra-field`),
+     which is the same idea done properly: shared phase, real drift, and a local
+     response to whoever is actually working on the card. */
   background-image:
     radial-gradient(
       circle at 100% 100%,
@@ -6336,11 +6340,6 @@ button:not(:disabled),
       color-mix(in oklab, var(--card-accent) 9%, transparent) 71px 72px,
       transparent 73px
     ),
-    radial-gradient(
-      circle at 72% 72%,
-      color-mix(in oklab, var(--card-accent) 28%, transparent) 0 0.62px,
-      transparent 0.9px
-    ),
     linear-gradient(
       134deg,
       transparent 0 42%,
@@ -6349,7 +6348,6 @@ button:not(:disabled),
     );
   background-size:
     100% 100%,
-    7px 7px,
     180% 180%;
   mask-image:
     radial-gradient(
@@ -15848,6 +15846,13 @@ body {
   font-family: var(--font-sans);
 }
 
+/* Surfaces that do not scroll under the layer: a transformed canvas, a fixed
+   panel, a pinned stage. Sticky has nothing to stick to there, and pins the
+   cursors to the top of a surface that is itself being moved. */
+.spectra-presence-layer[data-anchor="static"] {
+  position: static;
+}
+
 .spectra-presence-actor {
   position: absolute;
   inset: 0;
@@ -18217,4 +18222,1718 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
    app, not as marketing chrome. */
 .landing-demo-frame {
   animation: landing-hero-in-k 0.7s var(--ease-standard) both;
+}
+
+/* ================================================================ *
+ * Landing Story Canvas: one tall persistent surface, one camera.
+ * ================================================================ */
+
+/* The page itself. The frame inside it is fixed, so the document's height comes
+   entirely from the scroll spacer; this element owns the background and stops
+   the horizontal overflow a scaled canvas could otherwise cause mid-transform. */
+.landing-root {
+  position: relative;
+  min-height: 100dvh;
+  overflow-x: clip;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+/* The one persistent affordance: a way out of a thirty-screen page for a
+   visitor who decided in the first three. Opacity and offset are written from
+   the story frame, so it retires as the product's own furniture arrives and
+   returns if the visitor scrolls back up. */
+.landing-rail {
+  position: fixed;
+  inset: 0 0 auto;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  height: 64px;
+  padding: 0 clamp(16px, 3vw, 40px);
+  will-change: transform, opacity;
+}
+
+.landing-rail[data-live="false"] {
+  pointer-events: none;
+}
+
+.landing-rail-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-primary);
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+
+.landing-rail-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.landing-rail-link {
+  padding: 8px 4px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  transition: color var(--motion-base) var(--ease-standard);
+}
+
+.landing-rail-link:hover {
+  color: var(--text-primary);
+}
+
+/* The fixed viewport frame holds the scroll spacer and the transformed canvas.
+   The camera writes one transform per frame; nothing else in the tree moves. */
+.landing-frame {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  background: var(--bg-primary);
+}
+
+/* The tall work surface. Positioned at the viewport centre with origin at its
+   own top-left, so scale(z) translate3d(-W/2px, -camYpx, 0) maps canvas point
+   (x,y) to (Fw/2 + z(x-W/2), Fh/2 + z(y-camY)). Canvas centre lands exactly on
+   frame centre; no JS viewport read needed in the transform. */
+.landing-canvas {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform-origin: 0 0;
+  will-change: transform;
+  pointer-events: auto;
+}
+
+/* Text that an actor writes. The visible characters are driven straight from
+   the story clock into the DOM, so a headline can be authored at sixty frames
+   a second without React touching the tree. The trailing characters carry the
+   product's own shimmer while the caret is live. Once a line is finished it
+   stays finished; scrubbing backwards past its start removes it as a block
+   rather than un-typing it. */
+.spectra-authored {
+  --authored-ink: transparent;
+}
+
+/* Before an actor has written it, a line contributes nothing: `display: contents`
+   removes the box entirely, so an unwritten paragraph cannot open a flex gap
+   where its text will eventually go. The reading copy stays in the tree. */
+.spectra-authored[data-empty="true"] {
+  display: contents;
+}
+
+.spectra-authored[data-empty="true"] > [aria-hidden="true"] {
+  display: none;
+}
+
+/* The page's actual words, for anything reading rather than watching: present
+   from the first byte, in the right order, never announced character by
+   character. The visible copy beside it is marked `aria-hidden`. */
+.spectra-authored-read {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
+/* The last few characters are the live edge: they carry the shimmer while the
+   actor is still writing, and settle the moment they stop. Borrows the product's
+   own tail-shimmer grammar. */
+.spectra-authored[data-writing="true"] .spectra-authored-edge {
+  position: relative;
+}
+
+.spectra-authored[data-writing="true"] .spectra-authored-edge::after {
+  content: "";
+  display: inline-block;
+  width: 0.5em;
+  height: 1.05em;
+  margin-left: 3px;
+  vertical-align: text-bottom;
+  border-radius: 2px;
+  background: linear-gradient(
+    100deg,
+    color-mix(in oklab, var(--authored-ink) 55%, transparent),
+    color-mix(in oklab, var(--authored-ink) 70%, transparent)
+  );
+  animation: spectra-tail-shimmer 1.15s var(--ease-standard) infinite;
+}
+
+html[data-spectra-motion="reduced"]
+  .spectra-authored[data-writing="true"]
+  .spectra-authored-edge::after,
+html[data-spectra-motion="none"]
+  .spectra-authored[data-writing="true"]
+  .spectra-authored-edge::after {
+  content: none;
+}
+
+/* A block that only exists once the story has reached it. Objects on the landing
+   are placed by actors, so this never fades anything up out of nothing: it gates
+   whether the object is on the canvas at all, and the object's own entrance
+   grammar (a drag, an expansion, an emission) does the rest. */
+.spectra-staged[data-present="false"] {
+  display: none;
+}
+
+/* The landing environment field spans the viewport rather than a bounded
+   surface, and is fixed so it never travels with the camera: the room the page
+   is being built in does not move when the page does. */
+.landing-field {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+}
+
+/* Influences that the story clock drives directly, rather than ones that change
+   on a state transition. Position and size both travel in `transform` so a
+   viewport-sized layer never repaints; the CSS transition is removed because
+   the damping already happens in the clock. */
+.landing-field .spectra-field-wake[data-drive="frame"] {
+  left: 0;
+  top: 0;
+  transition: none;
+  transform: translate3d(var(--wake-tx, 0), var(--wake-ty, 0), 0)
+    scale(var(--wake-scale, 1));
+}
+
+/* --- the channel -------------------------------------------------- */
+/* The canvas is clipped by a box that spends the whole page filling the
+   viewport, and only at the very end contracts into the panel it was always
+   inside. Because the canvas is centred *within* this box, narrowing the box
+   is what carries the page into place: there is no second animation. */
+.landing-channel {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: 0;
+  contain: layout paint;
+}
+
+.landing-channel[data-open="true"] {
+  border-color: var(--card-border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-primary);
+  box-shadow: var(--shadow-soft);
+}
+
+/* Proof of height. The thumb is the honest ratio of viewport to surface, so
+   when it appears the visitor can read how much page they walked through. */
+.landing-channel-bar {
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  right: 3px;
+  width: 3px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in oklab, var(--text-primary) 6%, transparent);
+  opacity: var(--bar-opacity, 0);
+  transition: opacity var(--motion-slow) var(--ease-standard);
+  pointer-events: none;
+}
+
+.landing-channel-thumb {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  border-radius: var(--radius-pill);
+  background: color-mix(in oklab, var(--text-primary) 26%, transparent);
+  height: var(--thumb-h, 20%);
+  transform: translate3d(0, var(--thumb-y, 0), 0);
+}
+
+/* ================================================================== *
+ * LANDING SCENES — the shared grammar of the authored page.
+ *
+ * Thirteen scenes, one vocabulary. A scene is a rectangle on the tall
+ * surface; a plate is how a real product surface is mounted onto it; a
+ * carried object is one an actor physically brought in. Nothing here
+ * restyles a product component — plates hold them, they do not replace
+ * them.
+ * ================================================================== */
+
+.landing-scene {
+  position: absolute;
+  left: 0;
+  box-sizing: border-box;
+}
+
+/* Editorial column. Capped in characters rather than pixels because the
+   measure is what makes it readable, not the width. */
+.landing-lede {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 22px;
+}
+
+/* --- objects that arrive ------------------------------------------ */
+
+.landing-carried {
+  will-change: transform;
+}
+
+.landing-carried[data-present="false"] {
+  visibility: hidden;
+}
+
+/* While an actor is holding it, the object carries their ink at its edge:
+   the same relationship the presence layer draws, at object scale. */
+.landing-carried[data-carrying="true"] {
+  filter: drop-shadow(
+    0 18px 34px color-mix(in oklab, var(--carry-ink, transparent) 22%, transparent)
+  );
+}
+
+/* A block that develops rather than arrives. The default reading is an edge
+   growing downward, which is what a document emerging from the glass does;
+   children that mean something else by `--grow` simply use it differently. */
+.landing-grown {
+  clip-path: inset(0 0 calc((1 - var(--grow, 1)) * 100%) 0);
+}
+
+.landing-grown[data-present="false"] {
+  visibility: hidden;
+}
+
+/* Ingestion. A surface stops being a surface as it crosses the concealed input
+   face: the box compresses toward the contact point, the content's hierarchy
+   gives way before the border does, and what remains is energy the prism is
+   already holding. */
+.landing-ingest {
+  will-change: transform, opacity;
+}
+
+.landing-ingest[data-present="false"] {
+  visibility: hidden;
+}
+
+.landing-ingest > * {
+  opacity: calc(1 - var(--ingest, 0) * 0.7);
+  transition: opacity 180ms var(--ease-standard);
+}
+
+/* The output document that develops from the glass. */
+.landing-output {
+  transform: translateZ(0);
+}
+
+/* A box a person pulls open. The handle is a real annotated part, so the
+   presence layer's resize frame lands on it rather than near it; it only shows
+   itself while a hand is actually on it. */
+.landing-sized {
+  position: relative;
+}
+
+.landing-handle {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  width: 11px;
+  height: 11px;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  background: var(--card-paper);
+  opacity: 0;
+  transition: opacity var(--motion-base) var(--ease-standard);
+  pointer-events: none;
+}
+
+.landing-sized[data-resizing="true"] .landing-handle {
+  opacity: 1;
+}
+
+/* A region of a live document that somebody is currently influencing.
+   Two of these can be lit at once, several blocks apart, which is the whole
+   claim of the scene: one field, two people, no merge dialog. */
+.landing-region {
+  position: relative;
+  border-radius: var(--radius-input);
+  transition:
+    background-color var(--motion-slow) var(--ease-standard),
+    box-shadow var(--motion-slow) var(--ease-standard);
+}
+
+.landing-region[data-live="true"] {
+  background: color-mix(in oklab, var(--region-ink, transparent) 7%, transparent);
+  box-shadow: inset 2px 0 0 var(--region-ink, transparent);
+}
+
+/* The margin ledger: who touched which block, and why. Sits in the gutter of
+   the document rather than on top of it, so it never covers the sentence it is
+   describing. */
+.landing-ledger {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 20px;
+  padding-right: 2px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  line-height: 1.3;
+  white-space: nowrap;
+  opacity: 0;
+  transform: translate3d(-6px, 0, 0);
+  transition:
+    opacity var(--motion-base) var(--ease-standard),
+    transform var(--motion-base) var(--ease-out-expo);
+}
+
+.landing-ledger[data-live="true"] {
+  opacity: 1;
+  transform: translate3d(0, 0, 0);
+}
+
+/* The Live Dock, mounted on the canvas.
+   The dock is designed to sit at the bottom of a workspace, where its tab strip
+   scrolls horizontally under the whole window. Inside a plate it gets the same
+   breathing room and nothing else: no restyling of the component itself. */
+.landing-dock-host {
+  padding: 12px 12px 4px;
+}
+
+.landing-dock-host .spectra-run-tab-strip {
+  overflow-x: visible;
+  padding-bottom: 4px;
+}
+
+/* The workbench inside its plate. The split tree is a window's worth of
+   furniture: it needs a box with a height, and nothing else from us. */
+.landing-workbench {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+}
+
+.landing-pane {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.landing-pane > * {
+  height: 100%;
+}
+
+/* The week.
+   A calendar grid drawn to the product's own calendar layer colours. Items are
+   positioned absolutely inside their day column, which is how a real week view
+   works and the only way an overlap can read as an overlap. */
+
+.landing-week {
+  display: flex;
+  gap: 10px;
+  height: 100%;
+  padding: 14px 16px 16px;
+  overflow: hidden;
+}
+
+.landing-week-hours {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  padding-top: 26px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.landing-week-hours span {
+  display: block;
+  transform: translateY(-6px);
+}
+
+.landing-week-grid {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+  min-width: 0;
+}
+
+.landing-week-day {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.landing-week-name {
+  padding-bottom: 8px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.landing-week-column {
+  position: relative;
+  border-left: 1px solid var(--border-subtle);
+}
+
+.landing-week-rule {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: color-mix(in oklab, var(--text-primary) 4%, transparent);
+}
+
+.landing-week-item {
+  position: absolute;
+  left: 3px;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1px;
+  overflow: hidden;
+  padding: 4px 7px;
+  border-left: 2px solid var(--item-ink);
+  border-radius: var(--radius-input);
+  background: color-mix(in oklab, var(--item-ink) 11%, var(--card-paper));
+  transition:
+    opacity var(--motion-slow) var(--ease-standard),
+    transform 620ms var(--ease-out-expo),
+    top 620ms var(--ease-out-expo);
+}
+
+.landing-week-item[data-kind="official_deadline"] {
+  left: 0;
+  border-left: 0;
+  border-top: 2px solid var(--item-ink);
+  border-radius: 0 0 var(--radius-input) var(--radius-input);
+  background: color-mix(in oklab, var(--item-ink) 15%, var(--card-paper));
+}
+
+.landing-week-item[data-locked="true"] {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    transparent 0 5px,
+    color-mix(in oklab, var(--item-ink) 9%, transparent) 5px 10px
+  );
+}
+
+.landing-week-title {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.landing-week-note {
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The Foundry interview.
+   Questions stack, answers replace their waiting bar in place. Nothing here
+   reorders once it has landed, because a transcript that reshuffles is not a
+   transcript. */
+
+.landing-interview {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  padding: 16px 18px;
+  gap: 14px;
+}
+
+.landing-question {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding-left: 13px;
+  border-left: 2px solid var(--border-default);
+  transition:
+    border-color var(--motion-slow) var(--ease-standard),
+    opacity var(--motion-slow) var(--ease-standard);
+}
+
+.landing-question[data-answered="false"] {
+  border-left-color: color-mix(in oklab, var(--brand-primary) 52%, transparent);
+}
+
+.landing-question[data-answered="true"] {
+  opacity: 0.86;
+}
+
+.landing-question-facet {
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.landing-question-prompt {
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.landing-question-detail {
+  color: var(--text-tertiary);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.landing-question-answer {
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.landing-question-by {
+  margin-right: 8px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.landing-question-waiting {
+  width: 128px;
+  height: 9px;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(
+    90deg,
+    color-mix(in oklab, var(--brand-primary) 22%, transparent) 0%,
+    color-mix(in oklab, var(--brand-primary) 9%, transparent) 55%,
+    color-mix(in oklab, var(--brand-primary) 22%, transparent) 100%
+  );
+  background-size: 220% 100%;
+  animation: landing-waiting 2.4s var(--ease-in-out) infinite;
+}
+
+@keyframes landing-waiting {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+/* Mission coverage. Eleven facets, each either answered, ruled out, or open. */
+
+.landing-facets {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 15px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--card-paper-quiet);
+}
+
+.landing-facets-head {
+  display: flex;
+  align-items: center;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.landing-facets-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.landing-facet {
+  padding: 2px 8px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-pill);
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: capitalize;
+  transition:
+    background-color var(--motion-slow) var(--ease-standard),
+    border-color var(--motion-slow) var(--ease-standard),
+    color var(--motion-slow) var(--ease-standard);
+}
+
+.landing-facet[data-state="answered"] {
+  border-color: color-mix(in oklab, var(--brand-accent) 40%, transparent);
+  background: color-mix(in oklab, var(--brand-accent) 12%, transparent);
+  color: color-mix(in oklab, var(--brand-accent) 74%, var(--text-primary));
+}
+
+.landing-facet[data-state="skipped"] {
+  border-style: dashed;
+  border-color: var(--border-subtle);
+  color: color-mix(in oklab, var(--text-tertiary) 74%, transparent);
+}
+
+.landing-facets-note {
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.landing-btn[data-idle="true"] {
+  opacity: 0.5;
+}
+
+/* ---- The reveal ----
+   The product resolving around the panel. Every piece is a sibling of the
+   channel, never its parent, so the canvas is never remounted and the whole
+   movement stays exactly reversible. */
+
+.landing-shell {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.landing-shell[data-present="false"] {
+  visibility: hidden;
+}
+
+.landing-shell-sidebar {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 14px 12px;
+  border-right: 1px solid var(--border-subtle);
+  background: var(--bg-secondary);
+  will-change: transform;
+}
+
+.landing-shell-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.landing-shell-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.landing-shell-nav li {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: var(--radius-input);
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.landing-shell-nav li[data-current="true"] {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.landing-shell-glyph {
+  width: 13px;
+  height: 13px;
+  flex: none;
+  border: 1.4px solid currentColor;
+  border-radius: 3px;
+  opacity: 0.55;
+}
+
+.landing-shell-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+  padding: 6px;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.landing-shell-avatar {
+  display: flex;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-pill);
+  background: color-mix(in oklab, var(--brand-primary) 22%, transparent);
+  color: var(--brand-primary);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.landing-shell-rail {
+  position: absolute;
+  right: 0;
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--border-default);
+  background: var(--bg-primary);
+  will-change: transform;
+}
+
+.landing-shell-tab {
+  max-width: 190px;
+  overflow: hidden;
+  padding: 0 14px;
+  line-height: 28px;
+  border-radius: var(--radius-input) var(--radius-input) 0 0;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.landing-shell-tab[data-active="true"] {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* The thread the page started in, still open beside the finished panel. Its
+   left edge is written from the panel's own right edge, so the two cannot
+   disagree; below a readable width the product would collapse it, so this does
+   too rather than shipping a 90px conversation. */
+.landing-shell-aside {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-lg);
+  background: var(--card-paper);
+  box-shadow: var(--shadow-soft);
+  transition: opacity var(--motion-slow) var(--ease-standard);
+}
+
+.landing-shell-aside[data-shown="false"] {
+  display: none;
+}
+
+.landing-shell-aside-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.landing-shell-aside-meta {
+  color: var(--text-tertiary);
+  font-weight: 500;
+}
+
+/* The conversation itself. Positioned relative so the thread's own presence
+   layer has a containing block: Spectra genuinely crosses out of the panel and
+   its caret lands on real text in here. */
+.landing-shell-thread {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 14px;
+  min-height: 0;
+  padding: 18px 18px 10px;
+}
+
+.landing-shell-message {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 90%;
+}
+
+.landing-shell-message[data-actor="pablo"] {
+  align-self: flex-end;
+  align-items: flex-end;
+  text-align: right;
+}
+
+.landing-shell-message p {
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-input);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.landing-shell-message[data-actor="spectra"] p {
+  border-color: color-mix(in oklab, var(--brand-primary) 24%, transparent);
+  background: color-mix(in oklab, var(--brand-primary) 7%, transparent);
+}
+
+/* A reply Spectra has not written yet is not a bubble waiting to be filled: it
+   is a message that has not been sent. The whole row waits. */
+.landing-shell-message:has(.spectra-authored[data-empty="true"]) {
+  display: none;
+}
+
+.landing-shell-who {
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.landing-shell-composer {
+  margin: 0 14px 14px;
+  padding: 9px 12px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-input);
+  background: var(--bg-elevated);
+  color: var(--text-tertiary);
+  font-size: 12.5px;
+}
+
+.landing-shell-dock {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border-default);
+  background: var(--bg-secondary);
+  will-change: transform;
+}
+
+.landing-shell-dock-label {
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.landing-shell-dock-tabs {
+  display: flex;
+  gap: 10px;
+}
+
+.landing-shell-dock-tabs span {
+  display: flex;
+  max-width: 260px;
+  align-items: center;
+  overflow: hidden;
+  height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-input);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.landing-shell-dock-tabs span[data-state="working"] {
+  border-color: color-mix(in oklab, var(--accent-cyan) 40%, var(--border-default));
+  box-shadow: inset 3px 0 var(--accent-cyan);
+}
+
+.landing-shell-dock-tabs span[data-state="done"] {
+  box-shadow: inset 3px 0 var(--brand-accent);
+}
+
+/* --- plates: how a real surface sits on the canvas ----------------- */
+
+.landing-plate {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-lg);
+  background: var(--card-paper);
+  box-shadow: var(--shadow-soft);
+}
+
+.landing-plate[data-quiet="true"] {
+  background: var(--card-paper-quiet);
+  box-shadow: none;
+}
+
+.landing-plate-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.landing-plate-title {
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.landing-plate-body {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* A plate whose expensive surface is not mounted at this distance still holds
+   its own shape, so the tall page stays honest when the camera pulls back. */
+.landing-plate-husk {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  padding: 18px 20px;
+}
+
+.landing-plate-husk::before,
+.landing-plate-husk::after {
+  content: "";
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in oklab, var(--text-primary) 7%, transparent);
+}
+
+.landing-plate-husk::before {
+  width: 58%;
+}
+
+.landing-plate-husk::after {
+  width: 84%;
+}
+
+/* --- small chrome -------------------------------------------------- */
+
+.landing-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-pill);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.35;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.landing-chip[data-tone="violet"] {
+  border-color: color-mix(in oklab, var(--brand-primary) 34%, transparent);
+  background: color-mix(in oklab, var(--brand-primary) 9%, var(--bg-elevated));
+  color: var(--brand-primary);
+}
+
+.landing-chip[data-tone="cyan"] {
+  border-color: color-mix(in oklab, var(--accent-cyan) 34%, transparent);
+  background: color-mix(in oklab, var(--accent-cyan) 9%, var(--bg-elevated));
+  color: var(--accent-cyan);
+}
+
+.landing-chip[data-tone="mint"] {
+  border-color: color-mix(in oklab, var(--brand-accent) 34%, transparent);
+  background: color-mix(in oklab, var(--brand-accent) 9%, var(--bg-elevated));
+  color: var(--brand-accent);
+}
+
+.landing-chip[data-tone="gold"] {
+  border-color: color-mix(in oklab, var(--accent-gold) 40%, transparent);
+  background: color-mix(in oklab, var(--accent-gold) 12%, var(--bg-elevated));
+  color: var(--warning);
+}
+
+.landing-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: currentColor;
+  flex: none;
+}
+
+/* Buttons follow the product's own shape rule: interactive surfaces take the
+   input radius, containers take the large one. Nothing on this page is a pill
+   except a status chip. */
+.landing-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 22px;
+  border-radius: var(--radius-input);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition:
+    transform var(--motion-fast) var(--ease-standard),
+    border-color var(--motion-base) var(--ease-standard),
+    background-color var(--motion-base) var(--ease-standard);
+}
+
+.landing-btn[data-tone="primary"] {
+  border-color: transparent;
+  background: var(--brand-primary);
+  color: #fff;
+}
+
+.landing-btn[data-size="compact"] {
+  height: 34px;
+  padding: 0 15px;
+  font-size: 13px;
+}
+
+.landing-btn:hover {
+  border-color: var(--text-primary);
+}
+
+.landing-btn[data-tone="primary"]:hover {
+  background: color-mix(in oklab, var(--brand-primary) 88%, #000);
+  border-color: transparent;
+}
+
+.landing-btn:active {
+  transform: translateY(1px);
+}
+
+/* The two doors out of the story. Pablo carries them in, so they travel from
+   below rather than fading up, and they stagger by one beat so the primary one
+   reads as the answer and the second as the alternative. */
+.landing-doors {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-top: 8px;
+}
+
+.landing-doors > * {
+  opacity: 0;
+  transform: translate3d(0, 12px, 0);
+  transition:
+    opacity var(--motion-slow) var(--ease-standard),
+    transform var(--motion-slow) var(--ease-out-expo);
+}
+
+.landing-doors[data-present="true"] > * {
+  opacity: 1;
+  transform: translate3d(0, 0, 0);
+}
+
+.landing-doors > *:nth-child(2) {
+  transition-delay: 70ms;
+}
+
+.landing-doors > *:nth-child(3) {
+  transition-delay: 140ms;
+}
+
+/* --- scene 0: the surface wakes ------------------------------------ */
+
+.landing-wake {
+  display: flex;
+  align-items: flex-start;
+  height: 100%;
+  padding-top: 30px;
+}
+
+.landing-header {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  width: 100%;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.landing-header-brand {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+/* The guide exists only while the mark is being placed. A ruler that stayed
+   on the page would be decoration. */
+.landing-guide {
+  position: absolute;
+  left: -14px;
+  top: 50%;
+  width: 0;
+  height: 1px;
+  background: color-mix(in oklab, var(--brand-primary) 46%, transparent);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.landing-header-brand:has(.landing-carried[data-carrying="true"])
+  .landing-guide {
+  width: 148px;
+  opacity: 1;
+  transition:
+    width 420ms var(--ease-out-expo),
+    opacity 200ms var(--ease-standard);
+}
+
+.landing-header-mark {
+  display: flex;
+  align-items: center;
+}
+
+.landing-header-word {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  color: var(--text-primary);
+}
+
+.landing-header-nav {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  margin-left: 18px;
+}
+
+.landing-header-link {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.landing-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-left: auto;
+}
+
+.landing-header-cta {
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  padding: 0 13px;
+  border-radius: var(--radius-input);
+  background: var(--text-primary);
+  color: var(--bg-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* ================================================================== *
+ * THE FIELD — Spectra's ambient intelligence layer.
+ *
+ * Every bounded Spectra surface can carry a quiet dot field. At rest it
+ * is almost invisible and costs nothing: one periodic radial-gradient
+ * lattice, masked toward the surface's lower-right, drifting on the
+ * compositor via a transform that loops on exactly one lattice cell.
+ * No component owns a requestAnimationFrame.
+ *
+ * When someone acts, the surface wakes *locally*. A document is never
+ * covered in a glow because AI is working somewhere; the region around
+ * the actual edit brightens, picks up the actor's colour, and relaxes.
+ * A surface can hold several influences at once, which is what makes
+ * two simultaneous edits in one document legible.
+ * ================================================================== */
+
+.spectra-field {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  border-radius: inherit;
+  contain: layout paint style;
+
+  /* Lattice geometry. Cards keep a fine crisp grain; large surfaces open up. */
+  --field-cell: 21px;
+  --field-dot: 0.85px;
+  --field-rest: 0.05;
+  --field-ink: color-mix(in oklab, var(--text-primary) 46%, transparent);
+
+  /* Where the resting field gathers. Cards: lower-right. */
+  --field-bias-x: 100%;
+  --field-bias-y: 100%;
+  --field-bias-spread: 132%;
+}
+
+/* Behind the host's own content. Only inside a surface that isolates. */
+.spectra-field[data-behind="true"] {
+  z-index: -1;
+}
+
+.spectra-field[data-scale="panel"] {
+  --field-cell: 26px;
+  --field-dot: 0.95px;
+  --field-rest: 0.042;
+}
+
+.spectra-field[data-scale="stage"] {
+  --field-cell: 34px;
+  --field-dot: 1.15px;
+  --field-rest: 0.05;
+  --field-bias-spread: 160%;
+}
+
+/* Structural surfaces (sheets, code) read as more ordered material. */
+.spectra-field[data-grain="grid"] {
+  --field-bias-x: 50%;
+  --field-bias-y: 62%;
+  --field-bias-spread: 168%;
+}
+
+.spectra-field[data-grain="line"] {
+  --field-bias-x: 50%;
+  --field-bias-y: 50%;
+  --field-bias-spread: 200%;
+}
+
+.dark .spectra-field {
+  --field-ink: color-mix(in oklab, var(--text-primary) 34%, transparent);
+  --field-rest: 0.07;
+}
+
+/* --- resting lattice ---------------------------------------------- */
+
+.spectra-field-rest {
+  position: absolute;
+  inset: calc(var(--field-cell) * -2);
+  background-image: radial-gradient(
+    circle at 50% 50%,
+    var(--field-ink) var(--field-dot),
+    transparent calc(var(--field-dot) + 0.35px)
+  );
+  background-size: var(--field-cell) var(--field-cell);
+  opacity: var(--field-rest);
+  will-change: transform;
+  animation: spectra-field-drift 58s linear infinite;
+  animation-delay: var(--field-phase, 0s);
+  -webkit-mask-image: radial-gradient(
+    var(--field-bias-spread) calc(var(--field-bias-spread) - 8%) at
+      var(--field-bias-x) var(--field-bias-y),
+    #000 0%,
+    rgba(0, 0, 0, 0.4) 42%,
+    transparent 78%
+  );
+  mask-image: radial-gradient(
+    var(--field-bias-spread) calc(var(--field-bias-spread) - 8%) at
+      var(--field-bias-x) var(--field-bias-y),
+    #000 0%,
+    rgba(0, 0, 0, 0.4) 42%,
+    transparent 78%
+  );
+  transition: opacity var(--motion-slow) var(--ease-standard);
+}
+
+/* A second, coarser layer gives large surfaces depth without more nodes. */
+.spectra-field[data-depth="true"] .spectra-field-rest::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(
+    circle at 50% 50%,
+    var(--field-ink) calc(var(--field-dot) * 0.7),
+    transparent calc(var(--field-dot) * 0.7 + 0.3px)
+  );
+  background-size: calc(var(--field-cell) * 1.618)
+    calc(var(--field-cell) * 1.618);
+  opacity: 0.52;
+  animation: spectra-field-drift-far 94s linear infinite;
+  animation-delay: var(--field-phase, 0s);
+}
+
+@keyframes spectra-field-drift {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(var(--field-cell), calc(var(--field-cell) * -1), 0);
+  }
+}
+
+@keyframes spectra-field-drift-far {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(
+      calc(var(--field-cell) * -1.618),
+      calc(var(--field-cell) * -1.618),
+      0
+    );
+  }
+}
+
+/* --- local influence ---------------------------------------------- */
+/* One node per active region. Position, radius, strength and hue are the
+   only things that change, and they change on state transitions rather
+   than per frame — the transitions do the smoothing. */
+
+.spectra-field-wake {
+  position: absolute;
+  left: var(--wake-x);
+  top: var(--wake-y);
+  width: var(--wake-r);
+  height: var(--wake-r);
+  margin-left: calc(var(--wake-r) / -2);
+  margin-top: calc(var(--wake-r) / -2);
+  opacity: var(--wake-strength, 0);
+  will-change: transform, opacity;
+  transform: translate3d(0, 0, 0) scale(var(--wake-scale, 1));
+  transition:
+    left 620ms var(--ease-out-expo),
+    top 620ms var(--ease-out-expo),
+    width 520ms var(--ease-standard),
+    height 520ms var(--ease-standard),
+    margin 520ms var(--ease-standard),
+    opacity 480ms var(--ease-standard),
+    transform 520ms var(--ease-standard);
+}
+
+/* The dots inside a wake are denser and carry the actor's colour. */
+.spectra-field-wake::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(
+    circle at 50% 50%,
+    var(--wake-hue) calc(var(--field-dot) + 0.35px),
+    transparent calc(var(--field-dot) + 0.8px)
+  );
+  background-size: calc(var(--field-cell) * 0.86) calc(var(--field-cell) * 0.86);
+  -webkit-mask-image: radial-gradient(
+    circle at 50% 50%,
+    #000 0%,
+    rgba(0, 0, 0, 0.55) 46%,
+    transparent 72%
+  );
+  mask-image: radial-gradient(
+    circle at 50% 50%,
+    #000 0%,
+    rgba(0, 0, 0, 0.55) 46%,
+    transparent 72%
+  );
+  animation: spectra-field-breathe 3.6s var(--ease-in-out) infinite;
+  animation-delay: var(--field-phase, 0s);
+}
+
+/* A soft optical lift under the dots — never a glow, never a full tint. */
+.spectra-field-wake::after {
+  content: "";
+  position: absolute;
+  inset: 12%;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle at 50% 50%,
+    color-mix(in oklab, var(--wake-hue) 13%, transparent) 0%,
+    transparent 66%
+  );
+}
+
+/* Typing: a low horizontal phase travels along the line and trails the
+   caret, then clears within ~700ms of the last character. */
+.spectra-field-wake[data-state="typing"]::before {
+  animation:
+    spectra-field-breathe 2.1s var(--ease-in-out) infinite,
+    spectra-field-stream 1.5s linear infinite;
+}
+
+/* Waiting: motion decelerates, the region stays slightly compressed and
+   dims. Held tension, not an error. */
+.spectra-field-wake[data-state="waiting"] {
+  --wake-scale: 0.86;
+}
+.spectra-field-wake[data-state="waiting"]::before {
+  animation: spectra-field-breathe 7.5s var(--ease-in-out) infinite;
+  opacity: 0.62;
+}
+
+/* Drag: the lattice compresses under the object and relaxes behind it. */
+.spectra-field-wake[data-state="drag"] {
+  --wake-scale: 0.92;
+}
+.spectra-field-wake[data-state="drag"]::before {
+  transform: scaleY(0.88);
+}
+
+/* Success: one restrained convergence, once. */
+.spectra-field-wake[data-state="success"]::before {
+  animation: spectra-field-converge 900ms var(--ease-out-expo) 1 both;
+}
+
+/* Failure: a small local discontinuity that recovery visually resolves. */
+.spectra-field-wake[data-state="failure"]::before {
+  animation: spectra-field-fault 620ms var(--ease-standard) 2 both;
+}
+
+@keyframes spectra-field-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+  50% {
+    transform: scale(1.045);
+    opacity: 1;
+  }
+}
+
+@keyframes spectra-field-stream {
+  from {
+    background-position-x: 0;
+  }
+  to {
+    background-position-x: calc(var(--field-cell) * 0.86);
+  }
+}
+
+@keyframes spectra-field-converge {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  55% {
+    transform: scale(0.78);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(0.9);
+    opacity: 0;
+  }
+}
+
+@keyframes spectra-field-fault {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  35% {
+    transform: translate3d(2px, -1px, 0) skewX(1.4deg);
+  }
+  70% {
+    transform: translate3d(-1px, 1px, 0) skewX(-0.8deg);
+  }
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+/* Surfaces that host a field need a stacking context and content above it. */
+.spectra-field-host {
+  position: relative;
+  isolation: isolate;
+}
+.spectra-field-host > *:not(.spectra-field) {
+  position: relative;
+  z-index: 1;
+}
+
+/* ==================================================================
+   THE PRODUCT PRISM FAMILY.
+
+   One true 3D prism exists, and it lives on the landing page. Everything
+   inside the application draws the same object as clipped SVG with CSS
+   motion, so a 24px run indicator costs nothing.
+
+   Motion is finite where the work is finite: a completed run resolves to
+   one coherent warm edge rather than looping forever.
+   ================================================================== */
+
+.spectra-prism-optic {
+  --band-hue: #ffffff;
+  --band-tail: color-mix(in oklab, var(--accent-cyan) 70%, transparent);
+  --dispersion-a: var(--brand-primary);
+  --dispersion-b: var(--accent-cyan);
+}
+
+.spectra-prism-band {
+  opacity: 0;
+  transform: translateX(-22px);
+}
+
+.spectra-prism-dispersion {
+  stroke: var(--dispersion-a);
+  opacity: 0.4;
+  transition:
+    stroke var(--motion-slow) var(--ease-standard),
+    opacity var(--motion-slow) var(--ease-standard);
+}
+
+/* Working: light keeps entering the glass. */
+.spectra-prism-optic[data-optics="working"] .spectra-prism-band {
+  opacity: 1;
+  animation: spectra-prism-band 1.65s var(--ease-in-out) infinite;
+}
+.spectra-prism-optic[data-optics="working"] .spectra-prism-dispersion {
+  opacity: 0.72;
+  animation: spectra-prism-disperse 1.65s var(--ease-in-out) infinite;
+}
+
+/* Waiting: the band holds inside the glass. Tension, not failure. */
+.spectra-prism-optic[data-optics="waiting"] .spectra-prism-band {
+  opacity: 0.5;
+  transform: translateX(4px);
+  transition:
+    opacity 600ms var(--ease-standard),
+    transform 900ms var(--ease-out-expo);
+}
+.spectra-prism-optic[data-optics="waiting"] .spectra-prism-dispersion {
+  opacity: 0.24;
+}
+
+/* Completed: one pass resolves, then the base edge settles warm. */
+.spectra-prism-optic[data-optics="completed"] .spectra-prism-band {
+  opacity: 1;
+  animation: spectra-prism-band 900ms var(--ease-out-expo) 1 both;
+}
+.spectra-prism-optic[data-optics="completed"] .spectra-prism-dispersion {
+  --dispersion-a: var(--success);
+  opacity: 0.82;
+}
+
+.spectra-prism-optic[data-optics="failed"] .spectra-prism-dispersion {
+  --dispersion-a: var(--danger);
+  opacity: 0.6;
+}
+
+.spectra-prism-optic[data-optics="dormant"] .spectra-prism-dispersion {
+  opacity: 0.22;
+}
+
+@keyframes spectra-prism-band {
+  0% {
+    transform: translateX(-22px);
+    opacity: 0;
+  }
+  22% {
+    opacity: 0.95;
+  }
+  78% {
+    opacity: 0.85;
+  }
+  100% {
+    transform: translateX(26px);
+    opacity: 0;
+  }
+}
+
+@keyframes spectra-prism-disperse {
+  0%,
+  40% {
+    stroke: var(--dispersion-a);
+    opacity: 0.42;
+  }
+  72% {
+    stroke: var(--dispersion-b);
+    opacity: 0.95;
+  }
+  100% {
+    stroke: var(--dispersion-a);
+    opacity: 0.42;
+  }
+}
+
+.spectra-prism-slot {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+/* While the landing story docks its true 3D prism here, the lightweight
+   stand-in steps aside rather than doubling the object. */
+.spectra-prism-slot[data-occupied="true"] > svg {
+  opacity: 0;
+  transition: opacity 320ms var(--ease-standard);
+}
+
+html[data-spectra-motion="none"] .spectra-prism-band,
+html[data-spectra-motion="none"] .spectra-prism-dispersion {
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spectra-prism-band {
+    animation: none;
+    opacity: 0.55;
+    transform: translateX(2px);
+  }
+  .spectra-prism-dispersion {
+    animation: none;
+  }
+}
+
+html[data-spectra-motion="reduced"] .spectra-field-rest,
+html[data-spectra-motion="none"] .spectra-field-rest,
+html[data-spectra-motion="reduced"] .spectra-field-wake::before,
+html[data-spectra-motion="none"] .spectra-field-wake::before {
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spectra-field-rest,
+  .spectra-field-wake::before,
+  .spectra-field[data-depth="true"] .spectra-field-rest::after {
+    animation: none;
+  }
+  .spectra-field-wake {
+    transition: opacity 200ms linear;
+  }
 }

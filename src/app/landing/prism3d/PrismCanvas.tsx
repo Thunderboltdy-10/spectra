@@ -11,6 +11,11 @@ import * as THREE from "three";
 import { heroState, damp, phases, smoothstep } from "../scene/heroState";
 import { Prism, type PrismQuality } from "./Prism";
 
+/** Distance the story camera holds, so slot → world stays a fixed mapping. */
+const CAMERA_Z = 7.4;
+/** How wide the prism's silhouette reads in world units at unit scale. */
+const PRISM_WORLD_WIDTH = 2.24;
+
 /**
  * The real prism stage (Phase 15.2/15.4/15.7).
  *
@@ -78,7 +83,13 @@ function SceneDriver({
 }
 
 /** A soft optical pool grounds the glass; it warms as the output resolves. */
-function FloorPool({ reduced }: { reduced: boolean }) {
+function FloorPool({
+  reduced,
+  staged = false,
+}: {
+  reduced: boolean;
+  staged?: boolean;
+}) {
   const mat = useRef<THREE.MeshBasicMaterial>(null);
   const pool = useMemo(() => {
     const canvas = document.createElement("canvas");
@@ -104,7 +115,10 @@ function FloorPool({ reduced }: { reduced: boolean }) {
     const ph = phases(heroState.progress);
     const glow =
       0.1 + heroState.charge * 0.16 + ph.release * 0.12 + heroState.pulse * 0.1;
-    mat.current.opacity = reduced ? 0.16 : glow;
+    /* In story mode the pool travels inside the placement rig, so it must not
+       read as a glow blob when the object is docked small — it grounds, it
+       does not announce. */
+    mat.current.opacity = reduced ? 0.16 : staged ? glow * 0.62 : glow;
     tmp.copy(cool).lerp(warm, ph.compression * 0.5 + ph.release * 0.5);
     mat.current.color.copy(tmp);
   });
@@ -129,9 +143,17 @@ function FloorPool({ reduced }: { reduced: boolean }) {
 }
 
 /** Camera gently breathes with charge and parallax — never a hard cut. */
-function CameraRig({ reduced }: { reduced: boolean }) {
+function CameraRig({ reduced, staged }: { reduced: boolean; staged: boolean }) {
   const { camera } = useThree();
   useFrame(() => {
+    if (staged) {
+      /* Story mode: the object is placed by slot, so the camera must be a
+         stable projection. Parallax lives in the object, not the lens —
+         otherwise every published slot would resolve to a moving world point. */
+      camera.position.set(0, 0, CAMERA_Z);
+      camera.lookAt(0, 0, 0);
+      return;
+    }
     /* As the scroll scenes hand the stage to real surfaces (progress past
        the fragments scene), the glass slides toward the right frame edge and
        pulls back slightly — present and glowing, never fighting the demo. */
@@ -162,11 +184,63 @@ function CameraRig({ reduced }: { reduced: boolean }) {
   return null;
 }
 
+/**
+ * Slot placement: the one true prism is positioned by composition.
+ *
+ * Any element on the page publishes a slot in viewport pixels — a centre and
+ * a width. This rig converts that into world space against a fixed camera and
+ * damps toward it, so the object *travels* between compositions instead of
+ * being re-instantiated per section. The prism's own idle drift continues
+ * inside this group, which is why a placed object still breathes.
+ */
+function PlacementRig({ children }: { children: React.ReactNode }) {
+  const rig = useRef<THREE.Group>(null);
+  const { size, camera } = useThree();
+
+  useFrame((_, dt) => {
+    const node = rig.current;
+    if (!node) return;
+    const slot = heroState.slot;
+    if (slot.w <= 0 || size.width === 0 || size.height === 0) return;
+
+    /* Visible extent at the camera plane, from the perspective frustum. */
+    const perspective = camera as THREE.PerspectiveCamera;
+    const fov = ((perspective.fov ?? 35) * Math.PI) / 180;
+    const worldHeight = 2 * Math.tan(fov / 2) * CAMERA_Z;
+    const worldPerPx = worldHeight / size.height;
+
+    const targetX = (slot.x - size.width / 2) * worldPerPx;
+    const targetY = -(slot.y - size.height / 2) * worldPerPx;
+    const targetScale = (slot.w * worldPerPx) / PRISM_WORLD_WIDTH;
+
+    const d = Math.min(dt, 0.05);
+    const lambda = heroState.reducedMotion ? 999 : slot.lambda;
+
+    if (!heroState.slotSeeded) {
+      /* First placement is a composition, not a journey: the object is
+         already where the hero wants it before anyone can see it move. */
+      node.position.set(targetX, targetY, 0);
+      node.scale.setScalar(targetScale);
+      heroState.slotSeeded = true;
+      return;
+    }
+
+    node.position.x = damp(node.position.x, targetX, lambda, d);
+    node.position.y = damp(node.position.y, targetY, lambda, d);
+    node.scale.setScalar(
+      damp(node.scale.x, targetScale, lambda * 0.85, d),
+    );
+  });
+
+  return <group ref={rig}>{children}</group>;
+}
+
 export default function PrismCanvas({
   progressRef,
   quality,
   reduced,
   paused,
+  staged = false,
   onFirstFrame,
 }: {
   progressRef: { current: number };
@@ -174,6 +248,11 @@ export default function PrismCanvas({
   reduced: boolean;
   /** Freeze rendering entirely while the stage is off-screen. */
   paused?: boolean;
+  /**
+   * Story mode. The object is placed by published slots against a fixed
+   * camera, rather than by the scroll-derived camera curve.
+   */
+  staged?: boolean;
   onFirstFrame?: () => void;
 }) {
   const [painted, setPainted] = useState(false);
@@ -194,7 +273,7 @@ export default function PrismCanvas({
         powerPreference: quality === "low" ? "low-power" : "high-performance",
         preserveDrawingBuffer: false,
       }}
-      camera={{ position: [0, 0.05, 7.4], fov: 35, near: 0.1, far: 40 }}
+      camera={{ position: [0, 0.05, CAMERA_Z], fov: 35, near: 0.1, far: 40 }}
       frameloop={frameloop}
       onCreated={({ gl }) => {
         gl.setClearColor(0x000000, 0);
@@ -207,7 +286,7 @@ export default function PrismCanvas({
       eventSource={undefined}
     >
       <SceneDriver progressRef={progressRef} reduced={reduced} />
-      <CameraRig reduced={reduced} />
+      <CameraRig reduced={reduced} staged={staged} />
 
       {/* procedural environment for the transmission glass — no network HDR.
           Soft studio tones tuned for Spectra's light page. */}
@@ -231,8 +310,20 @@ export default function PrismCanvas({
       </Environment>
 
       <Suspense fallback={null}>
-        <Prism quality={quality} />
-        <FloorPool reduced={reduced} />
+        {staged ? (
+          /* The pool travels with the object: a placed prism carries its own
+             ground, so docking it into a 24px slot does not leave a five-unit
+             halo behind on the page. */
+          <PlacementRig>
+            <Prism quality={quality} />
+            <FloorPool reduced={reduced} staged />
+          </PlacementRig>
+        ) : (
+          <>
+            <Prism quality={quality} />
+            <FloorPool reduced={reduced} />
+          </>
+        )}
       </Suspense>
     </Canvas>
   );

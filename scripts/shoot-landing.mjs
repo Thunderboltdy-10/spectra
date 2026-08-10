@@ -126,6 +126,11 @@ const session = att.sessionId;
 await send("Page.enable", {}, session);
 await send("Runtime.enable", {}, session);
 await send("Log.enable", {}, session);
+/* React reports "Maximum update depth exceeded" through console.error with the
+   offending component stack as a later argument, and CDP only delivers those
+   arguments on `Runtime.consoleAPICalled`. Without this the log says "Uncaught"
+   and nothing else, which is exactly the case worth diagnosing. */
+await send("Runtime.setAsyncCallStackDepth", { maxDepth: 32 }, session);
 await send("Emulation.setDeviceMetricsOverride", {
   width: WIDTH,
   height: HEIGHT,
@@ -268,31 +273,33 @@ console.log("\ndiagnostics:", JSON.stringify(diag?.result?.value, null, 2));
 const bad = events.filter(
   (e) =>
     (e.method === "Log.entryAdded" && e.params.entry.level === "error") ||
-    e.method === "Runtime.exceptionThrown",
+    e.method === "Runtime.exceptionThrown" ||
+    (e.method === "Runtime.consoleAPICalled" && e.params.type === "error"),
 );
 console.log(`\nconsole errors: ${bad.length}`);
-for (const e of bad.slice(0, 10)) {
-  const detail = e.params.entry ?? e.params.exceptionDetails;
-  const text =
-    detail.text ||
-    detail.exception?.description ||
-    detail.exception?.value ||
-    "";
-  console.log(" -", String(text).split("\n").slice(0, 6).join("\n   ").slice(0, 900));
-  /* CDP reports a bare "Uncaught" when the throw carried no message string, so
-     the useful part is in the arguments rather than the text. */
-  for (const arg of detail.args ?? []) {
-    if (arg.description || arg.value !== undefined) {
-      console.log(
-        "   arg:",
-        String(arg.description ?? JSON.stringify(arg.value))
-          .split("\n")
-          .slice(0, 6)
-          .join("\n     ")
-          .slice(0, 900),
-      );
-    }
+const seen = new Set();
+for (const e of bad) {
+  const detail = e.params.entry ?? e.params.exceptionDetails ?? e.params;
+  const parts = [];
+  const push = (value) => {
+    if (value === undefined || value === null || value === "") return;
+    parts.push(String(value));
+  };
+  push(detail.text);
+  push(detail.exception?.description);
+  for (const arg of e.params.args ?? detail.args ?? []) {
+    push(arg.description ?? (arg.value !== undefined ? JSON.stringify(arg.value) : ""));
   }
+  for (const call of detail.stackTrace?.callFrames?.slice(0, 8) ?? []) {
+    push(`  at ${call.functionName || "(anon)"} ${call.url.split("/").pop()}:${call.lineNumber + 1}`);
+  }
+  const text = parts.join("\n");
+  /* React repeats the same warning on every re-render; the first one carries
+     the same stack as the thousandth. */
+  const key = text.slice(0, 120);
+  if (seen.has(key)) continue;
+  seen.add(key);
+  console.log("\n---\n" + text.slice(0, 2600));
 }
 
 ws.close();

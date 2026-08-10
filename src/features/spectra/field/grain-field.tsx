@@ -106,24 +106,26 @@ export function GrainField({
       if (!onScreen || document.hidden) return;
       const mood = source.mood.current;
       const influences = source.influences.current;
-      /* The field is allowed to be still. When neither the mood nor any
-         influence has moved, and the drift has had time to settle, drawing the
-         same sixty thousand points again buys nothing. */
-      const same =
-        !reduced &&
-        last !== null &&
-        moodEqual(last.mood, mood) &&
-        influencesEqual(last.influences, influences);
-      if (same) {
-        if (coast <= 0) return;
-        coast -= 1;
-      } else {
-        coast = COAST_FRAMES;
+      /* The lattice flows on its own, so an unchanged mood does not mean an
+         unchanged picture and the frame cannot be skipped on that basis. The
+         one case where it can is reduced motion: there the flow is frozen, and
+         redrawing an identical field is pure cost. */
+      if (reduced) {
+        const same =
+          last !== null &&
+          moodEqual(last.mood, mood) &&
+          influencesEqual(last.influences, influences);
+        if (same) {
+          if (coast <= 0) return;
+          coast -= 1;
+        } else {
+          coast = COAST_FRAMES;
+        }
+        last = {
+          mood: { ...mood },
+          influences: influences.map((one) => ({ ...one })),
+        };
       }
-      last = {
-        mood: { ...mood },
-        influences: influences.map((one) => ({ ...one })),
-      };
       const time = reduced ? 0 : (performance.now() - started) / 1000;
       engine.frame(mood, influences, time);
       /* The crossfade waits for a real frame, not for a context. A canvas that
@@ -180,9 +182,16 @@ function moodEqual(a: GrainMood, b: GrainMood): boolean {
     Math.abs(a.rest - b.rest) < 0.0008 &&
     Math.abs(a.spacing - b.spacing) < 0.05 &&
     Math.abs(a.wash - b.wash) < 0.0015 &&
+    Math.abs(a.wave - b.wave) < 0.004 &&
+    Math.abs(a.pulse - b.pulse) < 0.004 &&
+    Math.abs(a.clip - b.clip) < 0.002 &&
     Math.abs(a.bias[0] - b.bias[0]) < 0.002 &&
     Math.abs(a.bias[1] - b.bias[1]) < 0.002 &&
     Math.abs(a.bias[2] - b.bias[2]) < 0.004 &&
+    a.clipRect[0] === b.clipRect[0] &&
+    a.clipRect[1] === b.clipRect[1] &&
+    a.clipRect[2] === b.clipRect[2] &&
+    a.clipRect[3] === b.clipRect[3] &&
     a.ink[0] === b.ink[0] &&
     a.ink[1] === b.ink[1] &&
     a.ink[2] === b.ink[2] &&

@@ -509,6 +509,42 @@ export function useSwitched<T extends string>(
   return useStoryValue(select);
 }
 
+/**
+ * The reading layer of a scene.
+ *
+ * Everything else on this page is written by an actor, which is the point — but
+ * a page where every word waits for a cursor is a page with nothing to read.
+ * A caption is the author's own voice: present from the first byte, standing
+ * still, telling the visitor what the surface beside it is for.
+ *
+ * It is also the answer to a composition problem. Scenes that put all their
+ * weight in one interface read as a screenshot with space around it; a column of
+ * quiet text on the other side gives the frame two things to balance.
+ */
+export function SceneCaption({
+  eyebrow,
+  title,
+  note,
+  className,
+}: {
+  eyebrow?: string;
+  title?: string;
+  note?: string;
+  className?: string;
+}) {
+  return (
+    <div className={`landing-caption ${className ?? ""}`}>
+      {eyebrow ? (
+        <p className={`${TYPE.micro} text-[var(--text-tertiary)]`}>{eyebrow}</p>
+      ) : null}
+      {title ? (
+        <h3 className="landing-caption-title">{title}</h3>
+      ) : null}
+      {note ? <p className="landing-caption-note">{note}</p> : null}
+    </div>
+  );
+}
+
 /** A status chip. Same shape rule as the product: pills are for status only. */
 export function Chip({
   tone,

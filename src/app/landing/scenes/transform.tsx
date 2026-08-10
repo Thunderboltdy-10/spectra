@@ -28,7 +28,13 @@ import {
 import { ThreadCard } from "@/features/spectra/components/thread-card";
 import { targetAttrs } from "@/features/spectra/collaboration/target-attributes";
 import { SceneRegion } from "../story/scene-region";
-import { Body, Headline, useDuring, useSceneT } from "../story/scene-kit";
+import {
+  Body,
+  Headline,
+  SceneCaption,
+  useDuring,
+  useSceneT,
+} from "../story/scene-kit";
 import { onStoryFrame } from "../story/story-clock";
 import { setPrismIngestion, usePrismSlot } from "../prism/prism-slot";
 import { clamp01, typedCount, type Beat } from "../story/beats";
@@ -338,9 +344,17 @@ export function TransformScene() {
   return (
     <SceneRegion scene="transform">
       <div className="relative h-full">
-        {/* Left: the staging area. Deliberately collected rather than tiled. */}
+        {/* Left: the staging area, and the words for it. Deliberately collected
+            rather than tiled — three unfinished things, not a gallery. */}
+        <div className="absolute left-0 top-0 w-[248px]">
+          <SceneCaption
+            eyebrow="Three things in"
+            title="What the glass is given"
+            note="A task from school, notes that stop halfway, and a thread with one decision still open."
+          />
+        </div>
         <div
-          className="absolute left-0 top-[64px] w-[272px]"
+          className="absolute left-0 top-[214px] w-[248px]"
           {...targetAttrs("transform/staging", undefined, "surface")}
         >
           <Fed path="transform/task" from={FEED[0].from} to={FEED[0].to}>
@@ -349,8 +363,7 @@ export function TransformScene() {
                 id: "frag-task",
                 title: "Ecosystems revision",
                 blueprintKey: "planner_task",
-                summary:
-                  "Three requirements, from the Biology assignment. Due Friday.",
+                summary: "Three requirements, from Biology. Due Friday.",
                 meta: "Task · from school",
                 placement: "inbox",
                 updatedAt: FIXTURE_TIME.created,
@@ -360,16 +373,15 @@ export function TransformScene() {
               quiet
             />
           </Fed>
-          <div className="h-[18px]" />
-          <div className="translate-x-[26px]">
+          <div className="h-[12px]" />
+          <div className="translate-x-[20px]">
             <Fed path="transform/notes" from={FEED[1].from} to={FEED[1].to}>
               <ArtifactCard
                 artifact={{
                   id: "frag-notes",
                   title: "Chapter 4 notes",
                   blueprintKey: "document",
-                  summary:
-                    "Unfinished. Four blocks written, one statement with no source.",
+                  summary: "Four blocks written, one statement with no source.",
                   meta: "Document · 2 sources",
                   placement: "workspace",
                   updatedAt: FIXTURE_TIME.created,
@@ -380,8 +392,8 @@ export function TransformScene() {
               />
             </Fed>
           </div>
-          <div className="h-[18px]" />
-          <div className="translate-x-[10px]">
+          <div className="h-[12px]" />
+          <div className="translate-x-[8px]">
             <Fed path="transform/thread" from={FEED[2].from} to={FEED[2].to}>
               <ThreadCard
                 thread={{
@@ -402,16 +414,16 @@ export function TransformScene() {
           </div>
         </div>
 
-        {/* Centre-left: the glass, in its transformation pose. */}
+        {/* Centre: the glass, in its transformation pose. */}
         <div
           ref={prismRef}
-          className="absolute left-[236px] top-[168px] h-[430px] w-[430px]"
+          className="absolute left-[254px] top-[132px] h-[344px] w-[344px]"
           {...targetAttrs("transform/prism", undefined, "canvasObject")}
         />
 
         {/* Right: what comes out. The edge develops first, then the work. */}
         <div
-          className="landing-grown absolute right-0 top-[96px] w-[400px]"
+          className="landing-grown absolute right-0 top-[24px] w-[356px]"
           style={
             {
               "--grow": easeOutCubic(clamp01((growth - 0.6) / 0.14)).toFixed(3),
@@ -442,7 +454,7 @@ export function TransformScene() {
           </div>
         </div>
 
-        <div className="absolute bottom-[36px] left-0 w-[620px]">
+        <div className="absolute bottom-0 left-[276px] right-0">
           <Headline
             beats={TRANSFORM_BEATS}
             scene="transform"
@@ -453,7 +465,7 @@ export function TransformScene() {
             beats={TRANSFORM_BEATS}
             scene="transform"
             path="transform/close/body"
-            className="mt-4"
+            className="mt-3"
           />
         </div>
       </div>

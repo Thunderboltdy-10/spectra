@@ -150,11 +150,13 @@ function embedOf(input: {
             artifactId: "src-dataset",
             title: SOURCES[2]!.label,
             summary: "Four plots, light against biomass, remeasured Thursday.",
-            blueprintKey: "sheet",
+            blueprintKey: "sheets",
             updatedAt: FIXTURE_TIME.updated,
             tags: ["Biology", "Field work"],
           },
         }),
+    createdAt: FIXTURE_TIME.created,
+    updatedAt: FIXTURE_TIME.updated,
   };
 }
 

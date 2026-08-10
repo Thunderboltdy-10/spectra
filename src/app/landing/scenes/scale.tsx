@@ -104,8 +104,8 @@ export function ScaleScene() {
 
   return (
     <SceneRegion scene="scale">
-      <div className="flex h-full items-start gap-20 pt-[74px]">
-        <div className="w-[520px] shrink-0">
+      <div className="flex h-full items-center gap-16">
+        <div className="w-[496px] shrink-0">
           <Marker beats={SCALE_BEATS} scene="scale" path="scale/marker" />
           <Headline
             beats={SCALE_BEATS}
@@ -113,19 +113,19 @@ export function ScaleScene() {
             size="section"
             accentLast
             paths={["scale/line-1", "scale/line-2", "scale/line-3"]}
-            className="mt-5"
+            className="mt-4"
           />
           <Body
             beats={SCALE_BEATS}
             scene="scale"
             path="scale/body"
-            className="mt-8"
+            className="mt-6"
           />
 
           {/* The tally. It appears as a row of facts rather than a stat block,
               because these are things the visitor saw rather than metrics. */}
           <dl
-            className="mt-12 flex items-baseline gap-12 border-t border-[var(--border-subtle)] pt-6"
+            className="mt-8 flex items-baseline gap-10 border-t border-[var(--border-subtle)] pt-5"
             {...targetAttrs("scale/tally", undefined, "surface")}
           >
             {MADE.map((entry, index) => (

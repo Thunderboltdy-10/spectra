@@ -29,6 +29,14 @@ import { targetAttrs } from "@/features/spectra/collaboration/target-attributes"
 import { actorColor } from "./actors";
 import type { SceneId } from "./timeline";
 
+/** What `Authored` promises to pass to whatever tag it is asked to render. */
+type HostProps = {
+  ref: React.Ref<HTMLElement>;
+  className: string;
+  style?: React.CSSProperties;
+  children: React.ReactNode;
+} & Record<`data-${string}`, string | undefined>;
+
 export function Authored({
   beats,
   scene,
@@ -47,6 +55,13 @@ export function Authored({
   prefix?: string;
   style?: React.CSSProperties;
 }) {
+  /* `as` is authored per call site, so the tag is not statically known. The
+     props below are valid on every element this is used with; the cast keeps
+     that promise at the one boundary rather than spreading `any` through the
+     component. `ComponentType` rather than `ElementType` deliberately: the
+     latter would resolve against every intrinsic element in the JSX namespace,
+     and that union is large enough for the compiler to refuse to represent it. */
+  const Host = Tag as React.ComponentType<HostProps>;
   const hostRef = useRef<HTMLElement>(null);
   const headRef = useRef<HTMLSpanElement>(null);
   const tailRef = useRef<HTMLSpanElement>(null);
@@ -100,7 +115,7 @@ export function Authored({
   );
 
   return (
-    <Tag
+    <Host
       ref={hostRef}
       className={className ? `spectra-authored ${className}` : "spectra-authored"}
       style={style}
@@ -121,7 +136,7 @@ export function Authored({
         {prefix}
         {authoredText(beats, path)}
       </span>
-    </Tag>
+    </Host>
   );
 }
 

@@ -23,6 +23,7 @@ import {
   Chip,
   Headline,
   Marker,
+  SceneCaption,
   Sized,
   useDuring,
   useSceneT,
@@ -229,27 +230,32 @@ export function LivingScene() {
   return (
     <SceneRegion scene="living">
       <div className="relative h-full">
-        <div className="absolute right-0 top-[8px] w-[336px]">
+        <div className="absolute right-0 top-0 w-[318px]">
           <Marker beats={LIVING_BEATS} scene="living" path="living/marker" />
           <Headline
             beats={LIVING_BEATS}
             scene="living"
             size="support"
             paths={["living/line-1", "living/line-2"]}
-            className="mt-4"
+            className="mt-3"
           />
           <Body
             beats={LIVING_BEATS}
             scene="living"
             path="living/body"
-            className="mt-6"
+            className="mt-4"
+          />
+          <SceneCaption
+            className="mt-7"
+            eyebrow="Three at once"
+            note="Spectra is rewriting a paragraph, Pablo is editing the one under it, and Pablo's AI is off checking a claim. Nobody is waiting for a turn."
           />
         </div>
 
         {/* The glass, small and to one side, behind the work. */}
         <div
           ref={prismRef}
-          className="absolute right-[-44px] bottom-[-30px] h-[250px] w-[250px]"
+          className="absolute right-[-52px] bottom-[-36px] h-[212px] w-[212px]"
           aria-hidden="true"
         />
 
@@ -258,9 +264,9 @@ export function LivingScene() {
           beats={LIVING_BEATS}
           scene="living"
           path="living/doc"
-          from={[430, 372]}
-          to={[520, 700]}
-          className="absolute left-0 top-[26px]"
+          from={[400, 340]}
+          to={[512, 566]}
+          className="absolute left-0 top-0"
         >
           <div className="landing-plate h-full w-full">
             <div className="landing-plate-head">
@@ -273,7 +279,7 @@ export function LivingScene() {
               </span>
             </div>
             <div className="landing-plate-body overflow-hidden">
-              <div className="flex flex-col gap-1 py-4 pr-4">
+              <div className="flex flex-col gap-1 py-3 pr-4">
                 <Block
                   path="living/doc/light"
                   markdown={blocks[0]!}
@@ -306,7 +312,7 @@ export function LivingScene() {
         {/* The attached source. It appears in the document's own footer band,
             below the body, because that is where a source lives. */}
         <div
-          className="absolute left-0 top-[746px] flex items-center gap-2"
+          className="absolute bottom-[16px] left-0 flex items-center gap-2"
           data-present={t >= 0.84 ? "true" : "false"}
           style={{
             opacity: t >= 0.84 ? 1 : 0,

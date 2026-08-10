@@ -18480,6 +18480,34 @@ html[data-spectra-motion="none"]
   gap: 22px;
 }
 
+/* The author's own voice beside an actor's work: standing text that is already
+   there when the scene arrives. It carries a hairline on its leading edge rather
+   than a card, because it is a margin note on the surface, not an object on it. */
+.landing-caption {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-left: 18px;
+  border-left: 1px solid var(--border-subtle);
+}
+
+.landing-caption-title {
+  font-size: 25px;
+  line-height: 1.16;
+  letter-spacing: -0.021em;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-wrap: balance;
+}
+
+.landing-caption-note {
+  font-size: 15px;
+  line-height: 1.62;
+  letter-spacing: -0.004em;
+  color: var(--text-secondary);
+  max-width: 34ch;
+}
+
 /* --- objects that arrive ------------------------------------------ */
 
 .landing-carried {
@@ -19480,9 +19508,14 @@ html[data-spectra-motion="none"]
 /* ================================================================== *
  * THE FIELD — Spectra's ambient intelligence layer.
  *
- * Every bounded Spectra surface can carry a quiet dot field. At rest it
- * is almost invisible and costs nothing: one periodic radial-gradient
- * lattice, masked toward the surface's lower-right, drifting on the
+ * Every bounded Spectra surface can carry a quiet dot field. The grain is
+ * fine — single-digit pixels between dots — so it reads as the material a
+ * surface is made of rather than as a grid drawn on top of one. Two
+ * lattices at an irrational ratio are layered so the pattern never visibly
+ * repeats; what you see is texture, not tiling.
+ *
+ * At rest it is almost invisible and costs nothing: periodic radial
+ * gradients, masked toward the surface's lower-right, drifting on the
  * compositor via a transform that loops on exactly one lattice cell.
  * No component owns a requestAnimationFrame.
  *
@@ -19491,6 +19524,12 @@ html[data-spectra-motion="none"]
  * the actual edit brightens, picks up the actor's colour, and relaxes.
  * A surface can hold several influences at once, which is what makes
  * two simultaneous edits in one document legible.
+ *
+ * At environment scale — a whole window — CSS runs out: the field wants
+ * tens of thousands of dots that move individually. There the same
+ * primitive is drawn by `GrainField` on the GPU, and this lattice is what
+ * shows underneath it while the context starts and on machines without
+ * one.
  * ================================================================== */
 
 .spectra-field {
@@ -19502,10 +19541,12 @@ html[data-spectra-motion="none"]
   border-radius: inherit;
   contain: layout paint style;
 
-  /* Lattice geometry. Cards keep a fine crisp grain; large surfaces open up. */
-  --field-cell: 21px;
-  --field-dot: 0.85px;
-  --field-rest: 0.05;
+  /* Lattice geometry. Cards keep the finest grain; large surfaces open up
+     a little, because a fixed dot size at a fixed density reads heavier
+     the more of it you can see at once. */
+  --field-cell: 7px;
+  --field-dot: 0.58px;
+  --field-rest: 0.11;
   --field-ink: color-mix(in oklab, var(--text-primary) 46%, transparent);
 
   /* Where the resting field gathers. Cards: lower-right. */
@@ -19520,15 +19561,15 @@ html[data-spectra-motion="none"]
 }
 
 .spectra-field[data-scale="panel"] {
-  --field-cell: 26px;
-  --field-dot: 0.95px;
-  --field-rest: 0.042;
+  --field-cell: 8px;
+  --field-dot: 0.62px;
+  --field-rest: 0.105;
 }
 
 .spectra-field[data-scale="stage"] {
-  --field-cell: 34px;
-  --field-dot: 1.15px;
-  --field-rest: 0.05;
+  --field-cell: 9px;
+  --field-dot: 0.68px;
+  --field-rest: 0.1;
   --field-bias-spread: 160%;
 }
 
@@ -19547,18 +19588,18 @@ html[data-spectra-motion="none"]
 
 .dark .spectra-field {
   --field-ink: color-mix(in oklab, var(--text-primary) 34%, transparent);
-  --field-rest: 0.07;
+  --field-rest: 0.15;
 }
 
 /* --- resting lattice ---------------------------------------------- */
 
 .spectra-field-rest {
   position: absolute;
-  inset: calc(var(--field-cell) * -2);
+  inset: calc(var(--field-cell) * -4);
   background-image: radial-gradient(
     circle at 50% 50%,
     var(--field-ink) var(--field-dot),
-    transparent calc(var(--field-dot) + 0.35px)
+    transparent calc(var(--field-dot) + 0.5px)
   );
   background-size: var(--field-cell) var(--field-cell);
   opacity: var(--field-rest);
@@ -19582,21 +19623,65 @@ html[data-spectra-motion="none"]
   transition: opacity var(--motion-slow) var(--ease-standard);
 }
 
-/* A second, coarser layer gives large surfaces depth without more nodes. */
-.spectra-field[data-depth="true"] .spectra-field-rest::after {
+/* A second lattice at the golden ratio. The two periods never come back
+   into phase, so a fine grid stops looking like a grid — which is the
+   whole difference between texture and graph paper. */
+.spectra-field-rest::after {
   content: "";
   position: absolute;
   inset: 0;
   background-image: radial-gradient(
     circle at 50% 50%,
-    var(--field-ink) calc(var(--field-dot) * 0.7),
-    transparent calc(var(--field-dot) * 0.7 + 0.3px)
+    var(--field-ink) calc(var(--field-dot) * 0.8),
+    transparent calc(var(--field-dot) * 0.8 + 0.45px)
   );
   background-size: calc(var(--field-cell) * 1.618)
     calc(var(--field-cell) * 1.618);
-  opacity: 0.52;
+  opacity: 0.66;
   animation: spectra-field-drift-far 94s linear infinite;
   animation-delay: var(--field-phase, 0s);
+}
+
+/* Large surfaces get a third, coarser pass for depth. */
+.spectra-field[data-depth="true"] .spectra-field-rest::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(
+    circle at 50% 50%,
+    var(--field-ink) calc(var(--field-dot) * 1.15),
+    transparent calc(var(--field-dot) * 1.15 + 0.5px)
+  );
+  background-size: calc(var(--field-cell) * 2.618)
+    calc(var(--field-cell) * 2.618);
+  opacity: 0.4;
+  animation: spectra-field-drift-far 132s linear infinite reverse;
+  animation-delay: var(--field-phase, 0s);
+}
+
+/* --- the GPU field ------------------------------------------------- */
+/* Environment scale only. It fades in over the lattice once its first
+   frame lands, so a slow context start is never a flash of nothing. */
+
+.spectra-grain-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--motion-slow) var(--ease-standard);
+}
+
+.spectra-grain-canvas[data-live="true"] {
+  opacity: 1;
+}
+
+/* With the real field drawing, the lattice underneath would only add a
+   second, coarser pattern on top of a finer one. */
+.spectra-field[data-gpu="true"] .spectra-field-rest {
+  opacity: 0;
 }
 
 @keyframes spectra-field-drift {
@@ -19615,7 +19700,7 @@ html[data-spectra-motion="none"]
   to {
     transform: translate3d(
       calc(var(--field-cell) * -1.618),
-      calc(var(--field-cell) * -1.618),
+      calc(var(--field-cell) * 1.618),
       0
     );
   }
@@ -19647,17 +19732,19 @@ html[data-spectra-motion="none"]
     transform 520ms var(--ease-standard);
 }
 
-/* The dots inside a wake are denser and carry the actor's colour. */
+/* The dots inside a wake are denser, larger and carry the actor's colour.
+   The lattice compressing is the point: a wake is the field reacting, not a
+   coloured light switched on over it. */
 .spectra-field-wake::before {
   content: "";
   position: absolute;
   inset: 0;
   background-image: radial-gradient(
     circle at 50% 50%,
-    var(--wake-hue) calc(var(--field-dot) + 0.35px),
-    transparent calc(var(--field-dot) + 0.8px)
+    var(--wake-hue) calc(var(--field-dot) + 0.5px),
+    transparent calc(var(--field-dot) + 1.05px)
   );
-  background-size: calc(var(--field-cell) * 0.86) calc(var(--field-cell) * 0.86);
+  background-size: calc(var(--field-cell) * 0.78) calc(var(--field-cell) * 0.78);
   -webkit-mask-image: radial-gradient(
     circle at 50% 50%,
     #000 0%,
@@ -19740,7 +19827,7 @@ html[data-spectra-motion="none"]
     background-position-x: 0;
   }
   to {
-    background-position-x: calc(var(--field-cell) * 0.86);
+    background-position-x: calc(var(--field-cell) * 0.78);
   }
 }
 

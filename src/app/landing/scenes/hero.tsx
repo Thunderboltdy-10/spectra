@@ -137,9 +137,9 @@ export function HeroScene() {
 
   return (
     <SceneRegion scene="hero">
-      <div className="flex h-full items-start pt-[96px]">
+      <div className="flex h-full items-center">
         <div
-          className="landing-lede w-[520px] shrink-0"
+          className="landing-lede w-[500px] shrink-0"
           {...targetAttrs("hero/copy", undefined, "surface")}
         >
           <Marker beats={HERO_BEATS} scene="hero" path="hero/marker" />
@@ -184,7 +184,7 @@ export function HeroScene() {
             from={[40, 210]}
             className="w-full pt-2"
           >
-            <div ref={chatRef} className="w-[470px]">
+            <div ref={chatRef} className="w-[452px]">
               <CommandBar
                 placeholder="Ask Spectra to make something"
                 onSubmit={() => false}
@@ -197,7 +197,7 @@ export function HeroScene() {
             the object is a single fixed 3D scene that reads this rectangle
             every frame, so it travels with the camera without being re-created. */}
         <div
-          className="relative ml-auto h-full w-[430px]"
+          className="relative ml-auto h-full w-[396px]"
           {...targetAttrs("hero/stage", undefined, "surface")}
         >
           <Carried
@@ -205,7 +205,7 @@ export function HeroScene() {
             scene="hero"
             path="hero/prism"
             from={[600, -40]}
-            className="absolute right-[-38px] top-[86px] h-[460px] w-[460px]"
+            className="absolute right-[-44px] top-1/2 h-[404px] w-[404px] -translate-y-1/2"
           >
             <div
               ref={prismRef}

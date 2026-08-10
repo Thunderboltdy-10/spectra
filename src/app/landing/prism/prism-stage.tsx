@@ -3,9 +3,11 @@
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { PrismFallback } from "./prism-fallback";
+import { PrismBoundary } from "./prism-boundary";
 import type { PrismSceneState } from "./prism-scene";
 import type { PrismQuality } from "../prism3d/Prism";
 import { heroState } from "../scene/heroState";
+import { onStoryFrame } from "../story/story-clock";
 
 /**
  * Progressive-enhancement stage: a static SVG prism composes immediately
@@ -62,28 +64,30 @@ function SlotFallback({ children }: { children: React.ReactNode }) {
   const boxRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    let raf = 0;
-    const tick = () => {
+    let w = -1;
+    return onStoryFrame(() => {
       const node = boxRef.current;
-      if (node) {
-        const slot = heroState.slot;
-        if (slot.w > 0) {
-          const width = slot.w / FALLBACK_GLASS_W;
-          const height = width * FALLBACK_ASPECT;
-          node.style.width = `${width}px`;
-          node.style.height = `${height}px`;
-          node.style.transform = `translate3d(${
-            slot.x - FALLBACK_GLASS_CX * width
-          }px, ${slot.y - FALLBACK_GLASS_CY * height}px, 0)`;
-          node.style.opacity = "1";
-        } else {
-          node.style.opacity = "0";
-        }
+      if (!node) return;
+      const slot = heroState.slot;
+      if (slot.w <= 0) {
+        if (node.style.opacity !== "0") node.style.opacity = "0";
+        return;
       }
-      raf = window.requestAnimationFrame(tick);
-    };
-    raf = window.requestAnimationFrame(tick);
-    return () => window.cancelAnimationFrame(raf);
+      /* The box is sized only when the slot's width genuinely changes: width
+         and height are layout properties, and writing them every frame would
+         make the cheap renderer the expensive one. */
+      const width = slot.w / FALLBACK_GLASS_W;
+      if (Math.abs(width - w) > 0.5) {
+        w = width;
+        node.style.width = `${width}px`;
+        node.style.height = `${width * FALLBACK_ASPECT}px`;
+      }
+      const height = w * FALLBACK_ASPECT;
+      node.style.transform = `translate3d(${
+        slot.x - FALLBACK_GLASS_CX * w
+      }px, ${slot.y - FALLBACK_GLASS_CY * height}px, 0)`;
+      if (node.style.opacity !== "1") node.style.opacity = "1";
+    });
   }, []);
 
   return (
@@ -124,6 +128,7 @@ export function PrismStage({
   active?: boolean;
 }) {
   const [ready, setReady] = useState(false);
+  const [failed, setFailed] = useState(false);
   const [supported, setSupported] = useState(false);
   const [reduced, setReduced] = useState(false);
   const [visible, setVisible] = useState(true);
@@ -166,26 +171,24 @@ export function PrismStage({
   }, [reduced, staged]);
 
   const quality = useMemo(() => detectQuality(reduced), [reduced]);
-  const showCanvas = supported;
+  const showCanvas = supported && !failed;
   const paused = staged ? !active : !visible;
 
   // The fallback composes from the live progress too, but polled at a calm
-  // cadence into state — refs stay out of render.
+  // cadence into state — refs stay out of render. Once the engine has painted
+  // the static renderer is invisible, so it stops being polled at all.
   const [fallbackProgress, setFallbackProgress] = useState(scene.progress);
   useEffect(() => {
-    let raf = 0;
+    if (ready && !failed) return;
     let last = scene.progress;
-    const tick = () => {
+    return onStoryFrame(() => {
       const p = progressRef.current;
       if (Math.abs(p - last) > 0.02) {
         last = p;
         setFallbackProgress(p);
       }
-      raf = window.requestAnimationFrame(tick);
-    };
-    raf = window.requestAnimationFrame(tick);
-    return () => window.cancelAnimationFrame(raf);
-  }, [progressRef, scene.progress]);
+    });
+  }, [failed, progressRef, ready, scene.progress]);
 
   const fallback = (
     <PrismFallback progress={fallbackProgress} className="h-full w-full" />
@@ -206,14 +209,24 @@ export function PrismStage({
             ready ? "opacity-100" : "opacity-0"
           }`}
         >
-          <PrismCanvas
-            progressRef={progressRef}
-            quality={quality}
-            reduced={reduced}
-            paused={paused}
-            staged={staged}
-            onFirstFrame={() => setReady(true)}
-          />
+          {/* Fenced: the static renderer is already composing underneath, so a
+              GL failure costs the glass and nothing else. */}
+          <PrismBoundary
+            fallback={null}
+            onFail={() => {
+              setFailed(true);
+              setReady(false);
+            }}
+          >
+            <PrismCanvas
+              progressRef={progressRef}
+              quality={quality}
+              reduced={reduced}
+              paused={paused}
+              staged={staged}
+              onFirstFrame={() => setReady(true)}
+            />
+          </PrismBoundary>
         </div>
       ) : null}
       {/* Screen-reader-equivalent narrative lives in real HTML copy around the

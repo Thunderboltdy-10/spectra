@@ -283,7 +283,6 @@ export default function PrismCanvas({
         }
       }}
       style={{ background: "transparent" }}
-      eventSource={undefined}
     >
       <SceneDriver progressRef={progressRef} reduced={reduced} />
       <CameraRig reduced={reduced} staged={staged} />

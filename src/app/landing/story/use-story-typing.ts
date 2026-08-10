@@ -25,6 +25,26 @@ import type { SceneId } from "./timeline";
 
 type Field = HTMLTextAreaElement | HTMLInputElement;
 
+/**
+ * Input types whose `value` is not free text.
+ *
+ * A real composer is not only a textarea: the product's command bar also mounts
+ * a hidden file input for attachments, and it precedes the textarea in the DOM.
+ * Setting `value` on that one throws, so the search skips every input whose
+ * value is owned by the browser rather than by the person typing.
+ */
+const NOT_TEXT = ["file", "checkbox", "radio", "range", "color", "image"];
+
+const TEXT_FIELD = `textarea, input${NOT_TEXT.map((type) => `:not([type=${type}])`).join("")}`;
+
+/** True when this field's value can be set from a keystroke. */
+function isTextField(field: Field): boolean {
+  return (
+    field instanceof HTMLTextAreaElement ||
+    !NOT_TEXT.includes(field.type.toLowerCase())
+  );
+}
+
 /** Set a controlled field's value the way a keystroke does. */
 function commit(field: Field, next: string) {
   if (field.value === next) return;
@@ -51,7 +71,7 @@ export function useStoryTyping(
     beats,
     scene,
     path,
-    selector = "textarea, input",
+    selector = TEXT_FIELD,
   }: {
     beats: readonly Beat[];
     scene: SceneId;
@@ -66,7 +86,13 @@ export function useStoryTyping(
     let leased = false;
 
     return onStoryFrame((frame) => {
-      field ??= host.querySelector<Field>(selector);
+      if (!field) {
+        /* Resolve once, then keep it. The guard is belt and braces: the
+           selector already excludes non-text inputs, and a component that
+           mounts one anyway must not be able to stop the story clock. */
+        const found = host.querySelector<Field>(selector);
+        if (found && isTextField(found)) field = found;
+      }
       if (!field) return;
       if (field.getAttribute(TARGET_ATTRIBUTE) !== path) {
         field.setAttribute(TARGET_ATTRIBUTE, path);

@@ -76,7 +76,7 @@ export function ComposerArtifactDock({
   return (
     <div
       className="mb-2 flex max-h-[148px] flex-col gap-1.5 overflow-y-auto [scrollbar-width:thin]"
-      aria-label="Artifacts from this conversation"
+      aria-label="Work from this conversation"
     >
       {rows.map((artifact) => {
         const meta = blueprintMeta[artifact.blueprintKey];

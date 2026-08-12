@@ -1,6 +1,10 @@
 import * as Y from "yjs";
 
-export const LOCAL_YJS_DATABASE = "spectra-yjs-v2";
+// room-v1 begins with the server-authored native baseline protocol. Earlier
+// caches may
+// contain independently initialized Yjs identities, so replaying them into a
+// canonical room can duplicate document blocks and structured collections.
+export const LOCAL_YJS_DATABASE = "spectra-yjs-room-v1";
 export const LOCAL_YJS_STORE = "work-updates";
 export const LOCAL_PERSISTENCE_ORIGIN = Symbol("spectra-local-persistence");
 

@@ -464,7 +464,7 @@ function clozePrompt(value: string) {
   return value.replace(
     /\{\{c\d+::([\s\S]*?)(?:::(.*?))?\}\}/gi,
     (_source, _answer: string, hint: string | undefined) =>
-      hint?.trim() ? `[${hint.trim()}]` : "[â€¦]",
+      hint?.trim() ? `[${hint.trim()}]` : "[…]",
   );
 }
 
@@ -528,7 +528,7 @@ type QuizSettings = {
   maxAttempts?: number;
   allowResume: boolean;
   defaultTimeMultiplier: number;
-  /** How this quiz is used (Â§11C). Presets set all of it at once. */
+  /** How this quiz is used (§11C). Presets set all of it at once. */
   experience: QuizExperience;
 };
 
@@ -742,8 +742,8 @@ function ReadonlyCodeSnapshot({
       setState("building");
       setMessage(
         event.status === "loading"
-          ? "Loading the isolated Python runtimeâ€¦"
-          : "Running this historical checkpointâ€¦",
+          ? "Loading the isolated Python runtime…"
+          : "Running this historical checkpoint…",
       );
     } else if (event.type === "stdout" || event.type === "stderr") {
       setConsoleLines((current) => [...current, event.text].slice(-80));
@@ -790,7 +790,7 @@ function ReadonlyCodeSnapshot({
     pythonRef.current = null;
     setState("building");
     setMessage(
-      "Rebuilding this checkpoint with its recorded runtime profileâ€¦",
+      "Rebuilding this checkpoint with its recorded runtime profile…",
     );
     setConsoleLines([]);
     setPreviewFiles(null);
@@ -986,7 +986,7 @@ function ReadonlyCodeSnapshot({
           </aside>
           <div className="min-w-0 bg-[#151713] text-[#e8eadf]">
             <div className="border-b border-white/10 px-3 py-2 text-micro text-white/55">
-              {activeFile.path} Â· {activeFile.language}
+              {activeFile.path} · {activeFile.language}
             </div>
             <pre className="max-h-[520px] overflow-auto p-4 font-mono text-micro leading-4">
               {activeFile.source}
@@ -1113,7 +1113,7 @@ function ReadonlyArtifactSnapshot({
               className="rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4"
             >
               <div className="text-micro font-semibold uppercase tracking-[.1em] text-[#7560e8]">
-                Card {index + 1} Â· {card.section}
+                Card {index + 1} · {card.section}
               </div>
               <div className="mt-2 font-display text-[17px] font-semibold">
                 {card.front}
@@ -1352,9 +1352,9 @@ function ReadonlyArtifactSnapshot({
                       ? new Date(event.startAt).toLocaleString()
                       : "Time not set"}
                   {typeof event.end === "string"
-                    ? ` â€“ ${new Date(event.end).toLocaleString()}`
+                    ? ` – ${new Date(event.end).toLocaleString()}`
                     : typeof event.endAt === "number"
-                      ? ` â€“ ${new Date(event.endAt).toLocaleString()}`
+                      ? ` – ${new Date(event.endAt).toLocaleString()}`
                       : ""}
                 </div>
               </div>
@@ -1406,7 +1406,7 @@ function historyPresentationObjectSummary(
       .slice(0, 4)
       .map((row) =>
         Array.isArray(row)
-          ? row.map((cell) => String(cell ?? "")).join(" Â· ")
+          ? row.map((cell) => String(cell ?? "")).join(" · ")
           : String(row ?? ""),
       )
       .join("\n")
@@ -1414,7 +1414,7 @@ function historyPresentationObjectSummary(
   }
   if (Array.isArray(content.labels)) {
     const chartType = humanizeKey(String(content.chartType ?? "chart"));
-    return `${chartType} Â· ${content.labels.slice(0, 6).map(String).join(", ")}`;
+    return `${chartType} · ${content.labels.slice(0, 6).map(String).join(", ")}`;
   }
   if (typeof value.altText === "string" && value.altText.trim())
     return value.altText.trim();
@@ -1556,7 +1556,7 @@ function HistoryComparisonOverlay({
           </span>
           {selected ? (
             <span className="truncate rounded-[6px] bg-[color-mix(in_oklab,#8b6ff0_8%,var(--bg-secondary))] px-2 py-1 text-[12px] font-medium text-[#6f59cf]">
-              Previewing v{selected.versionNumber ?? "â€”"} from{" "}
+              Previewing v{selected.versionNumber ?? "—"} from{" "}
               {new Date(selected.createdAt).toLocaleString()}
             </span>
           ) : null}
@@ -1656,7 +1656,7 @@ function HistoryComparisonOverlay({
                 <section className="min-h-0 overflow-auto">
                   <div className="sticky top-0 z-10 flex items-center justify-between border-b border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--bg-primary)_94%,transparent)] px-4 py-2 backdrop-blur">
                     <span className="text-micro font-semibold text-[var(--text-primary)]">
-                      Version v{selected.versionNumber ?? "â€”"}
+                      Version v{selected.versionNumber ?? "—"}
                     </span>
                     <span className="rounded-[5px] bg-[color-mix(in_oklab,#8b6ff0_8%,var(--bg-secondary))] px-1.5 py-0.5 text-micro font-medium text-[#6f59cf]">
                       Preview only
@@ -1950,14 +1950,14 @@ function humanValue(value: unknown) {
 function humanFieldLabel(path: string[]) {
   const clean = path[0] === "content" ? path.slice(1) : path;
   if (clean[0] === "cards" && /^\d+$/.test(clean[1] ?? ""))
-    return `Card ${Number(clean[1]) + 1} Â· ${clean.slice(2).map(humanizeKey).join(" Â· ") || "Content"}`;
+    return `Card ${Number(clean[1]) + 1} · ${clean.slice(2).map(humanizeKey).join(" · ") || "Content"}`;
   if (clean[0] === "questions" && /^\d+$/.test(clean[1] ?? ""))
-    return `Question ${Number(clean[1]) + 1} Â· ${clean.slice(2).map(humanizeKey).join(" Â· ") || "Content"}`;
+    return `Question ${Number(clean[1]) + 1} · ${clean.slice(2).map(humanizeKey).join(" · ") || "Content"}`;
   if (clean[0] === "blocks" && /^\d+$/.test(clean[1] ?? ""))
-    return `Document block ${Number(clean[1]) + 1} Â· ${clean.slice(2).map(humanizeKey).join(" Â· ") || "Content"}`;
+    return `Document block ${Number(clean[1]) + 1} · ${clean.slice(2).map(humanizeKey).join(" · ") || "Content"}`;
   if (clean[0] === "subtasks" && /^\d+$/.test(clean[1] ?? ""))
-    return `Subtask ${Number(clean[1]) + 1} Â· ${clean.slice(2).map(humanizeKey).join(" Â· ") || "Content"}`;
-  return clean.map(humanizeKey).join(" Â· ") || "Artifact";
+    return `Subtask ${Number(clean[1]) + 1} · ${clean.slice(2).map(humanizeKey).join(" · ") || "Content"}`;
+  return clean.map(humanizeKey).join(" · ") || "Artifact";
 }
 
 function humanDiff(
@@ -2052,12 +2052,12 @@ function humanDiff(
       );
       if (!before || !after) {
         changes.push({
-          label: `${path} Â· ${before ? "File removed" : "File added"}`,
+          label: `${path} · ${before ? "File removed" : "File added"}`,
           before: before
-            ? `${String(before.file.language ?? "text")} Â· ${String(before.file.source ?? "").split("\n").length} lines`
+            ? `${String(before.file.language ?? "text")} · ${String(before.file.source ?? "").split("\n").length} lines`
             : "Not present",
           after: after
-            ? `${String(after.file.language ?? "text")} Â· ${String(after.file.source ?? "").split("\n").length} lines`
+            ? `${String(after.file.language ?? "text")} · ${String(after.file.source ?? "").split("\n").length} lines`
             : "Not present",
           path: [
             "content",
@@ -2071,7 +2071,7 @@ function humanDiff(
       for (const key of ["path", "language", "mediaType"] as const) {
         if (before.file[key] === after.file[key]) continue;
         changes.push({
-          label: `${path} Â· ${humanizeKey(key)}`,
+          label: `${path} · ${humanizeKey(key)}`,
           before: humanValue(before.file[key]),
           after: humanValue(after.file[key]),
           path: ["content", "files", String(after.index), key],
@@ -2104,7 +2104,7 @@ function humanDiff(
         if (oldLine?.text === newLine?.text) continue;
         const lineNumber = (newLine?.index ?? oldLine?.index ?? 0) + 1;
         changes.push({
-          label: `${path} Â· Line ${lineNumber}${!oldLine ? " added" : !newLine ? " removed" : ""}`,
+          label: `${path} · Line ${lineNumber}${!oldLine ? " added" : !newLine ? " removed" : ""}`,
           before: oldLine ? oldLine.text || "Blank line" : "Not present",
           after: newLine ? newLine.text || "Blank line" : "Not present",
           path: [
@@ -2312,7 +2312,7 @@ function documentJsonFromContent(content: unknown, title: string): JSONContent {
             const items = text
               .split(/\r?\n/)
               .map((line) =>
-                line.replace(/^\s*(?:[-*â€¢]|\d+[.)])\s+/, "").trim(),
+                line.replace(/^\s*(?:[-*•]|\d+[.)])\s+/, "").trim(),
               )
               .filter(Boolean);
             return {
@@ -3194,7 +3194,7 @@ export function ArtifactStudio({
                 {artifact.title}
               </div>
               <div className="mt-0.5 text-micro uppercase tracking-[0.11em] text-[var(--text-tertiary)]">
-                Conversation Â· {sourceLabel}
+                Conversation · {sourceLabel}
               </div>
             </div>
           </div>
@@ -3295,7 +3295,7 @@ export function ArtifactStudio({
     <StudioSplitShell
       width={width}
       onWidthChange={onPanelWidthChange}
-      ariaLabel="Artifact Studio"
+      ariaLabel="Work studio"
       cssWidthVariable="--spectra-studio-width"
       minWidth={560}
     >
@@ -3372,10 +3372,17 @@ export function StudioSplitShell({
         siblingCount > 0
           ? Math.max(floor, Math.floor(hostWidth * 0.46))
           : maximum;
-      const next = Math.max(floor, Math.min(width, maximum, fairCap));
+      const responsiveCap =
+        siblingCount === 0 && hostWidth < 1920
+          ? Math.max(floor, Math.floor(hostWidth * 0.5))
+          : maximum;
+      const next = Math.max(
+        floor,
+        Math.min(width, maximum, fairCap, responsiveCap),
+      );
       if (Math.abs(next - width) >= 8) updateWidth(next);
-      else if (width > maximum || width > fairCap)
-        updateWidth(Math.min(maximum, fairCap));
+      else if (width > maximum || width > fairCap || width > responsiveCap)
+        updateWidth(Math.min(maximum, fairCap, responsiveCap));
       else if (width < floor) updateWidth(floor);
     }
     const frame = window.requestAnimationFrame(fitPanel);
@@ -3426,12 +3433,16 @@ export function StudioSplitShell({
         siblings.length > 0
           ? Math.max(floor, Math.floor(hostWidth * 0.52))
           : available;
+      const responsiveCap =
+        siblings.length === 0 && hostWidth < 1920
+          ? Math.max(floor, Math.floor(hostWidth * 0.5))
+          : available;
       onWidthChange(
         Math.max(
           floor,
           Math.min(
             Math.round(hostRight - event.clientX - rightSiblingWidth),
-            Math.min(960, available, fairCap),
+            Math.min(960, available, fairCap, responsiveCap),
           ),
         ),
       );
@@ -3875,14 +3886,25 @@ function ArtifactStudioEditor({
             return true;
           }
         }
-        const result = await live.synchronize({
+        const nextLiveValue = {
           title: snapshot.title.trim(),
           ...(snapshot.summary.trim()
             ? { summary: snapshot.summary.trim() }
             : {}),
           content: snapshot.content,
           tags: tagsFromDraft(snapshot.tagDraft),
-        });
+        };
+        // Document and code bodies are already committed through their native
+        // Y.XmlFragment/Y.Text bindings. A metadata save must never replay the
+        // React snapshot over that live body: the snapshot can lag the editor
+        // by a render while the user types and would turn a title change into a
+        // false structural rewrite.
+        const result =
+          (artifact.blueprintKey === "document" ||
+            artifact.blueprintKey === "code") &&
+          live.modelSnapshot.initialized
+            ? await live.synchronizeMetadata(nextLiveValue)
+            : await live.synchronize(nextLiveValue);
         if (result && "applied" in result && result.applied === false) {
           localSyncKeysRef.current.delete(key);
           const claim = "claim" in result ? result.claim : undefined;
@@ -4208,7 +4230,7 @@ function ArtifactStudioEditor({
   const catchUpActive = joinLateArrival.active;
   // Pending creates often attach an empty aiPreview / aiEffects shell for
   // progress chrome before any concrete changedPaths arrive. Do not let that
-  // empty shell suppress the create fallback â€” otherwise mid-open whiteboard
+  // empty shell suppress the create fallback — otherwise mid-open whiteboard
   // (and peers) show rich content with 0 `data-ai-region` attributes.
   // Focused updates stay visually quiet until an exact region arrives. A
   // whole-artifact fallback reads as a refresh and obscures the real edit.
@@ -4372,7 +4394,7 @@ function ArtifactStudioEditor({
     if (semanticInteractionTargetPaths.length > 0)
       return semanticInteractionTargetPaths;
     if (activeAiCollaborator?.interactionState) return [];
-    // During live streaming, light only the active region â€” completed fields
+    // During live streaming, light only the active region — completed fields
     // stay visible via content patches without stacking blue traces on every
     // previously touched control.
     if (activeAiCollaborator?.previewPhase === "streaming") {
@@ -4910,7 +4932,7 @@ function ArtifactStudioEditor({
     // Any direct input returns control of the viewport to the user instantly.
     disengageFollowAi();
   }, []);
-  // Never steal the peer's viewport for AI edits â€” they may be reading or
+  // Never steal the peer's viewport for AI edits — they may be reading or
   // typing elsewhere. Cyan ink and the AI caret are the only locators.
   const handlePresencePointerMove = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
@@ -4927,7 +4949,7 @@ function ArtifactStudioEditor({
           active.tagName === "SELECT")
       ) {
         // While typing/focusing a control, never overwrite the caret with a
-        // hover pointer â€” peers should only see the action cursor.
+        // hover pointer — peers should only see the action cursor.
         return;
       }
       const anchor = resolvePresenceAnchorFromPoint(
@@ -5550,7 +5572,7 @@ function ArtifactStudioEditor({
                 ? "Needs attention"
                 : "Live"
         : syncBusy || dirty
-          ? "Savingâ€¦"
+          ? "Saving…"
           : "Saved";
   const visibleIdentityTags = tagDraft
     .split(",")
@@ -5584,7 +5606,7 @@ function ArtifactStudioEditor({
                   )),
             )}
             className={`min-h-8 w-full resize-none overflow-hidden bg-transparent font-display font-semibold leading-tight text-[var(--text-primary)] outline-none [field-sizing:content] ${compact ? "text-[28px]" : "text-[32px]"}`}
-            placeholder="Untitled artifact"
+            placeholder="Untitled work"
           />
         </div>
         <div className="mt-0.5 rounded-[7px]">
@@ -5625,7 +5647,7 @@ function ArtifactStudioEditor({
                 }}
                 aria-label="Expand summary"
               >
-                â€¦
+                …
               </button>
             ) : null}
           </div>
@@ -5757,7 +5779,7 @@ function ArtifactStudioEditor({
               )}
               {syncLabel}
               {isCollaborativeArtifact && collaboratorCount > 0
-                ? ` Â· ${collaboratorCount} here`
+                ? ` · ${collaboratorCount} here`
                 : ""}
             </span>
             {isCollaborativeArtifact || collaboratorCount > 0 ? (
@@ -5829,7 +5851,7 @@ function ArtifactStudioEditor({
             ) : null}
             {onShare ? (
               <IconButton
-                label="Share artifact"
+                label="Share work"
                 onClick={onShare}
                 icon={Share2}
               />
@@ -5889,13 +5911,13 @@ function ArtifactStudioEditor({
       </header>
       {readOnly && !livePermissionLost ? (
         <div className="shrink-0 border-y border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-5 py-2 text-[11px] text-[var(--text-secondary)]">
-          Read-only access{accessExplanation ? ` Â· ${accessExplanation}` : ""}{" "}
-          Â· You can inspect, comment, and place this artifact, but only a
+          Read-only access{accessExplanation ? ` · ${accessExplanation}` : ""}{" "}
+          · You can inspect, comment, and place this work, but only a
           collaborator with modify access can change it.
         </div>
       ) : accessExplanation ? (
         <div className="shrink-0 border-y border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-5 py-2 text-[11px] text-[var(--text-secondary)]">
-          {accessExplanation} Â· You can modify this artifact.
+          {accessExplanation} · You can modify this work.
         </div>
       ) : null}
       {livePermissionLost ? (
@@ -5927,9 +5949,9 @@ function ArtifactStudioEditor({
           >
             <span className="min-w-0 flex-1">
               {liveConflict.message}
-              {liveConflictLabel ? ` Â· ${liveConflictLabel}` : ""}
+              {liveConflictLabel ? ` · ${liveConflictLabel}` : ""}
               {liveConflict.queuePosition
-                ? ` Â· Waiting ${liveConflict.queuePosition === 1 ? "next" : `at position ${liveConflict.queuePosition}`}`
+                ? ` · Waiting ${liveConflict.queuePosition === 1 ? "next" : `at position ${liveConflict.queuePosition}`}`
                 : ""}
             </span>
             <button
@@ -6010,7 +6032,19 @@ function ArtifactStudioEditor({
         />
         <div className={`spectra-editor-layout ${editorLayoutClass}`}>
           <section className="min-w-0">
-            {artifact.blueprintKey === "document" ? (
+            {(artifact.blueprintKey === "document" ||
+              artifact.blueprintKey === "code") &&
+            !live.modelSnapshot.initialized ? (
+              <div
+                role="status"
+                className="flex min-h-[420px] items-center justify-center gap-2 text-ui text-[var(--text-secondary)]"
+              >
+                <Loader2 className="h-4 w-4 animate-spin text-[var(--brand-primary)] motion-reduce:animate-none" />
+                Preparing the live {artifact.blueprintKey === "code" ? "code" : "document"}…
+              </div>
+            ) : null}
+            {artifact.blueprintKey === "document" &&
+            live.modelSnapshot.initialized ? (
               <DocumentStudio
                 key={`${artifact._id}:document`}
                 artifactId={artifact._id}
@@ -6019,11 +6053,7 @@ function ArtifactStudioEditor({
                 onChange={editorChange}
                 aiChangedPaths={highlightPaths}
                 readOnly={readOnly}
-                collaborationDocument={
-                  live.modelSnapshot.initialized
-                    ? live.transport?.document
-                    : undefined
-                }
+                collaborationDocument={live.transport?.document}
                 header={null}
                 mode={contentMode}
               />
@@ -6077,7 +6107,8 @@ function ArtifactStudioEditor({
                 onActiveRegionChange={handleActiveRegionChange}
               />
             ) : null}
-            {artifact.blueprintKey === "code" ? (
+            {artifact.blueprintKey === "code" &&
+            live.modelSnapshot.initialized ? (
               <CodeStudio
                 key={`${artifact._id}:code`}
                 artifactId={artifact._id}
@@ -6087,11 +6118,7 @@ function ArtifactStudioEditor({
                 onChange={editorChange}
                 aiChangedPaths={highlightPaths}
                 readOnly={readOnly}
-                collaborationDocument={
-                  live.modelSnapshot.initialized
-                    ? live.transport?.document
-                    : undefined
-                }
+                collaborationDocument={live.transport?.document}
                 synchronizationReady={isSyncReady(syncLabel)}
                 syncMessage={artifactSyncMessage}
                 onActiveRegionChange={handleActiveRegionChange}
@@ -6427,9 +6454,9 @@ export function DocumentStudio({
   const [replaceDraft, setReplaceDraft] = useState("");
   const [findCursor, setFindCursor] = useState(0);
   /**
-   * The four ways of being in a document (Â§11A). Write is authoring, Read is
-   * the document as a reader meets it, Review is reading with the apparatus â€”
-   * outline, sources, comments â€” in view, and Focus is the text and nothing
+   * The four ways of being in a document (§11A). Write is authoring, Read is
+   * the document as a reader meets it, Review is reading with the apparatus —
+   * outline, sources, comments — in view, and Focus is the text and nothing
    * else. A reader who cannot edit is never offered Write, and a side panel
    * opens on Read: a third of the width is a poor place to write.
    */
@@ -6712,7 +6739,7 @@ export function DocumentStudio({
       if (/^\d+$/.test(raw)) return [{ index: Number(raw), line }];
       return [{ blockId: raw, line }];
     });
-    // Line-scoped paths must never also paint the whole block / whole doc â€”
+    // Line-scoped paths must never also paint the whole block / whole doc —
     // that is the mid-stream cyan wash that fails G-01/G-02 Excellent.
     const hasLineScope = lineTargets.length > 0;
     const target: AiRegionDecorationTarget | null = aiChangedPaths.length
@@ -6776,7 +6803,7 @@ export function DocumentStudio({
   const readingMinutes = Math.max(1, Math.ceil(wordCount / 220));
   // Outline, find and the source navigator all read the live ProseMirror
   // document rather than a JSON copy, so their positions are the editor's own
-  // and stay correct through collaborative edits (Â§11A).
+  // and stay correct through collaborative edits (§11A).
   const outlineEntries = (() => {
     const entries: DocumentOutlineEntry[] = [];
     const wordsAfter: number[] = [];
@@ -6895,7 +6922,7 @@ export function DocumentStudio({
   /**
    * Replaces every match as ranged edits in one transaction, working backwards
    * so earlier positions stay valid. A full `setContent` would rewrite the whole
-   * document and clobber a collaborator mid-sentence (Â§11A).
+   * document and clobber a collaborator mid-sentence (§11A).
    */
   function replaceAllMatches() {
     if (!editor || !findDraft || readOnly || !findMatches.length) return;
@@ -6917,7 +6944,7 @@ export function DocumentStudio({
   /**
    * Replaces the References section with one built from the citations in the
    * text right now. It is regenerated rather than hand-edited, so it can never
-   * claim a source the document does not actually cite (Â§11A).
+   * claim a source the document does not actually cite (§11A).
    */
   function insertBibliography() {
     if (!editor || readOnly) return;
@@ -8062,7 +8089,7 @@ export function DocumentStudio({
                   {entry.uses.length} citation
                   {entry.uses.length === 1 ? "" : "s"}
                   {entry.sections.length
-                    ? ` Â· ${entry.sections.slice(0, 2).join(", ")}`
+                    ? ` · ${entry.sections.slice(0, 2).join(", ")}`
                     : ""}
                 </em>
               </button>
@@ -8116,7 +8143,7 @@ export function DocumentStudio({
               )}
             </span>
             <span>
-              {wordCount.toLocaleString()} words Â· {readingMinutes} min read
+              {wordCount.toLocaleString()} words · {readingMinutes} min read
             </span>
           </div>
           <EditorContent
@@ -8176,9 +8203,9 @@ function FlashcardStudio({
   const [sectionNameDraft, setSectionNameDraft] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [deckTagDraft, setDeckTagDraft] = useState("");
-  // The four ways of being in a deck (Â§11B). Build authors it, Browse reads it,
+  // The four ways of being in a deck (§11B). Build authors it, Browse reads it,
   // Progress reports on your own recall, and Study is the session itself.
-  // Without Edit access Build is absent rather than shown disabled â€” offering a
+  // Without Edit access Build is absent rather than shown disabled — offering a
   // door that cannot open is worse than not mentioning the room.
   const deckViews = (
     [
@@ -8189,7 +8216,7 @@ function FlashcardStudio({
   ).filter(([view]) => view !== "build" || !readOnly);
   const [studioView, setStudioView] = useState<"build" | "browse" | "progress">(
     // A side panel opens on Browse: it is a reading surface, and a builder
-    // squeezed into a third of the width is worse at both jobs (Â§11B).
+    // squeezed into a third of the width is worse at both jobs (§11B).
     readOnly || mode === "split" ? "browse" : "build",
   );
   const [previewRevealed, setPreviewRevealed] = useState(false);
@@ -8320,7 +8347,7 @@ function FlashcardStudio({
       );
     // Progress filters read personal study state and never the card's own
     // fields, so filtering by "due" says something about this person rather
-    // than about the deck everyone shares (Â§11B).
+    // than about the deck everyone shares (§11B).
     if (deckFilter === "due") {
       const state = studyStates.get(deckStudyKey(card.id, "forward"));
       return !state || state.nextDueAt <= (studyClock || currentTimeMs());
@@ -8382,7 +8409,7 @@ function FlashcardStudio({
     : 0;
   // What the deck's edits did to this person's progress, in their terms. Cards
   // whose answer changed are due again; progress for cards that left the deck is
-  // kept in case they come back (Â§11B).
+  // kept in case they come back (§11B).
   const deckUpdateNotice = (() => {
     if (studyUpdateDismissed || studyStateLoading || !studyUpdate) return "";
     const changed = studyUpdate.changedCardIds.length;
@@ -8395,7 +8422,7 @@ function FlashcardStudio({
       );
     if (retained)
       parts.push(
-        `${retained} card${retained === 1 ? "" : "s"} left the deck â€” your progress is kept in case ${retained === 1 ? "it returns" : "they return"}`,
+        `${retained} card${retained === 1 ? "" : "s"} left the deck — your progress is kept in case ${retained === 1 ? "it returns" : "they return"}`,
       );
     return `${parts.join(". ")}.`;
   })();
@@ -9336,7 +9363,7 @@ function FlashcardStudio({
                   labelled.bidirectional || "",
                 ];
               }
-              const explicitPair = block.split(/\s+(?:::|=>|â†’)\s+/);
+              const explicitPair = block.split(/\s+(?:::|=>|→)\s+/);
               if (explicitPair.length >= 2)
                 return [
                   explicitPair[0]!.trim(),
@@ -9499,7 +9526,7 @@ function FlashcardStudio({
         importedContent: { cards: unique },
       });
       setDeckImportReport(
-        `${unique.length} cards imported as editable content Â· ${rows.length - unique.length} invalid or duplicate rows left unchanged.`,
+        `${unique.length} cards imported as editable content · ${rows.length - unique.length} invalid or duplicate rows left unchanged.`,
       );
     } catch (error) {
       const message =
@@ -9637,7 +9664,7 @@ function FlashcardStudio({
           );
           if (!asset?.downloadUrl)
             throw new Error(
-              `The image for â€œ${card.front || card.media.name}â€ is unavailable. Restore or replace it before exporting.`,
+              `The image for “${card.front || card.media.name}” is unavailable. Restore or replace it before exporting.`,
             );
           const response = await fetch(asset.downloadUrl, {
             cache: "no-store",
@@ -9786,7 +9813,7 @@ function FlashcardStudio({
 
   /**
    * A note lives with the learner's study state, so saving one changes nothing
-   * about the deck and needs no edit access (Â§11B).
+   * about the deck and needs no edit access (§11B).
    */
   async function saveStudyNote() {
     if (!activeStudyCard || !activeStudyItem) return;
@@ -9819,7 +9846,7 @@ function FlashcardStudio({
 
   /**
    * Move on without grading. The card returns at the end of this session and
-   * its schedule is untouched â€” not answering is not the same as answering
+   * its schedule is untouched — not answering is not the same as answering
    * badly, so it must not cost the learner an interval.
    */
   function skipStudyCard() {
@@ -9919,7 +9946,7 @@ function FlashcardStudio({
         </div>
         <div className="border-l border-[var(--border-subtle)] px-3 py-2">
           <strong className="block font-display text-[16px] leading-5 text-[var(--text-primary)]">
-            {studyStateLoading ? "â€”" : `${personalMastery}%`}
+            {studyStateLoading ? "—" : `${personalMastery}%`}
           </strong>
           <span className="text-micro text-[var(--text-tertiary)]">
             Personal mastery
@@ -9927,7 +9954,7 @@ function FlashcardStudio({
         </div>
         <div className="border-l border-[var(--border-subtle)] px-3 py-2">
           <strong className="block font-display text-[16px] leading-5 text-[var(--text-primary)]">
-            {studyStateLoading ? "â€”" : dueStudyCount}
+            {studyStateLoading ? "—" : dueStudyCount}
           </strong>
           <span className="text-micro text-[var(--text-tertiary)]">
             Due now
@@ -10010,7 +10037,7 @@ function FlashcardStudio({
         >
           <Play className="h-4 w-4" />
           Study
-          {!studyStateLoading && dueStudyCount ? ` Â· ${dueStudyCount}` : ""}
+          {!studyStateLoading && dueStudyCount ? ` · ${dueStudyCount}` : ""}
         </button>
         <button
           type="button"
@@ -10080,7 +10107,7 @@ function FlashcardStudio({
           >
             {cards.map((card, index) => (
               <option key={card.id} value={card.id}>
-                {index + 1} Â·{" "}
+                {index + 1} ·{" "}
                 {plannerDescriptionText(card.front) || "Untitled card"}
               </option>
             ))}
@@ -10188,7 +10215,7 @@ function FlashcardStudio({
           </header>
           {studyStateLoading ? (
             <p className="spectra-deck-progress-empty">
-              Loading your progressâ€¦
+              Loading your progress…
             </p>
           ) : !studyItems.length ? (
             <div className="spectra-deck-progress-empty">
@@ -10424,7 +10451,7 @@ function FlashcardStudio({
                 if (event.target.value) moveSelectedCards(event.target.value);
               }}
             >
-              <option value="">Move toâ€¦</option>
+              <option value="">Move to…</option>
               {sections.map((section) => (
                 <option key={section} value={section}>
                   {section}
@@ -10443,7 +10470,7 @@ function FlashcardStudio({
                   setSelectedDifficulty(event.target.value);
               }}
             >
-              <option value="">Difficultyâ€¦</option>
+              <option value="">Difficulty…</option>
               <option value="easy">Easy</option>
               <option value="medium">Medium</option>
               <option value="hard">Hard</option>
@@ -11385,7 +11412,7 @@ function FlashcardStudio({
                     : !activeCard.front.trim() || !activeCard.back.trim()
                       ? "Add both sides before studying this card"
                       : activeCardDirty
-                        ? "Syncing changesâ€¦"
+                        ? "Syncing changes…"
                         : "Synchronized"}
               </span>
               {activeCardDirty ? (
@@ -11439,7 +11466,7 @@ function FlashcardStudio({
                 if (typing) return;
                 // Study runs entirely from the keyboard: reveal, grade, note,
                 // skip and undo all have a key, so a session never needs a
-                // pointer (Â§11B).
+                // pointer (§11B).
                 if (studyRevealed && ["1", "2", "3", "4"].includes(event.key)) {
                   event.preventDefault();
                   const selected = (["again", "hard", "good", "easy"] as const)[
@@ -11505,10 +11532,10 @@ function FlashcardStudio({
                   {(
                     [
                       ["Space", "Reveal the answer"],
-                      ["1 â€“ 4", "Grade: again, hard, good, easy"],
+                      ["1 – 4", "Grade: again, hard, good, easy"],
                       ["N", "Write a private note"],
-                      ["S or â†’", "Skip without grading"],
-                      ["â†", "Go back a card"],
+                      ["S or →", "Skip without grading"],
+                      ["←", "Go back a card"],
                       ["Esc", "Leave the session"],
                     ] as const
                   ).map(([keys, meaning]) => (
@@ -11564,7 +11591,7 @@ function FlashcardStudio({
                     <span>
                       Prompt
                       {activeStudyItem?.direction === "reverse"
-                        ? " Â· reverse"
+                        ? " · reverse"
                         : ""}
                     </span>
                     <strong>{activeStudyPrompt}</strong>
@@ -11676,7 +11703,7 @@ function FlashcardStudio({
                           }
                           onBlur={() => void saveStudyNote()}
                         />
-                        {studyNoteSaving ? <small>Savingâ€¦</small> : null}
+                        {studyNoteSaving ? <small>Saving…</small> : null}
                       </div>
                     </section>
                   ) : deckSettings.revealMode === "type" ? (
@@ -11744,7 +11771,7 @@ function FlashcardStudio({
         <header>
           <strong>Flashcard deck</strong>
           <span>
-            {cards.length} cards Â· {sections.length} sections
+            {cards.length} cards · {sections.length} sections
           </span>
         </header>
         {sections.map((section) => (
@@ -11824,11 +11851,11 @@ function FlashcardStudio({
 }
 
 /**
- * How this quiz is used (Â§11C).
+ * How this quiz is used (§11C).
  *
  * Three presets carry the whole contract, because almost every quiz is one of
  * them. The six fields underneath stay folded away until someone wants a
- * combination the presets do not cover â€” advanced power without a wall of
+ * combination the presets do not cover — advanced power without a wall of
  * dropdowns on the way in.
  */
 function QuizExperienceSection({
@@ -11915,7 +11942,7 @@ function QuizExperienceSection({
               className={`${inputClass()} mt-1`}
             >
               <option value="ephemeral">
-                Nothing â€” answers clear on exit
+                Nothing — answers clear on exit
               </option>
               <option value="personal">Their own attempts</option>
               <option value="submitted">Submitted attempts</option>
@@ -12080,7 +12107,7 @@ function QuizExperienceSection({
   );
 }
 
-/** The five ways of being in a quiz (Â§11C), in the order they are offered. */
+/** The five ways of being in a quiz (§11C), in the order they are offered. */
 const QUIZ_MODE_LABELS: Record<QuizMode, string> = {
   build: "Build",
   preview: "Preview",
@@ -12105,14 +12132,14 @@ function quizPracticeErrorMessage(error: unknown, fallback: string) {
   if (message.includes("QUIZ_ATTEMPT_TIME_ELAPSED"))
     return "Time ran out, so this answer was not recorded. Submit to see how you did.";
   if (message.includes("QUIZ_PRACTICE_UNAVAILABLE")) {
-    // The server already phrases why an attempt cannot start â€” a deadline that
-    // has passed, an attempt allowance that is used up â€” so pass its own words
+    // The server already phrases why an attempt cannot start — a deadline that
+    // has passed, an attempt allowance that is used up — so pass its own words
     // through rather than guessing at a second explanation.
     const reason = message.split("QUIZ_PRACTICE_UNAVAILABLE:")[1]?.trim();
     return reason || "This quiz is not open for attempts right now.";
   }
   if (message.includes("QUIZ_PRACTICE_ATTEMPT_LIMIT_REACHED"))
-    return "You have reached this quizâ€™s configured practice-attempt limit.";
+    return "You have reached this quiz’s configured practice-attempt limit.";
   if (message.includes("QUIZ_PRACTICE_NOT_PUBLISHED"))
     return "This practice version is no longer available. The author may be preparing an updated draft.";
   if (message.includes("QUIZ_ATTEMPT_NOT_EDITABLE"))
@@ -12154,7 +12181,7 @@ export function QuizStudio({
   >(
     // A side panel opens on the quiz itself, not on the builder: a third of the
     // width is a poor place to author questions and a fine place to read or
-    // answer them (Â§11C).
+    // answer them (§11C).
     readOnly || mode === "split" ? "preview" : "builder",
   );
   const [quizSettings, setQuizSettings] = useState<QuizSettings>(() =>
@@ -12363,7 +12390,7 @@ export function QuizStudio({
   function commitSettings(patch: Partial<QuizSettings>) {
     const merged = { ...quizSettings, ...patch };
     // The contract is the source of truth; the older booleans are kept in step
-    // with it so nothing still reading them can disagree (Â§11C).
+    // with it so nothing still reading them can disagree (§11C).
     const experience = finalizeQuizExperience(merged.experience);
     const next: QuizSettings = {
       ...merged,
@@ -12618,7 +12645,7 @@ export function QuizStudio({
   /**
    * The countdown belongs to the server. The tab only interpolates between
    * anchors, so a refresh, a sleeping laptop or a clock that is minutes off
-   * cannot buy extra time â€” the next anchor snaps the display back (Â§11C).
+   * cannot buy extra time — the next anchor snaps the display back (§11C).
    */
   const practiceSecondsRemaining = practiceClock
     ? Math.max(
@@ -12639,8 +12666,8 @@ export function QuizStudio({
     (attempt) => attempt.status === "submitted",
   );
   /**
-   * The modes this person can actually use (Â§11C). A learner never sees Build,
-   * and Responses only exists on a quiz that keeps them â€” an unusable tab is
+   * The modes this person can actually use (§11C). A learner never sees Build,
+   * and Responses only exists on a quiz that keeps them — an unusable tab is
    * worse than a missing one, so unavailable modes are absent rather than
    * disabled.
    */
@@ -12821,8 +12848,8 @@ export function QuizStudio({
           });
         } catch {
           // Each answer was already saved as it was written; this pass is a
-          // final flush. A rejected save â€” most often a clock that has just run
-          // out â€” must not stand between the learner and their submission.
+          // final flush. A rejected save — most often a clock that has just run
+          // out — must not stand between the learner and their submission.
         }
       }
       const submittedAttempt = await submitSpectraQuizPractice({
@@ -12851,7 +12878,7 @@ export function QuizStudio({
   useEffect(() => {
     // A countdown that reaches zero submits what the learner has, once. The
     // server is the authority on expiry; this only saves them from staring at
-    // 0:00 wondering whether their work was kept (Â§11C).
+    // 0:00 wondering whether their work was kept (§11C).
     if (
       practiceSecondsRemaining !== 0 ||
       practiceAttempt?.status !== "in_progress" ||
@@ -13130,7 +13157,7 @@ export function QuizStudio({
                 }}
               >
                 {practiceBusy
-                  ? "Openingâ€¦"
+                  ? "Opening…"
                   : published
                     ? "Open practice"
                     : "Publish"}
@@ -13234,7 +13261,7 @@ export function QuizStudio({
               {submitted ? (
                 <div className="rounded-[8px] bg-[color-mix(in_oklab,var(--success)_9%,var(--bg-primary))] px-3 py-2 text-[12px] font-semibold text-[var(--success)]">
                   {practiceAttempt?.status === "submitted"
-                    ? `${practiceAttempt.score ?? 0}/${practiceAttempt.maxScore ?? 0} points Â· ${practiceAttempt.percentage ?? 0}%`
+                    ? `${practiceAttempt.score ?? 0}/${practiceAttempt.maxScore ?? 0} points · ${practiceAttempt.percentage ?? 0}%`
                     : `${displayedQuestions.filter((question) => questionCorrect(question)).length}/${displayedQuestions.length} correct`}
                 </div>
               ) : practiceSecondsRemaining !== null ? (
@@ -13305,7 +13332,7 @@ export function QuizStudio({
                   onClick={() => void beginPractice()}
                   className="rounded-[8px] bg-[var(--text-primary)] px-3 py-2 text-[11px] font-semibold text-[var(--bg-primary)]"
                 >
-                  {practiceBusy ? "Startingâ€¦" : "Start private practice"}
+                  {practiceBusy ? "Starting…" : "Start private practice"}
                 </button>
               </div>
             ) : null}
@@ -13339,7 +13366,7 @@ export function QuizStudio({
                 >
                   {displayedQuestions.map((question, index) => (
                     <option key={question.id} value={question.id}>
-                      {index + 1} Â·{" "}
+                      {index + 1} ·{" "}
                       {plannerDescriptionText(question.prompt) ||
                         "Untitled question"}
                     </option>
@@ -13528,7 +13555,7 @@ export function QuizStudio({
                                 {pair.left || "Untitled prompt"}
                               </span>
                               <span className="text-center text-[var(--text-tertiary)]">
-                                â†’
+                                →
                               </span>
                               <select
                                 disabled={submitted}
@@ -13619,7 +13646,7 @@ export function QuizStudio({
                                 revealedPracticeResultByQuestion.get(
                                   question.id,
                                 )?.expected as string[]
-                              ).join(" Â· ")
+                              ).join(" · ")
                             : String(
                                 revealedPracticeResultByQuestion.get(
                                   question.id,
@@ -13629,16 +13656,16 @@ export function QuizStudio({
                             ? (question.matchingPairs ?? [])
                                 .map(
                                   (pair) =>
-                                    `${pair.left} â†’ ${pair.right ?? ""}`,
+                                    `${pair.left} → ${pair.right ?? ""}`,
                                 )
-                                .join(" Â· ")
+                                .join(" · ")
                             : question.type === "long_response"
-                              ? "Advisory review â€” no single auto-scored answer"
+                              ? "Advisory review — no single auto-scored answer"
                               : question.type === "select_all" ||
                                   question.type === "ordering"
                                 ? (
                                     question.correctAnswers ?? question.options
-                                  ).join(" Â· ")
+                                  ).join(" · ")
                                 : question.correctAnswer}
                       </div>
                       {(
@@ -13666,7 +13693,7 @@ export function QuizStudio({
                       ) : null}
                       {question.sourceRefs?.length ? (
                         <div className="mt-1 text-[var(--text-tertiary)]">
-                          Sources: {question.sourceRefs.join(" Â· ")}
+                          Sources: {question.sourceRefs.join(" · ")}
                         </div>
                       ) : null}
                     </div>
@@ -13710,7 +13737,7 @@ export function QuizStudio({
                       : setSubmitted(true)
                   }
                 >
-                  {practiceBusy ? "Submitting safelyâ€¦" : "Submit answers"}
+                  {practiceBusy ? "Submitting safely…" : "Submit answers"}
                 </button>
               )}
             </div>
@@ -13900,7 +13927,7 @@ export function QuizStudio({
                     [
                       "Average",
                       responseSummary.averagePercentage === undefined
-                        ? "â€”"
+                        ? "—"
                         : `${responseSummary.averagePercentage}%`,
                     ],
                     [
@@ -13940,7 +13967,7 @@ export function QuizStudio({
                           {entry.prompt}
                         </p>
                         <strong className="shrink-0 font-display text-[16px] tabular-nums text-[var(--text-primary)]">
-                          {entry.answered ? `${share}%` : "â€”"}
+                          {entry.answered ? `${share}%` : "—"}
                         </strong>
                       </div>
                       <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--bg-secondary)]">
@@ -13971,7 +13998,7 @@ export function QuizStudio({
                             >
                               {response.response}
                               <em className="ml-1 not-italic tabular-nums text-[var(--text-tertiary)]">
-                                Ã—{response.count}
+                                ×{response.count}
                               </em>
                             </li>
                           ))}
@@ -13993,7 +14020,7 @@ export function QuizStudio({
               </h3>
               <p className="mt-1 max-w-[520px] text-[11px] leading-5 text-[var(--text-secondary)]">
                 Every attempt you have made on this quiz, newest first. Only you
-                can open them â€” authors and collaborators see the group, not
+                can open them — authors and collaborators see the group, not
                 your answers.
               </p>
             </div>
@@ -14039,7 +14066,7 @@ export function QuizStudio({
                       </span>
                     </span>
                     <span className="mt-1 block truncate text-micro text-[var(--text-tertiary)]">
-                      Started {formatShortDate(attempt.startedAt)} Â· pinned
+                      Started {formatShortDate(attempt.startedAt)} · pinned
                       content {attempt.contentHash}
                     </span>
                   </span>
@@ -14051,7 +14078,7 @@ export function QuizStudio({
                     </strong>
                     <span className="text-micro text-[var(--text-tertiary)]">
                       {attempt.status === "submitted"
-                        ? `${Math.max(1, Math.round((attempt.elapsedMs ?? 0) / 60_000))} min Â· Review`
+                        ? `${Math.max(1, Math.round((attempt.elapsedMs ?? 0) / 60_000))} min · Review`
                         : "Resume safely"}
                     </span>
                   </span>
@@ -14117,7 +14144,7 @@ export function QuizStudio({
                     >
                       {questions.map((question, index) => (
                         <option key={question.id} value={question.id}>
-                          {index + 1} Â·{" "}
+                          {index + 1} ·{" "}
                           {plannerDescriptionText(question.prompt) ||
                             "Untitled question"}
                         </option>
@@ -14565,7 +14592,7 @@ export function QuizStudio({
                         {uploadingQuizMedia ? (
                           <>
                             <Loader2 className="mx-auto mb-2 h-4 w-4 animate-spin" />
-                            Uploading imageâ€¦
+                            Uploading image…
                           </>
                         ) : (
                           <>
@@ -14639,7 +14666,7 @@ export function QuizStudio({
                 <ul>
                   {question.options.map((option, index) => (
                     <li key={`${question.id}-print-${index}`}>
-                      {String.fromCharCode(65 + index)}. {option || "â€”"}
+                      {String.fromCharCode(65 + index)}. {option || "—"}
                     </li>
                   ))}
                 </ul>
@@ -14651,12 +14678,12 @@ export function QuizStudio({
                   <strong>Answer / review guidance:</strong>{" "}
                   {question.type === "matching"
                     ? (question.matchingPairs ?? [])
-                        .map((pair) => `${pair.left} â†’ ${pair.right ?? ""}`)
-                        .join(" Â· ")
+                        .map((pair) => `${pair.left} → ${pair.right ?? ""}`)
+                        .join(" · ")
                     : question.type === "select_all" ||
                         question.type === "ordering"
                       ? (question.correctAnswers ?? question.options).join(
-                          " Â· ",
+                          " · ",
                         )
                       : question.type === "long_response"
                         ? question.rubric || "Advisory review"
@@ -14699,7 +14726,7 @@ function ArtifactRichTextEditor({
   onChange,
   onFocus,
   path,
-  placeholder = "Write somethingâ€¦",
+  placeholder = "Write something…",
   variant = "compact",
   collapsible = false,
 }: {
@@ -15386,7 +15413,7 @@ function QuestionEditor({
                   placeholder={`Prompt ${index + 1}`}
                 />
                 <span className="text-center text-[var(--text-tertiary)]">
-                  â†’
+                  →
                 </span>
                 <input
                   value={pair.right ?? ""}
@@ -15468,7 +15495,7 @@ function QuestionEditor({
             />
           </Field>
           <Field
-            label="Accepted tolerance (Â±)"
+            label="Accepted tolerance (±)"
             aiActive={aiField("numericTolerance")}
             path={`${qPath}/numericTolerance`}
           >
@@ -15896,7 +15923,7 @@ function StudioDetails({
                         {link.artifact.title}
                       </span>
                       <span className="text-micro text-[var(--text-tertiary)]">
-                        {link.direction === "incoming" ? "â†" : "â†’"}{" "}
+                        {link.direction === "incoming" ? "←" : "→"}{" "}
                         {link.relationType.replaceAll("_", " ")}
                       </span>
                       <button
@@ -15958,7 +15985,7 @@ function StudioDetails({
                         className="text-[var(--accent-cyan)]"
                         onClick={() => void confirmLink(candidate)}
                       >
-                        {linkingId === candidate._id ? "Linkingâ€¦" : "Add"}
+                        {linkingId === candidate._id ? "Linking…" : "Add"}
                       </button>
                     </div>
                   ))}
@@ -15972,7 +15999,7 @@ function StudioDetails({
               className="spectra-related-artifacts rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3"
             >
               <summary className="text-micro font-semibold uppercase tracking-[.08em] text-[var(--text-tertiary)]">
-                Related suggestions Â· {suggestions.length}
+                Related suggestions · {suggestions.length}
               </summary>
               <div className="space-y-1.5">
                 {suggestions.map(({ candidate }) => (
@@ -15990,7 +16017,7 @@ function StudioDetails({
                       className="rounded-[5px] px-1.5 py-1 text-micro font-medium text-[var(--accent-cyan)] opacity-70 hover:bg-[var(--bg-hover)] group-hover:opacity-100"
                     >
                       {linkingId === candidate._id
-                        ? "Linkingâ€¦"
+                        ? "Linking…"
                         : "Confirm link"}
                     </button>
                   </div>
@@ -16164,7 +16191,7 @@ function StudioDetails({
                 >
                   <Copy className="h-3.5 w-3.5" />
                   {duplicating
-                    ? "Duplicatingâ€¦"
+                    ? "Duplicating…"
                     : `Duplicate ${artifact.blueprintKey === "quiz" ? "quiz" : "deck"}`}
                 </button>
                 <button

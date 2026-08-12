@@ -42,8 +42,8 @@ async function probeWeb() {
 }
 
 function launchWeb() {
-  const nextBin = resolve("node_modules/next/dist/bin/next");
-  const next = spawn(process.execPath, [nextBin, "dev", "--hostname", hostname, "--port", String(port)], {
+  const serverScript = resolve("scripts/next-dev-server.mjs");
+  const next = spawn(process.execPath, [serverScript], {
     cwd: process.cwd(),
     env: process.env,
     stdio: "inherit",

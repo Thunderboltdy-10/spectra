@@ -400,21 +400,125 @@ export function changedArtifactRegionIds(
 ) {
   const previous = decomposeArtifactContent(typeKey, before);
   const next = decomposeArtifactContent(typeKey, after);
-  if (descriptorSignature(previous) !== descriptorSignature(next))
+  const previousStructure =
+    typeKey === "document"
+      ? documentDescriptorSignature(previous)
+      : descriptorSignature(previous);
+  const nextStructure =
+    typeKey === "document"
+      ? documentDescriptorSignature(next)
+      : descriptorSignature(next);
+  if (previousStructure !== nextStructure)
     return ["artifact:structure"];
-  const changed: string[] = [];
+  const changed = new Set<string>();
   for (const [regionId, encoded] of next.regionValues)
-    if (previous.regionValues.get(regionId) !== encoded) changed.push(regionId);
-  return changed;
+    if (previous.regionValues.get(regionId) !== encoded) changed.add(regionId);
+  if (typeKey === "document") {
+    const previousNodes = documentTiptapRegionSignatures(before);
+    const nextNodes = documentTiptapRegionSignatures(after);
+    if (
+      previousNodes.size !== nextNodes.size ||
+      [...previousNodes.keys()].some((regionId) => !nextNodes.has(regionId))
+    )
+      return ["artifact:structure"];
+    for (const [regionId, signature] of nextNodes)
+      if (previousNodes.get(regionId) !== signature) changed.add(regionId);
+  }
+  return [...changed];
+}
+
+function documentDescriptorSignature(value: DecomposedArtifact) {
+  let rootTemplate: unknown = value.rootTemplate;
+  try {
+    const parsed = JSON.parse(value.rootTemplate) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const { tiptap: _tiptap, ...semanticRoot } = parsed as Record<
+        string,
+        unknown
+      >;
+      rootTemplate = semanticRoot;
+    } else rootTemplate = parsed;
+  } catch {
+    // Projection validation reports malformed templates separately.
+  }
+  return JSON.stringify(
+    canonicalJsonValue({
+      rootTemplate,
+      descriptors: [...value.descriptors.values()]
+        .sort((left, right) => left.regionId.localeCompare(right.regionId))
+        .map(({ label: _label, ...descriptor }) => descriptor),
+    }),
+  );
+}
+
+function documentTiptapRegionSignatures(content: unknown) {
+  const value =
+    content && typeof content === "object" && !Array.isArray(content)
+      ? (content as Record<string, unknown>)
+      : {};
+  const blocks = Array.isArray(value.blocks) ? value.blocks : [];
+  const tiptap =
+    value.tiptap &&
+    typeof value.tiptap === "object" &&
+    !Array.isArray(value.tiptap)
+      ? (value.tiptap as Record<string, unknown>)
+      : {};
+  const nodes = Array.isArray(tiptap.content) ? tiptap.content : [];
+  return new Map(
+    nodes.flatMap((node, index) => {
+      if (!node || typeof node !== "object" || Array.isArray(node)) return [];
+      const record = node as Record<string, unknown>;
+      const attrs =
+        record.attrs &&
+        typeof record.attrs === "object" &&
+        !Array.isArray(record.attrs)
+          ? (record.attrs as Record<string, unknown>)
+          : {};
+      const block =
+        blocks[index] &&
+        typeof blocks[index] === "object" &&
+        !Array.isArray(blocks[index])
+          ? (blocks[index] as Record<string, unknown>)
+          : {};
+      const regionId =
+        typeof attrs.blockId === "string" && attrs.blockId
+          ? attrs.blockId
+          : typeof block.id === "string" && block.id
+            ? block.id
+            : null;
+      return regionId
+        ? [[regionId, JSON.stringify(canonicalJsonValue(record))] as const]
+        : [];
+    }),
+  );
 }
 
 function descriptorSignature(value: DecomposedArtifact) {
-  return JSON.stringify({
-    rootTemplate: value.rootTemplate,
-    descriptors: [...value.descriptors.values()].sort((left, right) =>
-      left.regionId.localeCompare(right.regionId),
-    ),
-  });
+  let rootTemplate: unknown = value.rootTemplate;
+  try {
+    rootTemplate = JSON.parse(value.rootTemplate) as unknown;
+  } catch {
+    // A malformed template is handled by the normal projection validation.
+    // Keeping the original string here preserves a deterministic signature.
+  }
+  return JSON.stringify(
+    canonicalJsonValue({
+      rootTemplate,
+      descriptors: [...value.descriptors.values()].sort((left, right) =>
+        left.regionId.localeCompare(right.regionId),
+      ),
+    }),
+  );
+}
+
+function canonicalJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalJsonValue);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => [key, canonicalJsonValue(entry)]),
+  );
 }
 
 function documentMaps(document: Y.Doc) {

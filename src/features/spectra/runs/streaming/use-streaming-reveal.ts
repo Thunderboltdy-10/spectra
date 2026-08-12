@@ -16,7 +16,6 @@
 import {
   useEffect,
   useMemo,
-  useRef,
   useState,
   useSyncExternalStore,
 } from "react";
@@ -69,15 +68,34 @@ function subscribeRevealPrefs(callback: () => void): () => void {
   return () => observer.disconnect();
 }
 
+const DEFAULT_REVEAL_PREFERENCES = 0b11;
+
+/**
+ * `useSyncExternalStore` requires referentially stable snapshots. Encoding the
+ * two document preferences as a primitive keeps unchanged reads stable while
+ * still allowing the hook to expose the descriptive object API below.
+ */
+function getRevealPreferencesSnapshot(): number {
+  return (
+    (readBooleanDataset("spectraStreamingReveal", true) ? 0b01 : 0) |
+    (readBooleanDataset("spectraTailShimmer", true) ? 0b10 : 0)
+  );
+}
+
 /** User-level streaming preferences mirrored by preference-store. */
 export function useRevealPreferences() {
-  return useSyncExternalStore(
+  const snapshot = useSyncExternalStore(
     subscribeRevealPrefs,
+    getRevealPreferencesSnapshot,
+    () => DEFAULT_REVEAL_PREFERENCES,
+  );
+
+  return useMemo(
     () => ({
-      streamingReveal: readBooleanDataset("spectraStreamingReveal", true),
-      activeTailShimmer: readBooleanDataset("spectraTailShimmer", true),
+      streamingReveal: Boolean(snapshot & 0b01),
+      activeTailShimmer: Boolean(snapshot & 0b10),
     }),
-    () => ({ streamingReveal: true, activeTailShimmer: true }),
+    [snapshot],
   );
 }
 
@@ -87,9 +105,7 @@ export function useStreamingReveal(
 ): StreamingRevealResult {
   const motion = useSpectraMotion();
   const { streamingReveal } = useRevealPreferences();
-  const schedulerRef = useRef<RevealScheduler | null>(null);
-  if (!schedulerRef.current)
-    schedulerRef.current = new RevealScheduler(profile);
+  const scheduler = useMemo(() => new RevealScheduler(profile), [profile]);
   const [tickResult, setTickResult] = useState<RevealTickResult>(() => ({
     revealed: canonical.length,
     queued: 0,
@@ -100,13 +116,13 @@ export function useStreamingReveal(
 
   useEffect(() => {
     if (!reveal) {
-      schedulerRef.current?.settle(canonical.length);
+      scheduler.settle(canonical.length);
       setTickResult({ revealed: canonical.length, queued: 0, active: false });
       return;
     }
     let frame = 0;
     const step = (now: number) => {
-      const result = schedulerRef.current!.tick(canonical.length, now);
+      const result = scheduler.tick(canonical.length, now);
       setTickResult((previous) =>
         previous.revealed === result.revealed &&
         previous.active === result.active
@@ -117,7 +133,7 @@ export function useStreamingReveal(
     };
     frame = requestAnimationFrame(step);
     return () => cancelAnimationFrame(frame);
-  }, [canonical, reveal]);
+  }, [canonical, reveal, scheduler]);
 
   return useMemo(() => {
     if (!reveal) return { visibleText: canonical, active: false, queued: 0 };

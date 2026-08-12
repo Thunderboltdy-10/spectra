@@ -168,7 +168,7 @@ export function AnalyticsShell() {
         </div>
         {payload ? (
           <p className="mt-3 text-micro text-[var(--text-tertiary)]">
-            {payload.range.fromDay} â†’ {payload.range.toDay} Â· computed {formatDate(payload.computedAt)}
+            {payload.range.fromDay} → {payload.range.toDay} · computed {formatDate(payload.computedAt)}
           </p>
         ) : null}
       </header>
@@ -235,7 +235,7 @@ export function AnalyticsShell() {
             </div>
 
             <div className="mt-7 grid gap-7 xl:grid-cols-2">
-              <RecentList title="Recent work" detail="Created in this range" empty="No recent work." rows={payload.recentWork.map((item) => ({ id: item.id, title: item.title, detail: `${item.blueprintKey.replaceAll("_", " ")} Â· ${item.status}`, timestamp: item.createdAt }))} />
+              <RecentList title="Recent work" detail="Created in this range" empty="No recent work." rows={payload.recentWork.map((item) => ({ id: item.id, title: item.title, detail: `${item.blueprintKey.replaceAll("_", " ")} · ${item.status}`, timestamp: item.createdAt }))} />
               <RecentList title="Recent AI runs" detail="Titles and status only; prompts are not queried" empty="No recent AI runs." rows={payload.recentRuns.map((item) => ({ id: item.id, title: item.title, detail: item.status, timestamp: item.createdAt }))} />
             </div>
 
@@ -264,7 +264,7 @@ function MetricCard({ definition, metric, icon, format }: { definition: SpectraM
         <CapabilityTruthBadge state={metric.state} className="min-h-5 px-2 text-micro" />
       </div>
       <p className="mt-4 font-display text-[30px] font-semibold tabular-nums text-[var(--text-primary)]">{formatMetric(metric.value, format)}</p>
-      <p className="mt-2 truncate text-micro text-[var(--text-tertiary)]" title={`${definition.source} Â· ${definition.aggregation}`}>{definition.source}</p>
+      <p className="mt-2 truncate text-micro text-[var(--text-tertiary)]" title={`${definition.source} · ${definition.aggregation}`}>{definition.source}</p>
       <p className="mt-1 text-micro leading-4 text-[var(--text-secondary)]">{metric.state.kind === "partial" ? metric.state.details : definition.zeroMeaning}</p>
     </article>
   );
@@ -275,7 +275,7 @@ function SectionHeading({ title, detail }: { title: string; detail: string }) {
 }
 
 function RecentList({ title, detail, empty, rows }: { title: string; detail: string; empty: string; rows: Array<{ id: string; title: string; detail: string; timestamp: number }> }) {
-  return <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5"><SectionHeading title={title} detail={detail} /><div className="mt-3 divide-y divide-[var(--border-subtle)]">{rows.length ? rows.map((row) => <div key={row.id} className="flex items-start gap-3 py-3"><Clock3 className="mt-0.5 size-3.5 shrink-0 text-[var(--text-tertiary)]" /><div className="min-w-0 flex-1"><p className="truncate text-[12px] font-semibold text-[var(--text-primary)]">{row.title}</p><p className="mt-1 text-micro capitalize text-[var(--text-tertiary)]">{row.detail} Â· {formatDate(row.timestamp)}</p></div></div>) : <EmptyLine label={empty} />}</div></section>;
+  return <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5"><SectionHeading title={title} detail={detail} /><div className="mt-3 divide-y divide-[var(--border-subtle)]">{rows.length ? rows.map((row) => <div key={row.id} className="flex items-start gap-3 py-3"><Clock3 className="mt-0.5 size-3.5 shrink-0 text-[var(--text-tertiary)]" /><div className="min-w-0 flex-1"><p className="truncate text-[12px] font-semibold text-[var(--text-primary)]">{row.title}</p><p className="mt-1 text-micro capitalize text-[var(--text-tertiary)]">{row.detail} · {formatDate(row.timestamp)}</p></div></div>) : <EmptyLine label={empty} />}</div></section>;
 }
 
 function EmptyLine({ label }: { label: string }) {

@@ -3641,7 +3641,7 @@ export const materializeClassWorkspaces = mutation({
               actor.accountId,
               "artifact",
               String(taskId),
-              { compactSummary: "School source task Â· personal planning remains separate" },
+              { compactSummary: "School source task · personal planning remains separate" },
             ))
           )
             projected += 1;

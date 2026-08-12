@@ -394,7 +394,7 @@ function histogramDataset(
     Math.min(6, Math.ceil(-Math.log10(Math.abs(width))) + 1),
   );
   return bins.map((bin) => ({
-    bucket: `${bin.lower.toFixed(precision)}â€“${bin.upper.toFixed(precision)}`,
+    bucket: `${bin.lower.toFixed(precision)}–${bin.upper.toFixed(precision)}`,
     count: bin.count,
   }));
 }
@@ -755,7 +755,7 @@ export function SheetsStudio({
   >("color_scale");
   const [conditionalThreshold, setConditionalThreshold] = useState("0");
   // Charts live in the sheet, so one can be selected the way a cell is, and a
-  // gesture in progress renders from local state until it commits (Â§11F).
+  // gesture in progress renders from local state until it commits (§11F).
   const [selectedChartId, setSelectedChartId] = useState<string>();
   const [chartGesture, setChartGesture] = useState<{
     id: string;
@@ -1540,7 +1540,7 @@ export function SheetsStudio({
     if (readOnly) return;
     // A new chart lands just past the selection it was made from, so the
     // relationship between the numbers and the picture is visible without
-    // scrolling anywhere (Â§11F).
+    // scrolling anywhere (§11F).
     const anchorColumn = normalizedSelection.end.column + 1;
     const anchorRow = normalizedSelection.start.row;
     const chart: SheetChart = {
@@ -1573,7 +1573,7 @@ export function SheetsStudio({
 
   /**
    * Moving or resizing a chart is one complete gesture, so it holds the pointer
-   * until release and writes the new geometry once â€” a half-finished drag never
+   * until release and writes the new geometry once — a half-finished drag never
    * reaches the other people in the sheet.
    */
   function beginChartGesture(
@@ -1829,7 +1829,7 @@ export function SheetsStudio({
                     ? "date"
                     : sourceCell.numFmt?.includes("%")
                       ? "percent"
-                      : /[$â‚¬Â£Â¥]/.test(sourceCell.numFmt ?? "")
+                      : /[$€£¥]/.test(sourceCell.numFmt ?? "")
                         ? "currency"
                         : "general",
                 fillColor: fillColor ? `#${fillColor.slice(-6)}` : undefined,
@@ -2440,7 +2440,7 @@ export function SheetsStudio({
             {filteredOutRows.size
               ? `${visibleRowIndices.length.toLocaleString()} of ${bounds.rows.toLocaleString()}`
               : bounds.rows.toLocaleString()}{" "}
-            rows Â· {bounds.columns.toLocaleString()} columns
+            rows · {bounds.columns.toLocaleString()} columns
           </span>
         </div>
         <input
@@ -2510,7 +2510,7 @@ export function SheetsStudio({
             }
             disabled={readOnly}
           >
-            .0â†
+            .0←
           </ToolbarButton>
           <ToolbarButton
             label="Increase decimal places"
@@ -2521,7 +2521,7 @@ export function SheetsStudio({
             }
             disabled={readOnly}
           >
-            .0â†’
+            .0→
           </ToolbarButton>
           <select
             aria-label="Number format"
@@ -2617,7 +2617,7 @@ export function SheetsStudio({
             />
           </label>
           <label className="sheets-color-control" title="Cell fill color">
-            <span>â—†</span>
+            <span>◆</span>
             <input
               type="color"
               value={activeCell?.format?.fillColor ?? "#ffffff"}
@@ -3382,7 +3382,7 @@ export function SheetsStudio({
               }),
             )}
             {/* Charts sit on the sheet itself, over the cells they read from,
-                rather than in a separate section underneath the data (Â§11F). */}
+                rather than in a separate section underneath the data (§11F). */}
             {activeSheet.charts.map((chart) => {
               const position =
                 chartGesture?.id === chart.id ? chartGesture.position : chart.position;
@@ -3489,9 +3489,9 @@ export function SheetsStudio({
                       {chart.sourceRange}
                     </button>
                     <span>
-                      n {statistics.count} Â· mean{" "}
+                      n {statistics.count} · mean{" "}
                       {statistics.mean === null
-                        ? "â€”"
+                        ? "—"
                         : statistics.mean.toLocaleString(
                             workbook.workbook.locale,
                             { maximumFractionDigits: 3 },
@@ -3696,7 +3696,7 @@ export function SheetsStudio({
                 />
               ) : (
                 <>
-                  <span className="sheets-tab-icon">â–¦</span>
+                  <span className="sheets-tab-icon">▦</span>
                   {sheet.name}
                   <ChevronDown />
                 </>

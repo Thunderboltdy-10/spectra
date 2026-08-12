@@ -50,7 +50,7 @@ import {
   type DragEvent,
   type ReactNode,
 } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { useNow } from "@/hooks/use-now";
 import { useSpectraContextStore } from "@/stores/spectra-context-store";
@@ -606,7 +606,11 @@ function WorkspaceHome({
     window.localStorage.setItem("spectra.home.pinned.open", String(pinnedOpen));
   }, [pinnedOpen]);
   const workspaces = overview?.workspaces ?? [];
-  const artifacts = overview?.artifacts ?? [];
+  // Calendar owns timetable state. Preserve legacy timetable records for the
+  // compatibility route, but keep them out of generic work listings and totals.
+  const artifacts = (overview?.artifacts ?? []).filter(
+    (artifact) => artifact.blueprintKey !== "timetable",
+  );
   const pinnedArtifacts = artifacts.filter((artifact) =>
     artifactPlacements(artifact).some((placement) => placement.pinned),
   );
@@ -2733,6 +2737,7 @@ function EmptyWorkspaceState({
 function Inspector({
   workspace,
   artifacts,
+  workspaceArtifacts,
   selectedArtifact,
   selectedRun,
   runs,
@@ -2746,6 +2751,7 @@ function Inspector({
 }: {
   workspace: SpectraWorkspace | null;
   artifacts: SpectraArtifact[];
+  workspaceArtifacts?: SpectraArtifact[];
   selectedArtifact: SpectraArtifact | null;
   selectedRun: SpectraRun | null;
   runs: SpectraRun[];
@@ -2928,18 +2934,22 @@ function Inspector({
     );
   }
 
-  const workspaceArtifacts = artifacts.filter(
-    (artifact) =>
-      !workspace ||
-      artifactPlacements(artifact).some(
-        (placement) => placement.workspaceId === workspace._id,
-      ),
-  );
-  const recentActivity = [...workspaceArtifacts]
+  const scopedWorkspaceArtifacts =
+    workspaceArtifacts ??
+    artifacts.filter(
+      (artifact) =>
+        !workspace ||
+        artifactPlacements(artifact).some(
+          (placement) => placement.workspaceId === workspace._id,
+        ),
+    );
+  const recentActivity = [...scopedWorkspaceArtifacts]
     .sort((a, b) => b.updatedAt - a.updatedAt)
     .slice(0, 5);
   const workspaceTags = Array.from(
-    new Set(workspaceArtifacts.flatMap((artifact) => artifact.tags ?? [])),
+    new Set(
+      scopedWorkspaceArtifacts.flatMap((artifact) => artifact.tags ?? []),
+    ),
   ).slice(0, 12);
   const activeRuns = runs.filter(
     (run) => run.status === "queued" || run.status === "running",
@@ -2947,7 +2957,7 @@ function Inspector({
   const sharedWithCount = workspace?.sharedWithCount ?? 0;
   const workspaceSources = Array.from(
     new Set(
-      workspaceArtifacts.flatMap((work) => [
+      scopedWorkspaceArtifacts.flatMap((work) => [
         ...(work.createdFrom?.sourceAttachmentNames ?? []),
         ...(work.createdFrom?.source
           ? [work.createdFrom.source.replaceAll("_", " ")]
@@ -2986,7 +2996,10 @@ function Inspector({
         {sharedWithCount > 0 ? (
           <MetricRow label="Shared with" value={String(sharedWithCount)} />
         ) : null}
-        <MetricRow label="Work" value={String(workspaceArtifacts.length)} />
+        <MetricRow
+          label="Work"
+          value={String(scopedWorkspaceArtifacts.length)}
+        />
         <MetricRow label="Active runs" value={String(activeRuns)} />
       </section>
 
@@ -3263,9 +3276,18 @@ export function WorkspaceShell({
   initialWorkspaceId,
 }: { initialWorkspaceId?: string } = {}) {
   const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
+  const pathnameWorkspaceId = pathname.startsWith("/workspace/")
+    ? decodeURIComponent(
+        pathname.slice("/workspace/".length).split("/", 1)[0] ?? "",
+      ) || undefined
+    : undefined;
   const requestedWorkspaceId =
-    initialWorkspaceId ?? searchParams.get("workspaceId") ?? undefined;
+    initialWorkspaceId ??
+    pathnameWorkspaceId ??
+    searchParams.get("workspaceId") ??
+    undefined;
   useEffect(() => {
     if (!requestedWorkspaceId) return;
     const session = readSharedWorkbenchSession(window.localStorage);
@@ -4368,7 +4390,7 @@ export function WorkspaceShell({
       setActiveRunPanelId(null);
       window.dispatchEvent(new Event("spectra:threads-changed"));
     },
-    onContinuationConflict: () => setComposerThread(null),
+    onContinuationConflict: startFreshComposerThread,
     onDataChanged: refreshRunData,
     onArtifactPatch: applyLiveArtifactPatch,
     onOpenArtifact: async (artifactId) => {
@@ -4677,19 +4699,24 @@ export function WorkspaceShell({
     );
   }
 
+  function startFreshComposerThread() {
+    if (liveThread) skipAutoContinueThreadIdRef.current = liveThread.id;
+    setComposerThread(null);
+  }
+
   function replaceWorkspaceLocation(workspaceId?: string) {
     const href = workspaceId
       ? `/workspace/${encodeURIComponent(workspaceId)}`
       : "/workspace";
-    const current = requestedWorkspaceId
-      ? `/workspace/${encodeURIComponent(requestedWorkspaceId)}`
-      : "/workspace";
+    const current = pathname;
     if (
       href !== current ||
       searchParams.get("create") ||
       searchParams.get("threadId")
     ) {
-      router.replace(href, { scroll: false });
+      // Next's native History API integration keeps this long-lived workbench
+      // mounted while making the selected workspace reload- and share-stable.
+      window.history.replaceState(null, "", href);
     }
   }
 
@@ -4822,8 +4849,11 @@ export function WorkspaceShell({
 
   function goToWorkspaceHub(workspaceId: string) {
     const target = workspaces.find((item) => item._id === workspaceId);
-    const next = workspaceHubTab(target?.title ?? "Workspace", workspaceId);
-    setHubTabs((current) => [...current, next]);
+    const next =
+      hubTabs.find((tab) => tab.workspaceId === workspaceId) ??
+      workspaceHubTab(target?.title ?? "Workspace", workspaceId);
+    if (!hubTabs.some((tab) => tab.id === next.id))
+      setHubTabs((current) => [...current, next]);
     setActiveHubTabId(next.id);
     studio.closeStudio();
     replaceWorkspaceLocation(workspaceId);
@@ -4839,9 +4869,15 @@ export function WorkspaceShell({
   }
 
   function goToHomeHub() {
-    setActiveHubDestination("Home");
+    const home = hubTabs.find((tab) => !tab.workspaceId) ?? workspaceHubTab();
+    if (!hubTabs.some((tab) => tab.id === home.id))
+      setHubTabs((current) => [...current, home]);
+    setActiveHubTabId(home.id);
+    studio.closeStudio();
+    replaceWorkspaceLocation();
     setSelection(null);
     setSelectedWorkspaceId(undefined);
+    pushShellNav({ kind: "hub", hubTabId: home.id });
   }
 
   function activateHubTab(tabId: string) {
@@ -5210,7 +5246,7 @@ export function WorkspaceShell({
       }
       const detail = result.report.skipped
         ? `${result.report.placed} placed; ${result.report.skipped} unavailable reference${result.report.skipped === 1 ? "" : "s"} skipped.`
-        : `${result.report.placed} artifact reference${result.report.placed === 1 ? "" : "s"} placed.`;
+        : `${result.report.placed} work reference${result.report.placed === 1 ? "" : "s"} placed.`;
       toast.success(`Workspace imported. ${detail}`);
       setSelection(null);
       setViewMode("list");
@@ -6091,6 +6127,9 @@ export function WorkspaceShell({
                     <Inspector
                       workspace={workspace}
                       artifacts={allArtifacts}
+                      workspaceArtifacts={entries.flatMap((entry) =>
+                        entry.artifact ? [entry.artifact] : [],
+                      )}
                       selectedArtifact={selectedArtifact}
                       selectedRun={selectedRun}
                       runs={workspaceRuns}
@@ -6205,7 +6244,7 @@ export function WorkspaceShell({
               </>
             </section>
           )}
-          <div className="pointer-events-none absolute bottom-0 left-0 right-[var(--spectra-studio-width,0px)] z-[220] bg-transparent px-2 pb-3 pt-2 sm:px-5 sm:pb-5 lg:px-8 min-[1920px]:right-0">
+          <div className="pointer-events-none absolute bottom-0 left-0 right-[calc(var(--spectra-studio-width,0px)+var(--spectra-live-thread-width,0px))] z-[220] bg-transparent px-2 pb-3 pt-2 sm:px-5 sm:pb-5 lg:px-8">
             <div className="pointer-events-auto mx-auto max-w-[880px]">
               <div ref={setAttachmentsHost} />
               <ComposerArtifactDock
@@ -6295,22 +6334,22 @@ export function WorkspaceShell({
                     composerThread
                       ? `Continue ${composerThread.title}...`
                       : commandFocusArtifact
-                        ? `Ask Spectra anything about this ${blueprintMeta[commandFocusArtifact.blueprintKey]?.label?.toLowerCase() ?? "artifact"}...`
+                        ? `Ask Spectra anything about this ${blueprintMeta[commandFocusArtifact.blueprintKey]?.label?.toLowerCase() ?? "work"}...`
                         : workspace
                           ? `Ask Spectra anything about this workspace...`
                           : "Ask Spectra anything..."
                   }
-                  onSubmit={(prompt, attachments) => {
-                    return runEngine.run(prompt, attachments);
-                  }}
+                  onSubmit={(prompt, attachments) =>
+                    runEngine.run(prompt, attachments, {
+                      threadId: composerThread?.id ?? null,
+                    })
+                  }
                   busy={runEngine.submitting}
                   allowConcurrent={!composerThread}
                   onStop={runEngine.stop}
-                  activeRunId={
-                    runEngine.liveExchange?.runId ?? composerThread?.runId
-                  }
+                  activeRunId={runEngine.activeRunId}
                   onSteer={runEngine.steer}
-                  onStartNewThread={() => setComposerThread(null)}
+                  onStartNewThread={startFreshComposerThread}
                   context={
                     <ContextFocusControl
                       mode={effectiveFocusMode}
@@ -6324,7 +6363,7 @@ export function WorkspaceShell({
                   menu={
                     <div>
                       <CommandBarMenuItem
-                        onClick={() => setComposerThread(null)}
+                        onClick={startFreshComposerThread}
                       >
                         <MessageSquare className="h-4 w-4" />
                         New chat
@@ -6378,9 +6417,7 @@ export function WorkspaceShell({
               title={liveThread.title}
               liveExchange={
                 runEngine.liveExchange &&
-                (!runEngine.liveExchange.runId ||
-                  composerThread?.id === liveThread.id ||
-                  !composerThread)
+                composerThread?.id === liveThread.id
                   ? runEngine.liveExchange
                   : null
               }

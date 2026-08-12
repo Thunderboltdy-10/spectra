@@ -20,6 +20,7 @@ import {
 import { NativeArtifactYjsModel } from "../work/models/yjs/native-artifact-model";
 import { useArtifactCollaboration } from "./use-artifact-collaboration";
 import { realtimeProviderForWorkType } from "../realtime/providers/provider-factory";
+import { nativeRoomBaselineExpected } from "./native-bootstrap";
 
 const EMPTY_MODEL_SNAPSHOT: ArtifactLiveModelSnapshot = {
   initialized: false,
@@ -64,7 +65,6 @@ export function useArtifactLiveModel(
     model?.getSnapshot ?? getEmptySnapshot,
     getEmptySnapshot,
   );
-  const initializingRef = useRef(false);
   const [initializationError, setInitializationError] = useState<string>();
   const reconciledRevisionRef = useRef<string | null>(null);
 
@@ -72,38 +72,24 @@ export function useArtifactLiveModel(
 
   useEffect(() => {
     if (
-      !model ||
-      !controller ||
       modelSnapshot.initialized ||
-      initializingRef.current ||
-      collaboration.level !== "modify"
-    )
+      !nativeRoomBaselineExpected(collaboration.state)
+    ) {
+      setInitializationError(undefined);
       return;
-    initializingRef.current = true;
-    setInitializationError(undefined);
-    void model
-      .initialize(initialValue, controller)
-      .then((result) => {
-        if (!result.applied && result.reason === "conflict") {
-          setInitializationError(
-            "Another collaborator is preparing the live artifact. Spectra will load it as soon as synchronization completes.",
-          );
-        }
-      })
-      .catch((error) =>
+    }
+    // The room/gateway authors the canonical native baseline. Give the final
+    // sync update one bounded window to reach the model; a client must never
+    // manufacture an equivalent Y.Doc with unrelated struct identities.
+    const timer = window.setTimeout(() => {
+      if (!model?.getSnapshot().initialized)
         setInitializationError(
-          error instanceof Error
-            ? error.message
-            : "Could not initialize live collaboration.",
-        ),
-      )
-      .finally(() => {
-        initializingRef.current = false;
-      });
+          "The live model did not arrive from the collaboration room. Reconnect to retry without replacing your draft.",
+        );
+    }, 3_000);
+    return () => window.clearTimeout(timer);
   }, [
-    collaboration.level,
-    controller,
-    initialValue,
+    collaboration.state,
     model,
     modelSnapshot.initialized,
   ]);
@@ -148,15 +134,19 @@ export function useArtifactLiveModel(
   const synchronize = useCallback(
     async (next: ArtifactLiveValue) => {
       if (!model || !controller) throw new Error("COLLABORATION_NOT_AVAILABLE");
-      if (!model.getSnapshot().initialized) {
-        const initialized = await model.initialize(next, controller);
-        if (
-          !initialized.applied &&
-          initialized.reason !== "already_initialized"
-        )
-          return initialized;
-      }
+      if (!model.getSnapshot().initialized)
+        throw new Error("ARTIFACT_LIVE_MODEL_UNINITIALIZED");
       return model.replaceSnapshot(next, controller);
+    },
+    [controller, model],
+  );
+
+  const synchronizeMetadata = useCallback(
+    async (next: ArtifactLiveValue) => {
+      if (!model || !controller) throw new Error("COLLABORATION_NOT_AVAILABLE");
+      if (!model.getSnapshot().initialized)
+        throw new Error("ARTIFACT_LIVE_MODEL_UNINITIALIZED");
+      return model.replaceMetadataSnapshot(next, controller);
     },
     [controller, model],
   );
@@ -180,6 +170,7 @@ export function useArtifactLiveModel(
         ? modelSnapshot.value
         : initialValue,
     synchronize,
+    synchronizeMetadata,
     restoreRegions,
     initializationError,
     supported,

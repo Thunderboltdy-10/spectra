@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  changedArtifactRegionIds,
   decomposeArtifactContent,
   overlayLiveArtifactRecord,
   recomposeArtifactContent,
@@ -57,6 +58,69 @@ describe("overlayLiveArtifactRecord", () => {
 });
 
 describe("decomposeArtifactContent", () => {
+  it("does not treat object-key order as a structural document change", () => {
+    const stored = {
+      blocks: [{ id: "intro", text: "", type: "paragraph" }],
+      outline: [],
+      tiptap: {
+        content: [{ attrs: { blockId: "intro" }, type: "paragraph" }],
+        type: "doc",
+      },
+    };
+    const nativeProjection = {
+      tiptap: {
+        type: "doc",
+        content: [{ type: "paragraph", attrs: { blockId: "intro" } }],
+      },
+      blocks: [{ id: "intro", type: "paragraph", text: "" }],
+      outline: [],
+    };
+
+    expect(
+      changedArtifactRegionIds("document", stored, nativeProjection),
+    ).toEqual([]);
+  });
+
+  it("attributes native Tiptap text changes to their stable document block", () => {
+    const before = {
+      blocks: [{ id: "intro", type: "paragraph", text: "" }],
+      outline: [],
+      tiptap: {
+        type: "doc",
+        content: [{ type: "paragraph", attrs: { blockId: "intro" } }],
+      },
+    };
+    const after = {
+      blocks: [
+        {
+          id: "intro",
+          type: "paragraph",
+          text: "Native collaboration remains mergeable.",
+        },
+      ],
+      outline: [],
+      tiptap: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            attrs: { blockId: "intro" },
+            content: [
+              {
+                type: "text",
+                text: "Native collaboration remains mergeable.",
+              },
+            ],
+          },
+        ],
+      },
+    };
+
+    expect(changedArtifactRegionIds("document", before, after)).toEqual([
+      "intro",
+    ]);
+  });
+
   it("decomposes sheets that omit optional identity maps without throwing", () => {
     // Schema allows missing rowIdentities/columnIdentities, but region paths
     // still address them. Decompose must materialize those parents.

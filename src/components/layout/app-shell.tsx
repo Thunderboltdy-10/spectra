@@ -153,7 +153,11 @@ function ShellNavigation() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const { openUserProfile } = useClerk();
-  const selectedWorkspaceId = searchParams.get("workspaceId");
+  const selectedWorkspaceId = pathname.startsWith("/workspace/")
+    ? decodeURIComponent(
+        pathname.slice("/workspace/".length).split("/", 1)[0] ?? "",
+      ) || null
+    : searchParams.get("workspaceId");
   const [workspaces, setWorkspaces] = useState<SpectraWorkspace[]>([]);
   const [workspacesLoading, setWorkspacesLoading] = useState(true);
   const [workspacesUnavailable, setWorkspacesUnavailable] = useState(false);
@@ -464,7 +468,11 @@ function ShellNavigation() {
           title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
           className="absolute right-3 top-4 z-10 grid size-8 place-items-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
         >
-          {sidebarCollapsed ? <PanelLeftOpen size={14} /> : <PanelLeftClose size={14} />}
+          {sidebarCollapsed ? (
+            <PanelLeftOpen size={14} />
+          ) : (
+            <PanelLeftClose size={14} />
+          )}
         </button>
         <Link
           href="/workspace?home=1"
@@ -472,11 +480,22 @@ function ShellNavigation() {
           aria-label="Spectra home"
         >
           <SpectraLogo size={20} />
-          <span className={cn("font-[family-name:var(--font-display)] text-[17px] font-semibold tracking-[-.025em] text-[#171513] transition-opacity", sidebarCollapsed && "pointer-events-none opacity-0")}>
+          <span
+            className={cn(
+              "font-[family-name:var(--font-display)] text-[17px] font-semibold tracking-[-.025em] text-[#171513] transition-opacity",
+              sidebarCollapsed && "pointer-events-none opacity-0",
+            )}
+          >
             spectra
           </span>
         </Link>
-        <label className={cn("relative mx-3 mt-2.5 block", sidebarCollapsed && "pointer-events-none h-0 overflow-hidden opacity-0")}>
+        <label
+          className={cn(
+            "relative mx-3 mt-2.5 block",
+            sidebarCollapsed &&
+              "pointer-events-none h-0 overflow-hidden opacity-0",
+          )}
+        >
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-[var(--text-tertiary)]" />
           <input
             value={sidebarSearch}
@@ -498,14 +517,25 @@ function ShellNavigation() {
               <Link
                 key={href}
                 href={href === "/workspace" ? "/workspace?home=1" : href}
-                onClick={() => {
-                  if (href === "/workspace")
+                onClick={(event) => {
+                  if (
+                    href === "/workspace" &&
+                    pathname.startsWith("/workspace")
+                  ) {
+                    event.preventDefault();
                     window.dispatchEvent(
                       new Event("spectra:navigate-workspace-home"),
                     );
+                  }
                 }}
                 aria-current={active ? "page" : undefined}
-                title={sidebarCollapsed ? (label === "Home" ? "Workspace" : label) : undefined}
+                title={
+                  sidebarCollapsed
+                    ? label === "Home"
+                      ? "Workspace"
+                      : label
+                    : undefined
+                }
                 className={cn(
                   "relative flex h-9 items-center gap-2.5 rounded-[6px] text-[13px] font-medium transition-colors",
                   sidebarCollapsed ? "justify-center px-0" : "px-2.5",
@@ -516,18 +546,29 @@ function ShellNavigation() {
               >
                 {active ? <ActiveRailMarker /> : null}
                 <Icon size={15} strokeWidth={active ? 2.05 : 1.65} />
-                <span className={cn(sidebarCollapsed && "sr-only")}>{label === "Home" ? "Workspace" : label}</span>
+                <span className={cn(sidebarCollapsed && "sr-only")}>
+                  {label === "Home" ? "Workspace" : label}
+                </span>
               </Link>
             );
           })}
         </nav>
         <Link
           href="/chat"
-          className={cn("mx-3 mt-2.5 flex h-8 items-center justify-center gap-2 rounded-[7px] bg-[var(--brand-primary)] text-[11px] font-semibold text-white shadow-[0_1px_2px_rgba(83,61,180,.16)] transition hover:brightness-95", sidebarCollapsed && "mx-auto w-10")}
+          className={cn(
+            "mx-3 mt-2.5 flex h-8 items-center justify-center gap-2 rounded-[7px] bg-[var(--brand-primary)] text-[11px] font-semibold text-white shadow-[0_1px_2px_rgba(83,61,180,.16)] transition hover:brightness-95",
+            sidebarCollapsed && "mx-auto w-10",
+          )}
         >
-          <Plus size={15} /> <span className={cn(sidebarCollapsed && "sr-only")}>New chat</span>
+          <Plus size={15} />{" "}
+          <span className={cn(sidebarCollapsed && "sr-only")}>New chat</span>
         </Link>
-        <div className={cn("spectra-thin-scrollbar min-h-0 flex-1 overflow-y-auto pb-3", sidebarCollapsed ? "px-2" : "px-3")}>
+        <div
+          className={cn(
+            "spectra-thin-scrollbar min-h-0 flex-1 overflow-y-auto pb-3",
+            sidebarCollapsed ? "px-2" : "px-3",
+          )}
+        >
           {([true, false] as const).map((pinned) => {
             const term = sidebarSearch.trim().toLowerCase();
             const rows = threads
@@ -540,7 +581,12 @@ function ShellNavigation() {
             if (!rows.length) return null;
             return (
               <section key={String(pinned)} className="mt-3">
-                <h2 className={cn("px-1 text-micro font-semibold uppercase tracking-[.1em] text-[var(--text-tertiary)]", sidebarCollapsed && "sr-only")}>
+                <h2
+                  className={cn(
+                    "px-1 text-micro font-semibold uppercase tracking-[.1em] text-[var(--text-tertiary)]",
+                    sidebarCollapsed && "sr-only",
+                  )}
+                >
                   {pinned ? "Pinned" : "Recents"}
                 </h2>
                 <div className="mt-1 space-y-0.5">
@@ -548,7 +594,10 @@ function ShellNavigation() {
                     <Link
                       key={thread._id}
                       href={`/chat?threadId=${encodeURIComponent(thread._id)}`}
-                      className={cn("group flex h-8 items-center gap-2 rounded-[5px] text-[12px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]", sidebarCollapsed ? "justify-center px-0" : "px-1.5")}
+                      className={cn(
+                        "group flex h-8 items-center gap-2 rounded-[5px] text-[12px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
+                        sidebarCollapsed ? "justify-center px-0" : "px-1.5",
+                      )}
                     >
                       <i
                         className="size-1.5 shrink-0 rounded-full"
@@ -556,10 +605,20 @@ function ShellNavigation() {
                           background: index % 4 === 3 ? "#8371ee" : "#1aa47b",
                         }}
                       />
-                      <span className={cn("min-w-0 flex-1 truncate", sidebarCollapsed && "sr-only")}>
+                      <span
+                        className={cn(
+                          "min-w-0 flex-1 truncate",
+                          sidebarCollapsed && "sr-only",
+                        )}
+                      >
                         {thread.title}
                       </span>
-                      <span className={cn("shrink-0 text-micro tabular-nums text-[var(--text-tertiary)]", sidebarCollapsed && "hidden")}>
+                      <span
+                        className={cn(
+                          "shrink-0 text-micro tabular-nums text-[var(--text-tertiary)]",
+                          sidebarCollapsed && "hidden",
+                        )}
+                      >
                         {formatRelativeTime(
                           thread.lastMessageAt ?? thread.updatedAt,
                         )}
@@ -571,20 +630,75 @@ function ShellNavigation() {
             );
           })}
           <section className="mt-3" aria-label="Workspaces">
-            <h2 className={cn("px-1 text-micro font-semibold uppercase tracking-[.1em] text-[var(--text-tertiary)]", sidebarCollapsed && "sr-only")}>Workspaces</h2>
+            <h2
+              className={cn(
+                "px-1 text-micro font-semibold uppercase tracking-[.1em] text-[var(--text-tertiary)]",
+                sidebarCollapsed && "sr-only",
+              )}
+            >
+              Workspaces
+            </h2>
             <div className="mt-1 space-y-0.5">
               {workspaces.map((workspace, index) => {
                 const Icon = workspaceIcon(workspace);
-                const active = pathname.startsWith("/workspace/") && pathname.endsWith(`/${workspace._id}`);
+                const active =
+                  pathname.startsWith("/workspace/") &&
+                  pathname.endsWith(`/${workspace._id}`);
                 return (
-                  <Link key={workspace._id} href={workspaceHref(workspace._id)} aria-current={active ? "page" : undefined} aria-label={workspace.title} title={sidebarCollapsed ? workspace.title : undefined} className={cn("relative flex h-9 items-center gap-2 rounded-[6px] text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]", sidebarCollapsed ? "justify-center px-0" : "px-1.5", active && "bg-[var(--bg-hover)] text-[var(--text-primary)]")}>
+                  <Link
+                    key={workspace._id}
+                    href={workspaceHref(workspace._id)}
+                    onClick={(event) => {
+                      if (pathname.startsWith("/workspace")) {
+                        event.preventDefault();
+                        window.dispatchEvent(
+                          new CustomEvent("spectra:open-workspace", {
+                            detail: { workspaceId: workspace._id },
+                          }),
+                        );
+                      }
+                    }}
+                    aria-current={active ? "page" : undefined}
+                    aria-label={workspace.title}
+                    title={sidebarCollapsed ? workspace.title : undefined}
+                    className={cn(
+                      "relative flex h-9 items-center gap-2 rounded-[6px] text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]",
+                      sidebarCollapsed ? "justify-center px-0" : "px-1.5",
+                      active &&
+                        "bg-[var(--bg-hover)] text-[var(--text-primary)]",
+                    )}
+                  >
                     {active ? <ActiveRailMarker /> : null}
-                    <span className="grid size-6 shrink-0 place-items-center rounded-[6px] text-white" style={{ background: workspaceColor(workspace, index) }}><Icon size={12} /></span>
-                    <span className={cn("min-w-0 flex-1 truncate", sidebarCollapsed && "sr-only")}>{workspace.title}</span>
+                    <span
+                      className="grid size-6 shrink-0 place-items-center rounded-[6px] text-white"
+                      style={{ background: workspaceColor(workspace, index) }}
+                    >
+                      <Icon size={12} />
+                    </span>
+                    <span
+                      className={cn(
+                        "min-w-0 flex-1 truncate",
+                        sidebarCollapsed && "sr-only",
+                      )}
+                    >
+                      {workspace.title}
+                    </span>
                   </Link>
                 );
               })}
-              <Link href="/workspace?create=1" className={cn("flex h-9 items-center gap-2 rounded-[6px] text-[11px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]", sidebarCollapsed ? "justify-center" : "px-1.5")} aria-label="Create workspace"><Plus size={14} /><span className={cn(sidebarCollapsed && "sr-only")}>Create workspace</span></Link>
+              <Link
+                href="/workspace?create=1"
+                className={cn(
+                  "flex h-9 items-center gap-2 rounded-[6px] text-[11px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]",
+                  sidebarCollapsed ? "justify-center" : "px-1.5",
+                )}
+                aria-label="Create workspace"
+              >
+                <Plus size={14} />
+                <span className={cn(sidebarCollapsed && "sr-only")}>
+                  Create workspace
+                </span>
+              </Link>
             </div>
           </section>
           {workspacesLoading ? (
@@ -664,7 +778,9 @@ function ShellNavigation() {
                     .toUpperCase()
                 )}
               </span>
-              <span className={cn("min-w-0 flex-1", sidebarCollapsed && "sr-only")}>
+              <span
+                className={cn("min-w-0 flex-1", sidebarCollapsed && "sr-only")}
+              >
                 <strong className="block truncate text-micro font-semibold text-[var(--text-primary)]">
                   {administrationIdentity.account.name}
                 </strong>
@@ -732,275 +848,275 @@ function ShellNavigation() {
         </div>
       </aside>
       {false ? (
-      <aside
-        aria-label="Spectra navigation"
-        className={cn(
-          "fixed inset-y-0 left-0 z-40 w-[76px] flex-col border-r",
-          "hidden",
-        )}
-        style={{
-          borderColor: "var(--border-default)",
-          background: "var(--bg-sidebar)",
-        }}
-      >
-        <Link
-          href="/chat"
-          aria-label="Open Spectra"
-          className="mx-auto mt-3.5 grid size-11 shrink-0 place-items-center rounded-2xl outline-none transition-transform hover:scale-[1.04] focus-visible:ring-2 focus-visible:ring-[var(--brand-primary)]"
+        <aside
+          aria-label="Spectra navigation"
+          className={cn(
+            "fixed inset-y-0 left-0 z-40 w-[76px] flex-col border-r",
+            "hidden",
+          )}
+          style={{
+            borderColor: "var(--border-default)",
+            background: "var(--bg-sidebar)",
+          }}
         >
-          <SpectraLogo size={34} />
-        </Link>
-        <button
-          type="button"
-          onClick={toggleSidebar}
-          aria-label="Expand sidebar"
-          title="Expand sidebar"
-          className="absolute right-1 top-1 grid size-7 place-items-center rounded-[7px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-        >
-          <PanelLeftOpen size={13} />
-        </button>
+          <Link
+            href="/chat"
+            aria-label="Open Spectra"
+            className="mx-auto mt-3.5 grid size-11 shrink-0 place-items-center rounded-2xl outline-none transition-transform hover:scale-[1.04] focus-visible:ring-2 focus-visible:ring-[var(--brand-primary)]"
+          >
+            <SpectraLogo size={34} />
+          </Link>
+          <button
+            type="button"
+            onClick={toggleSidebar}
+            aria-label="Expand sidebar"
+            title="Expand sidebar"
+            className="absolute right-1 top-1 grid size-7 place-items-center rounded-[7px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+          >
+            <PanelLeftOpen size={13} />
+          </button>
 
-        <nav
-          aria-label="Main destinations"
-          className="spectra-thin-scrollbar mt-5 flex max-h-[43dvh] shrink-0 flex-col items-center gap-1.5 overflow-y-auto overflow-x-visible px-2"
-        >
-          {coreDestinations.map(({ href, label, icon: Icon }) => {
-            const active = activeCoreHref === href;
-            return (
-              <Link
-                key={href}
-                href={href === "/workspace" ? "/workspace?home=1" : href}
-                onClick={() => {
-                  if (href === "/workspace")
-                    window.dispatchEvent(
-                      new Event("spectra:navigate-workspace-home"),
-                    );
-                }}
-                aria-label={label}
-                aria-current={active ? "page" : undefined}
-                className={cn(
-                  "group relative flex h-14 w-14 shrink-0 flex-col items-center justify-center gap-1 rounded-[8px] text-micro font-medium outline-none transition-[background,color,transform,box-shadow] duration-200",
-                  active
-                    ? "bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[0_2px_8px_rgba(27,20,12,.055)]"
-                    : "text-[var(--text-secondary)] hover:-translate-y-px hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
-                )}
-              >
-                {active ? <ActiveRailMarker /> : null}
-                <Icon size={16} strokeWidth={active ? 2 : 1.7} />
-                <span className="max-w-[52px] truncate leading-none">
-                  {label}
-                </span>
-                <RailTooltip>{label}</RailTooltip>
-              </Link>
-            );
-          })}
-        </nav>
-
-        <div
-          aria-hidden="true"
-          className="mx-auto my-3 h-px w-8 shrink-0 bg-[var(--border-subtle)]"
-        />
-
-        <nav
-          aria-label="Workspaces"
-          className="flex min-h-0 flex-1 flex-col items-center px-2"
-        >
-          <div className="spectra-thin-scrollbar flex w-full min-h-0 flex-1 flex-col items-center gap-2 overflow-x-visible overflow-y-auto py-0.5">
-            {workspaces.map((workspace, index) => {
-              const Icon = workspaceIcon(workspace);
-              const active =
-                pathname === "/workspace" &&
-                selectedWorkspaceId === workspace._id;
-              const shared =
-                workspace.isShared || workspace.ownership === "shared";
+          <nav
+            aria-label="Main destinations"
+            className="spectra-thin-scrollbar mt-5 flex max-h-[43dvh] shrink-0 flex-col items-center gap-1.5 overflow-y-auto overflow-x-visible px-2"
+          >
+            {coreDestinations.map(({ href, label, icon: Icon }) => {
+              const active = activeCoreHref === href;
               return (
                 <Link
-                  key={workspace._id}
-                  href={workspaceHref(workspace._id)}
-                  aria-label={workspace.title}
+                  key={href}
+                  href={href === "/workspace" ? "/workspace?home=1" : href}
+                  onClick={() => {
+                    if (href === "/workspace")
+                      window.dispatchEvent(
+                        new Event("spectra:navigate-workspace-home"),
+                      );
+                  }}
+                  aria-label={label}
                   aria-current={active ? "page" : undefined}
                   className={cn(
-                    "group relative flex w-14 shrink-0 flex-col items-center gap-1 rounded-[8px] px-1 py-2 text-micro font-medium outline-none transition-[background,transform,box-shadow] duration-200",
+                    "group relative flex h-14 w-14 shrink-0 flex-col items-center justify-center gap-1 rounded-[8px] text-micro font-medium outline-none transition-[background,color,transform,box-shadow] duration-200",
                     active
                       ? "bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[0_2px_8px_rgba(27,20,12,.055)]"
-                      : "text-[var(--text-secondary)] hover:-translate-y-px hover:bg-[var(--bg-hover)]",
+                      : "text-[var(--text-secondary)] hover:-translate-y-px hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]",
                   )}
                 >
                   {active ? <ActiveRailMarker /> : null}
-                  <span
-                    className="relative grid size-8 place-items-center rounded-[9px] text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,.18)]"
-                    style={{ background: workspaceColor(workspace, index) }}
-                  >
-                    <Icon size={15} strokeWidth={1.9} />
-                    {shared ? (
-                      <span className="absolute -bottom-1 -right-1 grid size-4 place-items-center rounded-full border-2 border-[var(--bg-elevated)] bg-[var(--text-primary)] text-[var(--bg-primary)]">
-                        <UsersRound size={8} strokeWidth={2.2} />
-                      </span>
-                    ) : null}
-                  </span>
+                  <Icon size={16} strokeWidth={active ? 2 : 1.7} />
                   <span className="max-w-[52px] truncate leading-none">
-                    {workspace.title}
+                    {label}
                   </span>
-                  <RailTooltip>
-                    {workspace.title}
-                    {shared ? " · Shared" : ""}
-                  </RailTooltip>
+                  <RailTooltip>{label}</RailTooltip>
                 </Link>
               );
             })}
-            {workspacesLoading ? (
-              <span
-                className="size-8 shrink-0 animate-pulse rounded-[9px] bg-[var(--bg-secondary)]"
-                aria-label="Loading workspaces"
-              />
-            ) : null}
-            {workspacesUnavailable ? (
-              <button
-                type="button"
-                onClick={() => void refreshWorkspaces(true)}
-                className="group relative grid size-10 shrink-0 place-items-center rounded-[12px] text-[var(--danger)] outline-none hover:bg-[color-mix(in_oklab,var(--danger)_7%,var(--bg-elevated))]"
-                aria-label="Retry loading workspaces"
-              >
-                <Folders size={17} />
-                <RailTooltip>Workspaces unavailable · Retry</RailTooltip>
-              </button>
-            ) : null}
-          </div>
-          <Link
-            href="/workspace?create=1"
-            className="group relative my-1 grid size-10 shrink-0 place-items-center rounded-[12px] text-[var(--text-tertiary)] outline-none hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
-            aria-label="Create workspace"
-          >
-            <Plus size={17} strokeWidth={1.8} />
-            <RailTooltip>Create workspace</RailTooltip>
-          </Link>
-        </nav>
+          </nav>
 
-        <div className="relative mx-auto mb-3.5 flex shrink-0 flex-col items-center gap-1">
-          <button
-            type="button"
-            aria-label="Share current page"
-            onClick={() =>
-              window.dispatchEvent(new CustomEvent("spectra:page-share"))
-            }
-            className="group relative grid size-11 place-items-center rounded-[14px] text-[var(--text-tertiary)] outline-none transition-colors hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
+          <div
+            aria-hidden="true"
+            className="mx-auto my-3 h-px w-8 shrink-0 bg-[var(--border-subtle)]"
+          />
+
+          <nav
+            aria-label="Workspaces"
+            className="flex min-h-0 flex-1 flex-col items-center px-2"
           >
-            <Share2 size={19} strokeWidth={1.7} />
-            <RailTooltip>Share</RailTooltip>
-          </button>
-          <button
-            type="button"
-            aria-label={`Notifications${unreadCount ? `, ${unreadCount} unread` : ""}`}
-            aria-expanded={notificationsOpen}
-            onClick={() => {
-              setNotificationsOpen((open) => !open);
-              void refreshNotifications();
-            }}
-            className="group relative grid size-11 place-items-center rounded-[14px] text-[var(--text-tertiary)] outline-none transition-colors hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)] focus-visible:ring-2 focus-visible:ring-[var(--brand-primary)]"
-          >
-            <Bell size={19} strokeWidth={1.7} />
-            {unreadCount ? (
-              <span className="absolute right-1.5 top-1.5 grid min-w-4 place-items-center rounded-full bg-[var(--danger)] px-1 text-micro font-bold leading-4 text-white">
-                {unreadCount > 99 ? "99+" : unreadCount}
-              </span>
-            ) : null}
-            <RailTooltip>Notifications</RailTooltip>
-          </button>
-          {notificationsOpen ? (
-            <section className="fixed right-4 top-4 z-[80] w-[340px] overflow-hidden rounded-[14px] border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[0_22px_70px_rgba(27,20,12,.2)]">
-              <header className="flex items-center justify-between border-b border-[var(--border-subtle)] px-4 py-3">
-                <div>
-                  <strong className="text-[13px] text-[var(--text-primary)]">
-                    Notifications
-                  </strong>
-                  <p className="text-micro text-[var(--text-tertiary)]">
-                    Shares, comments, tasks, and reminders
-                  </p>
-                </div>
+            <div className="spectra-thin-scrollbar flex w-full min-h-0 flex-1 flex-col items-center gap-2 overflow-x-visible overflow-y-auto py-0.5">
+              {workspaces.map((workspace, index) => {
+                const Icon = workspaceIcon(workspace);
+                const active =
+                  pathname === "/workspace" &&
+                  selectedWorkspaceId === workspace._id;
+                const shared =
+                  workspace.isShared || workspace.ownership === "shared";
+                return (
+                  <Link
+                    key={workspace._id}
+                    href={workspaceHref(workspace._id)}
+                    aria-label={workspace.title}
+                    aria-current={active ? "page" : undefined}
+                    className={cn(
+                      "group relative flex w-14 shrink-0 flex-col items-center gap-1 rounded-[8px] px-1 py-2 text-micro font-medium outline-none transition-[background,transform,box-shadow] duration-200",
+                      active
+                        ? "bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[0_2px_8px_rgba(27,20,12,.055)]"
+                        : "text-[var(--text-secondary)] hover:-translate-y-px hover:bg-[var(--bg-hover)]",
+                    )}
+                  >
+                    {active ? <ActiveRailMarker /> : null}
+                    <span
+                      className="relative grid size-8 place-items-center rounded-[9px] text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,.18)]"
+                      style={{ background: workspaceColor(workspace, index) }}
+                    >
+                      <Icon size={15} strokeWidth={1.9} />
+                      {shared ? (
+                        <span className="absolute -bottom-1 -right-1 grid size-4 place-items-center rounded-full border-2 border-[var(--bg-elevated)] bg-[var(--text-primary)] text-[var(--bg-primary)]">
+                          <UsersRound size={8} strokeWidth={2.2} />
+                        </span>
+                      ) : null}
+                    </span>
+                    <span className="max-w-[52px] truncate leading-none">
+                      {workspace.title}
+                    </span>
+                    <RailTooltip>
+                      {workspace.title}
+                      {shared ? " · Shared" : ""}
+                    </RailTooltip>
+                  </Link>
+                );
+              })}
+              {workspacesLoading ? (
+                <span
+                  className="size-8 shrink-0 animate-pulse rounded-[9px] bg-[var(--bg-secondary)]"
+                  aria-label="Loading workspaces"
+                />
+              ) : null}
+              {workspacesUnavailable ? (
                 <button
                   type="button"
-                  disabled={!unreadCount}
-                  onClick={() => void markAllNotificationsRead()}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-[8px] px-2 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-35"
+                  onClick={() => void refreshWorkspaces(true)}
+                  className="group relative grid size-10 shrink-0 place-items-center rounded-[12px] text-[var(--danger)] outline-none hover:bg-[color-mix(in_oklab,var(--danger)_7%,var(--bg-elevated))]"
+                  aria-label="Retry loading workspaces"
                 >
-                  <CheckCheck size={14} /> Mark read
+                  <Folders size={17} />
+                  <RailTooltip>Workspaces unavailable · Retry</RailTooltip>
                 </button>
-              </header>
-              <div className="spectra-thin-scrollbar max-h-[420px] overflow-y-auto p-1.5">
-                {notifications.slice(0, 50).map((item) => {
-                  const Icon =
-                    item.kind === "comment"
-                      ? MessageSquareText
-                      : item.kind === "share"
-                        ? Share2
-                        : item.kind === "planner"
-                          ? ListTodo
-                          : CalendarClock;
-                  return (
-                    <Link
-                      key={`${item.kind}:${item.id}`}
-                      href={
-                        "href" in item
-                          ? item.href
-                          : `/library/${encodeURIComponent(item.artifactId)}`
-                      }
-                      onClick={() => {
-                        setNotificationsOpen(false);
-                        void markNotificationRead(item);
-                      }}
-                      className="flex gap-3 rounded-[10px] px-3 py-2.5 hover:bg-[var(--bg-hover)]"
-                    >
-                      <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-[9px] bg-[color-mix(in_oklab,var(--brand-primary)_9%,var(--bg-primary))] text-[var(--brand-primary)]">
-                        <Icon size={15} />
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="flex items-center gap-2">
-                          <strong className="min-w-0 flex-1 truncate text-[11px] text-[var(--text-primary)]">
-                            {item.title}
-                          </strong>
-                          {!item.readAt ? (
-                            <i className="size-1.5 shrink-0 rounded-full bg-[var(--brand-primary)]" />
-                          ) : null}
-                        </span>
-                        <span className="mt-0.5 block line-clamp-2 text-micro leading-4 text-[var(--text-secondary)]">
-                          {item.detail}
-                        </span>
-                        <time
-                          className="mt-1 block text-micro text-[var(--text-tertiary)]"
-                          suppressHydrationWarning
-                        >
-                          {new Date(item.createdAt).toLocaleString("en-US")}
-                        </time>
-                      </span>
-                    </Link>
-                  );
-                })}
-                {!notifications.length && !notificationsLoading ? (
-                  <div className="px-5 py-9 text-center text-[11px] text-[var(--text-tertiary)]">
-                    You are all caught up.
+              ) : null}
+            </div>
+            <Link
+              href="/workspace?create=1"
+              className="group relative my-1 grid size-10 shrink-0 place-items-center rounded-[12px] text-[var(--text-tertiary)] outline-none hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
+              aria-label="Create workspace"
+            >
+              <Plus size={17} strokeWidth={1.8} />
+              <RailTooltip>Create workspace</RailTooltip>
+            </Link>
+          </nav>
+
+          <div className="relative mx-auto mb-3.5 flex shrink-0 flex-col items-center gap-1">
+            <button
+              type="button"
+              aria-label="Share current page"
+              onClick={() =>
+                window.dispatchEvent(new CustomEvent("spectra:page-share"))
+              }
+              className="group relative grid size-11 place-items-center rounded-[14px] text-[var(--text-tertiary)] outline-none transition-colors hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
+            >
+              <Share2 size={19} strokeWidth={1.7} />
+              <RailTooltip>Share</RailTooltip>
+            </button>
+            <button
+              type="button"
+              aria-label={`Notifications${unreadCount ? `, ${unreadCount} unread` : ""}`}
+              aria-expanded={notificationsOpen}
+              onClick={() => {
+                setNotificationsOpen((open) => !open);
+                void refreshNotifications();
+              }}
+              className="group relative grid size-11 place-items-center rounded-[14px] text-[var(--text-tertiary)] outline-none transition-colors hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)] focus-visible:ring-2 focus-visible:ring-[var(--brand-primary)]"
+            >
+              <Bell size={19} strokeWidth={1.7} />
+              {unreadCount ? (
+                <span className="absolute right-1.5 top-1.5 grid min-w-4 place-items-center rounded-full bg-[var(--danger)] px-1 text-micro font-bold leading-4 text-white">
+                  {unreadCount > 99 ? "99+" : unreadCount}
+                </span>
+              ) : null}
+              <RailTooltip>Notifications</RailTooltip>
+            </button>
+            {notificationsOpen ? (
+              <section className="fixed right-4 top-4 z-[80] w-[340px] overflow-hidden rounded-[14px] border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[0_22px_70px_rgba(27,20,12,.2)]">
+                <header className="flex items-center justify-between border-b border-[var(--border-subtle)] px-4 py-3">
+                  <div>
+                    <strong className="text-[13px] text-[var(--text-primary)]">
+                      Notifications
+                    </strong>
+                    <p className="text-micro text-[var(--text-tertiary)]">
+                      Shares, comments, tasks, and reminders
+                    </p>
                   </div>
-                ) : null}
-                {notificationsLoading && !notifications.length ? (
-                  <div className="px-5 py-9 text-center text-[11px] text-[var(--text-tertiary)]">
-                    Loading notifications…
-                  </div>
-                ) : null}
-              </div>
-            </section>
-          ) : null}
-          <button
-            type="button"
-            aria-label="Settings"
-            onClick={() =>
-              window.dispatchEvent(new Event("ai-school:toggle-settings"))
-            }
-            className="group relative grid size-11 place-items-center rounded-[14px] text-[var(--text-tertiary)] outline-none transition-colors hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)] focus-visible:ring-2 focus-visible:ring-[var(--brand-primary)]"
-          >
-            <Settings2 size={19} strokeWidth={1.7} />
-            <RailTooltip>Settings</RailTooltip>
-          </button>
-        </div>
-      </aside>
+                  <button
+                    type="button"
+                    disabled={!unreadCount}
+                    onClick={() => void markAllNotificationsRead()}
+                    className="inline-flex h-8 items-center gap-1.5 rounded-[8px] px-2 text-micro font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] disabled:opacity-35"
+                  >
+                    <CheckCheck size={14} /> Mark read
+                  </button>
+                </header>
+                <div className="spectra-thin-scrollbar max-h-[420px] overflow-y-auto p-1.5">
+                  {notifications.slice(0, 50).map((item) => {
+                    const Icon =
+                      item.kind === "comment"
+                        ? MessageSquareText
+                        : item.kind === "share"
+                          ? Share2
+                          : item.kind === "planner"
+                            ? ListTodo
+                            : CalendarClock;
+                    return (
+                      <Link
+                        key={`${item.kind}:${item.id}`}
+                        href={
+                          "href" in item
+                            ? item.href
+                            : `/library/${encodeURIComponent(item.artifactId)}`
+                        }
+                        onClick={() => {
+                          setNotificationsOpen(false);
+                          void markNotificationRead(item);
+                        }}
+                        className="flex gap-3 rounded-[10px] px-3 py-2.5 hover:bg-[var(--bg-hover)]"
+                      >
+                        <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-[9px] bg-[color-mix(in_oklab,var(--brand-primary)_9%,var(--bg-primary))] text-[var(--brand-primary)]">
+                          <Icon size={15} />
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="flex items-center gap-2">
+                            <strong className="min-w-0 flex-1 truncate text-[11px] text-[var(--text-primary)]">
+                              {item.title}
+                            </strong>
+                            {!item.readAt ? (
+                              <i className="size-1.5 shrink-0 rounded-full bg-[var(--brand-primary)]" />
+                            ) : null}
+                          </span>
+                          <span className="mt-0.5 block line-clamp-2 text-micro leading-4 text-[var(--text-secondary)]">
+                            {item.detail}
+                          </span>
+                          <time
+                            className="mt-1 block text-micro text-[var(--text-tertiary)]"
+                            suppressHydrationWarning
+                          >
+                            {new Date(item.createdAt).toLocaleString("en-US")}
+                          </time>
+                        </span>
+                      </Link>
+                    );
+                  })}
+                  {!notifications.length && !notificationsLoading ? (
+                    <div className="px-5 py-9 text-center text-[11px] text-[var(--text-tertiary)]">
+                      You are all caught up.
+                    </div>
+                  ) : null}
+                  {notificationsLoading && !notifications.length ? (
+                    <div className="px-5 py-9 text-center text-[11px] text-[var(--text-tertiary)]">
+                      Loading notifications…
+                    </div>
+                  ) : null}
+                </div>
+              </section>
+            ) : null}
+            <button
+              type="button"
+              aria-label="Settings"
+              onClick={() =>
+                window.dispatchEvent(new Event("ai-school:toggle-settings"))
+              }
+              className="group relative grid size-11 place-items-center rounded-[14px] text-[var(--text-tertiary)] outline-none transition-colors hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)] focus-visible:ring-2 focus-visible:ring-[var(--brand-primary)]"
+            >
+              <Settings2 size={19} strokeWidth={1.7} />
+              <RailTooltip>Settings</RailTooltip>
+            </button>
+          </div>
+        </aside>
       ) : null}
 
       {mobileWorkspaceOpen ? (

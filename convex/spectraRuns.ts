@@ -466,9 +466,7 @@ export const resolveBySubmissionKey = query({
     const run = await ctx.db
       .query("spectraAiRuns")
       .withIndex("by_account_submission", (q) =>
-        q
-          .eq("ownerAccountId", actor._id)
-          .eq("submissionKey", submissionKey),
+        q.eq("ownerAccountId", actor._id).eq("submissionKey", submissionKey),
       )
       .first();
     return run
@@ -575,12 +573,7 @@ export const updateStatus = mutation({
         now,
       );
     if (terminal && args.status === "completed")
-      await recordRunModelMeters(
-        ctx,
-        run,
-        args.usage ?? run.usage,
-        now,
-      );
+      await recordRunModelMeters(ctx, run, args.usage ?? run.usage, now);
     await ctx.db.patch(args.runId, {
       status: args.status,
       phase:
@@ -966,18 +959,30 @@ export const listTabs = query({
             .filter((message) => message.role === "assistant")
             .sort((a, b) => b.createdAt - a.createdAt)[0];
           const rawChoices = latestAssistant?.metadata?.choices as
-            | { question?: unknown; options?: unknown }
-            | undefined;
+            { question?: unknown; options?: unknown } | undefined;
           const options = Array.isArray(rawChoices?.options)
-            ? rawChoices.options.flatMap((option): Array<{ title: string; description?: string | null }> => {
-                if (!option || typeof option !== "object") return [];
-                const row = option as { title?: unknown; description?: unknown };
-                if (typeof row.title !== "string" || !row.title.trim()) return [];
-                return [{
-                  title: row.title.trim(),
-                  description: typeof row.description === "string" ? row.description : null,
-                }];
-              })
+            ? rawChoices.options.flatMap(
+                (
+                  option,
+                ): Array<{ title: string; description?: string | null }> => {
+                  if (!option || typeof option !== "object") return [];
+                  const row = option as {
+                    title?: unknown;
+                    description?: unknown;
+                  };
+                  if (typeof row.title !== "string" || !row.title.trim())
+                    return [];
+                  return [
+                    {
+                      title: row.title.trim(),
+                      description:
+                        typeof row.description === "string"
+                          ? row.description
+                          : null,
+                    },
+                  ];
+                },
+              )
             : [];
           const inputRequest =
             typeof rawChoices?.question === "string" &&
@@ -991,23 +996,34 @@ export const listTabs = query({
                 }
               : null;
           const meaningfulSteps = events
-            .filter((event) => event.type === "progress" || event.type === "checkpoint" || event.type === "operation_result")
+            .filter(
+              (event) =>
+                event.type === "progress" ||
+                event.type === "checkpoint" ||
+                event.type === "operation_result",
+            )
             .sort((a, b) => a.sequence - b.sequence)
             .flatMap((event): string[] => {
-              const payload = event.payload && typeof event.payload === "object"
-                ? event.payload as Record<string, unknown>
-                : {};
-              const item = payload.runItem && typeof payload.runItem === "object"
-                ? payload.runItem as Record<string, unknown>
-                : {};
-              const itemPayload = item.payload && typeof item.payload === "object"
-                ? item.payload as Record<string, unknown>
-                : {};
-              const checkpoint = itemPayload.checkpoint && typeof itemPayload.checkpoint === "object"
-                ? itemPayload.checkpoint as Record<string, unknown>
-                : {};
+              const payload =
+                event.payload && typeof event.payload === "object"
+                  ? (event.payload as Record<string, unknown>)
+                  : {};
+              const item =
+                payload.runItem && typeof payload.runItem === "object"
+                  ? (payload.runItem as Record<string, unknown>)
+                  : {};
+              const itemPayload =
+                item.payload && typeof item.payload === "object"
+                  ? (item.payload as Record<string, unknown>)
+                  : {};
+              const checkpoint =
+                itemPayload.checkpoint &&
+                typeof itemPayload.checkpoint === "object"
+                  ? (itemPayload.checkpoint as Record<string, unknown>)
+                  : {};
               const value =
-                (typeof checkpoint.summary === "string" && checkpoint.summary) ||
+                (typeof checkpoint.summary === "string" &&
+                  checkpoint.summary) ||
                 (typeof payload.detail === "string" && payload.detail) ||
                 (typeof payload.title === "string" && payload.title) ||
                 (typeof payload.message === "string" && payload.message);
@@ -1648,10 +1664,11 @@ export const stopRun = mutation({
     const currentOperations = operations.filter(
       (operation) => operation.executionId === args.executionId,
     );
-    if (currentOperations.some((operation) => operation.status === "executing"))
-      throw new Error(
-        "This run is currently committing an operation. Try stopping again once that atomic change settles.",
-      );
+    // Cancellation is a durable request even while an operation is in
+    // progress. Marking the run terminal makes the worker heartbeat return
+    // `alive: false`; it then aborts at the next safe boundary and performs
+    // the same pending/staged cleanup. Rejecting here can otherwise make a
+    // stalled executing operation literally impossible to stop.
     const hasAppliedWork = currentOperations.some(
       (operation) =>
         operation.status === "executed" || operation.status === "failed",

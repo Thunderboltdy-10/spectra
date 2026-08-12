@@ -185,6 +185,26 @@ export class NativeArtifactYjsModel {
     });
   }
 
+  async replaceMetadataSnapshot(
+    value: ArtifactLiveValue,
+    controller: ArtifactRegionController,
+  ) {
+    const current = this.snapshot.value;
+    const claims = [
+      ...(current?.title !== value.title
+        ? [{ regionId: "metadata:title", overlapDomains: ["metadata:title"] }]
+        : []),
+      ...((current?.summary ?? "") !== (value.summary ?? "")
+        ? [{ regionId: "metadata:summary", overlapDomains: ["metadata:summary"] }]
+        : []),
+      ...(JSON.stringify(current?.tags ?? []) !== JSON.stringify(value.tags)
+        ? [{ regionId: "metadata:tags", overlapDomains: ["metadata:tags"] }]
+        : []),
+    ];
+    if (!claims.length) return { applied: true as const, claims: [] };
+    return controller.editMany(claims, () => this.writeMetadata(value));
+  }
+
   async replaceRegion(
     _regionId: string,
     _value: unknown,

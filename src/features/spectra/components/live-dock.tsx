@@ -185,18 +185,28 @@ function DockTitle({
   runId,
   title,
   pending,
-  revealed,
 }: {
   runId: string;
   title: string;
   pending: boolean;
-  revealed: boolean;
 }) {
-  const shouldReveal = !pending && !revealed;
+  const [revealComplete, setRevealComplete] = useState(false);
+  const revealStarted = useRef(false);
+  const shouldReveal = !pending && !revealComplete;
   const { visibleText, active } = useStreamingReveal(title, {
     profile: "dock",
     enabled: shouldReveal,
   });
+  useEffect(() => {
+    if (active) revealStarted.current = true;
+    if (
+      revealStarted.current &&
+      !active &&
+      visibleText === title &&
+      !revealComplete
+    )
+      setRevealComplete(true);
+  }, [active, revealComplete, title, visibleText]);
   return (
     <span
       data-title-run={runId}
@@ -383,7 +393,6 @@ export function LiveDock({
   const motionLevel = useSpectraMotion();
   /* Titles that have already been established (and revealed) — a run title
      must only stream once, on first arrival (RUN-010). */
-  const seenTitlesRef = useRef<Map<string, string>>(new Map());
   const continuation = useSpectraContextStore((state) => state.continuation);
   const setContinuation = useSpectraContextStore(
     (state) => state.setContinuation,
@@ -404,17 +413,6 @@ export function LiveDock({
       window.removeEventListener("spectra:threads-changed", changed);
     };
   }, [refresh, story]);
-
-  useEffect(() => {
-    if (!continuation || story) return;
-    const canonical = tabs.find((tab) => tab.threadId === continuation.id);
-    if (
-      canonical &&
-      canonical.thread.title !== "New conversation" &&
-      canonical.thread.title !== continuation.title
-    )
-      setContinuation({ ...continuation, title: canonical.thread.title });
-  }, [continuation, setContinuation, story, tabs]);
 
   useEffect(() => {
     if (
@@ -586,15 +584,11 @@ export function LiveDock({
               model.state === "completing";
             /* A title reveals exactly once: re-renders with the same title
                render it complete (RUN-010). */
-            const seenTitle = seenTitlesRef.current.get(tab.runId);
-            const titleRevealed = seenTitle === model.title;
-            if (!model.titlePending)
-              seenTitlesRef.current.set(tab.runId, model.title);
             return (
               <motion.article
                 layout
                 key={tab.runId}
-                className={`group relative shrink-0 snap-start overflow-visible rounded-[9px] border bg-[var(--bg-elevated)] shadow-[0_7px_22px_-20px_rgba(20,26,32,.5)] ${active ? "border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] shadow-[inset_3px_0_var(--accent-cyan)]" : "border-[var(--border-default)]"} ${expanded ? "max-sm:fixed max-sm:inset-x-3 max-sm:bottom-3 max-sm:z-50 max-sm:max-h-[70dvh] max-sm:overflow-y-auto max-sm:shadow-[0_24px_80px_rgba(0,0,0,.32)]" : ""}`}
+                className={`group relative max-w-full shrink-0 snap-start overflow-visible rounded-[9px] border bg-[var(--bg-elevated)] shadow-[0_7px_22px_-20px_rgba(20,26,32,.5)] ${active ? "border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] shadow-[inset_3px_0_var(--accent-cyan)]" : "border-[var(--border-default)]"} ${expanded ? "max-sm:fixed max-sm:inset-x-3 max-sm:bottom-3 max-sm:z-50 max-sm:max-h-[70dvh] max-sm:overflow-y-auto max-sm:shadow-[0_24px_80px_rgba(0,0,0,.32)]" : ""}`}
                 style={{ width: layout?.preferredWidth }}
                 initial={
                   motionLevel.disabled
@@ -634,7 +628,6 @@ export function LiveDock({
                         runId={tab.runId}
                         title={model.title}
                         pending={model.titlePending}
-                        revealed={titleRevealed}
                       />
                       {model.attachmentNames.length ? (
                         <span

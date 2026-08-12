@@ -5,6 +5,69 @@ import { getActorForAccountId } from "./identityShared";
 import { internal } from "./_generated/api";
 import { commitChangeGroup, HUMAN_CHANGE_IDLE_MS } from "./changeGroups";
 import { timetableContentContainsPersonalState } from "./quizPrivacy";
+import { changedArtifactRegionIds } from "../src/features/spectra/collaboration/artifact-yjs-model";
+import { isArtifactTypeKey } from "../src/features/spectra/artifacts/registry";
+import { claimAuthorizesGatewayUpdate } from "./collaborationClaimAuthorization";
+
+const NATIVE_PROJECTION_REGION = "$spectra:native-projection";
+
+type GatewayProjection = {
+  title: string;
+  summary?: string;
+  tags: string[];
+  typeKey: string;
+  schemaVersion: number;
+  content: unknown;
+};
+
+function parseGatewayProjection(
+  projectionJson: string | undefined,
+  projectionHash: string | undefined,
+  artifact: {
+    blueprintKey: string;
+  },
+): GatewayProjection | null {
+  if (!projectionJson) return null;
+  if (
+    projectionJson.length > 900_000 ||
+    !projectionHash ||
+    projectionHash.length < 16
+  )
+    throw new Error("COLLABORATION_PROJECTION_SIZE");
+  const parsed: unknown = JSON.parse(projectionJson);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+    throw new Error("COLLABORATION_PROJECTION_INVALID");
+  const value = parsed as Record<string, unknown>;
+  const title = typeof value.title === "string" ? value.title.trim() : "";
+  const summary =
+    typeof value.summary === "string" ? value.summary.trim() : undefined;
+  const tags = Array.isArray(value.tags) ? value.tags : [];
+  if (
+    !title ||
+    title.length > 300 ||
+    (summary?.length ?? 0) > 2_000 ||
+    tags.length > 80 ||
+    !tags.every((tag) => typeof tag === "string" && tag.length <= 100) ||
+    value.typeKey !== artifact.blueprintKey ||
+    !Number.isSafeInteger(value.schemaVersion) ||
+    (value.schemaVersion as number) < 1 ||
+    value.content === undefined
+  )
+    throw new Error("COLLABORATION_PROJECTION_INVALID");
+  if (
+    artifact.blueprintKey === "timetable" &&
+    timetableContentContainsPersonalState(value.content)
+  )
+    throw new Error("COLLABORATION_TIMETABLE_PERSONAL_STATE_FORBIDDEN");
+  return {
+    title,
+    ...(summary ? { summary } : {}),
+    tags: tags as string[],
+    typeKey: value.typeKey as string,
+    schemaVersion: value.schemaVersion as number,
+    content: value.content,
+  };
+}
 
 export const policy = internalQuery({
   args: { artifactId: v.id("spectraArtifacts"), partitionKey: v.string() },
@@ -138,6 +201,8 @@ export const load = internalQuery({
       )
       .unique();
     if (!room || room.status === "closed") return null;
+    const artifact = await ctx.db.get(args.artifactId);
+    if (!artifact) return null;
     const snapshot = await ctx.db
       .query("collaborationSnapshots")
       .withIndex("by_room_sequence", (q) => q.eq("roomId", room._id))
@@ -172,13 +237,143 @@ export const load = internalQuery({
       hasMore:
         updates.length === limit &&
         updates[updates.length - 1]!.sequence < room.nextSequence - 1,
+      initialProjection:
+        args.afterSequence === 0
+          ? {
+              title: artifact.title,
+              summary: artifact.summary,
+              tags: artifact.tags,
+              typeKey: artifact.blueprintKey,
+              schemaVersion: room.schemaVersion,
+              content: artifact.content,
+              artifactUpdatedAt: artifact.updatedAt,
+            }
+          : null,
     };
+  },
+});
+
+export const bootstrapNative = internalMutation({
+  args: {
+    accountId: v.id("accounts"),
+    artifactId: v.id("spectraArtifacts"),
+    partitionKey: v.string(),
+    clientId: v.string(),
+    policyVersion: v.number(),
+    artifactUpdatedAt: v.number(),
+    expectedNextSequence: v.number(),
+    update: v.bytes(),
+    stateVectorHash: v.string(),
+    projectionJson: v.string(),
+    projectionHash: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const [actor, artifact, room] = await Promise.all([
+      getActorForAccountId(ctx, args.accountId),
+      ctx.db.get(args.artifactId),
+      ctx.db
+        .query("collaborationRooms")
+        .withIndex("by_artifact_partition", (q) =>
+          q.eq("artifactId", args.artifactId).eq("partitionKey", args.partitionKey),
+        )
+        .unique(),
+    ]);
+    if (!actor || !artifact || !room || room.status !== "active")
+      throw new Error("COLLABORATION_GATEWAY_UNAVAILABLE");
+    const resourceType = artifact.blueprintKey === "agent" ? "agent" as const : "artifact" as const;
+    const [decision, policy, existingUpdate] = await Promise.all([
+      evaluateAccessForActor(ctx, actor, resourceType, artifact._id),
+      ctx.db
+        .query("resourcePolicies")
+        .withIndex("by_resource", (q) =>
+          q.eq("resourceType", resourceType).eq("resourceId", artifact._id),
+        )
+        .unique(),
+      ctx.db
+        .query("collaborationUpdates")
+        .withIndex("by_room_sequence", (q) =>
+          q
+            .eq("roomId", room._id)
+            .eq("sequence", args.expectedNextSequence),
+        )
+        .unique(),
+    ]);
+    const currentPolicyVersion = policy?.version ?? 0;
+    if (
+      !decision.allowed ||
+      !decision.capabilities.includes("modify") ||
+      currentPolicyVersion !== args.policyVersion ||
+      room.policyVersion !== currentPolicyVersion
+    )
+      throw new Error("COLLABORATION_GATEWAY_FORBIDDEN");
+    if (
+      !Number.isSafeInteger(args.expectedNextSequence) ||
+      args.expectedNextSequence < 1 ||
+      artifact.updatedAt !== args.artifactUpdatedAt ||
+      args.update.byteLength <= 0 ||
+      args.update.byteLength > 760 * 1024 ||
+      args.stateVectorHash.length < 16
+    )
+      throw new Error("COLLABORATION_NATIVE_BOOTSTRAP_STALE");
+    const projection = parseGatewayProjection(
+      args.projectionJson,
+      args.projectionHash,
+      artifact,
+    );
+    if (!projection)
+      throw new Error("COLLABORATION_NATIVE_PROJECTION_INVALID");
+    if (existingUpdate) {
+      if (existingUpdate.stateVectorHash !== args.stateVectorHash)
+        throw new Error("COLLABORATION_NATIVE_BOOTSTRAP_STALE");
+      return { sequence: existingUpdate.sequence, duplicate: true };
+    }
+    if (room.nextSequence !== args.expectedNextSequence)
+      throw new Error("COLLABORATION_NATIVE_BOOTSTRAP_STALE");
+    const now = Date.now();
+    const clientId = args.clientId.trim().slice(0, 180);
+    if (!clientId) throw new Error("COLLABORATION_GATEWAY_UPDATE_INVALID");
+    await ctx.db.insert("collaborationUpdates", {
+      roomId: room._id,
+      schoolId: room.schoolId,
+      sequence: args.expectedNextSequence,
+      update: args.update,
+      byteLength: args.update.byteLength,
+      stateVectorHash: args.stateVectorHash,
+      actorAccountId: actor.accountId,
+      clientId,
+      idempotencyKey: `bootstrap:${artifact.updatedAt}:${args.stateVectorHash}`,
+      regionIds: ["artifact:structure"],
+      createdAt: now,
+    });
+    await Promise.all([
+      ctx.db.patch(room._id, {
+        nextSequence: args.expectedNextSequence + 1,
+        uncompactedBytes: room.uncompactedBytes + args.update.byteLength,
+        updatedAt: now,
+      }),
+      ctx.db.patch(artifact._id, {
+        title: projection.title,
+        summary: projection.summary,
+        tags: projection.tags,
+        content: projection.content,
+        schemaVersion: projection.schemaVersion,
+        validity: "valid",
+        validityIssues: [],
+        contentHash: args.projectionHash,
+        textIndex: `${projection.title}\n${projection.summary ?? ""}\n${projection.tags.join(" ")}\n${JSON.stringify(projection.content).slice(0, 80_000)}`,
+        syncState: "synchronized",
+        liveStateVectorHash: args.stateVectorHash,
+        lastSynchronizedAt: now,
+      }),
+    ]);
+    return { sequence: args.expectedNextSequence, duplicate: false };
   },
 });
 
 export const append = internalMutation({
   args: {
     accountId: v.id("accounts"),
+    actorKind: v.union(v.literal("human"), v.literal("ai")),
     artifactId: v.id("spectraArtifacts"),
     partitionKey: v.string(),
     clientId: v.string(),
@@ -188,6 +383,7 @@ export const append = internalMutation({
     baseStateVectorHash: v.string(),
     stateVectorHash: v.string(),
     regionIds: v.array(v.string()),
+    nativeInitialization: v.optional(v.boolean()),
     projectionJson: v.optional(v.string()),
     projectionHash: v.optional(v.string()),
   },
@@ -260,97 +456,103 @@ export const append = internalMutation({
       )
       .unique();
     if (duplicate) return { sequence: duplicate.sequence, duplicate: true };
-    const now = Date.now();
-    const claims = await ctx.db
-      .query("regionClaims")
-      .withIndex("by_artifact_status", (q) =>
-        q.eq("artifactId", artifact._id).eq("status", "active"),
-      )
-      .collect();
-    const actorClaims = claims.filter(
-      (claim) =>
-        claim.actorAccountId === actor.accountId &&
-        claim.clientId === clientId &&
-        claim.leaseExpiresAt > now,
+    const projection = parseGatewayProjection(
+      args.projectionJson,
+      args.projectionHash,
+      artifact,
     );
-    const regionIds = [
+    const now = Date.now();
+    const [activeClaims, releasedClaims] = await Promise.all(
+      (["active", "released"] as const).map((status) =>
+        ctx.db
+          .query("regionClaims")
+          .withIndex("by_artifact_status", (q) =>
+            q.eq("artifactId", artifact._id).eq("status", status),
+          )
+          .collect(),
+      ),
+    );
+    const actorClaims = [...activeClaims, ...releasedClaims].filter((claim) =>
+      claimAuthorizesGatewayUpdate(claim, {
+        actorAccountId: actor.accountId,
+        actorKind: args.actorKind,
+        clientId,
+        baseStateVectorHash: args.baseStateVectorHash,
+        now,
+      }),
+    );
+    const declaredRegionIds = [
       ...new Set(
         args.regionIds.map((regionId) => regionId.trim()).filter(Boolean),
       ),
     ];
+    const nativeProjection = declaredRegionIds.includes(
+      NATIVE_PROJECTION_REGION,
+    );
+    if (
+      nativeProjection &&
+      (declaredRegionIds.length !== 1 || !projection)
+    )
+      throw new Error("COLLABORATION_NATIVE_PROJECTION_INVALID");
+    const nativeTypeKey = isArtifactTypeKey(artifact.blueprintKey)
+      ? artifact.blueprintKey
+      : null;
+    if (nativeProjection && !nativeTypeKey)
+      throw new Error("COLLABORATION_NATIVE_PROJECTION_INVALID");
+    const regionIds = nativeProjection
+      ? [
+          ...new Set([
+            ...(args.nativeInitialization ? ["artifact:structure"] : []),
+            ...changedArtifactRegionIds(
+              nativeTypeKey!,
+              artifact.content,
+              projection!.content,
+            ),
+            ...(artifact.title !== projection!.title
+              ? ["metadata:title"]
+              : []),
+            ...((artifact.summary ?? "") !== (projection!.summary ?? "")
+              ? ["metadata:summary"]
+              : []),
+            ...(JSON.stringify(artifact.tags) !==
+            JSON.stringify(projection!.tags)
+              ? ["metadata:tags"]
+              : []),
+          ]),
+        ]
+      : declaredRegionIds;
     if (regionIds.length === 0 || regionIds.length > 128)
       throw new Error("COLLABORATION_REGION_CLAIM_REQUIRED");
+    const claimCoversRegion = (
+      claim: (typeof actorClaims)[number],
+      regionId: string,
+    ) =>
+      claim.regionId === regionId || claim.overlapDomains.includes(regionId);
     const coveringClaims = actorClaims.filter((claim) =>
       regionIds.some(
-        (regionId) =>
-          claim.regionId === regionId ||
-          claim.overlapDomains.includes(regionId),
+        (regionId) => claimCoversRegion(claim, regionId),
       ),
     );
+    const conflictingClaim = activeClaims.find(
+      (claim) =>
+        claim.leaseExpiresAt > now &&
+        !actorClaims.includes(claim) &&
+        regionIds.some((regionId) => claimCoversRegion(claim, regionId)),
+    );
+    if (conflictingClaim)
+      throw new Error(
+        `COLLABORATION_REGION_HELD: ${conflictingClaim.regionId}`,
+      );
     const uncovered = regionIds.filter(
       (regionId) =>
-        !coveringClaims.some(
-          (claim) =>
-            claim.regionId === regionId ||
-            claim.overlapDomains.includes(regionId),
-        ),
+        !coveringClaims.some((claim) => claimCoversRegion(claim, regionId)),
     );
-    if (uncovered.length > 0)
+    const claimsRequired =
+      args.actorKind === "ai" || regionIds.includes("artifact:structure");
+    if (claimsRequired && uncovered.length > 0)
       throw new Error(`COLLABORATION_REGION_UNCLAIMED: ${uncovered[0]}`);
-    let projection: {
-      title: string;
-      summary?: string;
-      tags: string[];
-      typeKey: string;
-      schemaVersion: number;
-      content: unknown;
-    } | null = null;
-    if (args.projectionJson) {
-      if (
-        args.projectionJson.length > 900_000 ||
-        !args.projectionHash ||
-        args.projectionHash.length < 16
-      )
-        throw new Error("COLLABORATION_PROJECTION_SIZE");
-      const parsed: unknown = JSON.parse(args.projectionJson);
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
-        throw new Error("COLLABORATION_PROJECTION_INVALID");
-      const value = parsed as Record<string, unknown>;
-      const title = typeof value.title === "string" ? value.title.trim() : "";
-      const summary =
-        typeof value.summary === "string" ? value.summary.trim() : undefined;
-      const tags = Array.isArray(value.tags) ? value.tags : [];
-      if (
-        !title ||
-        title.length > 300 ||
-        (summary?.length ?? 0) > 2_000 ||
-        tags.length > 80 ||
-        !tags.every((tag) => typeof tag === "string" && tag.length <= 100) ||
-        value.typeKey !== artifact.blueprintKey ||
-        !Number.isSafeInteger(value.schemaVersion) ||
-        (value.schemaVersion as number) < 1 ||
-        value.content === undefined
-      )
-        throw new Error("COLLABORATION_PROJECTION_INVALID");
-      if (
-        artifact.blueprintKey === "timetable" &&
-        timetableContentContainsPersonalState(value.content)
-      )
-        throw new Error("COLLABORATION_TIMETABLE_PERSONAL_STATE_FORBIDDEN");
-      projection = {
-        title,
-        ...(summary ? { summary } : {}),
-        tags: tags as string[],
-        typeKey: value.typeKey as string,
-        schemaVersion: value.schemaVersion as number,
-        content: value.content,
-      };
-    }
     const aiClaims = coveringClaims.filter((claim) => claim.actorKind === "ai");
-    const changeSource =
-      aiClaims.length > 0 && aiClaims.length === coveringClaims.length
-        ? ("ai" as const)
-        : ("human" as const);
+    const changeSource = args.actorKind;
     const aiRunId =
       changeSource === "ai"
         ? aiClaims.find((claim) => claim.runId)?.runId
@@ -369,7 +571,8 @@ export const append = internalMutation({
       changeSource === "ai" &&
       (!aiRunId ||
         aiOperationIds.length === 0 ||
-        aiClaims.some((claim) => claim.runId !== aiRunId))
+        aiClaims.some((claim) => claim.runId !== aiRunId) ||
+        uncovered.length > 0)
     )
       throw new Error("COLLABORATION_AI_ATTRIBUTION_INVALID");
     const beforeSnapshot = {

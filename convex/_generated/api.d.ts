@@ -26,6 +26,7 @@ import type * as calendar from "../calendar.js";
 import type * as calendarShared from "../calendarShared.js";
 import type * as changeGroups from "../changeGroups.js";
 import type * as collaboration from "../collaboration.js";
+import type * as collaborationClaimAuthorization from "../collaborationClaimAuthorization.js";
 import type * as collaborationGatewayBridge from "../collaborationGatewayBridge.js";
 import type * as collaborationGatewayStore from "../collaborationGatewayStore.js";
 import type * as crons from "../crons.js";
@@ -85,6 +86,7 @@ declare const fullApi: ApiFromModules<{
   calendarShared: typeof calendarShared;
   changeGroups: typeof changeGroups;
   collaboration: typeof collaboration;
+  collaborationClaimAuthorization: typeof collaborationClaimAuthorization;
   collaborationGatewayBridge: typeof collaborationGatewayBridge;
   collaborationGatewayStore: typeof collaborationGatewayStore;
   crons: typeof crons;

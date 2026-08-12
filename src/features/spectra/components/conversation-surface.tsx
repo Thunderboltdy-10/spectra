@@ -76,11 +76,11 @@ function operationLabel(
     : null;
   const proposed = operation.status === "proposed";
   if (operation.type === "artifact.create")
-    return `${proposed ? "Create" : "Created"} ${title ?? "artifact"}`;
+    return `${proposed ? "Create" : "Created"} ${title ?? "work"}`;
   if (operation.type === "artifact.update")
-    return `${proposed ? "Update" : "Updated"} ${target ?? "focused artifact"}`;
+    return `${proposed ? "Update" : "Updated"} ${target ?? "focused work"}`;
   if (operation.type === "artifact.link")
-    return proposed ? "Link the new artifacts" : "Linked the new artifacts";
+    return proposed ? "Link the new work" : "Linked the new work";
   if (operation.type === "workspaceItem.add")
     return proposed ? "Add to workspace" : "Added to workspace";
   if (operation.type === "workspaceItem.hide")
@@ -306,7 +306,7 @@ function ArtifactConflictResolution({
             ? "Your merged proposal is queued to apply."
             : resolution === "cancel"
               ? "The proposal was cancelled."
-              : "The current artifact was kept.",
+              : "The current work was kept.",
       );
     } catch (cause) {
       setError(
@@ -322,7 +322,7 @@ function ArtifactConflictResolution({
   return (
     <section
       className="mt-2 overflow-hidden rounded-[9px] border border-[color-mix(in_oklab,#d88922_24%,var(--border-default))] bg-[color-mix(in_oklab,#d88922_4%,var(--bg-elevated))]"
-      aria-label="Resolve artifact edit conflict"
+      aria-label="Resolve work edit conflict"
     >
       <header className="flex items-start gap-2.5 border-b border-[var(--border-subtle)] px-3 py-2.5">
         <GitCompareArrows className="mt-0.5 h-4 w-4 shrink-0 text-[#b46d15]" />
@@ -386,7 +386,7 @@ function ArtifactConflictResolution({
               </div>
               <p className="mt-0.5 text-micro leading-4 text-[var(--text-tertiary)]">
                 Adjust only the proposed fields you want Spectra to apply. The
-                operation is validated again before it can touch the artifact.
+                operation is validated again before it can touch the work.
               </p>
             </div>
           </div>
@@ -394,7 +394,7 @@ function ArtifactConflictResolution({
             value={mergeDraft}
             onChange={(event) => setMergeDraft(event.target.value)}
             spellCheck={false}
-            aria-label="Merged artifact operation"
+            aria-label="Merged work operation"
             className="min-h-44 w-full resize-y rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2.5 font-mono text-micro leading-4 text-[var(--text-primary)] outline-none transition focus:border-[var(--accent-cyan)] focus:ring-2 focus:ring-[color-mix(in_oklab,var(--accent-cyan)_15%,transparent)]"
           />
         </div>
@@ -1551,8 +1551,8 @@ function ArtifactResult({
             onOpen?.(artifact._id);
           }}
           className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
-          aria-label="Open artifact"
-          title="Open artifact"
+          aria-label="Open work"
+          title="Open work"
         >
           <ExternalLink className="h-3.5 w-3.5" />
         </button>
@@ -1594,7 +1594,7 @@ function ArtifactResult({
                     toast.error(
                       error instanceof Error
                         ? error.message
-                        : "Could not add artifact.",
+                        : "Could not add work.",
                     ),
                   )
                   .finally(() => setBusy(false));

@@ -1778,7 +1778,7 @@ export function CodeStudio({
               : result.report.warnings.length
                 ? "adapted"
                 : "exact",
-            message: `${result.report.imported} source file${result.report.imported === 1 ? "" : "s"} entered the live artifact.`,
+            message: `${result.report.imported} source file${result.report.imported === 1 ? "" : "s"} entered the live work.`,
           },
           ...(result.assets.length
             ? [
@@ -3897,7 +3897,7 @@ function CodeSettings({
       <nav className="code-settings-nav" aria-label="Code settings sections">
         <div className="code-settings-nav-heading">
           <span>Configuration</span>
-          <strong>Code artifact</strong>
+          <strong>Code work</strong>
         </div>
         {settingsSections.map((section) => {
           const Icon = section.icon;
@@ -4885,7 +4885,7 @@ function CodeSettings({
               aria-label="Artifact to bind"
               onChange={(event) => setBindingArtifactId(event.target.value)}
             >
-              <option value="">Choose an accessible artifact…</option>
+              <option value="">Choose accessible work…</option>
               {availableArtifacts.map((artifact) => (
                 <option key={artifact._id} value={artifact._id}>
                   {artifact.title} ·{" "}
@@ -5139,7 +5139,7 @@ function CodeSettings({
       {pendingAssetRevocation ? (
         <ConfirmDialog
           title="Revoke this asset everywhere?"
-          detail={`${pendingAssetRevocation.label} will stop loading in the current artifact, retained history, and every published or embedded build. This security action cannot be undone.`}
+          detail={`${pendingAssetRevocation.label} will stop loading in the current work, retained history, and every published or embedded build. This security action cannot be undone.`}
           confirmLabel={
             revokingAssetId === pendingAssetRevocation.assetId
               ? "Revoking..."

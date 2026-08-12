@@ -798,7 +798,7 @@ export function GlobalSearch({
             : "flex h-9 items-center gap-2 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
         }
         title="Search Spectra"
-        aria-label="Search artifacts and workspaces"
+        aria-label="Search work and workspaces"
         aria-expanded={open}
         aria-controls="spectra-global-search-dialog"
       >

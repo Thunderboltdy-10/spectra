@@ -10,7 +10,6 @@ import {
   signCollaborationSession,
 } from "@/lib/collaboration-token";
 import {
-  planArtifactYjsMutation,
   readArtifactYjsDocument,
   snapshotArtifactRegions,
   type ArtifactLiveValue,
@@ -254,8 +253,7 @@ async function createAiRealtimeProvider(params: {
     return provider;
   }
 
-  let rawProvider!: HocuspocusProvider;
-  rawProvider = new HocuspocusProvider({
+  const rawProvider = new HocuspocusProvider({
     url: session.url,
     WebSocketPolyfill: WebSocket,
     name: session.documentName,
@@ -279,7 +277,7 @@ async function createAiRealtimeProvider(params: {
             `AI_ARTIFACT_PERMISSION_REVOKED: ${event.reason || "Access was removed."}`,
           ),
         );
-      else if (!rawProvider.synced)
+      else if (!rawProvider.synced || rawProvider.hasUnsyncedChanges)
         observer?.onError?.(
           new Error(
             `AI_ARTIFACT_CONNECTION_CLOSED: The collaboration gateway closed before synchronization (${event.code}${event.reason ? `: ${event.reason}` : ""}).`,
@@ -1211,7 +1209,7 @@ async function synchronizeMutation(params: {
     params.provider.flushPendingUpdates();
     await waitUntil(
       () => params.provider.synced && !params.provider.hasUnsyncedChanges,
-      params.getConnectionError,
+      () => abortError(params.signal) ?? params.getConnectionError(),
       30_000,
       "AI_ARTIFACT_SYNC_TIMEOUT: The live edit was not durably acknowledged.",
     );
@@ -1405,7 +1403,7 @@ export async function applyAiArtifactMutation(params: {
   try {
     await waitUntil(
       () => provider.synced && provider.isAuthenticated,
-      () => connectionError,
+      () => abortError(params.signal) ?? connectionError,
       12_000,
       () =>
         `AI_ARTIFACT_CONNECT_TIMEOUT: The live artifact could not be synchronized within 12s (status=${connectionStatus}, opened=${opened}, authenticated=${authenticated || provider.isAuthenticated}, syncEvent=${syncEventReceived}, synced=${provider.synced}, elapsedMs=${Date.now() - connectStartedAt}). Fast-fail so pending shells can be discarded instead of pulsing indefinitely.`,
@@ -1534,7 +1532,7 @@ export async function applyAiArtifactMutation(params: {
         );
       }
       return {
-        title: desired.title.trim() || "Untitled artifact",
+        title: desired.title.trim() || "Untitled work",
         ...(desired.summary?.trim() ? { summary: desired.summary.trim() } : {}),
         tags: [
           ...new Set(desired.tags.map((tag) => tag.trim()).filter(Boolean)),

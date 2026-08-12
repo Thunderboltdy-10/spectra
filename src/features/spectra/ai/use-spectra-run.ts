@@ -25,6 +25,7 @@ import { publishArtifactAiActivity } from "../collaboration/artifact-ai-activity
  */
 const runFeedArtifacts = new Map<string, Set<string>>();
 const RUN_FEED_SOURCE = "run-feed";
+const RUN_BEGIN_TIMEOUT_MS = 90_000;
 
 function clearRunFeedActivity(runId: string): void {
   const artifactIds = runFeedArtifacts.get(runId);
@@ -880,7 +881,7 @@ export function useSpectraRun({
     (
       prompt: string,
       attachments: CommandAttachment[] = [],
-      options?: { threadId?: string },
+      options?: { threadId?: string | null },
     ): Promise<boolean> => {
       const clean = prompt.trim();
       if (!clean) return Promise.resolve(false);
@@ -914,8 +915,10 @@ export function useSpectraRun({
           actions: [],
           updatedAt: Date.now(),
         });
-        // If the route never acknowledges the run (gateway hang / stuck worker),
-        // fail closed so QC is not glued on "Starting…" forever.
+        // A first development request can include a cold route compilation on
+        // constrained hardware. Keep this guard generous enough that a healthy
+        // run is never misreported as an infrastructure failure while still
+        // preventing an unbounded optimistic "Starting" state.
         const beginTimeout = window.setTimeout(() => {
           if (beginSettled) return;
           for (const [controller, requestRunId] of activeRequests.current) {
@@ -931,10 +934,10 @@ export function useSpectraRun({
             current?.id === exchangeId ? null : current,
           );
           toast.error(
-            "Spectra could not start that run. Check the collaboration gateway and try again.",
+            "Spectra is still preparing this run. Try again; your work and conversation are safe.",
           );
           settleBegin(false);
-        }, 20_000);
+        }, RUN_BEGIN_TIMEOUT_MS);
         void consume(
           {
             action: "run",
@@ -943,7 +946,14 @@ export function useSpectraRun({
             surface,
             workspaceId,
             artifactId,
-            threadId: options?.threadId ?? durableThreadId.current,
+            // `null` is an explicit new-conversation boundary. It must not fall
+            // through to the last durable thread ref: a user can deselect an
+            // open thread and submit before React's synchronization effect has
+            // run, and that message still belongs to a fresh thread.
+            threadId:
+              options?.threadId === null
+                ? undefined
+                : (options?.threadId ?? durableThreadId.current),
             focusMode,
             selectedArtifactIds,
             explicitContextObjects,
@@ -1345,6 +1355,8 @@ export function useSpectraRun({
       cards,
       submitting,
       liveExchange,
+      activeRunId:
+        liveExchange?.runId ?? observedContinuationRunId ?? undefined,
       run,
       stop,
       retry,
@@ -1361,6 +1373,7 @@ export function useSpectraRun({
       closeDetails,
       keepAsThread,
       liveExchange,
+      observedContinuationRunId,
       onCardAction,
       openDetails,
       retry,

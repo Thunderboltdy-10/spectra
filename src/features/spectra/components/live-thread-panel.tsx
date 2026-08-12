@@ -37,6 +37,7 @@ export function LiveThreadPanel({
       width={width}
       onWidthChange={onWidthChange}
       ariaLabel="Live thread"
+      cssWidthVariable="--spectra-live-thread-width"
     >
       <div className="flex h-full min-h-0 flex-col bg-[var(--bg-primary)]">
         <header className="flex h-14 shrink-0 items-center gap-3 border-b border-[var(--border-default)] px-4">

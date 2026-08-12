@@ -138,7 +138,10 @@ import {
   type RunItem,
   type RunItemPayload,
 } from "@/features/spectra/actions/protocol";
-import { RunStateMachine, type RunProtocolState } from "@/features/spectra/runs/state";
+import {
+  RunStateMachine,
+  type RunProtocolState,
+} from "@/features/spectra/runs/state";
 
 export const runtime = "nodejs";
 
@@ -234,16 +237,18 @@ function protocolItemForLegacyEvent(
     return { type: "patch", patch: event };
   if (type === "confirmation_required")
     return { type: "approval", request: event };
-  if (type === "choice_required")
-    return { type: "question", request: event };
+  if (type === "choice_required") return { type: "question", request: event };
   if (type === "waiting" || type === "interrupted")
     return { type: "wait", reason: event };
   if (type === "final") return { type: "final", result: event };
-  if (type === "error")
-    return { type: "error", error: event };
+  if (type === "error") return { type: "error", error: event };
   return {
     type: "progress",
-    summary: String(event.message ?? event.title ?? type.replaceAll("_", " ")).slice(0, 240) || "Working",
+    summary:
+      String(event.message ?? event.title ?? type.replaceAll("_", " ")).slice(
+        0,
+        240,
+      ) || "Working",
   };
 }
 
@@ -251,46 +256,8 @@ function legacyEventForRunItem(
   item: RunItem,
   compatibility: Record<string, unknown>,
 ) {
-  const legacyType = String(compatibility.type ?? "status");
-  let projection: Record<string, unknown>;
-  switch (item.type) {
-    case "text_delta":
-      projection = { type: "text_delta", delta: item.text };
-      break;
-    case "progress":
-      projection = {
-        type: legacyType === "status" ? "status" : "progress",
-        message: item.summary,
-        ...(item.detail ? { detail: item.detail } : {}),
-      };
-      break;
-    case "action_start":
-      projection = { type: "operation_preview" };
-      break;
-    case "patch":
-      projection = { type: legacyType === "text_replace" ? "text_replace" : "artifact_patch" };
-      break;
-    case "question":
-      projection = { type: "choice_required" };
-      break;
-    case "approval":
-      projection = { type: "confirmation_required" };
-      break;
-    case "wait":
-      projection = { type: legacyType === "interrupted" ? "interrupted" : "waiting" };
-      break;
-    case "final":
-      projection = { type: "final" };
-      break;
-    case "error":
-      projection = { type: "error" };
-      break;
-    default:
-      projection = { type: legacyType };
-  }
   return {
     ...compatibility,
-    ...projection,
     protocolVersion: item.protocolVersion,
     runItem: item,
   };
@@ -4710,12 +4677,17 @@ async function buildContext(
     currentView: body.currentView,
     semanticTargets: explicitContextObjects.flatMap((item) =>
       typeof item.semanticTargetId === "string"
-        ? [{
-            id: item.semanticTargetId,
-            label: typeof item.label === "string" ? item.label : undefined,
-            summary: typeof item.contextSummary === "string" ? item.contextSummary : undefined,
-            anchor: item.semanticAnchor,
-          }]
+        ? [
+            {
+              id: item.semanticTargetId,
+              label: typeof item.label === "string" ? item.label : undefined,
+              summary:
+                typeof item.contextSummary === "string"
+                  ? item.contextSummary
+                  : undefined,
+              anchor: item.semanticAnchor,
+            },
+          ]
         : [],
     ),
     linksByArtifact,
@@ -5807,19 +5779,19 @@ const SINGLE_CREATION_TOOL_NAMES = {
 const COMPACT_COORDINATION_TOOL = spectraToolRegistry.providerTool(
   "submit_plan",
   {
-      type: "object",
-      additionalProperties: false,
-      required: ["plan"],
-      properties: {
-        plan: {
-          type: "object",
-          // The canonical Zod, ownership, intent, and policy validators parse
-          // every nested operation before execution. Keeping the transport
-          // envelope open avoids repeating the enormous artifact-content union
-          // for a coordinator that is explicitly forbidden from creating one.
-          additionalProperties: true,
-        },
+    type: "object",
+    additionalProperties: false,
+    required: ["plan"],
+    properties: {
+      plan: {
+        type: "object",
+        // The canonical Zod, ownership, intent, and policy validators parse
+        // every nested operation before execution. Keeping the transport
+        // envelope open avoids repeating the enormous artifact-content union
+        // for a coordinator that is explicitly forbidden from creating one.
+        additionalProperties: true,
       },
+    },
   },
 );
 
@@ -5829,50 +5801,50 @@ function singleCreationAgentTool(
   return spectraToolRegistry.providerTool(
     SINGLE_CREATION_TOOL_NAMES[blueprintKey],
     {
-        type: "object",
-        additionalProperties: false,
-        required: [
-          "title",
-          "workSummary",
-          "summary",
-          "content",
-          "tags",
-          "conversationTitle",
-          "conversationSummary",
-          "finalResponse",
-        ],
-        properties: {
-          title: { type: "string", minLength: 1, maxLength: 240 },
-          workSummary: {
-            type: "string",
-            minLength: 1,
-            maxLength: 120,
-            description:
-              "A short present-tense student-facing description of the specific content being built, without implementation language.",
-          },
-          summary: {
-            anyOf: [{ type: "string", maxLength: 2_000 }, { type: "null" }],
-          },
-          content: creationToolContentJsonSchema(blueprintKey),
-          tags: {
-            type: "array",
-            maxItems: 16,
-            items: { type: "string", minLength: 1, maxLength: 48 },
-          },
-          conversationTitle: {
-            anyOf: [
-              { type: "string", minLength: 1, maxLength: 64 },
-              { type: "null" },
-            ],
-          },
-          conversationSummary: {
-            anyOf: [
-              { type: "string", minLength: 1, maxLength: 320 },
-              { type: "null" },
-            ],
-          },
-          finalResponse: { type: "string", minLength: 1, maxLength: 4_000 },
+      type: "object",
+      additionalProperties: false,
+      required: [
+        "title",
+        "workSummary",
+        "summary",
+        "content",
+        "tags",
+        "conversationTitle",
+        "conversationSummary",
+        "finalResponse",
+      ],
+      properties: {
+        title: { type: "string", minLength: 1, maxLength: 240 },
+        workSummary: {
+          type: "string",
+          minLength: 1,
+          maxLength: 120,
+          description:
+            "A short present-tense student-facing description of the specific content being built, without implementation language.",
         },
+        summary: {
+          anyOf: [{ type: "string", maxLength: 2_000 }, { type: "null" }],
+        },
+        content: creationToolContentJsonSchema(blueprintKey),
+        tags: {
+          type: "array",
+          maxItems: 16,
+          items: { type: "string", minLength: 1, maxLength: 48 },
+        },
+        conversationTitle: {
+          anyOf: [
+            { type: "string", minLength: 1, maxLength: 64 },
+            { type: "null" },
+          ],
+        },
+        conversationSummary: {
+          anyOf: [
+            { type: "string", minLength: 1, maxLength: 320 },
+            { type: "null" },
+          ],
+        },
+        finalResponse: { type: "string", minLength: 1, maxLength: 4_000 },
+      },
     },
   );
 }
@@ -6410,9 +6382,7 @@ async function executeAgentReadTool(
       if (search.length < 3)
         return { ok: false, code: "web_search_query_required" };
       const mode =
-        args.mode === "deep" || args.mode === "verified"
-          ? args.mode
-          : "quick";
+        args.mode === "deep" || args.mode === "verified" ? args.mode : "quick";
       const requestedSearches = rows(args.searches)
         .flatMap((entry) =>
           typeof entry.purpose === "string" && typeof entry.query === "string"
@@ -6436,7 +6406,10 @@ async function executeAgentReadTool(
               ],
         signal: executionSignal,
       });
-      const evidence = await buildResearchEvidence(research.results, executionSignal);
+      const evidence = await buildResearchEvidence(
+        research.results,
+        executionSignal,
+      );
       return {
         ok: true,
         warning:
@@ -6469,23 +6442,23 @@ async function executeAgentReadTool(
       };
     }
     if (call.name === "schedule_calendar_task") {
-      const item = await mutate<Record<string, unknown>, Record<string, unknown>>(
-        "calendar:scheduleTask",
-        {
-          taskItemId:
-            typeof args.taskItemId === "string" ? args.taskItemId : undefined,
-          planArtifactId:
-            typeof args.planArtifactId === "string"
-              ? args.planArtifactId
-              : undefined,
-          planTaskId:
-            typeof args.planTaskId === "string" ? args.planTaskId : undefined,
-          startAt: Number(args.startAt),
-          endAt: Number(args.endAt),
-          timezone: typeof args.timezone === "string" ? args.timezone : "UTC",
-          actorKind: "ai",
-        },
-      );
+      const item = await mutate<
+        Record<string, unknown>,
+        Record<string, unknown>
+      >("calendar:scheduleTask", {
+        taskItemId:
+          typeof args.taskItemId === "string" ? args.taskItemId : undefined,
+        planArtifactId:
+          typeof args.planArtifactId === "string"
+            ? args.planArtifactId
+            : undefined,
+        planTaskId:
+          typeof args.planTaskId === "string" ? args.planTaskId : undefined,
+        startAt: Number(args.startAt),
+        endAt: Number(args.endAt),
+        timezone: typeof args.timezone === "string" ? args.timezone : "UTC",
+        actorKind: "ai",
+      });
       if (
         item.kind !== "scheduled_work_block" ||
         item.startAt !== Number(args.startAt) ||
@@ -6495,15 +6468,15 @@ async function executeAgentReadTool(
       return { ok: true, item };
     }
     if (call.name === "move_calendar_block") {
-      const item = await mutate<Record<string, unknown>, Record<string, unknown>>(
-        "calendar:moveWorkBlock",
-        {
-          itemId: String(args.itemId ?? ""),
-          startAt: Number(args.startAt),
-          endAt: Number(args.endAt),
-          expectedRevision: Number(args.expectedRevision),
-        },
-      );
+      const item = await mutate<
+        Record<string, unknown>,
+        Record<string, unknown>
+      >("calendar:moveWorkBlock", {
+        itemId: String(args.itemId ?? ""),
+        startAt: Number(args.startAt),
+        endAt: Number(args.endAt),
+        expectedRevision: Number(args.expectedRevision),
+      });
       if (
         item.kind !== "scheduled_work_block" ||
         item.startAt !== Number(args.startAt) ||
@@ -6513,14 +6486,14 @@ async function executeAgentReadTool(
       return { ok: true, item };
     }
     if (call.name === "resize_calendar_block") {
-      const item = await mutate<Record<string, unknown>, Record<string, unknown>>(
-        "calendar:resizeWorkBlock",
-        {
-          itemId: String(args.itemId ?? ""),
-          endAt: Number(args.endAt),
-          expectedRevision: Number(args.expectedRevision),
-        },
-      );
+      const item = await mutate<
+        Record<string, unknown>,
+        Record<string, unknown>
+      >("calendar:resizeWorkBlock", {
+        itemId: String(args.itemId ?? ""),
+        endAt: Number(args.endAt),
+        expectedRevision: Number(args.expectedRevision),
+      });
       if (
         item.kind !== "scheduled_work_block" ||
         item.endAt !== Number(args.endAt)
@@ -6539,7 +6512,8 @@ async function executeAgentReadTool(
     {
       signal: scope?.signal,
       executeRegisteredTool: async (_toolId, _input, executionContext) => {
-        if (executionContext.signal?.aborted) throw executionContext.signal.reason;
+        if (executionContext.signal?.aborted)
+          throw executionContext.signal.reason;
         return run(executionContext.signal);
       },
     },
@@ -11382,8 +11356,7 @@ async function runAttempt(
         finalSummary: plan.finalResponse,
         resultTitle: "Done",
         resultSummary: plan.finalResponse,
-        resultVariant:
-          provenanceArtifactIds.length > 0 ? "artifact" : "status",
+        resultVariant: provenanceArtifactIds.length > 0 ? "artifact" : "status",
         resultActions: actions,
         provenance: mergedProvenance,
         modelUsed: modelResult.model,
@@ -11598,8 +11571,7 @@ function verifyScheduledCallback(request: NextRequest, rawBody: string) {
     .digest("base64url");
   const timestampText =
     request.headers.get("x-spectra-scheduler-timestamp") ?? "";
-  const signature =
-    request.headers.get("x-spectra-scheduler-signature") ?? "";
+  const signature = request.headers.get("x-spectra-scheduler-signature") ?? "";
   const timestamp = Number(timestampText);
   if (
     !Number.isSafeInteger(timestamp) ||
@@ -12431,7 +12403,32 @@ export async function POST(request: NextRequest) {
         executionId: expectedExecutionId,
       });
     } catch (error) {
-      return new Response(publicError(error), { status: 409 });
+      const internalMessage =
+        error instanceof Error ? error.message : String(error);
+      const message = publicError(error);
+      if (!internalMessage.includes("currently committing an operation"))
+        return new Response(message, { status: 409 });
+
+      // Older Convex deployments rejected cancellation while an operation was
+      // marked `executing`, which leaves a stalled operation impossible to
+      // stop. Persist the terminal run state through the existing transition
+      // mutation; the worker heartbeat then aborts the operation at its next
+      // safe boundary and the cleanup below removes provisional state.
+      await mutate("spectraRuns:updateStatus", {
+        actorClerkId: actor.clerkId,
+        runId,
+        executionId: expectedExecutionId,
+        status: "cancelled",
+        resultTitle: "Stopped",
+        resultSummary: "Stopped by you. Any completed work remains available.",
+        recoveryState: "partial",
+        retryable: false,
+        preservedPartial: true,
+      });
+      stopped = {
+        alreadyStopped: false,
+        executionId: expectedExecutionId,
+      };
     }
     await mutate("spectraArtifacts:discardPendingForRun", {
       actorClerkId: actor.clerkId,
@@ -12569,8 +12566,7 @@ export async function POST(request: NextRequest) {
           artifactId: reset.artifactId,
           focusMode: reset.contextSnapshot?.focusMode,
           selectedArtifactIds: reset.contextSnapshot?.selectedObjectIds,
-          explicitContextObjects:
-            reset.contextSnapshot?.explicitContextObjects,
+          explicitContextObjects: reset.contextSnapshot?.explicitContextObjects,
           currentView: reset.contextSnapshot?.currentView,
           agentId:
             state.run.selectedAgentId ??
@@ -12675,13 +12671,19 @@ export async function POST(request: NextRequest) {
         status: 409,
       });
     if (
-      !["queued", "running", "awaiting_confirmation", "awaiting_resolution"].includes(
-        state.run.status,
-      )
+      ![
+        "queued",
+        "running",
+        "awaiting_confirmation",
+        "awaiting_resolution",
+      ].includes(state.run.status)
     )
-      return new Response("This run has already reached a safe stopping point.", {
-        status: 409,
-      });
+      return new Response(
+        "This run has already reached a safe stopping point.",
+        {
+          status: 409,
+        },
+      );
     const steerId = crypto.randomUUID();
     await mutate("spectraRuns:appendEvent", {
       actorClerkId: actor.clerkId,
@@ -12830,14 +12832,14 @@ export async function POST(request: NextRequest) {
     evaluatePlanPolicy(operations, { intent });
     let confirmation: { resultCardId?: string };
     try {
-      confirmation = await mutate<
-        unknown & object,
-        { resultCardId?: string }
-      >("spectraRuns:claimConfirmation", {
-        actorClerkId: actor.clerkId,
-        runId,
-        executionId: approvalExecutionId,
-      });
+      confirmation = await mutate<unknown & object, { resultCardId?: string }>(
+        "spectraRuns:claimConfirmation",
+        {
+          actorClerkId: actor.clerkId,
+          runId,
+          executionId: approvalExecutionId,
+        },
+      );
       await mutate("spectraRuns:appendEvent", {
         actorClerkId: actor.clerkId,
         runId,
@@ -12854,15 +12856,13 @@ export async function POST(request: NextRequest) {
     return ndjson(async (emit) => {
       emit({ type: "approval_accepted", runId });
       emit({ type: "result_card", runId, card: streamCard(card) });
-      await resumeOperationsAttempt(
-        {
-          actorClerkId: actor.clerkId,
-          runId,
-          resultCardId: confirmation.resultCardId!,
-          executionId: approvalExecutionId,
-          workerId: `event-confirm:${crypto.randomUUID()}`,
-        },
-      );
+      await resumeOperationsAttempt({
+        actorClerkId: actor.clerkId,
+        runId,
+        resultCardId: confirmation.resultCardId!,
+        executionId: approvalExecutionId,
+        workerId: `event-confirm:${crypto.randomUUID()}`,
+      });
     });
   }
 

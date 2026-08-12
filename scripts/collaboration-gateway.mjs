@@ -6,6 +6,12 @@ import { jwtVerify } from "jose";
 import * as Y from "yjs";
 import * as decoding from "lib0/decoding";
 import { messageYjsSyncStep2, messageYjsUpdate } from "y-protocols/sync";
+import {
+  initializeNativeArtifactDocument,
+  isNativeArtifactDocument,
+  nativeArtifactProjection,
+  NATIVE_PROJECTION_REGION,
+} from "./collaboration-native-projection.mjs";
 
 const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL || process.env.CONVEX_URL;
 const tokenSecret = process.env.SPECTRA_COLLAB_TOKEN_SECRET;
@@ -89,6 +95,7 @@ function sessionClaims(payload, documentName) {
   if (
     payload.kind !== "spectra_collaboration" ||
     payload.documentName !== documentName ||
+    (payload.actorKind !== "human" && payload.actorKind !== "ai") ||
     typeof payload.policyVersion !== "number" ||
     typeof payload.schemaVersion !== "number" ||
     typeof payload.exp !== "number"
@@ -279,7 +286,19 @@ function assertSharedTimetableProjection(content) {
   }
 }
 
-function artifactProjection(document) {
+function artifactProjection(document, fallbackSchemaVersion) {
+  const nativeProjection = nativeArtifactProjection(
+    document,
+    fallbackSchemaVersion,
+  );
+  if (nativeProjection) {
+    if (nativeProjection.typeKey === "timetable")
+      assertSharedTimetableProjection(nativeProjection.content);
+    const projection = JSON.stringify(nativeProjection);
+    if (projection.length > 900_000)
+      throw new Error("COLLABORATION_PROJECTION_SIZE");
+    return projection;
+  }
   const metadata = document.getMap(META_MAP);
   if (metadata.get("initialized") !== true) return null;
   const rootTemplate = metadata.get("rootTemplate");
@@ -427,29 +446,39 @@ const server = new Server({
   },
 
   async onAuthenticate({ token, documentName, connectionConfig }) {
-    const verified = await jwtVerify(token, jwtKey, {
-      issuer: "spectra",
-      audience: "spectra-collaboration-gateway",
-      algorithms: ["HS256"],
-    });
-    const claims = sessionClaims(verified.payload, documentName);
-    const context = {
-      artifactId: claims.artifactId,
-      roomId: claims.roomId,
-      partitionKey: claims.partitionKey,
-      accountId: claims.accountId,
-      schoolId: claims.schoolId,
-      clientId: claims.clientId,
-      displayName: claims.displayName,
-      policyVersion: claims.policyVersion,
-      schemaVersion: claims.schemaVersion,
-      expiresAt: claims.exp,
-      canModify: claims.level === "modify",
-      authorizationCheckedAt: 0,
-    };
-    await reauthorize(context);
-    connectionConfig.readOnly = !context.canModify;
-    return context;
+    try {
+      const verified = await jwtVerify(token, jwtKey, {
+        issuer: "spectra",
+        audience: "spectra-collaboration-gateway",
+        algorithms: ["HS256"],
+      });
+      const claims = sessionClaims(verified.payload, documentName);
+      const context = {
+        artifactId: claims.artifactId,
+        roomId: claims.roomId,
+        partitionKey: claims.partitionKey,
+        accountId: claims.accountId,
+        schoolId: claims.schoolId,
+        clientId: claims.clientId,
+        displayName: claims.displayName,
+        actorKind: claims.actorKind,
+        policyVersion: claims.policyVersion,
+        schemaVersion: claims.schemaVersion,
+        expiresAt: claims.exp,
+        canModify: claims.level === "modify",
+        authorizationCheckedAt: 0,
+      };
+      await reauthorize(context);
+      connectionConfig.readOnly = !context.canModify;
+      return context;
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Unknown authentication failure";
+      process.stderr.write(
+        `Spectra collaboration authentication failed: ${message}\n`,
+      );
+      throw error;
+    }
   },
 
   async connected({ connection }) {
@@ -457,7 +486,13 @@ const server = new Server({
     connection.onClose(() => activeConnections.delete(connection));
   },
 
-  async beforeHandleMessage({ context, document, update: frame, socketId }) {
+  async beforeHandleMessage({
+    context,
+    document,
+    update: frame,
+    socketId,
+    connection,
+  }) {
     await reauthorize(context);
     const documentUpdate = extractYjsUpdate(frame);
     if (!documentUpdate || documentUpdate.byteLength === 0) return;
@@ -471,6 +506,7 @@ const server = new Server({
       if (documentUpdate.byteLength > 256 * 1024)
         throw new Error("COLLABORATION_GATEWAY_UPDATE_SIZE");
       const before = artifactModelState(document);
+      const nativeBefore = isNativeArtifactDocument(document);
       const baseStateVectorHash = createHash("sha256")
         .update(Y.encodeStateVector(document))
         .digest("base64url");
@@ -478,8 +514,11 @@ const server = new Server({
       try {
         Y.applyUpdate(scratch, Y.encodeStateAsUpdate(document));
         Y.applyUpdate(scratch, documentUpdate);
-        const after = artifactModelState(scratch);
-        const regionIds = changedArtifactRegions(before, after);
+        const nativeAfter = isNativeArtifactDocument(scratch);
+        const after = nativeAfter ? null : artifactModelState(scratch);
+        const regionIds = nativeAfter
+          ? [NATIVE_PROJECTION_REGION]
+          : changedArtifactRegions(before, after);
         if (regionIds.length === 0) return;
         if (!context.canModify) throw new Error("COLLABORATION_READ_ONLY");
         if (regionIds.length > 128)
@@ -487,10 +526,19 @@ const server = new Server({
         const stateVectorHash = createHash("sha256")
           .update(Y.encodeStateVector(scratch))
           .digest("base64url");
+        // Yjs sync step two legitimately carries the two-byte empty update
+        // when the peer has nothing the room is missing. Treating that frame
+        // as a semantic write re-projects an unchanged native document and can
+        // manufacture a false structural diff during normalization. It is a
+        // handshake acknowledgement, not an authored mutation.
+        if (stateVectorHash === baseStateVectorHash) return;
         const updateHash = createHash("sha256")
           .update(documentUpdate)
           .digest("base64url");
-        const projectionJson = artifactProjection(scratch);
+        const projectionJson = artifactProjection(
+          scratch,
+          context.schemaVersion,
+        );
         // Persist and authorize the exact semantic mutation before Hocuspocus is
         // allowed to apply or broadcast it. A rejected claim can therefore never
         // contaminate the shared in-memory document.
@@ -498,6 +546,7 @@ const server = new Server({
           artifactId: context.artifactId,
           partitionKey: context.partitionKey,
           accountId: context.accountId,
+          actorKind: context.actorKind,
           clientId: context.clientId,
           policyVersion: context.policyVersion,
           idempotencyKey: `${context.clientId}:${updateHash}`,
@@ -505,6 +554,7 @@ const server = new Server({
           baseStateVectorHash,
           stateVectorHash,
           regionIds,
+          nativeInitialization: nativeAfter && !nativeBefore,
           projectionJson,
           projectionHash: projectionJson
             ? createHash("sha256").update(projectionJson).digest("base64url")
@@ -515,6 +565,17 @@ const server = new Server({
       }
     } catch (error) {
       releaseDocumentMessage(socketId);
+      const reason =
+        error instanceof Error ? error.message : "COLLABORATION_UPDATE_REJECTED";
+      process.stderr.write(`[beforeHandleMessage] ${reason}\n`);
+      // A rejected update leaves this peer's local Y.Doc ahead of the canonical
+      // room. Force a canonical reconnect instead of letting it advertise a
+      // false synchronized state until a generic client timeout expires.
+      try {
+        connection.webSocket.close(4409, "COLLABORATION_UPDATE_REJECTED");
+      } catch {
+        // The peer may already have disconnected while authorization ran.
+      }
       throw error;
     }
   },
@@ -622,7 +683,43 @@ const server = new Server({
       );
     for (const entry of stored?.updates ?? [])
       updates.push(new Uint8Array(Buffer.from(entry.update, "base64")));
-    return updates.length > 0 ? Y.mergeUpdates(updates) : new Y.Doc();
+    if (updates.length > 0) {
+      const storedDocument = new Y.Doc();
+      Y.applyUpdate(storedDocument, Y.mergeUpdates(updates));
+      if (isNativeArtifactDocument(storedDocument))
+        return Y.encodeStateAsUpdate(storedDocument);
+    }
+    const document = new Y.Doc();
+    if (stored?.initialProjection) {
+      if (!initializeNativeArtifactDocument(document, stored.initialProjection))
+        throw new Error("COLLABORATION_NATIVE_BOOTSTRAP_UNSUPPORTED");
+      const update = Y.encodeStateAsUpdate(document);
+      const stateVectorHash = createHash("sha256")
+        .update(Y.encodeStateVector(document))
+        .digest("base64url");
+      const projectionJson = artifactProjection(
+        document,
+        context.schemaVersion,
+      );
+      if (!projectionJson)
+        throw new Error("COLLABORATION_NATIVE_BOOTSTRAP_PROJECTION_MISSING");
+      await bridge("bootstrap", {
+        artifactId: context.artifactId,
+        partitionKey: context.partitionKey,
+        accountId: context.accountId,
+        clientId: context.clientId,
+        policyVersion: context.policyVersion,
+        artifactUpdatedAt: stored.initialProjection.artifactUpdatedAt,
+        expectedNextSequence: stored.nextSequence,
+        update: Buffer.from(update).toString("base64"),
+        stateVectorHash,
+        projectionJson,
+        projectionHash: createHash("sha256")
+          .update(projectionJson)
+          .digest("base64url"),
+      });
+    }
+    return document;
   },
 
   async onStoreDocument({ document, lastContext }) {

@@ -482,7 +482,7 @@ export function ChatShell() {
         continuingThread
           ? `Continue ${title}…`
           : selectedContextIds.size
-            ? `Ask with ${selectedContextIds.size} selected artifacts…`
+            ? `Ask with ${selectedContextIds.size} selected work items…`
             : activeWorkspace
               ? `Ask with ${activeWorkspace.title} context…`
               : focusedArtifact

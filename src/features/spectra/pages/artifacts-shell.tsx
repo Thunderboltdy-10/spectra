@@ -47,6 +47,7 @@ import {
 } from "react";
 import { toast } from "sonner";
 import { useSearchParams } from "next/navigation";
+import { useNow } from "@/hooks/use-now";
 import { useSpectraContextStore } from "@/stores/spectra-context-store";
 import { useSpectraRun } from "../ai/use-spectra-run";
 import { useSpectraContext } from "../hooks/use-spectra-context";
@@ -184,6 +185,7 @@ export function ArtifactsShell({
   initialArtifactId,
 }: { initialArtifactId?: string } = {}) {
   const searchParams = useSearchParams();
+  const now = useNow(60_000);
   const requestedArtifactId =
     initialArtifactId ?? searchParams.get("artifactId");
   useEffect(() => {
@@ -651,8 +653,11 @@ export function ArtifactsShell({
           ? Promise.resolve(null)
           : getSpectraOverview(),
       ]);
-      if (sequence !== loadSequenceRef.current) return artifactResult.artifacts;
-      setAllArtifacts(artifactResult.artifacts);
+      const listedArtifacts = artifactResult.artifacts.filter(
+        (artifact) => artifact.blueprintKey !== "timetable",
+      );
+      if (sequence !== loadSequenceRef.current) return listedArtifacts;
+      setAllArtifacts(listedArtifacts);
       setShareInvitations(invitationResult.invitations);
       if (overview) {
         metadataLoadedRef.current = true;
@@ -664,7 +669,7 @@ export function ArtifactsShell({
           ),
         );
       }
-      return artifactResult.artifacts;
+      return listedArtifacts;
     } catch (error) {
       if (sequence !== loadSequenceRef.current) return [];
       toast.error(
@@ -865,7 +870,7 @@ export function ArtifactsShell({
           return false;
         if (
           collection === "recent" &&
-          Date.now() - artifact.updatedAt > 1000 * 60 * 60 * 24 * 30
+          now - artifact.updatedAt > 1000 * 60 * 60 * 24 * 30
         )
           return false;
         if (collection === "favorites" && !favoriteIds.has(artifact._id))
@@ -907,6 +912,7 @@ export function ArtifactsShell({
     allArtifacts,
     collection,
     favoriteIds,
+    now,
     search,
     selectedWorkspaceId,
     sortMode,
@@ -1705,7 +1711,7 @@ export function ArtifactsShell({
                         label: "Recent",
                         count: allArtifacts.filter(
                           (work) =>
-                            Date.now() - work.updatedAt <=
+                            now - work.updatedAt <=
                             1000 * 60 * 60 * 24 * 30,
                         ).length,
                         icon: Clock3,
@@ -2155,9 +2161,7 @@ export function ArtifactsShell({
                 busy={runEngine.submitting}
                 allowConcurrent={!composerThread}
                 onStop={runEngine.stop}
-                activeRunId={
-                  runEngine.liveExchange?.runId ?? composerThread?.runId
-                }
+                activeRunId={runEngine.activeRunId}
                 onSteer={runEngine.steer}
                 onStartNewThread={() => setComposerThread(null)}
                 context={

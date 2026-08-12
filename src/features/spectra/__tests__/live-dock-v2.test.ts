@@ -107,6 +107,15 @@ describe("Live Dock V2", () => {
   it("keeps explicit New thread and touch/keyboard disclosure paths", () => {
     const command = read("src/features/spectra/components/command-bar.tsx");
     expect(command).toContain('aria-label="Start a new thread"');
+    const workspace = read("src/features/spectra/pages/workspace-shell.tsx");
+    expect(workspace).toContain("function startFreshComposerThread() ");
+    expect(workspace).toContain(
+      "skipAutoContinueThreadIdRef.current = liveThread.id",
+    );
+    expect(workspace).toContain("threadId: composerThread?.id ?? null");
+    expect(workspace).toContain("--spectra-live-thread-width");
+    const runHook = read("src/features/spectra/ai/use-spectra-run.ts");
+    expect(runHook).toContain("options?.threadId === null");
     const dock = read("src/features/spectra/components/live-dock.tsx");
     expect(dock).toContain("group-focus-within:block");
     expect(dock).toContain("max-sm:fixed");

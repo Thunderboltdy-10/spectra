@@ -52,6 +52,12 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning>
       <head>
         <meta name="color-scheme" content="light dark" />
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              'try{if(localStorage.getItem("spectra:sidebar-collapsed")==="true")document.documentElement.dataset.spectraSidebarCollapsed="true"}catch{}',
+          }}
+        />
       </head>
       <body className={`${manrope.variable} ${plexMono.variable} antialiased`}>
         <a href="#main-content" className="skip-link sr-only focus:not-sr-only">

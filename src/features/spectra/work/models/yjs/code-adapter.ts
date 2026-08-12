@@ -179,11 +179,13 @@ export class CodeYjsAdapter implements WorkYjsAdapter<CodeContent> {
 
   createUndoManager(doc: Y.Doc, actor: WorkActorIdentity) {
     const origins = this.origins(actor);
-    const texts = [...codeFiles(doc).values()].flatMap((map) => {
-      const source = map.get("source");
-      return source instanceof Y.Text ? [source] : [];
+    // Track the stable collection roots rather than only the source texts that
+    // happen to exist at construction time. A newly created code artifact may
+    // legitimately have no files yet; Y.UndoManager rejects an empty scope,
+    // and a text-only scope would also miss files added later.
+    return new Y.UndoManager([codeFiles(doc), codeFileOrder(doc)], {
+      trackedOrigins: new Set([origins.localHuman]),
     });
-    return new Y.UndoManager(texts, { trackedOrigins: new Set([origins.localHuman]) });
   }
 
   origins(actor: WorkActorIdentity): WorkYjsOriginSet {

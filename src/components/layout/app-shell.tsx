@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -197,7 +198,7 @@ function ShellNavigation() {
     };
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const stored = window.localStorage.getItem("spectra:sidebar-collapsed");
     if (stored === "true") setSidebarCollapsed(true);
   }, []);
@@ -1358,7 +1359,7 @@ export function AppShell({
     pathname === "/library" ||
     pathname.startsWith("/library/");
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     setShellSidebarCollapsed(
       window.localStorage.getItem("spectra:sidebar-collapsed") === "true",
     );
@@ -1372,8 +1373,12 @@ export function AppShell({
 
   return (
     <div
+      style={{
+        minHeight: "100dvh",
+        ...(noScroll ? { height: "100dvh", overflow: "hidden" } : {}),
+      }}
       className={cn(
-        "min-h-dvh bg-[var(--bg-primary)] text-[var(--text-primary)] transition-[padding] duration-200",
+        "spectra-app-shell min-h-dvh bg-[var(--bg-primary)] text-[var(--text-primary)] transition-[padding] duration-200",
         shellSidebarCollapsed ? "md:pl-[76px]" : "md:pl-[240px]",
       )}
     >
@@ -1396,6 +1401,17 @@ export function AppShell({
       />
       <ShellNavigation />
       <main
+        style={{
+          minHeight: "100dvh",
+          ...(noScroll
+            ? {
+                height: "100dvh",
+                overflow: "hidden",
+                display: "flex",
+                flexDirection: "column",
+              }
+            : {}),
+        }}
         className={cn(
           "relative min-h-dvh pb-24 md:flex md:h-dvh md:min-h-0 md:flex-col md:pb-0",
           noScroll && "h-dvh min-h-0 overflow-hidden",
@@ -1413,13 +1429,14 @@ export function AppShell({
           <div id="spectra-shell-tab-slot" className="hidden" />
         )}
         <div
+          style={{ minHeight: 0 }}
           className={cn(
-            "spectra-global-stage min-h-0 flex-1 md:overflow-hidden",
+            "spectra-global-stage flex min-h-0 flex-1 md:overflow-hidden",
             noScroll && "overflow-hidden",
             contentClassName,
           )}
         >
-          {children}
+          <div className="relative min-h-0 min-w-0 flex-1">{children}</div>
           <RouteSidePanelHost />
           <ViewportContextPicker />
         </div>

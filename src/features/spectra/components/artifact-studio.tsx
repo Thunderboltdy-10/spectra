@@ -6,7 +6,6 @@ import {
   AlignCenter,
   AlignLeft,
   AlignRight,
-  BarChart3,
   Bold,
   BookOpen,
   CalendarCheck2,
@@ -221,7 +220,11 @@ import {
 import type { ArtifactTypeKey } from "../artifacts/types";
 import { changedArtifactRegionIds } from "../collaboration/artifact-yjs-model";
 import { isArtifactTypeKey } from "../artifacts/registry";
-import { getWorkDefinition } from "../work/registry";
+import {
+  availableWorkModes,
+  getWorkDefinition,
+  workCan,
+} from "../work/registry";
 import { ContextSourceBoundary } from "./context-source-boundary";
 import { contextSourceRegistry } from "../context";
 import { spectraBus } from "../events";
@@ -3463,7 +3466,7 @@ export function StudioSplitShell({
     <aside
       ref={panelRef}
       data-studio-panel
-      className="fixed inset-y-0 right-0 z-[90] flex h-full min-w-[280px] max-w-[94vw] shrink-0 border-l border-[color-mix(in_oklab,var(--border-default)_55%,transparent)] bg-[var(--bg-primary)] shadow-[-18px_0_40px_rgba(27,20,12,0.10)] min-[1920px]:relative min-[1920px]:inset-auto min-[1920px]:z-40 min-[1920px]:min-w-[300px]"
+      className="relative z-40 flex h-full min-w-[280px] max-w-[94vw] shrink-0 border-l border-[color-mix(in_oklab,var(--border-default)_55%,transparent)] bg-[var(--bg-primary)] min-[1920px]:min-w-[300px]"
       style={{ width, containerType: "inline-size" }}
       aria-label={ariaLabel}
     >
@@ -3704,7 +3707,13 @@ function ArtifactStudioEditor({
   onDirtyChange: (dirty: boolean) => void;
   compact: boolean;
 }) {
-  const permissionReadOnly = artifact.accessLevel === "read";
+  const workType = isArtifactTypeKey(artifact.blueprintKey)
+    ? artifact.blueprintKey
+    : null;
+  const sharingRole = artifact.accessLevel === "read" ? "read_only" : "edit";
+  const permissionReadOnly = workType
+    ? !workCan(workType, sharingRole, "edit")
+    : artifact.accessLevel === "read";
   // The live room is the editing substrate, not a feature unlocked by sharing.
   // Owners need the identical interaction fabric for private AI work; access
   // policy still decides who else may authenticate into that room.
@@ -3737,10 +3746,10 @@ function ArtifactStudioEditor({
   );
   const livePermissionLost =
     isCollaborativeArtifact && live.state === "permission_lost";
-  const readOnly =
-    permissionReadOnly ||
-    livePermissionLost ||
-    (isCollaborativeArtifact && live.supported && live.level === "read");
+  // The durable access projection is the permission source of truth. A room
+  // transport can reconnect with a stale read-level token, but it cannot
+  // silently downgrade an owner/editor's open surface.
+  const readOnly = permissionReadOnly;
   const [title, setTitle] = useState(artifact.title);
   const [summary, setSummary] = useState(artifact.summary ?? "");
   const [summaryExpanded, setSummaryExpanded] = useState(false);
@@ -3833,15 +3842,33 @@ function ArtifactStudioEditor({
   } | null>(null);
   const localSyncKeysRef = useRef(new Set<string>());
   const syncingRef = useRef(false);
+  const nativeFallbackEditedRef = useRef(false);
   const reconciliationFrameRef = useRef<number | null>(null);
+  const nativeBodyBinding =
+    artifact.blueprintKey === "document" || artifact.blueprintKey === "code";
+  const incomingLiveContent = nativeBodyBinding
+    ? null
+    : live.liveValue.content;
+  const incomingLiveTagDraft = live.liveValue.tags.join(", ");
   const incomingSnapshot = useMemo(
     () => ({
       title: live.liveValue.title,
       summary: live.liveValue.summary ?? "",
-      tagDraft: live.liveValue.tags.join(", "),
-      content: live.liveValue.content,
+      tagDraft: incomingLiveTagDraft,
+      // Native document/code editors already consume their Yjs types directly.
+      // Feeding every live-origin body projection back through React creates a
+      // second full-document reconciliation path on each keystroke.
+      content: nativeBodyBinding
+        ? currentSnapshotRef.current.content
+        : incomingLiveContent,
     }),
-    [live.liveValue],
+    [
+      incomingLiveContent,
+      incomingLiveTagDraft,
+      live.liveValue.summary,
+      live.liveValue.title,
+      nativeBodyBinding,
+    ],
   );
   const currentSnapshot = useMemo(
     () => ({ title, summary, tagDraft, content }),
@@ -3902,7 +3929,8 @@ function ArtifactStudioEditor({
         const result =
           (artifact.blueprintKey === "document" ||
             artifact.blueprintKey === "code") &&
-          live.modelSnapshot.initialized
+          live.modelSnapshot.initialized &&
+          !nativeFallbackEditedRef.current
             ? await live.synchronizeMetadata(nextLiveValue)
             : await live.synchronize(nextLiveValue);
         if (result && "applied" in result && result.applied === false) {
@@ -3919,6 +3947,7 @@ function ArtifactStudioEditor({
         }
         const acknowledgedValue = live.model?.getSnapshot().value;
         if (acknowledgedValue) {
+          nativeFallbackEditedRef.current = false;
           const acknowledged = {
             title: acknowledgedValue.title,
             summary: acknowledgedValue.summary ?? "",
@@ -5245,7 +5274,10 @@ function ArtifactStudioEditor({
       // render AI frames via awareness; durable Yjs writes remain region-
       // scoped and only claim the blocks the human actually changed.
       liveConflict?.claimId ||
-      syncBusy
+      syncBusy ||
+      ((artifact.blueprintKey === "document" ||
+        artifact.blueprintKey === "code") &&
+        !live.modelSnapshot.initialized)
     )
       return;
     const timer = window.setTimeout(
@@ -5253,7 +5285,16 @@ function ArtifactStudioEditor({
       liveConflict ? 420 : 140,
     );
     return () => window.clearTimeout(timer);
-  }, [busy, dirty, liveConflict, readOnly, syncBusy, synchronizeDraft]);
+  }, [
+    artifact.blueprintKey,
+    busy,
+    dirty,
+    live.modelSnapshot.initialized,
+    liveConflict,
+    readOnly,
+    syncBusy,
+    synchronizeDraft,
+  ]);
 
   useEffect(() => {
     if (!liveConflict?.claimId || !live.transport) return;
@@ -5306,6 +5347,12 @@ function ArtifactStudioEditor({
     reconcilingRemoteRef.current = false;
     dirtyRef.current = true;
     setDirty(true);
+    if (
+      (artifact.blueprintKey === "document" ||
+        artifact.blueprintKey === "code") &&
+      !live.modelSnapshot.initialized
+    )
+      nativeFallbackEditedRef.current = true;
     if (isArtifactTypeKey(artifact.blueprintKey)) {
       try {
         const regions = changedArtifactRegionIds(
@@ -5557,10 +5604,10 @@ function ArtifactStudioEditor({
     },
     [setActivePresence],
   );
-  const syncLabel = livePermissionLost
-    ? "Access removed"
-    : readOnly
+  const syncLabel = readOnly
       ? "Read-only"
+      : livePermissionLost
+        ? "Reconnecting"
       : isCollaborativeArtifact
         ? live.state === "reconnecting" || live.state === "unsynchronized"
           ? "Reconnecting"
@@ -5922,11 +5969,11 @@ function ArtifactStudioEditor({
       ) : null}
       {livePermissionLost ? (
         <div
-          role="alert"
-          className="shrink-0 border-y border-[color-mix(in_oklab,var(--danger)_28%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--danger)_7%,var(--bg-primary))] px-5 py-2 text-[11px] text-[var(--danger)]"
+          role="status"
+          className="shrink-0 border-y border-[color-mix(in_oklab,#d88922_24%,var(--border-subtle))] bg-[color-mix(in_oklab,#d88922_6%,var(--bg-primary))] px-5 py-2 text-[11px] text-[var(--text-secondary)]"
         >
-          Your access changed while this artifact was open. Editing has stopped
-          and no further changes will be queued.
+          Spectra is refreshing this work’s access. You can keep editing your
+          local draft; it will synchronize after edit access is confirmed.
         </div>
       ) : null}
       {!permissionReadOnly &&
@@ -5975,8 +6022,8 @@ function ArtifactStudioEditor({
       (live.initializationError ||
         live.modelSnapshot.validity === "invalid") ? (
         <div
-          role="alert"
-          className="shrink-0 border-y border-[color-mix(in_oklab,var(--danger)_24%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--danger)_6%,var(--bg-primary))] px-5 py-2 text-[11px] text-[var(--danger)]"
+          role="status"
+          className="shrink-0 border-y border-[color-mix(in_oklab,#d88922_20%,var(--border-subtle))] bg-[color-mix(in_oklab,#d88922_5%,var(--bg-primary))] px-5 py-2 text-[11px] text-[var(--text-secondary)]"
         >
           {live.initializationError ??
             live.modelSnapshot.error ??
@@ -6032,19 +6079,7 @@ function ArtifactStudioEditor({
         />
         <div className={`spectra-editor-layout ${editorLayoutClass}`}>
           <section className="min-w-0">
-            {(artifact.blueprintKey === "document" ||
-              artifact.blueprintKey === "code") &&
-            !live.modelSnapshot.initialized ? (
-              <div
-                role="status"
-                className="flex min-h-[420px] items-center justify-center gap-2 text-ui text-[var(--text-secondary)]"
-              >
-                <Loader2 className="h-4 w-4 animate-spin text-[var(--brand-primary)] motion-reduce:animate-none" />
-                Preparing the live {artifact.blueprintKey === "code" ? "code" : "document"}…
-              </div>
-            ) : null}
-            {artifact.blueprintKey === "document" &&
-            live.modelSnapshot.initialized ? (
+            {artifact.blueprintKey === "document" ? (
               <DocumentStudio
                 key={`${artifact._id}:document`}
                 artifactId={artifact._id}
@@ -6053,7 +6088,11 @@ function ArtifactStudioEditor({
                 onChange={editorChange}
                 aiChangedPaths={highlightPaths}
                 readOnly={readOnly}
-                collaborationDocument={live.transport?.document}
+                collaborationDocument={
+                  live.modelSnapshot.initialized
+                    ? live.transport?.document
+                    : undefined
+                }
                 header={null}
                 mode={contentMode}
               />
@@ -6107,8 +6146,7 @@ function ArtifactStudioEditor({
                 onActiveRegionChange={handleActiveRegionChange}
               />
             ) : null}
-            {artifact.blueprintKey === "code" &&
-            live.modelSnapshot.initialized ? (
+            {artifact.blueprintKey === "code" ? (
               <CodeStudio
                 key={`${artifact._id}:code`}
                 artifactId={artifact._id}
@@ -6118,7 +6156,11 @@ function ArtifactStudioEditor({
                 onChange={editorChange}
                 aiChangedPaths={highlightPaths}
                 readOnly={readOnly}
-                collaborationDocument={live.transport?.document}
+                collaborationDocument={
+                  live.modelSnapshot.initialized
+                    ? live.transport?.document
+                    : undefined
+                }
                 synchronizationReady={isSyncReady(syncLabel)}
                 syncMessage={artifactSyncMessage}
                 onActiveRegionChange={handleActiveRegionChange}
@@ -6404,13 +6446,6 @@ function documentMarkdown(json: JSONContent) {
 
 type DocumentMode = "write" | "read" | "review" | "focus";
 
-const DOCUMENT_MODE_LABELS: Record<DocumentMode, string> = {
-  write: "Write",
-  read: "Read",
-  review: "Review",
-  focus: "Focus",
-};
-
 /**
  * Exported as a leaf so surfaces outside the studio shell — the landing story
  * among them — render the one real document view rather than a lookalike.
@@ -6453,22 +6488,17 @@ export function DocumentStudio({
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [replaceDraft, setReplaceDraft] = useState("");
   const [findCursor, setFindCursor] = useState(0);
-  /**
-   * The four ways of being in a document (§11A). Write is authoring, Read is
-   * the document as a reader meets it, Review is reading with the apparatus —
-   * outline, sources, comments — in view, and Focus is the text and nothing
-   * else. A reader who cannot edit is never offered Write, and a side panel
-   * opens on Read: a third of the width is a poor place to write.
-   */
+  const sharingRole = readOnly ? "read_only" : "edit";
+  const documentModes = availableWorkModes("document", sharingRole);
+  const canPreviewAsReader = documentModes.some(
+    (entry) => entry.id === "preview_as_reader",
+  );
+  /** Owners always enter the authoring surface. Reader preview and Focus are
+   * actions inside the overflow, never peer tabs competing with editing. */
   const [docMode, setDocMode] = useState<DocumentMode>(
-    readOnly || mode === "split" ? "read" : "write",
+    readOnly ? "read" : "write",
   );
   const focusMode = docMode === "focus";
-  const documentModes: readonly DocumentMode[] = readOnly
-    ? ["read", "review"]
-    : mode === "split"
-      ? ["write", "read", "review"]
-      : ["write", "read", "review", "focus"];
   const [pageLayout, setPageLayout] = useState<"page" | "continuous">(
     "continuous",
   );
@@ -7307,35 +7337,17 @@ export function DocumentStudio({
       data-layout={pageLayout}
     >
       {!focusMode ? header : null}
-      <div className="spectra-document-toolbar sticky top-0 z-30 mx-5 flex min-h-11 flex-wrap items-center gap-1 rounded-[8px] border border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_96%,transparent)] px-2 py-1.5 shadow-[0_8px_24px_-22px_rgba(27,20,12,.5)] backdrop-blur sm:mx-8">
-        <div
-          className="spectra-document-modes"
-          role="tablist"
-          aria-label="Document modes"
-        >
-          {documentModes.map((entry) => (
-            <button
-              key={entry}
-              type="button"
-              role="tab"
-              aria-selected={docMode === entry}
-              onClick={() => {
-                setDocMode(entry);
-                // Review is reading with the apparatus out. It opens what a
-                // reviewer needs rather than making them find it.
-                if (entry === "review") setSourcesOpen(true);
-                if (entry === "focus") {
-                  setOutlineOpen(false);
-                  setSourcesOpen(false);
-                  setFindOpen(false);
-                  setToolsOpen(false);
-                }
-              }}
-            >
-              {DOCUMENT_MODE_LABELS[entry]}
-            </button>
-          ))}
-        </div>
+      <div className="spectra-editor-workbar spectra-document-toolbar sticky top-0 z-30 mx-5 flex min-h-11 flex-wrap items-center gap-1 px-2 py-1.5 sm:mx-8">
+        {!readOnly && docMode !== "write" ? (
+          <button
+            type="button"
+            className="inline-flex h-8 items-center gap-1.5 rounded-[6px] bg-[var(--text-primary)] px-2.5 text-[11px] font-semibold text-[var(--bg-primary)]"
+            onClick={() => setDocMode("write")}
+          >
+            <Pencil className="h-3.5 w-3.5" />
+            Back to editing
+          </button>
+        ) : null}
         {docMode !== "write" ? (
           <>
             <Divider />
@@ -7571,6 +7583,42 @@ export function DocumentStudio({
       </div>
       {toolsOpen ? (
         <div className="spectra-document-tools-popover">
+          {!readOnly ? (
+            <section>
+              <strong>View</strong>
+              {canPreviewAsReader ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDocMode("read");
+                    setToolsOpen(false);
+                  }}
+                >
+                  <Eye className="h-4 w-4" />
+                  <span>
+                    <strong>Preview as reader</strong>
+                    <small>Check the document without editing controls</small>
+                  </span>
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => {
+                  setDocMode("focus");
+                  setOutlineOpen(false);
+                  setSourcesOpen(false);
+                  setFindOpen(false);
+                  setToolsOpen(false);
+                }}
+              >
+                <Focus className="h-4 w-4" />
+                <span>
+                  <strong>Focus</strong>
+                  <small>Keep the page and writing tools quiet</small>
+                </span>
+              </button>
+            </section>
+          ) : null}
           <section>
             <strong>Navigate & write</strong>
             <button
@@ -8203,21 +8251,13 @@ function FlashcardStudio({
   const [sectionNameDraft, setSectionNameDraft] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [deckTagDraft, setDeckTagDraft] = useState("");
-  // The four ways of being in a deck (§11B). Build authors it, Browse reads it,
-  // Progress reports on your own recall, and Study is the session itself.
-  // Without Edit access Build is absent rather than shown disabled — offering a
-  // door that cannot open is worse than not mentioning the room.
-  const deckViews = (
-    [
-      ["build", "Build", Pencil],
-      ["browse", "Browse", Eye],
-      ["progress", "Progress", BarChart3],
-    ] as const
-  ).filter(([view]) => view !== "build" || !readOnly);
+  const deckModes = availableWorkModes(
+    "flashcard_deck",
+    readOnly ? "read_only" : "edit",
+  );
+  const canStudy = deckModes.some((entry) => entry.id === "study");
   const [studioView, setStudioView] = useState<"build" | "browse" | "progress">(
-    // A side panel opens on Browse: it is a reading surface, and a builder
-    // squeezed into a third of the width is worse at both jobs (§11B).
-    readOnly || mode === "split" ? "browse" : "build",
+    readOnly ? "browse" : "build",
   );
   const [previewRevealed, setPreviewRevealed] = useState(false);
   const [railCollapsed, setRailCollapsed] = useState(mode === "split");
@@ -9982,7 +10022,7 @@ function FlashcardStudio({
         </div>
       ) : null}
       <div
-        className={`spectra-deck-toolbar flex min-w-0 flex-wrap items-center gap-2 ${mode === "tab" ? "lg:col-span-2" : ""}`}
+        className={`spectra-editor-workbar spectra-deck-toolbar flex min-w-0 flex-wrap items-center gap-2 ${mode === "tab" ? "lg:col-span-2" : ""}`}
       >
         <button
           type="button"
@@ -10027,7 +10067,7 @@ function FlashcardStudio({
           onClick={() => {
             beginStudySession();
           }}
-          disabled={!studyCards.length}
+          disabled={!canStudy || !studyCards.length}
           className="spectra-deck-study-trigger inline-flex h-9 items-center gap-2 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-primary)] disabled:opacity-40"
           aria-label={
             !studyStateLoading && dueStudyCount
@@ -10061,25 +10101,7 @@ function FlashcardStudio({
             {railCollapsed ? "Show cards" : "Hide cards"}
           </button>
         ) : null}
-        <div
-          className="spectra-deck-mode-switch ml-auto"
-          role="tablist"
-          aria-label="Flashcard views"
-        >
-          {deckViews.map(([view, label, Icon]) => (
-            <button
-              key={view}
-              type="button"
-              role="tab"
-              aria-selected={studioView === view}
-              data-active={studioView === view || undefined}
-              onClick={() => setStudioView(view)}
-            >
-              <Icon className="h-3.5 w-3.5" />
-              {label}
-            </button>
-          ))}
-        </div>
+        <span className="ml-auto" />
         <div
           className={`spectra-deck-pagination ${mode === "split" ? "w-full justify-between border-t border-[var(--border-subtle)] pt-2" : ""} flex min-w-0 items-center gap-1 text-[11px] text-[var(--text-secondary)]`}
         >
@@ -12108,14 +12130,6 @@ function QuizExperienceSection({
 }
 
 /** The five ways of being in a quiz (§11C), in the order they are offered. */
-const QUIZ_MODE_LABELS: Record<QuizMode, string> = {
-  build: "Build",
-  preview: "Preview",
-  attempt: "Attempt",
-  responses: "Responses",
-  results: "Results",
-};
-
 /** `1:04:09` for anything over an hour, `4:09` otherwise. */
 function quizClockLabel(totalSeconds: number) {
   const hours = Math.floor(totalSeconds / 3_600);
@@ -12179,10 +12193,7 @@ export function QuizStudio({
   const [view, setView] = useState<
     "builder" | "settings" | "preview" | "responses" | "summary"
   >(
-    // A side panel opens on the quiz itself, not on the builder: a third of the
-    // width is a poor place to author questions and a fine place to read or
-    // answer them (§11C).
-    readOnly || mode === "split" ? "preview" : "builder",
+    readOnly ? "preview" : "builder",
   );
   const [quizSettings, setQuizSettings] = useState<QuizSettings>(() =>
     quizSettingsFromContent(content),
@@ -12676,6 +12687,13 @@ export function QuizStudio({
     viewer: readOnly ? "learner" : "teacher",
     hasSubmittedAttempt: Boolean(latestSubmittedAttempt),
   });
+  const workQuizModes = availableWorkModes(
+    "quiz",
+    readOnly ? "read_only" : "edit",
+  );
+  const canAttemptQuiz = workQuizModes.some(
+    (entry) => entry.id === "attempt",
+  );
   const activeQuizMode: QuizMode =
     view === "builder" || view === "settings"
       ? "build"
@@ -13068,25 +13086,27 @@ export function QuizStudio({
 
   return (
     <div className="spectra-quiz-studio bg-transparent">
-      <div className="flex min-h-10 flex-wrap items-center justify-between gap-1.5 border-b border-[var(--border-default)] bg-transparent px-2 py-1">
-        <div
-          className="order-2 flex min-w-0 items-center rounded-[7px] bg-[var(--bg-secondary)] p-0.5 [&>button]:h-6 [&>button]:px-2 [&>button]:text-micro"
-          role="tablist"
-          aria-label="Quiz views"
-        >
-          {quizModes.map((quizMode) => (
+      <div className="spectra-editor-workbar flex min-h-10 flex-wrap items-center justify-between gap-1.5 px-2 py-1">
+        <div className="order-2 flex min-w-0 items-center gap-1.5">
+          {!readOnly && activeQuizMode !== "build" ? (
             <button
-              key={quizMode}
               type="button"
-              role="tab"
-              aria-selected={activeQuizMode === quizMode}
-              className={tabButtonClass(activeQuizMode === quizMode)}
-              onClick={() => openQuizMode(quizMode)}
-              disabled={quizMode === "attempt" && practiceBusy}
+              className="inline-flex h-7 items-center gap-1.5 rounded-[6px] bg-[var(--text-primary)] px-2.5 text-micro font-semibold text-[var(--bg-primary)]"
+              onClick={() => openQuizMode("build")}
             >
-              {QUIZ_MODE_LABELS[quizMode]}
+              <Pencil className="h-3.5 w-3.5" />
+              Back to build
             </button>
-          ))}
+          ) : !readOnly && quizModes.includes("preview") ? (
+            <button
+              type="button"
+              className={smallActionClass()}
+              onClick={() => openQuizMode("preview")}
+            >
+              <Eye className="h-3.5 w-3.5" />
+              Preview as learner
+            </button>
+          ) : null}
         </div>
         <div className="order-1 ml-auto flex shrink-0 items-center gap-1.5">
           {!readOnly ? (
@@ -13147,7 +13167,10 @@ export function QuizStudio({
               <button
                 type="button"
                 className={`order-2 h-7 rounded-[6px] px-2.5 text-micro font-semibold ${published ? "border border-[var(--success)] text-[var(--success)]" : "bg-[var(--text-primary)] text-[var(--bg-primary)]"}`}
-                disabled={practiceBusy || (published && !synchronizationReady)}
+                disabled={
+                  practiceBusy ||
+                  (published && (!synchronizationReady || !canAttemptQuiz))
+                }
                 onClick={() => {
                   if (published) {
                     void beginPractice();
@@ -13159,18 +13182,18 @@ export function QuizStudio({
                 {practiceBusy
                   ? "Opening…"
                   : published
-                    ? "Open practice"
+                    ? "Attempt quiz"
                     : "Publish"}
               </button>
             </>
-          ) : published ? (
+          ) : published && canAttemptQuiz ? (
             <button
               type="button"
               className="h-8 rounded-[7px] bg-[#7560e8] px-3 text-[12px] font-semibold text-white"
               disabled={practiceBusy || !synchronizationReady}
               onClick={() => void beginPractice()}
             >
-              {practiceBusy ? "Opening..." : "Start practice"}
+              {practiceBusy ? "Opening..." : "Start attempt"}
             </button>
           ) : null}
         </div>
@@ -16555,8 +16578,4 @@ function toolbarClass(active?: boolean) {
       ? "bg-[var(--text-primary)] text-[var(--bg-primary)]"
       : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
   }`;
-}
-
-function tabButtonClass(active: boolean) {
-  return `h-9 rounded-[8px] px-3 text-[13px] font-medium transition ${active ? "bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-[0_1px_6px_rgba(27,20,12,0.08)]" : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:text-[var(--text-tertiary)]"}`;
 }

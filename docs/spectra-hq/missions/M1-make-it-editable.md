@@ -34,3 +34,21 @@ Streaming/dock/thread layout (M2), broad perf (M3), visual hygiene systems (M4),
 2. Typing in a Document with the gateway under load shows no perceptible latency; killing the gateway mid-session leaves the editor usable with an honest sync indicator; restarting it reconciles without data loss.
 3. No mode toggle anywhere can strand an owner in a non-editable state; Quiz/Flashcards/Presentation dual views work as actions (Flow 7 for quiz).
 4. `.shots/missions/M1/` contains the evidence set; STATE.md §2.A entries moved to VERIFIED with paths; new discoveries logged.
+
+## Mission log — COMPLETE 2026-08-12
+
+- Dev collaboration is broadcast-first with asynchronous debounced durable projection/retry; the editor never waits on persistence before echoing human input.
+- Reconnect and unsynchronized states preserve local editing with an honest quiet indicator; a gateway-off Document edit reconciled and survived reload.
+- Owner/editor permission is authoritative over transient transport state; every registered type opens in authoring in split/side-panel context.
+- Document/Code native Yjs changes no longer re-enter the whole-body React projection path; Sheets honors synchronization readiness without freezing input.
+- Owner-stranding mode tabs were removed/wired through the work-mode kernel. Document reader preview, Quiz Attempt, Flashcards Study, and Presentation Present are actions with a return to authoring.
+- Fixed quiz normalization forcing `published` back to false; durable Publish → Attempt now works and has regression coverage.
+- Standardized opaque editor workbars, consolidated Code chrome, removed nested editor backgrounds/borders, and made full-surface editors consume available height.
+- Side artifact/thread panels participate in layout; Live Dock remains centered with reserved bottom space; workspace cards respond to reduced width; loading rails keep stable geometry.
+- Removed Round One artifact probes and generated New Document debris through the product UI.
+- Golden Flow 0 passed for Workspace and Library with dated screenshots.
+- Golden Flow 1 passed with immediate Document typing and post-reload persistence screenshots.
+- Golden Flow 2 passed with dated authoring evidence for all ten registered types.
+- Flow 7 passed with dated Quiz Build and real Attempt evidence; Flashcards Study returns to Build.
+- Gateway interruption/recovery passed with dated Synchronizing/editable, Live recovery, and post-reload persistence evidence.
+- Final code gates recorded: TypeScript passed; 73 test files / 687 tests passed. Repository-wide pre-existing lint debt is queued in STATE.

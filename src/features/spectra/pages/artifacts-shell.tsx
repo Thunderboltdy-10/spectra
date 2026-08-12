@@ -1373,7 +1373,7 @@ export function ArtifactsShell({
   }
 
   return (
-    <div className="spectra-wave-y flex h-full min-h-0 bg-[radial-gradient(circle_at_32%_-12%,color-mix(in_oklab,var(--bg-elevated)_70%,transparent),transparent_34%),var(--bg-primary)]">
+    <div className="spectra-wave-y flex h-full min-h-0 bg-[var(--bg-primary)]">
       <div className="flex min-w-0 flex-1 flex-col">
         {studio.mode !== "tab" ? (
           <StudioTabRail
@@ -2052,14 +2052,7 @@ export function ArtifactsShell({
               ) : null}
             </>
           )}
-          <div
-            className="pointer-events-none absolute inset-x-0 bottom-0 z-[320] bg-transparent px-2 pb-0 pt-2 sm:px-5 sm:pb-0 lg:px-8"
-            style={
-              activeRunPanelId
-                ? { right: "var(--spectra-run-panel-width, 680px)" }
-                : undefined
-            }
-          >
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 z-[320] bg-transparent px-2 pb-4 pt-2 sm:px-5 sm:pb-5 lg:px-8">
             <div className="pointer-events-auto mx-auto max-w-[880px]">
               <div ref={setAttachmentsHost} />
               <ComposerArtifactDock

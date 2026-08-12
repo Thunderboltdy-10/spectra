@@ -18,7 +18,7 @@ The entire ask→run→stream→steer→stop loop becomes truthful and pleasant:
 
 ## Also in scope
 
-Live Dock hover = few useful details only; click opens conversation immediately; required-input expansion works (Flow 5). Steering: the client-side fake (new-run-after-poll) must at minimum become honest — if true safe-boundary steering (dead `steering-queue.ts`) is too deep here, wire the UX truthfully and queue the runtime work explicitly in STATE.md (wire-or-delete decision documented).
+Live Dock hover = few useful details only; click opens conversation immediately; required-input expansion works (Flow 5). Steering: the client-side fake (new-run-after-poll) must at minimum become honest — if true safe-boundary steering (dead `steering-queue.ts`) is too deep here, wire the UX truthfully and queue the runtime work explicitly in STATE.md (wire-or-delete decision documented). The live dock full polished setup, with hover details, as documented in spectra definitive transformation plan.
 
 ## Out of scope
 

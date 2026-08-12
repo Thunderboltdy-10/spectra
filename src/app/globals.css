@@ -2,6 +2,12 @@
 @import "katex/dist/katex.min.css";
 @import "../styles/react-flow.css";
 
+/* Framework diagnostics stay available in the console during development;
+   they are not part of Spectra's visible product shell or browser evidence. */
+nextjs-portal {
+  display: none !important;
+}
+
 @utility grid-cols-14 {
   grid-template-columns: repeat(14, minmax(0, 1fr));
 }
@@ -987,16 +993,6 @@ body {
   color: var(--text-primary);
 }
 
-.spectra-deck-mode-switch {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  padding: 3px;
-  border: 1px solid var(--border-default);
-  border-radius: 9px;
-  background: var(--bg-secondary);
-}
-
 .spectra-deck-rail-toggle {
   display: inline-flex;
   height: 35px;
@@ -1023,28 +1019,6 @@ body {
 .spectra-flashcard-studio[data-rail-collapsed="true"]
   > .spectra-deck-card-editor {
   grid-column: 1 / -1;
-}
-
-.spectra-deck-mode-switch button {
-  display: inline-flex;
-  height: 29px;
-  align-items: center;
-  gap: 6px;
-  padding: 0 10px;
-  border-radius: 6px;
-  color: var(--text-secondary);
-  font-size: 11px;
-  font-weight: 650;
-  transition:
-    background-color 150ms ease,
-    color 150ms ease,
-    box-shadow 150ms ease;
-}
-
-.spectra-deck-mode-switch button[data-active="true"] {
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  box-shadow: 0 1px 3px rgba(30, 27, 24, 0.1);
 }
 
 .spectra-deck-pagination select {
@@ -12033,47 +12007,6 @@ button[data-spectra-context-trigger="true"]::after {
   overflow-y: auto;
 }
 
-/* The four ways of being in a document (Â§11A). The row is a quiet segmented
-   control, not a second command bar â€” it names the mode and gets out of the
-   way. */
-.spectra-document-modes {
-  display: inline-flex;
-  align-items: center;
-  gap: 1px;
-  padding: 2px;
-  border-radius: 7px;
-  background: var(--bg-secondary);
-}
-
-.spectra-document-modes > button {
-  height: 26px;
-  padding: 0 9px;
-  border-radius: 5px;
-  color: var(--text-secondary);
-  font-size: 11px;
-  font-weight: 550;
-  letter-spacing: -0.005em;
-  transition:
-    background 0.14s ease,
-    color 0.14s ease;
-}
-
-.spectra-document-modes > button:hover {
-  color: var(--text-primary);
-}
-
-.spectra-document-modes > button[aria-selected="true"] {
-  background: var(--bg-elevated);
-  color: var(--text-primary);
-  box-shadow: 0 1px 2px rgba(40, 50, 44, 0.09);
-}
-
-/* Focus is the text and nothing else, so the mode row leaves with everything
-   else; Escape and the exit button are the way back. */
-.spectra-document-studio[data-focus="true"] .spectra-document-modes {
-  display: none;
-}
-
 /* Read puts the document down rather than taking it away: the measure narrows
    to a comfortable one and the writing affordances stop advertising
    themselves. */
@@ -20023,4 +19956,187 @@ html[data-spectra-motion="none"] .spectra-field-wake::before {
   .spectra-field-wake {
     transition: opacity 200ms linear;
   }
+}
+
+/* Artifact editors are one continuous product canvas. Work types may arrange
+   their own tools and fields, but the editor root itself never becomes a
+   card, sheet of paper, tinted tray, or bordered container. Keep this at the
+   final cascade boundary so older type-specific styling cannot reintroduce a
+   perimeter after the shared shell has rendered. */
+.spectra-artifact-studio,
+.spectra-artifact-main,
+.spectra-editor-layout,
+.spectra-editor-layout > section,
+.spectra-document-studio,
+.spectra-flashcard-studio,
+.spectra-quiz-studio,
+.spectra-plan-studio,
+.presentation-studio,
+.spectra-sheets-studio,
+.code-studio,
+.whiteboard-studio,
+.timetable-studio,
+.spectra-agent-foundry {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: var(--bg-primary) !important;
+  box-shadow: none !important;
+}
+
+.spectra-artifact-studio .spectra-editor-layout > section {
+  outline: 0 !important;
+}
+
+/* One instrument bar across every work type. It follows the whiteboard's
+   compact, opaque tool shelf: one bounded surface, stable while its editor
+   scrolls, with no translucent text passing underneath. */
+.spectra-editor-workbar {
+  position: sticky !important;
+  z-index: 42 !important;
+  top: 8px !important;
+  min-height: 50px;
+  width: auto !important;
+  margin: 8px 12px 10px !important;
+  border: 1px solid var(--border-default) !important;
+  border-radius: 12px !important;
+  background: var(--bg-elevated) !important;
+  box-shadow: 0 8px 24px rgba(31, 44, 37, 0.045) !important;
+  backdrop-filter: none !important;
+}
+
+.spectra-editor-workbar :is(button, select, input) {
+  flex-shrink: 0;
+}
+
+.code-workbar {
+  flex-wrap: nowrap !important;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.code-workbar::-webkit-scrollbar {
+  display: none;
+}
+
+.code-workbar-source {
+  overflow: hidden;
+}
+
+.code-mobile-switch:not([data-surface="split"]) {
+  display: none !important;
+}
+
+/* Preserve the persisted navigation geometry before React hydrates so route
+   skeletons and loaded content share the same horizontal origin. */
+html[data-spectra-sidebar-collapsed="true"] .spectra-shell-sidebar {
+  width: 76px !important;
+}
+
+html[data-spectra-sidebar-collapsed="true"] .spectra-app-shell {
+  padding-left: 76px !important;
+}
+
+.presentation-toolbar {
+  margin: 0 12px 8px !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.sheets-top-bars {
+  overflow: visible !important;
+}
+
+.sheets-top-bars > :is(.sheets-menu-bar, .sheets-format-bar) {
+  border-color: var(--border-subtle) !important;
+  background: transparent !important;
+}
+
+/* The floating Live Dock no longer overlaps a split editor, so reserving
+   148px inside every work pane only truncates canvases. Full-surface editors
+   use every remaining pixel; form-style editors retain natural document flow. */
+.spectra-artifact-studio[data-studio-mode="split"] .spectra-artifact-main {
+  padding-bottom: 0 !important;
+}
+
+.spectra-artifact-studio:is(
+    [data-blueprint="sheets"],
+    [data-blueprint="code"],
+    [data-blueprint="presentation"],
+    [data-blueprint="whiteboard"],
+    [data-blueprint="timetable"]
+  )
+  .spectra-artifact-main {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.spectra-artifact-studio:is(
+    [data-blueprint="sheets"],
+    [data-blueprint="code"],
+    [data-blueprint="presentation"],
+    [data-blueprint="whiteboard"],
+    [data-blueprint="timetable"]
+  )
+  .spectra-editor-layout {
+  min-height: 0;
+  height: auto;
+  flex: 1 1 auto;
+}
+
+.spectra-artifact-studio:is(
+    [data-blueprint="sheets"],
+    [data-blueprint="code"],
+    [data-blueprint="presentation"],
+    [data-blueprint="whiteboard"],
+    [data-blueprint="timetable"]
+  )
+  .spectra-editor-layout
+  > section {
+  min-height: 0;
+  height: 100%;
+}
+
+.spectra-sheets-studio,
+.code-studio,
+.presentation-studio,
+.whiteboard-studio,
+.timetable-studio {
+  display: flex !important;
+  min-height: 0 !important;
+  height: 100% !important;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+
+.sheets-grid-frame,
+.code-editor-grid,
+.code-preview-pane,
+.presentation-workspace,
+.whiteboard-shell {
+  min-height: 0 !important;
+  height: auto !important;
+  flex: 1 1 auto;
+}
+
+.code-editor-grid > section {
+  min-height: 0 !important;
+}
+
+/* Mission Control cards size from the remaining canvas, not the viewport.
+   Opening a side panel therefore produces fewer, wider cards instead of four
+   desktop columns squeezed into unreadable slivers. */
+.spectra-mission-control-workspaces .spectra-workspace-card-grid {
+  grid-template-columns: repeat(
+    auto-fit,
+    minmax(min(270px, 100%), 1fr)
+  ) !important;
+  align-items: start;
+}
+
+.spectra-mission-control-workspaces [data-spectra-card="workspace"] {
+  min-width: 0;
+  height: auto;
+  align-self: start;
 }

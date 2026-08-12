@@ -84,7 +84,7 @@ export function useArtifactLiveModel(
     const timer = window.setTimeout(() => {
       if (!model?.getSnapshot().initialized)
         setInitializationError(
-          "The live model did not arrive from the collaboration room. Reconnect to retry without replacing your draft.",
+          "Working locally while Spectra reconnects. Your draft stays editable and will synchronize when the live model returns.",
         );
     }, 3_000);
     return () => window.clearTimeout(timer);

@@ -1823,7 +1823,7 @@ export function WhiteboardStudio({
           if (file) void importBoard(file);
         }}
       />
-      <header className="whiteboard-toolbar" aria-label="Whiteboard tools">
+      <header className="spectra-editor-workbar whiteboard-toolbar" aria-label="Whiteboard tools">
         <div>
           {(
             [

@@ -151,7 +151,7 @@ export function RouteSidePanelHost() {
       removeWork();
       removeThread();
     };
-  }, [eligible, loadThread, loadWork, pathname, thread?._id, work?._id]);
+  }, [eligible, fullscreen, loadThread, loadWork, pathname, thread?._id, work?._id]);
 
   const sideSession = useMemo(
     () => ({
@@ -185,7 +185,7 @@ export function RouteSidePanelHost() {
   if (!eligible || (!work && !thread)) return null;
   return (
     <div
-      className={`spectra-wave-y spectra-panel-enter pointer-events-none fixed inset-y-0 right-0 z-[88] flex max-w-[calc(100vw-76px)] [&>[data-studio-panel]]:!pointer-events-auto [&>[data-studio-panel]]:!relative [&>[data-studio-panel]]:!inset-auto ${exiting ? "spectra-panel-exit" : ""} ${handingOff ? "spectra-panel-handoff" : ""}`}
+      className={`spectra-wave-y spectra-panel-enter pointer-events-none relative z-[88] flex h-full max-w-[calc(100vw-76px)] shrink-0 [&>[data-studio-panel]]:!pointer-events-auto ${exiting ? "spectra-panel-exit" : ""} ${handingOff ? "spectra-panel-handoff" : ""}`}
     >
       {work ? (
         <ArtifactStudio

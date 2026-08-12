@@ -147,10 +147,16 @@ export const authorize = internalQuery({
       )
       .unique();
     const currentPolicyVersion = policy?.version ?? 0;
+    // Ownership is the strongest edit grant. A stale or incomplete policy
+    // projection must never turn an owner into a read-level room participant;
+    // the surrounding policy version checks still fail closed on revocation.
+    const canModify =
+      artifact.ownerAccountId === actor.accountId ||
+      decision.capabilities.includes("modify");
     if (
       artifact.blueprintKey === "quiz" &&
       decision.allowed &&
-      !decision.capabilities.includes("modify")
+      !canModify
     ) {
       return {
         allowed: false as const,
@@ -174,7 +180,7 @@ export const authorize = internalQuery({
     return {
       allowed: true as const,
       level: decision.level,
-      canModify: decision.capabilities.includes("modify"),
+      canModify,
       roomId: room._id,
       schoolId: actor.schoolId,
       displayName: actor.name || actor.email,
@@ -299,9 +305,12 @@ export const bootstrapNative = internalMutation({
         .unique(),
     ]);
     const currentPolicyVersion = policy?.version ?? 0;
+    const canModify =
+      artifact.ownerAccountId === actor.accountId ||
+      decision.capabilities.includes("modify");
     if (
       !decision.allowed ||
-      !decision.capabilities.includes("modify") ||
+      !canModify ||
       currentPolicyVersion !== args.policyVersion ||
       room.policyVersion !== currentPolicyVersion
     )
@@ -426,9 +435,12 @@ export const append = internalMutation({
       )
       .unique();
     const currentPolicyVersion = policy?.version ?? 0;
+    const canModify =
+      artifact.ownerAccountId === actor.accountId ||
+      decision.capabilities.includes("modify");
     if (
       !decision.allowed ||
-      !decision.capabilities.includes("modify") ||
+      !canModify ||
       currentPolicyVersion !== args.policyVersion ||
       room.policyVersion !== currentPolicyVersion
     )
@@ -521,6 +533,39 @@ export const append = internalMutation({
           ]),
         ]
       : declaredRegionIds;
+    if (nativeProjection && regionIds.length === 0) {
+      // A reconnect can legitimately add Yjs-only convergence metadata while
+      // projecting to the exact artifact value already stored in Convex. The
+      // state-vector delta still has to be durably appended; rejecting it as a
+      // missing semantic claim creates an endless reconnect/synchronizing loop.
+      const sequence = room.nextSequence;
+      await Promise.all([
+        ctx.db.insert("collaborationUpdates", {
+          roomId: room._id,
+          schoolId: room.schoolId,
+          sequence,
+          update: args.update,
+          byteLength: args.update.byteLength,
+          stateVectorHash: args.stateVectorHash,
+          actorAccountId: actor.accountId,
+          clientId,
+          idempotencyKey,
+          regionIds: [],
+          createdAt: now,
+        }),
+        ctx.db.patch(room._id, {
+          nextSequence: sequence + 1,
+          uncompactedBytes: room.uncompactedBytes + args.update.byteLength,
+          updatedAt: now,
+        }),
+        ctx.db.patch(artifact._id, {
+          syncState: "synchronized",
+          liveStateVectorHash: args.stateVectorHash,
+          lastSynchronizedAt: now,
+        }),
+      ]);
+      return { sequence, duplicate: false, regionIds: [] };
+    }
     if (regionIds.length === 0 || regionIds.length > 128)
       throw new Error("COLLABORATION_REGION_CLAIM_REQUIRED");
     const claimCoversRegion = (
@@ -547,8 +592,11 @@ export const append = internalMutation({
       (regionId) =>
         !coveringClaims.some((claim) => claimCoversRegion(claim, regionId)),
     );
-    const claimsRequired =
-      args.actorKind === "ai" || regionIds.includes("artifact:structure");
+    // Human changes are authorized and conflict-checked by the gateway, then
+    // committed optimistically. Requiring a separate structure lease put a
+    // network round trip in front of basic actions like adding a card or slide.
+    // AI writes remain lease-bound for attribution and overlap safety.
+    const claimsRequired = args.actorKind === "ai";
     if (claimsRequired && uncovered.length > 0)
       throw new Error(`COLLABORATION_REGION_UNCLAIMED: ${uncovered[0]}`);
     const aiClaims = coveringClaims.filter((claim) => claim.actorKind === "ai");

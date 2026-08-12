@@ -2445,7 +2445,7 @@ export function PresentationStudio({
 
   return (
     <section ref={studioRef} className="presentation-studio">
-      <div className="presentation-primary-bar">
+      <div className="spectra-editor-workbar presentation-primary-bar">
         <div role="tablist" aria-label="Presentation views">
           {(
             [

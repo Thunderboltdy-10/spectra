@@ -113,7 +113,7 @@ describe("Live Dock V2", () => {
       "skipAutoContinueThreadIdRef.current = liveThread.id",
     );
     expect(workspace).toContain("threadId: composerThread?.id ?? null");
-    expect(workspace).toContain("--spectra-live-thread-width");
+    expect(workspace).toContain("width={liveThreadPanelWidth}");
     const runHook = read("src/features/spectra/ai/use-spectra-run.ts");
     expect(runHook).toContain("options?.threadId === null");
     const dock = read("src/features/spectra/components/live-dock.tsx");

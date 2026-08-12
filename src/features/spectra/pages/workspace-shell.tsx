@@ -6244,7 +6244,7 @@ export function WorkspaceShell({
               </>
             </section>
           )}
-          <div className="pointer-events-none absolute bottom-0 left-0 right-[calc(var(--spectra-studio-width,0px)+var(--spectra-live-thread-width,0px))] z-[220] bg-transparent px-2 pb-3 pt-2 sm:px-5 sm:pb-5 lg:px-8">
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 z-[220] bg-transparent px-2 pb-4 pt-2 sm:px-5 sm:pb-5 lg:px-8">
             <div className="pointer-events-auto mx-auto max-w-[880px]">
               <div ref={setAttachmentsHost} />
               <ComposerArtifactDock

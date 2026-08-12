@@ -30,9 +30,13 @@ const REGION_MAP = "spectra:artifact-regions";
 const REGION_MARKER = "$spectraRegion";
 const CODE_LINES_MARKER = "$spectraCodeLines";
 const GATEWAY_PROTOCOL_VERSION = 1;
+const PERSISTENCE_DEBOUNCE_MS = 180;
+const PERSISTENCE_RETRY_MAX_MS = 5_000;
 const activeConnections = new Set();
 const documentMessageTails = new WeakMap();
 const pendingMessageReleases = new Map();
+const acceptedDocumentMessages = new Map();
+const documentPersistenceQueues = new WeakMap();
 let policySweepRunning = false;
 
 async function acquireDocumentMessage(document, socketId) {
@@ -58,6 +62,204 @@ function releaseDocumentMessage(socketId) {
   const release = queue?.shift();
   release?.();
   if (!queue?.length) pendingMessageReleases.delete(socketId);
+}
+
+function documentStateVectorHash(document) {
+  return createHash("sha256")
+    .update(Y.encodeStateVector(document))
+    .digest("base64url");
+}
+
+function sendGatewayState(connection, payload) {
+  try {
+    connection.sendStateless(JSON.stringify(payload));
+  } catch {
+    // The originating tab may close while a durable batch is in flight. The
+    // update still belongs in the room log even when nobody remains to ack it.
+  }
+}
+
+function messageQueue(socketId) {
+  const queue = acceptedDocumentMessages.get(socketId) ?? [];
+  if (!acceptedDocumentMessages.has(socketId))
+    acceptedDocumentMessages.set(socketId, queue);
+  return queue;
+}
+
+function persistenceQueue(document) {
+  const existing = documentPersistenceQueues.get(document);
+  if (existing) return existing;
+  const created = {
+    pending: [],
+    snapshotAfterFirst: null,
+    timer: null,
+    tail: Promise.resolve(),
+  };
+  documentPersistenceQueues.set(document, created);
+  return created;
+}
+
+function samePersistenceActor(left, right) {
+  return (
+    left.context.accountId === right.context.accountId &&
+    left.context.actorKind === right.context.actorKind &&
+    left.context.clientId === right.context.clientId &&
+    left.context.artifactId === right.context.artifactId &&
+    left.context.partitionKey === right.context.partitionKey &&
+    left.context.policyVersion === right.context.policyVersion
+  );
+}
+
+function permanentPersistenceFailure(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /COLLABORATION_(?:ACCESS_REVOKED|TOKEN_EXPIRED|READ_ONLY|BASE_STATE_STALE|REGION_|AI_ATTRIBUTION|NATIVE_PROJECTION|MODEL_CHANGE|GATEWAY_(?:FORBIDDEN|UNAVAILABLE|UPDATE_(?:SIZE|INVALID)))/.test(
+    message,
+  );
+}
+
+function forceCanonicalReconnect(context, reason) {
+  for (const peer of activeConnections) {
+    if (
+      peer.context?.artifactId !== context.artifactId ||
+      peer.context?.partitionKey !== context.partitionKey
+    )
+      continue;
+    sendGatewayState(peer, {
+      type: "spectra.durable_failed",
+      message:
+        "This edit could not be accepted. Spectra is reloading the latest permitted version while keeping the local draft available for review.",
+    });
+    try {
+      peer.webSocket.close(4409, reason);
+    } catch {
+      // Another policy path may already have closed the peer.
+    }
+  }
+}
+
+async function appendWithRetry(payload, entries) {
+  let attempt = 0;
+  for (;;) {
+    try {
+      const result = await bridge("append", payload);
+      for (const entry of entries)
+        sendGatewayState(entry.connection, {
+          type: "spectra.durable_ack",
+          updateIds: [entry.messageId],
+        });
+      return result;
+    } catch (error) {
+      if (permanentPersistenceFailure(error)) {
+        const reason =
+          error instanceof Error ? error.message : "COLLABORATION_UPDATE_REJECTED";
+        process.stderr.write(`[durable append] ${reason}\n`);
+        forceCanonicalReconnect(entries[0].context, reason);
+        throw error;
+      }
+      attempt += 1;
+      const retryMs = Math.min(
+        PERSISTENCE_RETRY_MAX_MS,
+        150 * 2 ** Math.min(attempt - 1, 6),
+      );
+      process.stderr.write(
+        `[durable append] retrying in ${retryMs}ms (${error instanceof Error ? error.message : String(error)})\n`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, retryMs));
+    }
+  }
+}
+
+async function persistAcceptedMessages(document, entries, snapshotAfterFirst) {
+  if (!entries.length || !snapshotAfterFirst) return;
+  const scratch = new Y.Doc();
+  try {
+    Y.applyUpdate(scratch, snapshotAfterFirst);
+    let index = 0;
+    while (index < entries.length) {
+      const group = [entries[index]];
+      if (index > 0) Y.applyUpdate(scratch, entries[index].documentUpdate);
+      index += 1;
+      while (
+        index < entries.length &&
+        samePersistenceActor(group[0], entries[index])
+      ) {
+        Y.applyUpdate(scratch, entries[index].documentUpdate);
+        group.push(entries[index]);
+        index += 1;
+      }
+      const first = group[0];
+      const last = group[group.length - 1];
+      const nativeAfter = isNativeArtifactDocument(scratch);
+      const regionIds = nativeAfter
+        ? [NATIVE_PROJECTION_REGION]
+        : [...new Set(group.flatMap((entry) => entry.regionIds))];
+      if (!regionIds.length) {
+        for (const entry of group)
+          sendGatewayState(entry.connection, {
+            type: "spectra.durable_ack",
+            updateIds: [entry.messageId],
+          });
+        continue;
+      }
+      const projectionJson = artifactProjection(
+        scratch,
+        first.context.schemaVersion,
+      );
+      const mergedUpdate = Y.mergeUpdates(
+        group.map((entry) => entry.documentUpdate),
+      );
+      const updateHash = createHash("sha256")
+        .update(mergedUpdate)
+        .digest("base64url");
+      await appendWithRetry(
+        {
+          artifactId: first.context.artifactId,
+          partitionKey: first.context.partitionKey,
+          accountId: first.context.accountId,
+          actorKind: first.context.actorKind,
+          clientId: first.context.clientId,
+          policyVersion: first.context.policyVersion,
+          idempotencyKey: `${first.context.clientId}:${updateHash}`,
+          update: Buffer.from(mergedUpdate).toString("base64"),
+          baseStateVectorHash: first.baseStateVectorHash,
+          stateVectorHash: last.stateVectorHash,
+          regionIds,
+          nativeInitialization: group.some(
+            (entry) => entry.nativeInitialization,
+          ),
+          projectionJson,
+          projectionHash: projectionJson
+            ? createHash("sha256").update(projectionJson).digest("base64url")
+            : null,
+        },
+        group,
+      );
+    }
+  } finally {
+    scratch.destroy();
+  }
+}
+
+function schedulePersistence(document, entry) {
+  const queue = persistenceQueue(document);
+  if (queue.pending.length === 0)
+    queue.snapshotAfterFirst = Y.encodeStateAsUpdate(document);
+  queue.pending.push(entry);
+  sendGatewayState(entry.connection, {
+    type: "spectra.durable_pending",
+    updateIds: [entry.messageId],
+  });
+  if (queue.timer) clearTimeout(queue.timer);
+  queue.timer = setTimeout(() => {
+    queue.timer = null;
+    const entries = queue.pending.splice(0);
+    const snapshotAfterFirst = queue.snapshotAfterFirst;
+    queue.snapshotAfterFirst = null;
+    queue.tail = queue.tail
+      .then(() => persistAcceptedMessages(document, entries, snapshotAfterFirst))
+      .catch(() => undefined);
+  }, PERSISTENCE_DEBOUNCE_MS);
+  queue.timer.unref?.();
 }
 
 function bridge(operation, payload) {
@@ -387,7 +589,9 @@ function extractYjsUpdate(frame) {
   const decoder = decoding.createDecoder(frame);
   decoding.readVarString(decoder);
   const outerType = decoding.readVarUint(decoder);
-  if (outerType !== 0 && outerType !== 4) return null;
+  if (outerType !== 0 && outerType !== 4) {
+    return null;
+  }
   const syncType = decoding.readVarUint(decoder);
   if (syncType !== messageYjsSyncStep2 && syncType !== messageYjsUpdate)
     return null;
@@ -507,62 +711,40 @@ const server = new Server({
         throw new Error("COLLABORATION_GATEWAY_UPDATE_SIZE");
       const before = artifactModelState(document);
       const nativeBefore = isNativeArtifactDocument(document);
-      const baseStateVectorHash = createHash("sha256")
-        .update(Y.encodeStateVector(document))
-        .digest("base64url");
-      const scratch = new Y.Doc();
+      if (!context.canModify) throw new Error("COLLABORATION_READ_ONLY");
+      const baseStateVectorHash = documentStateVectorHash(document);
+      const probe = new Y.Doc();
       try {
-        Y.applyUpdate(scratch, Y.encodeStateAsUpdate(document));
-        Y.applyUpdate(scratch, documentUpdate);
-        const nativeAfter = isNativeArtifactDocument(scratch);
-        const after = nativeAfter ? null : artifactModelState(scratch);
-        const regionIds = nativeAfter
-          ? [NATIVE_PROJECTION_REGION]
-          : changedArtifactRegions(before, after);
-        if (regionIds.length === 0) return;
-        if (!context.canModify) throw new Error("COLLABORATION_READ_ONLY");
-        if (regionIds.length > 128)
-          throw new Error("COLLABORATION_MODEL_CHANGE_UNRECOGNIZED");
-        const stateVectorHash = createHash("sha256")
-          .update(Y.encodeStateVector(scratch))
-          .digest("base64url");
-        // Yjs sync step two legitimately carries the two-byte empty update
-        // when the peer has nothing the room is missing. Treating that frame
-        // as a semantic write re-projects an unchanged native document and can
-        // manufacture a false structural diff during normalization. It is a
-        // handshake acknowledgement, not an authored mutation.
-        if (stateVectorHash === baseStateVectorHash) return;
-        const updateHash = createHash("sha256")
-          .update(documentUpdate)
-          .digest("base64url");
-        const projectionJson = artifactProjection(
-          scratch,
-          context.schemaVersion,
-        );
-        // Persist and authorize the exact semantic mutation before Hocuspocus is
-        // allowed to apply or broadcast it. A rejected claim can therefore never
-        // contaminate the shared in-memory document.
-        await bridge("append", {
-          artifactId: context.artifactId,
-          partitionKey: context.partitionKey,
-          accountId: context.accountId,
-          actorKind: context.actorKind,
-          clientId: context.clientId,
-          policyVersion: context.policyVersion,
-          idempotencyKey: `${context.clientId}:${updateHash}`,
-          update: Buffer.from(documentUpdate).toString("base64"),
-          baseStateVectorHash,
-          stateVectorHash,
-          regionIds,
-          nativeInitialization: nativeAfter && !nativeBefore,
-          projectionJson,
-          projectionHash: projectionJson
-            ? createHash("sha256").update(projectionJson).digest("base64url")
-            : null,
-        });
+        Y.applyUpdate(probe, Y.encodeStateAsUpdate(document));
+        Y.applyUpdate(probe, documentUpdate);
+        // Sync step 2 often contains the complete client state on room join.
+        // It must still be accepted, but if it adds nothing to the canonical
+        // room it does not enter the durable queue. Keeping a queued record for
+        // that no-op made `afterHandleMessage` consume the next real update,
+        // so the provider never received its SyncStatus acknowledgement and
+        // authoring surfaces stayed on “Waiting to sync”.
+        if (documentStateVectorHash(probe) === baseStateVectorHash) {
+          releaseDocumentMessage(socketId);
+          return;
+        }
       } finally {
-        scratch.destroy();
+        probe.destroy();
       }
+      const updateHash = createHash("sha256")
+        .update(documentUpdate)
+        .digest("base64url");
+      // Keep the pre-apply hook deliberately cheap. Hocuspocus applies and
+      // broadcasts as soon as this returns; projection and Convex persistence
+      // are batched only after peers have received the keystroke.
+      messageQueue(socketId).push({
+        context: { ...context },
+        connection,
+        documentUpdate,
+        before,
+        nativeBefore,
+        baseStateVectorHash,
+        messageId: `${context.clientId}:${updateHash}`,
+      });
     } catch (error) {
       releaseDocumentMessage(socketId);
       const reason =
@@ -580,8 +762,36 @@ const server = new Server({
     }
   },
 
-  async afterHandleMessage({ socketId }) {
-    releaseDocumentMessage(socketId);
+  async afterHandleMessage({ socketId, document }) {
+    const queue = acceptedDocumentMessages.get(socketId);
+    const accepted = queue?.shift();
+    if (!queue?.length) acceptedDocumentMessages.delete(socketId);
+    try {
+      if (!accepted) return;
+      const stateVectorHash = documentStateVectorHash(document);
+      const nativeAfter = isNativeArtifactDocument(document);
+      const regionIds = nativeAfter
+        ? [NATIVE_PROJECTION_REGION]
+        : changedArtifactRegions(accepted.before, artifactModelState(document));
+      if (regionIds.length > 128)
+        throw new Error("COLLABORATION_MODEL_CHANGE_UNRECOGNIZED");
+      schedulePersistence(document, {
+        ...accepted,
+        stateVectorHash,
+        regionIds,
+        nativeInitialization: nativeAfter && !accepted.nativeBefore,
+      });
+    } catch (error) {
+      const reason =
+        error instanceof Error ? error.message : "COLLABORATION_UPDATE_REJECTED";
+      process.stderr.write(`[afterHandleMessage] ${reason}\n`);
+      forceCanonicalReconnect(accepted?.context ?? {}, reason);
+      throw error;
+    } finally {
+      // The per-document gate protects only apply ordering. Durable I/O happens
+      // behind the queue and must never hold the next collaborator's message.
+      releaseDocumentMessage(socketId);
+    }
   },
 
   async beforeHandleAwareness({ context, states }) {

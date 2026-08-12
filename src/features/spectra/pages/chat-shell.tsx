@@ -844,7 +844,7 @@ export function ChatShell() {
           onDirtyChange={studio.setDirty}
         />
       ) : null}
-      <div className="pointer-events-none absolute bottom-0 left-0 right-[var(--spectra-studio-width,0px)] z-50 bg-transparent px-5 pb-5 pt-2 sm:px-8 min-[1920px]:right-0">
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-50 bg-transparent px-5 pb-5 pt-2 sm:px-8">
         <div className="pointer-events-auto mx-auto max-w-[820px]">
           <ComposerArtifactDock
             artifacts={artifacts}

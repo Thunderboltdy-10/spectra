@@ -1201,7 +1201,7 @@ path={eventPath(event.id)}
           if (file) void importFile(file);
         }}
       />
-      <header className="timetable-toolbar">
+      <header className="spectra-editor-workbar timetable-toolbar">
         <div className="timetable-date-navigation">
           <button
             type="button"

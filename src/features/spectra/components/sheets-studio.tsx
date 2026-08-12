@@ -713,7 +713,7 @@ export function SheetsStudio({
   aiChangedPaths = [],
   readOnly = false,
   mode = "tab",
-  synchronizationReady: _synchronizationReady = true,
+  synchronizationReady = true,
   syncMessage = "Auto-saved",
   onActiveRegionChange,
 }: {
@@ -1926,6 +1926,12 @@ export function SheetsStudio({
   }
 
   async function importWorkbookFile(file: File) {
+    if (!synchronizationReady) {
+      setImportNotice(
+        "Finish synchronizing the current sheet before replacing it with an import. You can keep editing cells while Spectra reconnects.",
+      );
+      return;
+    }
     if (file.size < 1 || file.size > 100 * 1024 * 1024) {
       setImportNotice(
         "Import quarantined: the file is empty or exceeds the 100 MB parsing safety ceiling.",
@@ -2102,7 +2108,7 @@ export function SheetsStudio({
       className="spectra-sheets-studio min-w-0 overflow-hidden"
       data-compact={mode === "split" || undefined}
     >
-      <div className="sheets-top-bars">
+      <div className="spectra-editor-workbar sheets-top-bars">
         <div className="sheets-menu-bar">
           {(["file", "edit", "view", "insert", "format", "data"] as const).map(
             (name) => (
@@ -2122,7 +2128,12 @@ export function SheetsStudio({
                       <>
                         <button
                           type="button"
-                          disabled={readOnly}
+                          disabled={readOnly || !synchronizationReady}
+                          title={
+                            !synchronizationReady
+                              ? "Finish synchronizing before importing"
+                              : undefined
+                          }
                           onClick={() => importRef.current?.click()}
                         >
                           <Upload />

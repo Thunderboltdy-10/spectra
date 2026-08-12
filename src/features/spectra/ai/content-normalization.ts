@@ -199,7 +199,10 @@ export function normalizeQuizContent(value: unknown) {
         }
       : {}),
   };
-  content.published = false;
+  // Normalization runs on live collaborative state as well as freshly
+  // generated drafts. Missing publication state is safely unpublished, but a
+  // real owner publish must survive the normalization/Yjs projection cycle.
+  content.published = content.published === true;
   const typeAliases: Record<string, string> = {
     mcq: "multiple_choice",
     multiplechoice: "multiple_choice",

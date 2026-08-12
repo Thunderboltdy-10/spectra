@@ -213,12 +213,41 @@ export const beginRun = mutation({
         thread.status !== "active")
     )
       throw new Error("That conversation is no longer available.");
+    // Continuing a thread is an explicit request to keep working with its
+    // primary artifact. The caller may have no open studio on the new surface
+    // (for example after opening a Dock tab in quick chat), so recover that
+    // target from the durable thread binding instead of dropping it.
+    let effectiveArtifactId = args.artifactId ?? thread?.artifactId;
+    if (!effectiveArtifactId && thread) {
+      const derivedArtifact = (
+        await ctx.db
+          .query("spectraArtifacts")
+          .withIndex("by_created_thread", (q) =>
+            q.eq("createdFrom.threadId", thread!._id),
+          )
+          .order("desc")
+          .take(12)
+      ).find(
+        (artifact) =>
+          artifact.ownerAccountId === actor._id && artifact.status !== "deleted",
+      );
+      if (derivedArtifact) {
+        effectiveArtifactId = derivedArtifact._id;
+        // Opportunistically migrate older create threads so every later
+        // continuation takes the direct, indexed path.
+        await ctx.db.patch(thread._id, {
+          artifactId: derivedArtifact._id,
+          updatedAt: Date.now(),
+        });
+        thread = { ...thread, artifactId: derivedArtifact._id };
+      }
+    }
     let requestedWorkspaceId = args.workspaceId;
-    if (!thread && !requestedWorkspaceId && args.artifactId) {
+    if (!thread && !requestedWorkspaceId && effectiveArtifactId) {
       const placements = await ctx.db
         .query("spectraWorkspaceItems")
         .withIndex("by_source", (q) =>
-          q.eq("sourceType", "artifact").eq("sourceId", args.artifactId!),
+          q.eq("sourceType", "artifact").eq("sourceId", effectiveArtifactId),
         )
         .collect();
       for (const placement of placements
@@ -246,7 +275,7 @@ export const beginRun = mutation({
       )
         throw new Error("That workspace is no longer available.");
     }
-    if (args.artifactId) {
+    if (effectiveArtifactId) {
       // A directly shared artifact is a legitimate AI context even when its
       // owner belongs to another school. Keep the run/thread private in the
       // actor's school, but authorize the artifact through the same audited
@@ -255,7 +284,7 @@ export const beginRun = mutation({
       // questions without gaining write authority.
       const { artifact } = await requireArtifactCapability(
         ctx,
-        args.artifactId,
+        effectiveArtifactId,
         "read",
       );
       if (artifact.status === "deleted")
@@ -295,7 +324,7 @@ export const beginRun = mutation({
         title,
         origin: args.sourceSurface,
         workspaceId,
-        artifactId: args.artifactId,
+        artifactId: effectiveArtifactId,
         status: "active",
         messageCount: 0,
         createdAt: now,
@@ -320,7 +349,7 @@ export const beginRun = mutation({
       sourceSurface: args.sourceSurface,
       threadId,
       workspaceId,
-      artifactId: args.artifactId,
+      artifactId: effectiveArtifactId,
       status: "queued",
       userPrompt: cleanPrompt,
       modelUsed: args.modelUsed,
@@ -337,7 +366,7 @@ export const beginRun = mutation({
       runId,
       surface: args.sourceSurface,
       workspaceId,
-      artifactId: args.artifactId,
+      artifactId: effectiveArtifactId,
       status: "queued",
       variant: "status",
       title: "Queued",
@@ -346,8 +375,8 @@ export const beginRun = mutation({
       provenance: {
         threadId,
         workspaceId,
-        artifactIds: args.artifactId ? [args.artifactId] : [],
-        focusMode: args.artifactId
+        artifactIds: effectiveArtifactId ? [effectiveArtifactId] : [],
+        focusMode: effectiveArtifactId
           ? "artifact"
           : workspaceId
             ? "workspace"
@@ -959,42 +988,85 @@ export const listTabs = query({
             .filter((message) => message.role === "assistant")
             .sort((a, b) => b.createdAt - a.createdAt)[0];
           const rawChoices = latestAssistant?.metadata?.choices as
-            { question?: unknown; options?: unknown } | undefined;
-          const options = Array.isArray(rawChoices?.options)
-            ? rawChoices.options.flatMap(
-                (
-                  option,
-                ): Array<{ title: string; description?: string | null }> => {
-                  if (!option || typeof option !== "object") return [];
-                  const row = option as {
-                    title?: unknown;
-                    description?: unknown;
-                  };
-                  if (typeof row.title !== "string" || !row.title.trim())
-                    return [];
-                  return [
-                    {
-                      title: row.title.trim(),
-                      description:
-                        typeof row.description === "string"
-                          ? row.description
-                          : null,
-                    },
-                  ];
-                },
-              )
+            | { question?: unknown; options?: unknown; questions?: unknown }
+            | undefined;
+          const choiceSelection = latestAssistant?.metadata?.choiceSelection;
+          const choiceAlreadyAnswered = Boolean(
+            choiceSelection && typeof choiceSelection === "object",
+          );
+          const parseOptions = (value: unknown) =>
+            Array.isArray(value)
+              ? value.flatMap(
+                  (
+                    option,
+                  ): Array<{ title: string; description?: string | null }> => {
+                    if (!option || typeof option !== "object") return [];
+                    const row = option as {
+                      title?: unknown;
+                      description?: unknown;
+                    };
+                    if (typeof row.title !== "string" || !row.title.trim())
+                      return [];
+                    return [
+                      {
+                        title: row.title.trim(),
+                        description:
+                          typeof row.description === "string"
+                            ? row.description
+                            : null,
+                      },
+                    ];
+                  },
+                )
+              : [];
+          const options = parseOptions(rawChoices?.options);
+          const batchQuestions = Array.isArray(rawChoices?.questions)
+            ? rawChoices.questions.flatMap((question, index) => {
+                if (!question || typeof question !== "object") return [];
+                const row = question as {
+                  id?: unknown;
+                  question?: unknown;
+                  options?: unknown;
+                };
+                const prompt =
+                  typeof row.question === "string" ? row.question.trim() : "";
+                const questionOptions = parseOptions(row.options);
+                return prompt && questionOptions.length >= 2
+                  ? [
+                      {
+                        id:
+                          typeof row.id === "string" && row.id.trim()
+                            ? row.id.trim()
+                            : `question-${index + 1}`,
+                        prompt,
+                        options: questionOptions,
+                      },
+                    ]
+                  : [];
+              })
             : [];
           const inputRequest =
-            typeof rawChoices?.question === "string" &&
-            rawChoices.question.trim() &&
-            options.length >= 2 &&
-            options.length <= 6
-              ? {
-                  kind: "choice" as const,
-                  prompt: rawChoices.question.trim(),
-                  options,
-                }
-              : null;
+            !latestAssistant ||
+            choiceAlreadyAnswered ||
+            thread?.lastRunId !== tab.runId
+              ? null
+              : batchQuestions.length >= 2
+                ? {
+                    kind: "choice_batch" as const,
+                    messageId: latestAssistant._id,
+                    questions: batchQuestions.slice(0, 4),
+                  }
+                : typeof rawChoices?.question === "string" &&
+                    rawChoices.question.trim() &&
+                    options.length >= 2 &&
+                    options.length <= 6
+                  ? {
+                      kind: "choice" as const,
+                      messageId: latestAssistant._id,
+                      prompt: rawChoices.question.trim(),
+                      options,
+                    }
+                  : null;
           const meaningfulSteps = events
             .filter(
               (event) =>
@@ -1029,7 +1101,23 @@ export const listTabs = query({
                 (typeof payload.message === "string" && payload.message);
               return value && value.trim() ? [value.trim()] : [];
             });
-          const checkpointSummary = meaningfulSteps.at(-1);
+          const collapsedSteps = meaningfulSteps.reduce<string[]>(
+            (steps, value) => {
+              const previous = steps.at(-1);
+              if (!previous) return [value];
+              if (previous === value) return steps;
+              const prior = previous.toLocaleLowerCase();
+              const next = value.toLocaleLowerCase();
+              if (prior.startsWith(next) || next.startsWith(prior))
+                return [
+                  ...steps.slice(0, -1),
+                  value.length >= previous.length ? value : previous,
+                ];
+              return [...steps, value];
+            },
+            [],
+          );
+          const checkpointSummary = collapsedSteps.at(-1);
           return {
             ...tab,
             run,
@@ -1037,7 +1125,7 @@ export const listTabs = query({
             card: cards.sort((a, b) => b.updatedAt - a.updatedAt)[0] ?? null,
             inputRequest,
             checkpointSummary,
-            recentSteps: meaningfulSteps.slice(-2),
+            recentSteps: collapsedSteps.slice(-8),
           };
         }),
       )
@@ -1294,10 +1382,10 @@ export const selectTab = mutation({
       const forThread = schoolTabs
         .filter((tab) => tab.threadId === thread._id)
         .sort((a, b) => b.updatedAt - a.updatedAt);
-      // Prefer an existing tab's run, then the thread's last run, then the
-      // explicitly requested runId.
+      // Prefer the conversation's latest run. Selecting an older dock tab
+      // updates that tab's timestamp, so tab order is not conversation order.
       targetRunId =
-        forThread[0]?.runId ?? thread.lastRunId ?? args.runId ?? targetRunId;
+        thread.lastRunId ?? forThread[0]?.runId ?? args.runId ?? targetRunId;
     }
 
     if (targetRunId && !targetThreadId) {
@@ -1327,7 +1415,6 @@ export const selectTab = mutation({
       .filter((tab) => tab.threadId === targetThreadId)
       .sort((a, b) => b.updatedAt - a.updatedAt);
     const canonical = threadTabs[0];
-
     for (const tab of schoolTabs) {
       if (canonical && tab._id === canonical._id) {
         await ctx.db.patch(tab._id, {
@@ -1340,7 +1427,6 @@ export const selectTab = mutation({
         continue;
       }
       if (tab.threadId === targetThreadId) {
-        // Collapse duplicate tabs for the same thread.
         await ctx.db.patch(tab._id, {
           selected: false,
           hiddenAt: now,

@@ -320,6 +320,21 @@ export const get = query({
   args: { threadId: v.id("spectraThreads") },
   handler: async (ctx, args) => {
     const { actor, thread } = await requireOwnedThread(ctx, args.threadId);
+    const derivedArtifact = thread.artifactId
+      ? null
+      : (
+          await ctx.db
+            .query("spectraArtifacts")
+            .withIndex("by_created_thread", (q) =>
+              q.eq("createdFrom.threadId", args.threadId),
+            )
+            .order("desc")
+            .take(12)
+        ).find(
+          (artifact) =>
+            artifact.ownerAccountId === actor._id &&
+            artifact.status !== "deleted",
+        );
     const messages = await ctx.db
       .query("spectraMessages")
       .withIndex("by_thread_created", (q) => q.eq("threadId", args.threadId))
@@ -379,7 +394,9 @@ export const get = query({
       }),
     );
     return {
-      thread,
+      thread: derivedArtifact
+        ? { ...thread, artifactId: derivedArtifact._id }
+        : thread,
       messages,
       traces: traces.filter(Boolean),
       viewerName: actor.name,

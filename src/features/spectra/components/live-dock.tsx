@@ -9,6 +9,7 @@ import {
   FileText,
   Loader2,
   MessageSquare,
+  MessageSquarePlus,
   PauseCircle,
   RotateCcw,
   ShieldCheck,
@@ -16,7 +17,14 @@ import {
   Unplug,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import { useNow } from "@/hooks/use-now";
 import { useSpectraContextStore } from "@/stores/spectra-context-store";
 import { PrismRunMark } from "@/components/spectra-prism-optic";
@@ -126,15 +134,14 @@ const stateCopy: Record<LiveDockTruthState, string> = {
   paused: "Paused",
   reconnecting: "Reconnecting",
   cancelled: "Cancelled",
-  failed_terminal: "Could not complete",
+  failed_terminal: "Recovery exhausted",
 };
 
 function StateIcon({ state }: { state: LiveDockTruthState }) {
   const className = "h-3.5 w-3.5 shrink-0";
   /* Working and checking are the run's own optical state, so they use the
      product prism: the same silhouette the landing's real glass docks into. */
-  if (state === "working")
-    return <PrismRunMark size={14} optics="working" />;
+  if (state === "working") return <PrismRunMark size={14} optics="working" />;
   if (state === "completing")
     return <PrismRunMark size={14} optics="working" />;
   if (state === "needs_input")
@@ -143,7 +150,7 @@ function StateIcon({ state }: { state: LiveDockTruthState }) {
   if (state === "reconnecting")
     return <Unplug className={`${className} text-[var(--warning)]`} />;
   if (state === "paused")
-    return <PauseCircle className={`${className} text-[var(--danger)]`} />;
+    return <PauseCircle className={`${className} text-[var(--warning)]`} />;
   if (state === "failed_terminal")
     return <AlertCircle className={`${className} text-[var(--danger)]`} />;
   if (state === "cancelled")
@@ -270,7 +277,14 @@ export type LiveDockProps = {
     title: string,
     workId?: string,
   ) => void;
+  onContinue?: (
+    runId: string,
+    threadId: string,
+    title: string,
+    workId?: string,
+  ) => void;
   onDeselect?: () => void;
+  onStartNewThread?: () => void;
   onStop?: (runId: string) => void | Promise<void>;
   onRetry?: (runId: string) => void;
   onAction?: (
@@ -285,15 +299,6 @@ export type LiveDockProps = {
     threadId: string,
     response: string,
     attachments?: CommandAttachment[],
-  ) => void | Promise<unknown>;
-  onSteer?: (
-    runId: string,
-    mode:
-      | "refine_current_goal"
-      | "redirect_next_step"
-      | "replace_goal"
-      | "cancel_current_action",
-    text: string,
   ) => void | Promise<unknown>;
   openThreadId?: string;
   /**
@@ -359,13 +364,14 @@ export function LiveDock({
   workspaceId,
   optimistic,
   onOpen,
+  onContinue,
   onDeselect,
+  onStartNewThread,
   onStop,
   onRetry,
   onAction,
   onRevise,
   onInput,
-  onSteer,
   openThreadId,
   storyTabs,
 }: LiveDockProps) {
@@ -373,21 +379,21 @@ export function LiveDock({
   /* Story mode is a state source, not a second dock. */
   const story = storyTabs !== undefined;
   const tabs = storyTabs ?? fetchedTabs;
-  const [disclosedRunId, setDisclosedRunId] = useState<string | null>(null);
   const [expandedInputRunId, setExpandedInputRunId] = useState<string | null>(
     null,
   );
   const [collapsedInputRuns, setCollapsedInputRuns] = useState<Set<string>>(
     new Set(),
   );
+  const [respondingInputRuns, setRespondingInputRuns] = useState<Set<string>>(
+    new Set(),
+  );
   const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [batchAnswers, setBatchAnswers] = useState<
+    Record<string, Record<string, string>>
+  >({});
   const [revisionRunId, setRevisionRunId] = useState<string | null>(null);
   const [revision, setRevision] = useState("");
-  const [steeringRunId, setSteeringRunId] = useState<string | null>(null);
-  const [steerText, setSteerText] = useState("");
-  const [steerFeedback, setSteerFeedback] = useState<Record<string, string>>(
-    {},
-  );
   const [stopping, setStopping] = useState<Set<string>>(new Set());
   const now = useNow(60_000);
   const motionLevel = useSpectraMotion();
@@ -431,6 +437,7 @@ export function LiveDock({
        declares them: recency filtering would quietly drop fixture tabs. */
     if (story) return tabs;
     return tabs
+      .filter((tab) => !respondingInputRuns.has(tab.runId))
       .filter(
         (tab) =>
           !workspaceId || tab.workspaceId === workspaceId || !tab.workspaceId,
@@ -456,9 +463,21 @@ export function LiveDock({
             ? 1
             : -1;
       });
-  }, [continuation?.id, now, openThreadId, story, tabs, workspaceId]);
+  }, [
+    continuation?.id,
+    now,
+    openThreadId,
+    respondingInputRuns,
+    story,
+    tabs,
+    workspaceId,
+  ]);
 
   const sources = useMemo(() => visible.map(tabSource), [visible]);
+  const canonicalContinuationRunId =
+    continuation?.runId ??
+    visible.find((tab) => tab.threadId === continuation?.id)?.runId ??
+    null;
   const expandableSources = useMemo(
     () => sources.filter((source) => !collapsedInputRuns.has(source.runId)),
     [collapsedInputRuns, sources],
@@ -496,9 +515,11 @@ export function LiveDock({
     ["starting", "streaming"].includes(optimistic.status) &&
     !durableHasOptimistic,
   );
+  // The rail is a collection of actual runs. A standalone new-thread button
+  // reads like a second composer action, so an empty dock renders nothing.
   if (!showOptimistic && visible.length === 0) return null;
 
-  async function selectTab(tab: SpectraRunTab) {
+  function openQuickChat(tab: SpectraRunTab) {
     if (story) {
       /* The story owns navigation. Opening is still a real call the host can
          answer; it simply never mutates a run that does not exist. */
@@ -510,20 +531,26 @@ export function LiveDock({
       );
       return;
     }
+    continueThread(tab);
+    onOpen?.(
+      tab.runId,
+      tab.threadId,
+      tab.thread.title,
+      tab.run.artifactId ?? tab.card?.provenance?.artifactIds?.[0],
+    );
+  }
+
+  function continueThread(tab: SpectraRunTab) {
+    if (story) return;
     setContinuation({
       id: tab.threadId,
       title: tab.thread.title,
       runId: tab.runId,
       workspaceId: tab.workspaceId,
     });
+    onContinue?.(tab.runId, tab.threadId, tab.thread.title, tab.run.artifactId);
     void postSpectra({ action: "selectRunTab", runId: tab.runId }).then(() =>
-      refresh(),
-    );
-    onOpen?.(
-      tab.runId,
-      tab.threadId,
-      tab.thread.title,
-      tab.run.artifactId ?? tab.card?.provenance?.artifactIds?.[0],
+      refresh(true),
     );
   }
 
@@ -539,6 +566,61 @@ export function LiveDock({
     await refresh(true);
   }
 
+  async function respondToInput(
+    tab: SpectraRunTab,
+    response: string,
+    attachments?: CommandAttachment[],
+  ) {
+    if (!onInput) return;
+    const model = deriveLiveDockTab(tabSource(tab));
+    setRespondingInputRuns((current) => new Set(current).add(tab.runId));
+    setExpandedInputRunId(null);
+    try {
+      if (
+        (model.inputRequest?.kind === "choice" ||
+          model.inputRequest?.kind === "choice_batch") &&
+        model.inputRequest.messageId
+      ) {
+        const index =
+          model.inputRequest.kind === "choice"
+            ? model.inputRequest.options.findIndex(
+                (option) => option.title === response,
+              )
+            : -1;
+        await postSpectra({
+          action: "selectMessageChoice",
+          messageId: model.inputRequest.messageId,
+          choiceKey:
+            response === "Skipped"
+              ? "skip"
+              : model.inputRequest.kind === "choice_batch"
+                ? "batch"
+                : `${index}:${response}`,
+          choiceTitle: response,
+        });
+      }
+      const accepted = await onInput(
+        tab.threadId,
+        response === "Skipped"
+          ? "Skip that question and continue with reasonable defaults."
+          : response,
+        attachments,
+      );
+      if (accepted === false) throw new Error("Input was not accepted");
+      setCollapsedInputRuns((current) => new Set(current).add(tab.runId));
+      if (!story) {
+        await postSpectra({ action: "hideRunTab", runId: tab.runId });
+        await refresh(true);
+      }
+    } catch {
+      setRespondingInputRuns((current) => {
+        const next = new Set(current);
+        next.delete(tab.runId);
+        return next;
+      });
+    }
+  }
+
   return (
     <section
       className="mb-2 w-full"
@@ -549,6 +631,17 @@ export function LiveDock({
         className="spectra-run-tab-strip flex w-full items-start gap-1.5 overflow-x-auto overflow-y-visible px-0.5 pb-1 pt-0.5 [scrollbar-width:thin] max-sm:snap-x"
         aria-live="polite"
       >
+        {onStartNewThread && (showOptimistic || visible.length > 0) ? (
+          <button
+            type="button"
+            onClick={onStartNewThread}
+            className="sticky left-0 z-20 mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] shadow-[0_7px_22px_-20px_rgba(20,26,32,.5)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+            aria-label="Start a new thread"
+            title="New thread"
+          >
+            <MessageSquarePlus className="h-4 w-4" />
+          </button>
+        ) : null}
         {showOptimistic ? (
           <article
             className="flex h-12 min-w-[224px] basis-[260px] items-center gap-2 rounded-[9px] border border-[color-mix(in_oklab,var(--accent-cyan)_28%,var(--border-default))] bg-[var(--bg-elevated)] px-3 shadow-[inset_3px_0_var(--accent-cyan)]"
@@ -570,10 +663,17 @@ export function LiveDock({
           {visible.map((tab) => {
             const source = tabSource(tab);
             const model = deriveLiveDockTab(source);
+            const stateLabel = ["working", "completing", "completed"].includes(
+              model.state,
+            )
+              ? null
+              : stateCopy[model.state];
             const layout = layouts.get(tab.runId);
             const expanded = selectedInputRunId === tab.runId;
-            const disclosed = disclosedRunId === tab.runId;
-            const active = continuation?.id === tab.threadId;
+            const disclosureAnchor = `--live-dock-${tab.runId.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+            // One conversation may have several historical run tabs. Only the
+            // exact selected run receives the cyan continuation border.
+            const active = canonicalContinuationRunId === tab.runId;
             const card = streamCard(tab);
             const canRetry =
               (model.state === "paused" || model.state === "cancelled") &&
@@ -589,7 +689,14 @@ export function LiveDock({
                 layout
                 key={tab.runId}
                 className={`group relative max-w-full shrink-0 snap-start overflow-visible rounded-[9px] border bg-[var(--bg-elevated)] shadow-[0_7px_22px_-20px_rgba(20,26,32,.5)] ${active ? "border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] shadow-[inset_3px_0_var(--accent-cyan)]" : "border-[var(--border-default)]"} ${expanded ? "max-sm:fixed max-sm:inset-x-3 max-sm:bottom-3 max-sm:z-50 max-sm:max-h-[70dvh] max-sm:overflow-y-auto max-sm:shadow-[0_24px_80px_rgba(0,0,0,.32)]" : ""}`}
-                style={{ width: layout?.preferredWidth }}
+                style={
+                  {
+                    flexBasis: layout?.preferredWidth,
+                    flexGrow: 0,
+                    width: layout?.preferredWidth,
+                    anchorName: disclosureAnchor,
+                  } as CSSProperties
+                }
                 initial={
                   motionLevel.disabled
                     ? false
@@ -619,9 +726,19 @@ export function LiveDock({
                   <AnimatedStateIcon state={model.state} />
                   <button
                     type="button"
-                    onClick={() => void selectTab(tab)}
+                    onClick={() => {
+                      continueThread(tab);
+                      if (model.state === "needs_input") {
+                        setCollapsedInputRuns((current) => {
+                          const next = new Set(current);
+                          next.delete(tab.runId);
+                          return next;
+                        });
+                        setExpandedInputRunId(tab.runId);
+                      }
+                    }}
                     className="min-w-0 flex-1 py-1 text-left"
-                    title={`Open ${model.title}`}
+                    title={`Continue ${model.title}`}
                   >
                     <span className="flex items-center gap-1.5">
                       <DockTitle
@@ -640,10 +757,15 @@ export function LiveDock({
                       ) : null}
                     </span>
                     <span className="flex min-w-0 items-baseline text-micro text-[var(--text-tertiary)]">
-                      <span className="shrink-0 font-medium text-[var(--text-secondary)]">
-                        <CrossfadeText value={stateCopy[model.state]} />
+                      <span
+                        className={`${stateLabel ? "" : "hidden"} shrink-0 font-semibold text-[var(--text-secondary)]`}
+                      >
+                        <CrossfadeText value={stateLabel ?? ""} />
                       </span>
-                      <span aria-hidden="true" className="shrink-0">
+                      <span
+                        aria-hidden="true"
+                        className={`${stateLabel ? "" : "hidden"} shrink-0`}
+                      >
                         {" "}
                         ·{" "}
                       </span>
@@ -654,18 +776,12 @@ export function LiveDock({
                   </button>
                   <button
                     type="button"
-                    onClick={() =>
-                      setDisclosedRunId((current) =>
-                        current === tab.runId ? null : tab.runId,
-                      )
-                    }
+                    onClick={() => openQuickChat(tab)}
                     className="flex h-8 w-7 items-center justify-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-                    aria-expanded={disclosed}
-                    aria-label={`Show details for ${model.title}`}
+                    aria-label={`Open ${model.title} in quick chat`}
+                    title="Open quick chat"
                   >
-                    <ChevronDown
-                      className={`h-3 w-3 transition-transform ${disclosed ? "rotate-180" : ""}`}
-                    />
+                    <MessageSquare className="h-3.5 w-3.5" />
                   </button>
                   <button
                     type="button"
@@ -684,20 +800,32 @@ export function LiveDock({
 
                 {!expanded ? (
                   <div
-                    className={`${disclosed ? "block" : "hidden group-hover:block group-focus-within:block"} absolute bottom-[calc(100%+6px)] left-0 z-30 w-[min(320px,calc(100vw-24px))] rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 shadow-[0_16px_45px_-18px_rgba(20,26,32,.45)]`}
+                    className="fixed z-30 hidden w-[min(360px,calc(100vw-24px))] rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3.5 shadow-[0_16px_45px_-18px_rgba(20,26,32,.45)] group-hover:block group-focus-within:block"
+                    style={
+                      {
+                        positionAnchor: disclosureAnchor,
+                        bottom: "anchor(top)",
+                        left: "max(12px, anchor(left))",
+                      } as CSSProperties
+                    }
                     role="status"
                   >
-                    <p className="line-clamp-4 text-[11px] leading-[1.55] text-[var(--text-secondary)]">
+                    <p className="line-clamp-4 text-xs font-medium leading-[1.55] text-[var(--text-primary)]">
                       {model.hoverSummary}
                     </p>
-                    {model.recentSteps.length ? (
-                      <ul className="mt-2 space-y-0.5 text-micro text-[var(--text-tertiary)]">
-                        {model.recentSteps.map((step) => (
-                          <li key={step} className="truncate">
-                            ✓ {step}
-                          </li>
-                        ))}
-                      </ul>
+                    {model.recentSteps.length && isSteerable ? (
+                      <div className="mt-3">
+                        <p className="mb-1 text-micro font-bold uppercase tracking-[0.08em] text-[var(--text-secondary)]">
+                          Progress
+                        </p>
+                        <ul className="max-h-24 space-y-1 overflow-y-auto pr-1 text-[11px] leading-4 text-[var(--text-secondary)] [scrollbar-width:thin]">
+                          {model.recentSteps.map((step, stepIndex) => (
+                            <li key={`${tab.runId}:${stepIndex}:${step}`}>
+                              ✓ {step}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
                     ) : null}
                     <div className="mt-2 flex flex-wrap items-center gap-2 text-micro text-[var(--text-tertiary)]">
                       {model.targetNames.length ? (
@@ -710,22 +838,34 @@ export function LiveDock({
                     <div className="mt-2 flex items-center gap-1.5 border-t border-[var(--border-subtle)] pt-2">
                       <button
                         type="button"
-                        onClick={() => void selectTab(tab)}
+                        onClick={() => openQuickChat(tab)}
                         className="inline-flex h-7 items-center gap-1 rounded-[6px] px-2 text-micro font-semibold text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
                       >
                         <MessageSquare className="h-3 w-3" /> Open conversation
                       </button>
-                      {isSteerable && onSteer ? (
+                      {!active ? (
                         <button
                           type="button"
-                          onClick={() =>
-                            setSteeringRunId((current) =>
-                              current === tab.runId ? null : tab.runId,
-                            )
-                          }
-                          className="h-7 rounded-[6px] px-2 text-micro font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                          onClick={() => continueThread(tab)}
+                          className="inline-flex h-7 items-center gap-1 rounded-[6px] px-2 text-micro font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
                         >
-                          Steer
+                          Continue here
+                        </button>
+                      ) : null}
+                      {model.state === "needs_input" ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCollapsedInputRuns((current) => {
+                              const next = new Set(current);
+                              next.delete(tab.runId);
+                              return next;
+                            });
+                            setExpandedInputRunId(tab.runId);
+                          }}
+                          className="inline-flex h-7 items-center gap-1 rounded-[6px] px-2 text-micro font-semibold text-[var(--accent-cyan)] hover:bg-[color-mix(in_oklab,var(--accent-cyan)_8%,transparent)]"
+                        >
+                          <CircleHelp className="h-3 w-3" /> Respond
                         </button>
                       ) : null}
                       {canRetry ? (
@@ -761,57 +901,25 @@ export function LiveDock({
                         </button>
                       ) : null}
                     </div>
-                    {steeringRunId === tab.runId && onSteer ? (
-                      <div className="mt-2 flex gap-1.5">
-                        <input
-                          autoFocus
-                          value={steerText}
-                          onChange={(event) => setSteerText(event.target.value)}
-                          placeholder="Refine the current goal…"
-                          className="h-8 min-w-0 flex-1 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-micro outline-none focus:border-[var(--accent-cyan)]"
-                        />
-                        <button
-                          type="button"
-                          disabled={!steerText.trim()}
-                          onClick={async () => {
-                            const text = steerText.trim();
-                            if (!text) return;
-                            await onSteer(
-                              tab.runId,
-                              "refine_current_goal",
-                              text,
-                            );
-                            setSteerText("");
-                            setSteerFeedback((current) => ({
-                              ...current,
-                              [tab.runId]: "Will apply after the current step",
-                            }));
-                          }}
-                          className="h-8 rounded-[6px] bg-[var(--text-primary)] px-2 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-40"
-                        >
-                          Queue
-                        </button>
-                      </div>
-                    ) : null}
-                    {steerFeedback[tab.runId] ? (
-                      <p className="mt-1.5 text-micro text-[var(--accent-cyan)]">
-                        {steerFeedback[tab.runId]}
-                      </p>
-                    ) : null}
                   </div>
                 ) : null}
 
                 {expanded ? (
                   <motion.div
-                    className="overflow-hidden border-t border-[var(--border-subtle)]"
-                    initial={
-                      motionLevel.disabled ? false : { height: 0, opacity: 0 }
+                    className="fixed z-40 w-[min(480px,calc(100vw-24px))] rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[0_18px_50px_-20px_rgba(20,26,32,.5)]"
+                    style={
+                      {
+                        positionAnchor: disclosureAnchor,
+                        bottom: "calc(anchor(top) - 6px)",
+                        left: "max(12px, anchor(left))",
+                      } as CSSProperties
                     }
-                    animate={{ height: "auto", opacity: 1 }}
+                    initial={
+                      motionLevel.disabled ? false : { y: 6, opacity: 0 }
+                    }
+                    animate={{ y: 0, opacity: 1 }}
                     exit={
-                      motionLevel.disabled
-                        ? undefined
-                        : { height: 0, opacity: 0 }
+                      motionLevel.disabled ? undefined : { y: 4, opacity: 0 }
                     }
                     transition={transitionFor("morph", motionLevel.level)}
                   >
@@ -821,8 +929,10 @@ export function LiveDock({
                     >
                       <div className="flex items-start gap-2">
                         <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--warning)]" />
-                        <p className="line-clamp-3 text-[11px] leading-4 text-[var(--text-secondary)]">
-                          {model.inputRequest?.prompt}
+                        <p className="line-clamp-4 text-xs font-medium leading-5 text-[var(--text-primary)]">
+                          {model.inputRequest?.kind === "choice_batch"
+                            ? "A few quick questions"
+                            : model.inputRequest?.prompt}
                         </p>
                         <button
                           type="button"
@@ -838,31 +948,112 @@ export function LiveDock({
                           <ChevronDown className="h-3 w-3" />
                         </button>
                       </div>
-                      {model.inputRequest?.kind === "choice" ? (
-                        <div className="mt-2 grid gap-1.5 sm:grid-cols-2">
-                          {model.inputRequest.options.map((option) => (
-                            <button
-                              key={option.title}
-                              type="button"
-                              onClick={() => {
-                                setCollapsedInputRuns((current) =>
-                                  new Set(current).add(tab.runId),
-                                );
-                                void onInput?.(tab.threadId, option.title);
-                              }}
-                              className="rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 py-2 text-left hover:border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))]"
-                            >
-                              <span className="block text-micro font-semibold text-[var(--text-primary)]">
-                                {option.title}
-                              </span>
-                              {option.description ? (
-                                <span className="mt-0.5 block line-clamp-2 text-micro leading-3.5 text-[var(--text-tertiary)]">
-                                  {option.description}
-                                </span>
-                              ) : null}
-                            </button>
-                          ))}
+                      {model.inputRequest?.kind === "choice_batch" ? (
+                        <div className="mt-2 max-h-64 space-y-3 overflow-y-auto pr-1 [scrollbar-width:thin]">
+                          {model.inputRequest.questions.map(
+                            (question, questionIndex) => {
+                              const selected =
+                                batchAnswers[tab.runId]?.[question.id];
+                              return (
+                                <fieldset key={question.id}>
+                                  <legend className="text-micro font-semibold leading-4 text-[var(--text-primary)]">
+                                    {questionIndex + 1}. {question.prompt}
+                                  </legend>
+                                  <div className="mt-1 grid gap-1 sm:grid-cols-2">
+                                    {question.options.map((option) => (
+                                      <button
+                                        key={option.title}
+                                        type="button"
+                                        aria-pressed={selected === option.title}
+                                        onClick={() =>
+                                          setBatchAnswers((current) => ({
+                                            ...current,
+                                            [tab.runId]: {
+                                              ...current[tab.runId],
+                                              [question.id]: option.title,
+                                            },
+                                          }))
+                                        }
+                                        className={`rounded-[6px] border px-2 py-1.5 text-left text-micro font-semibold ${selected === option.title ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_9%,var(--bg-primary))]" : "border-[var(--border-default)] bg-[var(--bg-primary)] hover:border-[var(--accent-cyan)]"}`}
+                                      >
+                                        {option.title}
+                                      </button>
+                                    ))}
+                                    <button
+                                      type="button"
+                                      aria-pressed={selected === "Skipped"}
+                                      onClick={() =>
+                                        setBatchAnswers((current) => ({
+                                          ...current,
+                                          [tab.runId]: {
+                                            ...current[tab.runId],
+                                            [question.id]: "Skipped",
+                                          },
+                                        }))
+                                      }
+                                      className="rounded-[6px] px-2 py-1.5 text-left text-micro text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]"
+                                    >
+                                      Skip this question
+                                    </button>
+                                  </div>
+                                </fieldset>
+                              );
+                            },
+                          )}
+                          <button
+                            type="button"
+                            disabled={model.inputRequest.questions.some(
+                              (question) =>
+                                !batchAnswers[tab.runId]?.[question.id],
+                            )}
+                            onClick={() => {
+                              const response =
+                                model.inputRequest?.kind === "choice_batch"
+                                  ? model.inputRequest.questions
+                                      .map(
+                                        (question, index) =>
+                                          `${index + 1}) ${batchAnswers[tab.runId]?.[question.id] ?? "Skipped"}`,
+                                      )
+                                      .join("; ")
+                                  : "";
+                              if (response) void respondToInput(tab, response);
+                            }}
+                            className="sticky bottom-0 h-9 w-full rounded-[7px] bg-[var(--text-primary)] text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-40"
+                          >
+                            Continue with these answers
+                          </button>
                         </div>
+                      ) : model.inputRequest?.kind === "choice" ? (
+                        <>
+                          <div className="mt-2 grid gap-1.5 sm:grid-cols-2">
+                            {model.inputRequest.options.map((option) => (
+                              <button
+                                key={option.title}
+                                type="button"
+                                onClick={() =>
+                                  void respondToInput(tab, option.title)
+                                }
+                                className="rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 py-2 text-left hover:border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))]"
+                              >
+                                <span className="block text-micro font-semibold text-[var(--text-primary)]">
+                                  {option.title}
+                                </span>
+                                {option.description ? (
+                                  <span className="mt-0.5 block line-clamp-2 text-micro leading-3.5 text-[var(--text-tertiary)]">
+                                    {option.description}
+                                  </span>
+                                ) : null}
+                              </button>
+                            ))}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => void respondToInput(tab, "Skipped")}
+                            className="mt-1.5 h-7 rounded-[6px] px-2 text-micro font-semibold text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-secondary)]"
+                          >
+                            Skip for now
+                          </button>
+                        </>
                       ) : model.inputRequest?.kind === "short_answer" ? (
                         <div className="mt-2 flex gap-1.5">
                           <input
@@ -873,8 +1064,15 @@ export function LiveDock({
                                 [tab.runId]: event.target.value,
                               }))
                             }
+                            onKeyDown={(event) => {
+                              if (event.key !== "Enter" || event.shiftKey)
+                                return;
+                              event.preventDefault();
+                              const answer = answers[tab.runId]?.trim();
+                              if (answer) void respondToInput(tab, answer);
+                            }}
                             placeholder="Your answer…"
-                            className="h-8 min-w-0 flex-1 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-micro outline-none focus:border-[var(--accent-cyan)]"
+                            className="h-9 min-w-0 flex-1 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 py-0 text-micro leading-9 outline-none focus:border-[var(--accent-cyan)]"
                           />
                           <button
                             type="button"
@@ -882,14 +1080,18 @@ export function LiveDock({
                             onClick={() => {
                               const answer = answers[tab.runId]?.trim();
                               if (!answer) return;
-                              setCollapsedInputRuns((current) =>
-                                new Set(current).add(tab.runId),
-                              );
-                              void onInput?.(tab.threadId, answer);
+                              void respondToInput(tab, answer);
                             }}
-                            className="h-8 rounded-[6px] bg-[var(--text-primary)] px-2.5 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-40"
+                            className="h-9 rounded-[6px] bg-[var(--text-primary)] px-2.5 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-40"
                           >
                             Continue
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void respondToInput(tab, "Skipped")}
+                            className="h-9 rounded-[6px] px-2 text-micro font-semibold text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]"
+                          >
+                            Skip
                           </button>
                         </div>
                       ) : model.inputRequest?.kind === "file" ? (
@@ -904,11 +1106,8 @@ export function LiveDock({
                               const file = event.target.files?.[0];
                               if (!file) return;
                               const attachment = await attachmentFromFile(file);
-                              setCollapsedInputRuns((current) =>
-                                new Set(current).add(tab.runId),
-                              );
-                              await onInput?.(
-                                tab.threadId,
+                              await respondToInput(
+                                tab,
                                 `Attached ${file.name}.`,
                                 [attachment],
                               );
@@ -953,7 +1152,7 @@ export function LiveDock({
                                   setRevision(event.target.value)
                                 }
                                 placeholder="What should change?"
-                                className="h-8 min-w-0 flex-1 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-micro outline-none focus:border-[var(--accent-cyan)]"
+                                className="h-9 min-w-0 flex-1 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 py-0 text-micro leading-9 outline-none focus:border-[var(--accent-cyan)]"
                               />
                               <button
                                 type="button"

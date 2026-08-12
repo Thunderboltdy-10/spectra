@@ -153,11 +153,7 @@ export const authorize = internalQuery({
     const canModify =
       artifact.ownerAccountId === actor.accountId ||
       decision.capabilities.includes("modify");
-    if (
-      artifact.blueprintKey === "quiz" &&
-      decision.allowed &&
-      !canModify
-    ) {
+    if (artifact.blueprintKey === "quiz" && decision.allowed && !canModify) {
       return {
         allowed: false as const,
         reason: "quiz_practice_projection_required" as const,
@@ -280,13 +276,18 @@ export const bootstrapNative = internalMutation({
       ctx.db
         .query("collaborationRooms")
         .withIndex("by_artifact_partition", (q) =>
-          q.eq("artifactId", args.artifactId).eq("partitionKey", args.partitionKey),
+          q
+            .eq("artifactId", args.artifactId)
+            .eq("partitionKey", args.partitionKey),
         )
         .unique(),
     ]);
     if (!actor || !artifact || !room || room.status !== "active")
       throw new Error("COLLABORATION_GATEWAY_UNAVAILABLE");
-    const resourceType = artifact.blueprintKey === "agent" ? "agent" as const : "artifact" as const;
+    const resourceType =
+      artifact.blueprintKey === "agent"
+        ? ("agent" as const)
+        : ("artifact" as const);
     const [decision, policy, existingUpdate] = await Promise.all([
       evaluateAccessForActor(ctx, actor, resourceType, artifact._id),
       ctx.db
@@ -298,9 +299,7 @@ export const bootstrapNative = internalMutation({
       ctx.db
         .query("collaborationUpdates")
         .withIndex("by_room_sequence", (q) =>
-          q
-            .eq("roomId", room._id)
-            .eq("sequence", args.expectedNextSequence),
+          q.eq("roomId", room._id).eq("sequence", args.expectedNextSequence),
         )
         .unique(),
     ]);
@@ -329,8 +328,7 @@ export const bootstrapNative = internalMutation({
       args.projectionHash,
       artifact,
     );
-    if (!projection)
-      throw new Error("COLLABORATION_NATIVE_PROJECTION_INVALID");
+    if (!projection) throw new Error("COLLABORATION_NATIVE_PROJECTION_INVALID");
     if (existingUpdate) {
       if (existingUpdate.stateVectorHash !== args.stateVectorHash)
         throw new Error("COLLABORATION_NATIVE_BOOTSTRAP_STALE");
@@ -501,10 +499,7 @@ export const append = internalMutation({
     const nativeProjection = declaredRegionIds.includes(
       NATIVE_PROJECTION_REGION,
     );
-    if (
-      nativeProjection &&
-      (declaredRegionIds.length !== 1 || !projection)
-    )
+    if (nativeProjection && (declaredRegionIds.length !== 1 || !projection))
       throw new Error("COLLABORATION_NATIVE_PROJECTION_INVALID");
     const nativeTypeKey = isArtifactTypeKey(artifact.blueprintKey)
       ? artifact.blueprintKey
@@ -520,9 +515,7 @@ export const append = internalMutation({
               artifact.content,
               projection!.content,
             ),
-            ...(artifact.title !== projection!.title
-              ? ["metadata:title"]
-              : []),
+            ...(artifact.title !== projection!.title ? ["metadata:title"] : []),
             ...((artifact.summary ?? "") !== (projection!.summary ?? "")
               ? ["metadata:summary"]
               : []),
@@ -572,11 +565,18 @@ export const append = internalMutation({
       claim: (typeof actorClaims)[number],
       regionId: string,
     ) =>
-      claim.regionId === regionId || claim.overlapDomains.includes(regionId);
+      // `artifact:structure` is the explicit whole-document lease. Pending AI
+      // creates use it to replace the visible placeholder atomically; the
+      // native projection then expands that one structural operation into the
+      // fine-grained semantic regions it produced. Requiring a second lease
+      // for every newly introduced question/card/slide makes an authorized
+      // structural replace impossible to persist.
+      claim.regionId === "artifact:structure" ||
+      claim.overlapDomains.includes("artifact:structure") ||
+      claim.regionId === regionId ||
+      claim.overlapDomains.includes(regionId);
     const coveringClaims = actorClaims.filter((claim) =>
-      regionIds.some(
-        (regionId) => claimCoversRegion(claim, regionId),
-      ),
+      regionIds.some((regionId) => claimCoversRegion(claim, regionId)),
     );
     const conflictingClaim = activeClaims.find(
       (claim) =>

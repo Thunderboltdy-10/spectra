@@ -67,7 +67,6 @@ import {
   CommandBarMenuItem,
   CommandBarSubmenu,
 } from "../components/command-bar";
-import { ComposerArtifactDock } from "../components/composer-artifact-dock";
 import {
   ContextFocusControl,
   GlobalSearch,
@@ -123,6 +122,7 @@ type ArtifactSort =
   "updated" | "created" | "title" | "type" | "workspace" | "activity";
 type ArtifactCollection =
   | "all"
+  | "threads"
   | "unplaced"
   | "shared"
   | "recent"
@@ -346,19 +346,6 @@ export function ArtifactsShell({
     setActiveWorkspaceContext,
   } = useSpectraContext(allArtifacts, workspaces);
   const skipAutoContinueThreadIdRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!liveThread) return;
-    if (skipAutoContinueThreadIdRef.current === liveThread.id) return;
-    setComposerThread((current) =>
-      current?.id === liveThread.id
-        ? current
-        : {
-            id: liveThread.id,
-            title: liveThread.title,
-            workspaceId: selectedWorkspaceId || undefined,
-          },
-    );
-  }, [liveThread, selectedWorkspaceId, setComposerThread]);
   const studio = useArtifactStudioState(
     "spectra.shared.artifactStudio",
     allArtifacts,
@@ -432,6 +419,20 @@ export function ArtifactsShell({
   );
   const selectedWorkspace =
     workspaces.find((item) => item._id === selectedWorkspaceId) ?? null;
+  const workArtifacts = useMemo(
+    () =>
+      allArtifacts.filter(
+        (artifact) => artifact.blueprintKey !== "thread_reference",
+      ),
+    [allArtifacts],
+  );
+  const threadArtifacts = useMemo(
+    () =>
+      allArtifacts.filter(
+        (artifact) => artifact.blueprintKey === "thread_reference",
+      ),
+    [allArtifacts],
+  );
   useEffect(
     () =>
       setActiveWorkspaceContext(
@@ -445,11 +446,17 @@ export function ArtifactsShell({
     () =>
       [
         ...new Set([
-          ...contextArtifactIds,
-          ...tiledArtifacts.map((artifact) => artifact._id),
+          ...contextArtifactIds.filter(
+            (id) =>
+              allArtifacts.find((artifact) => artifact._id === id)
+                ?.blueprintKey !== "thread_reference",
+          ),
+          ...tiledArtifacts
+            .filter((artifact) => artifact.blueprintKey !== "thread_reference")
+            .map((artifact) => artifact._id),
         ]),
       ].slice(0, 24),
-    [contextArtifactIds, tiledArtifacts],
+    [allArtifacts, contextArtifactIds, tiledArtifacts],
   );
   const naturalFocusMode: ComposerFocusMode = composerThread
     ? "thread"
@@ -474,8 +481,13 @@ export function ArtifactsShell({
   useEffect(() => {
     setVisibleArtifactIds([
       ...new Set([
-        ...tiledArtifacts.map((artifact) => artifact._id),
-        ...(studio.activeArtifact ? [studio.activeArtifact._id] : []),
+        ...tiledArtifacts
+          .filter((artifact) => artifact.blueprintKey !== "thread_reference")
+          .map((artifact) => artifact._id),
+        ...(studio.activeArtifact?.blueprintKey !== "thread_reference" &&
+        studio.activeArtifact
+          ? [studio.activeArtifact._id]
+          : []),
       ]),
     ]);
   }, [setVisibleArtifactIds, studio.activeArtifact, tiledArtifacts]);
@@ -728,7 +740,13 @@ export function ArtifactsShell({
         ? "artifact"
         : "artifacts",
     workspaceId: selectedWorkspaceId || undefined,
-    artifactId: studio.activeArtifact?._id,
+    // A visible non-thread artifact is always useful model context, including
+    // while a different conversation supplies history. Thread references are
+    // the sole exception: viewing one is inert until Add to Live Dock.
+    artifactId:
+      studio.activeArtifact?.blueprintKey !== "thread_reference"
+        ? studio.activeArtifact?._id
+        : undefined,
     threadId: composerThread?.id,
     focusMode: effectiveFocusMode,
     selectedArtifactIds: contextualArtifactIds,
@@ -820,6 +838,10 @@ export function ArtifactsShell({
   }
 
   function toggleContextArtifact(artifact: SpectraArtifact) {
+    if (artifact.blueprintKey === "thread_reference") {
+      toast.message("Use Add to Live Dock to continue a saved thread.");
+      return;
+    }
     setMultiSelectMode(true);
     setSelectedContextIds((current) => {
       const next = new Set(current);
@@ -861,6 +883,9 @@ export function ArtifactsShell({
     return allArtifacts
       .filter((artifact) => {
         if (collection === "invitations") return false;
+        if (collection === "threads")
+          return artifact.blueprintKey === "thread_reference";
+        if (artifact.blueprintKey === "thread_reference") return false;
         if (collection === "shared" && artifact.ownership !== "shared")
           return false;
         if (
@@ -1687,13 +1712,19 @@ export function ArtifactsShell({
                       {
                         key: "all" as const,
                         label: "All work",
-                        count: allArtifacts.length,
+                        count: workArtifacts.length,
                         icon: Files,
+                      },
+                      {
+                        key: "threads" as const,
+                        label: "Threads",
+                        count: threadArtifacts.length,
+                        icon: MessageSquare,
                       },
                       {
                         key: "unplaced" as const,
                         label: "Unplaced",
-                        count: allArtifacts.filter(
+                        count: workArtifacts.filter(
                           (work) => artifactPlacements(work).length === 0,
                         ).length,
                         icon: FolderInput,
@@ -1701,7 +1732,7 @@ export function ArtifactsShell({
                       {
                         key: "shared" as const,
                         label: "Shared with me",
-                        count: allArtifacts.filter(
+                        count: workArtifacts.filter(
                           (artifact) => artifact.ownership === "shared",
                         ).length,
                         icon: Share2,
@@ -1709,10 +1740,9 @@ export function ArtifactsShell({
                       {
                         key: "recent" as const,
                         label: "Recent",
-                        count: allArtifacts.filter(
+                        count: workArtifacts.filter(
                           (work) =>
-                            now - work.updatedAt <=
-                            1000 * 60 * 60 * 24 * 30,
+                            now - work.updatedAt <= 1000 * 60 * 60 * 24 * 30,
                         ).length,
                         icon: Clock3,
                       },
@@ -1726,7 +1756,7 @@ export function ArtifactsShell({
                         key: "collections" as const,
                         label: "Collections",
                         count: new Set(
-                          allArtifacts.flatMap((work) => work.tags),
+                          workArtifacts.flatMap((work) => work.tags),
                         ).size,
                         icon: Tags,
                       },
@@ -2055,23 +2085,11 @@ export function ArtifactsShell({
           <div className="pointer-events-none absolute inset-x-0 bottom-0 z-[320] bg-transparent px-2 pb-4 pt-2 sm:px-5 sm:pb-5 lg:px-8">
             <div className="pointer-events-auto mx-auto max-w-[880px]">
               <div ref={setAttachmentsHost} />
-              <ComposerArtifactDock
-                artifacts={allArtifacts}
-                cards={runEngine.cards}
-                assistantContent={
-                  runEngine.liveExchange?.content ?? runEngine.cards[0]?.summary
-                }
-                onOpen={(artifactId) => {
-                  const artifact = allArtifacts.find(
-                    (item) => item._id === artifactId,
-                  );
-                  if (artifact) openArtifactSurface(artifact);
-                }}
-              />
               <DurableRunTabs
                 workspaceId={selectedWorkspaceId || undefined}
                 optimistic={runEngine.liveExchange}
                 openThreadId={liveThread?.id}
+                onStartNewThread={() => setComposerThread(null)}
                 onOpen={(_runId, threadId, title, artifactId) => {
                   skipAutoContinueThreadIdRef.current = null;
                   setActiveRunPanelId(null);
@@ -2089,6 +2107,15 @@ export function ArtifactsShell({
                     if (artifact) openArtifactSurface(artifact);
                   }
                 }}
+                onContinue={(_runId, threadId, title) => {
+                  skipAutoContinueThreadIdRef.current = null;
+                  setComposerThread({
+                    id: threadId,
+                    title,
+                    runId: _runId,
+                    workspaceId: selectedWorkspaceId || undefined,
+                  });
+                }}
                 onDeselect={() => {
                   if (liveThread)
                     skipAutoContinueThreadIdRef.current = liveThread.id;
@@ -2104,9 +2131,6 @@ export function ArtifactsShell({
                 }
                 onInput={(threadId, response, attachments) =>
                   runEngine.run(response, attachments ?? [], { threadId })
-                }
-                onSteer={(runId, mode, text) =>
-                  runEngine.steer(runId, mode, text)
                 }
               />
               {multiSelectMode ? (
@@ -2219,9 +2243,7 @@ export function ArtifactsShell({
               title={liveThread.title}
               liveExchange={
                 runEngine.liveExchange &&
-                (!runEngine.liveExchange.runId ||
-                  composerThread?.id === liveThread.id ||
-                  !composerThread)
+                runEngine.liveExchange.threadId === liveThread.id
                   ? runEngine.liveExchange
                   : null
               }

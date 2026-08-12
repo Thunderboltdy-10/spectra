@@ -64,8 +64,7 @@ function effectsForRun(
   now = Date.now(),
 ) {
   return currentAiEffects(artifact, now).filter(
-    (effect) =>
-      effect.runId === runId && effect.executionId === executionId,
+    (effect) => effect.runId === runId && effect.executionId === executionId,
   );
 }
 
@@ -76,8 +75,7 @@ function effectsExcludingRun(
   now = Date.now(),
 ) {
   return currentAiEffects(artifact, now).filter(
-    (effect) =>
-      effect.runId !== runId || effect.executionId !== executionId,
+    (effect) => effect.runId !== runId || effect.executionId !== executionId,
   );
 }
 
@@ -663,7 +661,10 @@ export const listInstalledAgents = query({
       const owner = await ctx.db.get(artifact.ownerAccountId);
       rows.push({
         agentId: artifact._id,
-        ...publicAgentProjection(await loadVersionAfter(ctx, version), artifact),
+        ...publicAgentProjection(
+          await loadVersionAfter(ctx, version),
+          artifact,
+        ),
         owner: owner
           ? { name: owner.name, avatarUrl: owner.avatarUrl }
           : { name: "Spectra creator" },
@@ -1687,7 +1688,6 @@ export const create = mutation({
       createdAt: now,
       updatedAt: now,
     });
-
     let workspaceItemId: Id<"spectraWorkspaceItems"> | undefined;
     if (args.workspaceId) {
       workspaceItemId = await ctx.db.insert("spectraWorkspaceItems", {
@@ -1805,6 +1805,17 @@ export const createPending = mutation({
       createdAt: now,
       updatedAt: now,
     });
+    if (args.threadId && run.threadId === args.threadId) {
+      const thread = await ctx.db.get(args.threadId);
+      if (
+        thread &&
+        thread.ownerAccountId === actor._id &&
+        thread.schoolId === actor.schoolId &&
+        !thread.artifactId
+      ) {
+        await ctx.db.patch(thread._id, { artifactId, updatedAt: now });
+      }
+    }
     let workspaceItemId: Id<"spectraWorkspaceItems"> | undefined;
     if (args.workspaceId) {
       workspaceItemId = await ctx.db.insert("spectraWorkspaceItems", {
@@ -1847,6 +1858,36 @@ export const finalizePendingLive = mutation({
       "modify",
     );
     const run = await ctx.db.get(args.runId);
+    const existingVersion = artifact.currentVersionId
+      ? await ctx.db.get(artifact.currentVersionId)
+      : null;
+    const alreadyFinalizedByThisAttempt = Boolean(
+      run &&
+      run.ownerAccountId === actor.accountId &&
+      run.status === "running" &&
+      run.executionId === args.executionId &&
+      artifact.aiState === "edited" &&
+      !artifact.aiRunId &&
+      existingVersion &&
+      existingVersion.artifactId === artifact._id &&
+      existingVersion.source === "ai" &&
+      existingVersion.runId === args.runId,
+    );
+    if (alreadyFinalizedByThisAttempt) {
+      // Convex mutations are atomic, but a caller can lose the response after
+      // the commit and retry the exact operation. Treat that retry as success
+      // instead of turning already-saved work into a user-visible failure.
+      const placements = await ctx.db
+        .query("spectraWorkspaceItems")
+        .withIndex("by_source", (q) =>
+          q.eq("sourceType", "artifact").eq("sourceId", args.artifactId),
+        )
+        .collect();
+      const workspaceItemId = placements[0]?._id;
+      return workspaceItemId
+        ? { artifactId: args.artifactId, workspaceItemId }
+        : { artifactId: args.artifactId };
+    }
     if (
       !run ||
       run.ownerAccountId !== actor.accountId ||
@@ -1861,7 +1902,7 @@ export const finalizePendingLive = mutation({
       );
     if (!artifact.currentVersionId || !artifact.liveStateVectorHash)
       throw new Error("The live artifact has not finished synchronizing.");
-    const version = await ctx.db.get(artifact.currentVersionId);
+    const version = existingVersion;
     if (
       !version ||
       version.artifactId !== artifact._id ||
@@ -1923,7 +1964,10 @@ export const finalizePendingLive = mutation({
         }),
       ),
     );
-    return { artifactId: args.artifactId, workspaceItemId: placements[0]?._id };
+    const workspaceItemId = placements[0]?._id;
+    return workspaceItemId
+      ? { artifactId: args.artifactId, workspaceItemId }
+      : { artifactId: args.artifactId };
   },
 });
 
@@ -1945,8 +1989,7 @@ export const pausePendingForConflict = mutation({
       artifact.aiExecutionId === args.executionId;
     const ownsEffect = (artifact.aiEffects ?? []).some(
       (effect) =>
-        effect.runId === args.runId &&
-        effect.executionId === args.executionId,
+        effect.runId === args.runId && effect.executionId === args.executionId,
     );
     if (
       !run ||
@@ -1961,8 +2004,7 @@ export const pausePendingForConflict = mutation({
     const wasCreating = artifact.aiState === "creating";
     const remainingEffects = currentAiEffects(artifact, now).filter(
       (effect) =>
-        effect.runId !== args.runId ||
-        effect.executionId !== args.executionId,
+        effect.runId !== args.runId || effect.executionId !== args.executionId,
     );
     const latest = remainingEffects.at(-1);
     await ctx.db.patch(artifact._id, {
@@ -1975,8 +2017,8 @@ export const pausePendingForConflict = mutation({
       aiEffects: remainingEffects.length ? remainingEffects : undefined,
       summary:
         wasCreating && artifact.summary?.startsWith("Spectra is building ")
-        ? "Draft paused while an overlapping edit is resolved."
-        : artifact.summary,
+          ? "Draft paused while an overlapping edit is resolved."
+          : artifact.summary,
       updatedAt: now,
     });
     return { paused: true };
@@ -2148,7 +2190,8 @@ export const updateAiEffect = mutation({
     };
     const creating =
       artifact.aiState === "creating" ||
-      (artifact.createdFrom?.runId === args.runId && !artifact.currentVersionId);
+      (artifact.createdFrom?.runId === args.runId &&
+        !artifact.currentVersionId);
     await ctx.db.patch(args.artifactId, {
       aiState: creating ? "creating" : "updating",
       aiRunId: args.runId,
@@ -2159,7 +2202,7 @@ export const updateAiEffect = mutation({
       ].slice(-24),
       aiPreview: {
         ...(artifact.aiPreview ?? { startedAt: now }),
-        ...(creating && !(artifact.aiPreview?.changedPaths?.length)
+        ...(creating && !artifact.aiPreview?.changedPaths?.length
           ? { changedPaths: nextEffect.changedPaths }
           : {}),
         effectTitle,
@@ -2422,10 +2465,9 @@ export const failPendingForRun = mutation({
           aiProgress: undefined,
           aiPreview: undefined,
           aiEffects: undefined,
-          summary:
-            isPlaceholderBuildingSummary(artifact.summary)
-              ? "Incomplete draft preserved from an interrupted Spectra run."
-              : artifact.summary,
+          summary: isPlaceholderBuildingSummary(artifact.summary)
+            ? "Incomplete draft preserved from an interrupted Spectra run."
+            : artifact.summary,
           updatedAt: Date.now(),
         });
       }),
@@ -2452,10 +2494,10 @@ export const settleStagedForRun = mutation({
       throw new Error("This run attempt is no longer active.");
     const [ownedArtifacts, operations] = await Promise.all([
       ctx.db
-      .query("spectraArtifacts")
-      .withIndex("by_account_status", (q) =>
-        q.eq("ownerAccountId", actor._id).eq("status", "active"),
-      )
+        .query("spectraArtifacts")
+        .withIndex("by_account_status", (q) =>
+          q.eq("ownerAccountId", actor._id).eq("status", "active"),
+        )
         .collect(),
       ctx.db
         .query("spectraOperations")
@@ -2491,7 +2533,9 @@ export const settleStagedForRun = mutation({
           ctx.db.get(artifactId as Id<"spectraArtifacts">),
         ),
       )
-    ).filter((artifact): artifact is Doc<"spectraArtifacts"> => Boolean(artifact));
+    ).filter((artifact): artifact is Doc<"spectraArtifacts"> =>
+      Boolean(artifact),
+    );
     const artifacts = [
       ...new Map(
         [...ownedArtifacts, ...operationArtifacts].map((artifact) => [
@@ -2502,12 +2546,12 @@ export const settleStagedForRun = mutation({
     ];
     const staged = artifacts.filter(
       (artifact) =>
-        (artifact.aiRunId === args.runId ||
-          (artifact.aiEffects ?? []).some(
-            (effect) =>
-              effect.runId === args.runId &&
-              effect.executionId === args.executionId,
-          )),
+        artifact.aiRunId === args.runId ||
+        (artifact.aiEffects ?? []).some(
+          (effect) =>
+            effect.runId === args.runId &&
+            effect.executionId === args.executionId,
+        ),
     );
     const now = Date.now();
     const expiresAt = now + AI_EDITED_FLASH_MS;
@@ -2521,10 +2565,15 @@ export const settleStagedForRun = mutation({
     const referencedRuns = new Map(
       (
         await Promise.all(
-          referencedRunIds.map(async (runId) => [runId, await ctx.db.get(runId)] as const),
+          referencedRunIds.map(
+            async (runId) => [runId, await ctx.db.get(runId)] as const,
+          ),
         )
-      ).filter((entry): entry is readonly [Id<"spectraAiRuns">, Doc<"spectraAiRuns">] =>
-        Boolean(entry[1]),
+      ).filter(
+        (
+          entry,
+        ): entry is readonly [Id<"spectraAiRuns">, Doc<"spectraAiRuns">] =>
+          Boolean(entry[1]),
       ),
     );
     await Promise.all(
@@ -2835,9 +2884,7 @@ export const permanentlyDelete = mutation({
       "delete",
     );
     if (isProtectedTimetable(artifact))
-      throw new Error(
-        "Your Timetable stays in General and cannot be deleted.",
-      );
+      throw new Error("Your Timetable stays in General and cannot be deleted.");
     await bumpPolicyVersion(
       ctx,
       artifact.blueprintKey === "agent" ? "agent" : "artifact",

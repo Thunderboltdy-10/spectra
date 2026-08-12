@@ -46,9 +46,12 @@ import type {
   InteractionAct,
 } from "@/features/spectra/collaboration/interaction-model";
 import {
+  NATIVE_WORK_LIVE_META_MAP,
   planNativeArtifactYjsMutation,
   readNativeArtifactYjsDocument,
 } from "@/features/spectra/work/models/yjs/native-artifact-model";
+import { workYjsAdapter } from "@/features/spectra/work/models/yjs/registry";
+import { workYjsOrigins } from "@/features/spectra/work/models/yjs/origins";
 import { CloudflareRealtimeProvider } from "@/features/spectra/realtime/providers";
 import { realtimeProviderForWorkType } from "@/features/spectra/realtime/providers/provider-factory";
 import type { CollaborationPresence } from "@/features/spectra/collaboration/types";
@@ -153,6 +156,8 @@ class CloudflareAiRealtimeProvider implements AiRealtimeProvider {
 }
 
 class HocuspocusAiRealtimeProvider implements AiRealtimeProvider {
+  private readonly durablePendingUpdateIds = new Set<string>();
+
   constructor(readonly transport: HocuspocusProvider) {}
 
   get document() {
@@ -168,7 +173,34 @@ class HocuspocusAiRealtimeProvider implements AiRealtimeProvider {
   }
 
   get hasUnsyncedChanges() {
-    return this.transport.hasUnsyncedChanges;
+    return (
+      this.transport.hasUnsyncedChanges || this.durablePendingUpdateIds.size > 0
+    );
+  }
+
+  handleStateless(payload: string) {
+    try {
+      const message = JSON.parse(payload) as {
+        type?: string;
+        updateIds?: unknown;
+      };
+      const updateIds = Array.isArray(message.updateIds)
+        ? message.updateIds.filter(
+            (value): value is string =>
+              typeof value === "string" && value.length <= 400,
+          )
+        : [];
+      if (message.type === "spectra.durable_pending") {
+        for (const updateId of updateIds)
+          this.durablePendingUpdateIds.add(updateId);
+      } else if (message.type === "spectra.durable_ack") {
+        for (const updateId of updateIds)
+          this.durablePendingUpdateIds.delete(updateId);
+      }
+    } catch {
+      // Ignore malformed gateway metadata. The provider's native sync status
+      // still prevents a false clean state while its update is in flight.
+    }
   }
 
   get awareness() {
@@ -253,6 +285,7 @@ async function createAiRealtimeProvider(params: {
     return provider;
   }
 
+  let provider: HocuspocusAiRealtimeProvider | undefined;
   const rawProvider = new HocuspocusProvider({
     url: session.url,
     WebSocketPolyfill: WebSocket,
@@ -264,6 +297,7 @@ async function createAiRealtimeProvider(params: {
     onStatus: ({ status }) => observer?.onStatus?.(status),
     onAuthenticated: () => observer?.onAuthenticated?.(),
     onSynced: () => observer?.onSynced?.(),
+    onStateless: ({ payload }) => provider?.handleStateless(payload),
     onAuthenticationFailed: ({ reason }) =>
       observer?.onError?.(
         new Error(
@@ -287,7 +321,8 @@ async function createAiRealtimeProvider(params: {
   } as ConstructorParameters<typeof HocuspocusProvider>[0] & {
     WebSocketPolyfill: typeof WebSocket;
   });
-  return new HocuspocusAiRealtimeProvider(rawProvider);
+  provider = new HocuspocusAiRealtimeProvider(rawProvider);
+  return provider;
 }
 
 /**
@@ -787,6 +822,16 @@ async function synchronizeMutation(params: {
     proposedSnapshot: ArtifactRegionSnapshot;
   };
 }) {
+  const logPhase = (phase: string, detail: Record<string, unknown> = {}) =>
+    console.info("[spectra.ai.artifact.phase]", {
+      phase,
+      artifactId: params.session.artifact._id,
+      runId: params.runId,
+      operationId: params.operationId,
+      synced: params.provider.synced,
+      hasUnsyncedChanges: params.provider.hasUnsyncedChanges,
+      ...detail,
+    });
   let plan = params.plan;
   let streamBase = params.streamBase;
   let streamBeats = params.streamBeats;
@@ -860,6 +905,7 @@ async function synchronizeMutation(params: {
     baseSnapshot,
     proposedSnapshot,
   });
+  logPhase("claims-acquired", { regionCount: plan.regions.length });
   /** Last control the AI touched, so the settle frame lands on it. */
   let lastFramePath: string | undefined;
   let settleSequence = 0;
@@ -898,7 +944,7 @@ async function synchronizeMutation(params: {
     params.provider.setAwarenessField("user", idlePresence);
   };
   try {
-    const beats: AiStreamBeat[] =
+    const rawBeats: AiStreamBeat[] =
       streamBeats && streamBeats.length > 0
         ? [...streamBeats]
         : (params.streamValues ?? []).map((value) => ({
@@ -907,6 +953,54 @@ async function synchronizeMutation(params: {
             previewGesture: "typing" as const,
             cursorMode: "typing" as const,
           }));
+    // Choreography is evidence of the native operation, but it must never
+    // become the critical path for durability. Keep every structural,
+    // pointer, menu, and spatial beat; sample only redundant typing prefixes.
+    // A detailed two-question quiz previously emitted hundreds of speculative
+    // frames and spent over a minute awaiting preview-ledger writes before the
+    // single real Yjs transaction was even attempted.
+    const maxChoreographyBeats = 48;
+    let beats = rawBeats;
+    if (rawBeats.length > maxChoreographyBeats) {
+      const required = new Set<number>();
+      rawBeats.forEach((beat, index) => {
+        if (
+          index === 0 ||
+          index === rawBeats.length - 1 ||
+          beat.previewGesture !== "typing" ||
+          beat.menu !== undefined ||
+          beat.gesturePhase !== undefined
+        )
+          required.add(index);
+      });
+      const selectEvenly = (indices: number[], count: number) => {
+        if (count <= 0 || indices.length === 0) return [];
+        if (indices.length <= count) return indices;
+        if (count <= 1) return [indices.at(-1)!];
+        return Array.from(
+          { length: count },
+          (_, slot) =>
+            indices[Math.round((slot * (indices.length - 1)) / (count - 1))]!,
+        );
+      };
+      let selected = [...required].sort((left, right) => left - right);
+      if (selected.length > maxChoreographyBeats) {
+        selected = selectEvenly(selected, maxChoreographyBeats);
+      } else {
+        const remaining = maxChoreographyBeats - selected.length;
+        const optional = rawBeats
+          .map((_, index) => index)
+          .filter((index) => !required.has(index));
+        selected.push(...selectEvenly(optional, remaining));
+      }
+      beats = [...new Set(selected)]
+        .sort((left, right) => left - right)
+        .map((index) => rawBeats[index]!);
+    }
+    logPhase("choreography-planned", {
+      rawBeatCount: rawBeats.length,
+      beatCount: beats.length,
+    });
     let previousStream = streamBase;
     for (const [sequence, beat] of beats.entries()) {
       settleSequence = sequence + 1;
@@ -1177,9 +1271,7 @@ async function synchronizeMutation(params: {
           stagedPaths.push(`/blocks/${blockId}/lines/${Math.floor(lineIndex)}`);
         }
         if (
-          (sequence === beats.length - 1 ||
-            beat.previewGesture === "typing" ||
-            sequence % 3 === 0) &&
+          (sequence === 0 || sequence === beats.length - 1) &&
           stagedPaths.length > 0
         ) {
           // Keep the durable preview ledger ordered with the awareness body.
@@ -1201,19 +1293,24 @@ async function synchronizeMutation(params: {
         }
       }
     }
+    logPhase("choreography-complete", { beatCount: beats.length });
     params.document.transact(plan.apply, {
       kind: "spectra-ai-operation",
       runId: params.runId,
       operationId: params.operationId,
     });
+    logPhase("transaction-applied");
     params.provider.flushPendingUpdates();
+    logPhase("updates-flushed");
     await waitUntil(
       () => params.provider.synced && !params.provider.hasUnsyncedChanges,
       () => abortError(params.signal) ?? params.getConnectionError(),
       30_000,
       "AI_ARTIFACT_SYNC_TIMEOUT: The live edit was not durably acknowledged.",
     );
+    logPhase("provider-acknowledged");
     await releaseClaims(claims, params.session.clientId, "apply");
+    logPhase("claims-released");
     // Brief post-edit pause so peers can see the finished caret — then clear
     // streaming chrome. Do not keep previewPhase="streaming" or the owner UI
     // stays stuck in "updating" with a permanent AI badge.
@@ -1247,6 +1344,9 @@ async function synchronizeMutation(params: {
       changedRegionIds: plan.regions.map((region) => region.regionId),
     };
   } catch (error) {
+    logPhase("failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
     await releaseClaims(claims, params.session.clientId, "cancel");
     throw error;
   } finally {
@@ -1354,6 +1454,7 @@ export async function applyAiArtifactMutation(params: {
   onConflictResolved?: () => void | Promise<void>;
   collaborationClientId?: string;
   checkpointBeforeAi?: boolean;
+  replacePendingCreate?: boolean;
 }) {
   // The browser client id identifies the owner/viewer, not the AI body. Reusing
   // it for the worker makes every observer with that id discard the AI cursor
@@ -1515,6 +1616,14 @@ export async function applyAiArtifactMutation(params: {
         "AI_ARTIFACT_INITIALIZATION_FAILED: The live artifact model is unavailable.",
       );
 
+    // A pending create may have been opened while the model was still
+    // authoring. Its default projection is presentation scaffolding, never an
+    // authored baseline. Another client can race the gateway bootstrap and
+    // merge that placeholder into the room, so create operations must derive
+    // the final value from their requested payload and replace the whole
+    // pending structure atomically. Updates still rebase against live state.
+    const pendingCreate = params.replacePendingCreate === true;
+
     const resolveValidatedValue = (
       base: ArtifactLiveValue,
     ): ArtifactLiveValue => {
@@ -1575,12 +1684,35 @@ export async function applyAiArtifactMutation(params: {
     // an earlier database projection.
     const refreshed = readLiveYjsDocument(document, typeKey);
     if (!refreshed) throw new Error("AI_ARTIFACT_LIVE_STATE_LOST");
-    const refreshedValue = resolveValidatedValue(refreshed);
-    const refreshedPlan = planLiveYjsMutation(
-      document,
-      typeKey,
-      refreshedValue,
-    );
+    const refreshedValue = pendingCreate
+      ? normalizedDesired
+      : resolveValidatedValue(refreshed);
+    const refreshedPlan = pendingCreate
+      ? {
+          regions: [
+            {
+              regionId: "artifact:structure",
+              overlapDomains: ["artifact:structure"],
+            },
+          ],
+          apply: () => {
+            const adapter = workYjsAdapter(typeKey);
+            adapter.applyProjection(
+              document,
+              refreshedValue.content,
+              workYjsOrigins({
+                clientId: "spectra-ai-runtime",
+                kind: "ai",
+                name: "Spectra AI",
+              }).ai,
+            );
+            const meta = document.getMap<unknown>(NATIVE_WORK_LIVE_META_MAP);
+            meta.set("title", refreshedValue.title);
+            meta.set("summary", refreshedValue.summary ?? "");
+            meta.set("tags", [...refreshedValue.tags]);
+          },
+        }
+      : planLiveYjsMutation(document, typeKey, refreshedValue);
     const changedRegionIds = refreshedPlan.regions.map(
       (region) => region.regionId,
     );
@@ -1615,6 +1747,24 @@ export async function applyAiArtifactMutation(params: {
       rebaseAfterHumanWait: () => {
         const liveBase = readLiveYjsDocument(document, typeKey);
         if (!liveBase) throw new Error("AI_ARTIFACT_LIVE_STATE_LOST");
+        if (pendingCreate) {
+          return {
+            plan: refreshedPlan,
+            streamBase: liveBase,
+            streamBeats: buildArtifactLivePreviewBeats(
+              liveBase,
+              normalizedDesired,
+            ),
+            baseSnapshot: snapshotArtifactRegions(typeKey, liveBase, [
+              "artifact:structure",
+            ]),
+            proposedSnapshot: snapshotArtifactRegions(
+              typeKey,
+              normalizedDesired,
+              ["artifact:structure"],
+            ),
+          };
+        }
         const liveDesired = resolveValidatedValue(liveBase);
         const livePlan = planLiveYjsMutation(document, typeKey, liveDesired);
         const liveRegionIds = livePlan.regions.map((region) => region.regionId);

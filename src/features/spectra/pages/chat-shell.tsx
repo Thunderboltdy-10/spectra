@@ -281,10 +281,6 @@ export function ChatShell() {
     },
     [chatWorkspaceId, closePresentation, openObject],
   );
-  useEffect(() => {
-    if (!liveThread) return;
-    if (liveThread.id === threadId) setLiveThread(null);
-  }, [liveThread, setLiveThread, threadId]);
   const openArtifact = useCallback(
     (artifactId: string) => {
       // A user-chosen open ends spectating; a follow-dispatched open does not.
@@ -743,7 +739,9 @@ export function ChatShell() {
           }
           onChoice={(choice) =>
             void runEngine.run(
-              choice.description
+              choice.title === "Skipped"
+                ? "Skip that question and continue with reasonable defaults."
+                : choice.description
                 ? `${choice.title}: ${choice.description}`
                 : choice.title,
             )

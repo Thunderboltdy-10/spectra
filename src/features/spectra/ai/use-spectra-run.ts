@@ -122,6 +122,7 @@ export type SpectraRunSurface = "chat" | "workspace" | "artifacts" | "artifact";
 export type SpectraLiveExchange = {
   id: string;
   runId?: string;
+  threadId?: string;
   prompt: string;
   content: string;
   steps: Array<{
@@ -257,6 +258,21 @@ function appendStep(
           : step.status === "running"
             ? { ...step, status: "done" as const }
             : step,
+      ),
+    };
+  }
+  if (
+    last &&
+    last.status === "running" &&
+    (title.toLocaleLowerCase().startsWith(last.title.toLocaleLowerCase()) ||
+      last.title.toLocaleLowerCase().startsWith(title.toLocaleLowerCase()))
+  ) {
+    return {
+      ...exchange,
+      steps: exchange.steps.map((step, index) =>
+        index === exchange.steps.length - 1
+          ? { ...step, title, summary, createdAt: Date.now() }
+          : step,
       ),
     };
   }
@@ -486,6 +502,7 @@ export function useSpectraRun({
                     : {
                         id: `durable:${tab.runId}`,
                         runId: tab.runId,
+                        threadId: tab.threadId,
                         prompt: tab.run.userPrompt,
                         content: "",
                         steps: [],
@@ -556,8 +573,12 @@ export function useSpectraRun({
               event.type === "stopped" ||
               event.type === "interrupted" ||
               event.type === "final"
-            )
+            ) {
               reachedTerminalEvent = true;
+              setObservedContinuationRunId((current) =>
+                current === tab.runId ? null : current,
+              );
+            }
             if (event.type === "confirmation_required")
               setLiveExchange((current) =>
                 current?.runId === tab.runId ? null : current,
@@ -618,6 +639,7 @@ export function useSpectraRun({
     ) => {
       const controller = new AbortController();
       let requestRunId: string | null = null;
+      let requestReachedTerminal = false;
       activeRequests.current.set(controller, null);
       const response = await fetch("/api/spectra/run", {
         method: "POST",
@@ -643,6 +665,16 @@ export function useSpectraRun({
           if (!line.trim()) continue;
           const event = parseSpectraStreamEvent(JSON.parse(line));
           feedLedger(event);
+          if (
+            event.type === "error" ||
+            event.type === "stopped" ||
+            event.type === "interrupted" ||
+            event.type === "final" ||
+            event.type === "confirmation_required"
+          )
+            setObservedContinuationRunId((current) =>
+              current === event.runId ? null : current,
+            );
           if (event.type === "run_created") {
             if (optimisticCardId)
               setCards((current) =>
@@ -663,6 +695,11 @@ export function useSpectraRun({
           }
           if (event.type === "thread_ready") {
             durableThreadId.current = event.threadId;
+            setLiveExchange((current) =>
+              current && (!liveExchangeId || current.id === liveExchangeId)
+                ? { ...current, threadId: event.threadId }
+                : current,
+            );
             void onThreadReady?.(event.threadId);
           }
           if (event.type === "text_delta")
@@ -726,7 +763,7 @@ export function useSpectraRun({
             }, 450);
           }
           if (event.type === "stopped" || event.type === "interrupted")
-            changed = true;
+            changed = requestReachedTerminal = true;
           if (event.type === "operation_preview" && event.preview) {
             const operationTitle = operationPreviewMessage(event.preview);
             setCards((current) =>
@@ -844,6 +881,7 @@ export function useSpectraRun({
             );
           }
           if (event.type === "final") {
+            requestReachedTerminal = true;
             setLiveExchange((current) =>
               current && (!liveExchangeId || current.id === liveExchangeId)
                 ? {
@@ -866,11 +904,17 @@ export function useSpectraRun({
             });
           }
           if (event.type === "final" || event.type === "confirmation_required")
-            changed = true;
+            changed = requestReachedTerminal = true;
         }
         if (done) break;
       }
       if (changed) await onDataChanged?.();
+      if (requestReachedTerminal)
+        setLiveExchange((current) =>
+          current && (!liveExchangeId || current.id === liveExchangeId)
+            ? null
+            : current,
+        );
       activeRequests.current.delete(controller);
       if (requestRunId) activeRunIds.current.delete(requestRunId);
     },
@@ -899,6 +943,10 @@ export function useSpectraRun({
         setActiveRequestCount((count) => count + 1);
         setLiveExchange({
           id: exchangeId,
+          threadId:
+            options?.threadId === null
+              ? undefined
+              : (options?.threadId ?? durableThreadId.current),
           prompt: clean,
           content: "",
           steps: [],
@@ -996,9 +1044,6 @@ export function useSpectraRun({
             window.clearTimeout(beginTimeout);
             settleBegin(false);
             setActiveRequestCount((count) => Math.max(0, count - 1));
-            setLiveExchange((current) =>
-              current?.id === exchangeId ? null : current,
-            );
           });
       });
     },
@@ -1031,38 +1076,60 @@ export function useSpectraRun({
       if (!clean || queuedSteering.current.has(runId)) return false;
       queuedSteering.current.add(runId);
       try {
-        await consume({
-          action: "steer",
-          runId,
-          steerMode: mode,
-          steerText: clean,
-        });
-        toast.message("Will apply after the current step.");
         if (mode === "cancel_current_action") {
-          await consume({ action: "stop", runId });
+          const response = await fetch("/api/spectra/run", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "stop", runId }),
+          });
+          if (!response.ok && response.status !== 409)
+            throw new Error(
+              (await response.text().catch(() => "")) ||
+                "This run could not be stopped safely.",
+            );
+          window.dispatchEvent(new Event("spectra:threads-changed"));
           queuedSteering.current.delete(runId);
           return true;
         }
-        void (async () => {
-          for (let attempt = 0; attempt < 400; attempt += 1) {
-            await new Promise((resolve) => window.setTimeout(resolve, 1_500));
-            const { runTabs } = await getSpectraRunTabs({ limit: 120, force: true }).catch(() => ({ runTabs: [] }));
-            const target = runTabs.find((tab) => tab.runId === runId);
-            if (!target) continue;
-            if (["queued", "running", "awaiting_confirmation", "awaiting_resolution"].includes(target.run.status)) continue;
-            await run(clean, [], { threadId: target.threadId });
-            break;
-          }
-          queuedSteering.current.delete(runId);
-        })();
-        return true;
+        const { runTabs } = await getSpectraRunTabs({
+          limit: 120,
+          force: true,
+        });
+        const target = runTabs.find((tab) => tab.runId === runId);
+        if (!target) throw new Error("That run is no longer available.");
+        const stopResponse = await fetch("/api/spectra/run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "stop", runId }),
+        });
+        if (!stopResponse.ok && stopResponse.status !== 409)
+          throw new Error(
+            (await stopResponse.text().catch(() => "")) ||
+              "This run could not be redirected safely.",
+          );
+        window.dispatchEvent(new Event("spectra:threads-changed"));
+        const steerPrompt =
+          mode === "replace_goal"
+            ? clean
+            : mode === "redirect_next_step"
+              ? `Change the next step: ${clean}`
+              : `Refine the current goal: ${clean}`;
+        const accepted = await run(steerPrompt, [], {
+          threadId: target.threadId,
+        });
+        queuedSteering.current.delete(runId);
+        if (accepted)
+          toast.message("Continuing this conversation with your update.");
+        return accepted;
       } catch (error) {
         queuedSteering.current.delete(runId);
-        toast.error(error instanceof Error ? error.message : "Could not queue steering.");
+        toast.error(
+          error instanceof Error ? error.message : "Could not queue steering.",
+        );
         return false;
       }
     },
-    [consume, run],
+    [run],
   );
 
   const keepAsThread = useCallback(
@@ -1256,9 +1323,7 @@ export function useSpectraRun({
         );
       else
         setCards((current) =>
-          current.filter(
-            (card) => card.runId !== `pending:${submissionKey}`,
-          ),
+          current.filter((card) => card.runId !== `pending:${submissionKey}`),
         );
       try {
         const response = await fetch("/api/spectra/run", {
@@ -1313,6 +1378,7 @@ export function useSpectraRun({
       setLiveExchange({
         id: exchangeId,
         runId,
+        threadId: durableThreadId.current,
         prompt:
           promptByRun.current.get(runId) ?? "Continue from the last safe point",
         content: "",
@@ -1339,9 +1405,6 @@ export function useSpectraRun({
         );
       } finally {
         setActiveRequestCount((count) => Math.max(0, count - 1));
-        setLiveExchange((current) =>
-          current?.id === exchangeId ? null : current,
-        );
       }
     },
     [consume],
@@ -1356,7 +1419,8 @@ export function useSpectraRun({
       submitting,
       liveExchange,
       activeRunId:
-        liveExchange?.runId ?? observedContinuationRunId ?? undefined,
+        observedContinuationRunId ??
+        (activeRequestCount > 0 ? liveExchange?.runId : undefined),
       run,
       stop,
       retry,
@@ -1373,6 +1437,7 @@ export function useSpectraRun({
       closeDetails,
       keepAsThread,
       liveExchange,
+      activeRequestCount,
       observedContinuationRunId,
       onCardAction,
       openDetails,

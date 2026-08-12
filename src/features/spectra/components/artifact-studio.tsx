@@ -792,9 +792,7 @@ function ReadonlyCodeSnapshot({
     pythonRef.current?.cancel();
     pythonRef.current = null;
     setState("building");
-    setMessage(
-      "Rebuilding this checkpoint with its recorded runtime profile…",
-    );
+    setMessage("Rebuilding this checkpoint with its recorded runtime profile…");
     setConsoleLines([]);
     setPreviewFiles(null);
     setHistoricalAssets([]);
@@ -3209,13 +3207,13 @@ export function ArtifactStudio({
                 className={`flex h-8 w-8 items-center justify-center rounded-[7px] transition ${continuedThreadId === threadId ? "bg-[color-mix(in_oklab,#8b6ff0_14%,var(--bg-hover))] text-[#7256dc]" : "text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"}`}
                 aria-label={
                   continuedThreadId === threadId
-                    ? "Stop continuing this chat"
-                    : "Continue chat"
+                    ? "Remove this thread from the Live Dock"
+                    : "Add this thread to the Live Dock"
                 }
                 title={
                   continuedThreadId === threadId
-                    ? "Stop continuing chat"
-                    : "Continue chat"
+                    ? "Remove from Live Dock"
+                    : "Add to Live Dock"
                 }
                 aria-pressed={continuedThreadId === threadId}
               >
@@ -3744,6 +3742,26 @@ function ArtifactStudioEditor({
       ? `${artifact.aiRunId}:${artifact.updatedAt}`
       : null,
   );
+  const liveDescriptor = useCallback(
+    (regionId: string) => {
+      if (!live.modelSnapshot.initialized) return undefined;
+      try {
+        return live.model?.descriptor(regionId);
+      } catch (error) {
+        // A transport can publish the model object one render before its
+        // native root metadata arrives. Descriptor reads are supportive UI
+        // (highlights, labels, comments), so that brief bootstrap boundary
+        // must render without them instead of taking down the artifact.
+        if (
+          error instanceof Error &&
+          error.message.includes("WORK_YJS_UNINITIALIZED")
+        )
+          return undefined;
+        throw error;
+      }
+    },
+    [live.model, live.modelSnapshot.initialized],
+  );
   const livePermissionLost =
     isCollaborativeArtifact && live.state === "permission_lost";
   // The durable access projection is the permission source of truth. A room
@@ -3846,9 +3864,7 @@ function ArtifactStudioEditor({
   const reconciliationFrameRef = useRef<number | null>(null);
   const nativeBodyBinding =
     artifact.blueprintKey === "document" || artifact.blueprintKey === "code";
-  const incomingLiveContent = nativeBodyBinding
-    ? null
-    : live.liveValue.content;
+  const incomingLiveContent = nativeBodyBinding ? null : live.liveValue.content;
   const incomingLiveTagDraft = live.liveValue.tags.join(", ");
   const incomingSnapshot = useMemo(
     () => ({
@@ -3989,7 +4005,10 @@ function ArtifactStudioEditor({
         return true;
       } catch (error) {
         localSyncKeysRef.current.delete(key);
-        if (isCollaborativeArtifact) {
+        // Programmatic editor hydration can briefly report a changed value
+        // while a newly opened native room is still bootstrapping. Only a
+        // genuine human edit earns a persistent local-sync warning.
+        if (isCollaborativeArtifact && userHasEditedRef.current) {
           setLiveConflict({
             message: collaborationFailureMessage(error),
           });
@@ -4030,7 +4049,7 @@ function ArtifactStudioEditor({
       const contentPath =
         change.path[0] === "content" ? change.path.slice(1) : change.path;
       const descriptor = live.modelSnapshot.regionIds
-        .map((regionId) => live.model?.descriptor(regionId))
+        .map((regionId) => liveDescriptor(regionId))
         .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
         .filter((entry) =>
           entry.path.every(
@@ -4046,7 +4065,7 @@ function ArtifactStudioEditor({
   }, [
     artifact.blueprintKey,
     content,
-    live.model,
+    liveDescriptor,
     live.modelSnapshot.regionIds,
     previewVersion,
     summary,
@@ -4359,7 +4378,7 @@ function ArtifactStudioEditor({
         : materializeAiChangedPaths(
             activeAiEffects.flatMap((effect) =>
               effect.regionIds.flatMap((regionId) => {
-                const descriptor = live.model?.descriptor(regionId);
+                const descriptor = liveDescriptor(regionId);
                 return descriptor
                   ? [semanticPathToPointer(descriptor.path)]
                   : [];
@@ -4372,7 +4391,7 @@ function ArtifactStudioEditor({
       activeAiEffects,
       artifact.aiState,
       artifact.blueprintKey,
-      live.model,
+      liveDescriptor,
       streamingContent,
     ],
   );
@@ -4383,7 +4402,7 @@ function ArtifactStudioEditor({
           (!activeAiCollaborator.interactionState ||
             activeAiCollaborator.interactionState.target)
           ? (() => {
-              const descriptor = live.model?.descriptor(
+              const descriptor = liveDescriptor(
                 activeAiCollaborator.activeRegionId,
               );
               return descriptor ? [semanticPathToPointer(descriptor.path)] : [];
@@ -4396,7 +4415,7 @@ function ArtifactStudioEditor({
       activeAiCollaborator?.activeRegionId,
       activeAiCollaborator?.interactionState,
       artifact.blueprintKey,
-      live.model,
+      liveDescriptor,
       streamingContent,
     ],
   );
@@ -4612,7 +4631,7 @@ function ArtifactStudioEditor({
       if (segments[0] === "summary") return "metadata:summary";
       if (segments[0] === "tags") return "metadata:tags";
       return live.modelSnapshot.regionIds
-        .map((regionId) => live.model?.descriptor(regionId))
+        .map((regionId) => liveDescriptor(regionId))
         .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
         .filter((entry) =>
           entry.path.every(
@@ -4622,7 +4641,7 @@ function ArtifactStudioEditor({
         .sort((left, right) => right.path.length - left.path.length)[0]
         ?.regionId;
     },
-    [live.model, live.modelSnapshot.regionIds],
+    [live.modelSnapshot.regionIds, liveDescriptor],
   );
 
   /* ---------------------------------------------------------------- *
@@ -5571,7 +5590,7 @@ function ArtifactStudioEditor({
       ? "min-h-0 flex-1 overflow-y-auto pb-5"
       : "min-h-0 flex-1 overflow-y-auto pb-5 pl-[15px] pr-0 pt-1";
   const liveConflictLabel = liveConflict?.regionId
-    ? live.model?.descriptor(liveConflict.regionId)?.label
+    ? liveDescriptor(liveConflict.regionId)?.label
     : undefined;
   const collaboratorCount = displayPresence.filter(
     (person) => person.clientId !== live.transport?.clientId,
@@ -5579,7 +5598,7 @@ function ArtifactStudioEditor({
   const currentAccountId = live.accountId;
   const commentRegions = useMemo<ArtifactCommentRegion[]>(() => {
     const semantic = live.modelSnapshot.regionIds.map((regionId) => {
-      const descriptor = live.model?.descriptor(regionId);
+      const descriptor = liveDescriptor(regionId);
       return {
         regionId,
         label: descriptor?.label || descriptor?.kind || regionId,
@@ -5596,7 +5615,7 @@ function ArtifactStudioEditor({
       },
       ...semantic,
     ];
-  }, [live.model, live.modelSnapshot.regionIds]);
+  }, [live.modelSnapshot.regionIds, liveDescriptor]);
   const handleActiveRegionChange = useCallback(
     (regionId: string) => {
       setActiveCommentRegionId(regionId);
@@ -5605,9 +5624,9 @@ function ArtifactStudioEditor({
     [setActivePresence],
   );
   const syncLabel = readOnly
-      ? "Read-only"
-      : livePermissionLost
-        ? "Reconnecting"
+    ? "Read-only"
+    : livePermissionLost
+      ? "Reconnecting"
       : isCollaborativeArtifact
         ? live.state === "reconnecting" || live.state === "unsynchronized"
           ? "Reconnecting"
@@ -5897,11 +5916,7 @@ function ArtifactStudioEditor({
               />
             ) : null}
             {onShare ? (
-              <IconButton
-                label="Share work"
-                onClick={onShare}
-                icon={Share2}
-              />
+              <IconButton label="Share work" onClick={onShare} icon={Share2} />
             ) : null}
             <IconButton
               label="Comments"
@@ -5958,9 +5973,9 @@ function ArtifactStudioEditor({
       </header>
       {readOnly && !livePermissionLost ? (
         <div className="shrink-0 border-y border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-5 py-2 text-[11px] text-[var(--text-secondary)]">
-          Read-only access{accessExplanation ? ` · ${accessExplanation}` : ""}{" "}
-          · You can inspect, comment, and place this work, but only a
-          collaborator with modify access can change it.
+          Read-only access{accessExplanation ? ` · ${accessExplanation}` : ""} ·
+          You can inspect, comment, and place this work, but only a collaborator
+          with modify access can change it.
         </div>
       ) : accessExplanation ? (
         <div className="shrink-0 border-y border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-5 py-2 text-[11px] text-[var(--text-secondary)]">
@@ -11963,9 +11978,7 @@ function QuizExperienceSection({
               }
               className={`${inputClass()} mt-1`}
             >
-              <option value="ephemeral">
-                Nothing — answers clear on exit
-              </option>
+              <option value="ephemeral">Nothing — answers clear on exit</option>
               <option value="personal">Their own attempts</option>
               <option value="submitted">Submitted attempts</option>
             </select>
@@ -12192,9 +12205,7 @@ export function QuizStudio({
   );
   const [view, setView] = useState<
     "builder" | "settings" | "preview" | "responses" | "summary"
-  >(
-    readOnly ? "preview" : "builder",
-  );
+  >(readOnly ? "preview" : "builder");
   const [quizSettings, setQuizSettings] = useState<QuizSettings>(() =>
     quizSettingsFromContent(content),
   );
@@ -12691,9 +12702,7 @@ export function QuizStudio({
     "quiz",
     readOnly ? "read_only" : "edit",
   );
-  const canAttemptQuiz = workQuizModes.some(
-    (entry) => entry.id === "attempt",
-  );
+  const canAttemptQuiz = workQuizModes.some((entry) => entry.id === "attempt");
   const activeQuizMode: QuizMode =
     view === "builder" || view === "settings"
       ? "build"

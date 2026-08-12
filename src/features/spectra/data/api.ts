@@ -688,8 +688,18 @@ export type SpectraRunTab = {
   inputRequest?:
     | {
         kind: "choice";
+        messageId: string;
         prompt: string;
         options: Array<{ title: string; description?: string | null }>;
+      }
+    | {
+        kind: "choice_batch";
+        messageId: string;
+        questions: Array<{
+          id: string;
+          prompt: string;
+          options: Array<{ title: string; description?: string | null }>;
+        }>;
       }
     | null;
   checkpointSummary?: string;

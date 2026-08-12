@@ -25,7 +25,7 @@ export function LiveThreadPanel({
   width: number;
   onWidthChange: (width: number) => void;
   onClose: () => void;
-  /** Legacy selection hook; open threads now continue automatically. */
+  /** Select or remove this saved conversation as composer continuation. */
   onContinue?: () => void;
   continuing?: boolean;
   onOpenArtifact?: (artifactId: string) => void;
@@ -84,19 +84,17 @@ export function LiveThreadPanel({
               className={`spectra-icon-action ${continuing ? "text-[var(--accent-cyan)]" : "text-[var(--text-secondary)] hover:text-[var(--accent-cyan)]"}`}
               aria-label={
                 continuing
-                  ? "Stop continuing this thread; next message starts a new chat"
-                  : "Continue this thread"
+                  ? "Remove this thread from the Live Dock"
+                  : "Add this thread to the Live Dock"
               }
               aria-pressed={continuing}
               data-tooltip={
-                continuing
-                  ? "Stop continuing — start a new chat"
-                  : "Continue thread"
+                continuing ? "Remove from Live Dock" : "Add to Live Dock"
               }
               title={
                 continuing
-                  ? "Deselect this thread so the next message starts a new conversation"
-                  : "Select this thread and pin it to the run tabs"
+                  ? "Remove this thread from the Live Dock and start fresh next time"
+                  : "Restore this saved thread to the Live Dock and continue it"
               }
             >
               <MessageSquare className="h-4 w-4" />

@@ -1405,6 +1405,7 @@ export default defineSchema({
       "updatedAt",
     ])
     .index("by_school_status", ["schoolId", "status", "updatedAt"])
+    .index("by_created_thread", ["createdFrom.threadId", "updatedAt"])
     .index("by_created_workspace", ["createdFrom.workspaceId"])
     .searchIndex("search_text", {
       searchField: "textIndex",

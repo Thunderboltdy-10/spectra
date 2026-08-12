@@ -38,6 +38,7 @@ const pendingMessageReleases = new Map();
 const acceptedDocumentMessages = new Map();
 const documentPersistenceQueues = new WeakMap();
 let policySweepRunning = false;
+let lastPersistenceFailure = null;
 
 async function acquireDocumentMessage(document, socketId) {
   const previous = documentMessageTails.get(document) ?? Promise.resolve();
@@ -142,6 +143,7 @@ async function appendWithRetry(payload, entries) {
   for (;;) {
     try {
       const result = await bridge("append", payload);
+      lastPersistenceFailure = null;
       for (const entry of entries)
         sendGatewayState(entry.connection, {
           type: "spectra.durable_ack",
@@ -149,6 +151,15 @@ async function appendWithRetry(payload, entries) {
         });
       return result;
     } catch (error) {
+      const persistenceMessage =
+        error instanceof Error ? error.message : String(error);
+      lastPersistenceFailure = {
+        code:
+          persistenceMessage.match(/COLLABORATION_[A-Z_]+/)?.[0] ??
+          "COLLABORATION_APPEND_FAILED",
+        at: Date.now(),
+        attempt: attempt + 1,
+      };
       if (permanentPersistenceFailure(error)) {
         const reason =
           error instanceof Error ? error.message : "COLLABORATION_UPDATE_REJECTED";
@@ -642,6 +653,7 @@ const server = new Server({
         service: "spectra-collaboration-gateway",
         protocolVersion: GATEWAY_PROTOCOL_VERSION,
         status: "ready",
+        persistence: lastPersistenceFailure,
       }),
     );
     // Hocuspocus uses an empty rejection to signal that a request hook has

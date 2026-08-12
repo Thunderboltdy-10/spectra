@@ -123,6 +123,10 @@ function decodeRegionValue(encoded: string) {
 
 function boundedSnapshotValue(value: unknown) {
   const encoded = JSON.stringify(value);
+  // Optional metadata (most often summary) is legitimately undefined. JSON
+  // has no undefined token, and calling `.length` on JSON.stringify's
+  // undefined result used to crash an otherwise valid AI mutation at commit.
+  if (encoded === undefined) return { value: null };
   if (encoded.length <= 48_000) return { value };
   return {
     value: {
@@ -408,8 +412,7 @@ export function changedArtifactRegionIds(
     typeKey === "document"
       ? documentDescriptorSignature(next)
       : descriptorSignature(next);
-  if (previousStructure !== nextStructure)
-    return ["artifact:structure"];
+  if (previousStructure !== nextStructure) return ["artifact:structure"];
   const changed = new Set<string>();
   for (const [regionId, encoded] of next.regionValues)
     if (previous.regionValues.get(regionId) !== encoded) changed.add(regionId);
@@ -795,10 +798,7 @@ export class ArtifactYjsModel {
         throw new Error("ARTIFACT_ROOT_TEMPLATE_MISSING");
       const content = coerceArtifactContent(
         this.typeKey,
-        recomposeArtifactContent(
-          rootTemplate,
-          new Map(this.regions.entries()),
-        ),
+        recomposeArtifactContent(rootTemplate, new Map(this.regions.entries())),
       );
       const validation = validateArtifactContent(this.typeKey, content);
       if (!validation.success)
@@ -882,7 +882,10 @@ export class ArtifactYjsModel {
             content: coerceArtifactContent(this.typeKey, value.content),
           }
         : value;
-    const decomposed = decomposeArtifactContent(this.typeKey, nextValue.content);
+    const decomposed = decomposeArtifactContent(
+      this.typeKey,
+      nextValue.content,
+    );
     const result = await controller.edit(
       "artifact:structure",
       ["artifact:structure"],

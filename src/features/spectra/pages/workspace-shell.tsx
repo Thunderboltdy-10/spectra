@@ -73,7 +73,6 @@ import {
   CommandBarMenuItem,
   CommandBarSubmenu,
 } from "../components/command-bar";
-import { ComposerArtifactDock } from "../components/composer-artifact-dock";
 import {
   ContextFocusControl,
   GlobalSearch,
@@ -3671,17 +3670,6 @@ export function WorkspaceShell({
   );
 
   useEffect(() => {
-    if (!liveThread || studio.mode !== "split" || !studio.activeArtifact)
-      return;
-    // Artifact + conversation is one working surface, not two side panels
-    // competing with a third, crushed workspace behind them. Promote the
-    // artifact to the main canvas while the thread occupies the companion
-    // lane. The underlying hub remains in navigation history and returns when
-    // the user closes the artifact.
-    studio.openTab(studio.activeArtifact);
-  }, [liveThread, studio]);
-
-  useEffect(() => {
     if (!requestedHome) return;
     goToHomeHub();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- hub bootstrap once per requestedHome
@@ -6247,23 +6235,11 @@ export function WorkspaceShell({
           <div className="pointer-events-none absolute inset-x-0 bottom-0 z-[220] bg-transparent px-2 pb-4 pt-2 sm:px-5 sm:pb-5 lg:px-8">
             <div className="pointer-events-auto mx-auto max-w-[880px]">
               <div ref={setAttachmentsHost} />
-              <ComposerArtifactDock
-                artifacts={allArtifacts}
-                cards={runEngine.cards}
-                assistantContent={
-                  runEngine.liveExchange?.content ?? runEngine.cards[0]?.summary
-                }
-                onOpen={(artifactId) => {
-                  const artifact = allArtifacts.find(
-                    (item) => item._id === artifactId,
-                  );
-                  if (artifact) openArtifactPanel(artifact);
-                }}
-              />
               <DurableRunTabs
                 workspaceId={selectedWorkspaceId}
                 optimistic={runEngine.liveExchange}
                 openThreadId={liveThread?.id}
+                onStartNewThread={startFreshComposerThread}
                 onOpen={(_runId, threadId, title, artifactId) => {
                   skipAutoContinueThreadIdRef.current = null;
                   setActiveRunPanelId(null);
@@ -6281,6 +6257,15 @@ export function WorkspaceShell({
                     if (artifact) openArtifactPanel(artifact);
                   }
                 }}
+                onContinue={(_runId, threadId, title) => {
+                  skipAutoContinueThreadIdRef.current = null;
+                  setComposerThread({
+                    id: threadId,
+                    title,
+                    runId: _runId,
+                    workspaceId: selectedWorkspaceId,
+                  });
+                }}
                 onDeselect={() => {
                   if (liveThread)
                     skipAutoContinueThreadIdRef.current = liveThread.id;
@@ -6296,9 +6281,6 @@ export function WorkspaceShell({
                 }
                 onInput={(threadId, response, attachments) =>
                   runEngine.run(response, attachments ?? [], { threadId })
-                }
-                onSteer={(runId, mode, text) =>
-                  runEngine.steer(runId, mode, text)
                 }
               />
               {multiSelectMode ? (
@@ -6362,9 +6344,7 @@ export function WorkspaceShell({
                   }
                   menu={
                     <div>
-                      <CommandBarMenuItem
-                        onClick={startFreshComposerThread}
-                      >
+                      <CommandBarMenuItem onClick={startFreshComposerThread}>
                         <MessageSquare className="h-4 w-4" />
                         New chat
                       </CommandBarMenuItem>
@@ -6417,7 +6397,7 @@ export function WorkspaceShell({
               title={liveThread.title}
               liveExchange={
                 runEngine.liveExchange &&
-                composerThread?.id === liveThread.id
+                runEngine.liveExchange.threadId === liveThread.id
                   ? runEngine.liveExchange
                   : null
               }

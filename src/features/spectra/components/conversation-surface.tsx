@@ -54,6 +54,7 @@ import {
 import { CommandBar } from "./command-bar";
 import { ResultCardStack } from "./result-card";
 import { blueprintMeta } from "./artifact-card";
+import { publicSpectraFailureText } from "../runs/live-dock";
 
 function operationLabel(
   operation: SpectraThreadTrace["operations"][number],
@@ -108,41 +109,90 @@ function messageAttachments(message: SpectraThreadDetail["messages"][number]) {
 
 export type ConversationChoice = { title: string; description?: string | null };
 
-function messageChoices(message: SpectraThreadDetail["messages"][number]) {
+function messageChoices(
+  message: SpectraThreadDetail["messages"][number],
+  answeredByLaterMessage = false,
+) {
   const value = message.metadata?.choices;
   if (!value || typeof value !== "object") return null;
-  const row = value as { question?: unknown; options?: unknown };
-  if (
-    typeof row.question !== "string" ||
-    !Array.isArray(row.options) ||
-    row.options.length < 2 ||
-    row.options.length > 4
-  )
-    return null;
-  const options = row.options.flatMap((option): ConversationChoice[] =>
-    option &&
-    typeof option === "object" &&
-    typeof (option as { title?: unknown }).title === "string"
-      ? [
-          {
-            title: (option as { title: string }).title,
-            description:
-              typeof (option as { description?: unknown }).description ===
-              "string"
-                ? (option as { description: string }).description
-                : null,
-          },
-        ]
-      : [],
-  );
+  const row = value as {
+    question?: unknown;
+    options?: unknown;
+    questions?: unknown;
+  };
+  const options = Array.isArray(row.options)
+    ? row.options.flatMap((option): ConversationChoice[] =>
+        option &&
+        typeof option === "object" &&
+        typeof (option as { title?: unknown }).title === "string"
+          ? [
+              {
+                title: (option as { title: string }).title,
+                description:
+                  typeof (option as { description?: unknown }).description ===
+                  "string"
+                    ? (option as { description: string }).description
+                    : null,
+              },
+            ]
+          : [],
+      )
+    : [];
   const selection = message.metadata?.choiceSelection;
   const selectedTitle =
     selection &&
     typeof selection === "object" &&
     typeof (selection as { title?: unknown }).title === "string"
       ? String((selection as { title: string }).title)
-      : null;
-  return options.length >= 2
+      : answeredByLaterMessage
+        ? "Answered in the next message"
+        : null;
+  const batchQuestions = Array.isArray(row.questions)
+    ? row.questions.flatMap((question, index) => {
+        if (!question || typeof question !== "object") return [];
+        const item = question as {
+          id?: unknown;
+          question?: unknown;
+          options?: unknown;
+        };
+        if (typeof item.question !== "string" || !Array.isArray(item.options))
+          return [];
+        const itemOptions = item.options.flatMap(
+          (option): ConversationChoice[] =>
+            option &&
+            typeof option === "object" &&
+            typeof (option as { title?: unknown }).title === "string"
+              ? [
+                  {
+                    title: (option as { title: string }).title,
+                    description:
+                      typeof (option as { description?: unknown })
+                        .description === "string"
+                        ? (option as { description: string }).description
+                        : null,
+                  },
+                ]
+              : [],
+        );
+        return itemOptions.length >= 2 && itemOptions.length <= 6
+          ? [
+              {
+                id:
+                  typeof item.id === "string" && item.id.trim()
+                    ? item.id
+                    : `question-${index + 1}`,
+                question: item.question,
+                options: itemOptions,
+              },
+            ]
+          : [];
+      })
+    : [];
+  if (batchQuestions.length >= 2)
+    return { questions: batchQuestions.slice(0, 4), selectedTitle };
+  return typeof row.question === "string" &&
+    options.length >= 2 &&
+    options.length <= 6
     ? { question: row.question, options, selectedTitle }
     : null;
 }
@@ -152,6 +202,7 @@ function ChoiceBlock({
   options,
   selectedTitle,
   onChoose,
+  onSkip,
 }: {
   question: string;
   options: ConversationChoice[];
@@ -160,9 +211,27 @@ function ChoiceBlock({
     choice: ConversationChoice,
     index: number,
   ) => Promise<void> | void;
+  onSkip?: () => Promise<void> | void;
 }) {
   const [pending, setPending] = useState<string | null>(null);
   const selected = selectedTitle ?? pending;
+  if (selectedTitle)
+    return (
+      <section
+        className="mt-4 border-l-2 border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] py-1 pl-3"
+        data-conversation-action="choice-answered"
+        aria-label="Answered question"
+      >
+        <div className="text-[12px] font-semibold text-[var(--text-primary)]">
+          {question}
+        </div>
+        <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
+          {selectedTitle === "Skipped"
+            ? "Skipped"
+            : `Answered: ${selectedTitle}`}
+        </p>
+      </section>
+    );
   return (
     <section
       className="mt-4 overflow-hidden rounded-[11px] border border-[color-mix(in_oklab,var(--accent-cyan)_20%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_4%,var(--bg-elevated))] p-3"
@@ -205,11 +274,119 @@ function ChoiceBlock({
           </button>
         ))}
       </div>
-      {selectedTitle ? (
-        <p className="mt-2 text-micro text-[var(--text-tertiary)]">
-          Choice saved for this conversation.
-        </p>
+      {onSkip ? (
+        <button
+          type="button"
+          disabled={Boolean(selected)}
+          onClick={() => {
+            setPending("Skipped");
+            Promise.resolve(onSkip()).catch(() => setPending(null));
+          }}
+          className="mt-2 h-7 rounded-[6px] px-2 text-micro font-semibold text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-secondary)] disabled:opacity-45"
+        >
+          Skip for now
+        </button>
       ) : null}
+    </section>
+  );
+}
+
+function BatchedChoiceBlock({
+  questions,
+  selectedTitle,
+  onSubmit,
+}: {
+  questions: Array<{
+    id: string;
+    question: string;
+    options: ConversationChoice[];
+  }>;
+  selectedTitle?: string | null;
+  onSubmit: (answer: string) => Promise<void> | void;
+}) {
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [pending, setPending] = useState(false);
+  if (selectedTitle)
+    return (
+      <section
+        className="mt-4 border-l-2 border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] py-1 pl-3"
+        data-conversation-action="choice-batch-answered"
+        aria-label="Answered questions"
+      >
+        <p className="text-[12px] font-semibold text-[var(--text-primary)]">
+          {questions.length} questions asked
+        </p>
+        <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
+          {selectedTitle}
+        </p>
+      </section>
+    );
+  const complete = questions.every((question) => answers[question.id]);
+  return (
+    <section
+      className="mt-4 rounded-[11px] border border-[color-mix(in_oklab,var(--accent-cyan)_20%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_4%,var(--bg-elevated))] p-3"
+      aria-label="Answer multiple questions"
+    >
+      <p className="mb-2 text-[12px] font-bold text-[var(--text-primary)]">
+        A few quick questions
+      </p>
+      <div className="max-h-72 space-y-3 overflow-y-auto pr-1 [scrollbar-width:thin]">
+        {questions.map((question, index) => (
+          <fieldset key={question.id}>
+            <legend className="text-[11px] font-semibold leading-4 text-[var(--text-primary)]">
+              {index + 1}. {question.question}
+            </legend>
+            <div className="mt-1 grid gap-1 sm:grid-cols-2">
+              {question.options.map((option) => (
+                <button
+                  key={option.title}
+                  type="button"
+                  aria-pressed={answers[question.id] === option.title}
+                  onClick={() =>
+                    setAnswers((current) => ({
+                      ...current,
+                      [question.id]: option.title,
+                    }))
+                  }
+                  className={`rounded-[6px] border px-2 py-1.5 text-left text-[11px] font-semibold ${answers[question.id] === option.title ? "border-[var(--accent-cyan)] bg-[color-mix(in_oklab,var(--accent-cyan)_9%,var(--bg-primary))]" : "border-[var(--border-default)] bg-[var(--bg-primary)] hover:border-[var(--accent-cyan)]"}`}
+                >
+                  {option.title}
+                </button>
+              ))}
+              <button
+                type="button"
+                aria-pressed={answers[question.id] === "Skipped"}
+                onClick={() =>
+                  setAnswers((current) => ({
+                    ...current,
+                    [question.id]: "Skipped",
+                  }))
+                }
+                className="rounded-[6px] px-2 py-1.5 text-left text-[11px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]"
+              >
+                Skip this question
+              </button>
+            </div>
+          </fieldset>
+        ))}
+      </div>
+      <button
+        type="button"
+        disabled={!complete || pending}
+        onClick={() => {
+          const answer = questions
+            .map(
+              (question, index) =>
+                `${index + 1}) ${answers[question.id] ?? "Skipped"}`,
+            )
+            .join("; ");
+          setPending(true);
+          void Promise.resolve(onSubmit(answer)).catch(() => setPending(false));
+        }}
+        className="mt-3 h-9 w-full rounded-[7px] bg-[var(--text-primary)] text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-40"
+      >
+        Continue with these answers
+      </button>
     </section>
   );
 }
@@ -695,7 +872,9 @@ function OperationalTrace({ trace }: { trace: SpectraThreadTrace }) {
         className="flex w-full items-center gap-2.5 px-3 py-2 text-left hover:bg-[var(--bg-hover)]"
       >
         {failed ? (
-          <AlertCircle className="h-3.5 w-3.5 text-[var(--danger)]" />
+          <AlertCircle
+            className={`h-3.5 w-3.5 ${trace.run.retryable === false ? "text-[var(--danger)]" : "text-[var(--warning)]"}`}
+          />
         ) : trace.run.status === "awaiting_confirmation" ? (
           <ShieldCheck className="h-3.5 w-3.5 text-amber-600" />
         ) : trace.run.status === "awaiting_resolution" ? (
@@ -722,7 +901,10 @@ function OperationalTrace({ trace }: { trace: SpectraThreadTrace }) {
         <div className="border-t border-[var(--border-subtle)] px-3 py-2.5">
           {trace.operations.length === 0 ? (
             <p className="text-[11px] text-[var(--text-tertiary)]">
-              {trace.run.error ?? "No changes were applied."}
+              {publicSpectraFailureText(
+                trace.run.error,
+                trace.run.retryable !== false,
+              )}
             </p>
           ) : (
             <div className="space-y-2">
@@ -735,7 +917,9 @@ function OperationalTrace({ trace }: { trace: SpectraThreadTrace }) {
                     {operation.status === "executed" ? (
                       <Check className="h-3.5 w-3.5 text-[var(--success)]" />
                     ) : operation.status === "failed" ? (
-                      <AlertCircle className="h-3.5 w-3.5 text-[var(--danger)]" />
+                      <AlertCircle
+                        className={`h-3.5 w-3.5 ${trace.run.retryable === false ? "text-[var(--danger)]" : "text-[var(--warning)]"}`}
+                      />
                     ) : (
                       <CircleDot className="h-3.5 w-3.5 text-[var(--text-tertiary)]" />
                     )}
@@ -893,6 +1077,61 @@ function PersistedRunOutcomeNote({
           : undefined
       }
     />
+  );
+}
+
+function TerminalRunFailureNote({
+  trace,
+  onRetryRun,
+}: {
+  trace: SpectraThreadTrace;
+  onRetryRun?: (runId: string) => Promise<unknown> | unknown;
+}) {
+  const [retrying, setRetrying] = useState(false);
+  if (
+    trace.run.status !== "failed" ||
+    trace.operations.some((operation) => operation.status === "executed")
+  )
+    return null;
+  return (
+    <div
+      className={`mt-3 rounded-[9px] border px-3 py-2.5 ${trace.run.retryable === false ? "border-[color-mix(in_oklab,var(--danger)_20%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--danger)_4%,var(--bg-primary))]" : "border-[color-mix(in_oklab,var(--warning)_22%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--warning)_4%,var(--bg-primary))]"}`}
+    >
+      <div className="flex items-start gap-2.5">
+        <AlertCircle
+          className={`mt-px h-3.5 w-3.5 shrink-0 ${trace.run.retryable === false ? "text-[var(--danger)]" : "text-[var(--warning)]"}`}
+        />
+        <div className="min-w-0 flex-1">
+          <p className="text-[11px] font-semibold text-[var(--text-primary)]">
+            {trace.run.retryable === false
+              ? "Spectra could not complete this request"
+              : "Spectra paused after retrying"}
+          </p>
+          <p className="mt-0.5 text-micro leading-4 text-[var(--text-tertiary)]">
+            {publicSpectraFailureText(
+              trace.run.error,
+              trace.run.retryable !== false,
+            )}
+          </p>
+        </div>
+        {onRetryRun && trace.run.retryable !== false ? (
+          <button
+            type="button"
+            disabled={retrying}
+            onClick={() => {
+              setRetrying(true);
+              void Promise.resolve(onRetryRun(trace.run._id)).finally(() =>
+                setRetrying(false),
+              );
+            }}
+            className="inline-flex h-7 shrink-0 items-center gap-1 rounded-[6px] bg-[var(--text-primary)] px-2 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-50"
+          >
+            {retrying ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+            Retry
+          </button>
+        ) : null}
+      </div>
+    </div>
   );
 }
 
@@ -1058,6 +1297,11 @@ function ProgressTrace({
                 <AnimatePresence initial={false}>
                   {orderedSteps.map((step) => {
                     const open = openIds.has(step.id);
+                    const hasDetail = Boolean(
+                      step.summary?.trim() &&
+                      step.summary.trim().toLocaleLowerCase() !==
+                        step.title.trim().toLocaleLowerCase(),
+                    );
                     return (
                       <motion.div
                         key={step.id}
@@ -1073,14 +1317,9 @@ function ProgressTrace({
                           opacity: { duration: 0.28 },
                           y: { duration: 0.32, ease: [0.22, 1, 0.36, 1] },
                         }}
-                        className="rounded-[8px] bg-[color-mix(in_oklab,var(--bg-elevated)_82%,transparent)] px-2.5 py-1.5"
+                        className="py-1.5"
                       >
-                        <button
-                          type="button"
-                          onClick={() => toggleStep(step.id)}
-                          className="flex w-full items-center gap-2 text-left"
-                          aria-expanded={open}
-                        >
+                        <div className="flex w-full items-center gap-2 text-left">
                           {step.status === "running" ? (
                             <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-cyan)]" />
                           ) : step.status === "error" ? (
@@ -1088,21 +1327,36 @@ function ProgressTrace({
                           ) : (
                             <Check className="h-3.5 w-3.5 text-[var(--success)]" />
                           )}
-                          <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-[var(--text-secondary)]">
+                          <span
+                            className={cn(
+                              "min-w-0 flex-1 truncate text-[11px] font-semibold text-[var(--text-secondary)]",
+                              step.status === "running" && "thinking-wave",
+                            )}
+                          >
                             {pastTenseProgressTitle(
                               step.title,
                               step.status !== "running",
                             )}
                           </span>
-                          <ChevronDown
-                            className={cn(
-                              "h-3.5 w-3.5 text-[var(--text-tertiary)] transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]",
-                              open ? "rotate-180" : "rotate-0",
-                            )}
-                          />
-                        </button>
+                          {hasDetail ? (
+                            <button
+                              type="button"
+                              onClick={() => toggleStep(step.id)}
+                              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[5px] hover:bg-[var(--bg-hover)]"
+                              aria-expanded={open}
+                              aria-label={`${open ? "Hide" : "Show"} details for ${step.title}`}
+                            >
+                              <ChevronDown
+                                className={cn(
+                                  "h-3.5 w-3.5 text-[var(--text-tertiary)] transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]",
+                                  open ? "rotate-180" : "rotate-0",
+                                )}
+                              />
+                            </button>
+                          ) : null}
+                        </div>
                         <AnimatePresence initial={false}>
-                          {open && step.summary ? (
+                          {open && hasDetail && step.summary ? (
                             <motion.p
                               key={`${step.id}:summary`}
                               initial={
@@ -1247,7 +1501,8 @@ function PersistedProgressTrace({ trace }: { trace: SpectraThreadTrace }) {
       title: nativeTitle ?? previewTitle ?? terminalTitle ?? message,
       summary,
       status: ((event.type === "error" || event.type === "interrupted") &&
-      trace.run.status !== "completed"
+      trace.run.status !== "completed" &&
+      trace.run.retryable === false
         ? "error"
         : index === rows.length - 1 &&
             (trace.run.status === "queued" || trace.run.status === "running")
@@ -1260,8 +1515,17 @@ function PersistedProgressTrace({ trace }: { trace: SpectraThreadTrace }) {
     const existingIndex = publicSteps.findIndex(
       (candidate) => candidate.title === step.title,
     );
-    if (existingIndex === -1) publicSteps.push(step);
-    else publicSteps[existingIndex] = step;
+    const evolvingIndex = publicSteps.findIndex(
+      (candidate) =>
+        step.title
+          .toLocaleLowerCase()
+          .startsWith(candidate.title.toLocaleLowerCase()) ||
+        candidate.title
+          .toLocaleLowerCase()
+          .startsWith(step.title.toLocaleLowerCase()),
+    );
+    if (existingIndex === -1 && evolvingIndex === -1) publicSteps.push(step);
+    else publicSteps[existingIndex >= 0 ? existingIndex : evolvingIndex] = step;
     return publicSteps;
   }, []);
   return (
@@ -1839,7 +2103,7 @@ export function ConversationSurface({
               (message) =>
                 message.role === "user" || message.role === "assistant",
             )
-            .map((message) => {
+            .map((message, messageIndex, visibleMessages) => {
               const trace = message.runId
                 ? traceByRun.get(message.runId)
                 : undefined;
@@ -1902,6 +2166,10 @@ export function ConversationSurface({
                             trace={trace}
                             onRetryRun={onRetryRun}
                           />
+                          <TerminalRunFailureNote
+                            trace={trace}
+                            onRetryRun={onRetryRun}
+                          />
                         </div>
                       ) : null}
                     </>
@@ -1920,23 +2188,49 @@ export function ConversationSurface({
                           !compact && "sm:text-[15px]",
                         )}
                       />
-                      {messageChoices(message) ? (
-                        <ChoiceBlock
-                          {...messageChoices(message)!}
-                          onChoose={async (choice, index) => {
-                            await postSpectra({
-                              action: "selectMessageChoice",
-                              messageId: message._id,
-                              choiceKey: `${index}:${choice.title}`,
-                              choiceTitle: choice.title,
-                            });
-                            window.dispatchEvent(
-                              new CustomEvent("spectra:threads-changed"),
-                            );
-                            await onChoice?.(choice);
-                          }}
-                        />
-                      ) : null}
+                      {(() => {
+                        const choices = messageChoices(
+                          message,
+                          visibleMessages
+                            .slice(messageIndex + 1)
+                            .some((candidate) => candidate.role === "user"),
+                        );
+                        if (!choices) return null;
+                        const saveAnswer = async (
+                          choiceKey: string,
+                          choiceTitle: string,
+                        ) => {
+                          await postSpectra({
+                            action: "selectMessageChoice",
+                            messageId: message._id,
+                            choiceKey,
+                            choiceTitle,
+                          });
+                          window.dispatchEvent(
+                            new CustomEvent("spectra:threads-changed"),
+                          );
+                          await onChoice?.({ title: choiceTitle });
+                        };
+                        return "questions" in choices ? (
+                          <BatchedChoiceBlock
+                            {...choices}
+                            onSubmit={(answer) => saveAnswer("batch", answer)}
+                          />
+                        ) : (
+                          <ChoiceBlock
+                            {...choices}
+                            onChoose={(choice, index) =>
+                              saveAnswer(
+                                `${index}:${choice.title}`,
+                                choice.description
+                                  ? `${choice.title}: ${choice.description}`
+                                  : choice.title,
+                              )
+                            }
+                            onSkip={() => saveAnswer("skip", "Skipped")}
+                          />
+                        );
+                      })()}
                       <div className="mt-2 text-micro text-[var(--text-tertiary)]">
                         {messageMeta(message)}
                       </div>
@@ -1952,10 +2246,16 @@ export function ConversationSurface({
                         <OperationalTrace trace={trace} />
                       ) : null}
                       {trace ? (
-                        <PersistedRunOutcomeNote
-                          trace={trace}
-                          onRetryRun={onRetryRun}
-                        />
+                        <>
+                          <PersistedRunOutcomeNote
+                            trace={trace}
+                            onRetryRun={onRetryRun}
+                          />
+                          <TerminalRunFailureNote
+                            trace={trace}
+                            onRetryRun={onRetryRun}
+                          />
+                        </>
                       ) : null}
                       {trace?.cards.some((card) =>
                         card.actions.some(
@@ -2080,7 +2380,9 @@ export function ConversationSurface({
                       ) : trace.run.status === "awaiting_resolution" ? (
                         <GitCompareArrows className="h-3.5 w-3.5 text-[#b46d15]" />
                       ) : (
-                        <AlertCircle className="h-3.5 w-3.5 text-[var(--danger)]" />
+                        <AlertCircle
+                          className={`h-3.5 w-3.5 ${trace.run.retryable === false ? "text-[var(--danger)]" : "text-[var(--warning)]"}`}
+                        />
                       )}
                       <span className="capitalize">
                         {trace.run.status.replaceAll("_", " ")}
@@ -2091,8 +2393,10 @@ export function ConversationSurface({
                         ? "This response is still in progress. Saved text and progress will catch up here automatically."
                         : trace.run.status === "awaiting_resolution"
                           ? "The same semantic region changed concurrently. Review the preserved proposal below."
-                          : (trace.run.error ??
-                            "No incomplete assistant message was saved.")}
+                          : publicSpectraFailureText(
+                              trace.run.error,
+                              trace.run.retryable !== false,
+                            )}
                     </p>
                     {trace.operations.length > 0 ||
                     [
@@ -2104,6 +2408,10 @@ export function ConversationSurface({
                       <OperationalTrace trace={trace} />
                     ) : null}
                     <PersistedRunOutcomeNote
+                      trace={trace}
+                      onRetryRun={onRetryRun}
+                    />
+                    <TerminalRunFailureNote
                       trace={trace}
                       onRetryRun={onRetryRun}
                     />
@@ -2189,15 +2497,29 @@ export function ThreadConversation({
   const [detail, setDetail] = useState<SpectraThreadDetail | null>(null);
   const [workspaces, setWorkspaces] = useState<SpectraWorkspace[]>([]);
   const [loading, setLoading] = useState(true);
+  const activeThreadIdRef = useRef(threadId);
+  const refreshRequestRef = useRef(0);
+  activeThreadIdRef.current = threadId;
   const refresh = useCallback(async () => {
+    const requestedThreadId = threadId;
+    const requestId = ++refreshRequestRef.current;
     const [thread, workspaceRows] = await Promise.all([
-      getSpectraThread(threadId),
+      getSpectraThread(requestedThreadId),
       getSpectraWorkspaces(),
     ]);
+    // A side-panel switch can finish the previous thread's fetch after the
+    // new header has already rendered. Never let that stale response replace
+    // the newly selected conversation body (or its workspace links).
+    if (
+      activeThreadIdRef.current !== requestedThreadId ||
+      refreshRequestRef.current !== requestId
+    )
+      return;
     setDetail(thread);
     setWorkspaces(workspaceRows);
   }, [threadId]);
   useEffect(() => {
+    setDetail(null);
     setLoading(true);
     void refresh()
       .catch((error) =>
@@ -2205,8 +2527,10 @@ export function ThreadConversation({
           error instanceof Error ? error.message : "Could not load thread.",
         ),
       )
-      .finally(() => setLoading(false));
-  }, [refresh]);
+      .finally(() => {
+        if (activeThreadIdRef.current === threadId) setLoading(false);
+      });
+  }, [refresh, threadId]);
   useEffect(() => {
     const refreshVisibleThread = () => void refresh().catch(() => undefined);
     window.addEventListener("spectra:threads-changed", refreshVisibleThread);
@@ -2261,9 +2585,11 @@ export function ThreadConversation({
       onOpenWorkspace={onOpenWorkspace}
       onChoice={(choice) =>
         void runEngine.run(
-          choice.description
-            ? `${choice.title}: ${choice.description}`
-            : choice.title,
+          choice.title === "Skipped"
+            ? "Skip that question and continue with reasonable defaults."
+            : choice.description
+              ? `${choice.title}: ${choice.description}`
+              : choice.title,
         )
       }
       activeCards={runEngine.cards.filter((card) =>

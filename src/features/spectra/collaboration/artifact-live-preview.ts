@@ -116,7 +116,7 @@ function buildSelectReplaceFrames(before: string, after: string): string[] {
   // though the server technically streamed them. Keep enough meaningful
   // bursts for a short label to be legible, while bounding long prose so the
   // actor remains quick rather than theatrical.
-  const targetFrames = Math.min(28, Math.max(10, Math.ceil(after.length / 5)));
+  const targetFrames = Math.min(9, Math.max(4, Math.ceil(after.length / 12)));
   const stepChars = Math.max(1, Math.floor(after.length / targetFrames));
   for (let typed = stepChars; typed < after.length; typed += stepChars) {
     frames.push(after.slice(0, typed));
@@ -195,7 +195,8 @@ export function lineAnchorForRewrite(
     const targetLine = afterLines[lineIndex] ?? "";
     let typed = 0;
     const limit = Math.min(targetLine.length, currentLine.length);
-    while (typed < limit && currentLine[typed] === targetLine[typed]) typed += 1;
+    while (typed < limit && currentLine[typed] === targetLine[typed])
+      typed += 1;
     if (
       typed === 0 &&
       (beforeLines[lineIndex] ?? "").length > 0 &&
@@ -239,10 +240,7 @@ export function primaryChangedLine(
   return { lineIndex: 0, beforeLine: before, afterLine: after };
 }
 
-export function valueAtPath(
-  value: unknown,
-  path: string,
-): unknown {
+export function valueAtPath(value: unknown, path: string): unknown {
   if (!path || path === "/") return value;
   const segments = path
     .replace(/^\//, "")

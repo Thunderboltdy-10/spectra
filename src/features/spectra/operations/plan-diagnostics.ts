@@ -53,7 +53,10 @@ export function formatZodPlanPublicError(error: ZodError) {
   if (/operations$/.test(path) && /cannot contain operations/i.test(message)) {
     return "Spectra mixed an answer with edit operations. Rephrase as either a question or a specific change to one open artifact.";
   }
-  if (/operations$/.test(path) && /require at least one operation/i.test(message)) {
+  if (
+    /operations$/.test(path) &&
+    /require at least one operation/i.test(message)
+  ) {
     return "Spectra planned an edit but did not name a concrete change. Open the target artifact and describe the exact update.";
   }
   if (/operations(\.\d+)?\.type/i.test(path)) {
@@ -69,7 +72,11 @@ export function formatZodPlanPublicError(error: ZodError) {
   if (/operations(\.\d+)?\.input/i.test(path)) {
     return "Spectra drafted an incomplete edit plan. Keep the relevant artifact open and try a more specific request.";
   }
-  if (/intent\.(mode|requestedArtifactTypes|targetArtifactId|targetWorkspaceId)/i.test(path)) {
+  if (
+    /intent\.(mode|requestedArtifactTypes|targetArtifactId|targetWorkspaceId)/i.test(
+      path,
+    )
+  ) {
     return "Spectra misread the request intent. Name the artifact or workspace explicitly, or open it first, then try again.";
   }
   if (/choices(\.|$)/i.test(path)) {
@@ -82,15 +89,18 @@ export function formatZodPlanPublicError(error: ZodError) {
     return "Spectra returned an incomplete response plan. Your work is unchanged — try again in a moment.";
   }
   return path
-    ? `Spectra could not safely apply that plan (${path}). Keep the relevant document or workspace selected and try again.`
-    : "Spectra could not safely apply that plan. Keep the relevant document or workspace selected and try again.";
+    ? `Spectra paused after its recovery passes (${path}). Your work is unchanged; retry when ready.`
+    : "Spectra paused after its recovery passes. Your work is unchanged; retry when ready.";
 }
 
 export function formatPlanApplicationPublicError(error: unknown) {
   if (error instanceof ZodError) return formatZodPlanPublicError(error);
   if (error instanceof SyntaxError)
     return "I couldn't finish that response yet. Your work is unchanged, and you can try once more.";
-  const message = error instanceof Error ? error.message : "Spectra run failed.";
+  if (error instanceof TypeError)
+    return "Spectra paused after its recovery passes. Your saved work is safe, and this run can be retried.";
+  const message =
+    error instanceof Error ? error.message : "Spectra run failed.";
   if (/AI_ARTIFACT_REGION_BUSY/i.test(message)) {
     return "That control is still being edited. Spectra left it untouched; finish the active edit and retry.";
   }
@@ -116,7 +126,7 @@ export function formatPlanApplicationPublicError(error: unknown) {
       message,
     )
   ) {
-    return "Spectra could not safely complete that request. Try again, or choose the object you want Spectra to use.";
+    return "Spectra paused after trying to repair the response. Your saved work is unchanged; retry when ready.";
   }
   if (
     /\b(OpenRouter|provider|network|fetch failed|connection|stream failed|no meaningful stream data)\b/i.test(
@@ -158,7 +168,10 @@ export function coerceCommonPlanSchemaSlips(value: unknown) {
   for (const [key, entry] of Object.entries(source)) {
     if (allowed.has(key)) plan[key] = entry;
   }
-  if (typeof plan.finalResponse === "number" || typeof plan.finalResponse === "boolean")
+  if (
+    typeof plan.finalResponse === "number" ||
+    typeof plan.finalResponse === "boolean"
+  )
     plan.finalResponse = String(plan.finalResponse);
   if (plan.finalResponse == null) plan.finalResponse = "";
   if (typeof plan.finalResponse === "string" && !plan.finalResponse.trim()) {
@@ -191,7 +204,11 @@ export function coerceCommonPlanSchemaSlips(value: unknown) {
         ? "operate"
         : "answer";
   }
-  if (!plan.intent || typeof plan.intent !== "object" || Array.isArray(plan.intent)) {
+  if (
+    !plan.intent ||
+    typeof plan.intent !== "object" ||
+    Array.isArray(plan.intent)
+  ) {
     const ops = Array.isArray(plan.operations) ? plan.operations : [];
     const create = ops.some(
       (operation) =>
@@ -202,11 +219,7 @@ export function coerceCommonPlanSchemaSlips(value: unknown) {
     );
     plan.intent = {
       mode:
-        plan.decision === "operate"
-          ? create
-            ? "create"
-            : "update"
-          : "answer",
+        plan.decision === "operate" ? (create ? "create" : "update") : "answer",
       requestedArtifactTypes: [],
       requestedVisibleArtifactCount: 0,
       targetArtifactId: null,

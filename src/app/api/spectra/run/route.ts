@@ -10,6 +10,7 @@ import {
   allowSpectraProviderFallbacks,
   assertPrimarySpectraRouting,
   getSpectraAttachmentStrategy,
+  getSpectraFallbackModelId,
   getSpectraModelId,
   getSpectraModelProfile,
   getSpectraReasoningProfile,
@@ -153,7 +154,6 @@ type Body = {
     | "confirm"
     | "cancel"
     | "revise"
-    | "steer"
     | "stop"
     | "clear_agent"
     | "scheduled_run"
@@ -166,12 +166,6 @@ type Body = {
   runId?: string;
   executionId?: string;
   revision?: string;
-  steerMode?:
-    | "refine_current_goal"
-    | "redirect_next_step"
-    | "replace_goal"
-    | "cancel_current_action";
-  steerText?: string;
   attachments?: AttachmentInput[];
   focusMode?: EffectiveFocusMode;
   selectedArtifactIds?: string[];
@@ -1727,7 +1721,7 @@ Available actions in this wave:\n${activeToolContractPrompt()}\nUse an action on
 
 First classify the request as answer, operate, clarify, or refuse. The intent mode must describe the requested operation; focus is only a hint. Advice, explanation, and questions use decision=answer with zero operations. Ambiguous targets use clarify with zero operations. Unsupported or unsafe work uses refuse with zero operations.
 
-When one bounded user choice would unblock the work, use decision=clarify and include choices with 2–4 distinct options. Each option needs a short title and may include one concise description. Do not use choices for ordinary rhetorical questions or confirmations already represented by operation policy. Otherwise choices must be null.
+When bounded user input would unblock the work, use decision=clarify. For one question include choices with question and 2–6 distinct options. When 2–4 tightly related bounded questions can be answered together, include choices.questions with stable ids and 2–6 options per question so the user can submit the batch once. Each option needs a short title and may include one concise description. Never refer to listed options in finalResponse unless choices is non-null. Do not use choices for ordinary rhetorical questions or confirmations already represented by operation policy. Otherwise choices must be null.
 
 The owned context is a bounded packet. effectiveFocus states the user's explicit primary context. selectedObjects are intentional and take priority over relevant/catalog objects. A continued thread supplies conversation history while focusedArtifact/workspace may remain additional working focus. Never imply access to omitted or full workspace content.
 If the context packet contains activeGoal, it is the authoritative unresolved task. The selected choice answers that task's question. Continue that request and never revive an older completed, rejected, or abandoned instruction from the same thread.
@@ -2492,21 +2486,55 @@ function parseStreamedPlanText(
       !Array.isArray(raw.choices)
     ) {
       const choices = raw.choices as Record<string, unknown>;
+      const cleanChoiceOptions = (value: unknown) =>
+        Array.isArray(value)
+          ? value.flatMap((option) => {
+              if (
+                !option ||
+                typeof option !== "object" ||
+                Array.isArray(option)
+              )
+                return [];
+              const row = option as Record<string, unknown>;
+              const title =
+                typeof row.title === "string" ? row.title.trim() : "";
+              return title
+                ? [
+                    {
+                      title,
+                      description:
+                        typeof row.description === "string" &&
+                        row.description.trim()
+                          ? row.description.trim()
+                          : null,
+                    },
+                  ]
+                : [];
+            })
+          : [];
       if (Array.isArray(choices.options))
-        choices.options = choices.options.flatMap((option) => {
-          if (!option || typeof option !== "object" || Array.isArray(option))
+        choices.options = cleanChoiceOptions(choices.options);
+      if (Array.isArray(choices.questions))
+        choices.questions = choices.questions.flatMap((question, index) => {
+          if (
+            !question ||
+            typeof question !== "object" ||
+            Array.isArray(question)
+          )
             return [];
-          const row = option as Record<string, unknown>;
-          const title = typeof row.title === "string" ? row.title.trim() : "";
-          return title
+          const row = question as Record<string, unknown>;
+          const prompt =
+            typeof row.question === "string" ? row.question.trim() : "";
+          const options = cleanChoiceOptions(row.options);
+          return prompt && options.length >= 2
             ? [
                 {
-                  title,
-                  description:
-                    typeof row.description === "string" &&
-                    row.description.trim()
-                      ? row.description.trim()
-                      : null,
+                  id:
+                    typeof row.id === "string" && row.id.trim()
+                      ? row.id.trim()
+                      : `question-${index + 1}`,
+                  question: prompt,
+                  options,
                 },
               ]
             : [];
@@ -3476,6 +3504,104 @@ function assertRequestedArtifactContent(
       throw new Error(
         `The generated quiz must contain exactly ${quizCount} questions.`,
       );
+    if (
+      operation.type === "artifact.create" &&
+      operation.input.blueprintKey === "quiz"
+    ) {
+      const questions = Array.isArray(operationContent?.questions)
+        ? operationContent.questions
+        : [];
+      const issues: string[] = [];
+      const ids = new Set<string>();
+      for (const [index, entry] of questions.entries()) {
+        const label = `Question ${index + 1}`;
+        if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+          issues.push(`${label} is missing.`);
+          continue;
+        }
+        const question = entry as Record<string, unknown>;
+        const id = typeof question.id === "string" ? question.id.trim() : "";
+        const questionPrompt =
+          typeof question.prompt === "string" ? question.prompt.trim() : "";
+        const type =
+          typeof question.type === "string" ? question.type : "short_answer";
+        const correctAnswer =
+          typeof question.correctAnswer === "string"
+            ? question.correctAnswer.trim()
+            : "";
+        if (!id || ids.has(id)) issues.push(`${label} needs a unique id.`);
+        if (id) ids.add(id);
+        if (!questionPrompt) issues.push(`${label} needs a complete prompt.`);
+        if (
+          type === "multiple_choice" ||
+          type === "true_false" ||
+          type === "select_all" ||
+          type === "ordering"
+        ) {
+          const options = Array.isArray(question.options)
+            ? question.options
+                .filter((value): value is string => typeof value === "string")
+                .map((value) => value.trim())
+                .filter(Boolean)
+            : [];
+          if (options.length < 2)
+            issues.push(`${label} needs at least two complete options.`);
+          if (
+            new Set(options.map((value) => value.toLocaleLowerCase())).size !==
+            options.length
+          )
+            issues.push(`${label} has duplicate options.`);
+          if (
+            (type === "multiple_choice" || type === "true_false") &&
+            !options.includes(correctAnswer)
+          )
+            issues.push(
+              `${label} needs a correctAnswer that exactly matches one option.`,
+            );
+          if (type === "select_all") {
+            const answers = Array.isArray(question.correctAnswers)
+              ? question.correctAnswers.filter(
+                  (value): value is string =>
+                    typeof value === "string" && Boolean(value.trim()),
+                )
+              : [];
+            if (
+              answers.length === 0 ||
+              answers.some((answer) => !options.includes(answer.trim()))
+            )
+              issues.push(`${label} needs valid marked answers.`);
+          }
+        } else if (type === "matching") {
+          const pairs = Array.isArray(question.matchingPairs)
+            ? question.matchingPairs.filter(
+                (pair) =>
+                  pair &&
+                  typeof pair === "object" &&
+                  !Array.isArray(pair) &&
+                  typeof (pair as Record<string, unknown>).left === "string" &&
+                  Boolean(
+                    String((pair as Record<string, unknown>).left).trim(),
+                  ) &&
+                  typeof (pair as Record<string, unknown>).right === "string" &&
+                  Boolean(
+                    String((pair as Record<string, unknown>).right).trim(),
+                  ),
+              )
+            : [];
+          if (pairs.length < 2)
+            issues.push(`${label} needs at least two complete matching pairs.`);
+        } else if (type === "long_response") {
+          if (typeof question.rubric !== "string" || !question.rubric.trim())
+            issues.push(`${label} needs formative review guidance.`);
+        } else if (!correctAnswer) {
+          issues.push(`${label} needs an expected answer.`);
+        }
+      }
+      if (issues.length)
+        throw new Error(
+          `The generated quiz is incomplete: ${issues.slice(0, 8).join(" ")}`,
+        );
+    }
     if (operation.type === "artifact.create")
       assertCreateContentNotHollow(
         operation.input.blueprintKey,
@@ -4365,6 +4491,24 @@ async function buildContext(
           artifactId: body.artifactId,
         }).catch(() => null),
   ]);
+  const continuedThreadRecord =
+    threadDetail && typeof threadDetail === "object"
+      ? ((threadDetail as Record<string, unknown>).thread as
+          | Record<string, unknown>
+          | undefined)
+      : undefined;
+  const continuedArtifactId =
+    typeof continuedThreadRecord?.artifactId === "string"
+      ? continuedThreadRecord.artifactId
+      : undefined;
+  const effectiveArtifactId = body.artifactId ?? continuedArtifactId;
+  const effectiveFocusedArtifact =
+    focusedArtifact || !effectiveArtifactId
+      ? focusedArtifact
+      : await query<unknown & object, unknown>("spectraArtifacts:get", {
+          actorClerkId,
+          artifactId: effectiveArtifactId,
+        }).catch(() => null);
   const selectedRows = await Promise.all(
     selectedArtifactIds.map((artifactId) =>
       query<unknown & object, unknown>("spectraArtifacts:get", {
@@ -4377,9 +4521,9 @@ async function buildContext(
   // races / omitted projections). Prefer live Yjs for focused + selected
   // artifacts so just-saved editor state is what the model reviews.
   const [liveFocusedArtifact, ...liveSelectedRows] = await Promise.all([
-    focusedArtifact && typeof focusedArtifact === "object"
+    effectiveFocusedArtifact && typeof effectiveFocusedArtifact === "object"
       ? hydrateArtifactWithLiveContent(
-          focusedArtifact as Record<string, unknown>,
+          effectiveFocusedArtifact as Record<string, unknown>,
         )
       : Promise.resolve(null),
     ...selectedRows.map((row) =>
@@ -4388,7 +4532,8 @@ async function buildContext(
         : Promise.resolve(null),
     ),
   ]);
-  const hydratedFocusedArtifact = liveFocusedArtifact ?? focusedArtifact;
+  const hydratedFocusedArtifact =
+    liveFocusedArtifact ?? effectiveFocusedArtifact;
   const artifacts = [
     ...rows(artifactRows),
     ...retrievedRows.flatMap((result) => rows(result)),
@@ -4408,7 +4553,7 @@ async function buildContext(
   const ordinaryContextArtifacts = artifacts.filter(
     (artifact) =>
       artifact.blueprintKey !== "agent" ||
-      artifact._id === body.artifactId ||
+      artifact._id === effectiveArtifactId ||
       selectedArtifactIds.includes(String(artifact._id)),
   );
   const ownedArtifactIdSet = new Set(
@@ -4422,7 +4567,7 @@ async function buildContext(
   const linkedContextIds = [
     ...new Set([
       ...ownedSelectedArtifactIds,
-      ...(body.artifactId ? [body.artifactId] : []),
+      ...(effectiveArtifactId ? [effectiveArtifactId] : []),
     ]),
   ].slice(0, 12);
   const linkRows = await Promise.all(
@@ -4531,7 +4676,7 @@ async function buildContext(
       id,
       explicitArtifactIds.has(id)
         ? "explicit"
-        : id === body.artifactId
+        : id === effectiveArtifactId
           ? "open"
           : "visible",
     ]),
@@ -5535,7 +5680,74 @@ function resolveAndValidatePlan(
     prompt,
     context,
   );
-  const resolved = resolvePlanReferences(reconciled, context);
+  let resolved = resolvePlanReferences(reconciled, context);
+  if (
+    (context.focusMode === "artifact" || context.focusMode === "thread") &&
+    context.focusedArtifact &&
+    typeof context.focusedArtifact.id === "string"
+  ) {
+    const focusedId = context.focusedArtifact.id;
+    const allowed = ownedReferences(context).artifactIds;
+    const operations = resolved.operations.map((operation) => {
+      if (
+        operation.type === "artifact.update" &&
+        !allowed.has(operation.input.artifactId) &&
+        operation.input.blueprintKey === context.focusedArtifact?.blueprintKey
+      ) {
+        return parseModelOperation({
+          ...operation,
+          input: { ...operation.input, artifactId: focusedId },
+        });
+      }
+      if (
+        operation.type === "artifact.archive" &&
+        !allowed.has(operation.input.artifactId)
+      ) {
+        return parseModelOperation({
+          ...operation,
+          input: { ...operation.input, artifactId: focusedId },
+        });
+      }
+      return operation;
+    });
+    const repairedTarget =
+      resolved.intent.targetArtifactId &&
+      !allowed.has(resolved.intent.targetArtifactId)
+        ? focusedId
+        : resolved.intent.targetArtifactId;
+    if (
+      repairedTarget !== resolved.intent.targetArtifactId ||
+      operations.some((operation, index) => operation !== resolved.operations[index])
+    ) {
+      console.warn("[spectra.plan.focused_reference_repaired]", {
+        focusedId,
+        focusMode: context.focusMode,
+      });
+      resolved = parseSpectraPlan({
+        ...resolved,
+        intent: { ...resolved.intent, targetArtifactId: repairedTarget },
+        operations,
+      });
+    }
+  }
+  // A visible artifact is context, not an instruction to mutate it. When the
+  // user explicitly asks for a fresh object, keep the conversation identity
+  // anchored to that new object as well; otherwise the model can correctly
+  // create `Magnets Quiz` while leaving the Dock mislabeled `Update Water
+  // Cycle Quiz` from the contextual artifact.
+  if (requestedCreation && promptLooksLikeFreshCreate(prompt)) {
+    const created = resolved.operations.find(
+      (operation) =>
+        operation.type === "artifact.create" &&
+        operation.input.blueprintKey === requestedCreation.blueprintKey,
+    );
+    if (created?.type === "artifact.create") {
+      resolved = parseSpectraPlan({
+        ...resolved,
+        conversationTitle: created.input.title.trim().slice(0, 64),
+      });
+    }
+  }
   assertRequestedArtifactMutation(resolved.operations, prompt);
   assertPresentationLayoutContract(resolved.operations, prompt);
   console.info(
@@ -6848,6 +7060,7 @@ async function callModel(
     mode: RequestMode,
     repair?: { raw: string; error: unknown },
     agentMessages?: SpectraAgentMessage[],
+    modelOverride?: string,
   ) => {
     const repairIssues =
       repair?.error instanceof ZodError
@@ -6974,6 +7187,9 @@ async function callModel(
       },
       body: JSON.stringify({
         ...baseBody,
+        model:
+          modelOverride ??
+          (mode === "fallback" ? getSpectraFallbackModelId() : baseBody.model),
         provider,
         // The plan remains locally schema-validated after every stream,
         // including repair and provider-recovery paths.
@@ -7967,6 +8183,8 @@ async function callModel(
             selectedFallbackRouting,
             "repair",
             { raw: fallbackCandidate, error: fallbackFailure },
+            undefined,
+            getSpectraFallbackModelId(),
           );
           console.info("[spectra.openrouter.phase]", {
             phase: "fallback_repair_headers",
@@ -8001,7 +8219,38 @@ async function callModel(
       }
     }
     if (fallbackFailure) {
-      throw fallbackFailure;
+      // Provider outages are usually brief. Keep recovery inside the same run
+      // so the user does not see a terminal error before Spectra has retried
+      // the primary route from the same uncommitted conversation state.
+      for (const delayMs of [1_500, 5_000]) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        latestPlanText = "";
+        emittedOperationCount = 0;
+        emittedProgressCount = 0;
+        try {
+          onRepairRetry?.();
+          const recoveryPass = await runNativeAgentPass(
+            initialMessages,
+            "encouragement",
+            primaryRouting,
+            "Reconnecting to the model",
+          );
+          if (!recoveryPass.result)
+            throw new Error("The recovered model response was empty.");
+          plan = recoveryPass.plan;
+          result = recoveryPass.result;
+          fallbackFailure = undefined;
+          console.info("[spectra.openrouter.primary_recovery]", {
+            delayMs,
+            model: recoveryPass.result.model,
+            provider: recoveryPass.result.provider,
+          });
+          break;
+        } catch (recoveryError) {
+          fallbackFailure = recoveryError;
+        }
+      }
+      if (fallbackFailure) throw fallbackFailure;
     }
   }
   if (!result || !plan)
@@ -9090,6 +9339,7 @@ async function executeOperation(
       runId,
       operationId,
       executionId: context.executionId,
+      replacePendingCreate: true,
       signal: context.signal,
       onConflict: context.onRegionConflict,
       onConflictResolved: context.onRegionConflictResolved,
@@ -9100,6 +9350,13 @@ async function executeOperation(
         content: input.content,
         tags: input.tags,
       }),
+    });
+    console.info("[spectra.ai.artifact.create-phase]", {
+      phase: "yjs-applied",
+      artifactId: pendingArtifactId,
+      runId,
+      operationId,
+      changedRegionCount: mutationResult.changedRegionIds?.length ?? 0,
     });
     const changedRegionIds = mutationResult.changedRegionIds ?? [];
     const effectProgress = operationEffectProgress(
@@ -9136,6 +9393,12 @@ async function executeOperation(
       let finalizeError: unknown;
       while (true) {
         try {
+          console.info("[spectra.ai.artifact.create-phase]", {
+            phase: "finalize-attempt",
+            artifactId: pendingArtifactId,
+            runId,
+            operationId,
+          });
           output = (await mutate("spectraArtifacts:finalizePendingLive", {
             actorClerkId,
             artifactId: pendingArtifactId,
@@ -9144,6 +9407,12 @@ async function executeOperation(
             summary: creationSummary,
           })) as Record<string, unknown>;
           finalizeError = undefined;
+          console.info("[spectra.ai.artifact.create-phase]", {
+            phase: "finalized",
+            artifactId: pendingArtifactId,
+            runId,
+            operationId,
+          });
           break;
         } catch (error) {
           finalizeError = error;
@@ -9521,6 +9790,10 @@ async function runAttempt(
   let card = await latestCard(params.actorClerkId, params.runId);
   recordPhase("claim_and_initial_card");
   let commitStarted = false;
+  const operationOutcomes: Array<{
+    operation: ModelOperation;
+    affected: Array<{ type: string; id: string }>;
+  }> = [];
   let publicText = "";
   let markedStreaming = false;
   let hadVisibleActivity = false;
@@ -9548,7 +9821,7 @@ async function runAttempt(
         if (!result.alive) leaseController.abort();
       })
       .catch(() => null);
-  }, 5_000);
+  }, 1_000);
   const persistQueuedEvents = () => {
     if (eventFlushTimer) {
       clearTimeout(eventFlushTimer);
@@ -10214,10 +10487,10 @@ async function runAttempt(
                 .catch(() => null);
             }
             publicText = mode === "replace" ? content : publicText + content;
-            // Hold success-facing prose until the strict plan validates and
-            // guarded operations commit. Progress and artifact previews remain
-            // live, but a failed run can no longer leave behind a false
-            // assistant claim that the requested changes succeeded.
+            // Success-facing prose stays withheld until every guarded native
+            // operation has durably committed and verified. Progress and
+            // artifact presence continue live, but the assistant cannot claim
+            // completion while the actual work is still synchronizing.
           },
           undefined,
           executionSignal,
@@ -10848,10 +11121,6 @@ async function runAttempt(
       resultActions: [],
     });
     const allAffected: Array<{ type: string; id: string }> = [];
-    const operationOutcomes: Array<{
-      operation: ModelOperation;
-      affected: Array<{ type: string; id: string }>;
-    }> = [];
     const createdArtifactIds = new Map<number, string>();
     for (let index = 0; index < plan.operations.length; index += 1) {
       let operation = resolveCreatedArtifactDependencies(
@@ -11449,13 +11718,13 @@ async function runAttempt(
         actorClerkId: params.actorClerkId,
         runId: params.runId,
         executionId: params.executionId,
-        outcome: "clear",
+        outcome: "failed",
       }).catch(() => null);
       await mutate("spectraWorkspaces:settleForRun", {
         actorClerkId: params.actorClerkId,
         runId: params.runId,
         executionId: params.executionId,
-        outcome: "clear",
+        outcome: "failed",
       }).catch(() => null);
       await partialWrite;
       const stoppedWithVisibleWork = Boolean(
@@ -11491,7 +11760,15 @@ async function runAttempt(
       await flushEvents();
       return;
     }
-    advanceProtocolState("failed_terminal", "unrecoverable_run_failure");
+    const preservedPartial = operationOutcomes.some(({ affected }) =>
+      affected.some((item) => item.id),
+    );
+    advanceProtocolState(
+      preservedPartial ? "failed_terminal" : "interrupted",
+      preservedPartial
+        ? "unrecoverable_run_failure"
+        : "run_paused_after_recovery",
+    );
     const message = publicError(error);
     await mutate("spectraOperations:cancelPending", {
       actorClerkId: params.actorClerkId,
@@ -11515,7 +11792,7 @@ async function runAttempt(
       executionId: params.executionId,
       outcome: "failed",
     }).catch(() => null);
-    const resultSummary = commitStarted
+    const resultSummary = preservedPartial
       ? `${message} Review the affected objects before submitting a follow-up command.`
       : message;
     await mutate("spectraRuns:updateStatus", {
@@ -11524,10 +11801,10 @@ async function runAttempt(
       executionId: params.executionId,
       status: "failed",
       error: message,
-      resultTitle: "Run failed",
+      resultTitle: preservedPartial ? "Completed with limits" : "Paused",
       resultSummary,
-      resultVariant: "error",
-      resultActions: commitStarted
+      resultVariant: "status",
+      resultActions: preservedPartial
         ? []
         : [
             {
@@ -11537,9 +11814,9 @@ async function runAttempt(
               targetId: params.runId,
             },
           ],
-      recoveryState: commitStarted ? "partial" : "interrupted",
-      retryable: !commitStarted,
-      preservedPartial: commitStarted,
+      recoveryState: preservedPartial ? "partial" : "interrupted",
+      retryable: !preservedPartial,
+      preservedPartial,
     }).catch(() => null);
     card = await latestCard(params.actorClerkId, params.runId).catch(
       () => card,
@@ -11650,7 +11927,7 @@ async function resumeOperationsAttempt(params: {
       executionId: params.executionId,
       workerId: params.workerId,
     }).catch(() => null);
-  }, 5_000);
+  }, 1_000);
   try {
     for (let index = 0; index < operations.length; index += 1) {
       const row = operations[index]!;
@@ -12439,13 +12716,13 @@ export async function POST(request: NextRequest) {
       actorClerkId: actor.clerkId,
       runId,
       executionId: stopped.executionId,
-      outcome: "clear",
+      outcome: "failed",
     }).catch(() => null);
     await mutate("spectraWorkspaces:settleForRun", {
       actorClerkId: actor.clerkId,
       runId,
       executionId: stopped.executionId,
-      outcome: "clear",
+      outcome: "failed",
     }).catch(() => null);
     return new Response(null, { status: 204 });
   }
@@ -12651,65 +12928,6 @@ export async function POST(request: NextRequest) {
         runId,
         summary: "No proposed changes were applied.",
         card: streamCard(card),
-      }),
-    );
-  }
-
-  if (action === "steer") {
-    const steerText = body.steerText?.trim();
-    const steerMode = body.steerMode ?? "refine_current_goal";
-    if (!steerText)
-      return new Response("Describe how Spectra should adjust the run", {
-        status: 400,
-      });
-    const state = await query<
-      { actorClerkId: string; runId: string },
-      RunDetail
-    >("spectraRuns:get", { actorClerkId: actor.clerkId, runId });
-    if (!state.run.executionId)
-      return new Response("This run cannot accept steering safely.", {
-        status: 409,
-      });
-    if (
-      ![
-        "queued",
-        "running",
-        "awaiting_confirmation",
-        "awaiting_resolution",
-      ].includes(state.run.status)
-    )
-      return new Response(
-        "This run has already reached a safe stopping point.",
-        {
-          status: 409,
-        },
-      );
-    const steerId = crypto.randomUUID();
-    await mutate("spectraRuns:appendEvent", {
-      actorClerkId: actor.clerkId,
-      runId,
-      executionId: state.run.executionId,
-      type: "steer_queued",
-      payload: {
-        type: "steer_queued",
-        steer: {
-          id: steerId,
-          runId,
-          mode: steerMode,
-          text: steerText,
-          createdAt: Date.now(),
-          applyAt: "next_safe_boundary",
-        },
-      },
-    });
-    return ndjson(async (emit) =>
-      emit({
-        type: "steer_queued",
-        runId,
-        steerId,
-        mode: steerMode,
-        text: steerText,
-        message: "Will apply after the current step",
       }),
     );
   }

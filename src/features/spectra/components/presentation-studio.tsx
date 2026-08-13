@@ -91,6 +91,7 @@ import {
 } from "../presentation/io";
 import { aiRegionAttr, pathTouches } from "./ai-region-path";
 import { targetAttrs } from "../collaboration/target-attributes";
+import { WorkbarSelect } from "./workbar-controls";
 import {
   calculateWorkbook,
   coordinateToAddress,
@@ -2507,6 +2508,7 @@ export function PresentationStudio({
           </button>
         </div>
       </div>
+      <div className="spectra-editor-body">
       <input
         ref={importInputRef}
         type="file"
@@ -2583,44 +2585,43 @@ export function PresentationStudio({
             >
               <Redo2 className="h-3.5 w-3.5" />
             </button>
-            <select
+            <WorkbarSelect
+              ariaLabel={selectedTextPreset ? "Text style" : "Slide layout"}
+              disabled={readOnly}
               value={
                 selectedTextPreset ?? activeSlide.layoutId ?? "title-content"
               }
-              disabled={readOnly}
-              aria-label={selectedTextPreset ? "Text style" : "Slide layout"}
-              onChange={(event) => {
+              options={
+                selectedTextPreset
+                  ? [
+                      { value: "title", label: "Title" },
+                      { value: "subtitle", label: "Subtitle" },
+                      { value: "body", label: "Body" },
+                      { value: "caption", label: "Caption" },
+                    ]
+                  : [
+                      { value: "title-content", label: "Title & content" },
+                      { value: "title-only", label: "Title only" },
+                      { value: "two-column", label: "Two columns" },
+                      {
+                        value: "title-visual-text",
+                        label: "Title, visual & text",
+                      },
+                      { value: "visual-story", label: "Visual story" },
+                      { value: "three-ideas", label: "Three ideas" },
+                      { value: "statement", label: "Statement" },
+                      { value: "full-bleed", label: "Full bleed" },
+                      { value: "blank", label: "Blank" },
+                    ]
+              }
+              onChange={(value) => {
                 if (selectedTextPreset)
                   applyTextPreset(
-                    event.target.value as
-                      "title" | "subtitle" | "body" | "caption",
+                    value as "title" | "subtitle" | "body" | "caption",
                   );
-                else applySlideLayout(event.target.value);
+                else applySlideLayout(value);
               }}
-            >
-              {selectedTextPreset ? (
-                <>
-                  <option value="title">Title</option>
-                  <option value="subtitle">Subtitle</option>
-                  <option value="body">Body</option>
-                  <option value="caption">Caption</option>
-                </>
-              ) : (
-                <>
-                  <option value="title-content">Title & content</option>
-                  <option value="title-only">Title only</option>
-                  <option value="two-column">Two columns</option>
-                  <option value="title-visual-text">
-                    Title, visual & text
-                  </option>
-                  <option value="visual-story">Visual story</option>
-                  <option value="three-ideas">Three ideas</option>
-                  <option value="statement">Statement</option>
-                  <option value="full-bleed">Full bleed</option>
-                  <option value="blank">Blank</option>
-                </>
-              )}
-            </select>
+            />
             <span className="presentation-toolbar-rule" />
             <button
               type="button"
@@ -3814,6 +3815,7 @@ export function PresentationStudio({
         </div>
       ) : null}
 
+      </div>
       {presentedDeck && typeof document !== "undefined"
         ? createPortal(
             <div

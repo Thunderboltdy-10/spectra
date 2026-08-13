@@ -843,7 +843,7 @@ export function ChatShell() {
         />
       ) : null}
       <div className="pointer-events-none absolute inset-x-0 bottom-0 z-50 bg-transparent px-5 pb-5 pt-2 sm:px-8">
-        <div className="pointer-events-auto mx-auto max-w-[820px]">
+        <div className="pointer-events-auto mx-auto max-w-[820px] spectra-live-stack">
           <ComposerArtifactDock
             artifacts={artifacts}
             cards={runEngine.cards}

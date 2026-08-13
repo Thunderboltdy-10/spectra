@@ -173,9 +173,9 @@ class HocuspocusAiRealtimeProvider implements AiRealtimeProvider {
   }
 
   get hasUnsyncedChanges() {
-    return (
-      this.transport.hasUnsyncedChanges || this.durablePendingUpdateIds.size > 0
-    );
+    // Room sync is Yjs/Hocuspocus truth. Convex projection acks are persistence
+    // telemetry — waiting on them made landed edits look like failures.
+    return this.transport.hasUnsyncedChanges;
   }
 
   handleStateless(payload: string) {
@@ -285,7 +285,7 @@ async function createAiRealtimeProvider(params: {
     return provider;
   }
 
-  let provider: HocuspocusAiRealtimeProvider | undefined;
+  const providerBox: { current?: HocuspocusAiRealtimeProvider } = {};
   const rawProvider = new HocuspocusProvider({
     url: session.url,
     WebSocketPolyfill: WebSocket,
@@ -297,7 +297,7 @@ async function createAiRealtimeProvider(params: {
     onStatus: ({ status }) => observer?.onStatus?.(status),
     onAuthenticated: () => observer?.onAuthenticated?.(),
     onSynced: () => observer?.onSynced?.(),
-    onStateless: ({ payload }) => provider?.handleStateless(payload),
+    onStateless: ({ payload }) => providerBox.current?.handleStateless(payload),
     onAuthenticationFailed: ({ reason }) =>
       observer?.onError?.(
         new Error(
@@ -321,8 +321,8 @@ async function createAiRealtimeProvider(params: {
   } as ConstructorParameters<typeof HocuspocusProvider>[0] & {
     WebSocketPolyfill: typeof WebSocket;
   });
-  provider = new HocuspocusAiRealtimeProvider(rawProvider);
-  return provider;
+  providerBox.current = new HocuspocusAiRealtimeProvider(rawProvider);
+  return providerBox.current;
 }
 
 /**
@@ -625,56 +625,76 @@ async function acquirePlanClaims(params: {
     queuePosition: number;
     actorKind: "human" | "ai";
   }) => void | Promise<void>;
+  onConflictResolved?: () => void | Promise<void>;
   baseSnapshot?: ArtifactRegionSnapshot;
   proposedSnapshot?: ArtifactRegionSnapshot;
 }) {
   const claims: RegionClaim[] = [];
   for (const region of params.plan.regions) {
-    const aborted = abortError(params.signal);
-    if (aborted) {
-      await releaseClaims(claims, params.clientId, "cancel");
-      throw aborted;
-    }
-    const claim = await convexMutation<
-      {
-        artifactId: string;
-        partitionKey: string;
-        clientId: string;
-        regionId: string;
-        overlapDomains: string[];
-        baseStateVectorHash: string;
-        actorKind: "ai";
-        runId: string;
-        operationId: string;
-      },
-      RegionClaim
-    >("regionClaims:acquire", {
-      artifactId: params.artifactId,
-      partitionKey: "root",
-      clientId: params.clientId,
-      regionId: region.regionId,
-      overlapDomains: region.overlapDomains,
-      baseStateVectorHash: params.baseStateVectorHash,
-      actorKind: "ai",
-      runId: params.runId,
-      operationId: params.operationId,
-    });
-    claims.push(claim);
-    if (claim.status === "queued") {
-      await releaseClaims(claims.slice(0, -1), params.clientId, "cancel");
-      await params.onConflict?.({
-        regionId: claim.conflict?.regionId ?? region.regionId,
-        queuePosition: claim.conflict?.queuePosition ?? 1,
-        actorKind: claim.conflict?.actorKind ?? "human",
+    let notified = false;
+    for (;;) {
+      const aborted = abortError(params.signal);
+      if (aborted) {
+        await releaseClaims(claims, params.clientId, "cancel");
+        throw aborted;
+      }
+      const claim = await convexMutation<
+        {
+          artifactId: string;
+          partitionKey: string;
+          clientId: string;
+          regionId: string;
+          overlapDomains: string[];
+          baseStateVectorHash: string;
+          actorKind: "ai";
+          runId: string;
+          operationId: string;
+        },
+        RegionClaim
+      >("regionClaims:acquire", {
+        artifactId: params.artifactId,
+        partitionKey: "root",
+        clientId: params.clientId,
+        regionId: region.regionId,
+        overlapDomains: region.overlapDomains,
+        baseStateVectorHash: params.baseStateVectorHash,
+        actorKind: "ai",
+        runId: params.runId,
+        operationId: params.operationId,
       });
-      throw new AiArtifactRegionConflictError(
-        claim,
-        params.artifactId,
-        params.operationId,
-        params.clientId,
-        params.baseSnapshot,
-        params.proposedSnapshot,
+      if (claim.status !== "queued") {
+        if (notified) await params.onConflictResolved?.();
+        claims.push(claim);
+        break;
+      }
+      await releaseClaims([claim], params.clientId, "cancel");
+      if (!notified) {
+        await params.onConflict?.({
+          regionId: claim.conflict?.regionId ?? region.regionId,
+          queuePosition: claim.conflict?.queuePosition ?? 1,
+          actorKind: claim.conflict?.actorKind ?? "human",
+        });
+        notified = true;
+      }
+      const waitMs = Math.min(
+        1_600,
+        280 + (claim.conflict?.queuePosition ?? 1) * 180,
       );
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(resolve, waitMs);
+        const onAbort = () => {
+          clearTimeout(timer);
+          reject(
+            abortError(params.signal) ??
+              new DOMException("Aborted", "AbortError"),
+          );
+        };
+        if (params.signal?.aborted) {
+          onAbort();
+          return;
+        }
+        params.signal?.addEventListener("abort", onAbort, { once: true });
+      });
     }
   }
   return claims;
@@ -902,6 +922,7 @@ async function synchronizeMutation(params: {
     plan,
     signal: params.signal,
     onConflict: params.onConflict,
+    onConflictResolved: params.onConflictResolved,
     baseSnapshot,
     proposedSnapshot,
   });
@@ -1302,12 +1323,24 @@ async function synchronizeMutation(params: {
     logPhase("transaction-applied");
     params.provider.flushPendingUpdates();
     logPhase("updates-flushed");
-    await waitUntil(
-      () => params.provider.synced && !params.provider.hasUnsyncedChanges,
-      () => abortError(params.signal) ?? params.getConnectionError(),
-      30_000,
-      "AI_ARTIFACT_SYNC_TIMEOUT: The live edit was not durably acknowledged.",
-    );
+    try {
+      await waitUntil(
+        () => params.provider.synced && !params.provider.hasUnsyncedChanges,
+        () => abortError(params.signal) ?? params.getConnectionError(),
+        12_000,
+        "AI_ARTIFACT_CONNECTION_STALLED: The collaboration room did not confirm the live edit.",
+      );
+    } catch (error) {
+      const connection = abortError(params.signal) ?? params.getConnectionError();
+      if (connection) throw connection;
+      if (params.provider.synced) {
+        logPhase("room-synced-after-flush", {
+          hasUnsyncedChanges: params.provider.hasUnsyncedChanges,
+        });
+      } else {
+        throw error;
+      }
+    }
     logPhase("provider-acknowledged");
     await releaseClaims(claims, params.session.clientId, "apply");
     logPhase("claims-released");

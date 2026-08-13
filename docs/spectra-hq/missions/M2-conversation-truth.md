@@ -31,3 +31,15 @@ AI output *quality* (M5), motion polish of dock/panels (M8), multiplayer presenc
 3. Two simultaneous runs = two tabs, independently updating; navigating routes never kills or duplicates them.
 4. `/chat` and right-panel behave identically for send/continue/stream/stop/dock.
 5. `.shots/missions/M2/` evidence incl. mid-stream captures; STATE.md updated.
+
+## Mission log — 2026-08-13
+
+Builder continued M2 from the live worktree (no restart). Cursor in-editor browser only.
+
+**Lifecycle.** Yjs apply success no longer waits on Convex durable-ack. Room sync wait is 12s; if the provider is already `synced`, the operation succeeds. Region `queued` waits instead of pausing the run. Quiet retry skips re-choreography when live verify already matches. Tools return `{status:0|1}`. `web_search` returns snippets immediately (hosts published as progress).
+
+**Dock / shells.** Tabs dedupe by threadId; continue/steer keep one selected tab (blue left border). `/chat` now mounts `DurableRunTabs`. Collapsed sidebar does not render recents dots or workspace squares. Whiteboard dot-grid removed. Studio tab rail returns null until the shell slot exists (no mid-page jump). Quiz prev/select/next moved into the white workbar; Preview is an icon; Publish is compact.
+
+**Browser (2026-08-13).** Whiteboard “Latest AI Models” opened Live with content, no grid (`066`). Sticky “M2 verify” queued on one tab (`067`) then landed (`067b`); follow-up did not clone (`067c`). `/chat` Live Dock with two tabs, selected blue border (`070`). Library tab rail in the shell slot (`069`). Tides Quiz workbar has question nav + eye + Publish (`071`).
+
+**Not re-proven here.** Long-run token streaming (prior M2 shots 003+); live search host traces; Follow AI scroll lock; hover-card screenshot; stop at three stages. Hydration overlay on `app-shell` remains (Field Notes).

@@ -30,7 +30,13 @@ export function SpectraRichContent({ content, className, verifiedSourceIds = [] 
   return <div className={cn("spectra-rich-content", className)} data-rich-complete={ast.complete}>
     {ast.blocks.map((block) => {
       if (block.type === "code_block" || block.type === "math_block" || block.type === "table" || block.type === "list") return <RichText key={block.id} content={block.raw} />;
-      if (block.type === "media") return <figure key={block.id}><img src={block.url} alt={block.alt} className="max-w-full rounded-[8px]" /></figure>;
+      if (block.type === "media") return (
+        <figure key={block.id}>
+          {/* User-authored media URLs are not known at build time. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={block.url} alt={block.alt} className="max-w-full rounded-[8px]" />
+        </figure>
+      );
       if (block.type === "heading") { if (!hasNativeIdentity(block.content)) return <RichText key={block.id} content={block.raw} />; const Tag = `h${block.level}` as "h1" | "h2" | "h3" | "h4" | "h5" | "h6"; return <Tag key={block.id} className="mb-2 mt-5 font-display font-semibold"><InlineContent content={block.content} verifiedSourceIds={verified} /></Tag>; }
       if (block.type === "callout") return <aside key={block.id} data-tone={block.tone} className="my-3 border-l-2 border-[var(--accent-cyan)] bg-[var(--bg-secondary)] px-3 py-2">{hasNativeIdentity(block.content) ? <InlineContent content={block.content} verifiedSourceIds={verified} /> : <RichText content={block.raw} />}</aside>;
       if (block.type === "source_note") return <aside key={block.id} className="my-2 text-[.88em] text-[var(--text-secondary)]"><strong>Source: </strong><InlineContent content={block.content} verifiedSourceIds={verified} /></aside>;

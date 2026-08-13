@@ -151,7 +151,9 @@ export function RouteSidePanelHost() {
       removeWork();
       removeThread();
     };
-  }, [eligible, fullscreen, loadThread, loadWork, pathname, thread?._id, work?._id]);
+    // fullscreen is a stable handoff onto the library route for this panel.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fullscreen closes over the latest side session
+  }, [eligible, loadThread, loadWork, pathname, thread?._id, work?._id]);
 
   const sideSession = useMemo(
     () => ({

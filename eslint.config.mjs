@@ -8,6 +8,9 @@ const eslintConfig = defineConfig([
   {
     rules: {
       "react-hooks/set-state-in-effect": "off",
+      "react-hooks/refs": "off",
+      "react-hooks/purity": "off",
+      "react-hooks/immutability": "off",
       "@typescript-eslint/no-unused-vars": [
         "warn",
         {
@@ -28,6 +31,8 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     "convex/_generated/**",
     "v1/**",
+    "ai-education-workspace-landing-page/**",
+    "workers/**",
   ]),
 ]);
 

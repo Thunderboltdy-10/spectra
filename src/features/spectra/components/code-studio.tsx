@@ -2570,6 +2570,7 @@ export function CodeStudio({
         </div>
       </div>
 
+      <div className="spectra-editor-body">
       {importing ? (
         <div
           role="status"
@@ -3178,6 +3179,7 @@ export function CodeStudio({
           </div>
         </>
       ) : null}
+      </div>
 
       {deleteFileId ? (
         <ConfirmDialog

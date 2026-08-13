@@ -40,18 +40,21 @@ export function LiveThreadPanel({
       cssWidthVariable="--spectra-live-thread-width"
     >
       <div className="flex h-full min-h-0 flex-col bg-[var(--bg-primary)]">
-        <header className="flex h-14 shrink-0 items-center gap-3 border-b border-[var(--border-default)] px-4">
+        <header className="flex h-14 min-w-0 shrink-0 items-center gap-2 overflow-hidden border-b border-[var(--border-default)] px-4">
           <span
-            className="spectra-card-type-icon !h-8 !w-8 text-[var(--brand-primary)]"
+            className="spectra-card-type-icon !h-8 !w-8 shrink-0 text-[var(--brand-primary)]"
             style={{ "--card-accent": "var(--brand-primary)" } as CSSProperties}
           >
             <MessageSquare className="h-4 w-4" />
           </span>
-          <div className="min-w-0 flex-1">
-            <div className="truncate font-display text-[16px] font-semibold text-[var(--text-primary)]">
+          <div className="min-w-0 flex-1 overflow-hidden">
+            <div
+              className="truncate font-display text-[16px] font-semibold text-[var(--text-primary)]"
+              title={title || "Live thread"}
+            >
               {title || "Live thread"}
             </div>
-            <div className="text-micro font-semibold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
+            <div className="truncate text-micro font-semibold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
               Live conversation
             </div>
           </div>
@@ -60,7 +63,7 @@ export function LiveThreadPanel({
           <button
             type="button"
             onClick={() => follow.setFollowing(!follow.following)}
-            className="spectra-follow-toggle"
+            className="spectra-follow-toggle shrink-0"
             data-following={follow.following ? "true" : undefined}
             aria-label={
               follow.following
@@ -81,11 +84,11 @@ export function LiveThreadPanel({
             <button
               type="button"
               onClick={() => onContinue?.()}
-              className={`spectra-icon-action ${continuing ? "text-[var(--accent-cyan)]" : "text-[var(--text-secondary)] hover:text-[var(--accent-cyan)]"}`}
+              className={`spectra-icon-action ${continuing ? "is-selected" : ""}`}
               aria-label={
                 continuing
-                  ? "Remove this thread from the Live Dock"
-                  : "Add this thread to the Live Dock"
+                  ? "Stop continuing this thread in the Live Dock"
+                  : "Continue this thread in the Live Dock"
               }
               aria-pressed={continuing}
               data-tooltip={

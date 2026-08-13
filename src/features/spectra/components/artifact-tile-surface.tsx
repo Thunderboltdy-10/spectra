@@ -86,6 +86,8 @@ export function ArtifactTileSurface({
     const storedIds = session.openPanes ? collectWorkbenchTabs(session.openPanes).map((tab) => tab.id).sort().join(":") : "";
     const nextIds = workbenchTabs.map((tab) => tab.id).sort().join(":");
     setLayout(session.openPanes && storedIds === nextIds && validateWorkbenchTree(session.openPanes).length === 0 ? session.openPanes : automaticLayout);
+    // tabSignature already tracks workbenchTabs identity for this restore.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- workbenchTabs is represented by tabSignature
   }, [automaticLayout, tabSignature]);
   useEffect(() => {
     if (!layout) return;

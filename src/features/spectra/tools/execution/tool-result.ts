@@ -57,3 +57,33 @@ export function boundedToolSummary(value: string, maximum = 4_000) {
   const normalized = value.replace(/\u0000/g, "").trim();
   return normalized.length <= maximum ? normalized : `${normalized.slice(0, maximum - 1)}…`;
 }
+
+/** Canonical model-facing envelope: 0 succeeded, 1 failed with the useful error. */
+export function toModelToolResult(result: unknown) {
+  if (result && typeof result === "object" && !Array.isArray(result)) {
+    const rec = result as Record<string, unknown>;
+    if (rec.status === 0 || rec.status === 1) return rec;
+    if (rec.ok === false) {
+      const message =
+        typeof rec.message === "string" && rec.message.trim()
+          ? rec.message
+          : typeof rec.error === "string" && rec.error.trim()
+            ? rec.error
+            : typeof rec.code === "string"
+              ? rec.code
+              : "The tool could not complete.";
+      return {
+        status: 1,
+        error: message,
+        ...(typeof rec.code === "string" ? { code: rec.code } : {}),
+        ...(rec.retryable === true ? { retryable: true } : {}),
+        ...(typeof rec.suggestedAction === "string"
+          ? { suggestedAction: rec.suggestedAction }
+          : {}),
+      };
+    }
+    const { ok: _ok, ...rest } = rec;
+    return { status: 0, ...rest };
+  }
+  return { status: 0, data: result ?? null };
+}

@@ -219,8 +219,8 @@ export function WorkbenchScene() {
     return setSplitRatio(base, "split:root", 0.56 + 0.1 * (1 - (1 - pull) ** 3));
   }, [t]);
 
-  const renderTab = useMemo(
-    () => (tab: WorkbenchTab) => {
+  const renderTab = useMemo(() => {
+    function RenderWorkbenchTab(tab: WorkbenchTab) {
       if (tab.id === "tab-plan")
         return (
           <div className="landing-pane">
@@ -255,9 +255,9 @@ export function WorkbenchScene() {
           />
         </div>
       );
-    },
-    [],
-  );
+    }
+    return RenderWorkbenchTab;
+  }, []);
 
   return (
     <SceneRegion scene="workbench">

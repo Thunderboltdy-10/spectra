@@ -82,6 +82,7 @@ import {
   isValidElement,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -280,6 +281,7 @@ import {
   type QuizExperience,
   type QuizMode,
 } from "../quiz/experience";
+import { WorkbarSelect } from "./workbar-controls";
 
 const WAVE_C_BLUEPRINTS = new Set([
   "presentation",
@@ -3191,7 +3193,10 @@ export function ArtifactStudio({
               <MessageSquare className="h-5 w-5" />
             </span>
             <div className="min-w-0">
-              <div className="truncate font-display text-[20px] font-semibold text-[var(--text-primary)]">
+              <div
+                className="truncate font-display text-[20px] font-semibold text-[var(--text-primary)]"
+                title={artifact.title}
+              >
                 {artifact.title}
               </div>
               <div className="mt-0.5 text-micro uppercase tracking-[0.11em] text-[var(--text-tertiary)]">
@@ -3204,7 +3209,7 @@ export function ArtifactStudio({
               <button
                 type="button"
                 onClick={() => onContinueThread(threadId, artifact.title)}
-                className={`flex h-8 w-8 items-center justify-center rounded-[7px] transition ${continuedThreadId === threadId ? "bg-[color-mix(in_oklab,#8b6ff0_14%,var(--bg-hover))] text-[#7256dc]" : "text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"}`}
+                className={`spectra-icon-action ${continuedThreadId === threadId ? "is-selected" : ""}`}
                 aria-label={
                   continuedThreadId === threadId
                     ? "Remove this thread from the Live Dock"
@@ -3519,8 +3524,12 @@ export function StudioTabRail({
   onGoBack?: () => void;
   onGoForward?: () => void;
 }) {
-  const [shellSlot, setShellSlot] = useState<HTMLElement | null>(null);
-  useEffect(() => {
+  const [shellSlot, setShellSlot] = useState<HTMLElement | null>(() =>
+    typeof document === "undefined"
+      ? null
+      : document.getElementById("spectra-shell-tab-slot"),
+  );
+  useLayoutEffect(() => {
     setShellSlot(document.getElementById("spectra-shell-tab-slot"));
   }, []);
 
@@ -3675,7 +3684,7 @@ export function StudioTabRail({
   );
 
   if (shellSlot) return createPortal(rail, shellSlot);
-  return rail;
+  return null;
 }
 
 function ArtifactStudioEditor({
@@ -5202,6 +5211,7 @@ function ArtifactStudioEditor({
     setDirty(false);
     setRemoteConflict(null);
     setDismissedRemoteKey(null);
+    setLiveConflict(null);
     setTitle(incomingSnapshot.title);
     setSummary(incomingSnapshot.summary);
     setTagDraft(incomingSnapshot.tagDraft);
@@ -5671,7 +5681,7 @@ function ArtifactStudioEditor({
                     effect.regionIds.includes("metadata:title"),
                   )),
             )}
-            className={`min-h-8 w-full resize-none overflow-hidden bg-transparent font-display font-semibold leading-tight text-[var(--text-primary)] outline-none [field-sizing:content] ${compact ? "text-[28px]" : "text-[32px]"}`}
+            className={`spectra-artifact-title min-h-8 w-full resize-none overflow-hidden bg-transparent font-display font-semibold leading-tight text-[var(--text-primary)] outline-none [field-sizing:content] ${compact ? "text-[28px]" : "text-[32px]"}`}
             placeholder="Untitled work"
           />
         </div>
@@ -5699,7 +5709,7 @@ function ArtifactStudioEditor({
                       effect.regionIds.includes("metadata:summary"),
                     )),
               )}
-              className={`w-full resize-none overflow-hidden bg-transparent text-[14px] leading-6 text-[var(--text-secondary)] outline-none placeholder:text-[var(--text-tertiary)] [field-sizing:content] ${summaryExpanded ? "" : "max-h-12"}`}
+              className={`w-full resize-none overflow-hidden bg-transparent text-[12px] leading-4 text-[var(--text-secondary)] outline-none placeholder:text-[var(--text-tertiary)] [field-sizing:content] ${summaryExpanded ? "" : "max-h-8"}`}
               placeholder="Short useful summary"
             />
             {!summaryExpanded &&
@@ -5969,7 +5979,7 @@ function ArtifactStudioEditor({
             />
           </div>
         </div>
-        <div className="min-w-0">{identityBlock}</div>
+        <div className="min-w-0 overflow-hidden">{identityBlock}</div>
       </header>
       {readOnly && !livePermissionLost ? (
         <div className="shrink-0 border-y border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-5 py-2 text-[11px] text-[var(--text-secondary)]">
@@ -5993,6 +6003,7 @@ function ArtifactStudioEditor({
       ) : null}
       {!permissionReadOnly &&
       isCollaborativeArtifact &&
+      dirty &&
       (live.state === "reconnecting" || live.state === "unsynchronized") ? (
         <div className="relative z-[60] h-0 shrink-0">
           <div
@@ -6003,7 +6014,7 @@ function ArtifactStudioEditor({
           </div>
         </div>
       ) : null}
-      {isCollaborativeArtifact && liveConflict ? (
+      {isCollaborativeArtifact && liveConflict && dirty ? (
         <div className="relative z-[61] h-0 shrink-0">
           <div
             role="alert"
@@ -6029,6 +6040,14 @@ function ArtifactStudioEditor({
               onClick={() => void discardQueuedDraft()}
             >
               Use latest
+            </button>
+            <button
+              type="button"
+              className="grid size-7 shrink-0 place-items-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+              aria-label="Dismiss"
+              onClick={() => setLiveConflict(null)}
+            >
+              <X className="h-3.5 w-3.5" />
             </button>
           </div>
         </div>
@@ -7352,11 +7371,11 @@ export function DocumentStudio({
       data-layout={pageLayout}
     >
       {!focusMode ? header : null}
-      <div className="spectra-editor-workbar spectra-document-toolbar sticky top-0 z-30 mx-5 flex min-h-11 flex-wrap items-center gap-1 px-2 py-1.5 sm:mx-8">
+      <div className="spectra-editor-workbar spectra-document-toolbar sticky top-0 z-30 mx-5 flex min-h-11 flex-nowrap items-center gap-1 px-2 py-1 sm:mx-8">
         {!readOnly && docMode !== "write" ? (
           <button
             type="button"
-            className="inline-flex h-8 items-center gap-1.5 rounded-[6px] bg-[var(--text-primary)] px-2.5 text-[11px] font-semibold text-[var(--bg-primary)]"
+            className="spectra-workbar-primary inline-flex h-8 items-center gap-1.5 rounded-[6px] bg-[var(--text-primary)] px-2.5 text-[11px] font-semibold text-[var(--bg-primary)]"
             onClick={() => setDocMode("write")}
           >
             <Pencil className="h-3.5 w-3.5" />
@@ -7391,8 +7410,8 @@ export function DocumentStudio({
           disabled={readOnly || docMode !== "write"}
           className={docMode === "write" ? "contents" : "hidden"}
         >
-          <select
-            aria-label="Text style"
+          <WorkbarSelect
+            ariaLabel="Text style"
             value={
               editor?.isActive("heading", { level: 1 })
                 ? "h1"
@@ -7402,8 +7421,13 @@ export function DocumentStudio({
                     ? "h3"
                     : "paragraph"
             }
-            onChange={(event) => {
-              const value = event.target.value;
+            options={[
+              { value: "paragraph", label: "Text" },
+              { value: "h1", label: "Heading 1" },
+              { value: "h2", label: "Heading 2" },
+              { value: "h3", label: "Heading 3" },
+            ]}
+            onChange={(value) => {
               if (value === "paragraph")
                 editor?.chain().focus().setParagraph().run();
               else
@@ -7413,13 +7437,7 @@ export function DocumentStudio({
                   .setHeading({ level: Number(value.slice(1)) as 1 | 2 | 3 })
                   .run();
             }}
-            className="h-8 min-w-[126px] bg-transparent px-2 text-[12px] font-medium text-[var(--text-primary)] outline-none"
-          >
-            <option value="paragraph">Text</option>
-            <option value="h1">Heading 1</option>
-            <option value="h2">Heading 2</option>
-            <option value="h3">Heading 3</option>
-          </select>
+          />
           <Divider />
           <ToolbarTextButton
             label="Bold"
@@ -7596,6 +7614,7 @@ export function DocumentStudio({
           onClick={() => setToolsOpen((open) => !open)}
         />
       </div>
+      <div className="spectra-editor-body">
       {toolsOpen ? (
         <div className="spectra-document-tools-popover">
           {!readOnly ? (
@@ -8214,6 +8233,7 @@ export function DocumentStudio({
             className="tiptap-root mx-auto max-w-[920px] [&_.ProseMirror-focused]:outline-none [&_.ProseMirror]:outline-none [&_.ProseMirror_blockquote]:border-l-2 [&_.ProseMirror_blockquote]:border-[var(--border-default)] [&_.ProseMirror_blockquote]:pl-4 [&_.ProseMirror_h1]:font-display [&_.ProseMirror_h1]:text-[30px] [&_.ProseMirror_h1]:leading-tight [&_.ProseMirror_h2]:font-display [&_.ProseMirror_h2]:text-[23px] [&_.ProseMirror_h2]:leading-tight [&_.ProseMirror_li]:my-1 [&_.ProseMirror_p]:my-4"
           />
         </main>
+      </div>
       </div>
     </div>
   );
@@ -10042,9 +10062,9 @@ function FlashcardStudio({
         <button
           type="button"
           onClick={() => addCard()}
-          className="spectra-deck-edit-action inline-flex h-9 items-center gap-2 rounded-[7px] bg-[#7560e8] px-3 text-[12px] font-semibold text-white shadow-[0_8px_20px_-14px_#5f49d4]"
+          className="spectra-workbar-primary inline-flex h-8 items-center gap-1.5 rounded-[6px] bg-[var(--text-primary)] px-2.5 text-[11px] font-semibold text-[var(--bg-primary)]"
         >
-          <Plus className="h-4 w-4" />
+          <Plus className="h-3.5 w-3.5" />
           Add card
         </button>
         <button
@@ -10054,9 +10074,9 @@ function FlashcardStudio({
             setActiveSection(section);
             addCard(section);
           }}
-          className="spectra-deck-edit-action inline-flex h-9 items-center gap-2 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-primary)]"
+          className="inline-flex h-8 items-center gap-1.5 rounded-[6px] px-2.5 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
         >
-          <Plus className="h-4 w-4" />
+          <Plus className="h-3.5 w-3.5" />
           Add section
         </button>
         <input
@@ -10072,9 +10092,9 @@ function FlashcardStudio({
         <button
           type="button"
           onClick={() => deckImportRef.current?.click()}
-          className="spectra-deck-edit-action inline-flex h-9 items-center gap-2 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-primary)]"
+          className="inline-flex h-8 items-center gap-1.5 rounded-[6px] px-2.5 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
         >
-          <Import className="h-4 w-4" />
+          <Import className="h-3.5 w-3.5" />
           Import
         </button>
         <button
@@ -10083,7 +10103,7 @@ function FlashcardStudio({
             beginStudySession();
           }}
           disabled={!canStudy || !studyCards.length}
-          className="spectra-deck-study-trigger inline-flex h-9 items-center gap-2 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-primary)] disabled:opacity-40"
+          className="inline-flex h-8 items-center gap-1.5 rounded-[6px] px-2.5 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-40"
           aria-label={
             !studyStateLoading && dueStudyCount
               ? `Study flashcards, ${dueStudyCount} cards due`
@@ -10137,18 +10157,18 @@ function FlashcardStudio({
           >
             <ChevronDown className="h-4 w-4 rotate-90" />
           </button>
-          <select
-            aria-label="Current card"
+          <WorkbarSelect
+            ariaLabel="Current card"
+            className="min-w-0 max-w-[220px] flex-1"
             value={activeCard?.id ?? ""}
-            onChange={(event) => setActiveCardId(event.target.value)}
-          >
-            {cards.map((card, index) => (
-              <option key={card.id} value={card.id}>
-                {index + 1} ·{" "}
-                {plannerDescriptionText(card.front) || "Untitled card"}
-              </option>
-            ))}
-          </select>
+            options={cards.map((card, index) => ({
+              value: card.id,
+              label: `${index + 1} · ${
+                plannerDescriptionText(card.front) || "Untitled card"
+              }`,
+            }))}
+            onChange={setActiveCardId}
+          />
           <span className="whitespace-nowrap">
             {activeCardIndex + 1} of {cards.length}
           </span>
@@ -13095,29 +13115,78 @@ export function QuizStudio({
 
   return (
     <div className="spectra-quiz-studio bg-transparent">
-      <div className="spectra-editor-workbar flex min-h-10 flex-wrap items-center justify-between gap-1.5 px-2 py-1">
-        <div className="order-2 flex min-w-0 items-center gap-1.5">
+      <div className="spectra-editor-workbar flex min-h-10 items-center gap-1.5 px-2 py-1">
+        {view === "builder" && questions.length > 0 ? (
+          <div className="flex min-w-0 flex-1 items-center gap-1">
+            <button
+              type="button"
+              className={iconButtonClass()}
+              aria-label="Previous question"
+              disabled={activeQuestionIndex === 0}
+              onClick={() =>
+                setActiveQuestionId(
+                  questions[Math.max(0, activeQuestionIndex - 1)]?.id ?? "",
+                )
+              }
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+            </button>
+            <WorkbarSelect
+              ariaLabel="Current question"
+              className="min-w-0 flex-1"
+              value={activeQuestion?.id ?? ""}
+              options={questions.map((question, index) => ({
+                value: question.id,
+                label: `${index + 1} · ${
+                  plannerDescriptionText(question.prompt) || "Untitled question"
+                }`,
+              }))}
+              onChange={setActiveQuestionId}
+            />
+            <span className="shrink-0 text-micro text-[var(--text-tertiary)]">
+              {activeQuestionIndex + 1}/{questions.length}
+            </span>
+            <button
+              type="button"
+              className={iconButtonClass()}
+              aria-label="Next question"
+              disabled={activeQuestionIndex === questions.length - 1}
+              onClick={() =>
+                setActiveQuestionId(
+                  questions[
+                    Math.min(questions.length - 1, activeQuestionIndex + 1)
+                  ]?.id ?? "",
+                )
+              }
+            >
+              <ChevronRight className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        ) : (
+          <div className="min-w-0 flex-1" />
+        )}
+        <div className="ml-auto flex shrink-0 items-center gap-0.5">
           {!readOnly && activeQuizMode !== "build" ? (
             <button
               type="button"
-              className="inline-flex h-7 items-center gap-1.5 rounded-[6px] bg-[var(--text-primary)] px-2.5 text-micro font-semibold text-[var(--bg-primary)]"
+              className={iconButtonClass()}
+              aria-label="Back to build"
+              title="Back to build"
               onClick={() => openQuizMode("build")}
             >
-              <Pencil className="h-3.5 w-3.5" />
-              Back to build
+              <Pencil className="h-4 w-4" />
             </button>
           ) : !readOnly && quizModes.includes("preview") ? (
             <button
               type="button"
-              className={smallActionClass()}
+              className={iconButtonClass()}
+              aria-label="Preview as learner"
+              title="Preview as learner"
               onClick={() => openQuizMode("preview")}
             >
-              <Eye className="h-3.5 w-3.5" />
-              Preview as learner
+              <Eye className="h-4 w-4" />
             </button>
           ) : null}
-        </div>
-        <div className="order-1 ml-auto flex shrink-0 items-center gap-1.5">
           {!readOnly ? (
             <>
               <input
@@ -13130,7 +13199,7 @@ export function QuizStudio({
                   if (file) void importQuiz(file);
                 }}
               />
-              <details className="order-3 group relative">
+              <details className="group relative">
                 <summary
                   className={`${iconButtonClass()} list-none [&::-webkit-details-marker]:hidden`}
                   aria-label="More quiz options"
@@ -13169,13 +13238,9 @@ export function QuizStudio({
                   </button>
                 </div>
               </details>
-            </>
-          ) : null}
-          {!readOnly ? (
-            <>
               <button
                 type="button"
-                className={`order-2 h-7 rounded-[6px] px-2.5 text-micro font-semibold ${published ? "border border-[var(--success)] text-[var(--success)]" : "bg-[var(--text-primary)] text-[var(--bg-primary)]"}`}
+                className={`spectra-workbar-primary h-7 rounded-[6px] px-2 text-micro font-semibold ${published ? "border border-[var(--success)] text-[var(--success)]" : "bg-[var(--text-primary)] text-[var(--bg-primary)]"}`}
                 disabled={
                   practiceBusy ||
                   (published && (!synchronizationReady || !canAttemptQuiz))
@@ -13188,25 +13253,22 @@ export function QuizStudio({
                   publishQuiz();
                 }}
               >
-                {practiceBusy
-                  ? "Opening…"
-                  : published
-                    ? "Attempt quiz"
-                    : "Publish"}
+                {practiceBusy ? "…" : published ? "Attempt" : "Publish"}
               </button>
             </>
           ) : published && canAttemptQuiz ? (
             <button
               type="button"
-              className="h-8 rounded-[7px] bg-[#7560e8] px-3 text-[12px] font-semibold text-white"
+              className="spectra-workbar-primary h-7 rounded-[6px] bg-[#7560e8] px-2 text-micro font-semibold text-white"
               disabled={practiceBusy || !synchronizationReady}
               onClick={() => void beginPractice()}
             >
-              {practiceBusy ? "Opening..." : "Start attempt"}
+              {practiceBusy ? "…" : "Attempt"}
             </button>
           ) : null}
         </div>
       </div>
+      <div className="spectra-editor-body">
       {quizImportReport || quizImportError || publishIssues.length ? (
         <div
           className={`border-b px-4 py-3 ${quizImportError || publishIssues.length ? "border-[color-mix(in_oklab,var(--danger)_28%,var(--border-default))] bg-[color-mix(in_oklab,var(--danger)_4%,var(--bg-primary))]" : "border-[color-mix(in_oklab,var(--success)_24%,var(--border-default))] bg-[color-mix(in_oklab,var(--success)_4%,var(--bg-primary))]"}`}
@@ -14146,93 +14208,24 @@ export function QuizStudio({
             className={`${mode === "tab" ? "border-r p-3" : "border-b px-4 py-2.5"} border-[var(--border-default)]`}
           >
             <div className="flex items-center justify-between gap-2">
-              {mode !== "tab" && !questionNavigatorOpen ? (
-                <div className="flex min-w-0 flex-1 items-center gap-1.5">
-                  <button
-                    type="button"
-                    className={iconButtonClass()}
-                    aria-label="Previous question"
-                    disabled={activeQuestionIndex === 0}
-                    onClick={() =>
-                      setActiveQuestionId(
-                        questions[Math.max(0, activeQuestionIndex - 1)]?.id ??
-                          "",
-                      )
-                    }
-                  >
-                    <ChevronLeft className="h-3.5 w-3.5" />
-                  </button>
-                  <label className="grid min-w-0 flex-1 grid-cols-[auto_minmax(0,1fr)] items-center gap-2 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2">
-                    <span className="text-micro font-semibold uppercase tracking-[0.07em] text-[var(--text-tertiary)]">
-                      Question
-                    </span>
-                    <select
-                      aria-label="Current question"
-                      className="h-8 min-w-0 truncate bg-transparent text-[11px] font-medium text-[var(--text-primary)] outline-none"
-                      value={activeQuestion?.id ?? ""}
-                      onChange={(event) =>
-                        setActiveQuestionId(event.target.value)
-                      }
-                    >
-                      {questions.map((question, index) => (
-                        <option key={question.id} value={question.id}>
-                          {index + 1} ·{" "}
-                          {plannerDescriptionText(question.prompt) ||
-                            "Untitled question"}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <span className="shrink-0 text-micro text-[var(--text-tertiary)]">
-                    {activeQuestionIndex + 1} of {questions.length}
+              <button
+                type="button"
+                className={`flex min-w-0 items-center gap-2 text-left text-micro font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)] ${mode === "tab" && !questionNavigatorOpen ? "w-full justify-center" : ""}`}
+                onClick={() => setQuestionNavigatorOpen((open) => !open)}
+                aria-expanded={questionNavigatorOpen}
+                aria-label={
+                  questionNavigatorOpen
+                    ? "Collapse question navigator"
+                    : "Browse questions"
+                }
+              >
+                <PanelLeft className="h-3.5 w-3.5 shrink-0" />
+                {mode === "tab" && !questionNavigatorOpen ? null : (
+                  <span className="truncate">
+                    Question {activeQuestionIndex + 1} of {questions.length}
                   </span>
-                  <button
-                    type="button"
-                    className={iconButtonClass()}
-                    aria-label="Next question"
-                    disabled={activeQuestionIndex === questions.length - 1}
-                    onClick={() =>
-                      setActiveQuestionId(
-                        questions[
-                          Math.min(
-                            questions.length - 1,
-                            activeQuestionIndex + 1,
-                          )
-                        ]?.id ?? "",
-                      )
-                    }
-                  >
-                    <ChevronRight className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    className={iconButtonClass()}
-                    onClick={() => setQuestionNavigatorOpen(true)}
-                    aria-label="Browse all questions"
-                  >
-                    <PanelLeft className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  className={`flex min-w-0 items-center gap-2 text-left text-micro font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)] ${mode === "tab" && !questionNavigatorOpen ? "w-full justify-center" : ""}`}
-                  onClick={() => setQuestionNavigatorOpen((open) => !open)}
-                  aria-expanded={questionNavigatorOpen}
-                  aria-label={
-                    questionNavigatorOpen
-                      ? "Collapse question navigator"
-                      : "Browse questions"
-                  }
-                >
-                  <PanelLeft className="h-3.5 w-3.5 shrink-0" />
-                  {mode === "tab" && !questionNavigatorOpen ? null : (
-                    <span className="truncate">
-                      Question {activeQuestionIndex + 1} of {questions.length}
-                    </span>
-                  )}
-                </button>
-              )}
+                )}
+              </button>
               {!readOnly && questionNavigatorOpen ? (
                 <button
                   type="button"
@@ -14727,6 +14720,7 @@ export function QuizStudio({
           ))}
         </ol>
       </section>
+      </div>
     </div>
   );
 }
@@ -16502,7 +16496,8 @@ function ToolbarButton({
     <Tooltip label={label}>
       <button
         type="button"
-        className={toolbarClass(active)}
+        className={toolbarClass()}
+        data-active={active || undefined}
         onClick={onClick}
         disabled={disabled}
         aria-label={label}
@@ -16528,7 +16523,8 @@ function ToolbarTextButton({
     <Tooltip label={label}>
       <button
         type="button"
-        className={toolbarClass(active)}
+        className={toolbarClass()}
+        data-active={active || undefined}
         onClick={onClick}
         aria-label={label}
       >
@@ -16581,10 +16577,6 @@ function smallActionClass() {
   return "inline-flex h-8 items-center gap-1.5 rounded-[7px] bg-transparent px-2.5 text-[12px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-45";
 }
 
-function toolbarClass(active?: boolean) {
-  return `flex h-8 min-w-8 items-center justify-center rounded-[7px] px-2 text-[12px] font-medium transition disabled:opacity-40 ${
-    active
-      ? "bg-[var(--text-primary)] text-[var(--bg-primary)]"
-      : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-  }`;
+function toolbarClass() {
+  return "flex h-8 min-w-8 items-center justify-center rounded-[7px] px-2 text-[12px] font-medium text-[var(--text-secondary)] transition disabled:opacity-40";
 }

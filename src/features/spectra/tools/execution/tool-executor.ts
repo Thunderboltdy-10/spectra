@@ -50,14 +50,22 @@ export class SpectraToolExecutor {
     }
     const startedAt = Date.now();
     const attempts = Math.max(1, definition.retryPolicy.maxAttempts);
+    const requestedTimeout = Number(
+      input.data && typeof input.data === "object" && !Array.isArray(input.data)
+        ? (input.data as Record<string, unknown>).timeoutMs
+        : undefined,
+    );
+    const safetyLimit = Number.isFinite(requestedTimeout)
+      ? Math.min(10 * 60_000, Math.max(5_000, requestedTimeout))
+      : definition.hardSafetyLimit;
     const run = async () => {
       for (let attempt = 1; attempt <= attempts; attempt += 1) {
-        const controller = definition.hardSafetyLimit ? new AbortController() : null;
+        const controller = safetyLimit ? new AbortController() : null;
         const relayAbort = () => controller?.abort(context.signal?.reason);
         context.signal?.addEventListener("abort", relayAbort, { once: true });
         if (context.signal?.aborted) relayAbort();
-        const timer = definition.hardSafetyLimit
-          ? setTimeout(() => controller?.abort(new Error("TOOL_HARD_SAFETY_LIMIT")), definition.hardSafetyLimit)
+        const timer = safetyLimit
+          ? setTimeout(() => controller?.abort(new Error("TOOL_HARD_SAFETY_LIMIT")), safetyLimit)
           : null;
         try {
           const output = await consumeExecution(

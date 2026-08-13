@@ -12,7 +12,7 @@ import { alignIntentWithCreates } from "./intent-alignment";
  */
 export function isRepairablePlanFailure(error: unknown) {
   if (error instanceof SyntaxError || error instanceof ZodError) return true;
-  return /plan|JSON|schema|structured|truncated|empty|incomplete|hollow|no meaningful stream|stall|timeout|synchroniz|AI_ARTIFACT_(?:SCHEMA|BASELINE|CONNECT|SYNC|CONNECTION)|outer object|closing|unexpected character|position \d+|generated (?:deck|quiz|planner task|timetable|code artifact|document|presentation|workbook|whiteboard|agent).*(?:must|omitted|hollow|no scheduled|incomplete)|requested (?:cards|questions|subtasks|due date|events)|more visible artifacts|unrelated to the interpreted request|does not match the interpreted request|Author (?:concrete time blocks|real source files)|Content patch index is out of range|did not contain the requested content change|reliability (?:context|time|token spend) budget|paused this agent after its reliability|stopped this agent after \d+ (?:model turns|tool calls)/i.test(
+  return /plan|JSON|schema|structured|truncated|empty|incomplete|hollow|no meaningful stream|stall|outer object|closing|unexpected character|position \d+|generated (?:deck|quiz|planner task|timetable|code artifact|document|presentation|workbook|whiteboard|agent).*(?:must|omitted|hollow|no scheduled|incomplete)|requested (?:cards|questions|subtasks|due date|events)|more visible artifacts|unrelated to the interpreted request|does not match the interpreted request|Author (?:concrete time blocks|real source files)|Content patch index is out of range|did not contain the requested content change|reliability (?:context|time|token spend) budget|paused this agent after its reliability|stopped this agent after \d+ (?:model turns|tool calls)/i.test(
     error instanceof Error ? error.message : "",
   );
 }
@@ -122,7 +122,7 @@ export function formatPlanApplicationPublicError(error: unknown) {
     return "Spectra's draft was empty or incomplete, so nothing was saved. Try again with a clearer request.";
   }
   if (
-    /\bJSON|schema|Zod|planner|operation|structured output|FunctionPathNotFound|Convex\b/i.test(
+    /\bJSON|schema|Zod|planner|operation|structured output|FunctionPathNotFound\b/i.test(
       message,
     )
   ) {

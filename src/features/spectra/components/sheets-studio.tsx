@@ -94,6 +94,7 @@ import {
   sheetsAiTouchesColumn,
 } from "./ai-region-path";
 import { targetAttrs } from "../collaboration/target-attributes";
+import { WorkbarSelect } from "./workbar-controls";
 
 const ROW_HEIGHT = 31;
 const COLUMN_WIDTH = 122;
@@ -2481,20 +2482,20 @@ export function SheetsStudio({
             <Redo2 />
           </ToolbarButton>
           <span className="sheets-toolbar-divider" />
-          <select
-            aria-label="Zoom"
+          <WorkbarSelect
+            ariaLabel="Zoom"
             value={String(Math.round(zoom * 100))}
-            onChange={(event) => {
-              setZoom(Number(event.target.value) / 100);
+            options={[
+              { value: "75", label: "75%" },
+              { value: "100", label: "100%" },
+              { value: "125", label: "125%" },
+              { value: "150", label: "150%" },
+            ]}
+            onChange={(next) => {
+              setZoom(Number(next) / 100);
               requestAnimationFrame(updateViewport);
             }}
-            className="sheets-toolbar-select"
-          >
-            <option value="75">75%</option>
-            <option value="100">100%</option>
-            <option value="125">125%</option>
-            <option value="150">150%</option>
-          </select>
+          />
           <span className="sheets-toolbar-divider" />
           <ToolbarButton
             label="Currency"
@@ -2534,59 +2535,53 @@ export function SheetsStudio({
           >
             .0→
           </ToolbarButton>
-          <select
-            aria-label="Number format"
+          <WorkbarSelect
+            ariaLabel="Number format"
+            disabled={readOnly}
             value={activeCell?.format?.numberFormat ?? "general"}
-            onChange={(event) =>
+            options={[
+              { value: "general", label: "General" },
+              { value: "number", label: "Number" },
+              { value: "currency", label: "Currency" },
+              { value: "percent", label: "Percent" },
+              { value: "date", label: "Date" },
+            ]}
+            onChange={(next) =>
               formatSelection({
-                numberFormat: event.target.value as NonNullable<
+                numberFormat: next as NonNullable<
                   SheetCell["format"]
                 >["numberFormat"],
               })
             }
-            className="sheets-toolbar-select"
-            disabled={readOnly}
-          >
-            <option value="general">123</option>
-            <option value="number">Number</option>
-            <option value="currency">Currency</option>
-            <option value="percent">Percent</option>
-            <option value="date">Date</option>
-          </select>
+          />
           <span className="sheets-toolbar-divider" />
-          <select
-            aria-label="Font"
+          <WorkbarSelect
+            ariaLabel="Font"
+            disabled={readOnly}
             value={activeCell?.format?.fontFamily ?? "sans"}
-            onChange={(event) =>
+            options={[
+              { value: "sans", label: "Spectra Sans" },
+              { value: "serif", label: "Spectra Serif" },
+              { value: "mono", label: "Monospace" },
+            ]}
+            onChange={(next) =>
               formatSelection({
-                fontFamily: event.target.value as NonNullable<
+                fontFamily: next as NonNullable<
                   SheetCell["format"]
                 >["fontFamily"],
               })
             }
-            className="sheets-toolbar-select"
+          />
+          <WorkbarSelect
+            ariaLabel="Font size"
             disabled={readOnly}
-          >
-            <option value="sans">Spectra Sans</option>
-            <option value="serif">Spectra Serif</option>
-            <option value="mono">Monospace</option>
-          </select>
-          <select
-            aria-label="Font size"
             value={String(activeCell?.format?.fontSize ?? 11)}
-            onChange={(event) =>
-              formatSelection({ fontSize: Number(event.target.value) })
-            }
-            className="sheets-toolbar-select sheets-toolbar-size"
-            disabled={readOnly}
-          >
-            <option>9</option>
-            <option>10</option>
-            <option>11</option>
-            <option>12</option>
-            <option>14</option>
-            <option>16</option>
-          </select>
+            options={["9", "10", "11", "12", "14", "16"].map((size) => ({
+              value: size,
+              label: size,
+            }))}
+            onChange={(next) => formatSelection({ fontSize: Number(next) })}
+          />
           <ToolbarButton
             label="Bold"
             active={activeCell?.format?.bold}

@@ -509,7 +509,7 @@ export function CommandBar({
     <div
       ref={rootRef}
       className={cn(
-        "spectra-command-bar relative flex items-center gap-2",
+        "spectra-command-bar relative flex items-center gap-1",
         className,
       )}
     >
@@ -558,7 +558,7 @@ export function CommandBar({
       <button
         ref={menuTriggerRef}
         type="button"
-        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[8px] border border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_82%,transparent)] text-[var(--text-secondary)] shadow-[0_2px_8px_rgba(27,20,12,0.04)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-35"
+        className="mr-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-[8px] border border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_82%,transparent)] text-[var(--text-secondary)] shadow-[0_2px_8px_rgba(27,20,12,0.04)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-35"
         onClick={() => hasMenu && setMenuOpen((open) => !open)}
         disabled={!hasMenu}
         aria-expanded={menuOpen}
@@ -567,7 +567,7 @@ export function CommandBar({
       >
         <Plus className="h-4 w-4" />
       </button>
-      <div className="spectra-command-surface flex min-h-12 min-w-0 flex-1 flex-col rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 shadow-[0_3px_12px_rgba(27,20,12,0.08)]">
+      <div className="spectra-command-surface flex min-h-11 min-w-0 flex-1 flex-col justify-center rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[0_3px_12px_rgba(27,20,12,0.08)]">
         {showInlineBubbles ? bubbles : null}
         <div className="flex items-end gap-2">
           {context ? (
@@ -577,7 +577,7 @@ export function CommandBar({
             {autocomplete.suggestion ? (
               <div
                 aria-hidden="true"
-                className="pointer-events-none absolute inset-0 max-h-32 overflow-hidden whitespace-pre-wrap break-words px-2 py-2 text-[13.5px] leading-5"
+                className="pointer-events-none absolute inset-0 max-h-32 overflow-hidden whitespace-pre-wrap break-words px-2 py-1.5 text-[13.5px] leading-5"
               >
                 <span className="invisible">{value}</span>
                 <span className="text-[var(--text-tertiary)] opacity-70">
@@ -627,7 +627,7 @@ export function CommandBar({
                 }
               }}
               placeholder={placeholder}
-              className="relative z-[1] max-h-32 min-h-9 w-full resize-none overflow-y-auto bg-transparent px-2 py-2 text-[13.5px] leading-5 text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
+              className="relative z-[1] max-h-32 min-h-8 w-full resize-none overflow-y-auto bg-transparent px-2 py-1.5 text-[13.5px] leading-5 text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
             />
             {autocomplete.suggestion ? (
               <span id={autocompleteHintId} className="sr-only">

@@ -235,23 +235,17 @@ export function selectExpandedInputRun(
   return waiting[0]?.runId ?? null;
 }
 
-/** Geometry is deterministic so responsive component tests do not need a browser. */
+/** Tab geometry is CSS: min width is one-third of the tab strip. */
 export function allocateLiveDockWidths(
   sources: readonly LiveDockTabSource[],
   expandedRunId: string | null,
 ): LiveDockLayout[] {
-  const compactWidth =
-    sources.length <= 1 ? 720 : sources.length === 2 ? 400 : 270;
-  const compactMinimum = 270;
-  return sources.map((source) => {
-    const expanded = source.runId === expandedRunId;
-    return {
-      runId: source.runId,
-      minWidth: compactMinimum,
-      preferredWidth: compactWidth,
-      expanded,
-    };
-  });
+  return sources.map((source) => ({
+    runId: source.runId,
+    minWidth: 0,
+    preferredWidth: 0,
+    expanded: source.runId === expandedRunId,
+  }));
 }
 
 export function closePreservesRunningJob(source: LiveDockTabSource) {

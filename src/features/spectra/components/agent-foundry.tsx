@@ -1102,6 +1102,28 @@ export function AgentFoundry({
 
   return (
     <div className={`spectra-agent-foundry is-${mode}`}>
+      <div className="spectra-editor-workbar">
+        <span className="px-1 text-[12px] font-medium text-[var(--text-secondary)]">
+          Agent
+        </span>
+        <span className="ml-auto" />
+        <button
+          type="button"
+          className="inline-flex h-8 items-center rounded-[6px] px-2.5 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-45"
+          disabled={readOnly || busy === "next"}
+          onClick={() => void requestSection()}
+        >
+          {busy === "next" ? "Working…" : "Continue"}
+        </button>
+        <button
+          type="button"
+          className="spectra-workbar-primary inline-flex h-8 items-center rounded-[6px] bg-[var(--text-primary)] px-2.5 text-[11px] font-semibold text-[var(--bg-primary)] disabled:opacity-45"
+          disabled={readOnly || busy === "compile"}
+          onClick={() => void compile()}
+        >
+          {busy === "compile" ? "Drafting…" : "Compile skills"}
+        </button>
+      </div>
       <div
         className="foundry-stream"
         data-ai-region={aiRegionAttr(pathTouches(aiChangedPaths, "/foundry"))}

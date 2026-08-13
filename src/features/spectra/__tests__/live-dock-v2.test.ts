@@ -91,12 +91,12 @@ describe("Live Dock V2", () => {
     expect(selectExpandedInputRun([a, b, c], "b")).toBe("b");
     const layout = allocateLiveDockWidths([a, b, c], "b");
     expect(layout.filter((item) => item.expanded)).toEqual([
-      expect.objectContaining({ runId: "b", minWidth: 270 }),
+      expect.objectContaining({ runId: "b" }),
     ]);
-    expect(layout.find((item) => item.runId === "a")?.minWidth).toBe(270);
+    expect(layout.find((item) => item.runId === "a")?.expanded).toBe(false);
   });
 
-  it("sizes tabs from the actual number of visible runs", () => {
+  it("lets CSS size tabs from the strip rather than hardcoded pixel widths", () => {
     const one = allocateLiveDockWidths([source()], null);
     const two = allocateLiveDockWidths(
       [source({ runId: "a" }), source({ runId: "b" })],
@@ -108,9 +108,12 @@ describe("Live Dock V2", () => {
       ),
       null,
     );
-    expect(one[0]?.preferredWidth).toBe(720);
-    expect(two.map((item) => item.preferredWidth)).toEqual([400, 400]);
-    expect(many.every((item) => item.preferredWidth === 270)).toBe(true);
+    expect(one[0]?.preferredWidth).toBe(0);
+    expect(two.map((item) => item.preferredWidth)).toEqual([0, 0]);
+    expect(many.every((item) => item.preferredWidth === 0)).toBe(true);
+    const dock = read("src/features/spectra/components/live-dock.tsx");
+    expect(dock).toContain("spectra-live-dock-tab");
+    expect(dock).toContain("group-has-[.dock-tab-icon:hover]:hidden");
   });
 
   it("keeps close and cancel semantics separate", () => {
@@ -157,12 +160,11 @@ describe("Live Dock V2", () => {
     expect(dock).toContain("data-mobile-sheet");
   });
 
-  it("keeps /chat dock-free while Workspace and Library own the Live Dock", () => {
+  it("keeps Live Dock tabs off /chat and on Workspace and Library", () => {
     const chat = read("src/features/spectra/pages/chat-shell.tsx");
     const workspace = read("src/features/spectra/pages/workspace-shell.tsx");
     const library = read("src/features/spectra/pages/artifacts-shell.tsx");
     expect(chat).not.toContain("<DurableRunTabs");
-    expect(chat).not.toContain("<LiveDock");
     expect(workspace).toContain("<DurableRunTabs");
     expect(library).toContain("<DurableRunTabs");
   });
@@ -177,8 +179,8 @@ describe("Live Dock V2", () => {
     );
     expect(library).toContain('artifact.blueprintKey !== "thread_reference"');
     expect(library).toContain('label: "Threads"');
-    expect(library).toContain("count: threadArtifacts.length");
+    expect(library).toContain("count: libraryThreads.length");
     const panel = read("src/features/spectra/components/live-thread-panel.tsx");
-    expect(panel).toContain("Add this thread to the Live Dock");
+    expect(panel).toContain("Continue this thread in the Live Dock");
   });
 });

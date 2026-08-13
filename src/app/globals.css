@@ -1543,6 +1543,18 @@ body {
   line-height: 1.2 !important;
 }
 
+.spectra-artifact-studio[data-studio-mode="split"]
+  .spectra-artifact-title:not(:focus) {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  field-sizing: fixed !important;
+  max-height: 1.35em;
+  overflow: hidden !important;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 @container spectra-studio-split (max-width: 460px) {
   .spectra-artifact-studio[data-studio-mode="split"] [data-quiz-panel="editor"],
   .spectra-artifact-studio[data-studio-mode="split"]
@@ -1919,10 +1931,10 @@ body {
   min-height: 620px;
   flex: 1 1 auto;
   overflow: hidden;
-  border: 1px solid #e5e7e2;
-  border-radius: 12px;
-  background: #fbfbf8;
-  box-shadow: 0 8px 30px rgba(41, 52, 46, 0.035);
+  border: 0;
+  border-radius: 0;
+  background: var(--bg-primary);
+  box-shadow: none;
 }
 
 .whiteboard-canvas {
@@ -1934,11 +1946,7 @@ body {
   overflow: hidden;
   touch-action: none;
   user-select: none;
-  background-image: radial-gradient(circle, #d8dcd6 1px, transparent 1.15px);
-  background-position: var(--board-x) var(--board-y);
-  /* The grid is a calm screen-space navigation texture. Zooming the world must
-     not make its dots balloon, disappear, or change density. */
-  background-size: var(--board-grid) var(--board-grid);
+  background: var(--bg-primary);
 }
 
 .whiteboard-canvas[data-tool="hand"] {
@@ -2085,7 +2093,30 @@ body {
 .whiteboard-node[data-type="table"] {
   overflow: hidden;
   border-radius: 9px;
-  background: #fff !important;
+  background: var(--bg-primary) !important;
+}
+
+.whiteboard-node[data-type="table"] table {
+  width: 100%;
+  height: 100%;
+  border-collapse: collapse;
+}
+
+.whiteboard-node[data-type="table"] td {
+  border: 1px solid color-mix(in oklab, var(--border-default) 80%, transparent);
+  padding: 0;
+  vertical-align: top;
+}
+
+.whiteboard-node[data-type="table"] input {
+  width: 100%;
+  min-height: 28px;
+  border: 0;
+  background: transparent;
+  padding: 6px 8px;
+  color: inherit;
+  font: inherit;
+  outline: none;
 }
 
 .whiteboard-node[data-selected="true"] {
@@ -6946,6 +6977,15 @@ button:not(:disabled),
   color: var(--card-focus);
   background: color-mix(in oklab, var(--card-focus) 9%, transparent);
 }
+.spectra-icon-action.is-selected {
+  color: var(--accent-cyan);
+  background: color-mix(in oklab, var(--accent-cyan) 14%, transparent);
+}
+.spectra-icon-action.is-selected:hover,
+.spectra-icon-action.is-selected:focus-visible {
+  color: var(--accent-cyan);
+  background: color-mix(in oklab, var(--accent-cyan) 22%, transparent);
+}
 .spectra-icon-action.is-danger:hover {
   color: var(--danger);
   background: color-mix(in oklab, var(--danger) 7%, transparent);
@@ -7364,13 +7404,13 @@ button[data-spectra-context-trigger="true"]::after {
 
 .presentation-primary-bar {
   display: flex;
-  min-height: 58px;
+  min-height: 44px;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  border-bottom: 1px solid var(--border-default);
-  padding: 0 16px;
-  background: var(--bg-elevated);
+  border-bottom: 0;
+  padding: 0 8px;
+  background: transparent;
 }
 
 .presentation-primary-bar > div:first-child {
@@ -7383,23 +7423,22 @@ button[data-spectra-context-trigger="true"]::after {
 .presentation-primary-bar [role="tab"] {
   position: relative;
   min-width: max-content;
-  padding: 0 12px;
+  height: 32px;
+  margin: auto 0;
+  border-radius: 7px;
+  padding: 0 10px;
   color: var(--text-secondary);
   font-size: 11px;
   font-weight: 600;
 }
 
 .presentation-primary-bar [role="tab"][data-active="true"] {
-  color: var(--text-primary);
+  background: #f0edff;
+  color: #5a48cf;
 }
 
 .presentation-primary-bar [role="tab"][data-active="true"]::after {
-  content: "";
-  position: absolute;
-  inset: auto 7px 0;
-  height: 2px;
-  border-radius: 999px;
-  background: var(--text-primary);
+  content: none;
 }
 
 .presentation-secondary-action,
@@ -9071,10 +9110,9 @@ button[data-spectra-context-trigger="true"]::after {
   overflow: hidden;
   border: 1px solid var(--border-default);
   border-radius: 9px;
-  background: color-mix(in oklab, var(--bg-elevated) 97%, transparent);
-  padding: 5px;
-  box-shadow: 0 18px 46px -24px rgba(25, 31, 28, 0.35);
-  backdrop-filter: blur(16px);
+  background: var(--bg-elevated);
+  padding: 6px;
+  box-shadow: 0 14px 32px rgba(27, 20, 12, 0.13);
 }
 
 .sheets-menu-popover button {
@@ -11345,6 +11383,34 @@ button[data-spectra-context-trigger="true"]::after {
 .spectra-run-tab-strip {
   position: relative;
   isolation: isolate;
+  scrollbar-width: none;
+}
+
+.spectra-run-tab-strip::-webkit-scrollbar,
+.spectra-live-dock-progress::-webkit-scrollbar {
+  display: none;
+  height: 0;
+  width: 0;
+}
+
+.spectra-live-dock-progress {
+  scrollbar-width: none;
+}
+
+.spectra-live-dock-tab {
+  flex: 1 0 calc((100% - 12px) / 3);
+  min-width: calc((100% - 12px) / 3);
+}
+
+.spectra-live-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.spectra-live-dock-row,
+.spectra-command-bar {
+  padding-right: 20px;
 }
 
 .spectra-run-tab-strip::before {
@@ -14287,9 +14353,11 @@ button[data-spectra-context-trigger="true"]::after {
   .spectra-command-bar {
     gap: 6px;
   }
+  .spectra-live-dock-slot,
   .spectra-command-bar > button:first-of-type {
-    width: 40px;
+    width: 44px;
     height: 44px;
+    margin-right: 8px;
   }
   .spectra-conversation {
     background-image: none;
@@ -14887,6 +14955,35 @@ body {
 .spectra-workspace-header,
 .spectra-artifact-identity {
   animation: spectra-surface-in 420ms var(--ease-standard) both;
+}
+
+.spectra-mission-control-primary {
+  container-type: inline-size;
+  container-name: mission-primary;
+}
+
+.spectra-metric-card {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.spectra-metric-delta-short {
+  display: none;
+}
+
+@container mission-primary (max-width: 820px) {
+  .spectra-metric-delta-full {
+    display: none;
+  }
+  .spectra-metric-delta-short {
+    display: block;
+  }
+}
+
+@container mission-primary (max-width: 560px) {
+  .spectra-metric-icon {
+    display: none;
+  }
 }
 
 @keyframes spectra-surface-in {
@@ -16443,6 +16540,12 @@ html[data-spectra-motion="none"] .spectra-presence-flag {
   border-color: transparent;
   background: var(--brand-primary);
   color: #fff;
+}
+
+@container (max-width: 420px) {
+  .spectra-follow-toggle span {
+    display: none;
+  }
 }
 
 .spectra-follow-strip {
@@ -19976,27 +20079,58 @@ html[data-spectra-motion="none"] .spectra-field-wake::before {
 .code-studio,
 .whiteboard-studio,
 .timetable-studio,
-.spectra-agent-foundry {
+.spectra-agent-foundry,
+.spectra-document-studio {
   border: 0 !important;
   border-radius: 0 !important;
   background: var(--bg-primary) !important;
   box-shadow: none !important;
 }
 
+.spectra-quiz-studio,
+.spectra-document-studio,
+.presentation-studio,
+.spectra-sheets-studio,
+.code-studio,
+.whiteboard-studio {
+  display: flex;
+  min-height: 0;
+  height: 100%;
+  flex-direction: column;
+}
+
+.spectra-agent-foundry > .spectra-editor-workbar {
+  grid-column: 1 / -1;
+}
+
+.spectra-editor-body {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: auto;
+}
+
 .spectra-artifact-studio .spectra-editor-layout > section {
   outline: 0 !important;
 }
 
-/* One instrument bar across every work type. It follows the whiteboard's
-   compact, opaque tool shelf: one bounded surface, stable while its editor
-   scrolls, with no translucent text passing underneath. */
+/* One instrument bar across every work type. It stays in the editor chrome
+   rather than overlaying the scrolling page, so content cannot pass behind it. */
 .spectra-editor-workbar {
-  position: sticky !important;
-  z-index: 42 !important;
-  top: 8px !important;
-  min-height: 50px;
+  position: relative !important;
+  z-index: 12 !important;
+  top: auto !important;
+  display: flex;
+  min-height: 44px;
   width: auto !important;
-  margin: 8px 12px 10px !important;
+  margin: 8px 12px 0 !important;
+  flex-shrink: 0;
+  flex-wrap: nowrap !important;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--border-default) 28%, transparent)
+    transparent;
   border: 1px solid var(--border-default) !important;
   border-radius: 12px !important;
   background: var(--bg-elevated) !important;
@@ -20004,8 +20138,34 @@ html[data-spectra-motion="none"] .spectra-field-wake::before {
   backdrop-filter: none !important;
 }
 
+.spectra-editor-workbar::-webkit-scrollbar {
+  height: 3px;
+}
+
+.spectra-editor-workbar::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--border-default) 40%, transparent);
+}
+
 .spectra-editor-workbar :is(button, select, input) {
   flex-shrink: 0;
+}
+
+.spectra-editor-workbar .spectra-workbar-select {
+  min-width: 0;
+  max-width: 100%;
+  flex-shrink: 1;
+}
+
+.spectra-editor-workbar button:hover:not(:disabled):not(.spectra-workbar-primary):not([role="tab"]),
+.spectra-editor-workbar button[data-active="true"]:not([role="tab"]) {
+  border-color: #d9d4fa;
+  background: #f0edff;
+  color: #5a48cf;
+}
+
+.spectra-editor-workbar button:active:not(:disabled) {
+  transform: translateY(1px);
 }
 
 .code-workbar {
@@ -20036,6 +20196,11 @@ html[data-spectra-sidebar-collapsed="true"] .spectra-app-shell {
   padding-left: 76px !important;
 }
 
+html[data-spectra-sidebar-collapsed="true"] .spectra-shell-sidebar [data-sidebar-recents],
+html[data-spectra-sidebar-collapsed="true"] .spectra-shell-sidebar [data-sidebar-workspaces] {
+  display: none !important;
+}
+
 .presentation-toolbar {
   margin: 0 12px 8px !important;
   border: 0 !important;
@@ -20043,8 +20208,17 @@ html[data-spectra-sidebar-collapsed="true"] .spectra-app-shell {
   box-shadow: none !important;
 }
 
-.sheets-top-bars {
+.spectra-editor-workbar.sheets-top-bars {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
   overflow: visible !important;
+  min-height: 0;
+}
+
+.sheets-grid-frame {
+  min-height: 0;
+  flex: 1 1 auto;
 }
 
 .sheets-top-bars > :is(.sheets-menu-bar, .sheets-format-bar) {

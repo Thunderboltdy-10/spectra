@@ -282,12 +282,11 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
   }
 
   private updateSynchronizationState(error?: string) {
-    const pending =
-      this.providerUnsynchronizedChanges + this.durablePendingUpdateIds.size;
+    const yjsPending = this.providerUnsynchronizedChanges;
     const terminal =
       this.state === "permission_lost" || this.state === "closed";
     this.update({
-      unsynchronizedChanges: pending,
+      unsynchronizedChanges: yjsPending,
       ...(error !== undefined ? { error } : {}),
       ...(terminal
         ? {}
@@ -295,7 +294,7 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
             state:
               error !== undefined
                 ? "unsynchronized"
-                : pending > 0
+                : yjsPending > 0
                   ? "synchronizing"
                   : this.provider?.synced
                     ? "synchronized"

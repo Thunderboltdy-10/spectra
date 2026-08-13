@@ -111,6 +111,7 @@ import {
   getSpectraOverview,
   getSpectraRunDetail,
   getSpectraThread,
+  getSpectraThreads,
   peekSpectraWorkspace,
   getSpectraWorkspace,
   postSpectra,
@@ -549,6 +550,7 @@ function WorkspaceHome({
   overview,
   onSelect,
   onOpenArtifact,
+  onOpenThread,
   onAddArtifactToWorkspace,
   onMoveArtifactToWorkspace,
   onMoveArtifactToInbox,
@@ -565,6 +567,7 @@ function WorkspaceHome({
   overview: SpectraOverview | null;
   onSelect: (workspaceId: string) => void;
   onOpenArtifact: (artifact: SpectraArtifact) => void;
+  onOpenThread: (thread: SpectraThread) => void;
   onAddArtifactToWorkspace: (
     artifact: SpectraArtifact,
     workspaceId: string,
@@ -595,6 +598,7 @@ function WorkspaceHome({
   );
   const [pinnedOpen, setPinnedOpen] = useState(true);
   const [dropWorkspaceId, setDropWorkspaceId] = useState<string | null>(null);
+  const [homeThreads, setHomeThreads] = useState<SpectraThread[]>([]);
   const now = useNow(60_000);
   useEffect(() => {
     setPinnedOpen(
@@ -604,11 +608,31 @@ function WorkspaceHome({
   useEffect(() => {
     window.localStorage.setItem("spectra.home.pinned.open", String(pinnedOpen));
   }, [pinnedOpen]);
+  useEffect(() => {
+    let cancelled = false;
+    const loadThreads = () => {
+      void getSpectraThreads({ limit: 200 })
+        .then((result) => {
+          if (!cancelled) setHomeThreads(result.threads);
+        })
+        .catch(() => {
+          if (!cancelled) setHomeThreads([]);
+        });
+    };
+    loadThreads();
+    window.addEventListener("spectra:threads-changed", loadThreads);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("spectra:threads-changed", loadThreads);
+    };
+  }, []);
   const workspaces = overview?.workspaces ?? [];
   // Calendar owns timetable state. Preserve legacy timetable records for the
   // compatibility route, but keep them out of generic work listings and totals.
   const artifacts = (overview?.artifacts ?? []).filter(
-    (artifact) => artifact.blueprintKey !== "timetable",
+    (artifact) =>
+      artifact.blueprintKey !== "timetable" &&
+      artifact.blueprintKey !== "thread_reference",
   );
   const pinnedArtifacts = artifacts.filter((artifact) =>
     artifactPlacements(artifact).some((placement) => placement.pinned),
@@ -726,10 +750,10 @@ function WorkspaceHome({
               ({ label, count, delta, icon: MetricIcon, color }) => (
                 <div
                   key={label}
-                  className="flex min-h-[80px] items-center gap-3 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3.5"
+                  className="spectra-metric-card flex min-h-[80px] items-center gap-3 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3.5"
                 >
                   <span
-                    className="grid size-9 shrink-0 place-items-center rounded-[8px]"
+                    className="spectra-metric-icon grid size-9 shrink-0 place-items-center rounded-[8px]"
                     style={{
                       background: `color-mix(in oklab, ${color} 11%, white)`,
                       color,
@@ -744,8 +768,11 @@ function WorkspaceHome({
                     <strong className="block font-sans text-[20px] font-normal leading-6 tracking-[-0.01em] text-[var(--text-primary)]">
                       {count}
                     </strong>
-                    <span className="block text-[11px] font-medium text-[var(--success)]">
-                      {delta ? `+${delta} this week` : "No change this week"}
+                    <span className="spectra-metric-delta-full block truncate text-[11px] font-medium text-[var(--success)]">
+                      {delta ? `+${delta} this week` : "No change"}
+                    </span>
+                    <span className="spectra-metric-delta-short block truncate text-[11px] font-medium text-[var(--success)]">
+                      {delta ? `+${delta}` : "—"}
                     </span>
                   </span>
                 </div>
@@ -940,7 +967,10 @@ function WorkspaceHome({
             className="spectra-mission-control-library mt-9 scroll-mt-6"
           >
             <ObjectLibrary
-              entries={artifacts.map((artifact) => ({ artifact }))}
+              entries={[
+                ...artifacts.map((artifact) => ({ artifact })),
+                ...homeThreads.map((thread) => ({ thread })),
+              ]}
               workspaces={workspaces}
               groupBy="workspace"
               title="All work"
@@ -948,19 +978,30 @@ function WorkspaceHome({
               showHeader={false}
               flatTable
               showInbox={false}
-              onOpen={(entry) => onOpenArtifact(entry.artifact!)}
-              onAddToWorkspace={(entry, workspaceId) =>
-                onAddArtifactToWorkspace(entry.artifact!, workspaceId)
-              }
-              onMoveToWorkspace={(entry, workspaceId) =>
-                onMoveArtifactToWorkspace(entry.artifact!, workspaceId)
-              }
-              onMoveToInbox={(entry) => onMoveArtifactToInbox(entry.artifact!)}
+              onOpen={(entry) => {
+                if (entry.thread) onOpenThread(entry.thread);
+                else if (entry.artifact) onOpenArtifact(entry.artifact);
+              }}
+              onAddToWorkspace={(entry, workspaceId) => {
+                if (entry.artifact)
+                  onAddArtifactToWorkspace(entry.artifact, workspaceId);
+              }}
+              onMoveToWorkspace={(entry, workspaceId) => {
+                if (entry.artifact)
+                  onMoveArtifactToWorkspace(entry.artifact, workspaceId);
+              }}
+              onMoveToInbox={(entry) => {
+                if (entry.artifact) onMoveArtifactToInbox(entry.artifact);
+              }}
               onCreateArtifact={onCreateArtifact}
-              onDelete={(entry) => onDeleteArtifact(entry.artifact!)}
+              onDelete={(entry) => {
+                if (entry.artifact) onDeleteArtifact(entry.artifact);
+              }}
               selectionMode={selectionMode}
               selectedContextIds={selectedContextIds}
-              onToggleContext={(entry) => onToggleContext(entry.artifact!)}
+              onToggleContext={(entry) => {
+                if (entry.artifact) onToggleContext(entry.artifact);
+              }}
             />
           </div>
         </div>
@@ -5818,6 +5859,7 @@ export function WorkspaceShell({
                 overview={overview ? { ...overview, workspaces } : overview}
                 onSelect={goToWorkspaceHub}
                 onOpenArtifact={openArtifactPanel}
+                onOpenThread={openThreadPanel}
                 onAddArtifactToWorkspace={(artifact, workspaceId) =>
                   void addArtifactToWorkspace(artifact, workspaceId)
                 }
@@ -6233,7 +6275,7 @@ export function WorkspaceShell({
             </section>
           )}
           <div className="pointer-events-none absolute inset-x-0 bottom-0 z-[220] bg-transparent px-2 pb-4 pt-2 sm:px-5 sm:pb-5 lg:px-8">
-            <div className="pointer-events-auto mx-auto max-w-[880px]">
+            <div className="pointer-events-auto mx-auto max-w-[880px] spectra-live-stack">
               <div ref={setAttachmentsHost} />
               <DurableRunTabs
                 workspaceId={selectedWorkspaceId}

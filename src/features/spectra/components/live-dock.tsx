@@ -8,9 +8,9 @@ import {
   CircleHelp,
   FileText,
   Loader2,
-  MessageSquare,
   MessageSquarePlus,
   PauseCircle,
+  SquareArrowOutUpRight,
   RotateCcw,
   ShieldCheck,
   Square,
@@ -39,7 +39,6 @@ import {
   type SpectraRunTab,
 } from "../data/api";
 import {
-  allocateLiveDockWidths,
   closePreservesRunningJob,
   deriveLiveDockTab,
   selectExpandedInputRun,
@@ -268,6 +267,7 @@ export type LiveDockProps = {
     id: string;
     prompt: string;
     runId?: string;
+    threadId?: string;
     status: string;
     steps?: Array<{ title: string; status: string }>;
   } | null;
@@ -358,6 +358,40 @@ function DockTabField({ state }: { state: LiveDockTruthState }) {
     ];
   }, [state]);
   return <SurfaceField influences={influences} scale="panel" grain="wave" />;
+}
+
+function DockHoverProgress({ steps }: { steps: string[] }) {
+  const scroller = useRef<HTMLUListElement>(null);
+  useEffect(() => {
+    const node = scroller.current;
+    if (!node) return;
+    node.scrollTop = node.scrollHeight;
+  }, [steps]);
+  if (!steps.length) return null;
+  return (
+    <div className="mt-3">
+      <p className="mb-1 text-micro font-bold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
+        Progress
+      </p>
+      <ul
+        ref={scroller}
+        className="spectra-live-dock-progress max-h-28 space-y-1 overflow-y-auto pr-1 text-[11px] leading-4 text-[var(--text-secondary)]"
+      >
+        {steps.map((step, stepIndex) => (
+          <li
+            key={`${stepIndex}:${step}`}
+            className={
+              stepIndex === steps.length - 1
+                ? "font-medium text-[var(--text-primary)]"
+                : "text-[var(--text-tertiary)]"
+            }
+          >
+            {step}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 }
 
 export function LiveDock({
@@ -452,19 +486,32 @@ export function LiveDock({
         (tab, index, all) =>
           all.findIndex((candidate) => candidate.runId === tab.runId) === index,
       )
+      .filter((tab, _index, all) => {
+        const sameThread = all.filter(
+          (candidate) => candidate.threadId === tab.threadId,
+        );
+        if (sameThread.length <= 1) return true;
+        const preferred =
+          sameThread.find((candidate) =>
+            activeStatuses.has(candidate.run.status),
+          ) ??
+          sameThread.find(
+            (candidate) => candidate.runId === continuation?.runId,
+          ) ??
+          [...sameThread].sort(
+            (left, right) => right.run.updatedAt - left.run.updatedAt,
+          )[0];
+        return preferred?.runId === tab.runId;
+      })
       .sort((a, b) => {
-        const aPinned =
-          continuation?.id === a.threadId || openThreadId === a.threadId;
-        const bPinned =
-          continuation?.id === b.threadId || openThreadId === b.threadId;
-        return aPinned === bPinned
-          ? b.updatedAt - a.updatedAt
-          : bPinned
-            ? 1
-            : -1;
+        const aSending = activeStatuses.has(a.run.status);
+        const bSending = activeStatuses.has(b.run.status);
+        if (aSending !== bSending) return aSending ? -1 : 1;
+        return b.updatedAt - a.updatedAt;
       });
   }, [
     continuation?.id,
+    continuation?.runId,
     now,
     openThreadId,
     respondingInputRuns,
@@ -474,10 +521,6 @@ export function LiveDock({
   ]);
 
   const sources = useMemo(() => visible.map(tabSource), [visible]);
-  const canonicalContinuationRunId =
-    continuation?.runId ??
-    visible.find((tab) => tab.threadId === continuation?.id)?.runId ??
-    null;
   const expandableSources = useMemo(
     () => sources.filter((source) => !collapsedInputRuns.has(source.runId)),
     [collapsedInputRuns, sources],
@@ -490,16 +533,6 @@ export function LiveDock({
     () => setExpandedInputRunId(selectedInputRunId),
     [selectedInputRunId],
   );
-  const layouts = useMemo(
-    () =>
-      new Map(
-        allocateLiveDockWidths(sources, selectedInputRunId).map((layout) => [
-          layout.runId,
-          layout,
-        ]),
-      ),
-    [selectedInputRunId, sources],
-  );
 
   const hasActive = visible.some((tab) => activeStatuses.has(tab.run.status));
   useEffect(
@@ -508,7 +541,12 @@ export function LiveDock({
   );
 
   const durableHasOptimistic = Boolean(
-    optimistic?.runId && visible.some((tab) => tab.runId === optimistic.runId),
+    optimistic &&
+    visible.some(
+      (tab) =>
+        (optimistic.runId && tab.runId === optimistic.runId) ||
+        (optimistic.threadId && tab.threadId === optimistic.threadId),
+    ),
   );
   const showOptimistic = Boolean(
     optimistic &&
@@ -623,28 +661,29 @@ export function LiveDock({
 
   return (
     <section
-      className="mb-2 w-full"
+      className="mb-1.5 w-full"
       aria-label="Live Dock"
       data-live-dock-version="2"
     >
-      <div
-        className="spectra-run-tab-strip flex w-full items-start gap-1.5 overflow-x-auto overflow-y-visible px-0.5 pb-1 pt-0.5 [scrollbar-width:thin] max-sm:snap-x"
-        aria-live="polite"
-      >
+      <div className="spectra-live-dock-row flex w-full items-center gap-1">
         {onStartNewThread && (showOptimistic || visible.length > 0) ? (
           <button
             type="button"
             onClick={onStartNewThread}
-            className="sticky left-0 z-20 mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] shadow-[0_7px_22px_-20px_rgba(20,26,32,.5)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+            className="spectra-live-dock-slot mr-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] shadow-[0_7px_22px_-20px_rgba(20,26,32,.5)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
             aria-label="Start a new thread"
             title="New thread"
           >
             <MessageSquarePlus className="h-4 w-4" />
           </button>
         ) : null}
+        <div
+          className="spectra-run-tab-strip flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto overflow-y-visible px-0.5 pb-0.5 pt-0.5 max-sm:snap-x"
+          aria-live="polite"
+        >
         {showOptimistic ? (
           <article
-            className="flex h-12 min-w-[224px] basis-[260px] items-center gap-2 rounded-[9px] border border-[color-mix(in_oklab,var(--accent-cyan)_28%,var(--border-default))] bg-[var(--bg-elevated)] px-3 shadow-[inset_3px_0_var(--accent-cyan)]"
+            className="flex h-11 min-w-[224px] basis-[260px] items-center gap-2 rounded-[9px] border border-[color-mix(in_oklab,var(--accent-cyan)_28%,var(--border-default))] bg-[var(--bg-elevated)] px-3 shadow-[inset_3px_0_var(--accent-cyan)]"
             data-run-status="starting"
           >
             <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-cyan)] motion-reduce:animate-none" />
@@ -668,12 +707,9 @@ export function LiveDock({
             )
               ? null
               : stateCopy[model.state];
-            const layout = layouts.get(tab.runId);
             const expanded = selectedInputRunId === tab.runId;
             const disclosureAnchor = `--live-dock-${tab.runId.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
-            // One conversation may have several historical run tabs. Only the
-            // exact selected run receives the cyan continuation border.
-            const active = canonicalContinuationRunId === tab.runId;
+            const active = continuation?.id === tab.threadId;
             const card = streamCard(tab);
             const canRetry =
               (model.state === "paused" || model.state === "cancelled") &&
@@ -688,12 +724,9 @@ export function LiveDock({
               <motion.article
                 layout
                 key={tab.runId}
-                className={`group relative max-w-full shrink-0 snap-start overflow-visible rounded-[9px] border bg-[var(--bg-elevated)] shadow-[0_7px_22px_-20px_rgba(20,26,32,.5)] ${active ? "border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] shadow-[inset_3px_0_var(--accent-cyan)]" : "border-[var(--border-default)]"} ${expanded ? "max-sm:fixed max-sm:inset-x-3 max-sm:bottom-3 max-sm:z-50 max-sm:max-h-[70dvh] max-sm:overflow-y-auto max-sm:shadow-[0_24px_80px_rgba(0,0,0,.32)]" : ""}`}
+                className={`spectra-live-dock-tab group relative max-w-full snap-start overflow-visible rounded-[9px] border bg-[var(--bg-elevated)] shadow-[0_7px_22px_-20px_rgba(20,26,32,.5)] ${active ? "border-[color-mix(in_oklab,var(--accent-cyan)_45%,var(--border-default))] shadow-[inset_3px_0_var(--accent-cyan)]" : "border-[var(--border-default)]"} ${expanded ? "max-sm:fixed max-sm:inset-x-3 max-sm:bottom-3 max-sm:z-50 max-sm:max-h-[70dvh] max-sm:overflow-y-auto max-sm:shadow-[0_24px_80px_rgba(0,0,0,.32)]" : ""}`}
                 style={
                   {
-                    flexBasis: layout?.preferredWidth,
-                    flexGrow: 0,
-                    width: layout?.preferredWidth,
                     anchorName: disclosureAnchor,
                   } as CSSProperties
                 }
@@ -706,9 +739,6 @@ export function LiveDock({
                   opacity: 1,
                   y: 0,
                   scale: 1,
-                  ...(layout?.minWidth !== undefined
-                    ? { minWidth: layout.minWidth }
-                    : {}),
                 }}
                 exit={{
                   opacity: 0,
@@ -722,7 +752,7 @@ export function LiveDock({
                 {...targetAttrs(`live-dock/tab/${tab.runId}`)}
               >
                 <DockTabField state={model.state} />
-                <div className="relative flex h-12 min-w-0 items-center gap-1 pl-3 pr-1">
+                <div className="relative flex h-11 min-w-0 items-center gap-1 pl-3 pr-1">
                   <AnimatedStateIcon state={model.state} />
                   <button
                     type="button"
@@ -738,7 +768,6 @@ export function LiveDock({
                       }
                     }}
                     className="min-w-0 flex-1 py-1 text-left"
-                    title={`Continue ${model.title}`}
                   >
                     <span className="flex items-center gap-1.5">
                       <DockTitle
@@ -777,16 +806,16 @@ export function LiveDock({
                   <button
                     type="button"
                     onClick={() => openQuickChat(tab)}
-                    className="flex h-8 w-7 items-center justify-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-                    aria-label={`Open ${model.title} in quick chat`}
-                    title="Open quick chat"
+                    className="dock-tab-icon flex h-8 w-7 items-center justify-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                    aria-label={`Open ${model.title} conversation`}
+                    title="Open conversation"
                   >
-                    <MessageSquare className="h-3.5 w-3.5" />
+                    <SquareArrowOutUpRight className="h-3.5 w-3.5" />
                   </button>
                   <button
                     type="button"
                     onClick={() => void hideTab(tab)}
-                    className="flex h-8 w-7 items-center justify-center rounded-[6px] text-[var(--text-tertiary)] opacity-0 hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] focus:opacity-100 group-hover:opacity-100 max-sm:opacity-100"
+                    className="dock-tab-icon flex h-8 w-7 items-center justify-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
                     aria-label={`Close ${model.title}`}
                     title={
                       closePreservesRunningJob(source)
@@ -800,7 +829,7 @@ export function LiveDock({
 
                 {!expanded ? (
                   <div
-                    className="fixed z-30 hidden w-[min(360px,calc(100vw-24px))] rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3.5 shadow-[0_16px_45px_-18px_rgba(20,26,32,.45)] group-hover:block group-focus-within:block"
+                    className="fixed z-30 hidden w-[min(360px,calc(100vw-24px))] rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-3.5 shadow-[0_16px_45px_-18px_rgba(20,26,32,.45)] group-hover:block group-focus-within:block group-has-[.dock-tab-icon:hover]:hidden"
                     style={
                       {
                         positionAnchor: disclosureAnchor,
@@ -810,22 +839,14 @@ export function LiveDock({
                     }
                     role="status"
                   >
-                    <p className="line-clamp-4 text-xs font-medium leading-[1.55] text-[var(--text-primary)]">
+                    <p className="text-[13px] font-semibold leading-5 text-[var(--text-primary)]">
+                      {model.title}
+                    </p>
+                    <p className="mt-1 line-clamp-3 text-xs leading-[1.55] text-[var(--text-secondary)]">
                       {model.hoverSummary}
                     </p>
-                    {model.recentSteps.length && isSteerable ? (
-                      <div className="mt-3">
-                        <p className="mb-1 text-micro font-bold uppercase tracking-[0.08em] text-[var(--text-secondary)]">
-                          Progress
-                        </p>
-                        <ul className="max-h-24 space-y-1 overflow-y-auto pr-1 text-[11px] leading-4 text-[var(--text-secondary)] [scrollbar-width:thin]">
-                          {model.recentSteps.map((step, stepIndex) => (
-                            <li key={`${tab.runId}:${stepIndex}:${step}`}>
-                              ✓ {step}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
+                    {isSteerable ? (
+                      <DockHoverProgress steps={model.recentSteps} />
                     ) : null}
                     <div className="mt-2 flex flex-wrap items-center gap-2 text-micro text-[var(--text-tertiary)]">
                       {model.targetNames.length ? (
@@ -841,7 +862,7 @@ export function LiveDock({
                         onClick={() => openQuickChat(tab)}
                         className="inline-flex h-7 items-center gap-1 rounded-[6px] px-2 text-micro font-semibold text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
                       >
-                        <MessageSquare className="h-3 w-3" /> Open conversation
+                        <SquareArrowOutUpRight className="h-3 w-3" /> Open conversation
                       </button>
                       {!active ? (
                         <button
@@ -1178,6 +1199,7 @@ export function LiveDock({
             );
           })}
         </AnimatePresence>
+        </div>
       </div>
     </section>
   );

@@ -3,6 +3,7 @@ import type {
   OpenRouterAgentTurn,
   OpenRouterUsage,
 } from "./openrouter-stream";
+import { toModelToolResult } from "../tools/execution/tool-result";
 
 export type SpectraAgentMessage = {
   role: "system" | "user" | "assistant" | "tool";
@@ -193,8 +194,11 @@ export async function runSpectraAgentLoop(input: {
         );
       return repetition === 2
         ? {
+            status: 1,
             ok: false,
             code: "identical_tool_call_repeated",
+            error:
+              "This exact tool request already returned a result. Use that result, change the request, or finish the task.",
             message:
               "This exact tool request already returned a result. Use that result, change the request, or finish the task.",
           }
@@ -213,7 +217,7 @@ export async function runSpectraAgentLoop(input: {
       }),
     );
     for (const [index, call] of turn.toolCalls.entries()) {
-      const result = results[index];
+      const result = toModelToolResult(results[index]);
       messages.push({
         role: "tool",
         tool_call_id: call.id,

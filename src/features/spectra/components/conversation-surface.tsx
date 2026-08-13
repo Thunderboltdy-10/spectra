@@ -1105,7 +1105,7 @@ function TerminalRunFailureNote({
           <p className="text-[11px] font-semibold text-[var(--text-primary)]">
             {trace.run.retryable === false
               ? "Spectra could not complete this request"
-              : "Spectra paused after retrying"}
+              : "Spectra paused this run"}
           </p>
           <p className="mt-0.5 text-micro leading-4 text-[var(--text-tertiary)]">
             {publicSpectraFailureText(
@@ -2211,14 +2211,22 @@ export function ConversationSurface({
                           );
                           await onChoice?.({ title: choiceTitle });
                         };
-                        return "questions" in choices ? (
-                          <BatchedChoiceBlock
-                            {...choices}
-                            onSubmit={(answer) => saveAnswer("batch", answer)}
-                          />
-                        ) : (
+                        if ("questions" in choices && choices.questions) {
+                          return (
+                            <BatchedChoiceBlock
+                              questions={choices.questions}
+                              selectedTitle={choices.selectedTitle}
+                              onSubmit={(answer) =>
+                                saveAnswer("batch", answer)
+                              }
+                            />
+                          );
+                        }
+                        return (
                           <ChoiceBlock
-                            {...choices}
+                            question={choices.question}
+                            options={choices.options}
+                            selectedTitle={choices.selectedTitle}
                             onChoose={(choice, index) =>
                               saveAnswer(
                                 `${index}:${choice.title}`,

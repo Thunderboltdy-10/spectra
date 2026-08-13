@@ -674,21 +674,21 @@ export function useInteractionPresence(options: {
     document.addEventListener("selectionchange", onSelectionChange);
     window.addEventListener("pointerup", onPointerUp);
     const focusHeartbeat = window.setInterval(() => {
+      if (document.visibilityState !== "visible") return;
       const active = document.activeElement;
       if (!active || !surface.contains(active)) return;
       const target = controlFor(active);
       if (!target || !primitiveHoldsText(target.primitive)) return;
-      const value = readValue(active);
       const points = readTextPoints(active);
       publish({
         act: points ? { kind: "caret", point: points.head } : { kind: "focus" },
         target,
-        // A sequence-bearing frame is intentionally not deduplicated. It is
-        // the lease renewal for a stationary native focus and lets a joining
-        // AI distinguish "still thinking here" from abandoned presence.
-        ...(value !== undefined ? { provisionalValue: value } : {}),
+        // A sequence-bearing frame renews the stationary focus lease. The
+        // provisional value is published by real input events only; replaying
+        // a contenteditable's full HTML here put serialization and awareness
+        // traffic on an idle heartbeat.
       });
-    }, 800);
+    }, 10_000);
 
     return () => {
       if (frame) cancelAnimationFrame(frame);

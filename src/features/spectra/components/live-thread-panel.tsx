@@ -5,7 +5,7 @@ import type { CSSProperties } from "react";
 import type { SpectraLiveExchange } from "../ai/use-spectra-run";
 import { useFollowAi } from "../collaboration/follow-ai";
 import { ThreadConversation } from "./conversation-surface";
-import { StudioSplitShell } from "./artifact-studio";
+import { StudioSplitShell } from "./artifact-studio-shell";
 
 export function LiveThreadPanel({
   threadId,

@@ -306,7 +306,11 @@ function ShellNavigation() {
 
   useEffect(() => {
     void refreshNotifications();
-    const interval = window.setInterval(refreshNotifications, 8_000);
+    // Push events and focus/visibility changes cover the interactive path. The
+    // fallback poll is intentionally sparse and never fetches in a hidden tab.
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === "visible") void refreshNotifications();
+    }, 30_000);
     const refreshVisible = () => {
       if (document.visibilityState === "visible") void refreshNotifications();
     };

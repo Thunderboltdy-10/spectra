@@ -96,9 +96,10 @@ export async function POST(request: NextRequest) {
       ? requestedProvider === "cloudflare"
       : process.env.NEXT_PUBLIC_SPECTRA_CLOUDFLARE_REALTIME === "true";
     const requestHost = request.headers.get("host")?.trim() ?? "";
-    const safeDevelopmentHost = /^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i.test(
+    const isLocalRequestHost = /^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i.test(
       requestHost,
-    )
+    );
+    const safeDevelopmentHost = isLocalRequestHost
       ? requestHost
       : `localhost:${process.env.SPECTRA_WEB_PORT ?? "3000"}`;
     const localGatewayUrl = `${request.nextUrl.protocol === "https:" ? "wss" : "ws"}://${safeDevelopmentHost}/_spectra/realtime`;
@@ -106,7 +107,7 @@ export async function POST(request: NextRequest) {
       ? process.env.SPECTRA_CLOUDFLARE_COLLAB_URL ??
         process.env.NEXT_PUBLIC_SPECTRA_COLLAB_URL ??
         "ws://localhost:8787"
-      : process.env.NODE_ENV === "development"
+      : isLocalRequestHost
         ? localGatewayUrl
         : process.env.NEXT_PUBLIC_SPECTRA_COLLAB_URL ??
           "ws://localhost:1234";

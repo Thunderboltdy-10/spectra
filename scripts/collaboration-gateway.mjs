@@ -1029,7 +1029,7 @@ async function enforceActivePolicyVersions() {
 
 const policySweep = setInterval(() => {
   void enforceActivePolicyVersions();
-}, 1_000);
+}, 5_000);
 policySweep.unref?.();
 
 await server.listen();

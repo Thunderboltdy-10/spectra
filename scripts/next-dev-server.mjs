@@ -78,7 +78,8 @@ function proxyCollaborationUpgrade(request, socket, head) {
   socket.on("error", () => upstream.destroy());
 }
 
-const app = next({ dev: true, hostname, port });
+const dev = process.env.NODE_ENV !== "production";
+const app = next({ dev, hostname, port });
 await app.prepare();
 const handle = app.getRequestHandler();
 const handleUpgrade = app.getUpgradeHandler();
@@ -101,7 +102,7 @@ server.on("upgrade", (request, socket, head) => {
 
 server.listen(port, hostname, () => {
   process.stdout.write(
-    `Spectra web development server ready on http://localhost:${port} (realtime proxied to ${collaborationHost}:${collaborationPort})\n`,
+    `Spectra web ${dev ? "development" : "production"} server ready on http://localhost:${port} (realtime proxied to ${collaborationHost}:${collaborationPort})\n`,
   );
 });
 

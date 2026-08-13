@@ -1,9 +1,23 @@
 "use client";
 
-import { GripVertical, Maximize2, PanelRightClose, Plus, Scaling, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
+import dynamic from "next/dynamic";
+import {
+  GripVertical,
+  Maximize2,
+  PanelRightClose,
+  Plus,
+  Scaling,
+  X,
+} from "lucide-react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type DragEvent,
+  type ReactNode,
+} from "react";
 import { useSpectraContextStore } from "@/stores/spectra-context-store";
-import { ArtifactStudio } from "./artifact-studio";
 import type { SpectraArtifact } from "../data/api";
 import { getWorkDefinition } from "../work/registry";
 import { isArtifactTypeKey } from "../artifacts/registry";
@@ -38,6 +52,10 @@ type ArtifactTileSurfaceProps = {
   onContinueThread?: (threadId: string, title: string) => void;
 };
 
+const ArtifactStudio = dynamic(() =>
+  import("./artifact-studio").then((module) => module.ArtifactStudio),
+);
+
 export function ArtifactTileSurface({
   artifacts,
   allArtifacts,
@@ -57,53 +75,104 @@ export function ArtifactTileSurface({
   onContinueThread,
 }: ArtifactTileSurfaceProps) {
   const uniqueArtifacts = useMemo(
-    () => artifacts.filter((artifact, index, rows) => rows.findIndex((row) => row._id === artifact._id) === index),
+    () =>
+      artifacts.filter(
+        (artifact, index, rows) =>
+          rows.findIndex((row) => row._id === artifact._id) === index,
+      ),
     [artifacts],
   );
   const order = useSpectraContextStore((state) => state.tileArtifactIds);
-  const moveTileBefore = useSpectraContextStore((state) => state.moveTileBefore);
+  const moveTileBefore = useSpectraContextStore(
+    (state) => state.moveTileBefore,
+  );
   const cycleTileSize = useSpectraContextStore((state) => state.cycleTileSize);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const stageRef = useRef<HTMLElement | null>(null);
   const [inlineSize, setInlineSize] = useState(1200);
-  const visibleArtifacts = useMemo(() => [...uniqueArtifacts].sort((a, b) => (order.indexOf(a._id) < 0 ? 999 : order.indexOf(a._id)) - (order.indexOf(b._id) < 0 ? 999 : order.indexOf(b._id))), [order, uniqueArtifacts]);
+  const visibleArtifacts = useMemo(
+    () =>
+      [...uniqueArtifacts].sort(
+        (a, b) =>
+          (order.indexOf(a._id) < 0 ? 999 : order.indexOf(a._id)) -
+          (order.indexOf(b._id) < 0 ? 999 : order.indexOf(b._id)),
+      ),
+    [order, uniqueArtifacts],
+  );
   const workbenchTabs = useMemo(
-    () => visibleArtifacts.map((artifact) => {
-      const responsive = isArtifactTypeKey(artifact.blueprintKey)
-        ? getWorkDefinition(artifact.blueprintKey).responsive
-        : { minInlineSize: 320, preferredInlineSize: 640 };
-      return { id: artifact._id, title: artifact.title, minInlineSize: responsive.minInlineSize, preferredInlineSize: responsive.preferredInlineSize };
-    }),
+    () =>
+      visibleArtifacts.map((artifact) => {
+        const responsive = isArtifactTypeKey(artifact.blueprintKey)
+          ? getWorkDefinition(artifact.blueprintKey).responsive
+          : { minInlineSize: 320, preferredInlineSize: 640 };
+        return {
+          id: artifact._id,
+          title: artifact.title,
+          minInlineSize: responsive.minInlineSize,
+          preferredInlineSize: responsive.preferredInlineSize,
+        };
+      }),
     [visibleArtifacts],
   );
-  const automaticLayout = useMemo(() => createAutomaticWorkbenchLayout(workbenchTabs), [workbenchTabs]);
+  const automaticLayout = useMemo(
+    () => createAutomaticWorkbenchLayout(workbenchTabs),
+    [workbenchTabs],
+  );
   const tabSignature = workbenchTabs.map((tab) => tab.id).join(":");
   const [layout, setLayout] = useState<WorkbenchNode | null>(null);
-  const [fallbackLayout, setFallbackLayout] = useState<WorkbenchNode | null>(null);
+  const [fallbackLayout, setFallbackLayout] = useState<WorkbenchNode | null>(
+    null,
+  );
   useEffect(() => {
     const session = readSharedWorkbenchSession(window.localStorage);
-    const storedIds = session.openPanes ? collectWorkbenchTabs(session.openPanes).map((tab) => tab.id).sort().join(":") : "";
-    const nextIds = workbenchTabs.map((tab) => tab.id).sort().join(":");
-    setLayout(session.openPanes && storedIds === nextIds && validateWorkbenchTree(session.openPanes).length === 0 ? session.openPanes : automaticLayout);
+    const storedIds = session.openPanes
+      ? collectWorkbenchTabs(session.openPanes)
+          .map((tab) => tab.id)
+          .sort()
+          .join(":")
+      : "";
+    const nextIds = workbenchTabs
+      .map((tab) => tab.id)
+      .sort()
+      .join(":");
+    setLayout(
+      session.openPanes &&
+        storedIds === nextIds &&
+        validateWorkbenchTree(session.openPanes).length === 0
+        ? session.openPanes
+        : automaticLayout,
+    );
     // tabSignature already tracks workbenchTabs identity for this restore.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- workbenchTabs is represented by tabSignature
   }, [automaticLayout, tabSignature]);
   useEffect(() => {
     if (!layout) return;
     const session = readSharedWorkbenchSession(window.localStorage);
-    writeSharedWorkbenchSession(window.localStorage, { ...session, openPanes: layout, activePaneId: firstWorkbenchPaneId(layout) });
+    writeSharedWorkbenchSession(window.localStorage, {
+      ...session,
+      openPanes: layout,
+      activePaneId: firstWorkbenchPaneId(layout),
+    });
   }, [layout]);
   useEffect(() => {
     const stage = stageRef.current;
     if (!stage || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(([entry]) => setInlineSize(entry?.contentRect.width ?? 1200));
+    const observer = new ResizeObserver(([entry]) =>
+      setInlineSize(entry?.contentRect.width ?? 1200),
+    );
     observer.observe(stage);
     return () => observer.disconnect();
   }, []);
-  const fittedLayout = useMemo(() => layout ? enforceWorkbenchMinimums(layout, inlineSize) : null, [inlineSize, layout]);
-  const minimumFallback = Boolean(layout?.type === "split" && fittedLayout?.type === "pane");
-  const renderedLayout = minimumFallback && fallbackLayout ? fallbackLayout : fittedLayout;
+  const fittedLayout = useMemo(
+    () => (layout ? enforceWorkbenchMinimums(layout, inlineSize) : null),
+    [inlineSize, layout],
+  );
+  const minimumFallback = Boolean(
+    layout?.type === "split" && fittedLayout?.type === "pane",
+  );
+  const renderedLayout =
+    minimumFallback && fallbackLayout ? fallbackLayout : fittedLayout;
   useEffect(() => setFallbackLayout(null), [inlineSize, layout]);
 
   function moveBefore(event: DragEvent, targetId: string) {
@@ -114,16 +183,26 @@ export function ArtifactTileSurface({
 
   function safeClose(artifactId: string) {
     if (dirtyIds.has(artifactId)) {
-      window.dispatchEvent(new CustomEvent("spectra:request-artifact-close", { detail: { artifactId } }));
+      window.dispatchEvent(
+        new CustomEvent("spectra:request-artifact-close", {
+          detail: { artifactId },
+        }),
+      );
       return;
     }
     onCloseArtifact(artifactId);
   }
 
   function safeCloseAll() {
-    const dirty = visibleArtifacts.find((artifact) => dirtyIds.has(artifact._id));
+    const dirty = visibleArtifacts.find((artifact) =>
+      dirtyIds.has(artifact._id),
+    );
     if (dirty) {
-      window.dispatchEvent(new CustomEvent("spectra:request-artifact-close", { detail: { artifactId: dirty._id } }));
+      window.dispatchEvent(
+        new CustomEvent("spectra:request-artifact-close", {
+          detail: { artifactId: dirty._id },
+        }),
+      );
       return;
     }
     onCloseAll();
@@ -134,12 +213,28 @@ export function ArtifactTileSurface({
   return (
     <section
       ref={stageRef}
-      className={isolated
-        ? "relative min-w-0 flex-1 overflow-hidden bg-[var(--bg-primary)]"
-        : "fixed inset-2 z-[70] flex min-w-0 flex-col overflow-hidden rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-primary)] shadow-[0_24px_70px_rgba(27,20,12,0.18)] md:absolute md:inset-y-3 md:left-auto md:right-3 md:w-[min(72vw,1120px)] xl:inset-y-0 xl:right-0 xl:w-[min(62vw,1120px)] xl:rounded-none xl:border-y-0 xl:border-r-0"}
+      className={
+        isolated
+          ? "relative min-w-0 flex-1 overflow-hidden bg-[var(--bg-primary)]"
+          : "fixed inset-2 z-[70] flex min-w-0 flex-col overflow-hidden rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-primary)] shadow-[0_24px_70px_rgba(27,20,12,0.18)] md:absolute md:inset-y-3 md:left-auto md:right-3 md:w-[min(72vw,1120px)] xl:inset-y-0 xl:right-0 xl:w-[min(62vw,1120px)] xl:rounded-none xl:border-y-0 xl:border-r-0"
+      }
       aria-label={isolated ? "Focused work set" : "Workbench split layout"}
-      onDragOver={(event) => { if (event.dataTransfer.types.includes("application/x-spectra-artifact")) event.preventDefault(); }}
-      onDrop={(event) => { const artifactId = event.dataTransfer.getData("application/x-spectra-artifact") || event.dataTransfer.getData("text/plain"); if (artifactId && allArtifacts.some((artifact) => artifact._id === artifactId)) { event.preventDefault(); onAddArtifact?.(artifactId); } }}
+      onDragOver={(event) => {
+        if (event.dataTransfer.types.includes("application/x-spectra-artifact"))
+          event.preventDefault();
+      }}
+      onDrop={(event) => {
+        const artifactId =
+          event.dataTransfer.getData("application/x-spectra-artifact") ||
+          event.dataTransfer.getData("text/plain");
+        if (
+          artifactId &&
+          allArtifacts.some((artifact) => artifact._id === artifactId)
+        ) {
+          event.preventDefault();
+          onAddArtifact?.(artifactId);
+        }
+      }}
     >
       <div className="absolute right-3 top-3 z-50 flex items-center gap-1 rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[0_8px_24px_rgba(27,20,12,0.12)]">
         {actionSlot}
@@ -221,18 +316,63 @@ export function ArtifactTileSurface({
           <X className="h-4 w-4" />
         </button>
       </div>
-      <div className="flex min-h-0 flex-1 pt-12" data-workbench-valid={renderedLayout ? validateWorkbenchTree(renderedLayout).length === 0 : true}>
+      <div
+        className="flex min-h-0 flex-1 pt-12"
+        data-workbench-valid={
+          renderedLayout
+            ? validateWorkbenchTree(renderedLayout).length === 0
+            : true
+        }
+      >
         {renderedLayout ? (
           <WorkbenchSplitTree
             node={renderedLayout}
             onChange={minimumFallback ? setFallbackLayout : setLayout}
             renderTab={(tab) => {
-              const artifact = visibleArtifacts.find((item) => item._id === tab.id)!;
+              const artifact = visibleArtifacts.find(
+                (item) => item._id === tab.id,
+              )!;
               return (
-                <div draggable onDragStart={() => setDraggingId(artifact._id)} onDragEnd={() => setDraggingId(null)} onDragOver={(event) => event.preventDefault()} onDrop={(event) => moveBefore(event, artifact._id)} className={`relative flex h-full min-h-0 min-w-0 ${draggingId === artifact._id ? "opacity-60" : ""}`}>
-                  <span className="absolute left-2 top-2 z-30 flex h-7 w-7 cursor-grab items-center justify-center rounded-[7px] bg-[color-mix(in_oklab,var(--bg-primary)_88%,transparent)] text-[var(--text-tertiary)]" title="Drag to rearrange"><GripVertical className="h-3.5 w-3.5" /></span>
-                  <button type="button" onClick={() => cycleTileSize(artifact._id)} className="absolute right-2 top-2 z-30 flex h-7 w-7 items-center justify-center rounded-[7px] bg-[var(--bg-primary)] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]" aria-label={`Resize ${artifact.title}`}><Scaling className="h-3.5 w-3.5" /></button>
-                  <ArtifactStudio mode="tab" compact artifact={artifact} artifacts={allArtifacts} tabs={[]} dirtyIds={dirtyIds} busy={busyArtifactId === artifact._id} sourceLabel={sourceLabel} onClose={() => safeClose(artifact._id)} onExpand={() => undefined} onActivateTab={() => undefined} onCloseTab={onCloseArtifact} onArchive={onArchive} onDirtyChange={onDirtyChange} onContinueThread={onContinueThread} continuedThreadId={continuedThreadId} />
+                <div
+                  draggable
+                  onDragStart={() => setDraggingId(artifact._id)}
+                  onDragEnd={() => setDraggingId(null)}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={(event) => moveBefore(event, artifact._id)}
+                  className={`relative flex h-full min-h-0 min-w-0 ${draggingId === artifact._id ? "opacity-60" : ""}`}
+                >
+                  <span
+                    className="absolute left-2 top-2 z-30 flex h-7 w-7 cursor-grab items-center justify-center rounded-[7px] bg-[color-mix(in_oklab,var(--bg-primary)_88%,transparent)] text-[var(--text-tertiary)]"
+                    title="Drag to rearrange"
+                  >
+                    <GripVertical className="h-3.5 w-3.5" />
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => cycleTileSize(artifact._id)}
+                    className="absolute right-2 top-2 z-30 flex h-7 w-7 items-center justify-center rounded-[7px] bg-[var(--bg-primary)] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]"
+                    aria-label={`Resize ${artifact.title}`}
+                  >
+                    <Scaling className="h-3.5 w-3.5" />
+                  </button>
+                  <ArtifactStudio
+                    mode="tab"
+                    compact
+                    artifact={artifact}
+                    artifacts={allArtifacts}
+                    tabs={[]}
+                    dirtyIds={dirtyIds}
+                    busy={busyArtifactId === artifact._id}
+                    sourceLabel={sourceLabel}
+                    onClose={() => safeClose(artifact._id)}
+                    onExpand={() => undefined}
+                    onActivateTab={() => undefined}
+                    onCloseTab={onCloseArtifact}
+                    onArchive={onArchive}
+                    onDirtyChange={onDirtyChange}
+                    onContinueThread={onContinueThread}
+                    continuedThreadId={continuedThreadId}
+                  />
                 </div>
               );
             }}

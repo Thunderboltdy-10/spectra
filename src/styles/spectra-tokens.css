@@ -1,0 +1,66 @@
+/* Framework diagnostics stay available in the console during development;
+   they are not part of Spectra's visible product shell or browser evidence. */
+nextjs-portal {
+  display: none !important;
+}
+
+@utility grid-cols-14 {
+  grid-template-columns: repeat(14, minmax(0, 1fr));
+}
+
+/* ---------------------------------------------------------------------------
+   Spectra design-token → Tailwind v4 wiring.
+
+   The canonical custom properties live in the single `:root` block below.
+   `@theme inline` maps them onto utilities so TSX consumes the system instead
+   of arbitrary values:
+     text-micro / text-caption / text-ui / text-body / text-editor /
+     text-title / text-display        (approved type scale)
+     font-sans / font-mono            (Manrope / IBM Plex Mono — real stacks)
+     bg-brand text-brand border-brand + color-mint/cyan/violet/gold/orange/
+     coral/danger/success/warning     (brand, accent and status colors)
+     shadow-soft / shadow-card / shadow-hover, rounded-card
+     ease-standard / ease-out-expo    (motion grammar easings)
+   --------------------------------------------------------------------------- */
+@theme inline {
+  --font-sans: var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, monospace;
+
+  --text-micro: var(--text-micro);
+  --text-micro--line-height: 1.35;
+  --text-caption: var(--text-caption);
+  --text-caption--line-height: 1.4;
+  --text-ui: var(--text-ui);
+  --text-ui--line-height: 1.45;
+  --text-body: var(--text-body);
+  --text-body--line-height: 1.55;
+  --text-editor: var(--text-editor);
+  --text-editor--line-height: 1.65;
+  --text-title: var(--text-title);
+  --text-title--line-height: 1.35;
+  --text-display: var(--text-display);
+  --text-display--line-height: 1.15;
+
+  --color-brand: var(--brand-primary);
+  --color-mint: var(--accent-mint);
+  --color-cyan: var(--accent-cyan);
+  --color-violet: var(--accent-violet);
+  --color-gold: var(--accent-gold);
+  --color-orange: var(--accent-orange);
+  --color-coral: var(--accent-coral);
+  --color-danger: var(--danger);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+
+  --shadow-soft: var(--shadow-soft);
+  --shadow-card: var(--shadow-card);
+  --shadow-hover: var(--shadow-hover);
+
+  --radius-card: var(--card-radius);
+
+  --ease-standard: var(--ease-standard);
+  --ease-out-expo: var(--ease-out-expo);
+
+  --animate-surface-in: spectra-surface-in 420ms var(--ease-standard) both;
+  --animate-fade-in: chat-fade-in 240ms var(--ease-standard) both;
+}

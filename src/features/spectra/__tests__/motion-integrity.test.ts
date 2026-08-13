@@ -13,7 +13,15 @@ import { describe, expect, it } from "vitest";
  * 3. Reduced-motion gating exists for every new effect class.
  */
 
-const globals = readFileSync("src/app/globals.css", "utf8");
+const globals = [
+  "src/app/globals.css",
+  "src/styles/spectra-tokens.css",
+  "src/styles/spectra-app.css",
+  "src/styles/spectra-landing.css",
+  "src/styles/spectra-field.css",
+]
+  .map((file) => readFileSync(file, "utf8"))
+  .join("\n");
 const conversationSurface = readFileSync(
   "src/features/spectra/components/conversation-surface.tsx",
   "utf8",

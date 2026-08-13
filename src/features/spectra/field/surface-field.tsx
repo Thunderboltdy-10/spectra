@@ -187,8 +187,6 @@ export function useActivityField(
   options?: { localClientId?: string; enabled?: boolean },
 ): FieldInfluence[] {
   const [influences, setInfluences] = useState<FieldInfluence[]>(EMPTY);
-  const statesRef = useRef(states);
-  statesRef.current = states;
   const enabled = options?.enabled ?? true;
   const localClientId = options?.localClientId;
 
@@ -206,17 +204,13 @@ export function useActivityField(
     const surface = surfaceRef.current;
     if (!surface) return;
     let frame = 0;
-    let last = 0;
-    let disposed = false;
+    let delayTimer: number | null = null;
+    let lastMeasurement = 0;
 
-    const measure = (now: number) => {
-      if (disposed) return;
-      frame = requestAnimationFrame(measure);
-      if (now - last < SAMPLE_INTERVAL_MS) return;
-      last = now;
-
-      const current = statesRef.current;
-      if (!current.length) {
+    const measure = () => {
+      frame = 0;
+      lastMeasurement = performance.now();
+      if (!states.length) {
         commit(EMPTY);
         return;
       }
@@ -227,7 +221,7 @@ export function useActivityField(
       if (!width || !height) return;
 
       const next: FieldInfluence[] = [];
-      for (const state of current) {
+      for (const state of states) {
         if (state.actor.clientId === localClientId) continue;
         if (!stateIsVisible(state)) continue;
         if (!state.target) continue;
@@ -256,12 +250,31 @@ export function useActivityField(
       commit(next);
     };
 
-    frame = requestAnimationFrame(measure);
-    return () => {
-      disposed = true;
-      cancelAnimationFrame(frame);
+    const scheduleMeasure = () => {
+      if (frame) return;
+      const elapsed = performance.now() - lastMeasurement;
+      if (elapsed >= SAMPLE_INTERVAL_MS) frame = requestAnimationFrame(measure);
+      else if (delayTimer === null) {
+        delayTimer = window.setTimeout(() => {
+          delayTimer = null;
+          if (!frame) frame = requestAnimationFrame(measure);
+        }, SAMPLE_INTERVAL_MS - elapsed);
+      }
     };
-  }, [commit, enabled, localClientId, surfaceRef]);
+
+    const resize = new ResizeObserver(scheduleMeasure);
+    resize.observe(surface);
+    surface.addEventListener("scroll", scheduleMeasure, { passive: true });
+    window.addEventListener("resize", scheduleMeasure, { passive: true });
+    scheduleMeasure();
+    return () => {
+      if (frame) cancelAnimationFrame(frame);
+      if (delayTimer !== null) window.clearTimeout(delayTimer);
+      resize.disconnect();
+      surface.removeEventListener("scroll", scheduleMeasure);
+      window.removeEventListener("resize", scheduleMeasure);
+    };
+  }, [commit, enabled, localClientId, states, surfaceRef]);
 
   return influences;
 }

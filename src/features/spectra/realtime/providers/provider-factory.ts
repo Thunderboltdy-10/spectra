@@ -16,19 +16,10 @@ export function configuredRealtimeProviderKind(): RealtimeProviderKind {
  * compatibility rollback until the Phase 12 removal gate.
  */
 export function realtimeProviderForWorkType(typeKey: string): RealtimeProviderKind {
-  // The default development command starts the Hocuspocus gateway. Keep local
-  // document/code sessions on that healthy, persistence-backed path unless a
-  // developer explicitly opts into a separately running Cloudflare worker.
-  if (
-    process.env.NODE_ENV === "development" &&
-    process.env.NEXT_PUBLIC_SPECTRA_CLOUDFLARE_REALTIME !== "true"
-  )
-    return "hocuspocus";
-  if (
-    (typeKey === "document" || typeKey === "code") &&
-    process.env.NEXT_PUBLIC_SPECTRA_CLOUDFLARE_REALTIME !== "false"
-  )
-    return "cloudflare";
+  void typeKey;
+  // The local/self-hosted gateway is the launch-safe default for every work
+  // type. Cloudflare is selected only by an explicit deployment opt-in; an
+  // absent public flag must never silently route documents to a missing worker.
   return configuredRealtimeProviderKind();
 }
 

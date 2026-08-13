@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -18,7 +19,6 @@ import {
   writeRouteSideSession,
   writeSharedWorkbenchSession,
 } from "../workbench";
-import { ArtifactStudio } from "./artifact-studio";
 import { LiveThreadPanel } from "./live-thread-panel";
 
 const ROUTE_SIDE_PANEL_PREFIXES = [
@@ -27,6 +27,10 @@ const ROUTE_SIDE_PANEL_PREFIXES = [
   "/school",
   "/analytics",
 ];
+
+const ArtifactStudio = dynamic(() =>
+  import("./artifact-studio").then((module) => module.ArtifactStudio),
+);
 
 export function RouteSidePanelHost() {
   const pathname = usePathname();

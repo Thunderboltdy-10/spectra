@@ -90,13 +90,13 @@ describe("Cloudflare realtime browser provider", () => {
     expect(() => provider.transact("body", () => undefined)).toThrow(/READ_ONLY/);
   });
 
-  it("activates Cloudflare for native document/code work with an explicit rollback", () => {
+  it("uses the self-hosted gateway by default and Cloudflare only by explicit opt-in", () => {
     const previous = process.env.NEXT_PUBLIC_SPECTRA_CLOUDFLARE_REALTIME;
     delete process.env.NEXT_PUBLIC_SPECTRA_CLOUDFLARE_REALTIME;
-    expect(realtimeProviderForWorkType("document")).toBe("cloudflare");
-    expect(realtimeProviderForWorkType("code")).toBe("cloudflare");
-    process.env.NEXT_PUBLIC_SPECTRA_CLOUDFLARE_REALTIME = "false";
     expect(realtimeProviderForWorkType("document")).toBe("hocuspocus");
+    expect(realtimeProviderForWorkType("code")).toBe("hocuspocus");
+    process.env.NEXT_PUBLIC_SPECTRA_CLOUDFLARE_REALTIME = "true";
+    expect(realtimeProviderForWorkType("document")).toBe("cloudflare");
     if (previous === undefined)
       delete process.env.NEXT_PUBLIC_SPECTRA_CLOUDFLARE_REALTIME;
     else process.env.NEXT_PUBLIC_SPECTRA_CLOUDFLARE_REALTIME = previous;

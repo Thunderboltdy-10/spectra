@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import {
   BarChart3,
   BookOpen,
@@ -63,10 +64,9 @@ import {
 import { ArtifactCard, blueprintMeta } from "../components/artifact-card";
 import { ThreadCard } from "../components/thread-card";
 import {
-  ArtifactStudio,
   StudioTabRail,
   useArtifactStudioState,
-} from "../components/artifact-studio";
+} from "../components/artifact-studio-shell";
 import { ArtifactTileSurface } from "../components/artifact-tile-surface";
 import {
   CommandBar,
@@ -3311,6 +3311,12 @@ function _PinnedArtifactShelf({
     </div>
   );
 }
+
+const ArtifactStudio = dynamic(() =>
+  import("../components/artifact-studio").then(
+    (module) => module.ArtifactStudio,
+  ),
+);
 
 export function WorkspaceShell({
   initialWorkspaceId,

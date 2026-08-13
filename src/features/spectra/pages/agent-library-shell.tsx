@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import {
   Beaker,
   Bot,
@@ -40,10 +41,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { createDefaultArtifactPayload } from "../components/artifact-blueprint-sheet";
-import {
-  ArtifactStudio,
-  useArtifactStudioState,
-} from "../components/artifact-studio";
+import { useArtifactStudioState } from "../components/artifact-studio-shell";
 import { CommandBar } from "../components/command-bar";
 import {
   ContextFocusControl,
@@ -66,6 +64,12 @@ import {
   type SpectraWorkspace,
 } from "../data/api";
 import { formatRelativeTime } from "../components/spectra-view-model";
+
+const ArtifactStudio = dynamic(() =>
+  import("../components/artifact-studio").then(
+    (module) => module.ArtifactStudio,
+  ),
+);
 
 type SortMode = "relevance" | "recent" | "title";
 type LibrarySection = "discover" | "installed" | "yours" | "shared";
@@ -129,7 +133,9 @@ function accessibleCard(artifact: SpectraArtifact): LibraryCard {
       ? content.foundry.skills
           .filter((skill) => skill.status !== "deprecated")
           .map((skill) => skill.name)
-      : content.skills.filter((skill) => skill.enabled).map((skill) => skill.name)
+      : content.skills
+          .filter((skill) => skill.enabled)
+          .map((skill) => skill.name)
   ).filter(Boolean);
   const capabilities = [...new Set([...skills, ...artifact.tags])].slice(0, 4);
   return {
@@ -392,7 +398,9 @@ function LibrarySectionBlock({
   );
 }
 
-export function AgentLibraryShell({ initialAgentId }: { initialAgentId?: string } = {}) {
+export function AgentLibraryShell({
+  initialAgentId,
+}: { initialAgentId?: string } = {}) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const requestedAgentId = initialAgentId ?? searchParams.get("agentId");
@@ -619,7 +627,9 @@ export function AgentLibraryShell({ initialAgentId }: { initialAgentId?: string 
       toast.success(`${agent.title} is installed.`);
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : "Could not install this agent.",
+        error instanceof Error
+          ? error.message
+          : "Could not install this agent.",
       );
     } finally {
       setBusyKey(null);

@@ -19,7 +19,7 @@
  * frame, so nothing depends on a peer's pane size, scroll offset or zoom.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import {
   actIsDrag,
   actIsResize,
@@ -169,7 +169,7 @@ function frameSignature(state: InteractionState): string {
   ].join("~");
 }
 
-export function InteractionLayer({
+export const InteractionLayer = memo(function InteractionLayer({
   states,
   localClientId,
   /** Set while the local user has scrolled; suppresses travel to avoid smearing. */
@@ -236,13 +236,18 @@ export function InteractionLayer({
 
     const runtimes = runtimesRef.current;
     let frame = 0;
+    let staleTimer: number | null = null;
     let disposed = false;
 
     const measure = () => {
       if (disposed) return;
+      frame = 0;
+      if (document.visibilityState !== "visible") return;
       const now = Date.now();
       const surfaceFrame = resolveSurfaceFrame(surface, anchor);
       const seen = new Set<string>();
+      let keepAnimating = false;
+      let nextStaleDelay = Number.POSITIVE_INFINITY;
 
       for (const state of actors) {
         const key = state.actor.clientId;
@@ -261,6 +266,11 @@ export function InteractionLayer({
           runtimes.set(key, runtime);
         }
         const stale = now - state.at > STALE_AFTER_MS;
+        if (!stale)
+          nextStaleDelay = Math.min(
+            nextStaleDelay,
+            Math.max(0, state.at + STALE_AFTER_MS - now + 16),
+          );
         const terminal =
           TERMINAL_LIFECYCLES.has(state.lifecycle) &&
           state.lifecycle !== "completed" &&
@@ -312,6 +322,7 @@ export function InteractionLayer({
           runtime.departingAt !== null
             ? Math.min(1, (now - runtime.departingAt) / SETTLE_FADE_MS)
             : 0;
+        if (departing > 0) keepAnimating = true;
         if (departing >= 1) {
           runtime.lane.clear();
           runtimes.delete(key);
@@ -347,6 +358,7 @@ export function InteractionLayer({
             );
           }
           const sample: TravelSample = runtime.travel.sample(now);
+          if (sample.travelling) keepAnimating = true;
           point = { left: sample.x, top: sample.y };
           opacity *= runtime.travel.fadeOpacity(sample);
           if (effectsMutedRef.current) {
@@ -375,6 +387,11 @@ export function InteractionLayer({
         } else {
           runtime.trail.push(0, 0, now, false);
         }
+        if (trailPoints.length > 0) keepAnimating = true;
+        const justCompleted =
+          runtime.completedAt !== null &&
+          now - runtime.completedAt < COMPLETION_RING_MS;
+        if (justCompleted) keepAnimating = true;
 
         next.push({
           key,
@@ -390,22 +407,42 @@ export function InteractionLayer({
           tilt,
           trail: trailPoints,
           departing: runtime.departingAt !== null,
-          justCompleted:
-            runtime.completedAt !== null &&
-            now - runtime.completedAt < COMPLETION_RING_MS,
+          justCompleted,
         });
       }
 
       setVisuals((previous) =>
         visualsEqual(previous, next) ? previous : next,
       );
+      if (keepAnimating) frame = requestAnimationFrame(measure);
+      else if (Number.isFinite(nextStaleDelay)) {
+        staleTimer = window.setTimeout(scheduleMeasure, nextStaleDelay);
+      }
+    };
+
+    const scheduleMeasure = () => {
+      if (disposed || frame) return;
+      if (staleTimer !== null) {
+        window.clearTimeout(staleTimer);
+        staleTimer = null;
+      }
       frame = requestAnimationFrame(measure);
     };
 
-    frame = requestAnimationFrame(measure);
+    const resize = new ResizeObserver(scheduleMeasure);
+    resize.observe(surface);
+    surface.addEventListener("scroll", scheduleMeasure, { passive: true });
+    window.addEventListener("resize", scheduleMeasure, { passive: true });
+    document.addEventListener("visibilitychange", scheduleMeasure);
+    scheduleMeasure();
     return () => {
       disposed = true;
-      cancelAnimationFrame(frame);
+      if (frame) cancelAnimationFrame(frame);
+      if (staleTimer !== null) window.clearTimeout(staleTimer);
+      resize.disconnect();
+      surface.removeEventListener("scroll", scheduleMeasure);
+      window.removeEventListener("resize", scheduleMeasure);
+      document.removeEventListener("visibilitychange", scheduleMeasure);
     };
   }, [actors, signature]);
 
@@ -434,7 +471,7 @@ export function InteractionLayer({
       ))}
     </div>
   );
-}
+});
 
 /** A cheap frame-to-frame comparison; sub-pixel jitter must not re-render. */
 function visualsEqual(left: ActorVisual[], right: ActorVisual[]): boolean {
@@ -787,6 +824,7 @@ function DropTargetOutline({
     if (!surface || !anchor) return;
     let frame = 0;
     const measure = () => {
+      frame = 0;
       const placement = resolvePlacement(resolveSurfaceFrame(surface, anchor), {
         target: dropTarget,
       });
@@ -795,10 +833,21 @@ function DropTargetOutline({
           ? previous
           : (placement?.box ?? null),
       );
-      frame = requestAnimationFrame(measure);
     };
-    frame = requestAnimationFrame(measure);
-    return () => cancelAnimationFrame(frame);
+    const scheduleMeasure = () => {
+      if (!frame) frame = requestAnimationFrame(measure);
+    };
+    const resize = new ResizeObserver(scheduleMeasure);
+    resize.observe(surface);
+    surface.addEventListener("scroll", scheduleMeasure, { passive: true });
+    window.addEventListener("resize", scheduleMeasure, { passive: true });
+    scheduleMeasure();
+    return () => {
+      if (frame) cancelAnimationFrame(frame);
+      resize.disconnect();
+      surface.removeEventListener("scroll", scheduleMeasure);
+      window.removeEventListener("resize", scheduleMeasure);
+    };
   }, [dropTarget]);
   return (
     <div ref={ref} className="spectra-presence-drop-anchor">

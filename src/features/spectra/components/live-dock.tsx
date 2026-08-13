@@ -61,6 +61,18 @@ let pollTimer: number | null = null;
 let pollConsumers = 0;
 const listeners = new Set<(tabs: SpectraRunTab[]) => void>();
 
+function syncPollingVisibility() {
+  const shouldPoll =
+    pollConsumers > 0 && document.visibilityState === "visible";
+  if (shouldPoll && pollTimer === null) {
+    pollTimer = window.setInterval(() => void refreshRunTabs(), 30_000);
+  } else if (!shouldPoll && pollTimer !== null) {
+    window.clearInterval(pollTimer);
+    pollTimer = null;
+  }
+  if (shouldPoll) void refreshRunTabs();
+}
+
 function refreshRunTabs(force = false) {
   if (sharedRefresh && !force) return sharedRefresh;
   if (force) {
@@ -82,15 +94,14 @@ function refreshRunTabs(force = false) {
 
 function beginPolling() {
   pollConsumers += 1;
-  if (pollTimer === null)
-    pollTimer = window.setInterval(() => {
-      if (document.visibilityState === "visible") void refreshRunTabs();
-    }, 4000);
+  if (pollConsumers === 1)
+    document.addEventListener("visibilitychange", syncPollingVisibility);
+  syncPollingVisibility();
   return () => {
     pollConsumers = Math.max(0, pollConsumers - 1);
-    if (pollConsumers === 0 && pollTimer !== null) {
-      window.clearInterval(pollTimer);
-      pollTimer = null;
+    if (pollConsumers === 0) {
+      document.removeEventListener("visibilitychange", syncPollingVisibility);
+      syncPollingVisibility();
     }
   };
 }
@@ -462,7 +473,9 @@ export function LiveDock({
     )
       return;
     void refresh(true);
-    const timer = window.setInterval(() => void refresh(true), 900);
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") void refresh(true);
+    }, 2_000);
     return () => window.clearInterval(timer);
   }, [optimistic, optimistic?.runId, optimistic?.status, refresh, story]);
 

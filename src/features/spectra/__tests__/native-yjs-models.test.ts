@@ -2,7 +2,10 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import { getBlueprint } from "@/features/spectra/blueprints";
-import { ARTIFACT_TYPE_KEYS, type ArtifactTypeKey } from "@/features/spectra/artifacts/types";
+import {
+  ARTIFACT_TYPE_KEYS,
+  type ArtifactTypeKey,
+} from "@/features/spectra/artifacts/types";
 import {
   codeFileText,
   codeYjsAdapter,
@@ -82,12 +85,19 @@ function nativeTypes(value: unknown, result: Array<Y.Text | Y.XmlText> = []) {
   }
   if (value instanceof Y.Map)
     for (const entry of value.values()) nativeTypes(entry, result);
-  else if (value instanceof Y.Array || value instanceof Y.XmlFragment || value instanceof Y.XmlElement)
+  else if (
+    value instanceof Y.Array ||
+    value instanceof Y.XmlFragment ||
+    value instanceof Y.XmlElement
+  )
     for (const entry of value.toArray()) nativeTypes(entry, result);
   return result;
 }
 
-function sharedTexts(adapter: ReturnType<typeof workYjsAdapter>, document: Y.Doc) {
+function sharedTexts(
+  adapter: ReturnType<typeof workYjsAdapter>,
+  document: Y.Doc,
+) {
   const binding = adapter.bind(document, null, human);
   return binding.sharedTypes.flatMap((value) => nativeTypes(value));
 }
@@ -95,14 +105,18 @@ function sharedTexts(adapter: ReturnType<typeof workYjsAdapter>, document: Y.Doc
 describe("native fine-grained Yjs models", () => {
   it("registers a complete create/bind/project/regions/validate/migrate/undo adapter for every work type", () => {
     const adapters = listWorkYjsAdapters();
-    expect(adapters.map((adapter) => adapter.workType)).toEqual(ARTIFACT_TYPE_KEYS);
+    expect(adapters.map((adapter) => adapter.workType)).toEqual(
+      ARTIFACT_TYPE_KEYS,
+    );
     for (const type of ARTIFACT_TYPE_KEYS) {
       const adapter = workYjsAdapter(type);
       const document = adapter.createDocument(defaultContent(type));
       expect(adapter.validate(document)).toEqual({ valid: true });
       expect(adapter.project(document)).toBeTruthy();
       expect(adapter.deriveSemanticRegions(document).length).toBeGreaterThan(0);
-      expect(adapter.bind(document, null, human).sharedTypes.length).toBeGreaterThan(0);
+      expect(
+        adapter.bind(document, null, human).sharedTypes.length,
+      ).toBeGreaterThan(0);
       const undo = adapter.createUndoManager(document, human);
       expect(undo).toBeInstanceOf(Y.UndoManager);
       undo.destroy();
@@ -132,7 +146,10 @@ describe("native fine-grained Yjs models", () => {
       const leftText = sharedTexts(adapter, left)[0];
       const rightText = sharedTexts(adapter, right)[0];
       expect(leftText, `${type} must expose native shared text`).toBeTruthy();
-      expect(rightText, `${type} must reproduce native shared text`).toBeTruthy();
+      expect(
+        rightText,
+        `${type} must reproduce native shared text`,
+      ).toBeTruthy();
       const regionsBefore = new Set(
         adapter.deriveSemanticRegions(left).map((region) => region.regionId),
       );
@@ -193,11 +210,19 @@ describe("native fine-grained Yjs models", () => {
 
     codeYjsAdapter.applyProjection(
       document,
-      defaultContent("code") as Parameters<typeof codeYjsAdapter.applyProjection>[1],
+      defaultContent("code") as Parameters<
+        typeof codeYjsAdapter.applyProjection
+      >[1],
       origins.localHuman,
     );
-    const text = codeFileText(document, codeYjsAdapter.project(document).entryFileId)!;
-    document.transact(() => text.insert(text.length, "\n<!-- local -->"), origins.localHuman);
+    const text = codeFileText(
+      document,
+      codeYjsAdapter.project(document).entryFileId,
+    )!;
+    document.transact(
+      () => text.insert(text.length, "\n<!-- local -->"),
+      origins.localHuman,
+    );
     undo.undo();
 
     expect(text.toString()).not.toContain("<!-- local -->");
@@ -216,11 +241,19 @@ describe("native fine-grained Yjs models", () => {
     const rightText = firstXmlText(right.getXmlFragment("spectra:document-v2"));
     const anchor = createDocumentRelativeSelection(left, "intro", 5);
     expect(anchor).not.toBeNull();
-    left.transact(() => leftText.insert(5, " world"), workTransactionOrigin(human, "local_human"));
-    right.transact(() => rightText.insert(0, "Kind "), workTransactionOrigin(ai, "ai_semantic_edit"));
+    left.transact(
+      () => leftText.insert(5, " world"),
+      workTransactionOrigin(human, "local_human"),
+    );
+    right.transact(
+      () => rightText.insert(0, "Kind "),
+      workTransactionOrigin(ai, "ai_semantic_edit"),
+    );
     sync(left, right);
     sync(right, left);
-    expect(firstXmlText(left.getXmlFragment("spectra:document-v2")).toString()).toBe(
+    expect(
+      firstXmlText(left.getXmlFragment("spectra:document-v2")).toString(),
+    ).toBe(
       firstXmlText(right.getXmlFragment("spectra:document-v2")).toString(),
     );
     const resolved = resolveDocumentRelativeSelection(left, anchor!);
@@ -230,7 +263,9 @@ describe("native fine-grained Yjs models", () => {
   });
 
   it("merges code per file while structural metadata stays independent", () => {
-    const initial = defaultContent("code") as Parameters<typeof codeYjsAdapter.createDocument>[0];
+    const initial = defaultContent("code") as Parameters<
+      typeof codeYjsAdapter.createDocument
+    >[0];
     const left = codeYjsAdapter.createDocument(initial);
     const right = new Y.Doc();
     sync(left, right);
@@ -247,7 +282,9 @@ describe("native fine-grained Yjs models", () => {
   });
 
   it("keeps sparse sheet cells and presentation geometry in independent native maps", () => {
-    const sheetDoc = workYjsAdapter("sheets").createDocument(defaultContent("sheets"));
+    const sheetDoc = workYjsAdapter("sheets").createDocument(
+      defaultContent("sheets"),
+    );
     const sheets = structuredCollection(sheetDoc, ["sheets"]);
     expect(sheets).not.toBeNull();
     const sheet = sheets!.items.get("sheet-1")!;
@@ -267,7 +304,10 @@ describe("native fine-grained Yjs models", () => {
       B1: { value: "Independent" },
     });
 
-    const presentation = defaultContent("presentation") as Record<string, unknown>;
+    const presentation = defaultContent("presentation") as Record<
+      string,
+      unknown
+    >;
     (presentation.slides as Array<Record<string, unknown>>)[0]!.objects = [
       {
         id: "object-1",
@@ -282,7 +322,9 @@ describe("native fine-grained Yjs models", () => {
     ];
     const deckDoc = workYjsAdapter("presentation").createDocument(presentation);
     const slides = structuredCollection(deckDoc, ["slides"])!;
-    const objects = slides.items.get("slide-1")!.get("objects") as Y.Map<unknown>;
+    const objects = slides.items
+      .get("slide-1")!
+      .get("objects") as Y.Map<unknown>;
     const objectItems = objects.get("items") as Y.Map<Y.Map<unknown>>;
     const object = objectItems.get("object-1")!;
     object.set("x", 440);
@@ -343,7 +385,9 @@ describe("native fine-grained Yjs models", () => {
       workYjsAdapter("quiz").createDocument(quiz),
       ["questions"],
     )!;
-    const options = questions.items.get("question-1")!.get("options") as Y.Array<unknown>;
+    const options = questions.items
+      .get("question-1")!
+      .get("options") as Y.Array<unknown>;
     expect(options.get(0)).toBeInstanceOf(Y.Text);
   });
 
@@ -356,7 +400,12 @@ describe("native fine-grained Yjs models", () => {
     const planSource = {
       ...(defaultContent("planner_task") as Record<string, unknown>),
       tasks: [
-        { id: "task-1", title: "Research", status: "todo", calendarBlockIds: ["block-1"] },
+        {
+          id: "task-1",
+          title: "Research",
+          status: "todo",
+          calendarBlockIds: ["block-1"],
+        },
         { id: "task-2", title: "Draft", status: "doing" },
       ],
       milestones: [{ id: "milestone-1", title: "First review" }],
@@ -367,13 +416,15 @@ describe("native fine-grained Yjs models", () => {
       "task-1",
       "task-2",
     ]);
-    expect(structuredCollection(plan, ["milestones"])?.order.toArray()).toEqual([
-      "milestone-1",
-    ]);
+    expect(structuredCollection(plan, ["milestones"])?.order.toArray()).toEqual(
+      ["milestone-1"],
+    );
     expect(structuredText(plan, ["tasks", "task-1", "title"])?.toString()).toBe(
       "Research",
     );
-    expect(workYjsAdapter("planner_task").validate(plan)).toEqual({ valid: true });
+    expect(workYjsAdapter("planner_task").validate(plan)).toEqual({
+      valid: true,
+    });
   });
 
   it("supports collaborative Agent mission, evidence, dynamic sections, and release drafts", () => {
@@ -381,37 +432,52 @@ describe("native fine-grained Yjs models", () => {
       ...(defaultContent("agent") as Record<string, unknown>),
       mission: { objective: "Review research with source discipline" },
       foundationSections: [
-        { id: "section-1", type: "text", question: "What should improve?", answer: "Claims" },
+        {
+          id: "section-1",
+          type: "text",
+          question: "What should improve?",
+          answer: "Claims",
+        },
       ],
       evidenceBindings: [
         { id: "evidence-1", title: "Rubric", description: "Primary criteria" },
       ],
       releaseDrafts: [
-        { id: "release-1", releaseSummary: "Adds evidence checks", status: "draft" },
+        {
+          id: "release-1",
+          releaseSummary: "Adds evidence checks",
+          status: "draft",
+        },
       ],
     };
     const document = workYjsAdapter("agent").createDocument(source);
     expect(structuredText(document, ["mission", "objective"])?.toString()).toBe(
       "Review research with source discipline",
     );
-    expect(structuredCollection(document, ["foundationSections"])?.order.toArray()).toEqual([
-      "section-1",
-    ]);
-    expect(structuredCollection(document, ["evidenceBindings"])?.order.toArray()).toEqual([
-      "evidence-1",
-    ]);
-    expect(structuredCollection(document, ["releaseDrafts"])?.order.toArray()).toEqual([
-      "release-1",
-    ]);
+    expect(
+      structuredCollection(document, ["foundationSections"])?.order.toArray(),
+    ).toEqual(["section-1"]);
+    expect(
+      structuredCollection(document, ["evidenceBindings"])?.order.toArray(),
+    ).toEqual(["evidence-1"]);
+    expect(
+      structuredCollection(document, ["releaseDrafts"])?.order.toArray(),
+    ).toEqual(["release-1"]);
     expect(workYjsAdapter("agent").validate(document)).toEqual({ valid: true });
   });
 
   it("isolates human undo from remote AI origins", () => {
-    const document = codeYjsAdapter.createDocument(defaultContent("code") as Parameters<typeof codeYjsAdapter.createDocument>[0]);
+    const document = codeYjsAdapter.createDocument(
+      defaultContent("code") as Parameters<
+        typeof codeYjsAdapter.createDocument
+      >[0],
+    );
     const text = codeFileText(document, "file-main")!;
     const localOrigin = workTransactionOrigin(human, "local_human");
     const aiOrigin = workTransactionOrigin(ai, "ai_semantic_edit");
-    const undo = new Y.UndoManager(text, { trackedOrigins: new Set([localOrigin]) });
+    const undo = new Y.UndoManager(text, {
+      trackedOrigins: new Set([localOrigin]),
+    });
     document.transact(() => text.insert(text.length, " local"), localOrigin);
     document.transact(() => text.insert(text.length, " ai"), aiOrigin);
     undo.undo();
@@ -423,10 +489,16 @@ describe("native fine-grained Yjs models", () => {
   it("resolves every action/control through mergeable, lease, or claim policy", () => {
     collaborationPolicyRegistry.assertEveryRegisteredActionResolves();
     expect(
-      collaborationPolicyRegistry.resolve({ workType: "document", control: "richtext" }),
+      collaborationPolicyRegistry.resolve({
+        workType: "document",
+        control: "richtext",
+      }),
     ).toEqual({ mode: "mergeable", sharedType: "xml" });
     expect(
-      collaborationPolicyRegistry.resolve({ workType: "sheets", control: "gridCell" }),
+      collaborationPolicyRegistry.resolve({
+        workType: "sheets",
+        control: "gridCell",
+      }),
     ).toMatchObject({ mode: "interaction_lease", leaseScope: "field" });
     expect(
       collaborationPolicyRegistry.resolve({
@@ -500,7 +572,11 @@ describe("native fine-grained Yjs models", () => {
       }
     }
     const store = new DelayedStore();
-    const document = codeYjsAdapter.createDocument(defaultContent("code") as Parameters<typeof codeYjsAdapter.createDocument>[0]);
+    const document = codeYjsAdapter.createDocument(
+      defaultContent("code") as Parameters<
+        typeof codeYjsAdapter.createDocument
+      >[0],
+    );
     const persistence = new BoundedYjsLocalPersistence({
       key: "work:code-1:root",
       document,
@@ -529,13 +605,22 @@ describe("native fine-grained Yjs models", () => {
       debounceMs: 0,
     });
     await second.initialize();
-    expect(codeFileText(restored, "file-main")?.toString()).toContain("offline");
-    expect(second.getSnapshot()).toMatchObject({ restored: true, pendingRemoteSync: true });
+    expect(codeFileText(restored, "file-main")?.toString()).toContain(
+      "offline",
+    );
+    expect(second.getSnapshot()).toMatchObject({
+      restored: true,
+      pendingRemoteSync: true,
+    });
     second.destroy();
   });
 
   it("keeps native serialization bounded and statically guards focused document resets", async () => {
-    const document = codeYjsAdapter.createDocument(defaultContent("code") as Parameters<typeof codeYjsAdapter.createDocument>[0]);
+    const document = codeYjsAdapter.createDocument(
+      defaultContent("code") as Parameters<
+        typeof codeYjsAdapter.createDocument
+      >[0],
+    );
     const text = codeFileText(document, "file-main")!;
     text.insert(text.length, "x".repeat(200_000));
     const started = performance.now();
@@ -544,7 +629,7 @@ describe("native fine-grained Yjs models", () => {
     expect(update.byteLength).toBeLessThan(260_000);
 
     const source = await readFile(
-      new URL("../components/artifact-studio.tsx", import.meta.url),
+      new URL("../components/document-studio.tsx", import.meta.url),
       "utf8",
     );
     expect(source).toContain("contentChanged && !collaborationDocument");

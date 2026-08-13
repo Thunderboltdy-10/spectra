@@ -34,3 +34,21 @@ Landing performance (M7 — but shared field/prism code you touch must not regre
 2. Golden Flows 0–7, 10, 12 pass after decomposition — identical behavior, faster.
 3. `artifact-studio.tsx` no longer contains inline studios; every studio lazy-loads; line count and bundle evidence recorded in STATE.md.
 4. rAF/polling inventory with before/after documented in the mission log; STATE.md §2.C updated.
+
+## Mission log — closed 2026-08-13
+
+- Prerequisite: M2 was VERIFIED in STATE before work began.
+- C2: split Document/Flashcard/Quiz plus shell/file/value helpers; `artifact-studio.tsx` 16,563 → 6,599 lines; every studio and route host uses `dynamic()`.
+- A2: Yjs snapshot projection is coalesced to 120ms; initial projection remains synchronous.
+- C3 before: presence/surface measurement rAF loops ran continuously. After: ResizeObserver/scroll/visibility/active-motion schedule bounded frames. Landing GrainField is M7-only.
+- C4 before: Dock 4s + 900ms active, notifications 8s, policy sweep 1s. After: Dock 30s visible + 2s active, notifications 30s visible, policy sweep 5s.
+- C5: removed `innerHTML` heartbeat; focus heartbeat 10s and hidden-aware; cached one awareness signature per update.
+- C1 decision: self-hosted Hocuspocus remains default; Cloudflare requires explicit opt-in. Production start now keeps the same-origin realtime proxy.
+- C6: split 20k-line global CSS into ordered tokens/app/landing/field sheets.
+- A10 decision: projection-with-debounce is launch-sufficient. Heavy Whiteboard opened in 855ms and reached Live; no mass migration scheduled.
+- Chrome Profile P production trace (slow host): Workspace reload-to-ready 3.91s; Library cached commit 1.05s; Document warm 1.17s; Whiteboard 0.86s; Quiz 2.03s; Chat 1.08s.
+- Document typing and undo round trips were 392/313ms and undo restored the original text; no saved content mutation remained.
+- Focused Golden Flow proof: Workspace/Library, Document edit+undo, heavy Whiteboard Live+zoom, Quiz Build, and Chat shell passed with unchanged behavior.
+- User relaxed hard caps for this host. Experience is smoother, but cold hydration and ~1s route commits remain logged honestly in STATE.
+- Evidence: `.shots/missions/M3/001_workspace-ready.png`, `002_library-warm.png`, `003_document-open.png`, `007_whiteboard-live.png`, `008_quiz-open.png`, `009_chat-shell.png`, `010_browser-performance-trace.json`, `011_browser-console.json`.
+- One production build passed. Latest full suite: 688/690 with two pre-existing live-preview timing failures; focused structural tests 28/28.

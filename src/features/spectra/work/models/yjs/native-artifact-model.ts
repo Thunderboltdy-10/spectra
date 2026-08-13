@@ -16,6 +16,7 @@ import { workYjsOrigins } from "./origins";
 import type { WorkActorIdentity, WorkYjsAdapter } from "./contracts";
 
 export const NATIVE_WORK_LIVE_META_MAP = "spectra:work-v2:live-meta";
+const SNAPSHOT_PROJECTION_DELAY_MS = 120;
 const EMPTY: ArtifactLiveModelSnapshot = {
   initialized: false,
   validity: "uninitialized",
@@ -49,7 +50,8 @@ export class NativeArtifactYjsModel {
   private readonly listeners = new Set<() => void>();
   private snapshot: ArtifactLiveModelSnapshot = EMPTY;
   private destroyed = false;
-  private readonly refresh: () => void;
+  private refreshTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly scheduleRefresh: () => void;
 
   constructor(
     readonly typeKey: ArtifactTypeKey,
@@ -59,8 +61,19 @@ export class NativeArtifactYjsModel {
     this.actor = actorFor(transport);
     this.liveMeta = transport.document.getMap<unknown>(NATIVE_WORK_LIVE_META_MAP);
     this.undoManager = this.adapter.createUndoManager(transport.document, this.actor);
-    this.refresh = () => this.rebuildSnapshot();
-    transport.document.on("update", this.refresh);
+    // Document and Code editors bind to native Yjs types directly. Projecting
+    // their entire body in the synchronous Y.Doc update callback duplicated the
+    // editor work on every keystroke and put JSON allocation on the input path.
+    // Metadata/semantic consumers can tolerate a short coalescing window, so a
+    // burst of updates now pays for one projection after the input task yields.
+    this.scheduleRefresh = () => {
+      if (this.destroyed || this.refreshTimer !== null) return;
+      this.refreshTimer = setTimeout(() => {
+        this.refreshTimer = null;
+        this.rebuildSnapshot();
+      }, SNAPSHOT_PROJECTION_DELAY_MS);
+    };
+    transport.document.on("update", this.scheduleRefresh);
     this.rebuildSnapshot();
   }
 
@@ -74,8 +87,12 @@ export class NativeArtifactYjsModel {
   destroy() {
     if (this.destroyed) return;
     this.destroyed = true;
+    if (this.refreshTimer !== null) {
+      clearTimeout(this.refreshTimer);
+      this.refreshTimer = null;
+    }
     if (!this.transport.document.isDestroyed) {
-      this.transport.document.off("update", this.refresh);
+      this.transport.document.off("update", this.scheduleRefresh);
       this.undoManager.destroy();
     }
     this.listeners.clear();

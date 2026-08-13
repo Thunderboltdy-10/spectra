@@ -228,7 +228,9 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
   private durablePendingUpdateIds = new Set<string>();
   private unsynchronizedChanges = 0;
   private presence: CollaborationPresence[] = [];
+  private presenceSignature = "[]";
   private localPresence: CollaborationPresence | null = null;
+  private localPresenceSignature = "";
   private error?: string;
   private destroyed = false;
   private intentionallyDisconnected = false;
@@ -300,21 +302,6 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
                     ? "synchronized"
                     : this.state,
           }),
-    });
-  }
-
-  private samePresence(
-    left: CollaborationPresence[] | undefined,
-    right: CollaborationPresence[],
-  ) {
-    if (!left || left.length !== right.length) return false;
-    return left.every((person, index) => {
-      const other = right[index];
-      return (
-        other !== undefined &&
-        person.clientId === other.clientId &&
-        JSON.stringify(person) === JSON.stringify(other)
-      );
     });
   }
 
@@ -595,7 +582,11 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
           const resolvedPresence = presence.map((entry) =>
             this.resolveRelativePresence(entry),
           );
-          if (!this.samePresence(this.presence, resolvedPresence)) {
+          // Awareness callbacks rebuild wrapper objects. Compare one compact
+          // array signature instead of stringifying both sides for every peer.
+          const signature = JSON.stringify(resolvedPresence);
+          if (signature !== this.presenceSignature) {
+            this.presenceSignature = signature;
             this.update({ presence: resolvedPresence });
           }
         },
@@ -673,6 +664,7 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
         name: initial.displayName,
         actorKind: "human",
       };
+      this.localPresenceSignature = JSON.stringify(this.localPresence);
       this.provider.setAwarenessField("user", this.localPresence);
       this.startAuthorizationWatch();
     } catch (error) {
@@ -740,13 +732,10 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
       ...fields,
       clientId: this.clientId,
     };
-    if (
-      this.localPresence &&
-      JSON.stringify(this.localPresence) === JSON.stringify(nextPresence)
-    ) {
-      return;
-    }
+    const signature = JSON.stringify(nextPresence);
+    if (signature === this.localPresenceSignature) return;
     this.localPresence = nextPresence;
+    this.localPresenceSignature = signature;
     this.provider?.setAwarenessField("user", this.localPresence);
   }
 

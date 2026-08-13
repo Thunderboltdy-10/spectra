@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import {
   BookOpen,
   CalendarCheck2,
@@ -57,10 +58,9 @@ import {
 } from "../components/artifact-blueprint-sheet";
 import { ArtifactCard, blueprintMeta } from "../components/artifact-card";
 import {
-  ArtifactStudio,
   StudioTabRail,
   useArtifactStudioState,
-} from "../components/artifact-studio";
+} from "../components/artifact-studio-shell";
 import { ArtifactTileSurface } from "../components/artifact-tile-surface";
 import {
   CommandBar,
@@ -183,6 +183,12 @@ function useOutsideClick<T extends HTMLElement>(
   }, [onClose, open]);
   return ref;
 }
+
+const ArtifactStudio = dynamic(() =>
+  import("../components/artifact-studio").then(
+    (module) => module.ArtifactStudio,
+  ),
+);
 
 export function ArtifactsShell({
   initialArtifactId,
@@ -666,15 +672,15 @@ export function ArtifactsShell({
     try {
       const [artifactResult, invitationResult, overview, threadResult] =
         await Promise.all([
-        getSpectraArtifacts({
-          placement: "all",
-        }),
-        getSpectraShareInvitations(),
-        metadataLoadedRef.current
-          ? Promise.resolve(null)
-          : getSpectraOverview(),
-        getSpectraThreads({ limit: 200 }).catch(() => ({ threads: [] })),
-      ]);
+          getSpectraArtifacts({
+            placement: "all",
+          }),
+          getSpectraShareInvitations(),
+          metadataLoadedRef.current
+            ? Promise.resolve(null)
+            : getSpectraOverview(),
+          getSpectraThreads({ limit: 200 }).catch(() => ({ threads: [] })),
+        ]);
       const listedArtifacts = artifactResult.artifacts.filter(
         (artifact) => artifact.blueprintKey !== "timetable",
       );

@@ -8,7 +8,7 @@
     "dev:collab": "node --env-file=.env.local scripts/dev-collaboration-gateway.mjs",
     "start:collab": "node scripts/collaboration-gateway.mjs",
     "build": "next build",
-    "start": "next start",
+    "start": "node --env-file=.env.local scripts/start-web.mjs",
     "lint": "eslint . --max-warnings=0",
     "test": "vitest",
     "test:run": "vitest run",

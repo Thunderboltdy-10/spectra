@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import {
   useCallback,
   useEffect,
@@ -36,10 +37,7 @@ import {
   GlobalSearch,
   type ComposerFocusMode,
 } from "../components/context-controls";
-import {
-  ArtifactStudio,
-  useArtifactStudioState,
-} from "../components/artifact-studio";
+import { useArtifactStudioState } from "../components/artifact-studio-shell";
 import { LiveThreadPanel } from "../components/live-thread-panel";
 import {
   disengageFollow,
@@ -62,6 +60,12 @@ import {
   type SpectraThreadDetail,
   type SpectraWorkspace,
 } from "../data/api";
+
+const ArtifactStudio = dynamic(() =>
+  import("../components/artifact-studio").then(
+    (module) => module.ArtifactStudio,
+  ),
+);
 
 export function ChatShell() {
   const router = useRouter();
@@ -742,8 +746,8 @@ export function ChatShell() {
               choice.title === "Skipped"
                 ? "Skip that question and continue with reasonable defaults."
                 : choice.description
-                ? `${choice.title}: ${choice.description}`
-                : choice.title,
+                  ? `${choice.title}: ${choice.description}`
+                  : choice.title,
             )
           }
           activeCards={activeCards}

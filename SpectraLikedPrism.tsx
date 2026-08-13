@@ -1,5 +1,4 @@
 /* Reference asset (R3F render-loop idioms: per-frame ref/uniform mutation). */
-/* eslint-disable react-hooks/immutability */
 import { useFrame, useThree } from "@react-three/fiber";
 import { MeshTransmissionMaterial } from "@react-three/drei";
 import { useMemo, useRef, useEffect } from "react";

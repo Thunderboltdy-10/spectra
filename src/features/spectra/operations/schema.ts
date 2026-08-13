@@ -374,6 +374,24 @@ export const requestIntentSchema = z
 
 export type RequestIntent = z.infer<typeof requestIntentSchema>;
 
+const boundedChoiceQuestionSchema = z
+  .object({
+    id: z.string().trim().min(1).max(80),
+    question: z.string().trim().min(1).max(500),
+    options: z
+      .array(
+        z
+          .object({
+            title: z.string().trim().min(1).max(80),
+            description: z.string().trim().max(240).nullable().optional(),
+          })
+          .strict(),
+      )
+      .min(2)
+      .max(6),
+  })
+  .strict();
+
 export const spectraPlanSchema = z
   .object({
     decision: z.enum(PLAN_DECISIONS),
@@ -387,21 +405,14 @@ export const spectraPlanSchema = z
       .nullable()
       .optional(),
     choices: z
-      .object({
-        question: z.string().trim().min(1).max(500),
-        options: z
-          .array(
-            z
-              .object({
-                title: z.string().trim().min(1).max(80),
-                description: z.string().trim().max(240).nullable().optional(),
-              })
-              .strict(),
-          )
-          .min(2)
-          .max(4),
-      })
-      .strict()
+      .union([
+        boundedChoiceQuestionSchema.omit({ id: true }),
+        z
+          .object({
+            questions: z.array(boundedChoiceQuestionSchema).min(2).max(4),
+          })
+          .strict(),
+      ])
       .nullable()
       .optional(),
     finalResponse: z.string().trim().min(1).max(4_000),
@@ -1170,7 +1181,7 @@ export const SPECTRA_PLAN_JSON_SCHEMA = {
             options: {
               type: "array",
               minItems: 2,
-              maxItems: 4,
+              maxItems: 6,
               items: {
                 type: "object",
                 additionalProperties: false,
@@ -1178,6 +1189,41 @@ export const SPECTRA_PLAN_JSON_SCHEMA = {
                 properties: {
                   title: { type: "string" },
                   description: nullableString,
+                },
+              },
+            },
+          },
+        },
+        {
+          type: "object",
+          additionalProperties: false,
+          required: ["questions"],
+          properties: {
+            questions: {
+              type: "array",
+              minItems: 2,
+              maxItems: 4,
+              items: {
+                type: "object",
+                additionalProperties: false,
+                required: ["id", "question", "options"],
+                properties: {
+                  id: { type: "string" },
+                  question: { type: "string" },
+                  options: {
+                    type: "array",
+                    minItems: 2,
+                    maxItems: 6,
+                    items: {
+                      type: "object",
+                      additionalProperties: false,
+                      required: ["title", "description"],
+                      properties: {
+                        title: { type: "string" },
+                        description: nullableString,
+                      },
+                    },
+                  },
                 },
               },
             },

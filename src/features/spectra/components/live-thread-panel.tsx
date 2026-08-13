@@ -25,7 +25,7 @@ export function LiveThreadPanel({
   width: number;
   onWidthChange: (width: number) => void;
   onClose: () => void;
-  /** Legacy selection hook; open threads now continue automatically. */
+  /** Select or remove this saved conversation as composer continuation. */
   onContinue?: () => void;
   continuing?: boolean;
   onOpenArtifact?: (artifactId: string) => void;
@@ -37,20 +37,24 @@ export function LiveThreadPanel({
       width={width}
       onWidthChange={onWidthChange}
       ariaLabel="Live thread"
+      cssWidthVariable="--spectra-live-thread-width"
     >
       <div className="flex h-full min-h-0 flex-col bg-[var(--bg-primary)]">
-        <header className="flex h-14 shrink-0 items-center gap-3 border-b border-[var(--border-default)] px-4">
+        <header className="flex h-14 min-w-0 shrink-0 items-center gap-2 overflow-hidden border-b border-[var(--border-default)] px-4">
           <span
-            className="spectra-card-type-icon !h-8 !w-8 text-[var(--brand-primary)]"
+            className="spectra-card-type-icon !h-8 !w-8 shrink-0 text-[var(--brand-primary)]"
             style={{ "--card-accent": "var(--brand-primary)" } as CSSProperties}
           >
             <MessageSquare className="h-4 w-4" />
           </span>
-          <div className="min-w-0 flex-1">
-            <div className="truncate font-display text-[16px] font-semibold text-[var(--text-primary)]">
+          <div className="min-w-0 flex-1 overflow-hidden">
+            <div
+              className="truncate font-display text-[16px] font-semibold text-[var(--text-primary)]"
+              title={title || "Live thread"}
+            >
               {title || "Live thread"}
             </div>
-            <div className="text-micro font-semibold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
+            <div className="truncate text-micro font-semibold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
               Live conversation
             </div>
           </div>
@@ -59,7 +63,7 @@ export function LiveThreadPanel({
           <button
             type="button"
             onClick={() => follow.setFollowing(!follow.following)}
-            className="spectra-follow-toggle"
+            className="spectra-follow-toggle shrink-0"
             data-following={follow.following ? "true" : undefined}
             aria-label={
               follow.following
@@ -80,22 +84,20 @@ export function LiveThreadPanel({
             <button
               type="button"
               onClick={() => onContinue?.()}
-              className={`spectra-icon-action ${continuing ? "text-[var(--accent-cyan)]" : "text-[var(--text-secondary)] hover:text-[var(--accent-cyan)]"}`}
+              className={`spectra-icon-action ${continuing ? "is-selected" : ""}`}
               aria-label={
                 continuing
-                  ? "Stop continuing this thread; next message starts a new chat"
-                  : "Continue this thread"
+                  ? "Stop continuing this thread in the Live Dock"
+                  : "Continue this thread in the Live Dock"
               }
               aria-pressed={continuing}
               data-tooltip={
-                continuing
-                  ? "Stop continuing — start a new chat"
-                  : "Continue thread"
+                continuing ? "Remove from Live Dock" : "Add to Live Dock"
               }
               title={
                 continuing
-                  ? "Deselect this thread so the next message starts a new conversation"
-                  : "Select this thread and pin it to the run tabs"
+                  ? "Remove this thread from the Live Dock and start fresh next time"
+                  : "Restore this saved thread to the Live Dock and continue it"
               }
             >
               <MessageSquare className="h-4 w-4" />

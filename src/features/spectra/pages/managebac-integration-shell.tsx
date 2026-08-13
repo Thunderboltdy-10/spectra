@@ -371,7 +371,7 @@ function PeriodMapPanel({
             {periodMaps.slice().sort((a, b) => a.startMinutes - b.startMinutes).map((period) => (
               <article key={period._id} className="flex items-center gap-3 px-4 py-3">
                 <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-[#ebf7f2] text-micro font-bold text-[#277b5e]">{period.periodKey.slice(0, 3).toUpperCase()}</span>
-                <div className="min-w-0 flex-1"><div className="flex items-center gap-2"><strong className="truncate text-[11px]">{period.label}</strong><StatusPill state="good">Verified</StatusPill></div><p className="mt-1 text-micro text-[var(--text-tertiary)]">{timeFromMinutes(period.startMinutes)}â€“{timeFromMinutes(period.endMinutes)} Â· {period.timezone} Â· {period.weekdays.map((day) => weekdays[day]).join(", ")}</p></div>
+                <div className="min-w-0 flex-1"><div className="flex items-center gap-2"><strong className="truncate text-[11px]">{period.label}</strong><StatusPill state="good">Verified</StatusPill></div><p className="mt-1 text-micro text-[var(--text-tertiary)]">{timeFromMinutes(period.startMinutes)}–{timeFromMinutes(period.endMinutes)} · {period.timezone} · {period.weekdays.map((day) => weekdays[day]).join(", ")}</p></div>
                 <button type="button" disabled={Boolean(busy)} onClick={() => void onRemove(period._id)} className="grid size-7 place-items-center rounded-md text-[var(--text-tertiary)] hover:bg-[#fff0ed] hover:text-[#a84436] disabled:opacity-45" aria-label={`Remove ${period.label}`}><X size={13} /></button>
               </article>
             ))}

@@ -35,44 +35,42 @@ export class ArtifactRegionController {
     });
   }
 
-  async edit(regionId: string, overlapDomains: string[], change: () => void) {
-    const result = await this.editMany([{ regionId, overlapDomains }], change);
-    return result.applied
-      ? { applied: true as const, claim: result.claims[0]! }
-      : { applied: false as const, claim: result.claim };
+  async edit(
+    regionId: string,
+    overlapDomains: string[],
+    change: () => void,
+  ): Promise<
+    | { applied: true; claim?: undefined }
+    | { applied: false; claim: RegionClaimResult }
+  > {
+    await this.editMany([{ regionId, overlapDomains }], change);
+    return { applied: true as const };
   }
 
-  async editMany(regions: Array<{ regionId: string; overlapDomains: string[] }>, change: () => void) {
+  async editMany(
+    regions: Array<{ regionId: string; overlapDomains: string[] }>,
+    change: () => void,
+  ): Promise<
+    | { applied: true; claims: RegionClaimResult[] }
+    | {
+        applied: false;
+        claim: RegionClaimResult;
+        claims: RegionClaimResult[];
+      }
+  > {
     if (regions.length === 0 || regions.length > 128) throw new Error("REGION_EDIT_SET_INVALID");
     const unique = [...new Map(regions.map((entry) => [entry.regionId, entry])).values()];
-    const claims: RegionClaimResult[] = [];
-    for (const region of unique) {
-      const claim = await this.acquire(region.regionId, region.overlapDomains);
-      claims.push(claim);
-      if (claim.status === "queued") {
-        for (const held of [...claims.slice(0, -1)].reverse()) await postSpectra({ action: "releaseRegionClaim", claimId: held.claimId, clientId: this.transport.clientId, resolution: "cancel" }).catch(() => undefined);
-        return { applied: false as const, claim, claims };
-      }
-    }
-    let renewing = true;
-    const renew = window.setInterval(() => {
-      if (!renewing) return;
-      for (const claim of claims) void postSpectra({ action: "renewRegionClaim", claimId: claim.claimId, clientId: this.transport.clientId }).catch(() => undefined);
-    }, 9_000);
-    try {
-      this.transport.transact(unique.map((entry) => entry.regionId).join(","), change);
-      // The transaction is accepted into the local Y.Doc synchronously. Room
-      // broadcast, durable append and Convex projection continue independently;
-      // an ordinary edit must never wait for flush/projection latency.
-      for (const claim of claims) await postSpectra({ action: "releaseRegionClaim", claimId: claim.claimId, clientId: this.transport.clientId, resolution: "apply" });
-      return { applied: true as const, claims };
-    } catch (error) {
-      for (const claim of [...claims].reverse()) await postSpectra({ action: "releaseRegionClaim", claimId: claim.claimId, clientId: this.transport.clientId, resolution: "cancel" }).catch(() => undefined);
-      throw error;
-    } finally {
-      renewing = false;
-      window.clearInterval(renew);
-    }
+    // Human authoring is optimistic and broadcast-first. Waiting for one HTTP
+    // claim round trip per semantic region before touching Yjs made normal
+    // typing take seconds (or minutes on a busy account), even though the
+    // gateway already reauthorizes every frame and rejects overlap with an
+    // active AI claim. AI operations still acquire durable region leases on
+    // their server path; the append mutation requires those leases.
+    this.transport.transact(
+      unique.map((entry) => entry.regionId).join(","),
+      change,
+    );
+    return { applied: true as const, claims: [] as RegionClaimResult[] };
   }
 
   async resolve(claimId: string, resolution: "apply" | "keep_current" | "merge" | "cancel") {

@@ -247,7 +247,7 @@ export function LiveCodeRuntime({
       <RuntimeNotice
         icon={AlertTriangle}
         title="Live preview unavailable"
-        detail={`${message} The artifact source remains intact.`}
+        detail={`${message} The source remains intact.`}
         action={{ label: "Retry", onClick: prepare }}
       />
     );

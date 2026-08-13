@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { PrismStage } from "./prism-stage";
 import { PRISM_SCENES, type PrismSceneState } from "./prism-scene";
-import { prismOptics } from "./prism-slot";
+import { prismOptics, prismVisibility } from "./prism-slot";
+import { onStoryFrame } from "../story/story-clock";
 import { heroState } from "../scene/heroState";
 
 /**
@@ -48,23 +49,26 @@ export function PrismLayer({
   );
 
   /* Depth is a story decision, not a stylesheet one: the slot says whether the
-     object is behind the work or in the visitor's hand. */
-  useEffect(() => {
-    let raf = 0;
-    let front: boolean | null = null;
-    const tick = () => {
-      const node = hostRef.current;
-      if (node && heroState.front !== front) {
-        front = heroState.front;
-        /* Behind the work it sits between the ground and the canvas, seen
-           through the gaps between objects. In hand it is above everything. */
-        node.style.zIndex = front ? "70" : "1";
-      }
-      raf = window.requestAnimationFrame(tick);
-    };
-    raf = window.requestAnimationFrame(tick);
-    return () => window.cancelAnimationFrame(raf);
-  }, []);
+     object is behind the work or in the visitor's hand. Both this and the
+     render gate ride the story clock rather than opening loops of their own —
+     the page already has one heartbeat and does not need three. */
+  const [onScreen, setOnScreen] = useState(true);
+  useEffect(
+    () =>
+      onStoryFrame(() => {
+        const node = hostRef.current;
+        if (node) {
+          const front = heroState.front ? "70" : "1";
+          /* Behind the work it sits between the ground and the canvas, seen
+             through the gaps between objects. In hand it is above everything. */
+          if (node.style.zIndex !== front) node.style.zIndex = front;
+        }
+        setOnScreen((was) =>
+          was === prismVisibility.onScreen ? was : prismVisibility.onScreen,
+        );
+      }),
+    [],
+  );
 
   /* Grant hit-testing only over the glass. On coarse pointers the object stays
      inert — a drag-to-rotate would only ever fight the scroll. */
@@ -108,7 +112,7 @@ export function PrismLayer({
         scene={PRISM_SCENES.hero}
         sceneRef={sceneRef}
         staged
-        active={active}
+        active={active && onScreen}
         className="absolute inset-0"
       />
     </div>

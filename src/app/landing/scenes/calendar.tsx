@@ -178,7 +178,7 @@ function weekItems(moved: boolean): CalendarItem[] {
       sourceLocked: true,
       source: {
         provider: "School timetable",
-        state: "available",
+        state: { kind: "available" },
         freshAt: WEEK_START,
       },
     },

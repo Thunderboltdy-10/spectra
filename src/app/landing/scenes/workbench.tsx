@@ -219,8 +219,8 @@ export function WorkbenchScene() {
     return setSplitRatio(base, "split:root", 0.56 + 0.1 * (1 - (1 - pull) ** 3));
   }, [t]);
 
-  const renderTab = useMemo(
-    () => (tab: WorkbenchTab) => {
+  const renderTab = useMemo(() => {
+    function RenderWorkbenchTab(tab: WorkbenchTab) {
       if (tab.id === "tab-plan")
         return (
           <div className="landing-pane">
@@ -255,15 +255,15 @@ export function WorkbenchScene() {
           />
         </div>
       );
-    },
-    [],
-  );
+    }
+    return RenderWorkbenchTab;
+  }, []);
 
   return (
     <SceneRegion scene="workbench">
       <div className="relative h-full">
-        <div className="flex items-end gap-14 pb-6">
-          <div className="w-[400px] shrink-0">
+        <div className="flex items-end gap-12 pb-4">
+          <div className="w-[372px] shrink-0">
             <Marker
               beats={WORKBENCH_BEATS}
               scene="workbench"
@@ -274,7 +274,7 @@ export function WorkbenchScene() {
               scene="workbench"
               size="support"
               paths={["workbench/line-1", "workbench/line-2"]}
-              className="mt-4"
+              className="mt-3"
             />
           </div>
           <Body
@@ -289,7 +289,7 @@ export function WorkbenchScene() {
             always has one: the window it is in. */}
         <div
           className="relative"
-          style={{ height: 760 }}
+          style={{ height: 492 }}
           data-present={t >= 0.28 ? "true" : "false"}
         >
           <Plate
@@ -323,7 +323,7 @@ export function WorkbenchScene() {
               being lit by it rather than pasted over it. */}
           <div
             ref={prismRef}
-            className="pointer-events-none absolute left-[-140px] top-[300px] h-[280px] w-[280px]"
+            className="pointer-events-none absolute left-[-132px] top-[210px] h-[228px] w-[228px]"
             aria-hidden="true"
           />
         </div>

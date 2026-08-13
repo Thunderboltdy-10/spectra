@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, type RefObject } from "react";
 import { heroState } from "../scene/heroState";
+import { onStoryFrame } from "../story/story-clock";
 
 /**
  * Where the one true prism is, right now.
@@ -48,8 +49,18 @@ type Claim = {
 };
 
 const claims = new Map<number, Claim>();
-let frame = 0;
+let stop: (() => void) | null = null;
 let nextId = 1;
+
+/**
+ * Whether the object is anywhere near the viewport.
+ *
+ * The prism layer is a fixed full-screen canvas, so it always "intersects" and
+ * an IntersectionObserver on it can never say anything useful. The honest test
+ * is the slot itself: the object is somewhere specific in viewport pixels every
+ * frame, and when that somewhere is off-screen the GPU has nothing to draw.
+ */
+export const prismVisibility = { onScreen: true };
 
 /** Highest-priority live claim wins; ties go to the most recent claimant. */
 function leadClaim(): Claim | null {
@@ -104,7 +115,19 @@ function measure() {
     heroState.slot.w = 0;
     heroState.owned = false;
   }
-  frame = window.requestAnimationFrame(measure);
+
+  /* Rendering is gated on the object being somewhere the visitor could see.
+     The margin is generous — the glass is still travelling toward this slot,
+     and a prism that popped into existence at the viewport edge would undo the
+     one thing this whole system exists to sell: that it is the same object. */
+  const slot = heroState.slot;
+  const reach = Math.max(slot.w, 240) * 1.5;
+  prismVisibility.onScreen =
+    slot.w > 0 &&
+    slot.x > -reach &&
+    slot.y > -reach &&
+    slot.x < window.innerWidth + reach &&
+    slot.y < window.innerHeight + reach;
 }
 
 /**
@@ -129,12 +152,15 @@ export function usePrismSlot(
     if (!element || !active) return;
     const id = nextId++;
     claims.set(id, { element, priority, spec: live });
-    if (!frame) frame = window.requestAnimationFrame(measure);
+    /* Measured in the clock's measure phase, so the slot the prism reads this
+       frame is the slot the layout actually has this frame — not last frame's,
+       and not one resolved by a loop racing the camera. */
+    stop ??= onStoryFrame(measure, "measure");
     return () => {
       claims.delete(id);
-      if (claims.size === 0 && frame) {
-        window.cancelAnimationFrame(frame);
-        frame = 0;
+      if (claims.size === 0 && stop) {
+        stop();
+        stop = null;
       }
     };
   }, [ref, active, priority, live]);

@@ -6,7 +6,7 @@ import { v } from "convex/values";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import type { Id } from "./_generated/dataModel";
 
-const operation = v.union(v.literal("authorize"), v.literal("policy"), v.literal("load"), v.literal("append"), v.literal("snapshot"));
+const operation = v.union(v.literal("authorize"), v.literal("policy"), v.literal("load"), v.literal("bootstrap"), v.literal("append"), v.literal("snapshot"));
 
 function bridgeKey() {
   const value = process.env.SPECTRA_COLLAB_BRIDGE_KEY;
@@ -37,6 +37,19 @@ function text(value: unknown, name: string, max = 240) {
 
 function integer(value: unknown, name: string) {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) throw new Error(`COLLABORATION_BRIDGE_${name.toUpperCase()}_INVALID`);
+  return value;
+}
+
+function optionalBoolean(value: unknown, name: string) {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "boolean")
+    throw new Error(`COLLABORATION_BRIDGE_${name.toUpperCase()}_INVALID`);
+  return value;
+}
+
+function actorKind(value: unknown) {
+  if (value !== "human" && value !== "ai")
+    throw new Error("COLLABORATION_BRIDGE_ACTOR_KIND_INVALID");
   return value;
 }
 
@@ -73,25 +86,49 @@ export const exchange = action({
       let roomId: string | null = null;
       let schemaVersion = 1;
       let nextSequence = 1;
+      let initialProjection: unknown = null;
       for (let page = 0; page < 20; page += 1) {
         const result = await ctx.runQuery(internal.collaborationGatewayStore.load, { artifactId, partitionKey, afterSequence, limit: 500 });
         if (!result) return null;
         roomId = result.roomId;
         schemaVersion = result.schemaVersion;
         nextSequence = result.nextSequence;
+        if (!initialProjection && result.initialProjection)
+          initialProjection = result.initialProjection;
         if (!snapshot && result.snapshot) snapshot = { throughSequence: result.snapshot.throughSequence, update: Buffer.from(result.snapshot.update).toString("base64"), stateVector: Buffer.from(result.snapshot.stateVector).toString("base64"), contentHash: result.snapshot.contentHash };
         for (const update of result.updates) updates.push({ sequence: update.sequence, update: Buffer.from(update.update).toString("base64") });
         if (!result.hasMore) break;
         afterSequence = result.updates[result.updates.length - 1]!.sequence;
         if (page === 19) throw new Error("COLLABORATION_BRIDGE_SNAPSHOT_REQUIRED");
       }
-      return { roomId, schemaVersion, nextSequence, snapshot, updates };
+      return { roomId, schemaVersion, nextSequence, snapshot, updates, initialProjection };
+    }
+
+    if (args.operation === "bootstrap") {
+      const update = Buffer.from(text(payload.update, "update", 1_400_000), "base64");
+      return ctx.runMutation(internal.collaborationGatewayStore.bootstrapNative, {
+        accountId: text(payload.accountId, "account_id") as Id<"accounts">,
+        artifactId,
+        partitionKey,
+        clientId: text(payload.clientId, "client_id", 180),
+        policyVersion: integer(payload.policyVersion, "policy_version"),
+        artifactUpdatedAt: integer(payload.artifactUpdatedAt, "artifact_updated_at"),
+        expectedNextSequence: integer(
+          payload.expectedNextSequence,
+          "expected_next_sequence",
+        ),
+        update: update.buffer.slice(update.byteOffset, update.byteOffset + update.byteLength),
+        stateVectorHash: text(payload.stateVectorHash, "state_vector_hash", 180),
+        projectionJson: text(payload.projectionJson, "projection", 900_000),
+        projectionHash: text(payload.projectionHash, "projection_hash", 180),
+      });
     }
 
     if (args.operation === "append") {
       const update = Buffer.from(text(payload.update, "update", 1_400_000), "base64");
       return ctx.runMutation(internal.collaborationGatewayStore.append, {
         accountId: text(payload.accountId, "account_id") as Id<"accounts">,
+        actorKind: actorKind(payload.actorKind),
         artifactId,
         partitionKey,
         clientId: text(payload.clientId, "client_id", 180),
@@ -101,6 +138,10 @@ export const exchange = action({
         baseStateVectorHash: text(payload.baseStateVectorHash, "base_state_vector_hash", 180),
         stateVectorHash: text(payload.stateVectorHash, "state_vector_hash", 180),
         regionIds: stringArray(payload.regionIds, "region_ids"),
+        nativeInitialization: optionalBoolean(
+          payload.nativeInitialization,
+          "native_initialization",
+        ),
         projectionJson: payload.projectionJson === null || payload.projectionJson === undefined
           ? undefined
           : text(payload.projectionJson, "projection", 900_000),

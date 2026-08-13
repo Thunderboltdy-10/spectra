@@ -281,10 +281,6 @@ export function ChatShell() {
     },
     [chatWorkspaceId, closePresentation, openObject],
   );
-  useEffect(() => {
-    if (!liveThread) return;
-    if (liveThread.id === threadId) setLiveThread(null);
-  }, [liveThread, setLiveThread, threadId]);
   const openArtifact = useCallback(
     (artifactId: string) => {
       // A user-chosen open ends spectating; a follow-dispatched open does not.
@@ -482,7 +478,7 @@ export function ChatShell() {
         continuingThread
           ? `Continue ${title}…`
           : selectedContextIds.size
-            ? `Ask with ${selectedContextIds.size} selected artifacts…`
+            ? `Ask with ${selectedContextIds.size} selected work items…`
             : activeWorkspace
               ? `Ask with ${activeWorkspace.title} context…`
               : focusedArtifact
@@ -743,7 +739,9 @@ export function ChatShell() {
           }
           onChoice={(choice) =>
             void runEngine.run(
-              choice.description
+              choice.title === "Skipped"
+                ? "Skip that question and continue with reasonable defaults."
+                : choice.description
                 ? `${choice.title}: ${choice.description}`
                 : choice.title,
             )
@@ -844,8 +842,8 @@ export function ChatShell() {
           onDirtyChange={studio.setDirty}
         />
       ) : null}
-      <div className="pointer-events-none absolute bottom-0 left-0 right-[var(--spectra-studio-width,0px)] z-50 bg-transparent px-5 pb-5 pt-2 sm:px-8 min-[1920px]:right-0">
-        <div className="pointer-events-auto mx-auto max-w-[820px]">
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-50 bg-transparent px-5 pb-5 pt-2 sm:px-8">
+        <div className="pointer-events-auto mx-auto max-w-[820px] spectra-live-stack">
           <ComposerArtifactDock
             artifacts={artifacts}
             cards={runEngine.cards}

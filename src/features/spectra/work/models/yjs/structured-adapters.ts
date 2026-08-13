@@ -387,7 +387,12 @@ export function extractLegacyFlashcardStudyState(
   value: unknown,
 ): LegacyFlashcardStudySeed[] {
   const content = normalizeArtifactContent("flashcard_deck", value) as JsonRecord;
-  return (Array.isArray(content.cards) ? content.cards : []).flatMap((entry) => {
+  // Source normalization intentionally strips personal review state from the
+  // shared deck. Extract it from the incoming legacy payload first so the
+  // per-account migration does not silently discard a learner's progress.
+  const incomingCards =
+    isRecord(value) && Array.isArray(value.cards) ? value.cards : content.cards;
+  return (Array.isArray(incomingCards) ? incomingCards : []).flatMap((entry) => {
     if (!isRecord(entry) || typeof entry.id !== "string") return [];
     if (entry.review === undefined && entry.confidence === undefined) return [];
     return [

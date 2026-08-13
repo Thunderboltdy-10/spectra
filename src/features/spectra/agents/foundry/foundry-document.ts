@@ -30,6 +30,11 @@ import type { SpectraSkill } from "./skills";
 export const FOUNDRY_SCHEMA_VERSION = 1;
 
 export type AgentFoundryContent = AgentContent & {
+  /** Compatibility projection retained until every Agent reader uses Foundry. */
+  mission?: { objective: string; [key: string]: unknown };
+  foundationSections?: Record<string, unknown>[];
+  evidenceBindings?: Record<string, unknown>[];
+  releaseDrafts?: Record<string, unknown>[];
   foundry: {
     schemaVersion: number;
     mission: AgentMission;
@@ -311,6 +316,20 @@ export function normalizeFoundryContent(value: unknown): AgentFoundryContent {
   const source = record(value);
   const foundry = record(source.foundry);
   const state = record(foundry.state);
+  const legacyMission = record(source.mission);
+  const foundationSections = array<Record<string, unknown>>(
+    source.foundationSections,
+  )
+    .map(record)
+    .slice(0, 500);
+  const legacyEvidenceBindings = array<Record<string, unknown>>(
+    source.evidenceBindings,
+  )
+    .map(record)
+    .slice(0, 2_000);
+  const releaseDrafts = array<Record<string, unknown>>(source.releaseDrafts)
+    .map(record)
+    .slice(0, 500);
 
   const sections = array<unknown>(state.sections)
     .map((entry, index) => normalizeSection(entry, index))
@@ -320,12 +339,29 @@ export function normalizeFoundryContent(value: unknown): AgentFoundryContent {
 
   return {
     ...legacy,
+    ...(typeof legacyMission.objective === "string"
+      ? {
+          mission: {
+            ...legacyMission,
+            objective: text(legacyMission.objective, 8_000),
+          },
+        }
+      : {}),
+    ...(foundationSections.length ? { foundationSections } : {}),
+    ...(legacyEvidenceBindings.length
+      ? { evidenceBindings: legacyEvidenceBindings }
+      : {}),
+    ...(releaseDrafts.length ? { releaseDrafts } : {}),
     foundry: {
       schemaVersion:
         typeof foundry.schemaVersion === "number"
           ? foundry.schemaVersion
           : FOUNDRY_SCHEMA_VERSION,
-      mission: normalizeMission(foundry.mission),
+      mission: normalizeMission(
+        Object.keys(record(foundry.mission)).length
+          ? foundry.mission
+          : legacyMission,
+      ),
       state: {
         ...createFoundryState(),
         sections,

@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { resolve } from "node:path";
 
 const port = Number(process.env.SPECTRA_WEB_PORT || 3000);
-const hostname = process.env.SPECTRA_WEB_HOST || "0.0.0.0";
+const _hostname = process.env.SPECTRA_WEB_HOST || "0.0.0.0";
 const healthUrl = `http://127.0.0.1:${port}/api/health`;
 const pollIntervalMs = 2_000;
 let child = null;
@@ -42,8 +42,8 @@ async function probeWeb() {
 }
 
 function launchWeb() {
-  const nextBin = resolve("node_modules/next/dist/bin/next");
-  const next = spawn(process.execPath, [nextBin, "dev", "--hostname", hostname, "--port", String(port)], {
+  const serverScript = resolve("scripts/next-dev-server.mjs");
+  const next = spawn(process.execPath, [serverScript], {
     cwd: process.cwd(),
     env: process.env,
     stdio: "inherit",

@@ -68,7 +68,6 @@ const types: Array<{ key: "all" | ObjectType; label: string }> = [
   { key: "planner_task", label: "Tasks" },
   { key: "presentation", label: "Presentations" },
   { key: "agent", label: "Agents" },
-  { key: "timetable", label: "Timetables" },
   { key: "sheets", label: "Sheets" },
   { key: "code", label: "Code & visualisations" },
   { key: "whiteboard", label: "Whiteboards" },
@@ -277,6 +276,7 @@ export function ObjectLibrary({
   const visible = useMemo(() => {
     const needle = search.trim().toLowerCase();
     return entries
+      .filter((entry) => objectType(entry) !== "timetable")
       .filter(
         (entry) => activeType === "all" || objectType(entry) === activeType,
       )
@@ -575,7 +575,7 @@ export function ObjectLibrary({
           onClick={() => setCreateMenuKey(open ? null : groupKey)}
         >
           <Plus className="h-3.5 w-3.5" />
-          New artifact
+          New work
         </button>
         {open ? (
           <div className="absolute bottom-[calc(100%+7px)] left-0 z-30 w-[210px] rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 shadow-[0_14px_32px_rgba(27,20,12,0.13)]">

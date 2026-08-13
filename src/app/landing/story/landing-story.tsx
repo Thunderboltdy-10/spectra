@@ -23,7 +23,7 @@ import { StoryCanvas } from "./story-canvas";
 import { LandingField } from "../field/landing-field";
 import { PrismLayer } from "../prism/prism-layer";
 import { InteractionLayer } from "@/features/spectra/components/presence/interaction-layer";
-import { useStoryPresence } from "./use-story-states";
+import { useStoryActorField, useStoryPresence } from "./use-story-states";
 import { watchStoryMotion } from "./story-motion";
 import type { Beat } from "./beats";
 import type { SceneId } from "./timeline";
@@ -61,6 +61,10 @@ const BEATS: Partial<Record<SceneId, readonly Beat[]>> = {
 export function LandingStory() {
   const beats = useMemo(() => BEATS, []);
   const states = useStoryPresence(beats);
+
+  /* The field gathers around whoever is working. Reading that from the same
+     states the presence layer draws is what keeps the two agreeing. */
+  useStoryActorField(states);
 
   /* Calm mode is consulted inside the frame loop, so it is watched once here
      rather than subscribed to by every line of text on the page. */

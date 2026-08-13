@@ -224,6 +224,8 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
   private level: "read" | "modify" | null = null;
   private accountId?: string;
   private displayName?: string;
+  private providerUnsynchronizedChanges = 0;
+  private durablePendingUpdateIds = new Set<string>();
   private unsynchronizedChanges = 0;
   private presence: CollaborationPresence[] = [];
   private localPresence: CollaborationPresence | null = null;
@@ -277,6 +279,28 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
       ...(this.error ? { error: this.error } : {}),
     };
     this.emit();
+  }
+
+  private updateSynchronizationState(error?: string) {
+    const yjsPending = this.providerUnsynchronizedChanges;
+    const terminal =
+      this.state === "permission_lost" || this.state === "closed";
+    this.update({
+      unsynchronizedChanges: yjsPending,
+      ...(error !== undefined ? { error } : {}),
+      ...(terminal
+        ? {}
+        : {
+            state:
+              error !== undefined
+                ? "unsynchronized"
+                : yjsPending > 0
+                  ? "synchronizing"
+                  : this.provider?.synced
+                    ? "synchronized"
+                    : this.state,
+          }),
+    });
   }
 
   private samePresence(
@@ -433,21 +457,8 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
             });
         },
         onUnsyncedChanges: ({ number }) => {
-          const terminal =
-            this.state === "permission_lost" || this.state === "closed";
-          this.update({
-            unsynchronizedChanges: number,
-            ...(terminal
-              ? {}
-              : {
-                  state:
-                    number > 0
-                      ? "synchronizing"
-                      : this.provider?.synced
-                        ? "synchronized"
-                        : this.state,
-                }),
-          });
+          this.providerUnsynchronizedChanges = number;
+          this.updateSynchronizationState();
         },
         onAwarenessChange: ({ states }) => {
           const presence: CollaborationPresence[] = states.map((entry) => {
@@ -597,26 +608,61 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
         },
         onStateless: ({ payload }) => {
           try {
-            const message = JSON.parse(payload) as { type?: string };
-            if (message?.type !== "spectra.permission_changed") return;
-            this.update({
-              state: "reconnecting",
-              error: undefined,
-              level: null,
-            });
+            const message = JSON.parse(payload) as {
+              type?: string;
+              updateIds?: unknown;
+              message?: unknown;
+            };
+            if (message?.type === "spectra.permission_changed") {
+              this.update({
+                state: "reconnecting",
+                error: undefined,
+                level: null,
+              });
+              return;
+            }
+            const updateIds = Array.isArray(message.updateIds)
+              ? message.updateIds.filter(
+                  (value): value is string =>
+                    typeof value === "string" && value.length <= 400,
+                )
+              : [];
+            if (message.type === "spectra.durable_pending") {
+              for (const updateId of updateIds)
+                this.durablePendingUpdateIds.add(updateId);
+              this.updateSynchronizationState();
+              return;
+            }
+            if (message.type === "spectra.durable_ack") {
+              for (const updateId of updateIds)
+                this.durablePendingUpdateIds.delete(updateId);
+              this.updateSynchronizationState();
+              return;
+            }
+            if (message.type === "spectra.durable_failed")
+              this.updateSynchronizationState(
+                typeof message.message === "string"
+                  ? message.message
+                  : "This edit could not be synchronized. Your local draft is still available.",
+              );
           } catch {
             // Ignore malformed stateless payloads from the gateway.
           }
         },
         onDisconnect: ({ event }) => {
+          // A gateway restart discards only its in-memory acknowledgement set.
+          // Yjs keeps the local document and re-sends its state-vector delta on
+          // reconnect, where it receives a fresh durable pending/ack lifecycle.
+          this.durablePendingUpdateIds.clear();
           const revoked =
             event.code === 4403 && authenticationActuallyRevoked(event.reason);
           this.update({
             state: revoked
               ? "permission_lost"
-              : this.unsynchronizedChanges > 0
+              : this.providerUnsynchronizedChanges > 0
                 ? "unsynchronized"
                 : "reconnecting",
+            unsynchronizedChanges: this.providerUnsynchronizedChanges,
             error: revoked ? event.reason || "Access was removed." : undefined,
           });
         },
@@ -725,7 +771,12 @@ export class HocuspocusArtifactTransport implements ArtifactCollaborationTranspo
     // state, causing the region claim to be released before the gateway has
     // authorized and persisted the update.
     await new Promise<void>((resolve) => window.setTimeout(resolve, 16));
-    if (this.provider.synced && !this.provider.hasUnsyncedChanges) return;
+    if (
+      this.provider.synced &&
+      !this.provider.hasUnsyncedChanges &&
+      this.durablePendingUpdateIds.size === 0
+    )
+      return;
     await new Promise<void>((resolve, reject) => {
       const timeout = window.setTimeout(() => {
         cleanup();

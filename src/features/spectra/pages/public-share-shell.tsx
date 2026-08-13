@@ -114,7 +114,7 @@ function ArtifactContent({
               {artifact.title}
             </h3>
             <p className="mt-1 line-clamp-2 text-[11px] leading-5 text-[var(--text-secondary)]">
-              {artifact.summary || "Shared Spectra artifact"}
+              {artifact.summary || "Shared Spectra work"}
             </p>
           </div>
         </div>
@@ -431,7 +431,7 @@ function ArtifactContent({
           "agent",
         ].includes(artifact.blueprintKey) ? (
           <p className="text-[13px] text-[var(--text-secondary)]">
-            This artifact can be viewed in Spectra.
+            This work can be viewed in Spectra.
           </p>
         ) : null}
       </div>
@@ -572,7 +572,7 @@ export function PublicShareShell() {
               ))}
               {projection.artifacts.length === 0 ? (
                 <div className="col-span-full rounded-[12px] border border-dashed border-[var(--border-default)] py-16 text-center text-[12px] text-[var(--text-secondary)]">
-                  No artifacts have been included in this public workspace view.
+                  No work has been included in this public workspace view.
                 </div>
               ) : null}
             </div>

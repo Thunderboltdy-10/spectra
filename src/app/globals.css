@@ -2,6 +2,12 @@
 @import "katex/dist/katex.min.css";
 @import "../styles/react-flow.css";
 
+/* Framework diagnostics stay available in the console during development;
+   they are not part of Spectra's visible product shell or browser evidence. */
+nextjs-portal {
+  display: none !important;
+}
+
 @utility grid-cols-14 {
   grid-template-columns: repeat(14, minmax(0, 1fr));
 }
@@ -987,16 +993,6 @@ body {
   color: var(--text-primary);
 }
 
-.spectra-deck-mode-switch {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  padding: 3px;
-  border: 1px solid var(--border-default);
-  border-radius: 9px;
-  background: var(--bg-secondary);
-}
-
 .spectra-deck-rail-toggle {
   display: inline-flex;
   height: 35px;
@@ -1023,28 +1019,6 @@ body {
 .spectra-flashcard-studio[data-rail-collapsed="true"]
   > .spectra-deck-card-editor {
   grid-column: 1 / -1;
-}
-
-.spectra-deck-mode-switch button {
-  display: inline-flex;
-  height: 29px;
-  align-items: center;
-  gap: 6px;
-  padding: 0 10px;
-  border-radius: 6px;
-  color: var(--text-secondary);
-  font-size: 11px;
-  font-weight: 650;
-  transition:
-    background-color 150ms ease,
-    color 150ms ease,
-    box-shadow 150ms ease;
-}
-
-.spectra-deck-mode-switch button[data-active="true"] {
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  box-shadow: 0 1px 3px rgba(30, 27, 24, 0.1);
 }
 
 .spectra-deck-pagination select {
@@ -1569,6 +1543,18 @@ body {
   line-height: 1.2 !important;
 }
 
+.spectra-artifact-studio[data-studio-mode="split"]
+  .spectra-artifact-title:not(:focus) {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  field-sizing: fixed !important;
+  max-height: 1.35em;
+  overflow: hidden !important;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 @container spectra-studio-split (max-width: 460px) {
   .spectra-artifact-studio[data-studio-mode="split"] [data-quiz-panel="editor"],
   .spectra-artifact-studio[data-studio-mode="split"]
@@ -1945,10 +1931,10 @@ body {
   min-height: 620px;
   flex: 1 1 auto;
   overflow: hidden;
-  border: 1px solid #e5e7e2;
-  border-radius: 12px;
-  background: #fbfbf8;
-  box-shadow: 0 8px 30px rgba(41, 52, 46, 0.035);
+  border: 0;
+  border-radius: 0;
+  background: var(--bg-primary);
+  box-shadow: none;
 }
 
 .whiteboard-canvas {
@@ -1960,11 +1946,7 @@ body {
   overflow: hidden;
   touch-action: none;
   user-select: none;
-  background-image: radial-gradient(circle, #d8dcd6 1px, transparent 1.15px);
-  background-position: var(--board-x) var(--board-y);
-  /* The grid is a calm screen-space navigation texture. Zooming the world must
-     not make its dots balloon, disappear, or change density. */
-  background-size: var(--board-grid) var(--board-grid);
+  background: var(--bg-primary);
 }
 
 .whiteboard-canvas[data-tool="hand"] {
@@ -2111,7 +2093,30 @@ body {
 .whiteboard-node[data-type="table"] {
   overflow: hidden;
   border-radius: 9px;
-  background: #fff !important;
+  background: var(--bg-primary) !important;
+}
+
+.whiteboard-node[data-type="table"] table {
+  width: 100%;
+  height: 100%;
+  border-collapse: collapse;
+}
+
+.whiteboard-node[data-type="table"] td {
+  border: 1px solid color-mix(in oklab, var(--border-default) 80%, transparent);
+  padding: 0;
+  vertical-align: top;
+}
+
+.whiteboard-node[data-type="table"] input {
+  width: 100%;
+  min-height: 28px;
+  border: 0;
+  background: transparent;
+  padding: 6px 8px;
+  color: inherit;
+  font: inherit;
+  outline: none;
 }
 
 .whiteboard-node[data-selected="true"] {
@@ -6972,6 +6977,15 @@ button:not(:disabled),
   color: var(--card-focus);
   background: color-mix(in oklab, var(--card-focus) 9%, transparent);
 }
+.spectra-icon-action.is-selected {
+  color: var(--accent-cyan);
+  background: color-mix(in oklab, var(--accent-cyan) 14%, transparent);
+}
+.spectra-icon-action.is-selected:hover,
+.spectra-icon-action.is-selected:focus-visible {
+  color: var(--accent-cyan);
+  background: color-mix(in oklab, var(--accent-cyan) 22%, transparent);
+}
 .spectra-icon-action.is-danger:hover {
   color: var(--danger);
   background: color-mix(in oklab, var(--danger) 7%, transparent);
@@ -7390,13 +7404,13 @@ button[data-spectra-context-trigger="true"]::after {
 
 .presentation-primary-bar {
   display: flex;
-  min-height: 58px;
+  min-height: 44px;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  border-bottom: 1px solid var(--border-default);
-  padding: 0 16px;
-  background: var(--bg-elevated);
+  border-bottom: 0;
+  padding: 0 8px;
+  background: transparent;
 }
 
 .presentation-primary-bar > div:first-child {
@@ -7409,23 +7423,22 @@ button[data-spectra-context-trigger="true"]::after {
 .presentation-primary-bar [role="tab"] {
   position: relative;
   min-width: max-content;
-  padding: 0 12px;
+  height: 32px;
+  margin: auto 0;
+  border-radius: 7px;
+  padding: 0 10px;
   color: var(--text-secondary);
   font-size: 11px;
   font-weight: 600;
 }
 
 .presentation-primary-bar [role="tab"][data-active="true"] {
-  color: var(--text-primary);
+  background: #f0edff;
+  color: #5a48cf;
 }
 
 .presentation-primary-bar [role="tab"][data-active="true"]::after {
-  content: "";
-  position: absolute;
-  inset: auto 7px 0;
-  height: 2px;
-  border-radius: 999px;
-  background: var(--text-primary);
+  content: none;
 }
 
 .presentation-secondary-action,
@@ -9097,10 +9110,9 @@ button[data-spectra-context-trigger="true"]::after {
   overflow: hidden;
   border: 1px solid var(--border-default);
   border-radius: 9px;
-  background: color-mix(in oklab, var(--bg-elevated) 97%, transparent);
-  padding: 5px;
-  box-shadow: 0 18px 46px -24px rgba(25, 31, 28, 0.35);
-  backdrop-filter: blur(16px);
+  background: var(--bg-elevated);
+  padding: 6px;
+  box-shadow: 0 14px 32px rgba(27, 20, 12, 0.13);
 }
 
 .sheets-menu-popover button {
@@ -11371,6 +11383,34 @@ button[data-spectra-context-trigger="true"]::after {
 .spectra-run-tab-strip {
   position: relative;
   isolation: isolate;
+  scrollbar-width: none;
+}
+
+.spectra-run-tab-strip::-webkit-scrollbar,
+.spectra-live-dock-progress::-webkit-scrollbar {
+  display: none;
+  height: 0;
+  width: 0;
+}
+
+.spectra-live-dock-progress {
+  scrollbar-width: none;
+}
+
+.spectra-live-dock-tab {
+  flex: 1 0 calc((100% - 12px) / 3);
+  min-width: calc((100% - 12px) / 3);
+}
+
+.spectra-live-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.spectra-live-dock-row,
+.spectra-command-bar {
+  padding-right: 20px;
 }
 
 .spectra-run-tab-strip::before {
@@ -12031,47 +12071,6 @@ button[data-spectra-context-trigger="true"]::after {
 
 .spectra-document-studio[data-focus="true"] .spectra-document-canvas-shell {
   overflow-y: auto;
-}
-
-/* The four ways of being in a document (Â§11A). The row is a quiet segmented
-   control, not a second command bar â€” it names the mode and gets out of the
-   way. */
-.spectra-document-modes {
-  display: inline-flex;
-  align-items: center;
-  gap: 1px;
-  padding: 2px;
-  border-radius: 7px;
-  background: var(--bg-secondary);
-}
-
-.spectra-document-modes > button {
-  height: 26px;
-  padding: 0 9px;
-  border-radius: 5px;
-  color: var(--text-secondary);
-  font-size: 11px;
-  font-weight: 550;
-  letter-spacing: -0.005em;
-  transition:
-    background 0.14s ease,
-    color 0.14s ease;
-}
-
-.spectra-document-modes > button:hover {
-  color: var(--text-primary);
-}
-
-.spectra-document-modes > button[aria-selected="true"] {
-  background: var(--bg-elevated);
-  color: var(--text-primary);
-  box-shadow: 0 1px 2px rgba(40, 50, 44, 0.09);
-}
-
-/* Focus is the text and nothing else, so the mode row leaves with everything
-   else; Escape and the exit button are the way back. */
-.spectra-document-studio[data-focus="true"] .spectra-document-modes {
-  display: none;
 }
 
 /* Read puts the document down rather than taking it away: the measure narrows
@@ -14354,9 +14353,11 @@ button[data-spectra-context-trigger="true"]::after {
   .spectra-command-bar {
     gap: 6px;
   }
+  .spectra-live-dock-slot,
   .spectra-command-bar > button:first-of-type {
-    width: 40px;
+    width: 44px;
     height: 44px;
+    margin-right: 8px;
   }
   .spectra-conversation {
     background-image: none;
@@ -14954,6 +14955,35 @@ body {
 .spectra-workspace-header,
 .spectra-artifact-identity {
   animation: spectra-surface-in 420ms var(--ease-standard) both;
+}
+
+.spectra-mission-control-primary {
+  container-type: inline-size;
+  container-name: mission-primary;
+}
+
+.spectra-metric-card {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.spectra-metric-delta-short {
+  display: none;
+}
+
+@container mission-primary (max-width: 820px) {
+  .spectra-metric-delta-full {
+    display: none;
+  }
+  .spectra-metric-delta-short {
+    display: block;
+  }
+}
+
+@container mission-primary (max-width: 560px) {
+  .spectra-metric-icon {
+    display: none;
+  }
 }
 
 @keyframes spectra-surface-in {
@@ -16510,6 +16540,12 @@ html[data-spectra-motion="none"] .spectra-presence-flag {
   border-color: transparent;
   background: var(--brand-primary);
   color: #fff;
+}
+
+@container (max-width: 420px) {
+  .spectra-follow-toggle span {
+    display: none;
+  }
 }
 
 .spectra-follow-strip {
@@ -18480,6 +18516,34 @@ html[data-spectra-motion="none"]
   gap: 22px;
 }
 
+/* The author's own voice beside an actor's work: standing text that is already
+   there when the scene arrives. It carries a hairline on its leading edge rather
+   than a card, because it is a margin note on the surface, not an object on it. */
+.landing-caption {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-left: 18px;
+  border-left: 1px solid var(--border-subtle);
+}
+
+.landing-caption-title {
+  font-size: 25px;
+  line-height: 1.16;
+  letter-spacing: -0.021em;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-wrap: balance;
+}
+
+.landing-caption-note {
+  font-size: 15px;
+  line-height: 1.62;
+  letter-spacing: -0.004em;
+  color: var(--text-secondary);
+  max-width: 34ch;
+}
+
 /* --- objects that arrive ------------------------------------------ */
 
 .landing-carried {
@@ -19480,9 +19544,14 @@ html[data-spectra-motion="none"]
 /* ================================================================== *
  * THE FIELD — Spectra's ambient intelligence layer.
  *
- * Every bounded Spectra surface can carry a quiet dot field. At rest it
- * is almost invisible and costs nothing: one periodic radial-gradient
- * lattice, masked toward the surface's lower-right, drifting on the
+ * Every bounded Spectra surface can carry a quiet dot field. The grain is
+ * fine — single-digit pixels between dots — so it reads as the material a
+ * surface is made of rather than as a grid drawn on top of one. Two
+ * lattices at an irrational ratio are layered so the pattern never visibly
+ * repeats; what you see is texture, not tiling.
+ *
+ * At rest it is almost invisible and costs nothing: periodic radial
+ * gradients, masked toward the surface's lower-right, drifting on the
  * compositor via a transform that loops on exactly one lattice cell.
  * No component owns a requestAnimationFrame.
  *
@@ -19491,6 +19560,12 @@ html[data-spectra-motion="none"]
  * the actual edit brightens, picks up the actor's colour, and relaxes.
  * A surface can hold several influences at once, which is what makes
  * two simultaneous edits in one document legible.
+ *
+ * At environment scale — a whole window — CSS runs out: the field wants
+ * tens of thousands of dots that move individually. There the same
+ * primitive is drawn by `GrainField` on the GPU, and this lattice is what
+ * shows underneath it while the context starts and on machines without
+ * one.
  * ================================================================== */
 
 .spectra-field {
@@ -19502,10 +19577,12 @@ html[data-spectra-motion="none"]
   border-radius: inherit;
   contain: layout paint style;
 
-  /* Lattice geometry. Cards keep a fine crisp grain; large surfaces open up. */
-  --field-cell: 21px;
-  --field-dot: 0.85px;
-  --field-rest: 0.05;
+  /* Lattice geometry. Cards keep the finest grain; large surfaces open up
+     a little, because a fixed dot size at a fixed density reads heavier
+     the more of it you can see at once. */
+  --field-cell: 7px;
+  --field-dot: 0.58px;
+  --field-rest: 0.11;
   --field-ink: color-mix(in oklab, var(--text-primary) 46%, transparent);
 
   /* Where the resting field gathers. Cards: lower-right. */
@@ -19520,15 +19597,15 @@ html[data-spectra-motion="none"]
 }
 
 .spectra-field[data-scale="panel"] {
-  --field-cell: 26px;
-  --field-dot: 0.95px;
-  --field-rest: 0.042;
+  --field-cell: 8px;
+  --field-dot: 0.62px;
+  --field-rest: 0.105;
 }
 
 .spectra-field[data-scale="stage"] {
-  --field-cell: 34px;
-  --field-dot: 1.15px;
-  --field-rest: 0.05;
+  --field-cell: 9px;
+  --field-dot: 0.68px;
+  --field-rest: 0.1;
   --field-bias-spread: 160%;
 }
 
@@ -19547,18 +19624,18 @@ html[data-spectra-motion="none"]
 
 .dark .spectra-field {
   --field-ink: color-mix(in oklab, var(--text-primary) 34%, transparent);
-  --field-rest: 0.07;
+  --field-rest: 0.15;
 }
 
 /* --- resting lattice ---------------------------------------------- */
 
 .spectra-field-rest {
   position: absolute;
-  inset: calc(var(--field-cell) * -2);
+  inset: calc(var(--field-cell) * -4);
   background-image: radial-gradient(
     circle at 50% 50%,
     var(--field-ink) var(--field-dot),
-    transparent calc(var(--field-dot) + 0.35px)
+    transparent calc(var(--field-dot) + 0.5px)
   );
   background-size: var(--field-cell) var(--field-cell);
   opacity: var(--field-rest);
@@ -19582,21 +19659,65 @@ html[data-spectra-motion="none"]
   transition: opacity var(--motion-slow) var(--ease-standard);
 }
 
-/* A second, coarser layer gives large surfaces depth without more nodes. */
-.spectra-field[data-depth="true"] .spectra-field-rest::after {
+/* A second lattice at the golden ratio. The two periods never come back
+   into phase, so a fine grid stops looking like a grid — which is the
+   whole difference between texture and graph paper. */
+.spectra-field-rest::after {
   content: "";
   position: absolute;
   inset: 0;
   background-image: radial-gradient(
     circle at 50% 50%,
-    var(--field-ink) calc(var(--field-dot) * 0.7),
-    transparent calc(var(--field-dot) * 0.7 + 0.3px)
+    var(--field-ink) calc(var(--field-dot) * 0.8),
+    transparent calc(var(--field-dot) * 0.8 + 0.45px)
   );
   background-size: calc(var(--field-cell) * 1.618)
     calc(var(--field-cell) * 1.618);
-  opacity: 0.52;
+  opacity: 0.66;
   animation: spectra-field-drift-far 94s linear infinite;
   animation-delay: var(--field-phase, 0s);
+}
+
+/* Large surfaces get a third, coarser pass for depth. */
+.spectra-field[data-depth="true"] .spectra-field-rest::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(
+    circle at 50% 50%,
+    var(--field-ink) calc(var(--field-dot) * 1.15),
+    transparent calc(var(--field-dot) * 1.15 + 0.5px)
+  );
+  background-size: calc(var(--field-cell) * 2.618)
+    calc(var(--field-cell) * 2.618);
+  opacity: 0.4;
+  animation: spectra-field-drift-far 132s linear infinite reverse;
+  animation-delay: var(--field-phase, 0s);
+}
+
+/* --- the GPU field ------------------------------------------------- */
+/* Environment scale only. It fades in over the lattice once its first
+   frame lands, so a slow context start is never a flash of nothing. */
+
+.spectra-grain-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--motion-slow) var(--ease-standard);
+}
+
+.spectra-grain-canvas[data-live="true"] {
+  opacity: 1;
+}
+
+/* With the real field drawing, the lattice underneath would only add a
+   second, coarser pattern on top of a finer one. */
+.spectra-field[data-gpu="true"] .spectra-field-rest {
+  opacity: 0;
 }
 
 @keyframes spectra-field-drift {
@@ -19615,7 +19736,7 @@ html[data-spectra-motion="none"]
   to {
     transform: translate3d(
       calc(var(--field-cell) * -1.618),
-      calc(var(--field-cell) * -1.618),
+      calc(var(--field-cell) * 1.618),
       0
     );
   }
@@ -19647,17 +19768,19 @@ html[data-spectra-motion="none"]
     transform 520ms var(--ease-standard);
 }
 
-/* The dots inside a wake are denser and carry the actor's colour. */
+/* The dots inside a wake are denser, larger and carry the actor's colour.
+   The lattice compressing is the point: a wake is the field reacting, not a
+   coloured light switched on over it. */
 .spectra-field-wake::before {
   content: "";
   position: absolute;
   inset: 0;
   background-image: radial-gradient(
     circle at 50% 50%,
-    var(--wake-hue) calc(var(--field-dot) + 0.35px),
-    transparent calc(var(--field-dot) + 0.8px)
+    var(--wake-hue) calc(var(--field-dot) + 0.5px),
+    transparent calc(var(--field-dot) + 1.05px)
   );
-  background-size: calc(var(--field-cell) * 0.86) calc(var(--field-cell) * 0.86);
+  background-size: calc(var(--field-cell) * 0.78) calc(var(--field-cell) * 0.78);
   -webkit-mask-image: radial-gradient(
     circle at 50% 50%,
     #000 0%,
@@ -19740,7 +19863,7 @@ html[data-spectra-motion="none"]
     background-position-x: 0;
   }
   to {
-    background-position-x: calc(var(--field-cell) * 0.86);
+    background-position-x: calc(var(--field-cell) * 0.78);
   }
 }
 
@@ -19936,4 +20059,258 @@ html[data-spectra-motion="none"] .spectra-field-wake::before {
   .spectra-field-wake {
     transition: opacity 200ms linear;
   }
+}
+
+/* Artifact editors are one continuous product canvas. Work types may arrange
+   their own tools and fields, but the editor root itself never becomes a
+   card, sheet of paper, tinted tray, or bordered container. Keep this at the
+   final cascade boundary so older type-specific styling cannot reintroduce a
+   perimeter after the shared shell has rendered. */
+.spectra-artifact-studio,
+.spectra-artifact-main,
+.spectra-editor-layout,
+.spectra-editor-layout > section,
+.spectra-document-studio,
+.spectra-flashcard-studio,
+.spectra-quiz-studio,
+.spectra-plan-studio,
+.presentation-studio,
+.spectra-sheets-studio,
+.code-studio,
+.whiteboard-studio,
+.timetable-studio,
+.spectra-agent-foundry,
+.spectra-document-studio {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: var(--bg-primary) !important;
+  box-shadow: none !important;
+}
+
+.spectra-quiz-studio,
+.spectra-document-studio,
+.presentation-studio,
+.spectra-sheets-studio,
+.code-studio,
+.whiteboard-studio {
+  display: flex;
+  min-height: 0;
+  height: 100%;
+  flex-direction: column;
+}
+
+.spectra-agent-foundry > .spectra-editor-workbar {
+  grid-column: 1 / -1;
+}
+
+.spectra-editor-body {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: auto;
+}
+
+.spectra-artifact-studio .spectra-editor-layout > section {
+  outline: 0 !important;
+}
+
+/* One instrument bar across every work type. It stays in the editor chrome
+   rather than overlaying the scrolling page, so content cannot pass behind it. */
+.spectra-editor-workbar {
+  position: relative !important;
+  z-index: 12 !important;
+  top: auto !important;
+  display: flex;
+  min-height: 44px;
+  width: auto !important;
+  margin: 8px 12px 0 !important;
+  flex-shrink: 0;
+  flex-wrap: nowrap !important;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--border-default) 28%, transparent)
+    transparent;
+  border: 1px solid var(--border-default) !important;
+  border-radius: 12px !important;
+  background: var(--bg-elevated) !important;
+  box-shadow: 0 8px 24px rgba(31, 44, 37, 0.045) !important;
+  backdrop-filter: none !important;
+}
+
+.spectra-editor-workbar::-webkit-scrollbar {
+  height: 3px;
+}
+
+.spectra-editor-workbar::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--border-default) 40%, transparent);
+}
+
+.spectra-editor-workbar :is(button, select, input) {
+  flex-shrink: 0;
+}
+
+.spectra-editor-workbar .spectra-workbar-select {
+  min-width: 0;
+  max-width: 100%;
+  flex-shrink: 1;
+}
+
+.spectra-editor-workbar button:hover:not(:disabled):not(.spectra-workbar-primary):not([role="tab"]),
+.spectra-editor-workbar button[data-active="true"]:not([role="tab"]) {
+  border-color: #d9d4fa;
+  background: #f0edff;
+  color: #5a48cf;
+}
+
+.spectra-editor-workbar button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.code-workbar {
+  flex-wrap: nowrap !important;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.code-workbar::-webkit-scrollbar {
+  display: none;
+}
+
+.code-workbar-source {
+  overflow: hidden;
+}
+
+.code-mobile-switch:not([data-surface="split"]) {
+  display: none !important;
+}
+
+/* Preserve the persisted navigation geometry before React hydrates so route
+   skeletons and loaded content share the same horizontal origin. */
+html[data-spectra-sidebar-collapsed="true"] .spectra-shell-sidebar {
+  width: 76px !important;
+}
+
+html[data-spectra-sidebar-collapsed="true"] .spectra-app-shell {
+  padding-left: 76px !important;
+}
+
+html[data-spectra-sidebar-collapsed="true"] .spectra-shell-sidebar [data-sidebar-recents],
+html[data-spectra-sidebar-collapsed="true"] .spectra-shell-sidebar [data-sidebar-workspaces] {
+  display: none !important;
+}
+
+.presentation-toolbar {
+  margin: 0 12px 8px !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.spectra-editor-workbar.sheets-top-bars {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  overflow: visible !important;
+  min-height: 0;
+}
+
+.sheets-grid-frame {
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.sheets-top-bars > :is(.sheets-menu-bar, .sheets-format-bar) {
+  border-color: var(--border-subtle) !important;
+  background: transparent !important;
+}
+
+/* The floating Live Dock no longer overlaps a split editor, so reserving
+   148px inside every work pane only truncates canvases. Full-surface editors
+   use every remaining pixel; form-style editors retain natural document flow. */
+.spectra-artifact-studio[data-studio-mode="split"] .spectra-artifact-main {
+  padding-bottom: 0 !important;
+}
+
+.spectra-artifact-studio:is(
+    [data-blueprint="sheets"],
+    [data-blueprint="code"],
+    [data-blueprint="presentation"],
+    [data-blueprint="whiteboard"],
+    [data-blueprint="timetable"]
+  )
+  .spectra-artifact-main {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.spectra-artifact-studio:is(
+    [data-blueprint="sheets"],
+    [data-blueprint="code"],
+    [data-blueprint="presentation"],
+    [data-blueprint="whiteboard"],
+    [data-blueprint="timetable"]
+  )
+  .spectra-editor-layout {
+  min-height: 0;
+  height: auto;
+  flex: 1 1 auto;
+}
+
+.spectra-artifact-studio:is(
+    [data-blueprint="sheets"],
+    [data-blueprint="code"],
+    [data-blueprint="presentation"],
+    [data-blueprint="whiteboard"],
+    [data-blueprint="timetable"]
+  )
+  .spectra-editor-layout
+  > section {
+  min-height: 0;
+  height: 100%;
+}
+
+.spectra-sheets-studio,
+.code-studio,
+.presentation-studio,
+.whiteboard-studio,
+.timetable-studio {
+  display: flex !important;
+  min-height: 0 !important;
+  height: 100% !important;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+
+.sheets-grid-frame,
+.code-editor-grid,
+.code-preview-pane,
+.presentation-workspace,
+.whiteboard-shell {
+  min-height: 0 !important;
+  height: auto !important;
+  flex: 1 1 auto;
+}
+
+.code-editor-grid > section {
+  min-height: 0 !important;
+}
+
+/* Mission Control cards size from the remaining canvas, not the viewport.
+   Opening a side panel therefore produces fewer, wider cards instead of four
+   desktop columns squeezed into unreadable slivers. */
+.spectra-mission-control-workspaces .spectra-workspace-card-grid {
+  grid-template-columns: repeat(
+    auto-fit,
+    minmax(min(270px, 100%), 1fr)
+  ) !important;
+  align-items: start;
+}
+
+.spectra-mission-control-workspaces [data-spectra-card="workspace"] {
+  min-width: 0;
+  height: auto;
+  align-self: start;
 }

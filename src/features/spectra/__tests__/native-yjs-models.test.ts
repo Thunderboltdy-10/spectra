@@ -186,6 +186,25 @@ describe("native fine-grained Yjs models", () => {
     }
   });
 
+  it("constructs code undo before the collaboration document is bootstrapped", () => {
+    const document = new Y.Doc();
+    const origins = codeYjsAdapter.origins(human);
+    const undo = codeYjsAdapter.createUndoManager(document, human);
+
+    codeYjsAdapter.applyProjection(
+      document,
+      defaultContent("code") as Parameters<typeof codeYjsAdapter.applyProjection>[1],
+      origins.localHuman,
+    );
+    const text = codeFileText(document, codeYjsAdapter.project(document).entryFileId)!;
+    document.transact(() => text.insert(text.length, "\n<!-- local -->"), origins.localHuman);
+    undo.undo();
+
+    expect(text.toString()).not.toContain("<!-- local -->");
+    undo.destroy();
+    document.destroy();
+  });
+
   it("merges simultaneous document text and keeps relative anchors stable", () => {
     const initial = {
       blocks: [{ id: "intro", type: "paragraph", text: "Hello" }],

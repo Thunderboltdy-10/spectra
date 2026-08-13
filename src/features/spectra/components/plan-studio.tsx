@@ -346,7 +346,7 @@ export function PlanStudio({
 
   return (
     <div className="spectra-plan-studio" data-mode={mode}>
-      <div className="spectra-plan-bar">
+      <div className="spectra-editor-workbar spectra-plan-bar">
         <div className="spectra-plan-views" role="tablist" aria-label="Plan views">
           {(["list", "board", "timeline"] as const).map((kind) => (
             <button

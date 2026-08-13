@@ -265,6 +265,13 @@ describe("plan diagnostics and schema slip recovery", () => {
       ),
     ).toBe(true);
     expect(
+      isRepairablePlanFailure(
+        new Error(
+          "AI_ARTIFACT_SYNC_TIMEOUT: The live edit was not durably acknowledged.",
+        ),
+      ),
+    ).toBe(false);
+    expect(
       isQuietRetryableApplyFailure(
         new TypeError("Cannot set properties of undefined (setting '0')"),
       ),

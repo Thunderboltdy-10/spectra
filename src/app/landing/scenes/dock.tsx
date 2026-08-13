@@ -187,6 +187,7 @@ export function DockScene() {
           ? null
           : {
               kind: "choice",
+              messageId: "run-sources-choice",
               prompt:
                 "Two sources disagree on the Calvin cycle. Which should the document follow?",
               options: [

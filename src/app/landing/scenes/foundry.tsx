@@ -306,7 +306,7 @@ export function FoundryScene() {
   return (
     <SceneRegion scene="foundry">
       <div className="relative h-full">
-        <div className="absolute left-0 top-[26px] w-[398px]">
+        <div className="absolute left-0 top-0 w-[368px]">
           <Marker beats={FOUNDRY_BEATS} scene="foundry" path="foundry/marker" />
           <Headline
             beats={FOUNDRY_BEATS}
@@ -319,14 +319,14 @@ export function FoundryScene() {
             beats={FOUNDRY_BEATS}
             scene="foundry"
             path="foundry/close"
-            className="mt-5"
+            className="mt-4"
           />
 
           {/* Sufficiency, as the product computes it. Eleven facets, and the
               interview closes each one either by an answer or by deciding it
               does not apply to this mission. */}
           <div
-            className="landing-facets mt-7"
+            className="landing-facets mt-6"
             {...targetAttrs("foundry/facets", undefined, "surface")}
           >
             <div className="landing-facets-head">
@@ -364,7 +364,7 @@ export function FoundryScene() {
             interview, and the glass has no work to do in it. */}
         <div
           ref={prismRef}
-          className="absolute left-[36px] bottom-[18px] h-[210px] w-[210px]"
+          className="absolute left-[28px] bottom-[8px] h-[170px] w-[170px]"
           {...targetAttrs("foundry/prism", undefined, "canvasObject")}
         />
 
@@ -384,7 +384,7 @@ export function FoundryScene() {
               <Chip>Interviewing</Chip>
             )
           }
-          className="absolute right-0 top-[26px] h-[600px] w-[566px]"
+          className="absolute right-0 top-0 h-[562px] w-[498px]"
           radius={1}
         >
           <div className="landing-interview">
@@ -426,7 +426,7 @@ export function FoundryScene() {
 
         {/* Compilation is the last act, and it is a button rather than a
             mystery: the specification was the interview above it. */}
-        <div className="absolute right-0 bottom-[24px] flex w-[566px] items-center gap-3">
+        <div className="absolute right-0 bottom-[6px] flex w-[498px] items-center gap-3">
           <span
             className="landing-btn"
             data-tone={sufficient ? "primary" : undefined}

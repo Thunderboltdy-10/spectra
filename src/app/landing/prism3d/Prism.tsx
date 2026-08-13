@@ -4,7 +4,6 @@
    mutates refs, shader uniforms and three objects every frame. That is the
    correct React Three Fiber idiom — the react-hooks/immutability and
    react-hooks/refs rules target React render code, not frame loops. */
-/* eslint-disable react-hooks/immutability */
 
 import { useFrame, useThree } from "@react-three/fiber";
 import { MeshTransmissionMaterial } from "@react-three/drei";

@@ -701,7 +701,7 @@ export function ArtifactEmbed({
             <span>{embed.versionPolicy === "pinned" ? "Pinned" : "Live"}</span>
             {typeof embed.displayPreferences?.view === "string" ? (
               <>
-                <span>Â·</span>
+                <span>·</span>
                 <span>
                   {embed.displayPreferences.view.replaceAll("_", " ")}
                 </span>

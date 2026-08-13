@@ -2,7 +2,6 @@
 
 /* The SceneDriver/CameraRig run inside R3F's frame loop and intentionally
    dereference refs per frame — never during React render. */
-/* eslint-disable react-hooks/immutability */
 
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Environment } from "@react-three/drei";
@@ -283,7 +282,6 @@ export default function PrismCanvas({
         }
       }}
       style={{ background: "transparent" }}
-      eventSource={undefined}
     >
       <SceneDriver progressRef={progressRef} reduced={reduced} />
       <CameraRig reduced={reduced} staged={staged} />

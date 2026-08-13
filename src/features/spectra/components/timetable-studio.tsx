@@ -1201,7 +1201,7 @@ path={eventPath(event.id)}
           if (file) void importFile(file);
         }}
       />
-      <header className="timetable-toolbar">
+      <header className="spectra-editor-workbar timetable-toolbar">
         <div className="timetable-date-navigation">
           <button
             type="button"
@@ -1483,7 +1483,7 @@ path={eventPath(event.id)}
             <section className="timetable-linked-work">
               <header>
                 <strong>Linked work</strong>
-                <span>{linkedArtifacts.length} artifacts</span>
+                <span>{linkedArtifacts.length} linked work items</span>
               </header>
               <div>
                 {linkedArtifacts.slice(0, 6).map((artifact) => (
@@ -1979,7 +1979,7 @@ path={eventPath(event.id)}
                 });
               }}
             >
-              <option value="">Link an artifact…</option>
+              <option value="">Link work…</option>
               {artifacts
                 .filter(
                   (artifact) =>

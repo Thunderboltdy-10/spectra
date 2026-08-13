@@ -17,7 +17,13 @@
  */
 
 import { useCallback, useSyncExternalStore } from "react";
-import { cameraFor, zoomFor, type CameraState, type SceneId } from "./timeline";
+import {
+  cameraFor,
+  fitFor,
+  zoomFor,
+  type CameraState,
+  type SceneId,
+} from "./timeline";
 
 export type StoryFrame = CameraState & {
   /** Viewport size at this frame. */
@@ -35,6 +41,8 @@ const INITIAL: StoryFrame = {
   zoom: 1,
   scene: "wake",
   t: 0,
+  arrive: 1,
+  span: 0,
   index: 0,
   overall: 0,
   viewport: { width: 1440, height: 900 },
@@ -47,17 +55,51 @@ const INITIAL: StoryFrame = {
 export const storyFrame: StoryFrame = { ...INITIAL };
 
 type Listener = (frame: StoryFrame) => void;
+
+/**
+ * Two phases per frame, because order matters exactly once.
+ *
+ * `measure` reads layout: where the objects on the canvas actually are this
+ * frame. `write` consumes those measurements and paints. Keeping them apart is
+ * what lets the prism's slot, the field's wake and the camera agree about the
+ * same frame instead of trailing each other by one.
+ */
+const measureListeners = new Set<Listener>();
 const frameListeners = new Set<Listener>();
 
 /** Subscribe to every frame. For imperative consumers only. */
-export function onStoryFrame(listener: Listener): () => void {
-  frameListeners.add(listener);
+export function onStoryFrame(
+  listener: Listener,
+  phase: "measure" | "write" = "write",
+): () => void {
+  const set = phase === "measure" ? measureListeners : frameListeners;
+  set.add(listener);
   listener(storyFrame);
-  return () => frameListeners.delete(listener);
+  return () => set.delete(listener);
+}
+
+/**
+ * Run one listener set.
+ *
+ * Each listener is isolated. A single throwing subscriber used to take the
+ * whole rAF loop down with it — the camera, the prism, every authored line —
+ * and freeze the page mid-scene for the rest of the visit. One bad measurement
+ * now costs one listener, and says so in development.
+ */
+function emit(set: Set<Listener>) {
+  for (const listener of set) {
+    try {
+      listener(storyFrame);
+    } catch (error) {
+      if (process.env.NODE_ENV !== "production") console.error(error);
+      set.delete(listener);
+    }
+  }
 }
 
 export function emitStoryFrame() {
-  for (const listener of frameListeners) listener(storyFrame);
+  emit(measureListeners);
+  emit(frameListeners);
 }
 
 /* ------------------------------------------------------------------ *
@@ -163,8 +205,6 @@ export function storyStepVersion(): number {
  * The loop
  * ------------------------------------------------------------------ */
 
-export const CANVAS_MARGIN = 24;
-
 /**
  * Advance the clock. Called once per animation frame by the story root.
  *
@@ -172,25 +212,55 @@ export const CANVAS_MARGIN = 24;
  * frame, no event storm, and the value is always the one this frame will
  * actually paint with.
  */
+/**
+ * Frames still emitted after the page went still.
+ *
+ * Motion on this page does not all come from scroll: damped values settle,
+ * wakes relax, carets blink out. So the clock does not stop the instant the
+ * scroll does — it keeps running for a couple of seconds, then idles. Any real
+ * input wakes it immediately, and the idle state is invisible because by then
+ * nothing was moving anyway.
+ */
+const COAST_FRAMES = 150;
+let coast = COAST_FRAMES;
+
+/** Force the next frames to run: pointer movement, resize, a scene handoff. */
+export function wakeStory(frames = COAST_FRAMES) {
+  if (coast < frames) coast = frames;
+}
+
 export function advanceStory(
   scrollY: number,
   width: number,
   height: number,
-  canvasWidth: number,
 ) {
   const camera = cameraFor(scrollY, height);
+  const still =
+    camera.y === storyFrame.y &&
+    camera.scene === storyFrame.scene &&
+    camera.t === storyFrame.t &&
+    camera.arrive === storyFrame.arrive &&
+    width === storyFrame.viewport.width &&
+    height === storyFrame.viewport.height;
+  if (still) {
+    if (coast <= 0) return;
+    coast -= 1;
+  } else {
+    coast = COAST_FRAMES;
+  }
   const previousY = storyFrame.y;
   storyFrame.y = camera.y;
   storyFrame.scene = camera.scene;
   storyFrame.t = camera.t;
+  storyFrame.arrive = camera.arrive;
+  storyFrame.span = camera.span;
   storyFrame.index = camera.index;
   storyFrame.overall = camera.overall;
   storyFrame.viewport.width = width;
   storyFrame.viewport.height = height;
-  storyFrame.fit = Math.min(
-    1.08,
-    (width - CANVAS_MARGIN * 2) / canvasWidth,
-  );
+  /* Fitted to both axes, so a held scene is exactly the frame rather than a
+     crop of one. */
+  storyFrame.fit = fitFor(storyFrame.viewport);
   /* The final zoom is a measurement rather than an authored number: it is
      whatever makes the surface exactly one panel wide in this window. */
   storyFrame.zoom = zoomFor(camera, storyFrame.viewport, storyFrame.fit);

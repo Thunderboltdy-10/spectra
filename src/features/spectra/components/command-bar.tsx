@@ -6,10 +6,8 @@ import {
   ArrowUp,
   ChevronRight,
   FileText,
-  GitBranch,
   Image as ImageIcon,
   Loader2,
-  MessageSquarePlus,
   Paperclip,
   Plus,
   Square,
@@ -40,7 +38,11 @@ type CommandBarProps = {
   activeRunId?: string;
   onSteer?: (
     runId: string,
-    mode: "refine_current_goal" | "redirect_next_step" | "replace_goal" | "cancel_current_action",
+    mode:
+      | "refine_current_goal"
+      | "redirect_next_step"
+      | "replace_goal"
+      | "cancel_current_action",
     text: string,
   ) => void | Promise<unknown>;
 };
@@ -134,7 +136,11 @@ export function CommandBarSubmenu({
         aria-haspopup="menu"
         onClick={() => setOpen((current) => !current)}
       >
-        {Icon ? <Icon className="h-4 w-4 shrink-0" /> : <Plus className="h-4 w-4 shrink-0" />}
+        {Icon ? (
+          <Icon className="h-4 w-4 shrink-0" />
+        ) : (
+          <Plus className="h-4 w-4 shrink-0" />
+        )}
         <span className="min-w-0 flex-1">{label}</span>
         <ChevronRight className="h-3.5 w-3.5 shrink-0 text-[var(--text-tertiary)]" />
       </CommandBarMenuItem>
@@ -220,7 +226,6 @@ export function CommandBar({
   attachmentsPortalTarget = null,
   onStop,
   allowConcurrent = false,
-  onStartNewThread,
   activeRunId,
   onSteer,
 }: CommandBarProps) {
@@ -228,11 +233,6 @@ export function CommandBar({
   const [menuOpen, setMenuOpen] = useState(false);
   const [attachments, setAttachments] = useState<CommandAttachment[]>([]);
   const [sending, setSending] = useState(false);
-  const [blockedAttempt, setBlockedAttempt] = useState(false);
-  const [steering, setSteering] = useState(false);
-  const [steerText, setSteerText] = useState("");
-  const [steerMode, setSteerMode] = useState<"refine_current_goal" | "redirect_next_step" | "replace_goal" | "cancel_current_action">("refine_current_goal");
-  const [steerQueued, setSteerQueued] = useState(false);
   const [queuedSubmissions, setQueuedSubmissions] = useState<
     Array<{ value: string; attachments: CommandAttachment[] }>
   >([]);
@@ -266,10 +266,15 @@ export function CommandBar({
           mimeType: file.type || "application/octet-stream",
           size: file.size,
         };
-        if (file.type.startsWith("image/") || /\.(png|jpe?g|webp|gif)$/i.test(file.name)) {
+        if (
+          file.type.startsWith("image/") ||
+          /\.(png|jpe?g|webp|gif)$/i.test(file.name)
+        ) {
           const mime = file.type || "image/png";
           if (
-            !["image/png", "image/jpeg", "image/webp", "image/gif"].includes(mime) &&
+            !["image/png", "image/jpeg", "image/webp", "image/gif"].includes(
+              mime,
+            ) &&
             !/\.(png|jpe?g|webp|gif)$/i.test(file.name)
           )
             return {
@@ -406,13 +411,29 @@ export function CommandBar({
 
   async function submit() {
     const draft = value.trim();
-    if (
-      !draft ||
-      attachments.some((attachment) => attachment.error)
-    )
-      return;
+    if (!draft || attachments.some((attachment) => attachment.error)) return;
     const draftAttachments = attachments;
     if (busy && !allowConcurrent) {
+      if (activeRunId && onSteer) {
+        setValue("");
+        setAttachments([]);
+        setMenuOpen(false);
+        try {
+          const accepted = await onSteer(
+            activeRunId,
+            "refine_current_goal",
+            draft,
+          );
+          if (accepted === false) {
+            setValue(draft);
+            setAttachments(draftAttachments);
+          }
+        } catch {
+          setValue(draft);
+          setAttachments(draftAttachments);
+        }
+        return;
+      }
       setQueuedSubmissions((current) => [
         ...current,
         { value: draft, attachments: draftAttachments },
@@ -420,7 +441,6 @@ export function CommandBar({
       setValue("");
       setAttachments([]);
       setMenuOpen(false);
-      setBlockedAttempt(false);
       return;
     }
     if (sendingRef.current || sending) return;
@@ -430,7 +450,6 @@ export function CommandBar({
     setValue("");
     setAttachments([]);
     setMenuOpen(false);
-    setBlockedAttempt(false);
     sendingRef.current = false;
     await dispatchSubmission(draft, draftAttachments);
   }
@@ -469,10 +488,6 @@ export function CommandBar({
   }, [value]);
 
   useEffect(() => {
-    if (!busy) setBlockedAttempt(false);
-  }, [busy]);
-
-  useEffect(() => {
     if (busy || sending || sendingRef.current || queuedSubmissions.length === 0)
       return;
     const next = queuedSubmissions[0]!;
@@ -484,10 +499,7 @@ export function CommandBar({
     setAttachments((current) => current.filter((item) => item.id !== id));
 
   const bubbles = (
-    <AttachmentBubbles
-      attachments={attachments}
-      onRemove={removeAttachment}
-    />
+    <AttachmentBubbles attachments={attachments} onRemove={removeAttachment} />
   );
   const portalReady =
     typeof document !== "undefined" && attachmentsPortalTarget != null;
@@ -497,7 +509,7 @@ export function CommandBar({
     <div
       ref={rootRef}
       className={cn(
-        "spectra-command-bar relative flex items-center gap-2",
+        "spectra-command-bar relative flex items-center gap-1",
         className,
       )}
     >
@@ -512,9 +524,7 @@ export function CommandBar({
           event.currentTarget.value = "";
         }}
       />
-      {portalReady
-        ? createPortal(bubbles, attachmentsPortalTarget)
-        : null}
+      {portalReady ? createPortal(bubbles, attachmentsPortalTarget) : null}
       {menuOpen && hasMenu ? (
         <div
           ref={menuPanelRef}
@@ -537,9 +547,7 @@ export function CommandBar({
               {menu ? (
                 <div className="my-1 h-px bg-[var(--border-subtle)]" />
               ) : null}
-              <CommandBarMenuItem
-                onClick={() => fileInputRef.current?.click()}
-              >
+              <CommandBarMenuItem onClick={() => fileInputRef.current?.click()}>
                 <Paperclip className="h-4 w-4" />
                 Select files
               </CommandBarMenuItem>
@@ -550,7 +558,7 @@ export function CommandBar({
       <button
         ref={menuTriggerRef}
         type="button"
-        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[8px] bg-[color-mix(in_oklab,var(--bg-elevated)_82%,transparent)] text-[var(--text-secondary)] shadow-[0_2px_8px_rgba(27,20,12,0.04)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-35"
+        className="mr-2 flex h-11 w-11 shrink-0 items-center justify-center rounded-[8px] border border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_82%,transparent)] text-[var(--text-secondary)] shadow-[0_2px_8px_rgba(27,20,12,0.04)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-35"
         onClick={() => hasMenu && setMenuOpen((open) => !open)}
         disabled={!hasMenu}
         aria-expanded={menuOpen}
@@ -559,76 +567,7 @@ export function CommandBar({
       >
         <Plus className="h-4 w-4" />
       </button>
-      {onStartNewThread ? (
-        <button
-          type="button"
-          onClick={() => {
-            onStartNewThread();
-            setBlockedAttempt(false);
-          }}
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[8px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-          aria-label="Start a new thread"
-          title="New thread"
-        >
-          <MessageSquarePlus className="h-4 w-4" />
-        </button>
-      ) : null}
-      <div className="spectra-command-surface flex min-h-12 min-w-0 flex-1 flex-col rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 shadow-[0_3px_12px_rgba(27,20,12,0.08)]">
-        {blockedAttempt ? (
-          <div
-            className="mb-1 flex min-h-8 flex-wrap items-center gap-1.5 rounded-[8px] bg-[color-mix(in_oklab,var(--warning)_7%,var(--bg-primary))] px-2 py-1 text-micro text-[var(--text-secondary)]"
-            role="alert"
-          >
-            <span className="mr-auto font-medium text-[var(--text-primary)]">
-              This selected conversation is still running. Deselect its tab or
-              start a new thread to send separately.
-            </span>
-            {onStop ? (
-              <button
-                type="button"
-                onClick={() => onStop()}
-                className="rounded-[5px] px-1.5 py-1 font-semibold text-[var(--danger)] hover:bg-[color-mix(in_oklab,var(--danger)_8%,transparent)]"
-              >
-                Stop current run
-              </button>
-            ) : null}
-            {onStartNewThread ? (
-              <button
-                type="button"
-                onClick={() => {
-                  onStartNewThread();
-                  setBlockedAttempt(false);
-                }}
-                className="rounded-[5px] bg-[var(--text-primary)] px-2 py-1 font-semibold text-[var(--bg-primary)]"
-              >
-                Start new thread
-              </button>
-            ) : null}
-          </div>
-        ) : null}
-        {activeRunId && onSteer ? (
-          <div className="mb-1 rounded-[8px] bg-[color-mix(in_oklab,var(--accent-cyan)_5%,var(--bg-primary))] px-2 py-1.5">
-            <div className="flex items-center gap-1.5">
-              <GitBranch className="h-3 w-3 text-[var(--accent-cyan)]" />
-              <span className="mr-auto text-micro font-medium text-[var(--text-secondary)]">
-                {steerQueued ? "Will apply after the current step" : "A run is active"}
-              </span>
-              <button type="button" onClick={() => setSteering((current) => !current)} className="h-6 rounded-[5px] px-2 text-micro font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" aria-expanded={steering}>Steer</button>
-            </div>
-            {steering ? (
-              <div className="mt-1.5 flex flex-wrap gap-1.5">
-                <select value={steerMode} onChange={(event) => setSteerMode(event.target.value as typeof steerMode)} className="h-8 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 text-micro text-[var(--text-secondary)] outline-none">
-                  <option value="refine_current_goal">Refine goal</option>
-                  <option value="redirect_next_step">Redirect next step</option>
-                  <option value="replace_goal">Replace goal</option>
-                  <option value="cancel_current_action">Cancel current action</option>
-                </select>
-                <input value={steerText} onChange={(event) => setSteerText(event.target.value)} placeholder="What should change?" className="h-8 min-w-[160px] flex-1 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 text-micro outline-none focus:border-[var(--accent-cyan)]" />
-                <button type="button" disabled={!steerText.trim()} onClick={async () => { const text = steerText.trim(); if (!text) return; await onSteer(activeRunId, steerMode, text); setSteerText(""); setSteerQueued(true); setSteering(false); }} className="h-8 rounded-[6px] bg-[var(--text-primary)] px-2.5 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-40">Queue</button>
-              </div>
-            ) : null}
-          </div>
-        ) : null}
+      <div className="spectra-command-surface flex min-h-11 min-w-0 flex-1 flex-col justify-center rounded-[12px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1 shadow-[0_3px_12px_rgba(27,20,12,0.08)]">
         {showInlineBubbles ? bubbles : null}
         <div className="flex items-end gap-2">
           {context ? (
@@ -636,9 +575,14 @@ export function CommandBar({
           ) : null}
           <div className="relative min-w-0 flex-1">
             {autocomplete.suggestion ? (
-              <div aria-hidden="true" className="pointer-events-none absolute inset-0 max-h-32 overflow-hidden whitespace-pre-wrap break-words px-2 py-2 text-[13.5px] leading-5">
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-0 max-h-32 overflow-hidden whitespace-pre-wrap break-words px-2 py-1.5 text-[13.5px] leading-5"
+              >
                 <span className="invisible">{value}</span>
-                <span className="text-[var(--text-tertiary)] opacity-70">{autocomplete.suggestion.text}</span>
+                <span className="text-[var(--text-tertiary)] opacity-70">
+                  {autocomplete.suggestion.text}
+                </span>
               </div>
             ) : null}
             <textarea
@@ -648,7 +592,9 @@ export function CommandBar({
               onChange={(event) => setValue(event.target.value)}
               onCompositionStart={autocomplete.compositionStart}
               onCompositionEnd={autocomplete.compositionEnd}
-              aria-describedby={autocomplete.suggestion ? autocompleteHintId : undefined}
+              aria-describedby={
+                autocomplete.suggestion ? autocompleteHintId : undefined
+              }
               onKeyDown={(event) => {
                 if (autocomplete.suggestion && event.key === "Escape") {
                   event.preventDefault();
@@ -681,9 +627,14 @@ export function CommandBar({
                 }
               }}
               placeholder={placeholder}
-              className="relative z-[1] max-h-32 min-h-9 w-full resize-none overflow-y-auto bg-transparent px-2 py-2 text-[13.5px] leading-5 text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
+              className="relative z-[1] max-h-32 min-h-8 w-full resize-none overflow-y-auto bg-transparent px-2 py-1.5 text-[13.5px] leading-5 text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
             />
-            {autocomplete.suggestion ? <span id={autocompleteHintId} className="sr-only">Suggestion available. Press Tab to accept all, Right Arrow to accept a word, or Escape to dismiss.</span> : null}
+            {autocomplete.suggestion ? (
+              <span id={autocompleteHintId} className="sr-only">
+                Suggestion available. Press Tab to accept all, Right Arrow to
+                accept a word, or Escape to dismiss.
+              </span>
+            ) : null}
           </div>
           {busy && onStop ? (
             <button
@@ -706,11 +657,16 @@ export function CommandBar({
             onClick={() => {
               void submit();
             }}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] bg-[var(--text-primary)] text-[var(--bg-primary)] disabled:bg-[var(--bg-secondary)] disabled:text-[var(--text-tertiary)]"
-            aria-label="Send command"
+            className={`flex h-9 shrink-0 items-center justify-center rounded-[8px] bg-[var(--text-primary)] text-[var(--bg-primary)] disabled:bg-[var(--bg-secondary)] disabled:text-[var(--text-tertiary)] ${busy && !allowConcurrent ? "min-w-14 px-3 text-micro font-semibold" : "w-9"}`}
+            aria-label={
+              busy && !allowConcurrent ? "Steer active run" : "Send command"
+            }
+            title={busy && !allowConcurrent ? "Steer the active run" : "Send"}
           >
             {sending && !busy ? (
               <Loader2 className="h-4 w-4 animate-spin" />
+            ) : busy && !allowConcurrent ? (
+              "Steer"
             ) : (
               <ArrowUp className="h-4 w-4" />
             )}

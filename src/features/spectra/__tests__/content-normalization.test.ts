@@ -90,6 +90,25 @@ describe("model artifact content normalization", () => {
     });
   });
 
+  it("preserves an owner's explicit quiz publication state", () => {
+    const published = normalizeArtifactContent("quiz", {
+      questions: [
+        {
+          id: "question-1",
+          prompt: "What changed?",
+          type: "short_answer",
+          options: [],
+          correctAnswer: "The durable state",
+        },
+      ],
+      settings: {},
+      published: true,
+      publishedAt: 1_786_550_400_000,
+    });
+    expect(published.published).toBe(true);
+    expect(published.publishedAt).toBe(1_786_550_400_000);
+  });
+
   it("fills sparse live-Yjs sheets required strings and identity maps", () => {
     const sparse = normalizeArtifactContent("sheets", {
       workbook: { calculationMode: "automatic" },

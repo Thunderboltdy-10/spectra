@@ -6,14 +6,38 @@ const boundedText = z.string().max(32_000);
 const jsonRecord = z.record(z.string(), z.unknown());
 
 export const runItemSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("title"), text: z.string().min(1).max(120), final: z.boolean() }),
-  z.object({ type: z.literal("progress"), summary: z.string().min(1).max(240), detail: z.string().max(1_000).optional() }),
-  z.object({ type: z.literal("text_delta"), channel: z.enum(["answer", "narration"]), text: boundedText }),
+  z.object({
+    type: z.literal("title"),
+    text: z.string().min(1).max(120),
+    final: z.boolean(),
+  }),
+  z.object({
+    type: z.literal("progress"),
+    summary: z.string().min(1).max(240),
+    detail: z.string().max(1_000).optional(),
+  }),
+  z.object({
+    type: z.literal("text_delta"),
+    channel: z.enum(["answer", "narration"]),
+    text: boundedText,
+  }),
   z.object({ type: z.literal("tool_start"), call: jsonRecord }),
-  z.object({ type: z.literal("tool_progress"), callId: identifier, progress: jsonRecord }),
-  z.object({ type: z.literal("tool_result"), callId: identifier, result: jsonRecord }),
+  z.object({
+    type: z.literal("tool_progress"),
+    callId: identifier,
+    progress: jsonRecord,
+  }),
+  z.object({
+    type: z.literal("tool_result"),
+    callId: identifier,
+    result: jsonRecord,
+  }),
   z.object({ type: z.literal("action_start"), action: jsonRecord }),
-  z.object({ type: z.literal("action_progress"), actionId: identifier, step: jsonRecord }),
+  z.object({
+    type: z.literal("action_progress"),
+    actionId: identifier,
+    step: jsonRecord,
+  }),
   z.object({ type: z.literal("patch"), patch: jsonRecord }),
   z.object({ type: z.literal("wait"), reason: jsonRecord }),
   z.object({ type: z.literal("question"), request: jsonRecord }),
@@ -26,12 +50,17 @@ export const runItemSchema = z.discriminatedUnion("type", [
 ]);
 
 export type RunItemPayload = z.infer<typeof runItemSchema>;
-export type RunItem = RunItemPayload & {
-  protocolVersion: typeof SPECTRA_PROTOCOL_VERSIONS.runItems;
-  runId: string;
-  sequence: number;
-  createdAt: number;
-};
+export const runItemRecordSchema = z.intersection(
+  runItemSchema,
+  z.object({
+    protocolVersion: z.literal(SPECTRA_PROTOCOL_VERSIONS.runItems),
+    runId: identifier,
+    sequence: z.number().int().nonnegative(),
+    createdAt: z.number(),
+  }),
+);
+
+export type RunItem = z.infer<typeof runItemRecordSchema>;
 
 export function createRunItem(
   runId: string,
@@ -39,13 +68,13 @@ export function createRunItem(
   payload: RunItemPayload,
   createdAt = Date.now(),
 ): RunItem {
-  return {
+  return runItemRecordSchema.parse({
     ...runItemSchema.parse(payload),
     protocolVersion: SPECTRA_PROTOCOL_VERSIONS.runItems,
     runId: identifier.parse(runId),
-    sequence: z.number().int().nonnegative().parse(sequence),
+    sequence,
     createdAt,
-  };
+  });
 }
 
 export function isTerminalRunItem(item: RunItemPayload) {
@@ -53,5 +82,10 @@ export function isTerminalRunItem(item: RunItemPayload) {
 }
 
 export function isRecoverableRunItem(item: RunItemPayload) {
-  return item.type === "wait" || item.type === "question" || item.type === "approval" || item.type === "degraded";
+  return (
+    item.type === "wait" ||
+    item.type === "question" ||
+    item.type === "approval" ||
+    item.type === "degraded"
+  );
 }

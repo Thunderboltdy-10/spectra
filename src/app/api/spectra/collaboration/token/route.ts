@@ -9,7 +9,7 @@ import { ok } from "@/lib/http";
 import { withRouteErrorHandling } from "@/lib/route-handler";
 
 export async function POST(request: NextRequest) {
-  return withRouteErrorHandling(async () => {
+  return withRouteErrorHandling(async (logger) => {
     const actor = await requireActor();
     const body = (await request.json()) as Record<string, unknown>;
     const artifactId =
@@ -31,10 +31,20 @@ export async function POST(request: NextRequest) {
       throw new Error(
         "COLLABORATION_SESSION_INVALID: Artifact and client identity are required.",
       );
-    const artifact = await convexQuery<
-      Record<string, unknown>,
-      { _id: string; blueprintKey: string }
-    >("spectraArtifacts:get", { artifactId });
+    let artifact: { _id: string; blueprintKey: string };
+    try {
+      artifact = await convexQuery<
+        Record<string, unknown>,
+        { _id: string; blueprintKey: string }
+      >("spectraArtifacts:get", { artifactId });
+    } catch (error) {
+      logger.warn("Collaboration work lookup failed", {
+        artifactId,
+        message:
+          error instanceof Error ? error.message : "Unknown lookup failure",
+      });
+      throw error;
+    }
     const resourceType =
       artifact.blueprintKey === "agent" ? "agent" : "artifact";
     const [room, access] = await Promise.all([
@@ -85,15 +95,30 @@ export async function POST(request: NextRequest) {
     const cloudflareRealtime = requestedProvider
       ? requestedProvider === "cloudflare"
       : process.env.NEXT_PUBLIC_SPECTRA_CLOUDFLARE_REALTIME === "true";
+    const requestHost = request.headers.get("host")?.trim() ?? "";
+    const safeDevelopmentHost = /^(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i.test(
+      requestHost,
+    )
+      ? requestHost
+      : `localhost:${process.env.SPECTRA_WEB_PORT ?? "3000"}`;
+    const localGatewayUrl = `${request.nextUrl.protocol === "https:" ? "wss" : "ws"}://${safeDevelopmentHost}/_spectra/realtime`;
+    const collaborationUrl = cloudflareRealtime
+      ? process.env.SPECTRA_CLOUDFLARE_COLLAB_URL ??
+        process.env.NEXT_PUBLIC_SPECTRA_COLLAB_URL ??
+        "ws://localhost:8787"
+      : process.env.NODE_ENV === "development"
+        ? localGatewayUrl
+        : process.env.NEXT_PUBLIC_SPECTRA_COLLAB_URL ??
+          "ws://localhost:1234";
+    logger.info("Collaboration session issued", {
+      provider: cloudflareRealtime ? "cloudflare" : "hocuspocus",
+      url: collaborationUrl,
+    });
     return ok({
       token,
       documentName,
       provider: cloudflareRealtime ? "cloudflare_durable_object" : "self_hosted_yjs",
-      url: cloudflareRealtime
-        ? process.env.SPECTRA_CLOUDFLARE_COLLAB_URL ??
-          process.env.NEXT_PUBLIC_SPECTRA_COLLAB_URL ??
-          "ws://localhost:8787"
-        : process.env.NEXT_PUBLIC_SPECTRA_COLLAB_URL ?? "ws://localhost:1234",
+      url: collaborationUrl,
       expiresInMs: 600_000,
       level: access.level,
       accountId: actor.accountId,

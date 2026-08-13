@@ -37,10 +37,8 @@ const names = {
  */
 const modes = {
   document: [
-    ["Write", "edit"],
-    ["Read", "view"],
-    ["Review", "interact"],
-    ["Focus", "edit"],
+    ["Edit", "edit"],
+    ["Preview as reader", "view"],
   ],
   flashcard_deck: [
     ["Build", "edit"],
@@ -50,7 +48,7 @@ const modes = {
   ],
   quiz: [
     ["Build", "edit"],
-    ["Preview", "edit"],
+    ["Preview as learner", "view"],
     ["Attempt", "attempt"],
     ["Responses", "submit"],
     ["Results", "view"],
@@ -80,7 +78,7 @@ const modes = {
   sheets: [
     ["Edit", "edit"],
     ["Analyse", "interact"],
-    ["Read", "view"],
+    ["View", "view"],
   ],
   code: [
     ["Source", "edit"],
@@ -91,7 +89,7 @@ const modes = {
   ],
   whiteboard: [
     ["Edit", "edit"],
-    ["Read", "view"],
+    ["View", "view"],
   ],
 } satisfies Record<
   ArtifactTypeKey,

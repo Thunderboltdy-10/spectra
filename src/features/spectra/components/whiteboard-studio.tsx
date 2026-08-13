@@ -8,7 +8,6 @@ import {
   CheckCircle2,
   Circle,
   CircleDot,
-  Download,
   Eye,
   EyeOff,
   Frame,
@@ -79,6 +78,7 @@ import {
 import { uniqueToken } from "@/lib/unique-token";
 import { aiRegionAttr, pathTouches } from "./ai-region-path";
 import { targetAttrs } from "../collaboration/target-attributes";
+import { WorkbarSelect } from "./workbar-controls";
 
 type Tool = "select" | "hand" | "connector" | WhiteboardNodeType;
 type Drag = {
@@ -310,7 +310,33 @@ function BoardNode({
               (row, rowIndex) => (
                 <tr key={rowIndex}>
                   {(Array.isArray(row) ? row : []).map((cell, cellIndex) => (
-                    <td key={cellIndex}>{String(cell)}</td>
+                    <td key={cellIndex}>
+                      <input
+                        value={String(cell ?? "")}
+                        readOnly={
+                          readOnly || node.locked || compact || !editingText
+                        }
+                        aria-label={`Row ${rowIndex + 1}, column ${cellIndex + 1}`}
+                        onPointerDown={textPointerDown}
+                        onDoubleClick={beginTextEditing}
+                        onFocus={() => onSelect(false)}
+                        onChange={(event) => {
+                          const rows = (
+                            Array.isArray(content.rows) ? content.rows : []
+                          ).map((currentRow, currentRowIndex) =>
+                            currentRowIndex !== rowIndex ||
+                            !Array.isArray(currentRow)
+                              ? currentRow
+                              : currentRow.map((currentCell, currentCellIndex) =>
+                                  currentCellIndex === cellIndex
+                                    ? event.target.value
+                                    : currentCell,
+                                ),
+                          );
+                          onContentChange({ rows });
+                        }}
+                      />
+                    </td>
                   ))}
                 </tr>
               ),
@@ -1823,7 +1849,7 @@ export function WhiteboardStudio({
           if (file) void importBoard(file);
         }}
       />
-      <header className="whiteboard-toolbar" aria-label="Whiteboard tools">
+      <header className="spectra-editor-workbar whiteboard-toolbar" aria-label="Whiteboard tools">
         <div>
           {(
             [
@@ -1873,36 +1899,23 @@ export function WhiteboardStudio({
           >
             <FileUp className="h-4 w-4" />
           </button>
-          <label
-            className="whiteboard-export-control"
-            title={
-              selectedNode?.type === "frame"
-                ? "Export the selected frame"
-                : "Export the current page or portable board"
-            }
-          >
-            <Download className="h-4 w-4" aria-hidden="true" />
-            <span className="sr-only">Export board</span>
-            <select
-              aria-label="Export board"
-              value=""
-              disabled={Boolean(ioBusy)}
-              onChange={(event) => {
-                const format = event.currentTarget.value as
-                  "package" | "svg" | "png" | "pdf";
-                event.currentTarget.value = "";
-                if (format) void exportBoard(format);
-              }}
-            >
-              <option value="" disabled>
-                Export…
-              </option>
-              <option value="png">PNG image</option>
-              <option value="svg">Editable SVG</option>
-              <option value="pdf">PDF</option>
-              <option value="package">Portable Spectra board</option>
-            </select>
-          </label>
+          <WorkbarSelect
+            ariaLabel="Export board"
+            align="end"
+            disabled={Boolean(ioBusy)}
+            value="export"
+            options={[
+              { value: "export", label: "Export" },
+              { value: "png", label: "PNG image" },
+              { value: "svg", label: "Editable SVG" },
+              { value: "pdf", label: "PDF" },
+              { value: "package", label: "Portable Spectra board" },
+            ]}
+            onChange={(format) => {
+              if (format === "export") return;
+              void exportBoard(format as "package" | "svg" | "png" | "pdf");
+            }}
+          />
         </div>
         <span />
         <div>

@@ -10,7 +10,6 @@ import {
   signCollaborationSession,
 } from "@/lib/collaboration-token";
 import {
-  planArtifactYjsMutation,
   readArtifactYjsDocument,
   snapshotArtifactRegions,
   type ArtifactLiveValue,
@@ -47,9 +46,12 @@ import type {
   InteractionAct,
 } from "@/features/spectra/collaboration/interaction-model";
 import {
+  NATIVE_WORK_LIVE_META_MAP,
   planNativeArtifactYjsMutation,
   readNativeArtifactYjsDocument,
 } from "@/features/spectra/work/models/yjs/native-artifact-model";
+import { workYjsAdapter } from "@/features/spectra/work/models/yjs/registry";
+import { workYjsOrigins } from "@/features/spectra/work/models/yjs/origins";
 import { CloudflareRealtimeProvider } from "@/features/spectra/realtime/providers";
 import { realtimeProviderForWorkType } from "@/features/spectra/realtime/providers/provider-factory";
 import type { CollaborationPresence } from "@/features/spectra/collaboration/types";
@@ -154,6 +156,8 @@ class CloudflareAiRealtimeProvider implements AiRealtimeProvider {
 }
 
 class HocuspocusAiRealtimeProvider implements AiRealtimeProvider {
+  private readonly durablePendingUpdateIds = new Set<string>();
+
   constructor(readonly transport: HocuspocusProvider) {}
 
   get document() {
@@ -169,7 +173,34 @@ class HocuspocusAiRealtimeProvider implements AiRealtimeProvider {
   }
 
   get hasUnsyncedChanges() {
+    // Room sync is Yjs/Hocuspocus truth. Convex projection acks are persistence
+    // telemetry — waiting on them made landed edits look like failures.
     return this.transport.hasUnsyncedChanges;
+  }
+
+  handleStateless(payload: string) {
+    try {
+      const message = JSON.parse(payload) as {
+        type?: string;
+        updateIds?: unknown;
+      };
+      const updateIds = Array.isArray(message.updateIds)
+        ? message.updateIds.filter(
+            (value): value is string =>
+              typeof value === "string" && value.length <= 400,
+          )
+        : [];
+      if (message.type === "spectra.durable_pending") {
+        for (const updateId of updateIds)
+          this.durablePendingUpdateIds.add(updateId);
+      } else if (message.type === "spectra.durable_ack") {
+        for (const updateId of updateIds)
+          this.durablePendingUpdateIds.delete(updateId);
+      }
+    } catch {
+      // Ignore malformed gateway metadata. The provider's native sync status
+      // still prevents a false clean state while its update is in flight.
+    }
   }
 
   get awareness() {
@@ -254,8 +285,8 @@ async function createAiRealtimeProvider(params: {
     return provider;
   }
 
-  let rawProvider!: HocuspocusProvider;
-  rawProvider = new HocuspocusProvider({
+  const providerBox: { current?: HocuspocusAiRealtimeProvider } = {};
+  const rawProvider = new HocuspocusProvider({
     url: session.url,
     WebSocketPolyfill: WebSocket,
     name: session.documentName,
@@ -266,6 +297,7 @@ async function createAiRealtimeProvider(params: {
     onStatus: ({ status }) => observer?.onStatus?.(status),
     onAuthenticated: () => observer?.onAuthenticated?.(),
     onSynced: () => observer?.onSynced?.(),
+    onStateless: ({ payload }) => providerBox.current?.handleStateless(payload),
     onAuthenticationFailed: ({ reason }) =>
       observer?.onError?.(
         new Error(
@@ -279,7 +311,7 @@ async function createAiRealtimeProvider(params: {
             `AI_ARTIFACT_PERMISSION_REVOKED: ${event.reason || "Access was removed."}`,
           ),
         );
-      else if (!rawProvider.synced)
+      else if (!rawProvider.synced || rawProvider.hasUnsyncedChanges)
         observer?.onError?.(
           new Error(
             `AI_ARTIFACT_CONNECTION_CLOSED: The collaboration gateway closed before synchronization (${event.code}${event.reason ? `: ${event.reason}` : ""}).`,
@@ -289,7 +321,8 @@ async function createAiRealtimeProvider(params: {
   } as ConstructorParameters<typeof HocuspocusProvider>[0] & {
     WebSocketPolyfill: typeof WebSocket;
   });
-  return new HocuspocusAiRealtimeProvider(rawProvider);
+  providerBox.current = new HocuspocusAiRealtimeProvider(rawProvider);
+  return providerBox.current;
 }
 
 /**
@@ -592,56 +625,76 @@ async function acquirePlanClaims(params: {
     queuePosition: number;
     actorKind: "human" | "ai";
   }) => void | Promise<void>;
+  onConflictResolved?: () => void | Promise<void>;
   baseSnapshot?: ArtifactRegionSnapshot;
   proposedSnapshot?: ArtifactRegionSnapshot;
 }) {
   const claims: RegionClaim[] = [];
   for (const region of params.plan.regions) {
-    const aborted = abortError(params.signal);
-    if (aborted) {
-      await releaseClaims(claims, params.clientId, "cancel");
-      throw aborted;
-    }
-    const claim = await convexMutation<
-      {
-        artifactId: string;
-        partitionKey: string;
-        clientId: string;
-        regionId: string;
-        overlapDomains: string[];
-        baseStateVectorHash: string;
-        actorKind: "ai";
-        runId: string;
-        operationId: string;
-      },
-      RegionClaim
-    >("regionClaims:acquire", {
-      artifactId: params.artifactId,
-      partitionKey: "root",
-      clientId: params.clientId,
-      regionId: region.regionId,
-      overlapDomains: region.overlapDomains,
-      baseStateVectorHash: params.baseStateVectorHash,
-      actorKind: "ai",
-      runId: params.runId,
-      operationId: params.operationId,
-    });
-    claims.push(claim);
-    if (claim.status === "queued") {
-      await releaseClaims(claims.slice(0, -1), params.clientId, "cancel");
-      await params.onConflict?.({
-        regionId: claim.conflict?.regionId ?? region.regionId,
-        queuePosition: claim.conflict?.queuePosition ?? 1,
-        actorKind: claim.conflict?.actorKind ?? "human",
+    let notified = false;
+    for (;;) {
+      const aborted = abortError(params.signal);
+      if (aborted) {
+        await releaseClaims(claims, params.clientId, "cancel");
+        throw aborted;
+      }
+      const claim = await convexMutation<
+        {
+          artifactId: string;
+          partitionKey: string;
+          clientId: string;
+          regionId: string;
+          overlapDomains: string[];
+          baseStateVectorHash: string;
+          actorKind: "ai";
+          runId: string;
+          operationId: string;
+        },
+        RegionClaim
+      >("regionClaims:acquire", {
+        artifactId: params.artifactId,
+        partitionKey: "root",
+        clientId: params.clientId,
+        regionId: region.regionId,
+        overlapDomains: region.overlapDomains,
+        baseStateVectorHash: params.baseStateVectorHash,
+        actorKind: "ai",
+        runId: params.runId,
+        operationId: params.operationId,
       });
-      throw new AiArtifactRegionConflictError(
-        claim,
-        params.artifactId,
-        params.operationId,
-        params.clientId,
-        params.baseSnapshot,
-        params.proposedSnapshot,
+      if (claim.status !== "queued") {
+        if (notified) await params.onConflictResolved?.();
+        claims.push(claim);
+        break;
+      }
+      await releaseClaims([claim], params.clientId, "cancel");
+      if (!notified) {
+        await params.onConflict?.({
+          regionId: claim.conflict?.regionId ?? region.regionId,
+          queuePosition: claim.conflict?.queuePosition ?? 1,
+          actorKind: claim.conflict?.actorKind ?? "human",
+        });
+        notified = true;
+      }
+      const waitMs = Math.min(
+        1_600,
+        280 + (claim.conflict?.queuePosition ?? 1) * 180,
       );
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(resolve, waitMs);
+        const onAbort = () => {
+          clearTimeout(timer);
+          reject(
+            abortError(params.signal) ??
+              new DOMException("Aborted", "AbortError"),
+          );
+        };
+        if (params.signal?.aborted) {
+          onAbort();
+          return;
+        }
+        params.signal?.addEventListener("abort", onAbort, { once: true });
+      });
     }
   }
   return claims;
@@ -789,6 +842,16 @@ async function synchronizeMutation(params: {
     proposedSnapshot: ArtifactRegionSnapshot;
   };
 }) {
+  const logPhase = (phase: string, detail: Record<string, unknown> = {}) =>
+    console.info("[spectra.ai.artifact.phase]", {
+      phase,
+      artifactId: params.session.artifact._id,
+      runId: params.runId,
+      operationId: params.operationId,
+      synced: params.provider.synced,
+      hasUnsyncedChanges: params.provider.hasUnsyncedChanges,
+      ...detail,
+    });
   let plan = params.plan;
   let streamBase = params.streamBase;
   let streamBeats = params.streamBeats;
@@ -859,9 +922,11 @@ async function synchronizeMutation(params: {
     plan,
     signal: params.signal,
     onConflict: params.onConflict,
+    onConflictResolved: params.onConflictResolved,
     baseSnapshot,
     proposedSnapshot,
   });
+  logPhase("claims-acquired", { regionCount: plan.regions.length });
   /** Last control the AI touched, so the settle frame lands on it. */
   let lastFramePath: string | undefined;
   let settleSequence = 0;
@@ -900,7 +965,7 @@ async function synchronizeMutation(params: {
     params.provider.setAwarenessField("user", idlePresence);
   };
   try {
-    const beats: AiStreamBeat[] =
+    const rawBeats: AiStreamBeat[] =
       streamBeats && streamBeats.length > 0
         ? [...streamBeats]
         : (params.streamValues ?? []).map((value) => ({
@@ -909,6 +974,54 @@ async function synchronizeMutation(params: {
             previewGesture: "typing" as const,
             cursorMode: "typing" as const,
           }));
+    // Choreography is evidence of the native operation, but it must never
+    // become the critical path for durability. Keep every structural,
+    // pointer, menu, and spatial beat; sample only redundant typing prefixes.
+    // A detailed two-question quiz previously emitted hundreds of speculative
+    // frames and spent over a minute awaiting preview-ledger writes before the
+    // single real Yjs transaction was even attempted.
+    const maxChoreographyBeats = 48;
+    let beats = rawBeats;
+    if (rawBeats.length > maxChoreographyBeats) {
+      const required = new Set<number>();
+      rawBeats.forEach((beat, index) => {
+        if (
+          index === 0 ||
+          index === rawBeats.length - 1 ||
+          beat.previewGesture !== "typing" ||
+          beat.menu !== undefined ||
+          beat.gesturePhase !== undefined
+        )
+          required.add(index);
+      });
+      const selectEvenly = (indices: number[], count: number) => {
+        if (count <= 0 || indices.length === 0) return [];
+        if (indices.length <= count) return indices;
+        if (count <= 1) return [indices.at(-1)!];
+        return Array.from(
+          { length: count },
+          (_, slot) =>
+            indices[Math.round((slot * (indices.length - 1)) / (count - 1))]!,
+        );
+      };
+      let selected = [...required].sort((left, right) => left - right);
+      if (selected.length > maxChoreographyBeats) {
+        selected = selectEvenly(selected, maxChoreographyBeats);
+      } else {
+        const remaining = maxChoreographyBeats - selected.length;
+        const optional = rawBeats
+          .map((_, index) => index)
+          .filter((index) => !required.has(index));
+        selected.push(...selectEvenly(optional, remaining));
+      }
+      beats = [...new Set(selected)]
+        .sort((left, right) => left - right)
+        .map((index) => rawBeats[index]!);
+    }
+    logPhase("choreography-planned", {
+      rawBeatCount: rawBeats.length,
+      beatCount: beats.length,
+    });
     let previousStream = streamBase;
     for (const [sequence, beat] of beats.entries()) {
       settleSequence = sequence + 1;
@@ -1179,9 +1292,7 @@ async function synchronizeMutation(params: {
           stagedPaths.push(`/blocks/${blockId}/lines/${Math.floor(lineIndex)}`);
         }
         if (
-          (sequence === beats.length - 1 ||
-            beat.previewGesture === "typing" ||
-            sequence % 3 === 0) &&
+          (sequence === 0 || sequence === beats.length - 1) &&
           stagedPaths.length > 0
         ) {
           // Keep the durable preview ledger ordered with the awareness body.
@@ -1203,19 +1314,36 @@ async function synchronizeMutation(params: {
         }
       }
     }
+    logPhase("choreography-complete", { beatCount: beats.length });
     params.document.transact(plan.apply, {
       kind: "spectra-ai-operation",
       runId: params.runId,
       operationId: params.operationId,
     });
+    logPhase("transaction-applied");
     params.provider.flushPendingUpdates();
-    await waitUntil(
-      () => params.provider.synced && !params.provider.hasUnsyncedChanges,
-      params.getConnectionError,
-      30_000,
-      "AI_ARTIFACT_SYNC_TIMEOUT: The live edit was not durably acknowledged.",
-    );
+    logPhase("updates-flushed");
+    try {
+      await waitUntil(
+        () => params.provider.synced && !params.provider.hasUnsyncedChanges,
+        () => abortError(params.signal) ?? params.getConnectionError(),
+        12_000,
+        "AI_ARTIFACT_CONNECTION_STALLED: The collaboration room did not confirm the live edit.",
+      );
+    } catch (error) {
+      const connection = abortError(params.signal) ?? params.getConnectionError();
+      if (connection) throw connection;
+      if (params.provider.synced) {
+        logPhase("room-synced-after-flush", {
+          hasUnsyncedChanges: params.provider.hasUnsyncedChanges,
+        });
+      } else {
+        throw error;
+      }
+    }
+    logPhase("provider-acknowledged");
     await releaseClaims(claims, params.session.clientId, "apply");
+    logPhase("claims-released");
     // Brief post-edit pause so peers can see the finished caret — then clear
     // streaming chrome. Do not keep previewPhase="streaming" or the owner UI
     // stays stuck in "updating" with a permanent AI badge.
@@ -1249,6 +1377,9 @@ async function synchronizeMutation(params: {
       changedRegionIds: plan.regions.map((region) => region.regionId),
     };
   } catch (error) {
+    logPhase("failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
     await releaseClaims(claims, params.session.clientId, "cancel");
     throw error;
   } finally {
@@ -1356,6 +1487,7 @@ export async function applyAiArtifactMutation(params: {
   onConflictResolved?: () => void | Promise<void>;
   collaborationClientId?: string;
   checkpointBeforeAi?: boolean;
+  replacePendingCreate?: boolean;
 }) {
   // The browser client id identifies the owner/viewer, not the AI body. Reusing
   // it for the worker makes every observer with that id discard the AI cursor
@@ -1405,7 +1537,7 @@ export async function applyAiArtifactMutation(params: {
   try {
     await waitUntil(
       () => provider.synced && provider.isAuthenticated,
-      () => connectionError,
+      () => abortError(params.signal) ?? connectionError,
       12_000,
       () =>
         `AI_ARTIFACT_CONNECT_TIMEOUT: The live artifact could not be synchronized within 12s (status=${connectionStatus}, opened=${opened}, authenticated=${authenticated || provider.isAuthenticated}, syncEvent=${syncEventReceived}, synced=${provider.synced}, elapsedMs=${Date.now() - connectStartedAt}). Fast-fail so pending shells can be discarded instead of pulsing indefinitely.`,
@@ -1517,6 +1649,14 @@ export async function applyAiArtifactMutation(params: {
         "AI_ARTIFACT_INITIALIZATION_FAILED: The live artifact model is unavailable.",
       );
 
+    // A pending create may have been opened while the model was still
+    // authoring. Its default projection is presentation scaffolding, never an
+    // authored baseline. Another client can race the gateway bootstrap and
+    // merge that placeholder into the room, so create operations must derive
+    // the final value from their requested payload and replace the whole
+    // pending structure atomically. Updates still rebase against live state.
+    const pendingCreate = params.replacePendingCreate === true;
+
     const resolveValidatedValue = (
       base: ArtifactLiveValue,
     ): ArtifactLiveValue => {
@@ -1534,7 +1674,7 @@ export async function applyAiArtifactMutation(params: {
         );
       }
       return {
-        title: desired.title.trim() || "Untitled artifact",
+        title: desired.title.trim() || "Untitled work",
         ...(desired.summary?.trim() ? { summary: desired.summary.trim() } : {}),
         tags: [
           ...new Set(desired.tags.map((tag) => tag.trim()).filter(Boolean)),
@@ -1577,12 +1717,35 @@ export async function applyAiArtifactMutation(params: {
     // an earlier database projection.
     const refreshed = readLiveYjsDocument(document, typeKey);
     if (!refreshed) throw new Error("AI_ARTIFACT_LIVE_STATE_LOST");
-    const refreshedValue = resolveValidatedValue(refreshed);
-    const refreshedPlan = planLiveYjsMutation(
-      document,
-      typeKey,
-      refreshedValue,
-    );
+    const refreshedValue = pendingCreate
+      ? normalizedDesired
+      : resolveValidatedValue(refreshed);
+    const refreshedPlan = pendingCreate
+      ? {
+          regions: [
+            {
+              regionId: "artifact:structure",
+              overlapDomains: ["artifact:structure"],
+            },
+          ],
+          apply: () => {
+            const adapter = workYjsAdapter(typeKey);
+            adapter.applyProjection(
+              document,
+              refreshedValue.content,
+              workYjsOrigins({
+                clientId: "spectra-ai-runtime",
+                kind: "ai",
+                name: "Spectra AI",
+              }).ai,
+            );
+            const meta = document.getMap<unknown>(NATIVE_WORK_LIVE_META_MAP);
+            meta.set("title", refreshedValue.title);
+            meta.set("summary", refreshedValue.summary ?? "");
+            meta.set("tags", [...refreshedValue.tags]);
+          },
+        }
+      : planLiveYjsMutation(document, typeKey, refreshedValue);
     const changedRegionIds = refreshedPlan.regions.map(
       (region) => region.regionId,
     );
@@ -1617,6 +1780,24 @@ export async function applyAiArtifactMutation(params: {
       rebaseAfterHumanWait: () => {
         const liveBase = readLiveYjsDocument(document, typeKey);
         if (!liveBase) throw new Error("AI_ARTIFACT_LIVE_STATE_LOST");
+        if (pendingCreate) {
+          return {
+            plan: refreshedPlan,
+            streamBase: liveBase,
+            streamBeats: buildArtifactLivePreviewBeats(
+              liveBase,
+              normalizedDesired,
+            ),
+            baseSnapshot: snapshotArtifactRegions(typeKey, liveBase, [
+              "artifact:structure",
+            ]),
+            proposedSnapshot: snapshotArtifactRegions(
+              typeKey,
+              normalizedDesired,
+              ["artifact:structure"],
+            ),
+          };
+        }
         const liveDesired = resolveValidatedValue(liveBase);
         const livePlan = planLiveYjsMutation(document, typeKey, liveDesired);
         const liveRegionIds = livePlan.regions.map((region) => region.regionId);

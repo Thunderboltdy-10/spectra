@@ -10,11 +10,11 @@
  */
 
 import { useEffect, useRef, type ReactNode } from "react";
-import { advanceStory, onStoryFrame } from "./story-clock";
+import { advanceStory, onStoryFrame, wakeStory } from "./story-clock";
 import {
   CANVAS_HEIGHT,
+  FIRST_REST,
   LANDING_WIDTH,
-  SCENES,
   channelFor,
   opticsFor,
   totalScroll,
@@ -62,22 +62,27 @@ export function StoryCanvas({
   useEffect(() => {
     let raf = 0;
     const tick = () => {
-      advanceStory(
-        window.scrollY,
-        window.innerWidth,
-        window.innerHeight,
-        LANDING_WIDTH,
-      );
+      advanceStory(window.scrollY, window.innerWidth, window.innerHeight);
       raf = window.requestAnimationFrame(tick);
     };
     raf = window.requestAnimationFrame(tick);
     return () => window.cancelAnimationFrame(raf);
   }, []);
 
+  /* The camera drives on scroll; the rest of the loop wakes on it. Scroll
+     events are one gesture, so a couple of wake calls per frame at worst, and
+     the clock's idle deadband swallows the rest. */
+  useEffect(() => {
+    const onScroll = () => wakeStory();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
   /* The camera writes one transform, and — only at the very end — one clip.
      Nothing else in the tree moves. */
   useEffect(() => {
     let open = "";
+    let arrive = "";
     return onStoryFrame((frame) => {
       const node = canvasRef.current;
       const channel = channelRef.current;
@@ -87,6 +92,14 @@ export function StoryCanvas({
       }px, ${-frame.y}px, 0)`;
       setPrismProgress(opticsFor(frame));
       heroState.progress = opticsFor(frame);
+
+      /* `arrive` starts at zero the instant a travel begins, so a scene can
+         know it is *leaving* as well as arriving. */
+      const tag = frame.arrive >= 1 ? "true" : "false";
+      if (arrive !== tag) {
+        arrive = tag;
+        node.dataset.arrive = tag;
+      }
 
       const box = channelFor(frame, frame.viewport);
       channel.style.left = `${box.left.toFixed(1)}px`;
@@ -148,9 +161,9 @@ export function StoryCanvas({
               height: CANVAS_HEIGHT,
               /* Seeded so the first paint is already framed, before the clock
                  has had a frame to run. */
-              transform: `scale(1) translate3d(${-LANDING_WIDTH / 2}px, ${
-                -SCENES[0]!.camera[0]
-              }px, 0)`,
+              transform: `scale(1) translate3d(${
+                -LANDING_WIDTH / 2
+              }px, ${-FIRST_REST}px, 0)`,
             }}
           >
             {children}

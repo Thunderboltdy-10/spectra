@@ -79,8 +79,8 @@ describe("sharing maps to two roles and internal capabilities", () => {
     const readOnlyDocument = availableWorkModes("document", "read_only").map(
       (mode) => mode.label,
     );
-    expect(readOnlyDocument).toContain("Read");
-    expect(readOnlyDocument).not.toContain("Write");
+    expect(readOnlyDocument).toContain("Preview as reader");
+    expect(readOnlyDocument).not.toContain("Edit");
 
     const readOnlyQuiz = availableWorkModes("quiz", "read_only").map(
       (mode) => mode.label,

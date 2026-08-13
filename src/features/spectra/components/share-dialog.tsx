@@ -405,7 +405,7 @@ export function ShareDialog({
   if (!open) return null;
   return (
     <div
-      className="fixed inset-0 z-[120] flex items-center justify-center bg-[color-mix(in_oklab,var(--text-primary)_18%,transparent)] p-4 backdrop-blur-[2px]"
+      className="fixed inset-0 z-[400] flex items-center justify-center bg-[color-mix(in_oklab,var(--text-primary)_18%,transparent)] p-4 backdrop-blur-[2px]"
       onPointerDown={onClose}
     >
       <section
@@ -792,7 +792,7 @@ export function ShareDialog({
                             event.target.value as "default" | "read" | "none",
                           )
                         }
-                        aria-label={`Access to this artifact for ${entry.account.name}`}
+                        aria-label={`Access to this work for ${entry.account.name}`}
                         className="h-8 max-w-[160px] rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-micro text-[var(--text-primary)] outline-none"
                       >
                         <option value="default">

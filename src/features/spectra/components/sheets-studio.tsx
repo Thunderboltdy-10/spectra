@@ -94,6 +94,7 @@ import {
   sheetsAiTouchesColumn,
 } from "./ai-region-path";
 import { targetAttrs } from "../collaboration/target-attributes";
+import { WorkbarSelect } from "./workbar-controls";
 
 const ROW_HEIGHT = 31;
 const COLUMN_WIDTH = 122;
@@ -394,7 +395,7 @@ function histogramDataset(
     Math.min(6, Math.ceil(-Math.log10(Math.abs(width))) + 1),
   );
   return bins.map((bin) => ({
-    bucket: `${bin.lower.toFixed(precision)}â€“${bin.upper.toFixed(precision)}`,
+    bucket: `${bin.lower.toFixed(precision)}–${bin.upper.toFixed(precision)}`,
     count: bin.count,
   }));
 }
@@ -713,7 +714,7 @@ export function SheetsStudio({
   aiChangedPaths = [],
   readOnly = false,
   mode = "tab",
-  synchronizationReady: _synchronizationReady = true,
+  synchronizationReady = true,
   syncMessage = "Auto-saved",
   onActiveRegionChange,
 }: {
@@ -755,7 +756,7 @@ export function SheetsStudio({
   >("color_scale");
   const [conditionalThreshold, setConditionalThreshold] = useState("0");
   // Charts live in the sheet, so one can be selected the way a cell is, and a
-  // gesture in progress renders from local state until it commits (Â§11F).
+  // gesture in progress renders from local state until it commits (§11F).
   const [selectedChartId, setSelectedChartId] = useState<string>();
   const [chartGesture, setChartGesture] = useState<{
     id: string;
@@ -1540,7 +1541,7 @@ export function SheetsStudio({
     if (readOnly) return;
     // A new chart lands just past the selection it was made from, so the
     // relationship between the numbers and the picture is visible without
-    // scrolling anywhere (Â§11F).
+    // scrolling anywhere (§11F).
     const anchorColumn = normalizedSelection.end.column + 1;
     const anchorRow = normalizedSelection.start.row;
     const chart: SheetChart = {
@@ -1573,7 +1574,7 @@ export function SheetsStudio({
 
   /**
    * Moving or resizing a chart is one complete gesture, so it holds the pointer
-   * until release and writes the new geometry once â€” a half-finished drag never
+   * until release and writes the new geometry once — a half-finished drag never
    * reaches the other people in the sheet.
    */
   function beginChartGesture(
@@ -1829,7 +1830,7 @@ export function SheetsStudio({
                     ? "date"
                     : sourceCell.numFmt?.includes("%")
                       ? "percent"
-                      : /[$â‚¬Â£Â¥]/.test(sourceCell.numFmt ?? "")
+                      : /[$€£¥]/.test(sourceCell.numFmt ?? "")
                         ? "currency"
                         : "general",
                 fillColor: fillColor ? `#${fillColor.slice(-6)}` : undefined,
@@ -1926,6 +1927,12 @@ export function SheetsStudio({
   }
 
   async function importWorkbookFile(file: File) {
+    if (!synchronizationReady) {
+      setImportNotice(
+        "Finish synchronizing the current sheet before replacing it with an import. You can keep editing cells while Spectra reconnects.",
+      );
+      return;
+    }
     if (file.size < 1 || file.size > 100 * 1024 * 1024) {
       setImportNotice(
         "Import quarantined: the file is empty or exceeds the 100 MB parsing safety ceiling.",
@@ -2102,7 +2109,7 @@ export function SheetsStudio({
       className="spectra-sheets-studio min-w-0 overflow-hidden"
       data-compact={mode === "split" || undefined}
     >
-      <div className="sheets-top-bars">
+      <div className="spectra-editor-workbar sheets-top-bars">
         <div className="sheets-menu-bar">
           {(["file", "edit", "view", "insert", "format", "data"] as const).map(
             (name) => (
@@ -2122,7 +2129,12 @@ export function SheetsStudio({
                       <>
                         <button
                           type="button"
-                          disabled={readOnly}
+                          disabled={readOnly || !synchronizationReady}
+                          title={
+                            !synchronizationReady
+                              ? "Finish synchronizing before importing"
+                              : undefined
+                          }
                           onClick={() => importRef.current?.click()}
                         >
                           <Upload />
@@ -2440,7 +2452,7 @@ export function SheetsStudio({
             {filteredOutRows.size
               ? `${visibleRowIndices.length.toLocaleString()} of ${bounds.rows.toLocaleString()}`
               : bounds.rows.toLocaleString()}{" "}
-            rows Â· {bounds.columns.toLocaleString()} columns
+            rows · {bounds.columns.toLocaleString()} columns
           </span>
         </div>
         <input
@@ -2470,20 +2482,20 @@ export function SheetsStudio({
             <Redo2 />
           </ToolbarButton>
           <span className="sheets-toolbar-divider" />
-          <select
-            aria-label="Zoom"
+          <WorkbarSelect
+            ariaLabel="Zoom"
             value={String(Math.round(zoom * 100))}
-            onChange={(event) => {
-              setZoom(Number(event.target.value) / 100);
+            options={[
+              { value: "75", label: "75%" },
+              { value: "100", label: "100%" },
+              { value: "125", label: "125%" },
+              { value: "150", label: "150%" },
+            ]}
+            onChange={(next) => {
+              setZoom(Number(next) / 100);
               requestAnimationFrame(updateViewport);
             }}
-            className="sheets-toolbar-select"
-          >
-            <option value="75">75%</option>
-            <option value="100">100%</option>
-            <option value="125">125%</option>
-            <option value="150">150%</option>
-          </select>
+          />
           <span className="sheets-toolbar-divider" />
           <ToolbarButton
             label="Currency"
@@ -2510,7 +2522,7 @@ export function SheetsStudio({
             }
             disabled={readOnly}
           >
-            .0â†
+            .0←
           </ToolbarButton>
           <ToolbarButton
             label="Increase decimal places"
@@ -2521,61 +2533,55 @@ export function SheetsStudio({
             }
             disabled={readOnly}
           >
-            .0â†’
+            .0→
           </ToolbarButton>
-          <select
-            aria-label="Number format"
+          <WorkbarSelect
+            ariaLabel="Number format"
+            disabled={readOnly}
             value={activeCell?.format?.numberFormat ?? "general"}
-            onChange={(event) =>
+            options={[
+              { value: "general", label: "General" },
+              { value: "number", label: "Number" },
+              { value: "currency", label: "Currency" },
+              { value: "percent", label: "Percent" },
+              { value: "date", label: "Date" },
+            ]}
+            onChange={(next) =>
               formatSelection({
-                numberFormat: event.target.value as NonNullable<
+                numberFormat: next as NonNullable<
                   SheetCell["format"]
                 >["numberFormat"],
               })
             }
-            className="sheets-toolbar-select"
-            disabled={readOnly}
-          >
-            <option value="general">123</option>
-            <option value="number">Number</option>
-            <option value="currency">Currency</option>
-            <option value="percent">Percent</option>
-            <option value="date">Date</option>
-          </select>
+          />
           <span className="sheets-toolbar-divider" />
-          <select
-            aria-label="Font"
+          <WorkbarSelect
+            ariaLabel="Font"
+            disabled={readOnly}
             value={activeCell?.format?.fontFamily ?? "sans"}
-            onChange={(event) =>
+            options={[
+              { value: "sans", label: "Spectra Sans" },
+              { value: "serif", label: "Spectra Serif" },
+              { value: "mono", label: "Monospace" },
+            ]}
+            onChange={(next) =>
               formatSelection({
-                fontFamily: event.target.value as NonNullable<
+                fontFamily: next as NonNullable<
                   SheetCell["format"]
                 >["fontFamily"],
               })
             }
-            className="sheets-toolbar-select"
+          />
+          <WorkbarSelect
+            ariaLabel="Font size"
             disabled={readOnly}
-          >
-            <option value="sans">Spectra Sans</option>
-            <option value="serif">Spectra Serif</option>
-            <option value="mono">Monospace</option>
-          </select>
-          <select
-            aria-label="Font size"
             value={String(activeCell?.format?.fontSize ?? 11)}
-            onChange={(event) =>
-              formatSelection({ fontSize: Number(event.target.value) })
-            }
-            className="sheets-toolbar-select sheets-toolbar-size"
-            disabled={readOnly}
-          >
-            <option>9</option>
-            <option>10</option>
-            <option>11</option>
-            <option>12</option>
-            <option>14</option>
-            <option>16</option>
-          </select>
+            options={["9", "10", "11", "12", "14", "16"].map((size) => ({
+              value: size,
+              label: size,
+            }))}
+            onChange={(next) => formatSelection({ fontSize: Number(next) })}
+          />
           <ToolbarButton
             label="Bold"
             active={activeCell?.format?.bold}
@@ -2617,7 +2623,7 @@ export function SheetsStudio({
             />
           </label>
           <label className="sheets-color-control" title="Cell fill color">
-            <span>â—†</span>
+            <span>◆</span>
             <input
               type="color"
               value={activeCell?.format?.fillColor ?? "#ffffff"}
@@ -3382,7 +3388,7 @@ export function SheetsStudio({
               }),
             )}
             {/* Charts sit on the sheet itself, over the cells they read from,
-                rather than in a separate section underneath the data (Â§11F). */}
+                rather than in a separate section underneath the data (§11F). */}
             {activeSheet.charts.map((chart) => {
               const position =
                 chartGesture?.id === chart.id ? chartGesture.position : chart.position;
@@ -3489,9 +3495,9 @@ export function SheetsStudio({
                       {chart.sourceRange}
                     </button>
                     <span>
-                      n {statistics.count} Â· mean{" "}
+                      n {statistics.count} · mean{" "}
                       {statistics.mean === null
-                        ? "â€”"
+                        ? "—"
                         : statistics.mean.toLocaleString(
                             workbook.workbook.locale,
                             { maximumFractionDigits: 3 },
@@ -3696,7 +3702,7 @@ export function SheetsStudio({
                 />
               ) : (
                 <>
-                  <span className="sheets-tab-icon">â–¦</span>
+                  <span className="sheets-tab-icon">▦</span>
                   {sheet.name}
                   <ChevronDown />
                 </>

@@ -29,9 +29,7 @@ export type CrossTypeIssue = {
  * is a defect to fix, not a precedent to copy.
  */
 export const DOCUMENTED_LABEL_SPLITS: Readonly<Record<string, string>> =
-  Object.freeze({
-    Preview: "author preview (edit) vs runtime preview (interact)",
-  });
+  Object.freeze({});
 
 /**
  * The label a person reads is a promise about the capability behind it. If
@@ -75,8 +73,8 @@ export function checkModeLabelConsistency(): readonly CrossTypeIssue[] {
  * be view or interact (selecting, filtering, following), never edit.
  */
 export function checkReadingModesStayReading(): readonly CrossTypeIssue[] {
-  // "Preview" is deliberately absent: it is a documented capability split.
-  const reading = /^(Read|Browse|Results|Releases)$/i;
+  const reading =
+    /^(Read|Browse|Results|Releases|Preview as (?:reader|learner))$/i;
   const editing = /^(Edit|Write|Build|Source|Settings)$/i;
   const issues: CrossTypeIssue[] = [];
   for (const type of WORK_TYPE_KEYS) {

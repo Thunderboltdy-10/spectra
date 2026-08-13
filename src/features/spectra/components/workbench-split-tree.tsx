@@ -65,7 +65,7 @@ export function WorkbenchSplitTree({
                     }
                   }}
                   className={`h-9 max-w-[220px] shrink-0 truncate border-r border-[var(--border-subtle)] px-3 text-micro font-medium ${tab.id === active.id ? "bg-[var(--bg-primary)] text-[var(--text-primary)]" : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}
-                  aria-selected={tab.id === active.id}
+                  aria-pressed={tab.id === active.id}
                   title={`${tab.title} · Alt+Delete close · Alt+Shift+H/V split · Alt+Shift+Arrow move`}
                 >
                   {tab.title}

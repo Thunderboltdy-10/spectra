@@ -353,8 +353,8 @@ export function ArtifactBlueprintSheet({
                   <Icon className="h-5 w-5" />
                 </span>
                 <div>
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">{mode === "create" ? "Create artifact" : "Artifact detail"}</div>
-                  <h2 id={dialogTitleId} className="font-display text-[26px] font-semibold leading-tight text-[var(--text-primary)]">{mode === "create" ? `New ${meta.label}` : artifact?.title ?? "Artifact"}</h2>
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">{mode === "create" ? "Create work" : "Work details"}</div>
+                  <h2 id={dialogTitleId} className="font-display text-[26px] font-semibold leading-tight text-[var(--text-primary)]">{mode === "create" ? `New ${meta.label}` : artifact?.title ?? "Untitled work"}</h2>
                 </div>
               </div>
             </div>
@@ -396,7 +396,7 @@ export function ArtifactBlueprintSheet({
               {blueprintKey === "flashcard_deck" ? <DeckEditor cards={cards} setCards={setCards} /> : null}
               {blueprintKey === "quiz" ? <QuizEditor questions={questions} setQuestions={setQuestions} /> : null}
               {blueprintKey === "planner_task" ? <TaskEditor task={task} setTask={setTask} /> : null}
-              {artifact?.blueprintKey === "thread_reference" ? <div className="flex min-h-[220px] items-center justify-center rounded-[9px] bg-[var(--bg-elevated)] p-6 text-center"><div><MessageSquare className="mx-auto h-8 w-8 text-[#8b6ff0]" /><p className="mt-3 text-[13px] leading-6 text-[var(--text-secondary)]">Thread artifacts continue in the shared conversation view.</p></div></div> : null}
+              {artifact?.blueprintKey === "thread_reference" ? <div className="flex min-h-[220px] items-center justify-center rounded-[9px] bg-[var(--bg-elevated)] p-6 text-center"><div><MessageSquare className="mx-auto h-8 w-8 text-[#8b6ff0]" /><p className="mt-3 text-[13px] leading-6 text-[var(--text-secondary)]">Thread references continue in the shared conversation view.</p></div></div> : null}
             </section>
             <aside className="space-y-4">
               <div className="rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">

@@ -17,7 +17,6 @@ import {
   Box,
   Check,
   CheckCircle2,
-  Circle,
   CircleStop,
   CloudUpload,
   Code2,
@@ -383,7 +382,7 @@ export function CodeStudio({
   readOnly,
   collaborationDocument,
   synchronizationReady,
-  syncMessage = "Auto-saved",
+  syncMessage: _syncMessage = "Auto-saved",
   onActiveRegionChange,
 }: {
   artifactId: string;
@@ -521,7 +520,7 @@ export function CodeStudio({
       collaborationDocument
         ? codeFileText(collaborationDocument, activeFile.id)
         : null,
-    [activeFile.id, collaborationDocument, incoming],
+    [activeFile.id, collaborationDocument],
   );
   const filteredFiles = workbook.files.filter((file) =>
     file.path.toLowerCase().includes(fileQuery.trim().toLowerCase()),
@@ -1778,7 +1777,7 @@ export function CodeStudio({
               : result.report.warnings.length
                 ? "adapted"
                 : "exact",
-            message: `${result.report.imported} source file${result.report.imported === 1 ? "" : "s"} entered the live artifact.`,
+            message: `${result.report.imported} source file${result.report.imported === 1 ? "" : "s"} entered the live work.`,
           },
           ...(result.assets.length
             ? [
@@ -2261,9 +2260,9 @@ export function CodeStudio({
 
   return (
     <div className="code-studio w-full overflow-hidden">
-      <div className="flex min-h-12 flex-wrap items-center justify-between gap-2 border-b border-[var(--border-default)] px-3 py-2">
+      <div className="spectra-editor-workbar code-workbar flex min-h-12 flex-wrap items-center gap-2 px-3 py-2">
         <div
-          className="flex items-center gap-1"
+          className="flex shrink-0 items-center gap-1"
           role="tablist"
           aria-label="Code artifact views"
         >
@@ -2304,22 +2303,76 @@ export function CodeStudio({
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-1.5">
-          <span
-            className="hidden items-center gap-1.5 text-micro text-[var(--text-secondary)] lg:inline-flex"
-            role="status"
-            aria-live="polite"
-          >
-            {syncMessage === "Auto-saved" ? (
-              <CheckCircle2 className="h-3.5 w-3.5 text-[var(--success)]" />
-            ) : syncMessage === "Synchronizing" ||
-              syncMessage === "Reconnecting" ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-cyan)]" />
-            ) : (
-              <Circle className="h-3 w-3 fill-[#d88922] text-[#d88922]" />
-            )}
-            {syncMessage}
-          </span>
+        {(surface === "code" || surface === "split") && mobilePane === "source" ? (
+          <div className="code-workbar-source flex min-w-0 flex-1 items-center gap-1">
+            <span className="mx-1 h-5 w-px shrink-0 bg-[var(--border-subtle)]" />
+            <button
+              type="button"
+              aria-pressed={sourceMode === "parameters"}
+              onClick={() => setSourceMode(sourceMode === "code" ? "parameters" : "code")}
+              className={`code-pane-tab shrink-0 ${sourceMode === "parameters" ? "is-active" : ""}`}
+            >
+              <SlidersHorizontal className="h-3 w-3" />
+              {sourceMode === "parameters" ? "Code" : "Controls"}
+            </button>
+            {sourceMode === "code" ? (
+              <>
+                <FileCode2 className="h-3.5 w-3.5 shrink-0 text-[var(--accent-cyan)]" />
+                <span className="max-w-36 truncate text-micro font-semibold text-[var(--text-primary)]">
+                  {activeFile.path}
+                </span>
+                {workbook.entryFileId === activeFile.id ? (
+                  <span className="shrink-0 rounded-full bg-[color-mix(in_oklab,var(--success)_10%,transparent)] px-1.5 py-0.5 text-micro font-bold uppercase tracking-[.09em] text-[var(--success)]">
+                    Entry
+                  </span>
+                ) : null}
+              </>
+            ) : null}
+          </div>
+        ) : (
+          <span className="min-w-0 flex-1" />
+        )}
+        <div className="ml-auto flex shrink-0 items-center gap-1.5">
+          {(surface === "code" || surface === "split") &&
+          mobilePane === "source" &&
+          sourceMode === "code" ? (
+            <>
+              <button
+                type="button"
+                className="code-files-toggle code-small-action"
+                onClick={() => setFileRailOpen((value) => !value)}
+                aria-expanded={fileRailOpen}
+              >
+                <FolderOpen className="h-3 w-3" /> Files
+              </button>
+              <button
+                type="button"
+                className="code-small-action"
+                onClick={() =>
+                  editorViewRef.current &&
+                  (openSearchPanel(editorViewRef.current),
+                  editorViewRef.current.focus())
+                }
+              >
+                <Search className="h-3 w-3" /> Find
+              </button>
+              {parserFor(activeFile) ? (
+                <button
+                  type="button"
+                  className="code-small-action"
+                  onClick={() => void formatActiveFile()}
+                  disabled={readOnly || formatting}
+                >
+                  {formatting ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <Sparkles className="h-3 w-3" />
+                  )}
+                  Format
+                </button>
+              ) : null}
+            </>
+          ) : null}
           <button
             type="button"
             onClick={() => void run()}
@@ -2517,6 +2570,7 @@ export function CodeStudio({
         </div>
       </div>
 
+      <div className="spectra-editor-body">
       {importing ? (
         <div
           role="status"
@@ -2596,11 +2650,12 @@ export function CodeStudio({
         />
       ) : null}
       {surface === "preview" ? (
-        <div className="min-h-[650px] p-3">{preview}</div>
+        <div className="code-preview-pane min-h-[650px] p-3">{preview}</div>
       ) : null}
       {surface === "code" || surface === "split" ? (
         <>
           <div
+            data-surface={surface}
             className={`code-mobile-switch h-10 items-center justify-between border-b border-[var(--border-subtle)] px-2 sm:hidden ${
               surface === "split" ? "flex" : "hidden"
             }`}
@@ -2642,91 +2697,6 @@ export function CodeStudio({
               data-code-pane-active={mobilePane === "source" || undefined}
               className={`${mobilePane === "source" ? "flex" : "hidden"} min-h-0 min-w-0 flex-col sm:flex`}
             >
-              <div className="flex min-h-11 shrink-0 flex-wrap items-center justify-between gap-2 border-b border-[var(--border-subtle)] px-2.5 py-1.5">
-                <div
-                  className="flex min-w-0 items-center gap-1"
-                  role="tablist"
-                  aria-label="Code editing mode"
-                >
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={sourceMode === "code"}
-                    onClick={() => setSourceMode("code")}
-                    className={`code-pane-tab ${sourceMode === "code" ? "is-active" : ""}`}
-                  >
-                    <Code2 className="h-3 w-3" />
-                    Code
-                  </button>
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={sourceMode === "parameters"}
-                    onClick={() => setSourceMode("parameters")}
-                    className={`code-pane-tab ${sourceMode === "parameters" ? "is-active" : ""}`}
-                  >
-                    <SlidersHorizontal className="h-3 w-3" />
-                    Controls
-                  </button>
-                  {sourceMode === "code" ? (
-                    <>
-                      <span className="mx-1 h-4 w-px bg-[var(--border-subtle)]" />
-                      <FileCode2 className="h-3.5 w-3.5 text-[var(--accent-cyan)]" />
-                      <span className="max-w-32 truncate text-micro font-semibold text-[var(--text-primary)]">
-                        {activeFile.path}
-                      </span>
-                      {workbook.entryFileId === activeFile.id ? (
-                        <span className="rounded-full bg-[color-mix(in_oklab,var(--success)_10%,transparent)] px-1.5 py-0.5 text-micro font-bold uppercase tracking-[.09em] text-[var(--success)]">
-                          Entry
-                        </span>
-                      ) : null}
-                    </>
-                  ) : null}
-                </div>
-                {sourceMode === "code" ? (
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      className="code-files-toggle code-small-action"
-                      onClick={() => setFileRailOpen((value) => !value)}
-                      aria-expanded={fileRailOpen}
-                    >
-                      <FolderOpen className="h-3 w-3" /> Files
-                    </button>
-                    <button
-                      type="button"
-                      className="code-small-action"
-                      onClick={() =>
-                        editorViewRef.current &&
-                        (openSearchPanel(editorViewRef.current),
-                        editorViewRef.current.focus())
-                      }
-                    >
-                      <Search className="h-3 w-3" />
-                      Find
-                    </button>
-                    {parserFor(activeFile) ? (
-                      <button
-                        type="button"
-                        className="code-small-action"
-                        onClick={() => void formatActiveFile()}
-                        disabled={readOnly || formatting}
-                      >
-                        {formatting ? (
-                          <Loader2 className="h-3 w-3 animate-spin" />
-                        ) : (
-                          <Sparkles className="h-3 w-3" />
-                        )}
-                        Format
-                      </button>
-                    ) : null}
-                  </div>
-                ) : (
-                  <span className="text-micro text-[var(--text-tertiary)]">
-                    Updates stream into the running preview
-                  </span>
-                )}
-              </div>
               {sourceMode === "code" ? (
                 <div
                   className={`code-source-body grid min-h-0 flex-1 ${
@@ -3209,6 +3179,7 @@ export function CodeStudio({
           </div>
         </>
       ) : null}
+      </div>
 
       {deleteFileId ? (
         <ConfirmDialog
@@ -3897,7 +3868,7 @@ function CodeSettings({
       <nav className="code-settings-nav" aria-label="Code settings sections">
         <div className="code-settings-nav-heading">
           <span>Configuration</span>
-          <strong>Code artifact</strong>
+          <strong>Code work</strong>
         </div>
         {settingsSections.map((section) => {
           const Icon = section.icon;
@@ -4885,7 +4856,7 @@ function CodeSettings({
               aria-label="Artifact to bind"
               onChange={(event) => setBindingArtifactId(event.target.value)}
             >
-              <option value="">Choose an accessible artifact…</option>
+              <option value="">Choose accessible work…</option>
               {availableArtifacts.map((artifact) => (
                 <option key={artifact._id} value={artifact._id}>
                   {artifact.title} ·{" "}
@@ -5139,7 +5110,7 @@ function CodeSettings({
       {pendingAssetRevocation ? (
         <ConfirmDialog
           title="Revoke this asset everywhere?"
-          detail={`${pendingAssetRevocation.label} will stop loading in the current artifact, retained history, and every published or embedded build. This security action cannot be undone.`}
+          detail={`${pendingAssetRevocation.label} will stop loading in the current work, retained history, and every published or embedded build. This security action cannot be undone.`}
           confirmLabel={
             revokingAssetId === pendingAssetRevocation.assetId
               ? "Revoking..."

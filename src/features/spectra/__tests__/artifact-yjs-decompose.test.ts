@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  changedArtifactRegionIds,
   decomposeArtifactContent,
   overlayLiveArtifactRecord,
   recomposeArtifactContent,
+  snapshotArtifactRegions,
 } from "../collaboration/artifact-yjs-model";
 import { normalizeArtifactContent } from "../ai/content-normalization";
 import { validateArtifactContent } from "../artifacts/registry";
@@ -16,7 +18,9 @@ describe("overlayLiveArtifactRecord", () => {
       summary: "Stale summary",
       tags: ["old"],
       content: {
-        blocks: [{ id: "b1", type: "heading", text: "Key Takeaways", level: 2 }],
+        blocks: [
+          { id: "b1", type: "heading", text: "Key Takeaways", level: 2 },
+        ],
       },
       updatedAt: 1,
     };
@@ -57,6 +61,93 @@ describe("overlayLiveArtifactRecord", () => {
 });
 
 describe("decomposeArtifactContent", () => {
+  it("snapshots optional undefined region values without failing a mutation", () => {
+    const content = {
+      questions: [
+        {
+          id: "question-1",
+          type: "multiple_choice",
+          prompt: "What do plants use for photosynthesis?",
+          options: ["Light", "Sound", "Wind", "Soil"],
+          correctAnswer: "Light",
+        },
+      ],
+    };
+    const regions = [
+      ...decomposeArtifactContent("quiz", content).descriptors.keys(),
+    ];
+    expect(() =>
+      snapshotArtifactRegions(
+        "quiz",
+        { title: "Photosynthesis quiz", tags: [], content },
+        regions,
+      ),
+    ).not.toThrow();
+  });
+
+  it("does not treat object-key order as a structural document change", () => {
+    const stored = {
+      blocks: [{ id: "intro", text: "", type: "paragraph" }],
+      outline: [],
+      tiptap: {
+        content: [{ attrs: { blockId: "intro" }, type: "paragraph" }],
+        type: "doc",
+      },
+    };
+    const nativeProjection = {
+      tiptap: {
+        type: "doc",
+        content: [{ type: "paragraph", attrs: { blockId: "intro" } }],
+      },
+      blocks: [{ id: "intro", type: "paragraph", text: "" }],
+      outline: [],
+    };
+
+    expect(
+      changedArtifactRegionIds("document", stored, nativeProjection),
+    ).toEqual([]);
+  });
+
+  it("attributes native Tiptap text changes to their stable document block", () => {
+    const before = {
+      blocks: [{ id: "intro", type: "paragraph", text: "" }],
+      outline: [],
+      tiptap: {
+        type: "doc",
+        content: [{ type: "paragraph", attrs: { blockId: "intro" } }],
+      },
+    };
+    const after = {
+      blocks: [
+        {
+          id: "intro",
+          type: "paragraph",
+          text: "Native collaboration remains mergeable.",
+        },
+      ],
+      outline: [],
+      tiptap: {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            attrs: { blockId: "intro" },
+            content: [
+              {
+                type: "text",
+                text: "Native collaboration remains mergeable.",
+              },
+            ],
+          },
+        ],
+      },
+    };
+
+    expect(changedArtifactRegionIds("document", before, after)).toEqual([
+      "intro",
+    ]);
+  });
+
   it("decomposes sheets that omit optional identity maps without throwing", () => {
     // Schema allows missing rowIdentities/columnIdentities, but region paths
     // still address them. Decompose must materialize those parents.
@@ -123,8 +214,8 @@ describe("decomposeArtifactContent", () => {
           sheets: Array<{ rowIdentities?: Record<string, string> }>;
         }
       ).sheets[0]!.rowIdentities ?? {};
-    expect(Object.values(identities).every((id) => typeof id === "string")).toBe(
-      true,
-    );
+    expect(
+      Object.values(identities).every((id) => typeof id === "string"),
+    ).toBe(true);
   });
 });

@@ -5,6 +5,9 @@ import { fileURLToPath } from "node:url";
 const projectRoot = dirname(fileURLToPath(import.meta.url));
 
 const nextConfig: NextConfig = {
+  // Browser evidence is taken against the development server, but framework
+  // diagnostics are not part of Spectra's product chrome.
+  devIndicators: false,
   transpilePackages: ["@lobehub/icons", "@lobehub/ui", "es-toolkit"],
   serverExternalPackages: ["pdfjs-dist", "@napi-rs/canvas", "esbuild"],
   turbopack: {

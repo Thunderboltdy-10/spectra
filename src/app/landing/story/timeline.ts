@@ -1,11 +1,20 @@
 /**
  * The tall canvas, and how the camera moves down it.
  *
- * The landing is one work surface roughly 1040 logical px wide and ten
- * thousand tall. Scenes are regions of that surface, not separate pages. The
- * camera travels down it, holds still while a staged sequence plays, and at
- * the very end pulls back far enough to reveal what the surface has been
- * sitting inside all along.
+ * The landing is one work surface roughly 1040 logical px wide and ten thousand
+ * tall. Scenes are regions of that surface, not separate pages.
+ *
+ * The camera does exactly two things, and never both at once. It **travels**:
+ * moving from the scene it was holding to the next one, which is the only time
+ * the page appears to scroll. Then it **holds**: perfectly still, while that
+ * scene's work plays out under continued scrolling. A scene therefore gets the
+ * visitor's whole attention while it happens, and the movement between scenes
+ * reads as a camera move rather than as a page being dragged.
+ *
+ * That split is also what keeps the choreography honest. Scene-local progress
+ * (`t`) is zero for the entire travel and only starts advancing once the camera
+ * has arrived, so nothing can reveal itself before the actor who is supposed to
+ * reveal it is on screen doing so.
  *
  * Everything here is a pure function of one number: how far the visitor has
  * scrolled. That is what makes the whole story reversible.
@@ -13,7 +22,24 @@
 
 export const LANDING_WIDTH = 1040;
 
-export type SceneMode = "travel" | "stage" | "hybrid";
+/**
+ * Authored height of one scene, in canvas px.
+ *
+ * This is the contract between the timeline and the frame: the canvas is fitted
+ * so that exactly this much of it is visible, which is what lets a held scene
+ * fill the window at any window shape instead of being cropped on a laptop and
+ * lost on a monitor.
+ */
+export const SCENE_FRAME = 640;
+
+/**
+ * Dead canvas between scenes.
+ *
+ * Two scenes are never in frame together. The gap is what the camera crosses
+ * during a travel, so the transition reads as leaving one composition and
+ * arriving at another rather than as two overlapping ones sliding past.
+ */
+export const SCENE_GAP = 128;
 
 export type SceneId =
   | "wake"
@@ -30,166 +56,110 @@ export type SceneId =
   | "scale"
   | "reveal";
 
-export type Scene = {
+/** What a scene is authored as. Everything else about it is derived. */
+type SceneSpec = {
   id: SceneId;
-  mode: SceneMode;
+  /** Viewport heights spent travelling into this scene's composition. */
+  travel: number;
+  /** Viewport heights the camera holds still while the scene plays. */
+  hold: number;
+  /**
+   * Camera scale while held. 1 means the frame is exactly one scene. Only the
+   * last two scenes leave 1, because only they are pulling back.
+   */
+  zoom?: number;
+};
+
+export type Scene = SceneSpec & {
   /** Where this scene's content sits on the tall canvas. */
   top: number;
   height: number;
-  /** How much scrolling the scene consumes, in viewport heights. */
+  /** Canvas Y held at the centre of the frame while this scene plays. */
+  rest: number;
+  /** Scroll this scene consumes in total, in viewport heights. */
   length: number;
-  /**
-   * Canvas Y held at the centre of the frame, at the scene's start and end.
-   * A `stage` scene reaches its end value early and then holds, so entering it
-   * is an arrival rather than a stop.
-   */
-  camera: [number, number];
-  /**
-   * Camera scale multiplier at start and end. 1 means "the canvas fills the
-   * frame". The final two scenes are the only ones that leave 1.
-   */
-  zoom?: [number, number];
+  zoom: number;
 };
-
-/** How much of a staged scene is spent arriving at its composition. */
-const STAGE_ARRIVAL = 0.2;
 
 /**
  * The scenes, in order.
  *
- * Stage scenes are deliberately generous: a six-second sequence costs roughly
- * one and a half screens of scrolling, never a dozen. Camera values are
- * continuous across boundaries, so there is never a cut.
+ * Budgets are in viewport heights, so the page costs the same number of
+ * gestures on a laptop and on a tall monitor. A travel is around four tenths of
+ * a screen — long enough to read as a move, short enough that nobody is waiting
+ * on it. Holds are sized to the work each scene actually has to show.
  */
-export const SCENES: Scene[] = [
-  {
-    id: "wake",
-    mode: "travel",
-    top: 0,
-    height: 200,
-    length: 0.5,
-    camera: [100, 400],
-  },
-  {
-    id: "hero",
-    mode: "travel",
-    top: 200,
-    height: 840,
-    length: 2.2,
-    camera: [400, 900],
-  },
-  {
-    id: "prepare",
-    mode: "stage",
-    top: 1040,
-    height: 440,
-    length: 1.2,
-    camera: [900, 1260],
-  },
-  {
-    id: "transform",
-    mode: "stage",
-    top: 1480,
-    height: 1160,
-    length: 2.8,
-    camera: [1260, 2060],
-  },
-  {
-    id: "living",
-    mode: "hybrid",
-    top: 2640,
-    height: 980,
-    length: 2.1,
-    camera: [2060, 3130],
-  },
-  {
-    id: "contention",
-    mode: "stage",
-    top: 3620,
-    height: 860,
-    length: 1.8,
-    camera: [3130, 4050],
-  },
-  {
-    id: "dock",
-    mode: "hybrid",
-    top: 4480,
-    height: 700,
-    length: 1.6,
-    camera: [4050, 4830],
-  },
-  {
-    id: "workbench",
-    mode: "stage",
-    top: 5180,
-    height: 1080,
-    length: 2.6,
-    camera: [4830, 5720],
-  },
-  {
-    id: "references",
-    mode: "hybrid",
-    top: 6260,
-    height: 940,
-    length: 2.0,
-    camera: [5720, 6730],
-  },
-  {
-    id: "calendar",
-    mode: "stage",
-    top: 7200,
-    height: 960,
-    length: 2.0,
-    camera: [6730, 7680],
-  },
-  {
-    id: "foundry",
-    mode: "hybrid",
-    top: 8160,
-    height: 1000,
-    length: 2.1,
-    camera: [7680, 8660],
-  },
-  {
-    id: "scale",
-    mode: "travel",
-    top: 9160,
-    height: 880,
-    length: 1.9,
-    camera: [8660, 9600],
-    zoom: [1, 0.72],
-  },
-  {
-    /* The longest scene on the page, because four things happen in it and
-       rushing any of them would make the last one read as a trick: the closing
-       lines are written, the box contracts into a panel, the product resolves
-       around it, and then the page proves how tall it really is. The end zoom
-       is nominal — `revealZoom` corrects it to whatever makes 1040 canvas px
-       measure exactly one panel at this window size. */
-    id: "reveal",
-    mode: "stage",
-    top: 10040,
-    height: 760,
-    length: 4.6,
-    camera: [9600, 10380],
-    zoom: [0.72, 0.42],
-  },
+const AUTHORED: SceneSpec[] = [
+  /* The first scene is already in frame, so there is nothing to travel. */
+  { id: "wake", travel: 0, hold: 0.45 },
+  { id: "hero", travel: 0.5, hold: 0.8 },
+  { id: "prepare", travel: 0.4, hold: 0.7 },
+  /* The transformation itself: three things in, one out, provenance attached.
+     The longest hold before the reveal, because rushing it would make the
+     payoff read as a trick. */
+  { id: "transform", travel: 0.45, hold: 1.25 },
+  { id: "living", travel: 0.4, hold: 0.9 },
+  { id: "contention", travel: 0.4, hold: 0.8 },
+  { id: "dock", travel: 0.4, hold: 0.75 },
+  { id: "workbench", travel: 0.4, hold: 1.0 },
+  { id: "references", travel: 0.4, hold: 0.85 },
+  { id: "calendar", travel: 0.4, hold: 0.9 },
+  { id: "foundry", travel: 0.4, hold: 0.95 },
+  /* The camera starts to leave: the first scene that does not fill the frame,
+     which is the visitor's warning that the surface has an edge. */
+  { id: "scale", travel: 0.5, hold: 0.6, zoom: 0.78 },
+  /* Four things happen here: the closing lines are written, the box contracts
+     into a panel, the product resolves around it, and the page proves how tall
+     it really is. The end zoom is nominal — `revealZoom` corrects it to whatever
+     makes 1040 canvas px measure exactly one panel at this window size. */
+  { id: "reveal", travel: 0.45, hold: 2.6, zoom: 0.42 },
 ];
+
+/**
+ * Positions, derived rather than authored.
+ *
+ * The old table carried `top`, `height` and a camera range per scene, and every
+ * one of those had to be kept consistent with its neighbours by hand — a camera
+ * that did not end where the next one started was a visible cut. There is
+ * nothing left to get wrong here: scenes are a fixed pitch down the canvas and
+ * the camera rests on their centres.
+ */
+export const SCENES: Scene[] = AUTHORED.map((spec, index) => {
+  const top = index * (SCENE_FRAME + SCENE_GAP);
+  return {
+    ...spec,
+    top,
+    height: SCENE_FRAME,
+    rest: top + SCENE_FRAME / 2,
+    length: spec.travel + spec.hold,
+    zoom: spec.zoom ?? 1,
+  };
+});
 
 /** Total logical height of the authored surface. */
 export const CANVAS_HEIGHT =
-  SCENES[SCENES.length - 1]!.top + SCENES[SCENES.length - 1]!.height + 240;
+  SCENES[SCENES.length - 1]!.top + SCENE_FRAME + SCENE_GAP;
 
 export const SCENE_BY_ID = new Map(SCENES.map((scene) => [scene.id, scene]));
+
+/** Where the camera sits before the story has run a frame. */
+export const FIRST_REST = SCENES[0]!.rest;
 
 export type CameraState = {
   /** Canvas Y held at the centre of the frame. */
   y: number;
-  /** Scale multiplier on top of the fit-to-width scale. */
+  /** Scale multiplier on top of the fit-to-frame scale. */
   zoom: number;
   scene: SceneId;
-  /** Progress through the current scene, 0..1. */
+  /**
+   * Progress through this scene's *action*, 0..1. Zero for the whole travel:
+   * the scene has not started until the camera has arrived.
+   */
   t: number;
+  /** Progress through the travel into this scene, 0..1. One once held. */
+  arrive: number;
+  /** Progress through the scene's whole scroll budget, travel included. */
+  span: number;
   /** Index of the current scene. */
   index: number;
   /** Overall progress through the whole story, 0..1. */
@@ -215,7 +185,9 @@ function band(t: number, from: number, to: number): number {
  *
  * Six overlapping windows, written down once so the clip box, the camera, the
  * zoom and the shell furniture cannot disagree about when anything happens.
- * Every consumer reads these; none of them holds its own copy.
+ * Every consumer reads these; none of them holds its own copy. The numbers are
+ * fractions of the reveal's hold, so the whole sequence plays with the camera
+ * already parked.
  */
 const REVEAL = {
   /** A small symmetric inset: enough to see an edge, not enough to relocate. */
@@ -228,9 +200,10 @@ const REVEAL = {
   up: [0.72, 0.805],
   hold: [0.805, 0.835],
   down: [0.835, 0.9],
-  /** Canvas Y the proof pass travels to. The hero, recognisably. */
-  restY: 620,
 } as const;
+
+/** Canvas Y the proof pass travels to. The hero, recognisably. */
+const PROOF_TARGET = SCENE_BY_ID.get("hero")!.rest;
 
 /**
  * The proof pass (§27, Stage I).
@@ -240,24 +213,23 @@ const REVEAL = {
  * hero long enough to be recognised, and returns. Nothing is faked and nothing
  * is replayed: it is the same camera reading the same canvas, and every scene
  * it passes is in the finished state the visitor left it in.
+ *
+ * This is the one place a held camera moves, because here the movement is the
+ * scene's content rather than a transition between scenes.
  */
 function proofPass(t: number, rest: number): number {
   if (t <= REVEAL.up[0] || t >= REVEAL.down[1]) return rest;
   if (t < REVEAL.hold[0]) {
-    return rest + (REVEAL.restY - rest) * band(t, REVEAL.up[0], REVEAL.up[1]);
+    return rest + (PROOF_TARGET - rest) * band(t, REVEAL.up[0], REVEAL.up[1]);
   }
-  if (t < REVEAL.down[0]) return REVEAL.restY;
+  if (t < REVEAL.down[0]) return PROOF_TARGET;
   return (
-    REVEAL.restY +
-    (rest - REVEAL.restY) * band(t, REVEAL.down[0], REVEAL.down[1])
+    PROOF_TARGET + (rest - PROOF_TARGET) * band(t, REVEAL.down[0], REVEAL.down[1])
   );
 }
 
 /**
  * Scroll length of the whole page, in px, for a given viewport height.
- *
- * Scene lengths are expressed in viewport heights so the page costs the same
- * number of gestures on a laptop and on a tall monitor.
  */
 export function totalScroll(viewportHeight: number): number {
   const units = SCENES.reduce((sum, scene) => sum + scene.length, 0);
@@ -267,8 +239,8 @@ export function totalScroll(viewportHeight: number): number {
 /**
  * Resolve scroll position into camera state.
  *
- * Pure, monotonic and exactly invertible in intent: scrolling up recomputes
- * the same values it produced on the way down, which is why no scene needs to
+ * Pure, monotonic and exactly invertible in intent: scrolling up recomputes the
+ * same values it produced on the way down, which is why no scene needs to
  * "rewind" anything.
  */
 export function cameraFor(
@@ -278,42 +250,61 @@ export function cameraFor(
   const total = totalScroll(viewportHeight);
   const clamped = Math.max(0, Math.min(total, scrollY));
   let cursor = 0;
+
   for (let index = 0; index < SCENES.length; index += 1) {
     const scene = SCENES[index]!;
     const span = scene.length * viewportHeight;
     const last = index === SCENES.length - 1;
-    if (clamped < cursor + span || last) {
-      const raw = span > 0 ? (clamped - cursor) / span : 1;
-      const t = Math.max(0, Math.min(1, raw));
-      /* Travel is linear so it feels like ordinary scrolling. A staged scene
-         arrives at its composition in the first fifth and then holds, so the
-         viewport settles rather than stopping dead. Hybrid keeps moving. */
-      const curve =
-        scene.mode === "travel"
-          ? t
-          : scene.mode === "hybrid"
-            ? easeInOut(t)
-            : easeInOut(Math.min(1, t / STAGE_ARRIVAL));
-      const zoom = scene.zoom ?? [1, 1];
-      const held =
-        scene.camera[0] + (scene.camera[1] - scene.camera[0]) * curve;
+    if (clamped >= cursor + span && !last) {
+      cursor += span;
+      continue;
+    }
+
+    const into = clamped - cursor;
+    const travel = scene.travel * viewportHeight;
+    const previous = SCENES[index - 1];
+    const fromY = previous?.rest ?? scene.rest;
+    const fromZoom = previous?.zoom ?? scene.zoom;
+
+    /* Travelling. The camera moves and the scene has not begun. */
+    if (travel > 0 && into < travel) {
+      const arrive = Math.max(0, Math.min(1, into / travel));
+      const eased = easeInOut(arrive);
       return {
-        y: scene.id === "reveal" ? proofPass(t, held) : held,
-        zoom: zoom[0] + (zoom[1] - zoom[0]) * easeInOut(t),
+        y: fromY + (scene.rest - fromY) * eased,
+        zoom: fromZoom + (scene.zoom - fromZoom) * eased,
         scene: scene.id,
-        t,
+        t: 0,
+        arrive,
+        span: span > 0 ? into / span : 0,
         index,
         overall: total > 0 ? clamped / total : 0,
       };
     }
-    cursor += span;
+
+    /* Held. The camera is still and the scene plays. */
+    const hold = scene.hold * viewportHeight;
+    const t = hold > 0 ? Math.max(0, Math.min(1, (into - travel) / hold)) : 1;
+    return {
+      y: scene.id === "reveal" ? proofPass(t, scene.rest) : scene.rest,
+      zoom: scene.zoom,
+      scene: scene.id,
+      t,
+      arrive: 1,
+      span: span > 0 ? Math.min(1, into / span) : 1,
+      index,
+      overall: total > 0 ? clamped / total : 0,
+    };
   }
+
   const scene = SCENES[0]!;
   return {
-    y: scene.camera[0],
-    zoom: 1,
+    y: scene.rest,
+    zoom: scene.zoom,
     scene: scene.id,
     t: 0,
+    arrive: 1,
+    span: 0,
     index: 0,
     overall: 0,
   };
@@ -323,9 +314,10 @@ export function cameraFor(
  * The prism's optical progress at a point in the story.
  *
  * The glass has its own arc: dormant through the hero, charging as it is
- * prepared, igniting as work is fed into it, alive while the work is alive,
- * and resolving as the page completes. It is deliberately not a linear map of
- * scroll, because the prism is doing something specific in each scene.
+ * prepared, igniting as work is fed into it, alive while the work is alive, and
+ * resolving as the page completes. It reads `span` rather than `t`, because the
+ * glass is the one thing that must keep changing during a travel — a prism that
+ * froze every time the camera moved would read as a video that had buffered.
  */
 const OPTICS: Record<SceneId, [number, number]> = {
   wake: [0.02, 0.03],
@@ -344,8 +336,30 @@ const OPTICS: Record<SceneId, [number, number]> = {
 };
 
 export function opticsFor(camera: CameraState): number {
-  const band = OPTICS[camera.scene];
-  return band[0] + (band[1] - band[0]) * camera.t;
+  const optics = OPTICS[camera.scene];
+  return optics[0] + (optics[1] - optics[0]) * camera.span;
+}
+
+/* ------------------------------------------------------------------ *
+ * The frame
+ * ------------------------------------------------------------------ */
+
+/** Breathing room between the canvas and the window, in viewport px. */
+export const CANVAS_MARGIN = 28;
+
+/**
+ * The scale that makes one scene exactly one frame.
+ *
+ * Fit-to-width alone was the reason a held scene still could not be seen: a
+ * laptop showed 670 canvas px of a scene authored at 840, so a third of every
+ * composition was always outside the window. Fitting to *both* axes and taking
+ * the smaller factor means the held scene is the frame, whatever shape the
+ * window is — wide windows get margin at the sides, short ones at the top.
+ */
+export function fitFor(viewport: Viewport): number {
+  const byWidth = (viewport.width - CANVAS_MARGIN * 2) / LANDING_WIDTH;
+  const byHeight = (viewport.height - CANVAS_MARGIN * 2) / SCENE_FRAME;
+  return Math.max(0.2, Math.min(byWidth, byHeight));
 }
 
 /* ------------------------------------------------------------------ *
@@ -413,8 +427,8 @@ export function revealZoom(viewport: Viewport, fit: number): number {
 /**
  * The zoom actually applied, once the window is known.
  *
- * Every scene but the last uses the authored value. The last one is aiming at
- * a measurement rather than a number, so its end point is replaced by the zoom
+ * Every scene but the last uses the authored value. The last one is aiming at a
+ * measurement rather than a number, so its end point is replaced by the zoom
  * that makes the surface exactly one panel wide. The camera and the clip then
  * arrive together by construction rather than by tuning.
  */
@@ -424,8 +438,12 @@ export function zoomFor(
   fit: number,
 ): number {
   if (camera.scene !== "reveal") return camera.zoom;
-  const start = SCENE_BY_ID.get("reveal")!.zoom![0];
-  return start + (revealZoom(viewport, fit) - start) * easeInOut(camera.t);
+  const start = SCENE_BY_ID.get("scale")!.zoom;
+  const end = revealZoom(viewport, fit);
+  /* During the travel the zoom is already interpolating from the previous
+     scene's value, so only the held portion is ours to drive. */
+  if (camera.arrive < 1) return start + (end - start) * easeInOut(camera.arrive);
+  return end;
 }
 
 /**
@@ -484,3 +502,5 @@ export function shellFor(viewport: Viewport): {
   const panelLeft = sidebar + SHELL.gap;
   return { sidebar, panelLeft, panelRight: panelLeft + width };
 }
+
+

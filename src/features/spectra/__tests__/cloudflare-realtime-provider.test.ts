@@ -29,7 +29,10 @@ class FakeSocket {
   }
 }
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+});
 
 function wire(value: unknown) {
   return JSON.stringify(value, (_key, entry) =>
@@ -97,6 +100,14 @@ describe("Cloudflare realtime browser provider", () => {
     if (previous === undefined)
       delete process.env.NEXT_PUBLIC_SPECTRA_CLOUDFLARE_REALTIME;
     else process.env.NEXT_PUBLIC_SPECTRA_CLOUDFLARE_REALTIME = previous;
+  });
+
+  it("uses the running local gateway in development unless Cloudflare is explicit", () => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("NEXT_PUBLIC_SPECTRA_CLOUDFLARE_REALTIME", "");
+    expect(realtimeProviderForWorkType("document")).toBe("hocuspocus");
+    vi.stubEnv("NEXT_PUBLIC_SPECTRA_CLOUDFLARE_REALTIME", "true");
+    expect(realtimeProviderForWorkType("document")).toBe("cloudflare");
   });
 
   it("acquires/releases leases and queues structural claims through room events", async () => {

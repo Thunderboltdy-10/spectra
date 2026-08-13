@@ -12,7 +12,21 @@ export type LiveDockTruthState =
 
 export type LiveDockInputRequest =
   | { kind: "approval"; prompt: string }
-  | { kind: "choice"; prompt: string; options: Array<{ title: string; description?: string | null }> }
+  | {
+      kind: "choice";
+      messageId?: string;
+      prompt: string;
+      options: Array<{ title: string; description?: string | null }>;
+    }
+  | {
+      kind: "choice_batch";
+      messageId?: string;
+      questions: Array<{
+        id: string;
+        prompt: string;
+        options: Array<{ title: string; description?: string | null }>;
+      }>;
+    }
   | { kind: "short_answer"; prompt: string }
   | { kind: "file"; prompt: string; accept?: string };
 
@@ -28,6 +42,7 @@ export type LiveDockTabSource = {
     error?: string;
     retryable?: boolean;
     traceDegraded?: boolean;
+    userPrompt?: string;
   };
   card?: {
     title?: string;
@@ -62,39 +77,101 @@ const phaseSteps: Record<string, string> = {
   interrupted: "Reconnecting to continue",
   partial: "Completed with limitations",
   stopped: "Stopped",
-  failed: "Could not complete",
+  failed: "Recovery exhausted",
   completed: "Completed",
 };
 
+function compactText(value: string | undefined) {
+  return value
+    ?.replace(/(^|\s)#{1,6}\s+/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/\*([^*]+)\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/^[-*+]\s+/gm, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function publicSpectraFailureText(
+  value: string | undefined,
+  retryable = true,
+) {
+  const fallback = retryable
+    ? "Spectra paused after trying to recover. Retry when you’re ready."
+    : "Spectra could not finish after exhausting its recovery options.";
+  const clean = compactText(value);
+  if (!clean) return fallback;
+  if (
+    /(?:typeerror|referenceerror|syntaxerror|work_yjs_|stack trace|\.tsx?:\d+|cannot read propert|json\.stringify|could not safely complete)/i.test(
+      clean,
+    )
+  )
+    return fallback;
+  return clean;
+}
+
 function distinct(value: string | undefined, title: string) {
-  const clean = value?.replace(/\s+/g, " ").trim();
-  return clean && clean.toLocaleLowerCase() !== title.toLocaleLowerCase() ? clean : null;
+  const clean = compactText(value);
+  return clean && clean.toLocaleLowerCase() !== title.toLocaleLowerCase()
+    ? clean
+    : null;
 }
 
 export function deriveLiveDockTab(source: LiveDockTabSource) {
-  const rawTitle = source.threadTitle?.trim() || source.card?.title?.trim() || "";
-  const titlePending = !rawTitle || ["new conversation", "spectra", "starting run"].includes(rawTitle.toLocaleLowerCase());
-  const title = titlePending ? "Starting run" : rawTitle;
-  const inputRequest = source.inputRequest ??
+  const rawTitle =
+    source.threadTitle?.trim() || source.card?.title?.trim() || "";
+  const titlePending =
+    !rawTitle ||
+    ["new conversation", "spectra", "starting run"].includes(
+      rawTitle.toLocaleLowerCase(),
+    );
+  const promptTitle = (compactText(source.run.userPrompt) ?? "")
+    .replace(/[.!?].*$/, "")
+    .slice(0, 56);
+  const title = titlePending
+    ? !["queued", "running"].includes(source.run.status) && promptTitle
+      ? promptTitle
+      : "Starting run"
+    : rawTitle;
+  const clarification =
+    source.run.finalSummary ||
+    source.card?.summary ||
+    "What should Spectra use to continue?";
+  const inputRequest =
+    source.inputRequest ??
     (source.run.status === "awaiting_confirmation"
-      ? { kind: "approval" as const, prompt: source.card?.summary || "Review the proposed changes before they are applied." }
+      ? {
+          kind: "approval" as const,
+          prompt:
+            source.card?.summary ||
+            "Review the proposed changes before they are applied.",
+        }
       : source.run.decision === "clarify"
-        ? { kind: "short_answer" as const, prompt: source.run.finalSummary || source.card?.summary || "What should Spectra use to continue?" }
+        ? /\b(?:attach|upload|file|pdf|document|image|spreadsheet|presentation)\b/i.test(
+            clarification,
+          )
+          ? { kind: "file" as const, prompt: clarification }
+          : { kind: "short_answer" as const, prompt: clarification }
         : null);
   let state: LiveDockTruthState;
   if (inputRequest || source.run.decision === "clarify") state = "needs_input";
   else if (source.run.status === "queued" || source.run.status === "running")
-    state = source.run.phase === "checking"
-      ? "completing"
-      : source.run.phase === "interrupted"
-        ? "reconnecting"
-        : source.run.phase === "conflict"
-          ? "waiting"
-          : "working";
+    state =
+      source.run.phase === "checking"
+        ? "completing"
+        : source.run.phase === "interrupted"
+          ? "reconnecting"
+          : source.run.phase === "conflict"
+            ? "waiting"
+            : "working";
   else if (source.run.status === "awaiting_resolution") state = "waiting";
   else if (source.run.status === "cancelled") state = "cancelled";
-  else if (source.run.status === "failed") state = source.run.retryable ? "paused" : "failed_terminal";
-  else if (source.run.traceDegraded || source.run.phase === "partial") state = "completed_limited";
+  else if (source.run.status === "failed")
+    state = source.run.retryable ? "paused" : "failed_terminal";
+  else if (source.run.traceDegraded || source.run.phase === "partial")
+    state = "completed_limited";
   else state = "completed";
 
   const cardSummary = distinct(source.card?.summary, title);
@@ -103,52 +180,81 @@ export function deriveLiveDockTab(source: LiveDockTabSource) {
     state === "needs_input"
       ? "Ready for your input"
       : state === "completed" || state === "completed_limited"
-        ? finalSummary || cardSummary || phaseSteps[source.run.phase ?? "completed"]
-        : cardSummary || phaseSteps[source.run.phase ?? source.run.status] || "Working on the request";
+        ? finalSummary ||
+          cardSummary ||
+          phaseSteps[source.run.phase ?? "completed"]
+        : cardSummary ||
+          phaseSteps[source.run.phase ?? source.run.status] ||
+          "Working on the request";
   const checkpointSummary = distinct(source.checkpointSummary, title);
-  const expandedSummary = checkpointSummary || finalSummary || cardSummary || semanticStep;
+  const failureSummary =
+    state === "paused" || state === "failed_terminal"
+      ? publicSpectraFailureText(source.run.error, state === "paused")
+      : null;
+  const expandedSummary =
+    failureSummary ||
+    checkpointSummary ||
+    finalSummary ||
+    cardSummary ||
+    semanticStep;
   return {
     title,
     titlePending,
     state,
     semanticStep: semanticStep.slice(0, 240),
     expandedSummary: expandedSummary.slice(0, 800),
-    finalSummary: (finalSummary || cardSummary || semanticStep).slice(0, 800),
+    finalSummary: (
+      failureSummary ||
+      finalSummary ||
+      cardSummary ||
+      semanticStep
+    ).slice(0, 800),
     hoverSummary: expandedSummary.slice(0, 800),
     recentSteps: (source.recentSteps ?? [])
-      .filter((step) => distinct(step, title))
-      .slice(-2),
+      .flatMap((step) => {
+        const clean = distinct(step, title);
+        return clean ? [clean] : [];
+      })
+      .slice(-8),
     inputRequest,
-    attachmentNames: source.card?.provenance?.attachmentNames?.slice(0, 8) ?? [],
+    attachmentNames:
+      source.card?.provenance?.attachmentNames?.slice(0, 8) ?? [],
     targetNames: source.card?.provenance?.artifactTitles?.slice(0, 4) ?? [],
   };
 }
 
-export function selectExpandedInputRun(sources: readonly LiveDockTabSource[], current: string | null) {
-  const waiting = sources.filter((source) => deriveLiveDockTab(source).state === "needs_input");
-  if (current && waiting.some((source) => source.runId === current)) return current;
+export function selectExpandedInputRun(
+  sources: readonly LiveDockTabSource[],
+  current: string | null,
+) {
+  const waiting = sources.filter(
+    (source) => deriveLiveDockTab(source).state === "needs_input",
+  );
+  if (current && waiting.some((source) => source.runId === current))
+    return current;
   return waiting[0]?.runId ?? null;
 }
 
-/** Geometry is deterministic so responsive component tests do not need a browser. */
+/** Tab geometry is CSS: min width is one-third of the tab strip. */
 export function allocateLiveDockWidths(
   sources: readonly LiveDockTabSource[],
   expandedRunId: string | null,
 ): LiveDockLayout[] {
-  return sources.map((source) => {
-    const expanded = source.runId === expandedRunId;
-    return {
-      runId: source.runId,
-      minWidth: expanded ? 320 : 176,
-      preferredWidth: expanded ? 480 : sources.length > 3 ? 224 : 280,
-      expanded,
-    };
-  });
+  return sources.map((source) => ({
+    runId: source.runId,
+    minWidth: 0,
+    preferredWidth: 0,
+    expanded: source.runId === expandedRunId,
+  }));
 }
 
 export function closePreservesRunningJob(source: LiveDockTabSource) {
-  return source.run.status === "queued" || source.run.status === "running" ||
-    source.run.status === "awaiting_confirmation" || source.run.status === "awaiting_resolution";
+  return (
+    source.run.status === "queued" ||
+    source.run.status === "running" ||
+    source.run.status === "awaiting_confirmation" ||
+    source.run.status === "awaiting_resolution"
+  );
 }
 
 /** Run persistence and panel visibility are deliberately independent. */

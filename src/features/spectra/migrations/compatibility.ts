@@ -16,7 +16,7 @@ export function resolveLegacySpectraRoute(pathname: string) {
   if (pathname === "/timetable" || pathname.startsWith("/timetable/"))
     return "/calendar";
   if (pathname === "/memory" || pathname.startsWith("/memory/"))
-    return "/settings/privacy-data";
+    return "/settings?section=privacy";
   return null;
 }
 

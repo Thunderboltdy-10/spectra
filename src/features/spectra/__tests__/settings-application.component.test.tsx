@@ -12,20 +12,19 @@ afterEach(() => {
 });
 
 describe("Settings application accessibility contract", () => {
-  it("provides stable navigation, labelled controls and collapsed advanced disclosure", () => {
+  it("provides stable navigation and only labelled controls with product effects", () => {
     render(
       <ThemeProvider>
         <SettingsApplication initialSection="ai" />
       </ThemeProvider>,
     );
     expect(screen.getByRole("navigation", { name: "Settings sections" })).toBeTruthy();
-    expect(screen.getAllByRole("heading", { name: "AI and runs", level: 2 })).toHaveLength(2);
-    expect(screen.getByRole("switch", { name: "Continue current conversation" })).toBeTruthy();
-    const advanced = screen.getByText("Advanced").closest("details");
-    expect(advanced?.open).toBe(false);
-    fireEvent.click(screen.getByRole("button", { name: "Accessibility" }));
-    expect(screen.getAllByRole("heading", { name: "Accessibility", level: 2 })).toHaveLength(2);
-    expect(screen.getByRole("switch", { name: "Always-visible focus" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Conversations", level: 2 })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Conversations and Live Dock", level: 2 })).toBeTruthy();
+    expect(screen.getByRole("switch", { name: "Continue the current conversation" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Appearance" }));
+    expect(screen.getByRole("heading", { name: "Appearance", level: 2 })).toBeTruthy();
+    expect(screen.getByRole("switch", { name: "Reduced motion" })).toBeTruthy();
   });
 
   it("persists a setting as one versioned device preference document", () => {

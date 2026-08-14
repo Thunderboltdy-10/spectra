@@ -1,7 +1,7 @@
 import * as Y from "yjs";
 import { WORK_ANCHOR_ADAPTERS } from "../../anchors/registry";
 import type { SemanticAnchor } from "../../anchors/semantic-anchor";
-import { getBlueprint } from "../../blueprints/registry";
+import { getBlueprint } from "../../artifacts/blueprint-catalog";
 import { WORK_TYPE_KEYS, type ArtifactTypeKey } from "../../artifacts/types";
 import { INTERNAL_LEGACY_TERMS } from "../../copy/user-facing";
 import { collaborationPolicyRegistry } from "../../realtime/policies/collaboration-policy-registry";

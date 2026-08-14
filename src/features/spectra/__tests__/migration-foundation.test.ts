@@ -1,45 +1,17 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
-  DEFAULT_SPECTRA_MIGRATION_FLAGS,
   LegacyArtifactModelAdapter,
-  SPECTRA_MIGRATION_FLAG_KEYS,
   SPECTRA_PROTOCOL_VERSIONS,
   adaptLegacyPreferences,
   adaptLegacyReferencePreview,
   adaptLegacyRunEvent,
   adaptLegacySchoolRecord,
   adaptLegacyToolDefinition,
-  resolveSpectraMigrationFlags,
   resolveLegacySpectraRoute,
   supportsProtocol,
 } from "@/features/spectra/migrations";
 
-const changedEnvironment = new Set<string>();
-
-afterEach(() => {
-  for (const key of changedEnvironment) delete process.env[key];
-  changedEnvironment.clear();
-});
-
 describe("definitive migration foundation", () => {
-  it("keeps every migration path disabled by default", () => {
-    expect(Object.keys(DEFAULT_SPECTRA_MIGRATION_FLAGS).sort()).toEqual(
-      [...SPECTRA_MIGRATION_FLAG_KEYS].sort(),
-    );
-    expect(Object.values(resolveSpectraMigrationFlags()).every((value) => !value)).toBe(true);
-  });
-
-  it("resolves typed overrides before environment values", () => {
-    const key = "SPECTRA_MIGRATION_CLOUDFLARE_REALTIME";
-    changedEnvironment.add(key);
-    process.env[key] = "true";
-    expect(resolveSpectraMigrationFlags().cloudflareRealtime).toBe(true);
-    expect(
-      resolveSpectraMigrationFlags({ cloudflareRealtime: false })
-        .cloudflareRealtime,
-    ).toBe(false);
-  });
-
   it("round-trips legacy atomic region snapshots idempotently", () => {
     const adapter = new LegacyArtifactModelAdapter();
     const snapshot = {
@@ -86,7 +58,7 @@ describe("definitive migration foundation", () => {
     );
     expect(resolveLegacySpectraRoute("/timetable")).toBe("/calendar");
     expect(resolveLegacySpectraRoute("/memory")).toBe(
-      "/settings/privacy-data",
+      "/settings?section=privacy",
     );
     expect(resolveLegacySpectraRoute("/workspace")).toBeNull();
   });

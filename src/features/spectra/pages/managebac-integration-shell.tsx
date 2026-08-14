@@ -1,14 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import {
   AlertCircle,
   AlertTriangle,
   BookOpen,
   CalendarDays,
   CheckCircle2,
-  ChevronDown,
+  ChevronRight,
   CircleHelp,
   Clock3,
   Code2,
@@ -36,8 +35,9 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { CommandBar } from "../components/command-bar";
-import { CapabilityTruthBadge } from "@/features/spectra/integrations/status/capability-truth";
+import { ProductSectionNav } from "../components/product-section-nav";
+import { AuxiliaryRail, AuxiliaryRailTrigger } from "../components/auxiliary-rail";
+import { ProductPageHeader } from "../components/product-page-header";
 import {
   configureSpectraManageBac,
   disconnectSpectraManageBac,
@@ -66,16 +66,16 @@ type Tab =
   | "conflicts"
   | "provenance";
 
-const tabs: Array<{ key: Tab; label: string }> = [
-  { key: "overview", label: "Overview" },
-  { key: "classes", label: "Classes" },
-  { key: "calendar", label: "Calendar" },
-  { key: "periods", label: "Period map" },
-  { key: "tasks", label: "Tasks" },
-  { key: "history", label: "Sync history" },
-  { key: "conflicts", label: "Conflicts" },
-  { key: "provenance", label: "Provenance" },
-];
+const tabs = [
+  { key: "overview", label: "Overview", icon: School },
+  { key: "classes", label: "Classes", icon: BookOpen },
+  { key: "calendar", label: "Calendar", icon: CalendarDays },
+  { key: "periods", label: "Period map", icon: Clock3 },
+  { key: "tasks", label: "Tasks", icon: ListChecks },
+  { key: "history", label: "Sync history", icon: History },
+  { key: "conflicts", label: "Conflicts", icon: AlertTriangle },
+  { key: "provenance", label: "Provenance", icon: Fingerprint },
+] satisfies Array<{ key: Tab; label: string; icon: typeof School }>;
 
 function object(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -185,10 +185,10 @@ function EmptyState({
 }) {
   return (
     <div className="flex min-h-52 flex-col items-center justify-center px-6 text-center">
-      <span className="mb-3 grid size-10 place-items-center rounded-xl bg-[var(--bg-secondary)] text-[var(--text-tertiary)]">
+      <span className="mb-3 text-[var(--text-tertiary)]">
         <Icon size={18} />
       </span>
-      <strong className="font-[var(--font-serif)] text-[17px] font-medium text-[var(--text-primary)]">
+      <strong className="font-display text-[17px] font-semibold text-[var(--text-primary)]">
         {title}
       </strong>
       <p className="mt-1 max-w-sm text-[12px] leading-5 text-[var(--text-tertiary)]">
@@ -270,18 +270,18 @@ function RecordsList({
       <EmptyState icon={FileText} title={emptyTitle} detail={emptyDetail} />
     );
   return (
-    <div className="divide-y divide-[var(--border-subtle)]">
+    <div className="space-y-1 px-2 py-2">
       {records.map((record) => (
         <article
           key={record._id}
-          className="group flex min-w-0 items-center gap-3 px-4 py-3 transition-colors hover:bg-[var(--bg-secondary)]/65"
+          className="group flex min-w-0 items-center gap-3 rounded-xl px-3 py-2.5 transition-colors hover:bg-[var(--bg-secondary)]"
         >
           <span
             className={cn(
-              "grid size-8 shrink-0 place-items-center rounded-lg",
+              "grid size-6 shrink-0 place-items-center",
               record.tombstone
-                ? "bg-[#fff0ed] text-[#b64838]"
-                : "bg-[#ebf7f2] text-[#2c8968]",
+                ? "text-[#b64838]"
+                : "text-[var(--text-tertiary)]",
             )}
           >
             <RecordIcon type={record.recordType} />
@@ -350,6 +350,7 @@ function PeriodMapPanel({
   }) => Promise<unknown>;
   onRemove: (periodMapId: string) => Promise<unknown>;
 }) {
+  const [editorOpen, setEditorOpen] = useState(false);
   const [draft, setDraft] = useState({
     periodKey: "",
     label: "",
@@ -360,27 +361,37 @@ function PeriodMapPanel({
   });
   const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   return (
-    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
-      <section className="overflow-hidden rounded-[9px] border border-[var(--border-subtle)] bg-[var(--bg-elevated)]">
-        <header className="border-b border-[var(--border-subtle)] px-4 py-3">
-          <div className="flex items-center gap-2"><Clock3 size={14} className="text-[#2f8769]" /><h2 className="text-[12px] font-semibold">Verified school periods</h2></div>
-          <p className="mt-1 text-micro leading-4 text-[var(--text-tertiary)]">Calendar uses these only when a provider event supplies a period key but no exact timestamp. Exact source times always win.</p>
+    <div className="grid gap-x-10 gap-y-7 xl:grid-cols-[minmax(0,1fr)_320px]">
+      <section className="min-w-0">
+        <header className="mb-4">
+          <div className="flex items-center gap-2"><Clock3 size={14} className="text-[#2f8769]" /><h2 className="text-[14px] font-semibold">Verified school periods</h2></div>
+          <p className="mt-1 max-w-2xl text-[11px] leading-5 text-[var(--text-tertiary)]">Calendar uses a period only when a source event has no exact time. Exact source times always win.</p>
         </header>
         {periodMaps.length ? (
-          <div className="divide-y divide-[var(--border-subtle)]">
+          <div className="space-y-1">
             {periodMaps.slice().sort((a, b) => a.startMinutes - b.startMinutes).map((period) => (
-              <article key={period._id} className="flex items-center gap-3 px-4 py-3">
-                <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-[#ebf7f2] text-micro font-bold text-[#277b5e]">{period.periodKey.slice(0, 3).toUpperCase()}</span>
+              <article key={period._id} className="group flex items-center gap-3 rounded-xl px-2 py-2.5 transition-colors hover:bg-[var(--bg-secondary)]">
+                <span className="grid size-8 shrink-0 place-items-center text-micro font-bold text-[#277b5e]">{period.periodKey.slice(0, 3).toUpperCase()}</span>
                 <div className="min-w-0 flex-1"><div className="flex items-center gap-2"><strong className="truncate text-[11px]">{period.label}</strong><StatusPill state="good">Verified</StatusPill></div><p className="mt-1 text-micro text-[var(--text-tertiary)]">{timeFromMinutes(period.startMinutes)}–{timeFromMinutes(period.endMinutes)} · {period.timezone} · {period.weekdays.map((day) => weekdays[day]).join(", ")}</p></div>
-                <button type="button" disabled={Boolean(busy)} onClick={() => void onRemove(period._id)} className="grid size-7 place-items-center rounded-md text-[var(--text-tertiary)] hover:bg-[#fff0ed] hover:text-[#a84436] disabled:opacity-45" aria-label={`Remove ${period.label}`}><X size={13} /></button>
+                <button type="button" disabled={Boolean(busy)} onClick={() => void onRemove(period._id)} className="grid size-7 place-items-center rounded-md text-[var(--text-tertiary)] opacity-0 hover:bg-[#fff0ed] hover:text-[#a84436] group-hover:opacity-100 focus:opacity-100 disabled:opacity-45" aria-label={`Remove ${period.label}`}><X size={13} /></button>
               </article>
             ))}
           </div>
         ) : <EmptyState icon={Clock3} title="No verified period map" detail="Events without exact timestamps remain partial until an administrator verifies their period schedule." />}
       </section>
 
-      <form
-        className="rounded-[9px] border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-4"
+      <section className="xl:pt-0.5">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-[14px] font-semibold">Period editor</h2>
+            <p className="mt-1 text-[11px] leading-5 text-[var(--text-tertiary)]">Use the provider’s exact period key.</p>
+          </div>
+          <button type="button" onClick={() => setEditorOpen((open) => !open)} className="grid size-8 shrink-0 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" aria-expanded={editorOpen} aria-label={editorOpen ? "Close period editor" : "Add period"} title={editorOpen ? "Close period editor" : "Add period"}>
+            {editorOpen ? <X size={14} /> : <Plus size={14} />}
+          </button>
+        </div>
+      {editorOpen ? <form
+        className="mt-5"
         onSubmit={(event) => {
           event.preventDefault();
           void onSave({
@@ -393,9 +404,7 @@ function PeriodMapPanel({
           }).then(() => setDraft((current) => ({ ...current, periodKey: "", label: "" })));
         }}
       >
-        <div className="flex items-center gap-2"><Plus size={14} /><h2 className="text-[12px] font-semibold">Add or replace a period</h2></div>
-        <p className="mt-1 text-micro leading-4 text-[var(--text-tertiary)]">Use the exact provider period identifier. Saving the same key updates it idempotently and records administrator verification.</p>
-        <div className="mt-4 grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-2 gap-3">
           <label className="text-micro font-medium text-[var(--text-secondary)]">Period key<input required value={draft.periodKey} onChange={(event) => setDraft((current) => ({ ...current, periodKey: event.target.value }))} className="mt-1 h-9 w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 text-[11px] outline-none focus:border-[#39856d]" placeholder="period-1" /></label>
           <label className="text-micro font-medium text-[var(--text-secondary)]">Label<input required value={draft.label} onChange={(event) => setDraft((current) => ({ ...current, label: event.target.value }))} className="mt-1 h-9 w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 text-[11px] outline-none focus:border-[#39856d]" placeholder="Period 1" /></label>
           <label className="text-micro font-medium text-[var(--text-secondary)]">Start<input required type="time" value={draft.start} onChange={(event) => setDraft((current) => ({ ...current, start: event.target.value }))} className="mt-1 h-9 w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 text-[11px]" /></label>
@@ -404,13 +413,13 @@ function PeriodMapPanel({
         <label className="mt-3 block text-micro font-medium text-[var(--text-secondary)]">IANA timezone<input required value={draft.timezone} onChange={(event) => setDraft((current) => ({ ...current, timezone: event.target.value }))} className="mt-1 h-9 w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 text-[11px]" placeholder="Europe/Madrid" /></label>
         <fieldset className="mt-3"><legend className="text-micro font-medium text-[var(--text-secondary)]">Weekdays</legend><div className="mt-1.5 flex flex-wrap gap-1">{weekdays.map((label, value) => <button key={label} type="button" aria-pressed={draft.weekdays.includes(value)} onClick={() => setDraft((current) => ({ ...current, weekdays: current.weekdays.includes(value) ? current.weekdays.filter((day) => day !== value) : [...current.weekdays, value].sort() }))} className={cn("h-7 rounded-md border px-2 text-micro font-semibold", draft.weekdays.includes(value) ? "border-[#2d7d62] bg-[#edf8f3] text-[#24664f]" : "border-[var(--border-default)] text-[var(--text-tertiary)]")}>{label}</button>)}</div></fieldset>
         <button type="submit" disabled={Boolean(busy)} className="mt-4 inline-flex h-9 w-full items-center justify-center gap-2 rounded-md bg-[#173d33] text-micro font-semibold text-white disabled:opacity-45"><Save size={13} />Verify period</button>
-      </form>
+      </form> : null}
+      </section>
     </div>
   );
 }
 
 export function ManageBacIntegrationShell() {
-  const router = useRouter();
   const [overview, setOverview] = useState<SpectraManageBacOverview | null>(
     null,
   );
@@ -421,6 +430,7 @@ export function ManageBacIntegrationShell() {
   const [detailsTab, setDetailsTab] = useState<"details" | "activity">(
     "details",
   );
+  const [contextOpen, setContextOpen] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [manifestOpen, setManifestOpen] = useState(false);
   const [disconnectOpen, setDisconnectOpen] = useState(false);
@@ -499,27 +509,6 @@ export function ManageBacIntegrationShell() {
         ),
     [records],
   );
-  const coverage = integration?.capabilityCoverage;
-  const integrationCapabilityState = !integration
-    ? ({ kind: "not_connected" } as const)
-    : integration.status === "connected"
-      ? ({ kind: "available", updatedAt: integration.lastSyncAt } as const)
-      : integration.status === "validating"
-        ? ({ kind: "refreshing" } as const)
-        : integration.status === "degraded"
-          ? ({
-              kind: "partial",
-              details: integration.blockedReason ?? "Some verified capabilities did not synchronize.",
-            } as const)
-          : ({
-              kind: "unavailable",
-              retryable: integration.status !== "revoked",
-              message: integration.blockedReason ?? "The provider connection is unavailable.",
-            } as const);
-  const coveragePercent = coverage?.discovered
-    ? Math.round((coverage.verifiedReadable / coverage.discovered) * 100)
-    : 0;
-
   const runAction = useCallback(
     async (key: string, action: () => Promise<unknown>) => {
       setBusy(key);
@@ -600,30 +589,6 @@ export function ManageBacIntegrationShell() {
     <div className="spectra-wave-y relative flex h-full min-h-0 overflow-hidden bg-[var(--bg-primary)] text-[var(--text-primary)]">
       <main className="min-w-0 flex-1 overflow-y-auto">
         <div className="flex min-h-full w-full flex-col px-4 pb-24 pt-3 sm:px-6 lg:px-8">
-          <div className="mb-3 flex h-11 items-center justify-end gap-3">
-            <span className="hidden items-center gap-1.5 text-micro text-[var(--text-secondary)] sm:flex">
-              {integration ? (
-                <>
-                  <CheckCircle2 size={13} className="text-[#46866d]" />
-                  {busy ? "Working…" : "Connected"}
-                </>
-              ) : (
-                <>
-                  <AlertCircle size={13} />
-                  {busy ? "Working…" : "Not connected"}
-                </>
-              )}
-            </span>
-            <button
-              type="button"
-              onClick={() => void refresh()}
-              className="grid size-8 place-items-center rounded-md border border-[var(--border-subtle)] bg-white text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]"
-              aria-label="Refresh integration"
-            >
-              <RefreshCw size={14} />
-            </button>
-          </div>
-
           {error ? (
             <div
               className="mb-2 flex items-start gap-2 rounded-lg border border-[#edc7bf] bg-[#fff7f4] px-3 py-2.5 text-[11px] leading-5 text-[#9a4336]"
@@ -643,120 +608,26 @@ export function ManageBacIntegrationShell() {
           ) : null}
 
           <section className="min-w-0">
-            <header className="flex flex-wrap items-start justify-between gap-4 pb-4 pt-1 sm:pt-2">
-              <div className="flex min-w-0 items-start gap-3.5">
-                <span className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-[9px] bg-[linear-gradient(145deg,#eef8fd,#e5ecff)] text-[#367ea8] shadow-inner">
-                  <Network size={18} />
-                </span>
-                <div className="min-w-0">
-                  <span className="block text-micro font-semibold uppercase tracking-[.12em] text-[var(--text-tertiary)]">
-                    ManageBac · Admin setup
-                  </span>
-                  <div className="mt-1 flex flex-wrap items-center gap-2.5">
-                    <h1 className="font-display text-[26px] font-semibold tracking-[-.025em]">
-                      ManageBac connection
-                    </h1>
-                    <CapabilityTruthBadge state={integrationCapabilityState} />
-                  </div>
-                  <p className="mt-1 max-w-[520px] text-[11px] text-[var(--text-tertiary)]">
-                    School administrators manage the canonical provider connection,
-                    school-wide key, verified periods, and synchronization here. Individual class workspaces
-                    are created from{" "}
-                    <a
-                      href="/school-data"
-                      className="font-medium text-[var(--text-primary)] underline-offset-2 hover:underline"
-                    >
-                      School data
-                    </a>
-                    , not automatically.
-                  </p>
-                </div>
-              </div>
-              <div className="flex shrink-0 items-center gap-2">
-                {integration ? (
-                  <button
-                    type="button"
-                    disabled={Boolean(busy)}
-                    onClick={() =>
-                      void runAction("sync", () => syncSpectraManageBac())
-                    }
-                    className="inline-flex h-8 items-center gap-2 rounded-[7px] border border-[var(--border-subtle)] bg-white px-3 text-[11px] font-medium shadow-sm transition hover:bg-[var(--bg-secondary)] disabled:opacity-60"
-                  >
-                    <RefreshCw
-                      size={13}
-                      className={busy === "sync" ? "animate-spin" : ""}
-                    />
-                    Sync now
-                  </button>
-                ) : null}
-                {overview?.admin ? (
-                  <button
-                    type="button"
-                    onClick={() => setSettingsOpen(true)}
-                    className="inline-flex h-8 items-center gap-2 rounded-[7px] border border-[var(--border-subtle)] bg-white px-3 text-[11px] font-medium shadow-sm transition hover:bg-[var(--bg-secondary)]"
-                  >
-                    <Settings2 size={13} />
-                    Settings
-                    <ChevronDown size={11} />
-                  </button>
-                ) : null}
-              </div>
-            </header>
+<ProductPageHeader
+              className="pb-5 pt-1 sm:pt-2"
+              eyebrow="ManageBac · Admin setup"
+              title="ManageBac connection"
+              description="Manage the school connection, synchronization, and verified provider records. Class workspaces are created explicitly from School data."
+              actions={
+                <>
+                  <button type="button" onClick={() => void refresh()} className="inline-flex size-8 items-center justify-center rounded-[7px] border border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" aria-label="Refresh connection data" title="Refresh connection data"><RefreshCw size={13} /></button>
+                  {integration ? <button type="button" disabled={Boolean(busy)} onClick={() => void runAction("sync", () => syncSpectraManageBac())} className="inline-flex h-8 items-center gap-2 rounded-[7px] bg-[var(--text-primary)] px-3 text-[11px] font-medium text-[var(--bg-primary)] transition hover:opacity-90 disabled:opacity-60"><RefreshCw size={13} className={busy === "sync" ? "animate-spin" : ""} />Sync now</button> : null}
+                  {overview?.admin ? <button type="button" onClick={() => setSettingsOpen(true)} className="inline-flex size-8 items-center justify-center rounded-[7px] border border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" aria-label="ManageBac settings" title="ManageBac settings"><Settings2 size={13} /></button> : null}
+                  {!contextOpen ? <AuxiliaryRailTrigger label="ManageBac context" onOpen={() => setContextOpen(true)} /> : null}
+                </>
+              }
+            />
 
-            {integration ? (
-              <div className="grid overflow-hidden rounded-[8px] border border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--bg-elevated)_72%,transparent)] sm:grid-cols-3 lg:grid-cols-6">
-                <SummaryMetric
-                  label="Connection status"
-                  value={integration.status.replaceAll("_", " ")}
-                  detail={
-                    integration.lastValidatedAt
-                      ? `Validated ${relative(integration.lastValidatedAt)}`
-                      : "Awaiting validation"
-                  }
-                  state={
-                    integration.status === "connected" ? "good" : "warning"
-                  }
-                />
-                <SummaryMetric
-                  label="Connected school"
-                  value={data?.school?.name ?? "Your school"}
-                  detail="ManageBac"
-                />
-                <SummaryMetric
-                  label="Last sync"
-                  value={
-                    integration.lastSyncAt
-                      ? relative(integration.lastSyncAt)
-                      : "Not yet"
-                  }
-                  detail={formatDate(integration.lastSyncAt)}
-                />
-                <SummaryMetric
-                  label="Next sync"
-                  value={relative(integration.nextSyncAt)}
-                  detail={`Every ${integration.syncPolicy.frequencyMinutes} minutes`}
-                />
-                <SummaryMetric
-                  label="Sync coverage"
-                  value={`${coveragePercent}%`}
-                  detail={`${coverage?.verifiedReadable ?? 0} of ${coverage?.discovered ?? 0} routes`}
-                />
-                <SummaryMetric
-                  label="Conflicts"
-                  value={String(data?.conflicts.length ?? 0)}
-                  detail={
-                    data?.conflicts.length
-                      ? "Require review"
-                      : "Nothing pending"
-                  }
-                  state={data?.conflicts.length ? "warning" : "good"}
-                />
-              </div>
-            ) : (
+            {!integration && (
               <div className="mb-1 rounded-[9px] border border-dashed border-[var(--border-strong)] bg-[color-mix(in_oklab,var(--bg-secondary)_45%,transparent)] px-5 py-5">
                 <div className="flex flex-wrap items-center justify-between gap-4">
                   <div className="flex items-start gap-3">
-                    <span className="grid size-9 place-items-center rounded-lg bg-white text-[#39799e] shadow-sm">
+                    <span className="grid size-9 place-items-center rounded-lg bg-[var(--bg-elevated)] text-[#39799e]">
                       <KeyRound size={16} />
                     </span>
                     <div>
@@ -786,30 +657,13 @@ export function ManageBacIntegrationShell() {
               </div>
             )}
 
-            <nav
-              className="mt-4 flex min-w-0 gap-1 overflow-x-auto border-b border-[var(--border-subtle)]"
-              aria-label="ManageBac sections"
-            >
-              {tabs.map((item) => (
-                <button
-                  key={item.key}
-                  type="button"
-                  onClick={() => setTab(item.key)}
-                  className={cn(
-                    "relative h-10 shrink-0 px-2 text-[11px] text-[var(--text-tertiary)] transition-colors hover:text-[var(--text-primary)]",
-                    tab === item.key &&
-                      "font-medium text-[var(--text-primary)] after:absolute after:inset-x-1 after:bottom-0 after:h-[1.5px] after:bg-[var(--text-primary)]",
-                  )}
-                >
-                  {item.label}
-                  {item.key === "conflicts" && data?.conflicts.length ? (
-                    <span className="ml-1.5 rounded bg-[#eee9ff] px-1.5 py-0.5 text-micro text-[#7258c5]">
-                      {data.conflicts.length}
-                    </span>
-                  ) : null}
-                </button>
-              ))}
-            </nav>
+            <ProductSectionNav
+              label="ManageBac sections"
+              items={tabs}
+              active={tab}
+              onChange={setTab}
+              className="mt-4"
+            />
 
             <div className="min-h-[470px] py-4">
               {!integration ? (
@@ -823,7 +677,7 @@ export function ManageBacIntegrationShell() {
                   <span className="grid size-12 place-items-center rounded-2xl bg-[#edf5ff] text-[#3b77a8]">
                     <UserCheck size={22} />
                   </span>
-                  <h2 className="mt-4 font-[var(--font-serif)] text-xl font-medium">
+                  <h2 className="mt-4 font-display text-xl font-semibold">
                     Match your verified school account
                   </h2>
                   <p className="mt-2 text-[12px] leading-5 text-[var(--text-tertiary)]">
@@ -850,200 +704,40 @@ export function ManageBacIntegrationShell() {
                   </button>
                 </div>
               ) : tab === "overview" ? (
-                <div className="grid gap-3 xl:grid-cols-[.92fr_1.35fr_.92fr]">
-                  <section className="rounded-[9px] border border-[var(--border-subtle)]">
-                    <div className="flex items-center justify-between px-4 py-3">
-                      <h2 className="text-[12px] font-semibold">
-                        Importable classes
-                      </h2>
-                      <StatusPill state="blue">{classes.length}</StatusPill>
-                    </div>
-                    <div className="px-4 pb-3">
-                      {classes.slice(0, 5).map((record) => (
-                        <div
-                          key={record._id}
-                          className="flex items-center justify-between gap-2 py-2"
-                        >
-                          <div className="min-w-0">
-                            <strong className="block truncate text-[11px] font-medium">
-                              {recordTitle(record)}
-                            </strong>
-                            <span className="block truncate text-micro text-[var(--text-tertiary)]">
-                              {recordSubtitle(record)}
-                            </span>
-                          </div>
-                          <StatusPill
-                            state={record.tombstone ? "danger" : "good"}
-                          >
-                            {record.tombstone ? "Removed" : "Ready"}
-                          </StatusPill>
-                        </div>
-                      ))}
-                      {!classes.length ? (
-                        <p className="py-8 text-center text-micro text-[var(--text-tertiary)]">
-                          No class records have synchronized yet.
-                        </p>
-                      ) : null}
-                      {classes.length > 5 ? (
-                        <button
-                          type="button"
-                          onClick={() => setTab("classes")}
-                          className="mt-2 text-micro text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
-                        >
-                          + {classes.length - 5} more classes
-                        </button>
-                      ) : null}
-                    </div>
-                  </section>
-
-                  <section className="rounded-[9px] border border-[var(--border-subtle)] p-4">
-                    <h2 className="text-[12px] font-semibold">
-                      Calendar source preview
-                    </h2>
-                    <p className="mt-0.5 text-micro text-[var(--text-tertiary)]">
-                      Source-owned times remain locked; personal overlays stay
-                      private.
-                    </p>
-                    <div className="mt-4 grid grid-cols-[46px_repeat(5,minmax(58px,1fr))] overflow-hidden rounded-md border border-[var(--border-subtle)] text-micro">
-                      <div className="bg-[var(--bg-secondary)]" />
-                      {["Mon", "Tue", "Wed", "Thu", "Fri"].map((day) => (
-                        <div
-                          key={day}
-                          className="border-l border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-1 py-1.5 text-center font-medium"
-                        >
-                          {day}
-                        </div>
-                      ))}
-                      {[8, 9, 10, 11].flatMap((hour) => [
-                        <div
-                          key={`time-${hour}`}
-                          className="border-t border-[var(--border-subtle)] px-1 py-3 text-right text-[var(--text-tertiary)]"
-                        >
-                          {hour}:00
-                        </div>,
-                        ...[1, 2, 3, 4, 5].map((day) => {
-                          const match = timetable.find((record) => {
-                            const start = recordStart(record);
-                            if (!start) return false;
-                            const date = new Date(start);
-                            return (
-                              date.getDay() === day && date.getHours() === hour
-                            );
-                          });
-                          return (
-                            <div
-                              key={`${hour}-${day}`}
-                              className="min-h-10 border-l border-t border-[var(--border-subtle)] p-1"
-                            >
-                              {match ? (
-                                <div className="h-full rounded bg-[#e6f4ec] px-1 py-1 text-[#326c58]">
-                                  <span className="line-clamp-2">
-                                    {recordTitle(match)}
-                                  </span>
-                                </div>
-                              ) : null}
-                            </div>
-                          );
-                        }),
-                      ])}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setTab("calendar")}
-                      className="mt-3 text-micro text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
-                    >
-                      {timetable.length
-                        ? `View all ${timetable.length} source events`
-                        : "No source events yet"}
-                    </button>
-                  </section>
-
-                  <section className="rounded-[9px] border border-[var(--border-subtle)]">
-                    <div className="px-4 py-3">
-                      <h2 className="text-[12px] font-semibold">
-                        Tasks preview
-                      </h2>
-                      <p className="text-micro text-[var(--text-tertiary)]">
-                        Upcoming source work
-                      </p>
-                    </div>
-                    <div className="px-4 pb-3">
-                      {tasks.slice(0, 5).map((record) => (
-                        <div
-                          key={record._id}
-                          className="flex items-center gap-2 py-2"
-                        >
-                          <span className="grid size-5 shrink-0 place-items-center rounded bg-[#eef8f4] text-[#328269]">
-                            <RecordIcon type={record.recordType} />
-                          </span>
-                          <div className="min-w-0 flex-1">
-                            <strong className="block truncate text-micro font-medium">
-                              {recordTitle(record)}
-                            </strong>
-                            <span className="block truncate text-micro text-[var(--text-tertiary)]">
-                              {recordSubtitle(record)}
-                            </span>
-                          </div>
-                          <time className="text-micro text-[var(--text-tertiary)]">
-                            {recordStart(record)
-                              ? formatDate(recordStart(record), false)
-                              : "—"}
-                          </time>
-                        </div>
-                      ))}
-                      {!tasks.length ? (
-                        <p className="py-8 text-center text-micro text-[var(--text-tertiary)]">
-                          No task records have synchronized yet.
-                        </p>
-                      ) : null}
-                    </div>
-                  </section>
-
-                  <section className="rounded-[9px] border border-[var(--border-subtle)] xl:col-span-2">
-                    <div className="px-4 py-3">
-                      <h2 className="text-[12px] font-semibold">
-                        Sync history
-                      </h2>
-                    </div>
-                    <SyncTable runs={data?.syncRuns.slice(0, 5) ?? []} />
-                    <button
-                      type="button"
-                      onClick={() => setTab("history")}
-                      className="m-4 text-micro text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
-                    >
-                      View full history
-                    </button>
-                  </section>
-
-                  <section className="rounded-[9px] border border-[var(--border-subtle)]">
-                    <div className="flex items-center justify-between px-4 py-3">
-                      <h2 className="text-[12px] font-semibold">
-                        Conflict review
-                      </h2>
-                      {data?.conflicts.length ? (
-                        <StatusPill state="warning">
-                          {data.conflicts.length}
-                        </StatusPill>
-                      ) : null}
-                    </div>
-                    <ConflictList
-                      conflicts={(data?.conflicts ?? []).slice(0, 3)}
-                      busy={busy}
-                      onResolve={(conflict, resolution) =>
-                        runAction(`conflict:${conflict._id}`, () =>
-                          resolveSpectraManageBacConflict({
-                            conflictId: conflict._id,
-                            resolution,
-                          }),
-                        )
-                      }
-                    />
-                    {!data?.conflicts.length ? (
-                      <div className="flex items-center gap-2 px-4 pb-4 text-micro text-[var(--text-tertiary)]">
-                        <CheckCircle2 size={13} className="text-[#2f9872]" />
-                        Source and user overlays are aligned.
+                <div className="grid gap-x-12 gap-y-10 px-4 py-8 sm:px-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(260px,.8fr)] lg:py-10">
+                  <section className="min-w-0">
+                    <p className="text-micro font-semibold uppercase tracking-[0.14em] text-[var(--text-tertiary)]">Connection</p>
+                    <div className="mt-3 flex items-start gap-3">
+                      <span className={cn("mt-2 size-2.5 shrink-0 rounded-full shadow-[0_0_0_5px_color-mix(in_oklab,currentColor_10%,transparent)]", integration.status === "connected" ? "text-emerald-600 bg-emerald-600" : "text-amber-500 bg-amber-500")} />
+                      <div>
+                        <h2 className="font-display text-[24px] font-semibold tracking-[-0.02em]">{integration.status === "connected" ? "ManageBac is connected" : "The connection needs attention"}</h2>
+                        <p className="mt-2 max-w-xl text-[12px] leading-5 text-[var(--text-secondary)]">{integration.status === "connected" ? "Verified school records are available to Spectra." : "The last synchronization completed with partial coverage. Existing verified records remain available."}</p>
                       </div>
-                    ) : null}
+                    </div>
+                    <p className="ml-5 mt-4 text-[11px] text-[var(--text-tertiary)]">{data?.school?.name ?? "Your school"} · last synchronized {integration.lastSyncAt ? relative(integration.lastSyncAt) : "never"} · {data?.conflicts.length ?? 0} conflicts</p>
+                    <div className="ml-5 mt-5 flex flex-wrap gap-1">
+                      <button type="button" onClick={() => setTab("history")} className="h-8 rounded-lg px-3 text-[11px] font-medium hover:bg-[var(--bg-hover)]">Sync history</button>
+                      <button type="button" onClick={() => setTab("conflicts")} className="h-8 rounded-lg px-3 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">Review conflicts</button>
+                    </div>
+                  </section>
+
+                  <section className="min-w-0 lg:pt-1">
+                    <h2 className="text-[14px] font-semibold">Synchronized data</h2>
+                    <p className="mt-1 text-[11px] leading-5 text-[var(--text-tertiary)]">Open a verified source collection.</p>
+                    <div className="mt-3 space-y-1">
+                      {([
+                        ["Classes", classes.length, "classes", BookOpen],
+                        ["Calendar", timetable.length, "calendar", CalendarDays],
+                        ["Tasks", tasks.length, "tasks", ListChecks],
+                      ] as const).map(([label, count, target, Icon]) => (
+                        <button key={target} type="button" onClick={() => setTab(target)} className="group flex h-11 w-full items-center gap-3 rounded-xl px-2.5 text-[11px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]">
+                          <Icon size={14} className="text-[var(--text-tertiary)] transition-transform group-hover:scale-110 group-hover:text-[var(--text-primary)]" />
+                          <span className="flex-1 text-left">{label}</span>
+                          <strong className="font-display text-[16px] font-semibold tabular-nums text-[var(--text-primary)]">{count}</strong>
+                          <ChevronRight size={13} className="text-[var(--text-tertiary)] transition-transform group-hover:translate-x-0.5" />
+                        </button>
+                      ))}
+                    </div>
                   </section>
                 </div>
               ) : tab === "classes" ? (
@@ -1080,32 +774,28 @@ export function ManageBacIntegrationShell() {
                   emptyDetail="Readable assignments, assessments, and deadlines appear as source-linked planner tasks without replacing personal notes."
                 />
               ) : tab === "history" ? (
-                <div className="overflow-hidden rounded-[9px] border border-[var(--border-subtle)]">
-                  <SyncTable runs={data?.syncRuns ?? []} />
-                </div>
+                <SyncTable runs={data?.syncRuns ?? []} />
               ) : tab === "conflicts" ? (
-                <div className="rounded-[9px] border border-[var(--border-subtle)]">
-                  {data?.conflicts.length ? (
-                    <ConflictList
-                      conflicts={data.conflicts}
-                      busy={busy}
-                      onResolve={(conflict, resolution) =>
-                        runAction(`conflict:${conflict._id}`, () =>
-                          resolveSpectraManageBacConflict({
-                            conflictId: conflict._id,
-                            resolution,
-                          }),
-                        )
-                      }
-                    />
-                  ) : (
-                    <EmptyState
-                      icon={CheckCircle2}
-                      title="No conflicts to review"
-                      detail="Safe source updates apply automatically. Ambiguous changes stop here before touching customized work."
-                    />
-                  )}
-                </div>
+                data?.conflicts.length ? (
+                  <ConflictList
+                    conflicts={data.conflicts}
+                    busy={busy}
+                    onResolve={(conflict, resolution) =>
+                      runAction(`conflict:${conflict._id}`, () =>
+                        resolveSpectraManageBacConflict({
+                          conflictId: conflict._id,
+                          resolution,
+                        }),
+                      )
+                    }
+                  />
+                ) : (
+                  <EmptyState
+                    icon={CheckCircle2}
+                    title="No conflicts to review"
+                    detail="Safe source updates apply automatically. Ambiguous changes stop here before touching customized work."
+                  />
+                )
               ) : (
                 <ProvenancePanel
                   records={records}
@@ -1113,6 +803,8 @@ export function ManageBacIntegrationShell() {
                   quarantine={data?.quarantine ?? []}
                   identityQueue={data?.identityQueue ?? []}
                   onOpenManifest={() => setManifestOpen(true)}
+                  onRetrySync={() => void runAction("sync", () => syncSpectraManageBac())}
+                  syncBusy={busy === "sync"}
                   admin={Boolean(overview?.admin)}
                 />
               )}
@@ -1121,35 +813,36 @@ export function ManageBacIntegrationShell() {
         </div>
       </main>
 
-      <aside className="hidden w-[286px] shrink-0 overflow-y-auto border-l border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--bg-elevated)_55%,var(--bg-primary))] xl:block">
-        <div className="sticky top-0 z-10 grid h-12 grid-cols-2 border-b border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--bg-elevated)_88%,transparent)]">
+      {contextOpen ? <AuxiliaryRail label="ManageBac context" onClose={() => setContextOpen(false)} className="hidden xl:block" navigation={
+        <div className="grid grid-cols-2 gap-1">
           {(["details", "activity"] as const).map((item) => (
             <button
               key={item}
               type="button"
               onClick={() => setDetailsTab(item)}
               className={cn(
-                "relative text-[11px] capitalize text-[var(--text-tertiary)]",
+                "h-7 rounded-md text-[11px] capitalize text-[var(--text-tertiary)] transition",
                 detailsTab === item &&
-                  "font-medium text-[var(--text-primary)] after:absolute after:inset-x-5 after:bottom-0 after:h-[1.5px] after:bg-[var(--text-primary)]",
+                  "bg-[color-mix(in_oklab,var(--text-primary)_7%,transparent)] font-medium text-[var(--text-primary)]",
               )}
             >
               {item}
             </button>
           ))}
         </div>
+      }>
         {detailsTab === "details" ? (
-          <div className="space-y-2 p-3">
+          <div className="space-y-7 px-4 pb-5 pt-3">
             <RightCard title="Integration">
               <div className="flex items-center gap-2.5">
-                <span className="grid size-8 place-items-center rounded-lg bg-[linear-gradient(145deg,#eef8fd,#e9eaff)] text-[#367ea8]">
+                <span className="grid size-7 place-items-center text-[#367ea8]">
                   <Network size={15} />
                 </span>
                 <div className="min-w-0 flex-1">
-                  <strong className="block text-[11px] font-medium">
+                  <strong className="block text-[12px] font-medium">
                     ManageBac
                   </strong>
-                  <span className="block truncate text-micro text-[var(--text-tertiary)]">
+                  <span className="block truncate text-[11px] text-[var(--text-tertiary)]">
                     {integration?.providerVersion
                       ? `Reference ${integration.providerVersion}`
                       : "Tenant-verified API"}
@@ -1168,10 +861,10 @@ export function ManageBacIntegrationShell() {
               <div className="flex items-center gap-2.5">
                 <School size={16} className="text-[#6e62d8]" />
                 <div className="min-w-0">
-                  <strong className="block truncate text-[11px] font-medium">
+                  <strong className="block truncate text-[12px] font-medium">
                     {data?.school?.name ?? "Your school"}
                   </strong>
-                  <span className="text-micro text-[var(--text-tertiary)]">
+                  <span className="text-[11px] text-[var(--text-tertiary)]">
                     Read-only operational connection
                   </span>
                 </div>
@@ -1226,7 +919,7 @@ export function ManageBacIntegrationShell() {
               ) : null}
             </RightCard>
             <RightCard title="Data provenance">
-              <p className="text-micro leading-4 text-[var(--text-secondary)]">
+              <p className="text-[11px] leading-5 text-[var(--text-secondary)]">
                 Imported records retain source identity, contract version,
                 refresh time, and tombstone state. User overlays remain
                 separate.
@@ -1286,21 +979,21 @@ export function ManageBacIntegrationShell() {
             ) : null}
           </div>
         ) : (
-          <div className="p-3">
+          <div className="px-4 pb-5 pt-3">
             <RightCard title="Recent sync activity">
               {(data?.syncRuns ?? []).slice(0, 8).map((run) => (
                 <div
                   key={run._id}
-                  className="flex gap-2 border-b border-[var(--border-subtle)] py-2.5 last:border-0"
+                    className="flex gap-2 rounded-lg py-2.5 transition-colors hover:bg-[var(--bg-hover)]"
                 >
-                  <span className="mt-0.5 grid size-5 shrink-0 place-items-center rounded-full bg-[var(--bg-secondary)]">
+                  <span className="mt-0.5 grid size-5 shrink-0 place-items-center">
                     <History size={11} />
                   </span>
                   <div className="min-w-0">
-                    <strong className="block text-micro font-medium capitalize">
+                    <strong className="block text-[11px] font-medium capitalize">
                       {run.kind} sync {run.status.replaceAll("_", " ")}
                     </strong>
-                    <span className="block text-micro text-[var(--text-tertiary)]">
+                    <span className="block text-[11px] text-[var(--text-tertiary)]">
                       {run.counts.created} added · {run.counts.updated} updated
                       · {relative(run.completedAt ?? run.createdAt)}
                     </span>
@@ -1315,30 +1008,7 @@ export function ManageBacIntegrationShell() {
             </RightCard>
           </div>
         )}
-      </aside>
-
-      <div className="pointer-events-none absolute inset-x-0 bottom-3 z-20 flex justify-center px-4 xl:right-[286px]">
-        <div className="pointer-events-auto w-full max-w-[760px]">
-          <CommandBar
-            className="w-full"
-            placeholder="Ask Spectra about permitted school data…"
-            onSubmit={(prompt) => {
-              router.push(
-                `/chat?prompt=${encodeURIComponent(
-                  `Using only my permitted ManageBac school data, ${prompt}`,
-                )}`,
-              );
-              return true;
-            }}
-            context={
-              <span className="flex h-full min-w-[88px] items-center gap-2 px-3 text-[11px] font-semibold text-[var(--text-primary)]">
-                <School className="size-3.5 shrink-0 text-[var(--brand-primary)]" />
-                ManageBac
-              </span>
-            }
-          />
-        </div>
-      </div>
+      </AuxiliaryRail> : null}
 
       {settingsOpen ? (
         <SettingsDialog
@@ -1390,10 +1060,10 @@ function SyncTable({ runs }: { runs: SpectraManageBacSyncRun[] }) {
       />
     );
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[620px] border-collapse text-left">
+    <div className="overflow-x-auto px-1">
+      <table className="w-full min-w-[620px] border-separate border-spacing-y-1 text-left">
         <thead>
-          <tr className="border-b border-[var(--border-subtle)] text-micro font-normal text-[var(--text-tertiary)]">
+          <tr className="text-micro font-normal text-[var(--text-tertiary)]">
             <th className="px-4 py-2 font-normal">Date & time</th>
             <th className="px-3 py-2 font-normal">Status</th>
             <th className="px-3 py-2 font-normal">Imported</th>
@@ -1406,20 +1076,20 @@ function SyncTable({ runs }: { runs: SpectraManageBacSyncRun[] }) {
           {runs.map((run) => (
             <tr
               key={run._id}
-              className="border-b border-[var(--border-subtle)] last:border-0"
+              className="group"
             >
-              <td className="px-4 py-2.5 text-micro">
+              <td className="rounded-l-lg px-4 py-2.5 text-[11px] transition-colors group-hover:bg-[var(--bg-secondary)]">
                 {formatDate(run.completedAt ?? run.createdAt)}
               </td>
-              <td className="px-3 py-2.5">
+              <td className="px-3 py-2.5 transition-colors group-hover:bg-[var(--bg-secondary)]">
                 <SyncStatus run={run} />
               </td>
-              <td className="px-3 py-2.5 text-micro">{run.counts.created}</td>
-              <td className="px-3 py-2.5 text-micro">{run.counts.updated}</td>
-              <td className="px-3 py-2.5 text-micro">
+              <td className="px-3 py-2.5 text-[11px] transition-colors group-hover:bg-[var(--bg-secondary)]">{run.counts.created}</td>
+              <td className="px-3 py-2.5 text-[11px] transition-colors group-hover:bg-[var(--bg-secondary)]">{run.counts.updated}</td>
+              <td className="px-3 py-2.5 text-[11px] transition-colors group-hover:bg-[var(--bg-secondary)]">
                 {run.counts.conflicts}
               </td>
-              <td className="px-3 py-2.5 text-micro capitalize text-[var(--text-secondary)]">
+              <td className="rounded-r-lg px-3 py-2.5 text-[11px] capitalize text-[var(--text-secondary)] transition-colors group-hover:bg-[var(--bg-secondary)]">
                 {run.kind}
               </td>
             </tr>
@@ -1443,12 +1113,12 @@ function ConflictList({
   ) => void;
 }) {
   return (
-    <div className="divide-y divide-[var(--border-subtle)]">
+    <div className="space-y-2 px-1">
       {conflicts.map((conflict) => {
         const oldSource = object(conflict.oldSource);
         const nextSource = object(conflict.newSource);
         return (
-          <article key={conflict._id} className="px-4 py-3">
+          <article key={conflict._id} className="rounded-xl px-3 py-3 transition-colors hover:bg-[var(--bg-secondary)]">
             <div className="flex items-start gap-2.5">
               <span className="mt-0.5 grid size-5 shrink-0 place-items-center rounded-full bg-[#fff3df] text-[#d17a21]">
                 <AlertCircle size={12} />
@@ -1500,6 +1170,8 @@ function ProvenancePanel({
   quarantine,
   identityQueue,
   onOpenManifest,
+  onRetrySync,
+  syncBusy,
   admin,
 }: {
   records: SpectraManageBacRecord[];
@@ -1507,6 +1179,8 @@ function ProvenancePanel({
   quarantine: NonNullable<SpectraManageBacOverview["data"]["quarantine"]>;
   identityQueue: NonNullable<SpectraManageBacOverview["data"]["identityQueue"]>;
   onOpenManifest: () => void;
+  onRetrySync: () => void;
+  syncBusy: boolean;
   admin: boolean;
 }) {
   const grouped = useMemo(() => {
@@ -1519,9 +1193,9 @@ function ProvenancePanel({
     return [...result.entries()];
   }, [capabilities]);
   return (
-    <div className="grid gap-3 lg:grid-cols-[1.4fr_.8fr]">
-      <section className="overflow-hidden rounded-[9px] border border-[var(--border-subtle)]">
-        <div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-4 py-3">
+    <div className="grid gap-x-12 gap-y-10 lg:grid-cols-[1.4fr_.8fr]">
+      <section className="min-w-0">
+        <div className="flex items-center justify-between gap-4">
           <div>
             <h2 className="text-[12px] font-semibold">
               Verified capability manifest
@@ -1534,7 +1208,7 @@ function ProvenancePanel({
             <button
               type="button"
               onClick={onOpenManifest}
-              className="inline-flex h-7 items-center gap-1.5 rounded-md border border-[var(--border-subtle)] px-2.5 text-micro hover:bg-[var(--bg-secondary)]"
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[11px] text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
             >
               <Code2 size={11} />
               Import manifest
@@ -1545,7 +1219,7 @@ function ProvenancePanel({
           grouped.map(([category, rows]) => (
             <div
               key={category}
-              className="border-b border-[var(--border-subtle)] px-4 py-3 last:border-0"
+              className="mt-6"
             >
               <div className="mb-2 flex items-center justify-between">
                 <strong className="text-micro uppercase tracking-[.08em] text-[var(--text-tertiary)]">
@@ -1560,11 +1234,12 @@ function ProvenancePanel({
                   /{rows.length} verified
                 </span>
               </div>
-              <div className="space-y-1.5">
+              <div className="space-y-1">
                 {rows.map((capability) => (
                   <div
                     key={capability._id}
-                    className="grid grid-cols-[1fr_auto_auto] items-center gap-3 rounded-md bg-[var(--bg-secondary)]/55 px-3 py-2"
+                    className="grid grid-cols-[1fr_auto_auto] items-center gap-3 rounded-xl px-2.5 py-2.5 transition-colors hover:bg-[var(--bg-secondary)] target:bg-amber-500/10 target:ring-1 target:ring-amber-600/20"
+                    id={`capability-${capability._id}`}
                   >
                     <div className="min-w-0">
                       <strong className="block truncate text-micro font-medium">
@@ -1601,8 +1276,8 @@ function ProvenancePanel({
           />
         )}
       </section>
-      <div className="space-y-3">
-        <section className="rounded-[9px] border border-[var(--border-subtle)] p-4">
+      <div className="space-y-10">
+        <section>
           <h2 className="text-[12px] font-semibold">Source guarantees</h2>
           <div className="mt-3 space-y-3">
             {[
@@ -1647,7 +1322,7 @@ function ProvenancePanel({
             })}
           </div>
         </section>
-        <section className="rounded-[9px] border border-[var(--border-subtle)] p-4">
+        <section>
           <div className="flex items-center justify-between">
             <h2 className="text-[12px] font-semibold">Quarantine</h2>
             <StatusPill state={quarantine.length ? "warning" : "good"}>
@@ -1658,20 +1333,27 @@ function ProvenancePanel({
             Schema drift is isolated as a sanitized shape—never coerced into
             live records.
           </p>
+          {quarantine.length ? <div className="mt-3 flex items-center gap-1">
+            {admin ? <button type="button" onClick={onOpenManifest} className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[11px] font-medium text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><Code2 size={12} />Update manifest</button> : null}
+            <button type="button" onClick={onRetrySync} disabled={syncBusy} className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[11px] font-medium text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-50"><RefreshCw size={12} className={syncBusy ? "animate-spin" : ""} />Retry sync</button>
+          </div> : null}
           {quarantine.slice(0, 5).map((item) => (
-            <div
+            <a
               key={item._id}
-              className="mt-2 rounded-md bg-[#fff7ed] px-3 py-2 text-micro text-[#995c22]"
+              href={`#capability-${item.capabilityId}`}
+              className="group mt-1 flex items-center gap-2 rounded-lg px-2 py-2 text-[11px] text-[#8a5a26] transition-colors hover:bg-amber-500/8"
+              title="Inspect the quarantined capability"
             >
-              <strong className="block font-medium">{item.reasonCode}</strong>
-              <span>
+              <AlertTriangle size={12} className="shrink-0" />
+              <span className="min-w-0 flex-1"><strong className="block truncate font-medium">{item.reasonCode}</strong><span className="block text-micro text-[var(--text-tertiary)]">
                 Contract {item.contractVersion} · {formatDate(item.createdAt)}
-              </span>
-            </div>
+              </span></span>
+              <ChevronRight size={12} className="shrink-0 opacity-0 transition group-hover:translate-x-0.5 group-hover:opacity-100" />
+            </a>
           ))}
         </section>
         {admin ? (
-          <section className="rounded-[9px] border border-[var(--border-subtle)] p-4">
+          <section>
             <div className="flex items-center justify-between gap-2">
               <h2 className="text-[12px] font-semibold">Identity resolution</h2>
               <StatusPill state={identityQueue.length ? "warning" : "good"}>
@@ -1685,7 +1367,7 @@ function ProvenancePanel({
             {identityQueue.slice(0, 8).map((item) => (
               <div
                 key={item.mappingId}
-                className="mt-2 flex items-center gap-2 rounded-md bg-[var(--bg-secondary)]/60 px-3 py-2"
+                className="mt-1 flex items-center gap-2 rounded-lg px-2 py-2 transition-colors hover:bg-[var(--bg-secondary)]"
               >
                 <UserCheck
                   size={13}
@@ -1708,21 +1390,7 @@ function ProvenancePanel({
             ))}
           </section>
         ) : null}
-        <section className="rounded-[9px] border border-[var(--border-subtle)] p-4">
-          <h2 className="text-[12px] font-semibold">Record provenance</h2>
-          <p className="mt-2 text-micro leading-4 text-[var(--text-tertiary)]">
-            {records.length} accessible normalized records. Raw provider
-            payloads are not rendered here.
-          </p>
-          <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-[var(--bg-secondary)]">
-            <div
-              className="h-full rounded-full bg-[#3a9b77]"
-              style={{
-                width: `${records.length ? Math.max(5, (records.filter((record) => !record.tombstone).length / records.length) * 100) : 0}%`,
-              }}
-            />
-          </div>
-        </section>
+        <p className="text-[11px] leading-5 text-[var(--text-tertiary)]">{records.length} accessible normalized records. Raw provider payloads stay server-side.</p>
       </div>
     </div>
   );
@@ -1736,8 +1404,8 @@ function RightCard({
   children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-[8px] border border-[var(--border-subtle)] p-3">
-      <h3 className="mb-2.5 text-micro font-semibold uppercase tracking-[.1em] text-[var(--text-tertiary)]">
+    <section>
+      <h3 className="mb-2.5 text-[11px] font-semibold uppercase tracking-[.08em] text-[var(--text-tertiary)]">
         {title}
       </h3>
       {children}
@@ -1757,14 +1425,14 @@ function DetailRow({
   good?: boolean;
 }) {
   return (
-    <div className="flex h-7 items-center gap-2">
+    <div className="flex min-h-8 items-center gap-2 rounded-lg px-1 transition-colors hover:bg-[var(--bg-hover)]">
       <Icon size={12} className="text-[var(--text-tertiary)]" />
-      <span className="min-w-0 flex-1 truncate text-micro text-[var(--text-secondary)]">
+      <span className="min-w-0 flex-1 truncate text-[11px] text-[var(--text-secondary)]">
         {label}
       </span>
       <span
         className={cn(
-          "shrink-0 text-micro text-[var(--text-secondary)]",
+          "shrink-0 text-[11px] text-[var(--text-secondary)]",
           good && "text-[#2d8b68]",
         )}
       >
@@ -1790,7 +1458,7 @@ function QuickAction({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="flex h-8 w-full items-center gap-2 rounded-md px-1 text-left text-micro text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] disabled:opacity-45"
+      className="flex h-9 w-full items-center gap-2 rounded-lg px-1.5 text-left text-[11px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-45"
     >
       <Icon size={13} />
       {label}
@@ -1821,7 +1489,7 @@ function SettingsDialog({
   onManifest: () => void;
 }) {
   const input =
-    "h-9 w-full rounded-[7px] border border-[var(--border-subtle)] bg-white px-3 text-[11px] outline-none focus:border-[#7aa999] focus:ring-2 focus:ring-[#dceee7]";
+    "h-9 w-full rounded-[7px] border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 text-[11px] outline-none focus:border-[#7aa999] focus:ring-2 focus:ring-[#dceee7]";
   const canConnectWithoutTypedToken =
     !connected && envTokenAvailable && config.token.length === 0;
   return (
@@ -1834,7 +1502,7 @@ function SettingsDialog({
       <div className="max-h-[92vh] w-full max-w-[520px] overflow-y-auto rounded-[13px] border border-white/70 bg-[#fbfaf8] shadow-[0_24px_80px_rgba(20,24,21,.25)]">
         <header className="sticky top-0 z-10 flex items-start justify-between border-b border-[var(--border-subtle)] bg-[#fbfaf8]/95 px-5 py-4 backdrop-blur">
           <div>
-            <h2 className="font-[var(--font-serif)] text-xl font-medium">
+            <h2 className="font-display text-xl font-semibold">
               ManageBac connection
             </h2>
             <p className="mt-1 text-micro text-[var(--text-tertiary)]">
@@ -1983,7 +1651,7 @@ function ManifestDialog({
       <div className="w-full max-w-[760px] overflow-hidden rounded-[13px] border border-white/70 bg-[#fbfaf8] shadow-[0_24px_80px_rgba(20,24,21,.25)]">
         <header className="flex items-start justify-between border-b border-[var(--border-subtle)] px-5 py-4">
           <div>
-            <h2 className="font-[var(--font-serif)] text-xl font-medium">
+            <h2 className="font-display text-xl font-semibold">
               Verified capability manifest
             </h2>
             <p className="mt-1 max-w-xl text-micro leading-4 text-[var(--text-tertiary)]">
@@ -2066,7 +1734,7 @@ function DisconnectDialog({
         <span className="grid size-10 place-items-center rounded-xl bg-[#fff0ed] text-[#b54b3d]">
           <AlertTriangle size={18} />
         </span>
-        <h2 className="mt-4 font-[var(--font-serif)] text-xl font-medium">
+        <h2 className="mt-4 font-display text-xl font-semibold">
           Disconnect ManageBac?
         </h2>
         <p className="mt-2 text-[11px] leading-5 text-[var(--text-secondary)]">

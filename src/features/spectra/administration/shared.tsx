@@ -5,6 +5,7 @@ import {
   AlertCircle,
   ArrowUpRight,
   CheckCircle2,
+  ChevronDown,
   LoaderCircle,
   X,
   type LucideIcon,
@@ -12,13 +13,13 @@ import {
 import { cn } from "@/lib/utils";
 import type { CapabilityState } from "@/features/spectra/core/capability-truth";
 import { CapabilityTruthBadge } from "@/features/spectra/integrations/status/capability-truth";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { ProductEmptyState, ProductErrorState } from "@/features/spectra/components/product-state";
+
+function userFacingMetricSource(source: string) {
+  if (/usageMeters/i.test(source)) return "Daily usage meter";
+  if (/operationalCounters/i.test(source)) return "Daily operational counters";
+  return "Product records";
+}
 
 export function AdminCard({
   children,
@@ -30,7 +31,7 @@ export function AdminCard({
   return (
     <section
       className={cn(
-        "rounded-[8px] border border-[var(--border-subtle)] bg-[var(--bg-elevated)] shadow-[0_1px_2px_rgba(30,26,20,.025)]",
+        "rounded-[10px] bg-transparent",
         className,
       )}
     >
@@ -85,49 +86,39 @@ export function MetricCard({
   source?: string;
 }) {
   const toneClass = {
-    green: "bg-[#e9f6f0] text-[#15906b]",
-    violet: "bg-[#f1ecff] text-[#7a58ee]",
-    orange: "bg-[#fff0e5] text-[#ef7c2e]",
-    blue: "bg-[#edf3ff] text-[#537fe7]",
+    green: "text-[#15906b]",
+    violet: "text-[#7a58ee]",
+    orange: "text-[#c66a2d]",
+    blue: "text-[#537fe7]",
   }[tone];
   return (
-    <AdminCard className="min-w-0 p-4">
+    <section
+      className="group min-w-0 rounded-[10px] px-4 py-3 transition-colors hover:bg-[var(--bg-secondary)]"
+      title={source ? `Source: ${userFacingMetricSource(source)}` : undefined}
+    >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="text-[11px] text-[var(--text-secondary)]">{label}</p>
-            {state ? <CapabilityTruthBadge state={state} className="min-h-5 px-2 text-micro" /> : null}
+          <div className="flex flex-wrap items-center gap-2 text-[var(--text-secondary)]">
+            <Icon size={14} className={toneClass} strokeWidth={1.8} />
+            <p className="text-[11px]">{label}</p>
+            {state && state.kind !== "available" ? (
+              <CapabilityTruthBadge state={state} className="min-h-5 px-2 text-micro" />
+            ) : null}
           </div>
-          <strong className="mt-2 block truncate font-sans text-[26px] font-normal leading-none tracking-[-.02em] text-[var(--text-primary)]">
+          <strong className="mt-2 block truncate font-sans text-[24px] font-normal leading-none tracking-[-.02em] text-[var(--text-primary)]">
             {value}
           </strong>
-          <p
-            className={cn(
-              "mt-2 text-micro",
-              tone === "orange"
-                ? "text-[#d96f24]"
-                : "text-[var(--success,#27876b)]",
-            )}
-          >
+          <p className="mt-2 text-micro leading-4 text-[var(--text-secondary)]">
             {detail}
           </p>
-          {source ? (
-            <p className="mt-1 truncate text-micro text-[var(--text-tertiary)]" title={source}>
-              {source}
-            </p>
-          ) : null}
         </div>
-        <span
-          className={cn(
-            "grid size-9 shrink-0 place-items-center rounded-[10px]",
-            toneClass,
-          )}
-        >
-          <Icon size={17} strokeWidth={1.8} />
-        </span>
       </div>
-      {action ? <div className="mt-4">{action}</div> : null}
-    </AdminCard>
+      {action ? (
+        <div className="mt-3 [&>button]:min-h-7 [&>button]:w-auto [&>button]:border-0 [&>button]:bg-transparent [&>button]:px-0 [&>button]:text-[var(--brand-primary)]">
+          {action}
+        </div>
+      ) : null}
+    </section>
   );
 }
 
@@ -270,18 +261,12 @@ export function SelectField({
       <span className="mb-1.5 block text-[12px] font-medium text-[var(--text-secondary)]">
         {label}
       </span>
-      <Select value={value} onValueChange={onChange}>
-        <SelectTrigger aria-label={label}>
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {options.map((option) => (
-            <SelectItem key={option.value} value={option.value}>
-              {option.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      <span className="relative block">
+        <select aria-label={label} value={value} onChange={(event) => onChange(event.target.value)} className="h-9 w-full appearance-none rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] py-0 pl-3 pr-9 text-[12px] font-medium text-[var(--text-primary)] outline-none transition hover:bg-[var(--bg-hover)] focus-visible:ring-2 focus-visible:ring-[var(--brand-primary)]">
+          {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+        </select>
+        <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-3.5 -translate-y-1/2 text-[var(--text-tertiary)]" />
+      </span>
     </label>
   );
 }
@@ -378,20 +363,7 @@ export function EmptyPanel({
   detail: string;
   action?: ReactNode;
 }) {
-  return (
-    <div className="flex min-h-52 flex-col items-center justify-center px-6 text-center">
-      <span className="grid size-10 place-items-center rounded-[10px] bg-[var(--bg-secondary)] text-[var(--text-tertiary)]">
-        <Icon size={17} />
-      </span>
-      <strong className="mt-3 font-[var(--font-serif)] text-[16px] font-medium text-[var(--text-primary)]">
-        {title}
-      </strong>
-      <p className="mt-1 max-w-sm text-[11px] leading-5 text-[var(--text-tertiary)]">
-        {detail}
-      </p>
-      {action ? <div className="mt-4">{action}</div> : null}
-    </div>
-  );
+  return <ProductEmptyState icon={Icon} title={title} detail={detail} action={action} />;
 }
 
 export function ErrorPanel({
@@ -401,22 +373,7 @@ export function ErrorPanel({
   message: string;
   retry: () => void;
 }) {
-  return (
-    <div className="flex min-h-52 flex-col items-center justify-center px-6 text-center">
-      <span className="grid size-10 place-items-center rounded-[10px] bg-[#fff0ed] text-[#b54a3d]">
-        <AlertCircle size={18} />
-      </span>
-      <strong className="mt-3 text-[13px] font-semibold text-[var(--text-primary)]">
-        Administration data is unavailable
-      </strong>
-      <p className="mt-1 max-w-md text-[11px] leading-5 text-[var(--text-tertiary)]">
-        {message}
-      </p>
-      <AdminButton className="mt-4" onClick={retry}>
-        Try again
-      </AdminButton>
-    </div>
-  );
+  return <ProductErrorState title="Administration data is unavailable" detail={message} action={<AdminButton onClick={retry}>Try again</AdminButton>} />;
 }
 
 export function InlineLink({

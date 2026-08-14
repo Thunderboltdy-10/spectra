@@ -80,7 +80,7 @@ import {
 } from "./artifact-studio";
 import { artifactBlobSha256 } from "./artifact-studio-file-utils";
 import { formatShortDate } from "./spectra-view-model";
-import { WorkbarSelect } from "./workbar-controls";
+import { WorkbarSelect } from "./artifact-workbar";
 
 function QuizExperienceSection({
   experience,

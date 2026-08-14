@@ -48,3 +48,10 @@ export function metricDefinition(id: string) {
   if (!definition) throw new Error(`Unregistered displayed metric: ${id}`);
   return definition;
 }
+
+export function metricSourceLabel(definition: SpectraMetricDefinition) {
+  if (definition.instrumentation === "usage_meter") return "Daily usage meter";
+  if (definition.instrumentation === "operational_counter")
+    return "Daily operational counters";
+  return "Product records";
+}

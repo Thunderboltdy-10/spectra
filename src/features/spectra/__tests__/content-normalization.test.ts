@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { normalizeArtifactContent } from "../ai/content-normalization";
-import { validateBlueprintContent } from "../blueprints/registry";
+import { validateBlueprintContent } from "../artifacts/blueprint-catalog";
 
 describe("model artifact content normalization", () => {
   it("adds storage ids and canonicalizes rich document block aliases", () => {

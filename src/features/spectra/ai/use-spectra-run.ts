@@ -17,6 +17,7 @@ import type { CommandAttachment } from "../components/command-bar";
 import { getRunLedger, recordRunEvent } from "../collaboration/run-ledger";
 import { noteAiLocation } from "../collaboration/follow-ai";
 import { publishArtifactAiActivity } from "../collaboration/artifact-ai-activity";
+import { useSpectraPreferences } from "../settings/preference-store";
 
 /**
  * Artifact ids the run feed has published coarse activity for, per run, so a
@@ -348,6 +349,7 @@ export function useSpectraRun({
   currentView?: string;
   observeDurableRuns?: boolean;
 }) {
+  const { preferences } = useSpectraPreferences();
   const [cards, setCards] = useState<ResultCardStreamView[]>(() =>
     initialCards.map(persistedToStream),
   );
@@ -929,6 +931,13 @@ export function useSpectraRun({
     ): Promise<boolean> => {
       const clean = prompt.trim();
       if (!clean) return Promise.resolve(false);
+      const continuedThreadId =
+        options?.threadId === null
+          ? undefined
+          : options?.threadId ??
+            (preferences.ai.continueCurrentConversation
+              ? durableThreadId.current
+              : undefined);
       toast.dismiss();
       return new Promise<boolean>((resolve) => {
         const exchangeId = crypto.randomUUID();
@@ -943,10 +952,7 @@ export function useSpectraRun({
         setActiveRequestCount((count) => count + 1);
         setLiveExchange({
           id: exchangeId,
-          threadId:
-            options?.threadId === null
-              ? undefined
-              : (options?.threadId ?? durableThreadId.current),
+          threadId: continuedThreadId,
           prompt: clean,
           content: "",
           steps: [],
@@ -998,10 +1004,7 @@ export function useSpectraRun({
             // through to the last durable thread ref: a user can deselect an
             // open thread and submit before React's synchronization effect has
             // run, and that message still belongs to a fresh thread.
-            threadId:
-              options?.threadId === null
-                ? undefined
-                : (options?.threadId ?? durableThreadId.current),
+            threadId: continuedThreadId,
             focusMode,
             selectedArtifactIds,
             explicitContextObjects,
@@ -1057,6 +1060,7 @@ export function useSpectraRun({
       selectedArtifactIds,
       surface,
       upsert,
+      preferences.ai.continueCurrentConversation,
       workspaceId,
     ],
   );

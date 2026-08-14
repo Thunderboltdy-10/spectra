@@ -94,7 +94,7 @@ import {
   sheetsAiTouchesColumn,
 } from "./ai-region-path";
 import { targetAttrs } from "../collaboration/target-attributes";
-import { WorkbarSelect } from "./workbar-controls";
+import { WorkbarSelect } from "./artifact-workbar";
 
 const ROW_HEIGHT = 31;
 const COLUMN_WIDTH = 122;

@@ -1,20 +1,5 @@
 /* Agent Library â€” a quiet, high-density catalog aligned to the supplied
    reference while remaining inside Spectra's merged navigation shell. */
-.agent-library-topbar {
-  min-height: 56px;
-  margin: 14px 16px 0;
-  padding: 0 16px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  border: 1px solid var(--border-subtle);
-  border-radius: 12px;
-  background: color-mix(in oklab, var(--bg-elevated) 88%, transparent);
-  color: var(--text-secondary);
-  font-size: 13px;
-  box-shadow: 0 1px 2px rgba(27, 20, 12, 0.025);
-}
-
 .agent-library-create {
   margin-left: 8px;
   display: inline-flex;
@@ -23,9 +8,9 @@
   gap: 7px;
   border: 1px solid transparent;
   border-radius: 10px;
-  background: var(--brand-primary);
+  background: var(--text-primary);
   padding: 0 14px;
-  color: white;
+  color: var(--bg-primary);
   font-size: 13px;
   font-weight: 650;
 }
@@ -57,6 +42,17 @@
   );
   box-shadow: 0 0 0 3px
     color-mix(in oklab, var(--brand-primary) 8%, transparent);
+}
+
+.agent-library-filter select {
+  min-width: 0;
+  flex: 1;
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 11px;
+  outline: 0;
 }
 
 .agent-library-card {
@@ -124,25 +120,6 @@
   color: var(--success);
 }
 
-.agent-library-composer {
-  position: fixed;
-  z-index: 34;
-  bottom: 18px;
-  left: calc(50% + 38px);
-  display: flex;
-  width: min(680px, calc(100vw - 130px));
-  min-height: 52px;
-  transform: translateX(-50%);
-  align-items: center;
-  gap: 8px;
-  border: 1px solid var(--border-default);
-  border-radius: 13px;
-  background: color-mix(in oklab, var(--bg-elevated) 94%, transparent);
-  padding: 6px 7px;
-  box-shadow: 0 18px 50px rgba(27, 20, 12, 0.14);
-  backdrop-filter: blur(18px);
-}
-
 .agent-library-overlay {
   position: fixed;
   z-index: 120;
@@ -166,9 +143,6 @@
 }
 
 @media (max-width: 767px) {
-  .agent-library-topbar {
-    margin: 8px 9px 0;
-  }
   .agent-library-composer {
     bottom: 86px;
     left: 50%;
@@ -1714,7 +1688,7 @@ body {
   flex: 1 1 auto;
   flex-direction: column;
   overflow: hidden;
-  background: #f7f8f5;
+  background: var(--bg-primary);
   color: #24312c;
 }
 
@@ -2260,15 +2234,15 @@ body {
   width: 246px;
   flex: 0 0 246px;
   overflow-y: auto;
-  border: 1px solid #e4e7e1;
-  border-right: 0;
-  border-radius: 12px 0 0 12px;
-  background: #fff;
-  box-shadow: 7px 0 25px rgba(40, 50, 44, 0.035);
+  border: 0;
+  border-right: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: var(--bg-primary);
+  box-shadow: none;
 }
 
 .whiteboard-panel + main {
-  border-radius: 0 12px 12px 0;
+  border-radius: 0;
 }
 
 .whiteboard-panel > header {
@@ -2279,8 +2253,8 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 15px 14px 12px;
-  border-bottom: 1px solid #eceeea;
-  background: rgba(255, 255, 255, 0.96);
+  border-bottom: 1px solid var(--border-subtle);
+  background: color-mix(in oklab, var(--bg-primary) 96%, transparent);
 }
 
 .whiteboard-panel > header strong {
@@ -4352,6 +4326,73 @@ body {
     rgba(255, 255, 255, 0.92),
     rgba(243, 248, 255, 0.88)
   );
+}
+
+/* M4 one-product contract --------------------------------------------------
+   Work types own their tools; the workbar owns their shared interaction
+   grammar. The whiteboard established this restrained lift and active tint. */
+.spectra-editor-workbar {
+  border-color: var(--border-default);
+  background: color-mix(in oklab, var(--bg-elevated) 96%, transparent);
+  box-shadow: 0 8px 24px -22px rgba(31, 44, 37, 0.22);
+  backdrop-filter: blur(14px);
+}
+
+.spectra-editor-workbar :is(button, [role="button"]):not(.spectra-workbar-primary) {
+  transition:
+    color var(--motion-fast) var(--ease-standard),
+    border-color var(--motion-fast) var(--ease-standard),
+    background-color var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-standard);
+}
+
+.spectra-editor-workbar
+  :is(button, [role="button"]):not(.spectra-workbar-primary):hover:not(:disabled) {
+  border-color: color-mix(in oklab, var(--brand-primary) 22%, var(--border-default));
+  background: color-mix(in oklab, var(--brand-primary) 8%, var(--bg-elevated));
+  color: color-mix(in oklab, var(--brand-primary) 76%, var(--text-primary));
+  transform: translateY(-1px);
+}
+
+.spectra-editor-workbar
+  :is(button, [role="button"]):not(.spectra-workbar-primary):active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.spectra-workbar-primary {
+  border-color: var(--text-primary) !important;
+  background: var(--text-primary) !important;
+  color: var(--bg-primary) !important;
+  transition:
+    opacity var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-standard) !important;
+}
+
+.spectra-workbar-primary:hover:not(:disabled) {
+  opacity: 0.88;
+  transform: translateY(-1px);
+}
+
+:root[data-spectra-editor-text="small"] { --text-editor: 14px; }
+:root[data-spectra-editor-text="large"] { --text-editor: 18px; }
+:root[data-spectra-editor-text="extra_large"] { --text-editor: 20px; }
+:root[data-spectra-interface-text="large"] {
+  --text-micro: 12px;
+  --text-caption: 13px;
+  --text-ui: 14px;
+  --text-body: 15px;
+}
+:root[data-spectra-motion="reduced"] {
+  --motion-fast: 0ms;
+  --motion-base: 0ms;
+  --motion-slow: 0ms;
+}
+:root[data-spectra-motion="none"] *,
+:root[data-spectra-motion="reduced"] [data-decorative-motion="true"] {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  scroll-behavior: auto !important;
+  transition-duration: 0ms !important;
 }
 
 .dark {
@@ -11335,11 +11376,42 @@ button[data-spectra-context-trigger="true"]::after {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  width: min(880px, calc(100% - 36px));
+}
+
+@media (min-width: 1280px) {
 }
 
 .spectra-live-dock-row,
 .spectra-command-bar {
-  padding-right: 20px;
+  padding-inline: 0;
+}
+
+.spectra-live-dock-row {
+  justify-content: center;
+}
+
+@media (min-width: 900px) {
+  .spectra-workbench-live-stack .spectra-command-bar > button:first-of-type {
+    position: absolute;
+    right: calc(100% + 8px);
+    margin-right: 0;
+  }
+}
+
+.spectra-artifact-card {
+  container-type: inline-size;
+}
+
+@container (max-width: 250px) {
+  .spectra-artifact-card .spectra-artifact-card-meta,
+  .spectra-artifact-card .spectra-card-ai-activity {
+    display: none;
+  }
+
+  .spectra-artifact-card .spectra-artifact-card-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .spectra-run-tab-strip::before {
@@ -14461,7 +14533,7 @@ button[data-spectra-context-trigger="true"]::after {
 
 .spectra-studio-details {
   border-radius: 8px !important;
-  background: #faf9f8 !important;
+  background: var(--bg-primary) !important;
 }
 
 .spectra-studio-details [data-spectra-card="side"] {
@@ -14852,8 +14924,26 @@ body {
 }
 
 /* Shared Spectra redesign polish â€” transitions, composer, rails. */
+.spectra-workbench-live-stack {
+  position: fixed !important;
+  left: 0 !important;
+  right: 0 !important;
+}
+
+@media (min-width: 768px) {
+  .spectra-app-shell[data-sidebar-collapsed="false"]
+    .spectra-workbench-live-stack {
+    left: 240px !important;
+  }
+
+  .spectra-app-shell[data-sidebar-collapsed="true"]
+    .spectra-workbench-live-stack {
+    left: 76px !important;
+  }
+}
+
 .spectra-command-bar {
-  border-radius: 18px !important;
+  border-radius: 12px !important;
   border: 0 !important;
   background: transparent !important;
   box-shadow: none !important;
@@ -15428,8 +15518,8 @@ body {
 /* Full-height artifact shell. The editable identity shares the same top rail
    as sync and close actions so the working surface begins immediately below. */
 .spectra-artifact-header {
-  min-height: 98px !important;
-  padding: 8px 14px 0 !important;
+  min-height: 66px !important;
+  padding: 9px 14px 8px !important;
 }
 
 .spectra-artifact-header-topline {
@@ -15438,12 +15528,23 @@ body {
 
 .spectra-artifact-header .spectra-artifact-identity {
   min-width: 0;
-  padding-top: 5px !important;
-  padding-bottom: 12px !important;
+  padding: 0 !important;
 }
 
 .spectra-artifact-header-actions {
   padding-top: 0;
+}
+
+.spectra-artifact-studio[data-studio-mode="split"]
+  .spectra-artifact-header-actions {
+  width: auto;
+  flex-wrap: nowrap;
+}
+
+@container (max-width: 780px) {
+  .spectra-artifact-sync-status {
+    display: none !important;
+  }
 }
 
 .spectra-artifact-main {
@@ -15521,6 +15622,151 @@ body {
 
 .spectra-artifact-studio[data-blueprint="whiteboard"] .whiteboard-toolbar {
   margin-top: 7px;
+}
+
+/* Advanced artifact information is a rail, not a stack of dashboard cards. */
+.spectra-studio-details {
+  border: 0 !important;
+  border-left: 1px solid var(--border-subtle) !important;
+  border-radius: 0 !important;
+  background: var(--bg-secondary) !important;
+  box-shadow: none !important;
+}
+
+.spectra-studio-details [data-spectra-card="side"] {
+  margin-top: 0 !important;
+  border: 0 !important;
+  border-bottom: 1px solid var(--border-subtle) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+/* Library layout responds to its actual pane, not the browser viewport. This
+   matters whenever work is open beside it: a 1440px window can still leave a
+   650px Library lane. */
+.spectra-library-content {
+  container-name: spectra-library;
+  container-type: inline-size;
+}
+
+@media (min-width: 768px) {
+  .spectra-shell-tab-header:has(#spectra-shell-tab-slot:empty) {
+    display: none;
+  }
+}
+
+@container spectra-library (max-width: 1080px) {
+  .spectra-library-heading-row {
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 16px !important;
+  }
+
+  .spectra-library-heading-copy p {
+    display: none;
+  }
+
+  .spectra-library-primary-actions {
+    min-width: 0;
+    flex: 1;
+    flex-wrap: nowrap !important;
+    justify-content: flex-end;
+  }
+
+  .spectra-library-collection-tabs {
+    display: flex !important;
+    gap: 16px !important;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .spectra-library-collection-select {
+    display: none !important;
+  }
+
+  .spectra-library-filter-row {
+    flex-direction: row !important;
+    align-items: center !important;
+    gap: 8px !important;
+    margin-top: 12px !important;
+  }
+
+  .spectra-library-view-actions {
+    width: auto;
+    margin-left: auto !important;
+    flex-wrap: nowrap;
+  }
+
+  .spectra-library-card-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@container spectra-library (max-width: 700px) {
+  .spectra-library-content {
+    padding-top: 20px !important;
+  }
+
+  .spectra-library-heading-copy h1 {
+    font-size: 28px !important;
+  }
+
+  .spectra-library-collection-tabs {
+    margin-top: 14px !important;
+  }
+
+  .spectra-library-collection-tabs button:not([aria-current="page"])
+    .spectra-library-collection-label {
+    display: none;
+  }
+
+  .spectra-library-primary-actions > :first-child {
+    width: min(240px, 100%) !important;
+    min-width: 0 !important;
+  }
+
+  .spectra-library-card-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .spectra-library-view-actions {
+    display: flex !important;
+    min-width: 0;
+  }
+
+  .spectra-library-view-actions > :first-child button {
+    max-width: 148px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+}
+
+@container spectra-library (max-width: 540px) {
+  .spectra-library-heading-row {
+    align-items: stretch !important;
+    flex-direction: column !important;
+  }
+
+  .spectra-library-primary-actions {
+    justify-content: stretch;
+  }
+
+  .spectra-library-primary-actions > :first-child {
+    flex: 1;
+    width: auto !important;
+  }
+
+  .spectra-library-filter-row {
+    align-items: stretch !important;
+    flex-direction: column !important;
+  }
+
+  .spectra-library-view-actions {
+    margin-left: 0 !important;
+  }
 }
 
 .whiteboard-shell {
@@ -18202,3 +18448,151 @@ html[data-spectra-motion="reduced"] .spectra-panel-handoff {
 /* ================================================================ *
  * Landing Story Canvas: one tall persistent surface, one camera.
  * ================================================================ */
+
+/* M4 artifact workbar system. ---------------------------------------------
+   One quiet tool surface, three priorities: view navigation stays readable,
+   contextual actions can collapse to icons, and destructive/primary actions
+   remain fixed. Dense types scroll only their tool rail, never the page. */
+.spectra-editor-workbar {
+  container-name: artifact-workbar;
+  container-type: inline-size;
+  min-width: 0;
+  min-height: 42px;
+  flex-wrap: nowrap !important;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border-default);
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  padding: 4px 6px;
+  box-shadow: 0 8px 24px -22px rgba(31, 44, 37, 0.22);
+}
+
+.spectra-artifact-workbar {
+  display: flex;
+}
+
+.spectra-artifact-workbar-rail,
+.whiteboard-toolbar > div:first-child,
+.code-workbar > div:first-child,
+.presentation-primary-bar > div:first-child,
+.sheets-format-bar {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: none;
+}
+
+.spectra-artifact-workbar-rail::-webkit-scrollbar,
+.whiteboard-toolbar > div:first-child::-webkit-scrollbar,
+.code-workbar > div:first-child::-webkit-scrollbar,
+.presentation-primary-bar > div:first-child::-webkit-scrollbar,
+.sheets-format-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.spectra-artifact-workbar-action {
+  display: inline-flex;
+  height: 32px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  border-radius: 7px;
+  padding: 0 9px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.spectra-editor-workbar :is(button, [role="tab"])[data-active="true"],
+.spectra-editor-workbar :is(button, [role="tab"])[aria-selected="true"],
+.spectra-editor-workbar .is-active {
+  background: color-mix(in oklab, var(--brand-primary) 11%, var(--bg-elevated));
+  color: color-mix(in oklab, var(--brand-primary) 80%, var(--text-primary));
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--brand-primary) 20%, transparent);
+}
+
+.whiteboard-toolbar > div:first-child {
+  flex: 1 1 auto;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.spectra-editor-workbar.whiteboard-toolbar {
+  overflow: visible !important;
+}
+
+.whiteboard-toolbar > div:not(:first-child) {
+  flex: 0 0 auto;
+}
+
+.sheets-top-bars {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 5px !important;
+}
+
+.sheets-menu-bar {
+  flex: 0 0 auto;
+  border: 0 !important;
+}
+
+.sheets-format-bar {
+  flex: 1 1 auto;
+  border: 0 !important;
+}
+
+.presentation-primary-bar {
+  display: flex;
+  justify-content: space-between;
+}
+
+.presentation-primary-bar > div:first-child {
+  flex: 1 1 auto;
+}
+
+.presentation-primary-bar > div:last-child {
+  flex: 0 0 auto;
+}
+
+/* Presentation's second row is contextual formatting, not another nav. */
+.presentation-toolbar {
+  min-height: 38px;
+  border: 0 !important;
+  border-bottom: 1px solid var(--border-subtle) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+@container artifact-workbar (max-width: 720px) {
+  .spectra-artifact-workbar-action[data-workbar-priority="context"] span,
+  .code-small-action,
+  .presentation-secondary-action {
+    font-size: 0;
+  }
+
+  .spectra-artifact-workbar-action[data-workbar-priority="context"],
+  .code-small-action,
+  .presentation-secondary-action {
+    width: 32px;
+    justify-content: center;
+    padding-inline: 0;
+  }
+
+  .presentation-present-action {
+    white-space: nowrap;
+  }
+}
+
+@container artifact-workbar (max-width: 500px) {
+  .spectra-editor-workbar [role="status"],
+  .whiteboard-toolbar > .whiteboard-utility-tools {
+    display: none !important;
+  }
+}

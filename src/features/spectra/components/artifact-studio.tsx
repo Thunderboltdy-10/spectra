@@ -15,7 +15,6 @@ import {
   Bold,
   BookOpen,
   CalendarCheck2,
-  CheckCircle2,
   Circle,
   Code2,
   Copy,
@@ -146,6 +145,10 @@ import {
   type ArtifactCommentRegion,
 } from "./artifact-comments-panel";
 import { ArtifactEmbedsPanel } from "./artifact-embeds-panel";
+import {
+  WorkbarMore,
+  workbarMenuItemClass,
+} from "./artifact-workbar";
 import {
   markdownToDocumentHtml,
   sanitizeDocumentHtml,
@@ -3135,6 +3138,7 @@ function ArtifactStudioEditor({
     artifact.blueprintKey !== "planner_task" &&
     artifact.blueprintKey !== "thread_reference";
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [headerMoreOpen, setHeaderMoreOpen] = useState(false);
   const detailsPinnedRef = useRef(false);
   const [aiHighlightDismissed, setAiHighlightDismissed] = useState(false);
   const [versions, setVersions] = useState<SpectraArtifactVersion[]>([]);
@@ -4994,11 +4998,10 @@ function ArtifactStudioEditor({
     .map((tag) => tag.trim())
     .filter(Boolean)
     .slice(0, 3);
-  const waveCBlueprint = WAVE_C_BLUEPRINTS.has(artifact.blueprintKey);
   const artifactSyncMessage = studioSyncMessage(syncLabel);
   const identityBlock = (
     <div
-      className={`spectra-artifact-identity flex w-full items-start ${compact ? "gap-3 px-5 pb-5" : artifact.blueprintKey === "document" ? "gap-4 px-6 pb-2" : artifact.blueprintKey === "quiz" || waveCBlueprint ? "gap-[10px] px-2 pb-0" : "gap-4 px-1 pb-2"}`}
+      className="spectra-artifact-identity flex min-w-0 flex-1 items-start"
     >
       <div className="min-w-0 flex-1">
         <div className="rounded-[7px]">
@@ -5020,7 +5023,7 @@ function ArtifactStudioEditor({
                     effect.regionIds.includes("metadata:title"),
                   )),
             )}
-            className={`spectra-artifact-title min-h-8 w-full resize-none overflow-hidden bg-transparent font-display font-semibold leading-tight text-[var(--text-primary)] outline-none [field-sizing:content] ${compact ? "text-[28px]" : "text-[32px]"}`}
+            className={`spectra-artifact-title min-h-6 w-full resize-none overflow-hidden bg-transparent font-display font-semibold leading-tight text-[var(--text-primary)] outline-none [field-sizing:content] ${compact ? "text-[18px]" : "text-[21px]"}`}
             placeholder="Untitled work"
           />
         </div>
@@ -5048,14 +5051,14 @@ function ArtifactStudioEditor({
                       effect.regionIds.includes("metadata:summary"),
                     )),
               )}
-              className={`w-full resize-none overflow-hidden bg-transparent text-[12px] leading-4 text-[var(--text-secondary)] outline-none placeholder:text-[var(--text-tertiary)] [field-sizing:content] ${summaryExpanded ? "" : "max-h-8"}`}
+              className={`w-full resize-none overflow-hidden bg-transparent text-[11px] leading-[15px] text-[var(--text-secondary)] outline-none placeholder:text-[var(--text-tertiary)] [field-sizing:content] ${summaryExpanded ? "" : "max-h-[15px]"}`}
               placeholder="Short useful summary"
             />
             {!summaryExpanded &&
-            (presencePreview?.summary ?? summary).length > 110 ? (
+            (presencePreview?.summary ?? summary).length > 84 ? (
               <button
                 type="button"
-                className="absolute bottom-0 right-0 bg-[var(--bg-primary)] pl-2 text-[13px] font-semibold tracking-wide text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
+                className="absolute bottom-0 right-0 bg-[var(--bg-primary)] pl-2 text-[11px] font-semibold tracking-wide text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
                 onMouseDown={(event) => {
                   event.preventDefault();
                   setSummaryExpanded(true);
@@ -5163,41 +5166,41 @@ function ArtifactStudioEditor({
           ))}
         </div>
       ) : null}
-      <header className="spectra-artifact-header flex shrink-0 flex-col bg-transparent">
-        <div className="spectra-artifact-header-topline flex min-w-0 items-center justify-between gap-4">
-          <div className="flex min-w-0 items-center gap-2.5">
+      <header className="spectra-artifact-header relative z-30 flex shrink-0 flex-col bg-transparent">
+        <div className="spectra-artifact-header-topline flex min-w-0 items-start justify-between gap-3">
+          <div className="flex min-w-0 flex-1 items-start gap-3">
             <span
               className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] border border-[color-mix(in_oklab,currentColor_24%,transparent)] bg-[color-mix(in_oklab,currentColor_9%,var(--bg-elevated))]"
               style={{ color: meta.color }}
             >
               <Icon className="h-4 w-4" />
             </span>
-            <span className="truncate text-[11px] font-semibold uppercase tracking-[.13em] text-[var(--text-tertiary)]">
-              {meta.label}
-            </span>
+            <div className="min-w-0 flex-1">
+              <span className="block truncate text-[10px] font-semibold uppercase tracking-[.12em] text-[var(--text-tertiary)]">
+                {meta.label}
+              </span>
+              {identityBlock}
+            </div>
           </div>
-          <div className="spectra-artifact-header-actions flex shrink-0 items-center gap-2">
-            <span
-              className="hidden items-center gap-1.5 text-[11px] text-[var(--text-secondary)] sm:inline-flex"
-              role="status"
-              aria-live="polite"
-            >
-              {syncLabel === "Saved" || syncLabel === "Live" ? (
-                <CheckCircle2 className="h-3.5 w-3.5 text-[var(--success)]" />
-              ) : syncBusy ||
+          <div className="spectra-artifact-header-actions flex shrink-0 items-center gap-1">
+            {syncLabel !== "Saved" && syncLabel !== "Live" ? (
+              <span
+                className="spectra-artifact-sync-status hidden items-center gap-1.5 text-[11px] text-[var(--text-secondary)] sm:inline-flex"
+                role="status"
+                aria-live="polite"
+              >
+                {syncBusy ||
                 live.state === "connecting" ||
                 live.state === "synchronizing" ||
                 live.state === "reconnecting" ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-cyan)]" />
-              ) : (
-                <Circle className="h-3 w-3 fill-[#d88922] text-[#d88922]" />
-              )}
-              {syncLabel}
-              {isCollaborativeArtifact && collaboratorCount > 0
-                ? ` · ${collaboratorCount} here`
-                : ""}
-            </span>
-            {isCollaborativeArtifact || collaboratorCount > 0 ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-cyan)]" />
+                ) : (
+                  <Circle className="h-3 w-3 fill-[#d88922] text-[#d88922]" />
+                )}
+                {syncLabel}
+              </span>
+            ) : null}
+            {collaboratorCount > 0 ? (
               <CollaborationPresenceIndicator
                 presence={displayPresence}
                 currentClientId={live.transport?.clientId}
@@ -5264,29 +5267,11 @@ function ArtifactStudioEditor({
                 }}
               />
             ) : null}
-            {onShare ? (
-              <IconButton label="Share work" onClick={onShare} icon={Share2} />
-            ) : null}
             <IconButton
               label="Comments"
               onClick={() => setCommentsOpen(true)}
               icon={MessageSquare}
             />
-            <IconButton
-              label="References"
-              onClick={() => setEmbedsOpen(true)}
-              icon={Link2}
-            />
-            {artifact.blueprintKey !== "planner_task" ? (
-              <IconButton
-                label={detailsOpen ? "Close details" : "Open details"}
-                onClick={() => {
-                  detailsPinnedRef.current = true;
-                  setDetailsOpen((open) => !open);
-                }}
-                icon={PanelRight}
-              />
-            ) : null}
             {mode === "split" ? (
               <IconButton
                 label="Open as tab"
@@ -5294,23 +5279,68 @@ function ArtifactStudioEditor({
                 icon={Maximize2}
               />
             ) : null}
-            <IconButton
-              label="Version history"
-              onClick={() => {
-                setHistoryOpen(true);
-                void getSpectraArtifactVersions(artifact._id, 100).then(
-                  (result) => {
-                    setVersions(result.versions);
-                    setPreviewVersion(
-                      result.versions.find((version) => version.after) ??
-                        result.versions[0] ??
-                        null,
-                    );
-                  },
-                );
-              }}
-              icon={History}
-            />
+            <WorkbarMore
+              open={headerMoreOpen}
+              onOpenChange={setHeaderMoreOpen}
+              label="More work actions"
+            >
+              {onShare ? (
+                <button
+                  type="button"
+                  className={workbarMenuItemClass()}
+                  onClick={() => {
+                    setHeaderMoreOpen(false);
+                    onShare();
+                  }}
+                >
+                  <Share2 className="h-4 w-4" /> Share work
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className={workbarMenuItemClass()}
+                onClick={() => {
+                  setHeaderMoreOpen(false);
+                  setEmbedsOpen(true);
+                }}
+              >
+                <Link2 className="h-4 w-4" /> References
+              </button>
+              {artifact.blueprintKey !== "planner_task" ? (
+                <button
+                  type="button"
+                  className={workbarMenuItemClass()}
+                  onClick={() => {
+                    setHeaderMoreOpen(false);
+                    detailsPinnedRef.current = true;
+                    setDetailsOpen((open) => !open);
+                  }}
+                >
+                  <PanelRight className="h-4 w-4" />
+                  {detailsOpen ? "Close details" : "Open details"}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className={workbarMenuItemClass()}
+                onClick={() => {
+                  setHeaderMoreOpen(false);
+                  setHistoryOpen(true);
+                  void getSpectraArtifactVersions(artifact._id, 100).then(
+                    (result) => {
+                      setVersions(result.versions);
+                      setPreviewVersion(
+                        result.versions.find((version) => version.after) ??
+                          result.versions[0] ??
+                          null,
+                      );
+                    },
+                  );
+                }}
+              >
+                <History className="h-4 w-4" /> Version history
+              </button>
+            </WorkbarMore>
             <IconButton
               label={dirty ? "Synchronize before closing" : "Close"}
               onClick={() => void closeAfterSynchronization()}
@@ -5318,7 +5348,6 @@ function ArtifactStudioEditor({
             />
           </div>
         </div>
-        <div className="min-w-0 overflow-hidden">{identityBlock}</div>
       </header>
       {readOnly && !livePermissionLost ? (
         <div className="shrink-0 border-y border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-5 py-2 text-[11px] text-[var(--text-secondary)]">
@@ -6146,9 +6175,6 @@ function StudioDetails({
             <div className="flex items-center gap-2 text-[12px] font-semibold text-[var(--text-primary)]">
               <Icon className="h-4 w-4" style={{ color: meta.color }} />
               {meta.label}
-              <span className="ml-auto rounded-[6px] bg-[color-mix(in_oklab,var(--success)_11%,var(--bg-primary))] px-2 py-1 text-[11px] text-[var(--success)]">
-                Active
-              </span>
             </div>
           </SideCard>
           <SideCard title="Placement">

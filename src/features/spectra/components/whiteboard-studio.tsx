@@ -78,7 +78,7 @@ import {
 import { uniqueToken } from "@/lib/unique-token";
 import { aiRegionAttr, pathTouches } from "./ai-region-path";
 import { targetAttrs } from "../collaboration/target-attributes";
-import { WorkbarSelect } from "./workbar-controls";
+import { WorkbarMore, workbarMenuItemClass } from "./artifact-workbar";
 
 type Tool = "select" | "hand" | "connector" | WhiteboardNodeType;
 type Drag = {
@@ -535,6 +535,7 @@ export function WhiteboardStudio({
   const [undo, setUndo] = useState<WhiteboardContent[]>([]);
   const [redo, setRedo] = useState<WhiteboardContent[]>([]);
   const [presenting, setPresenting] = useState(false);
+  const [moreToolsOpen, setMoreToolsOpen] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [assets, setAssets] = useState<SpectraArtifactAsset[]>([]);
   const [assetError, setAssetError] = useState<string>();
@@ -1850,7 +1851,7 @@ export function WhiteboardStudio({
         }}
       />
       <header className="spectra-editor-workbar whiteboard-toolbar" aria-label="Whiteboard tools">
-        <div>
+        <div className="whiteboard-core-tools">
           {(
             [
               ["select", MousePointer2, "Select"],
@@ -1859,10 +1860,6 @@ export function WhiteboardStudio({
               ["note", StickyNote, "Sticky"],
               ["shape", Square, "Shape"],
               ["connector", CircleDot, "Connector"],
-              ["frame", Frame, "Frame"],
-              ["card", BoxSelect, "Card"],
-              ["table", Table2, "Table"],
-              ["embed", Link2, "Embed artifact"],
             ] as const
           ).map(([id, Icon, label]) => (
             <button
@@ -1877,86 +1874,39 @@ export function WhiteboardStudio({
               <Icon className="h-4 w-4" />
             </button>
           ))}
-          <button
-            type="button"
-            aria-label="Add image"
-            title="Add image"
-            disabled={readOnly || uploadingImage}
-            onClick={() => imageInputRef.current?.click()}
-          >
-            {uploadingImage ? (
-              <Upload className="h-4 w-4 animate-pulse" />
-            ) : (
-              <ImagePlus className="h-4 w-4" />
-            )}
-          </button>
-          <button
-            type="button"
-            aria-label="Import board"
-            title="Import Spectra board, CSV, safe SVG, or PDF pages"
-            disabled={readOnly}
-            onClick={() => boardInputRef.current?.click()}
-          >
-            <FileUp className="h-4 w-4" />
-          </button>
-          <WorkbarSelect
-            ariaLabel="Export board"
-            align="end"
-            disabled={Boolean(ioBusy)}
-            value="export"
-            options={[
-              { value: "export", label: "Export" },
-              { value: "png", label: "PNG image" },
-              { value: "svg", label: "Editable SVG" },
-              { value: "pdf", label: "PDF" },
-              { value: "package", label: "Portable Spectra board" },
-            ]}
-            onChange={(format) => {
-              if (format === "export") return;
-              void exportBoard(format as "package" | "svg" | "png" | "pdf");
-            }}
-          />
         </div>
+        <WorkbarMore open={moreToolsOpen} onOpenChange={setMoreToolsOpen}>
+            {([ ["frame", Frame, "Frame"], ["card", BoxSelect, "Card"], ["table", Table2, "Table"], ["embed", Link2, "Embed artifact"] ] as const).map(([id, Icon, label]) => <button key={id} type="button" role="menuitem" disabled={readOnly} className={workbarMenuItemClass()} onClick={() => { setTool(id); setMoreToolsOpen(false); }}><Icon className="size-3.5" />{label}</button>)}
+            <button type="button" role="menuitem" disabled={readOnly || uploadingImage} className={workbarMenuItemClass()} onClick={() => { imageInputRef.current?.click(); setMoreToolsOpen(false); }}>{uploadingImage ? <Upload className="size-3.5 animate-pulse" /> : <ImagePlus className="size-3.5" />}Add image</button>
+            <button type="button" role="menuitem" disabled={readOnly} className={workbarMenuItemClass()} onClick={() => { boardInputRef.current?.click(); setMoreToolsOpen(false); }}><FileUp className="size-3.5" />Import board</button>
+            <span className="my-1 block border-t border-[var(--border-subtle)]" />
+            {([
+              ["layers", Layers3, "Pages & layers"],
+              ["templates", LayoutTemplate, "Templates"],
+              ["search", Search, "Search board"],
+              ["outline", Grid3X3, "Accessible outline"],
+            ] as const).map(([panelKey, Icon, label]) => (
+              <button
+                key={panelKey}
+                type="button"
+                role="menuitem"
+                disabled={readOnly && panelKey === "templates"}
+                data-active={panel === panelKey || undefined}
+                className={workbarMenuItemClass()}
+                onClick={() => {
+                  setPanel(panel === panelKey ? "none" : panelKey);
+                  setMoreToolsOpen(false);
+                }}
+              >
+                <Icon className="size-3.5" />
+                {label}
+              </button>
+            ))}
+            <span className="my-1 block border-t border-[var(--border-subtle)]" />
+            {([ ["png", "PNG image"], ["svg", "Editable SVG"], ["pdf", "PDF"], ["package", "Portable board"] ] as const).map(([format, label]) => <button key={format} type="button" role="menuitem" disabled={Boolean(ioBusy)} className={workbarMenuItemClass()} onClick={() => { void exportBoard(format); setMoreToolsOpen(false); }}><FileUp className="size-3.5" />{label}</button>)}
+        </WorkbarMore>
         <span />
-        <div>
-          <button
-            type="button"
-            title="Layers and pages"
-            data-active={panel === "layers" || undefined}
-            onClick={() => setPanel(panel === "layers" ? "none" : "layers")}
-          >
-            <Layers3 className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            title="Templates"
-            disabled={readOnly}
-            data-active={panel === "templates" || undefined}
-            onClick={() =>
-              setPanel(panel === "templates" ? "none" : "templates")
-            }
-          >
-            <LayoutTemplate className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            title="Search"
-            data-active={panel === "search" || undefined}
-            onClick={() => setPanel(panel === "search" ? "none" : "search")}
-          >
-            <Search className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            title="Accessible outline"
-            data-active={panel === "outline" || undefined}
-            onClick={() => setPanel(panel === "outline" ? "none" : "outline")}
-          >
-            <Grid3X3 className="h-4 w-4" />
-          </button>
-        </div>
-        <span />
-        <div>
+        <div className="whiteboard-utility-tools">
           <span
             className="hidden items-center gap-1.5 px-1 text-micro text-[var(--text-secondary)] xl:inline-flex"
             role="status"

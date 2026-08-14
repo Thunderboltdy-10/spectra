@@ -42,6 +42,7 @@ import type {
   SpectraWorkspaceItem,
 } from "../data/api";
 import type { ArtifactTypeKey } from "../artifacts/types";
+import { previewText } from "./preview-text";
 
 export type ObjectLibraryEntry = {
   artifact?: SpectraArtifact;
@@ -95,10 +96,11 @@ function objectSummary(entry: ObjectLibraryEntry) {
     return `Building ${objectTitle(entry)}`;
   if (entry.artifact?.aiState === "updating")
     return `Updating ${objectTitle(entry)}`;
-  return (
+  return previewText(
     entry.artifact?.summary ??
     entry.thread?.summaryShort ??
-    "Continue this conversation."
+    "Continue this conversation.",
+    "Continue this conversation.",
   );
 }
 function objectUpdatedAt(entry: ObjectLibraryEntry) {
@@ -654,12 +656,13 @@ export function ObjectLibrary({
         ) : null}
         <button
           type="button"
+          title={objectTitle(entry)}
           className="flex w-full items-start gap-2.5 pl-1 text-left"
           onClick={() => activateEntry(entry)}
         >
           <CardTypeIcon icon={Icon} color={meta.color} className="h-8 w-8" />
           <div className="min-w-0 flex-1">
-            <span className="block truncate text-[13px] font-semibold text-[var(--text-primary)]">
+            <span className="block truncate text-[13px] font-semibold text-[var(--text-primary)]" title={objectTitle(entry)}>
               {objectTitle(entry)}
             </span>
             <CompactSummary
@@ -701,19 +704,18 @@ export function ObjectLibrary({
         <div
           className={`mt-5 flex flex-wrap items-center gap-2 pb-1 ${flatTable ? "spectra-object-flat-toolbar" : ""}`}
         >
-          <div className="flex shrink-0 gap-1 overflow-x-auto">
-            {types.map((type) => (
-              <button
-                key={type.key}
-                type="button"
-                data-active={activeType === type.key}
-                onClick={() => setActiveType(type.key)}
-                className={`inline-flex h-9 shrink-0 items-center rounded-[8px] px-3 text-[13px] font-medium transition-all ${activeType === type.key ? "bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[0_1px_7px_rgba(27,20,12,0.08)]" : "text-[var(--text-secondary)] hover:bg-[color-mix(in_oklab,var(--bg-elevated)_68%,transparent)]"}`}
-              >
-                {flatTable && type.key === "all" ? "All work" : type.label}
-              </button>
-            ))}
-          </div>
+          <label className="relative shrink-0">
+            <span className="sr-only">Work type</span>
+            <select
+              aria-label="Work type"
+              value={activeType}
+              onChange={(event) => setActiveType(event.target.value as "all" | ObjectType)}
+              className="h-9 min-w-[168px] appearance-none rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] py-0 pl-3 pr-9 text-[12px] font-medium text-[var(--text-primary)] outline-none transition hover:bg-[var(--bg-hover)] focus-visible:ring-2 focus-visible:ring-[var(--brand-primary)]"
+            >
+              {types.map((type) => <option key={type.key} value={type.key}>{flatTable && type.key === "all" ? "All work" : type.label}</option>)}
+            </select>
+            <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-3.5 -translate-y-1/2 text-[var(--text-tertiary)]" />
+          </label>
           <div className="ml-auto flex items-center gap-2">
             <div className="relative w-[210px] shrink-0">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-tertiary)]" />

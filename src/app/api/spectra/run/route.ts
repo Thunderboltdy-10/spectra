@@ -116,7 +116,7 @@ import {
 import {
   loadArtifactSkill,
   validateBlueprintContent,
-} from "@/features/spectra/blueprints/registry";
+} from "@/features/spectra/artifacts/blueprint-catalog";
 import type {
   ArtifactTypeKey,
   WorkTypeKey,

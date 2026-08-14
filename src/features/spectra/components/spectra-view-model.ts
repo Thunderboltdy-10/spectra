@@ -1,5 +1,6 @@
 import type { ArtifactCardView } from "./artifact-card";
 import type { SpectraArtifact, SpectraWorkspace, SpectraWorkspaceItem } from "../data/api";
+import { previewText } from "./preview-text";
 
 const demoWorkspaceOrder = ["Biology", "Maths EE", "Spectra", "Economics", "English"];
 
@@ -102,7 +103,7 @@ export function artifactToCard(artifact: SpectraArtifact, placement?: "inbox" | 
     id: artifact._id,
     title: artifact.title,
     blueprintKey: artifact.blueprintKey,
-    summary: artifact.aiPreview?.effectTitle ?? artifact.summary ?? "No summary yet.",
+    summary: previewText(artifact.aiPreview?.effectTitle ?? artifact.summary, "No summary yet."),
     meta: placements.length > 0 ? placements.map((item) => item.workspaceTitle).join(", ") : "Created recently",
     placement: placement ?? artifactPlacementStatus(artifact),
     shared: artifact.isShared,
@@ -135,7 +136,7 @@ export function workspaceItemToCard(item: SpectraWorkspaceItem): ArtifactCardVie
     id: item.artifact._id,
     title: item.viewData.titleOverride ?? item.artifact.title,
     blueprintKey: item.artifact.blueprintKey,
-    summary: item.artifact.aiPreview?.effectTitle ?? item.viewData.compactSummary ?? item.artifact.summary ?? "No summary yet.",
+    summary: previewText(item.artifact.aiPreview?.effectTitle ?? item.viewData.compactSummary ?? item.artifact.summary, "No summary yet."),
     meta: item.viewData.pinned ? "Pinned" : formatRelativeTime(item.updatedAt),
     placement: "workspace",
     shared: item.artifact.isShared,

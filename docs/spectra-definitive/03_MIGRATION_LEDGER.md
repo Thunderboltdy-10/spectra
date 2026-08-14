@@ -1,5 +1,8 @@
 # Migration ledger
 
+> **Historical document.** Completion claims here are superseded.
+> See `docs/spectra-hq/STATE.md` for current operational truth.
+
 | Migration | Old path | Replacement | Dual-read/write policy | Removal target | Status |
 |---|---|---|---|---|---|
 | Collaboration transport | Hocuspocus gateway | Cloudflare Durable Object provider | Document/code and their AI actors use Cloudflare; Hocuspocus remains explicit rollback/unmigrated compatibility | Phase 12/16 | Active; native document/code migrated |

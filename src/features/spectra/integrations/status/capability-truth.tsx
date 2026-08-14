@@ -105,7 +105,7 @@ export function CapabilityTruthState({
   return (
     <div
       role={state.kind === "unavailable" ? "alert" : "status"}
-      className="flex items-start gap-3 rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] px-4 py-3"
+      className="flex max-w-2xl items-start gap-3 rounded-[10px] bg-[var(--bg-secondary)] px-5 py-4"
     >
       <CircleDashed className="mt-0.5 size-4 shrink-0 text-[var(--text-tertiary)]" />
       <div className="min-w-0 flex-1">

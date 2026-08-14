@@ -47,6 +47,9 @@ These are settled. Do not re-litigate them; do not "improve" them away.
 - **D11. Stop always works and tells the truth.** Stopping a run halts server work, and the UI reflects the stopped state everywhere within seconds. No stale "running" states, no dead stop buttons.
 - **D12. Sending from Quick Chat continues the current thread by default and does not fling open the right panel.** `/chat` and the right panel are one conversation implementation at different widths — including Live Dock behavior.
 
+### AI operating plane
+- **D23. Spectra's AI is a permissioned operator across the whole product, not an artifact-only assistant.** The same typed capability system must let it navigate product surfaces, change user-approved settings, read and deliberately write or revise its memory, trigger operations such as ManageBac synchronization, and act on non-work pages. It may customize how it helps, but every capability remains scoped to the signed-in user's authority, visibly attributable, reversible where possible, and governed by explicit confirmation boundaries for sensitive or destructive actions. Add capabilities to one audited tool/action registry; never create page-local AI shortcuts or invisible ambient authority.
+
 ### Product hygiene
 - **D13. No developer chrome in the product.** No floating issue badges, no leaked schema keys (`spectraArtifacts.by__account_created`), no test IDs in content, no raw HTML in previews, no "Compiling…" pills. Dev diagnostics live behind a dev-only flag.
 - **D14. Truthful data or no data.** A count never contradicts its own copy. Capability states (not connected / stale / unsupported / failed) are explicit.

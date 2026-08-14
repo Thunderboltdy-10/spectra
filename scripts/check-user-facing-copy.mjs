@@ -5,7 +5,6 @@ const root = process.cwd();
 const files = [
   "src/features/spectra/pages/artifacts-shell.tsx",
   "src/features/spectra/pages/workspace-shell.tsx",
-  "src/features/spectra/pages/timetable-page-shell.tsx",
   "src/components/layout/app-shell.tsx",
   "src/app/layout.tsx",
 ];

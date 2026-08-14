@@ -112,7 +112,7 @@ import {
   markdownToDocumentHtml,
   sanitizeDocumentHtml,
 } from "./artifact-studio-file-utils";
-import { WorkbarSelect } from "./workbar-controls";
+import { WorkbarSelect } from "./artifact-workbar";
 
 function documentMarkdown(json: JSONContent) {
   const renderInline = (node: JSONContent): string => {

@@ -48,13 +48,15 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { CommandBar } from "../components/command-bar";
 import {
   getAdministration,
   mutateAdministration,
   type SchoolAdministrationOverview,
 } from "@/features/spectra/administration/api";
 import { metricDefinition } from "@/features/spectra/administration/metric-registry";
+import { AuxiliaryRail, AuxiliaryRailTrigger } from "@/features/spectra/components/auxiliary-rail";
+import { ProductPageHeader } from "@/features/spectra/components/product-page-header";
+import { ProductSectionNav } from "@/features/spectra/components/product-section-nav";
 import {
   AdminButton,
   AdminCard,
@@ -200,10 +202,12 @@ function OverviewSurface({
     (point) =>
       Object.values(point.values).reduce((sum, value) => sum + value, 0) || 0,
   );
+  const [contextOpen, setContextOpen] = useState(true);
   return (
-    <div className="grid min-w-0 gap-3 xl:grid-cols-[minmax(0,1fr)_300px]">
+    <div className={cn("grid min-w-0 gap-3", contextOpen && "xl:grid-cols-[minmax(0,1fr)_auto]")}>
       <div className="min-w-0 space-y-3">
-        <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-4">
+        {!contextOpen ? <div className="flex justify-end"><AuxiliaryRailTrigger label="School context" onOpen={() => setContextOpen(true)} /></div> : null}
+        <div className="grid gap-1 sm:grid-cols-2 2xl:grid-cols-4">
           <MetricCard
             icon={Users}
             label="Members"
@@ -265,7 +269,7 @@ function OverviewSurface({
           />
         </div>
 
-        <AdminCard>
+        <section className="mt-7">
           <AdminSectionHeader
             title="Workspace overview"
             detail="Source-linked class workspaces only; ordinary private workspaces are never inspected here."
@@ -277,7 +281,7 @@ function OverviewSurface({
             <div className="overflow-x-auto px-4 pb-4">
               <table className="w-full min-w-[620px] text-left text-micro">
                 <thead className="text-[var(--text-tertiary)]">
-                  <tr className="border-b border-[var(--border-subtle)]">
+                  <tr>
                     <th className="pb-2 font-normal">Workspace</th>
                     <th className="pb-2 font-normal">Type</th>
                     <th className="pb-2 font-normal">Activity</th>
@@ -289,13 +293,11 @@ function OverviewSurface({
                   {data.groupWorkspaces.map((workspace) => (
                     <tr
                       key={workspace.workspaceId}
-                      className="border-b border-[var(--border-subtle)] last:border-0"
+                      className="rounded-[10px] transition-colors hover:bg-[var(--bg-secondary)]"
                     >
                       <td className="py-2.5">
                         <span className="flex items-center gap-2 font-medium text-[var(--text-primary)]">
-                          <span className="grid size-6 place-items-center rounded-[6px] bg-[#eeeafd] text-[#755ee2]">
-                            <School size={12} />
-                          </span>
+                          <School size={13} className="text-[#755ee2]" />
                           {workspace.title}
                         </span>
                       </td>
@@ -333,10 +335,10 @@ function OverviewSurface({
               }
             />
           )}
-        </AdminCard>
+        </section>
 
-        <div className="grid gap-3 lg:grid-cols-2">
-          <AdminCard>
+        <div className="mt-7 grid gap-6 lg:grid-cols-2">
+          <section>
             <AdminSectionHeader
               title="Feedback inbox"
               detail={`${data.metrics.feedbackNew} new school reports`}
@@ -353,7 +355,7 @@ function OverviewSurface({
                     type="button"
                     key={item.feedbackId}
                     onClick={() => onTab("feedback")}
-                    className="flex w-full items-center gap-3 border-b border-[var(--border-subtle)] py-2.5 text-left last:border-0"
+                    className="flex w-full items-center gap-3 rounded-[10px] px-2 py-2.5 text-left transition-colors hover:bg-[var(--bg-secondary)]"
                   >
                     <ChevronDown
                       size={12}
@@ -380,8 +382,8 @@ function OverviewSurface({
                 detail="New feedback from your school will appear here."
               />
             )}
-          </AdminCard>
-          <AdminCard>
+          </section>
+          <section>
             <AdminSectionHeader
               title="Recent activity"
               detail="Privileged and operational events, never private content."
@@ -395,11 +397,9 @@ function OverviewSurface({
               {data.recentActivity.slice(0, 5).map((event) => (
                 <div
                   key={event.eventId}
-                  className="flex items-center gap-3 border-b border-[var(--border-subtle)] py-2.5 last:border-0"
+                  className="flex items-center gap-3 rounded-[10px] px-2 py-2.5 transition-colors hover:bg-[var(--bg-secondary)]"
                 >
-                  <span className="grid size-6 place-items-center rounded-[6px] bg-[#edf7f3] text-[#25846a]">
-                    <Activity size={12} />
-                  </span>
+                  <Activity size={13} className="text-[#25846a]" />
                   <span className="min-w-0 flex-1 truncate text-micro text-[var(--text-primary)]">
                     {actionLabel(event.action)}
                   </span>
@@ -412,13 +412,14 @@ function OverviewSurface({
                 </div>
               ))}
             </div>
-          </AdminCard>
+          </section>
         </div>
         <PrivacyNotice>{data.privacy}</PrivacyNotice>
       </div>
 
-      <aside className="space-y-3">
-        <AdminCard className="p-4">
+      {contextOpen ? <AuxiliaryRail label="School context" onClose={() => setContextOpen(false)}>
+        <div className="space-y-7 p-4">
+        <section>
           <div className="flex items-start justify-between gap-3">
             <div>
               <h2 className="font-[var(--font-serif)] text-[15px] font-medium">
@@ -445,10 +446,7 @@ function OverviewSurface({
             )
               .filter(([, value]) => value !== null && value !== undefined)
               .map(([label, value, kind]) => (
-                <div
-                  key={label}
-                  className="flex justify-between gap-4 border-b border-[var(--border-subtle)] py-1.5 last:border-0"
-                >
+                <div key={label} className="flex justify-between gap-4 rounded-[8px] px-2 py-1.5 hover:bg-[var(--bg-hover)]">
                   <span className="text-[var(--text-secondary)]">{label}</span>
                   <strong>
                     {kind === "bytes"
@@ -468,13 +466,11 @@ function OverviewSurface({
               </p>
             ) : null}
           </div>
-        </AdminCard>
+        </section>
 
-        <AdminCard className="p-4">
+        <section>
           <div className="flex items-center gap-2">
-            <span className="grid size-7 place-items-center rounded-full bg-[#eeeafd] text-[#735fd5]">
-              <Database size={13} />
-            </span>
+            <Database size={14} className="text-[#735fd5]" />
             <h2 className="text-[12px] font-medium">ManageBac connection</h2>
           </div>
           <div className="mt-3">
@@ -494,9 +490,9 @@ function OverviewSurface({
           >
             Sync settings
           </Link>
-        </AdminCard>
+        </section>
 
-        <AdminCard className="p-4">
+        <section>
           <h2 className="font-[var(--font-serif)] text-[15px] font-medium">
             School settings
           </h2>
@@ -514,15 +510,16 @@ function OverviewSurface({
                 type="button"
                 key={String(label)}
                 onClick={() => onTab(tab as Tab)}
-                className="flex w-full items-center gap-2 rounded-[6px] px-1 py-1.5 text-left text-micro text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
+                className="flex w-full items-center gap-2 rounded-[8px] px-2 py-2 text-left text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
               >
                 <Icon size={12} />
                 {label}
               </button>
             ))}
           </div>
-        </AdminCard>
-      </aside>
+        </section>
+        </div>
+      </AuxiliaryRail> : null}
     </div>
   );
 }
@@ -631,7 +628,7 @@ export function SchoolAdminShell() {
   if (!overview) return null;
 
   return (
-    <div className="spectra-wave-y spectra-admin-stage min-h-dvh bg-[var(--bg-primary)] pb-24">
+    <div className="spectra-wave-y spectra-admin-stage relative min-h-dvh bg-[var(--bg-primary)] pb-24">
       {overview.operatorSession ? (
         <div className="sticky top-0 z-30 flex min-h-10 items-center justify-between gap-3 border-b border-[#d5e5f0] bg-[#eef7fc] px-5 py-2 text-micro text-[#315e78]">
           <span className="flex items-center gap-2">
@@ -661,72 +658,27 @@ export function SchoolAdminShell() {
         </div>
       ) : null}
 
-      <header className="border-b border-[var(--border-subtle)] bg-[var(--bg-elevated)]">
-        <div className="flex min-h-12 items-center justify-end gap-4 px-5 lg:px-7">
-          <AdminButton
-            className="min-h-8"
-            onClick={() => setRefreshKey((value) => value + 1)}
-          >
-            <RefreshCw size={12} />
-            Refresh
-          </AdminButton>
-        </div>
-      </header>
-
       <div className="w-full px-4 py-5 sm:px-6 lg:px-8 xl:px-10">
-        <div className="mb-5 flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
-          <div className="flex items-center gap-4">
-            <span className="grid size-14 shrink-0 place-items-center rounded-[13px] bg-[#e8f5ef] text-[#14916b]">
-              <Building2 size={28} strokeWidth={1.7} />
-            </span>
-            <div>
-              <p className="text-micro font-semibold uppercase tracking-[.12em] text-[#16805f]">
-                School administration
-              </p>
-              <h1 className="mt-1 font-[var(--font-serif)] text-[32px] font-medium leading-none tracking-[-.03em]">
-                {tab === "overview"
-                  ? "School Admin Overview"
-                  : tabs.find((item) => item.key === tab)?.label}
-              </h1>
-              <p className="mt-2 text-[11px] text-[var(--text-tertiary)]">
-                {overview.school.name} · operational tools without private
-                content access
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <StatusBadge
-              tone={overview.school.status === "active" ? "good" : "warn"}
-            >
-              {overview.school.status}
-            </StatusBadge>
-            <div className="min-w-[230px] rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 py-2 text-[11px]">
-              {overview.school.name}
-            </div>
-          </div>
-        </div>
+        <ProductPageHeader
+          className="mb-5"
+          title="School administration"
+          description={`${overview.school.name} · operational tools without private content access`}
+          actions={
+            <>
+            {overview.school.status !== "active" ? (
+              <StatusBadge tone="warn">{overview.school.status}</StatusBadge>
+            ) : null}
+            <AdminButton className="min-h-8" onClick={() => setRefreshKey((value) => value + 1)}><RefreshCw size={12} />Refresh</AdminButton>
+            </>
+          }
+        />
 
-        <nav
-          aria-label="School administration"
-          className="mb-4 flex gap-1 overflow-x-auto border-b border-[var(--border-subtle)] pb-2"
-        >
-          {tabs.map(({ key, label, icon: Icon }) => (
-            <button
-              type="button"
-              key={key}
-              onClick={() => setTab(key)}
-              className={cn(
-                "flex h-8 shrink-0 items-center gap-1.5 rounded-[6px] px-2.5 text-micro font-medium",
-                tab === key
-                  ? "bg-[var(--text-primary)] text-[var(--bg-primary)]"
-                  : "text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]",
-              )}
-            >
-              <Icon size={12} />
-              {label}
-            </button>
-          ))}
-        </nav>
+        <ProductSectionNav
+          label="School administration"
+          items={tabs}
+          active={tab}
+          onChange={setTab}
+        />
 
         {tab === "overview" ? (
           <OverviewSurface data={overview} onTab={setTab} />
@@ -743,28 +695,6 @@ export function SchoolAdminShell() {
         )}
       </div>
 
-      <div className="pointer-events-none fixed bottom-4 left-1/2 z-20 w-[min(calc(100%-2rem),760px)] -translate-x-1/2 md:ml-[38px]">
-        <div className="pointer-events-auto">
-          <CommandBar
-            className="w-full"
-            placeholder="Ask Spectra anything about your school…"
-            onSubmit={(prompt) => {
-              router.push(
-                `/chat?prompt=${encodeURIComponent(
-                  `As a school administrator for ${overview.school.name}, ${prompt}`,
-                )}`,
-              );
-              return true;
-            }}
-            context={
-              <span className="flex h-full min-w-[88px] items-center gap-2 px-3 text-[11px] font-semibold text-[var(--text-primary)]">
-                <School className="size-3.5 shrink-0 text-[#16805f]" />
-                School
-              </span>
-            }
-          />
-        </div>
-      </div>
     </div>
   );
 }
@@ -947,7 +877,7 @@ function PeopleSurface({
           tone="orange"
         />
       </div>
-      <AdminCard>
+      <AdminCard className="rounded-none border-0 bg-transparent shadow-none">
         <AdminSectionHeader
           title="People"
           detail="Roles only add management surfaces; students and teachers retain the same ordinary Spectra capabilities."
@@ -981,7 +911,7 @@ function PeopleSurface({
           <div className="overflow-x-auto px-4 pb-4">
             <table className="w-full min-w-[760px] text-left text-micro">
               <thead className="text-[var(--text-tertiary)]">
-                <tr className="border-b border-[var(--border-subtle)]">
+                <tr>
                   <th className="pb-2 font-normal">Member</th>
                   <th className="pb-2 font-normal">Role</th>
                   <th className="pb-2 font-normal">Status</th>
@@ -993,7 +923,7 @@ function PeopleSurface({
                 {people.map((person) => (
                   <tr
                     key={person.membershipId}
-                    className="border-b border-[var(--border-subtle)] last:border-0"
+                    className="rounded-[10px] transition-colors hover:bg-[var(--bg-secondary)]"
                   >
                     <td className="py-2.5">
                       <div className="flex items-center gap-2">
@@ -1076,7 +1006,7 @@ function PeopleSurface({
           </div>
         )}
       </AdminCard>
-      <AdminCard>
+      <AdminCard className="rounded-none border-0 bg-transparent shadow-none">
         <AdminSectionHeader
           title="Invitations"
           detail="Tokens are hashed, expiring, single-use, domain checked, and revocable."
@@ -1263,7 +1193,7 @@ function GroupsSurface({
 
   return (
     <>
-      <AdminCard>
+      <AdminCard className="rounded-none border-0 bg-transparent shadow-none">
         <AdminSectionHeader
           title="Groups and classes"
           detail="Manual groups and source-linked classes can target announcements and future assigned learning experiences."
@@ -1472,7 +1402,7 @@ function CommunicationSurface({
 
   return (
     <>
-      <AdminCard>
+      <AdminCard className="rounded-none border-0 bg-transparent shadow-none">
         <AdminSectionHeader
           title="Announcements"
           detail="Audience membership is snapshotted at send time. Delivery, reads, failures, edits, cancellation, and rate limits are audited."
@@ -1489,7 +1419,7 @@ function CommunicationSurface({
           <div className="overflow-x-auto px-4 pb-4">
             <table className="w-full min-w-[720px] text-left text-micro">
               <thead className="text-[var(--text-tertiary)]">
-                <tr className="border-b border-[var(--border-subtle)]">
+                <tr>
                   <th className="pb-2 font-normal">Announcement</th>
                   <th className="pb-2 font-normal">Audience</th>
                   <th className="pb-2 font-normal">Delivery</th>
@@ -1501,7 +1431,7 @@ function CommunicationSurface({
                 {rows.map((row) => (
                   <tr
                     key={row.announcementId}
-                    className="border-b border-[var(--border-subtle)] last:border-0"
+                    className="rounded-[10px] transition-colors hover:bg-[var(--bg-secondary)]"
                   >
                     <td className="py-3">
                       <strong className="block font-medium">{row.title}</strong>
@@ -1740,7 +1670,7 @@ function UsageSurface({
           />
         ))}
       </div>
-      <AdminCard>
+      <AdminCard className="rounded-none border-0 bg-transparent shadow-none">
         <AdminSectionHeader
           title="Daily usage"
           detail="Privacy-safe metering by category. Missing meters remain unknown rather than being inferred from private records."
@@ -2473,7 +2403,7 @@ function ProfileSurface({
             <div>
               <strong className="text-[12px]">{name}</strong>
               <p className="mt-1 text-micro text-[var(--text-tertiary)]">
-                Live profile preview
+                Profile preview
               </p>
             </div>
           </div>

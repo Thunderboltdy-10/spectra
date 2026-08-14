@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { FileText, MessageSquare, PanelRightClose, PanelRightOpen } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -26,6 +27,10 @@ const ROUTE_SIDE_PANEL_PREFIXES = [
   "/agents",
   "/school",
   "/analytics",
+  "/settings",
+  "/managebac",
+  "/admin",
+  "/superadmin",
 ];
 
 const ArtifactStudio = dynamic(() =>
@@ -43,6 +48,7 @@ export function RouteSidePanelHost() {
   const [workWidth, setWorkWidth] = useState(620);
   const [threadWidth, setThreadWidth] = useState(480);
   const [dirtyIds, setDirtyIds] = useState<Set<string>>(new Set());
+  const [collapsed, setCollapsed] = useState(false);
   const motionLevel = useSpectraMotion();
   const [exiting, setExiting] = useState<null | "work" | "thread">(null);
   const [handingOff, setHandingOff] = useState(false);
@@ -96,6 +102,7 @@ export function RouteSidePanelHost() {
       const result = await getSpectraArtifact(workId);
       cancelPendingExits();
       setWork(result.artifact);
+      setCollapsed(false);
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Could not open this work.",
@@ -107,6 +114,7 @@ export function RouteSidePanelHost() {
       const result = await getSpectraThread(threadId);
       cancelPendingExits();
       setThread(result.thread);
+      setCollapsed(false);
     } catch (error) {
       toast.error(
         error instanceof Error
@@ -119,6 +127,7 @@ export function RouteSidePanelHost() {
   useEffect(() => {
     setWork(null);
     setThread(null);
+    setCollapsed(false);
     if (!eligible) return;
     const restored = readRouteSideSession(window.localStorage, pathname);
     if (restored.workId) void loadWork(restored.workId);
@@ -193,7 +202,22 @@ export function RouteSidePanelHost() {
     <div
       className={`spectra-wave-y spectra-panel-enter pointer-events-none relative z-[88] flex h-full max-w-[calc(100vw-76px)] shrink-0 [&>[data-studio-panel]]:!pointer-events-auto ${exiting ? "spectra-panel-exit" : ""} ${handingOff ? "spectra-panel-handoff" : ""}`}
     >
-      {work ? (
+      <div className="pointer-events-auto flex w-11 shrink-0 flex-col items-center border-l border-[var(--border-subtle)] bg-[var(--bg-secondary)] py-2">
+        <button
+          type="button"
+          onClick={() => setCollapsed((value) => !value)}
+          className="grid size-8 place-items-center rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+          aria-label={collapsed ? "Expand side panels" : "Collapse side panels"}
+          title={collapsed ? "Expand side panels" : "Collapse side panels"}
+        >
+          {collapsed ? <PanelRightOpen className="size-4" /> : <PanelRightClose className="size-4" />}
+        </button>
+        <div className="mt-2 flex flex-col gap-1 text-[var(--text-tertiary)]">
+          {work ? <FileText className="size-3.5" aria-label="Work open" /> : null}
+          {thread ? <MessageSquare className="size-3.5" aria-label="Conversation open" /> : null}
+        </div>
+      </div>
+      {!collapsed && work ? (
         <ArtifactStudio
           mode="split"
           compact
@@ -218,7 +242,7 @@ export function RouteSidePanelHost() {
           }
         />
       ) : null}
-      {thread ? (
+      {!collapsed && thread ? (
         <LiveThreadPanel
           threadId={thread._id}
           title={thread.title}

@@ -1,5 +1,8 @@
 # Spectra definitive goal checklist
 
+> **Historical document.** Completion claims here are superseded.
+> See `docs/spectra-hq/STATE.md` for current operational truth.
+
 This is the source of truth for remaining work. An item is checked only when the implementation and its code-only verification are complete. Section references point to `SPECTRA_DEFINITIVE_TRANSFORMATION_PLAN.md`; all nested bullets and contracts in the referenced section are part of the checkbox.
 
 ## Programme controls

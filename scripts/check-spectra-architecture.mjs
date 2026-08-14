@@ -27,7 +27,6 @@ const violations = [];
 for (const path of await walk(sourceRoot)) {
   const source = await readFile(path, "utf8");
   const repoPath = relative(root, path).replaceAll("\\", "/");
-  if (repoPath.endsWith("events/legacy-window-bridge.ts")) continue;
   for (const match of source.matchAll(/(?:CustomEvent|Event)\(\s*["']([^"']+)["']/g)) {
     if (!baselineEvents.has(match[1]))
       violations.push(`${repoPath}: unregistered global event ${match[1]}`);

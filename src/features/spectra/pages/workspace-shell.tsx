@@ -79,10 +79,10 @@ import {
   SelectionActionBar,
   type ComposerFocusMode,
 } from "../components/context-controls";
-import { DurableRunTabs } from "../components/durable-run-tabs";
 import { WorkbenchInspectorTabs } from "../components/workbench-inspector-tabs";
 import { RunDetailPanel } from "../components/run-detail-panel";
 import { LiveThreadPanel } from "../components/live-thread-panel";
+import { WorkbenchDockShell } from "./workbench-dock-shell";
 import {
   disengageFollowAi,
   isProgrammaticOpen,
@@ -94,6 +94,8 @@ import {
 import { ShareDialog } from "../components/share-dialog";
 import { ObjectLibrary, type LibraryMode } from "../components/object-library";
 import { parseWorkspaceHubTabs } from "../components/workspace-tab-state";
+import { previewText } from "../components/preview-text";
+import { ProductEmptyState } from "../components/product-state";
 import {
   formatRelativeTime,
   formatShortDate,
@@ -650,58 +652,16 @@ function WorkspaceHome({
     }))
     .sort((a, b) => b.time - a.time)
     .slice(0, 6);
-  const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
-  const byType = (key: string) =>
-    artifacts.filter((artifact) => artifact.blueprintKey === key);
-  const freshThisWeek = (list: typeof artifacts) =>
-    list.filter((artifact) => artifact.updatedAt >= weekAgo).length;
-  const metricCards = [
-    {
-      label: "Work",
-      count: artifacts.length,
-      delta: freshThisWeek(artifacts),
-      icon: FileText,
-      color: "#15946d",
-    },
-    {
-      label: "Flashcards",
-      count: byType("flashcard_deck").length,
-      delta: freshThisWeek(byType("flashcard_deck")),
-      icon: BookOpen,
-      color: "#735ce7",
-    },
-    {
-      label: "Quizzes",
-      count: byType("quiz").length,
-      delta: freshThisWeek(byType("quiz")),
-      icon: HelpCircle,
-      color: "#e56b3e",
-    },
-    {
-      label: "Documents",
-      count: byType("document").length,
-      delta: freshThisWeek(byType("document")),
-      icon: FileText,
-      color: "#168fd2",
-    },
-    {
-      label: "Decks",
-      count: byType("presentation").length,
-      delta: freshThisWeek(byType("presentation")),
-      icon: Sparkles,
-      color: "#d69222",
-    },
-    {
-      label: "Tasks",
-      count: byType("planner_task").length,
-      delta: freshThisWeek(byType("planner_task")),
-      icon: CalendarCheck2,
-      color: "#6f6962",
-    },
-  ];
   const visibleTags = Array.from(
     new Set(artifacts.flatMap((artifact) => artifact.tags ?? [])),
   ).slice(0, 8);
+  const metricCards: Array<{
+    label: string;
+    count: number;
+    delta: number;
+    icon: typeof FileText;
+    color: string;
+  }> = [];
 
   function artifactFromDrag(event: DragEvent<HTMLElement>) {
     const artifactId =
@@ -727,24 +687,7 @@ function WorkspaceHome({
       className="spectra-mission-control relative flex min-h-0 flex-1 flex-col overflow-y-auto xl:flex-row xl:overflow-hidden"
     >
       <div className="min-w-0 flex-1 px-6 pb-[170px] pt-6 sm:px-9 xl:h-full xl:overflow-y-auto">
-        <div className="spectra-mission-control-primary">
-          <div className="flex items-start gap-3">
-            <span className="grid size-9 shrink-0 place-items-center rounded-[9px] bg-[#e8f7f1] text-[#15946d]">
-              <Sprout className="h-[18px] w-[18px]" />
-            </span>
-            <div>
-              <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.13em] text-[var(--text-tertiary)]">
-                Workspace
-              </div>
-              <h1 className="font-display text-[34px] font-semibold leading-[1.05] tracking-[-.025em] text-[var(--text-primary)]">
-                Mission Control
-              </h1>
-              <p className="mt-2 max-w-[46ch] text-[14px] leading-relaxed text-[var(--text-secondary)]">
-                Your overview of work, conversations, and activity across
-                Spectra.
-              </p>
-            </div>
-          </div>
+        <div className="hidden">
           <div className="mt-6 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
             {metricCards.map(
               ({ label, count, delta, icon: MetricIcon, color }) => (
@@ -779,6 +722,15 @@ function WorkspaceHome({
               ),
             )}
           </div>
+        </div>
+
+        <div>
+          <h1 className="font-display text-[34px] font-semibold leading-[1.05] tracking-[-.025em] text-[var(--text-primary)]">
+            Workspace
+          </h1>
+          <p className="mt-2 max-w-[52ch] text-[13px] leading-5 text-[var(--text-secondary)]">
+            Move between active spaces, recent work, and conversations.
+          </p>
         </div>
 
         <div className="spectra-workspace-home-grid mt-8">
@@ -887,9 +839,6 @@ function WorkspaceHome({
                         selectionMode ? workspaceSelected : undefined
                       }
                     />
-                    <span className="pointer-events-none absolute right-3 top-3 z-[2] rounded-full bg-[color-mix(in_oklab,var(--success)_10%,var(--bg-elevated))] px-2 py-0.5 text-micro font-semibold text-[var(--success)]">
-                      Active
-                    </span>
                     <div className="relative z-[2] flex items-start gap-3">
                       <span
                         className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px] border border-[color-mix(in_oklab,var(--card-accent)_22%,var(--card-border))] bg-[color-mix(in_oklab,var(--card-accent)_9%,var(--card-paper))]"
@@ -902,7 +851,7 @@ function WorkspaceHome({
                         )}
                       </span>
                       <span className="min-w-0 flex-1">
-                        <span className="flex items-center gap-2 pr-12">
+                        <span className="flex items-center gap-2">
                           <span className="min-w-0 flex-1 truncate font-display text-[15px] font-semibold leading-tight text-[var(--text-primary)]">
                             {workspace.title}
                           </span>
@@ -1735,7 +1684,7 @@ function CardsView({
       <section>
         <div className="mb-4">
           <h2 className="font-display text-[17px] font-semibold text-[var(--text-primary)]">
-            Pinned / Active
+            Pinned and recent
           </h2>
           <p className="mt-1 text-[12px] text-[var(--text-secondary)]">
             Your most important items at a glance
@@ -2758,19 +2707,12 @@ function EmptyWorkspaceState({
   message: string;
 }) {
   return (
-    <div className="flex min-h-[360px] items-center justify-center rounded-[8px] border border-dashed border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_44%,transparent)]">
-      <div className="max-w-sm text-center">
-        <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-secondary)]">
-          <Sparkles className="h-4 w-4" />
-        </div>
-        <h2 className="mt-4 font-display text-[20px] font-semibold text-[var(--text-primary)]">
-          {title}
-        </h2>
-        <p className="mt-2 text-[13px] leading-6 text-[var(--text-secondary)]">
-          {message}
-        </p>
-      </div>
-    </div>
+    <ProductEmptyState
+      icon={Sparkles}
+      title={title}
+      detail={message}
+      className="min-h-[360px]"
+    />
   );
 }
 
@@ -2889,7 +2831,7 @@ function Inspector({
               </div>
               <InspectorSection title="Description">
                 <p className="text-[13px] leading-6 text-[var(--text-secondary)]">
-                  {selectedArtifact.summary || "No description yet."}
+                  {previewText(selectedArtifact.summary, "No description yet.")}
                 </p>
               </InspectorSection>
               <InspectorSection title="People and access">
@@ -3012,15 +2954,7 @@ function Inspector({
         <h2 className="text-[14px] font-semibold text-[var(--text-primary)]">
           {workspace?.title ?? "Workspace"} details
         </h2>
-        <div className="flex items-center gap-1.5">
-          {workspace?.status === "active" ? (
-            <span className="flex items-center gap-2 text-[12px] text-[var(--text-secondary)]">
-              <span className="h-2 w-2 rounded-full bg-[var(--success)]" />
-              Active
-            </span>
-          ) : null}
-          {collapseControl}
-        </div>
+        <div className="flex items-center gap-1.5">{collapseControl}</div>
       </div>
 
       <section className="mt-5 space-y-3 text-[13px]">
@@ -5453,7 +5387,7 @@ export function WorkspaceShell({
           onGoBack={navigateShellBack}
           onGoForward={navigateShellForward}
         />
-        <div className="relative flex min-h-0 flex-1">
+        <div className="spectra-workbench-frame relative flex min-h-0 flex-1">
           {pendingCreateType ? (
             <div
               className="absolute inset-0 z-[90] flex items-center justify-center bg-[color-mix(in_oklab,var(--bg-primary)_72%,transparent)] backdrop-blur-[2px]"
@@ -6280,58 +6214,56 @@ export function WorkspaceShell({
               </>
             </section>
           )}
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 z-[220] bg-transparent px-2 pb-4 pt-2 sm:px-5 sm:pb-5 lg:px-8">
-            <div className="pointer-events-auto mx-auto max-w-[880px] spectra-live-stack">
-              <div ref={setAttachmentsHost} />
-              <DurableRunTabs
-                workspaceId={selectedWorkspaceId}
-                optimistic={runEngine.liveExchange}
-                openThreadId={liveThread?.id}
-                onStartNewThread={startFreshComposerThread}
-                onOpen={(_runId, threadId, title, artifactId) => {
-                  skipAutoContinueThreadIdRef.current = null;
-                  setActiveRunPanelId(null);
-                  setLiveThread({ id: threadId, title });
-                  setComposerThread({
-                    id: threadId,
-                    title,
-                    runId: _runId,
-                    workspaceId: selectedWorkspaceId,
-                  });
-                  if (artifactId) {
-                    const artifact = allArtifacts.find(
-                      (item) => item._id === artifactId,
-                    );
-                    if (artifact) openArtifactPanel(artifact);
-                  }
-                }}
-                onContinue={(_runId, threadId, title) => {
-                  skipAutoContinueThreadIdRef.current = null;
-                  setComposerThread({
-                    id: threadId,
-                    title,
-                    runId: _runId,
-                    workspaceId: selectedWorkspaceId,
-                  });
-                }}
-                onDeselect={() => {
-                  if (liveThread)
-                    skipAutoContinueThreadIdRef.current = liveThread.id;
-                  setComposerThread(null);
-                }}
-                onStop={(runId) => runEngine.stop(runId)}
-                onRetry={(runId) => void runEngine.retry(runId)}
-                onAction={(card, action) =>
-                  void runEngine.onCardAction(card, action, card.runId)
+          <WorkbenchDockShell
+            zIndex={220}
+            attachmentsHostRef={setAttachmentsHost}
+            dock={{
+              workspaceId: selectedWorkspaceId,
+              optimistic: runEngine.liveExchange,
+              openThreadId: liveThread?.id,
+              onStartNewThread: startFreshComposerThread,
+              onOpen: (_runId, threadId, title, artifactId) => {
+                skipAutoContinueThreadIdRef.current = null;
+                setActiveRunPanelId(null);
+                setLiveThread({ id: threadId, title });
+                setComposerThread({
+                  id: threadId,
+                  title,
+                  runId: _runId,
+                  workspaceId: selectedWorkspaceId,
+                });
+                if (artifactId) {
+                  const artifact = allArtifacts.find(
+                    (item) => item._id === artifactId,
+                  );
+                  if (artifact) openArtifactPanel(artifact);
                 }
-                onRevise={(card, revision) =>
-                  void runEngine.revise(card, revision)
-                }
-                onInput={(threadId, response, attachments) =>
-                  runEngine.run(response, attachments ?? [], { threadId })
-                }
-              />
-              {multiSelectMode ? (
+              },
+              onContinue: (_runId, threadId, title) => {
+                skipAutoContinueThreadIdRef.current = null;
+                setComposerThread({
+                  id: threadId,
+                  title,
+                  runId: _runId,
+                  workspaceId: selectedWorkspaceId,
+                });
+              },
+              onDeselect: () => {
+                if (liveThread)
+                  skipAutoContinueThreadIdRef.current = liveThread.id;
+                setComposerThread(null);
+              },
+              onStop: (runId) => runEngine.stop(runId),
+              onRetry: (runId) => void runEngine.retry(runId),
+              onAction: (card, action) =>
+                void runEngine.onCardAction(card, action, card.runId),
+              onRevise: (card, revision) =>
+                void runEngine.revise(card, revision),
+              onInput: (threadId, response, attachments) =>
+                runEngine.run(response, attachments ?? [], { threadId }),
+            }}
+            selection={
+              multiSelectMode ? (
                 <SelectionActionBar
                   count={selectionCount}
                   onClear={clearSelection}
@@ -6354,7 +6286,9 @@ export function WorkspaceShell({
                       : undefined
                   }
                 />
-              ) : null}
+              ) : undefined
+            }
+            composer={
               <div className="flex items-center gap-1">
                 <CommandBar
                   className="min-w-0 flex-1"
@@ -6437,8 +6371,8 @@ export function WorkspaceShell({
                   }
                 />
               </div>
-            </div>
-          </div>
+            }
+          />
           {liveThread ? (
             <LiveThreadPanel
               threadId={liveThread.id}

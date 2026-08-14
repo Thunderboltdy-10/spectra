@@ -494,6 +494,25 @@ export function projectFoundryToLegacy(
       enabled: skill.status !== "deprecated",
     }));
 
+  const compiledInstructions = [
+    mission.objective,
+    mission.domains.length ? `Work within: ${mission.domains.join(", ")}.` : "",
+    mission.expectedOutputs.length
+      ? `Produce: ${mission.expectedOutputs.map((output) => output.description).join("; ")}.`
+      : "",
+    legacySkills.length
+      ? `Use these approved skills:\n${legacySkills
+          .map((skill) => `- ${skill.name}: ${skill.instructions}`)
+          .join("\n")}`
+      : "",
+    mission.exclusions.length
+      ? `Do not: ${mission.exclusions.join("; ")}.`
+      : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n")
+    .trim();
+
   return {
     ...content,
     profile: {
@@ -502,6 +521,10 @@ export function projectFoundryToLegacy(
       outcomes: mission.expectedOutputs.map((output) => output.description),
       inScope: mission.domains,
       outOfScope: mission.exclusions,
+    },
+    instructions: {
+      regionId: content.instructions.regionId || "agent-instructions",
+      text: compiledInstructions || content.instructions.text,
     },
     behavior: {
       ...content.behavior,

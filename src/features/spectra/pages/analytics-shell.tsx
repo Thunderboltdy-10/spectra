@@ -18,6 +18,7 @@ import {
 } from "@/features/spectra/integrations/status/capability-truth";
 import {
   metricDefinition,
+  metricSourceLabel,
   type SpectraMetricDefinition,
 } from "@/features/spectra/administration/metric-registry";
 
@@ -126,20 +127,15 @@ export function AnalyticsShell() {
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-[var(--bg-primary)]">
-      <header className="border-b border-[var(--border-default)] px-6 py-5 lg:px-9">
+      <header className="px-6 py-5 lg:px-9">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2.5">
-              <p className="text-micro font-bold uppercase tracking-[0.16em] text-[var(--text-tertiary)]">
-                Private account signals
-              </p>
-              <CapabilityTruthBadge state={overallState} />
-            </div>
-            <h1 className="mt-2 font-display text-[28px] font-semibold tracking-[-0.025em] text-[var(--text-primary)]">
+            {overallState.kind !== "available" ? <CapabilityTruthBadge state={overallState} /> : null}
+            <h1 className="font-display text-[32px] font-semibold leading-none tracking-[-0.03em] text-[var(--text-primary)]">
               Analytics
             </h1>
-            <p className="mt-1 max-w-2xl text-[13px] leading-6 text-[var(--text-secondary)]">
-              An exact, date-bounded view of work and AI activity. Every number names its source and collection state.
+            <p className="mt-2 max-w-2xl text-[12px] leading-5 text-[var(--text-secondary)]">
+              A date-bounded view of your work and AI activity, derived without reading private content.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -149,7 +145,7 @@ export function AnalyticsShell() {
                   key={windowDays}
                   type="button"
                   onClick={() => setDays(windowDays)}
-                  className={`h-7 rounded-md px-3 text-[11px] font-semibold ${days === windowDays ? "bg-[#173d33] text-white" : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}
+                  className={`h-7 rounded-md px-3 text-[11px] font-semibold ${days === windowDays ? "bg-[var(--text-primary)] text-[var(--bg-primary)]" : "text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}
                 >
                   {windowDays}d
                 </button>
@@ -178,7 +174,7 @@ export function AnalyticsShell() {
           <CapabilityTruthState state={overallState} title="Personal analytics" onRetry={() => void refresh()} />
         ) : null}
 
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-1 sm:grid-cols-2 xl:grid-cols-3">
           {metricCards.map(([id, metric, Icon, format]) => (
             <MetricCard
               key={id}
@@ -190,7 +186,7 @@ export function AnalyticsShell() {
           ))}
           {!payload
             ? Array.from({ length: 6 }, (_, index) => (
-                <div key={index} className="h-36 animate-pulse rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)]" />
+                <div key={index} className="h-28 animate-pulse rounded-[10px] bg-[var(--bg-secondary)]" />
               ))
             : null}
         </div>
@@ -198,7 +194,7 @@ export function AnalyticsShell() {
         {payload ? (
           <>
             <div className="mt-7 grid gap-7 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,.85fr)]">
-              <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5">
+              <section className="p-2">
                 <SectionHeading title="Work created by type" detail="New work in this account and date range" />
                 <div className="mt-5 space-y-3">
                   {byType.length ? byType.map((row) => {
@@ -216,16 +212,16 @@ export function AnalyticsShell() {
                 </div>
               </section>
 
-              <section className="rounded-2xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-5">
+              <section className="p-2">
                 <SectionHeading title="AI run outcomes" detail="Settled and still-active runs remain distinct" />
-                <div className="mt-4 grid grid-cols-2 gap-px overflow-hidden rounded-xl bg-[var(--border-subtle)]">
+                <div className="mt-4 grid grid-cols-2 gap-1">
                   {([
                     ["Completed", payload.runOutcomes.completed, "#14795c"],
                     ["Active", payload.runOutcomes.active, "#2563eb"],
                     ["Failed", payload.runOutcomes.failed, "#b45309"],
                     ["Cancelled", payload.runOutcomes.cancelled, "#64748b"],
                   ] as const).map(([label, value, color]) => (
-                    <div key={label} className="bg-[var(--bg-elevated)] p-4">
+                    <div key={label} className="rounded-[10px] p-4 transition-colors hover:bg-[var(--bg-secondary)]">
                       <p className="text-micro font-bold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">{label}</p>
                       <p className="mt-2 font-display text-[26px] font-semibold tabular-nums" style={{ color }}>{value}</p>
                     </div>
@@ -239,7 +235,7 @@ export function AnalyticsShell() {
               <RecentList title="Recent AI runs" detail="Titles and status only; prompts are not queried" empty="No recent AI runs." rows={payload.recentRuns.map((item) => ({ id: item.id, title: item.title, detail: item.status, timestamp: item.createdAt }))} />
             </div>
 
-            <section className="mt-7 rounded-2xl border border-emerald-800/15 bg-emerald-950/[0.025] p-5">
+            <section className="mt-8 p-2">
               <div className="flex items-start gap-3">
                 <ShieldCheck className="mt-0.5 size-5 shrink-0 text-emerald-800" />
                 <div>
@@ -258,14 +254,13 @@ export function AnalyticsShell() {
 
 function MetricCard({ definition, metric, icon, format }: { definition: SpectraMetricDefinition; metric: MetricValue; icon: React.ReactNode; format: "number" | "percent" | "compact" | "bytes" }) {
   return (
-    <article className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
+    <article className="rounded-[10px] p-4 transition-colors hover:bg-[var(--bg-secondary)]" title={`Source: ${metricSourceLabel(definition)}. ${definition.aggregation}`}>
       <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-2 text-[var(--text-secondary)]">{icon}<span className="text-micro font-bold uppercase tracking-[0.12em]">{definition.label}</span></div>
-        <CapabilityTruthBadge state={metric.state} className="min-h-5 px-2 text-micro" />
+        <div className="flex items-center gap-2 text-[var(--text-secondary)]">{icon}<span className="text-[11px] font-medium">{definition.label}</span></div>
+        {metric.state.kind !== "available" ? <CapabilityTruthBadge state={metric.state} className="min-h-5 px-2 text-micro" /> : null}
       </div>
-      <p className="mt-4 font-display text-[30px] font-semibold tabular-nums text-[var(--text-primary)]">{formatMetric(metric.value, format)}</p>
-      <p className="mt-2 truncate text-micro text-[var(--text-tertiary)]" title={`${definition.source} · ${definition.aggregation}`}>{definition.source}</p>
-      <p className="mt-1 text-micro leading-4 text-[var(--text-secondary)]">{metric.state.kind === "partial" ? metric.state.details : definition.zeroMeaning}</p>
+      <p className="mt-3 font-display text-[28px] font-semibold tabular-nums text-[var(--text-primary)]">{formatMetric(metric.value, format)}</p>
+      {metric.state.kind === "partial" || metric.value === 0 || metric.value === null ? <p className="mt-2 text-micro leading-4 text-[var(--text-secondary)]">{metric.state.kind === "partial" ? metric.state.details : definition.zeroMeaning}</p> : null}
     </article>
   );
 }

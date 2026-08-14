@@ -72,6 +72,8 @@ import { formatRelativeTime } from "@/features/spectra/components/spectra-view-m
 import { KeyboardShortcutsRegistrar } from "@/components/keyboard-shortcuts";
 import { RouteSidePanelHost } from "@/features/spectra/components/route-side-panel-host";
 import { ViewportContextPicker } from "@/features/spectra/components/viewport-context-picker";
+import { GlobalRouteWorkbench } from "@/features/spectra/components/global-route-workbench";
+import { useSpectraContextStore } from "@/stores/spectra-context-store";
 
 type AppShellProps = {
   children: ReactNode;
@@ -185,13 +187,20 @@ function ShellNavigation() {
 
   useLayoutEffect(() => {
     const stored = window.localStorage.getItem("spectra:sidebar-collapsed");
-    if (stored === "true") setSidebarCollapsed(true);
+    const collapsed = stored === "true";
+    setSidebarCollapsed(collapsed);
+    if (collapsed)
+      document.documentElement.dataset.spectraSidebarCollapsed = "true";
+    else delete document.documentElement.dataset.spectraSidebarCollapsed;
   }, []);
 
   const toggleSidebar = useCallback(() => {
     setSidebarCollapsed((collapsed) => {
       const next = !collapsed;
       window.localStorage.setItem("spectra:sidebar-collapsed", String(next));
+      if (next)
+        document.documentElement.dataset.spectraSidebarCollapsed = "true";
+      else delete document.documentElement.dataset.spectraSidebarCollapsed;
       window.dispatchEvent(
         new CustomEvent("spectra:sidebar-layout", {
           detail: { collapsed: next },
@@ -471,6 +480,7 @@ function ShellNavigation() {
         >
           <SpectraLogo size={20} />
           <span
+            data-sidebar-expanded=""
             className={cn(
               "font-[family-name:var(--font-display)] text-[17px] font-semibold tracking-[-.025em] text-[#171513] transition-opacity",
               sidebarCollapsed && "pointer-events-none opacity-0",
@@ -480,6 +490,7 @@ function ShellNavigation() {
           </span>
         </Link>
         <label
+          data-sidebar-expanded=""
           className={cn(
             "relative mx-3 mt-2.5 block",
             sidebarCollapsed &&
@@ -536,7 +547,10 @@ function ShellNavigation() {
               >
                 {active ? <ActiveRailMarker /> : null}
                 <Icon size={15} strokeWidth={active ? 2.05 : 1.65} />
-                <span className={cn(sidebarCollapsed && "sr-only")}>
+                <span
+                  data-sidebar-expanded=""
+                  className={cn(sidebarCollapsed && "sr-only")}
+                >
                   {label === "Home" ? "Workspace" : label}
                 </span>
               </Link>
@@ -551,7 +565,12 @@ function ShellNavigation() {
           )}
         >
           <Plus size={15} />{" "}
-          <span className={cn(sidebarCollapsed && "sr-only")}>New chat</span>
+          <span
+            data-sidebar-expanded=""
+            className={cn(sidebarCollapsed && "sr-only")}
+          >
+            New chat
+          </span>
         </Link>
         <div
           className={cn(
@@ -599,8 +618,18 @@ function ShellNavigation() {
                 );
               })}
         </div>
-        <div className="relative shrink-0 border-t border-[var(--border-subtle)] px-3 py-2">
-          <div className="flex items-center justify-between">
+        <div
+          className={cn(
+            "relative mt-auto shrink-0 border-t border-[var(--border-subtle)] py-2",
+            sidebarCollapsed ? "px-2" : "px-3",
+          )}
+        >
+          <div
+            className={cn(
+              "flex items-center justify-between",
+              sidebarCollapsed && "flex-col justify-center gap-1",
+            )}
+          >
             <button
               type="button"
               aria-label="Share current page"
@@ -630,9 +659,7 @@ function ShellNavigation() {
             <button
               type="button"
               aria-label="Settings"
-              onClick={() =>
-                window.dispatchEvent(new Event("ai-school:toggle-settings"))
-              }
+              onClick={() => window.location.assign("/settings")}
               className="grid size-8 place-items-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-secondary)]"
             >
               <Settings2 size={15} />
@@ -642,7 +669,10 @@ function ShellNavigation() {
             <button
               type="button"
               onClick={() => openUserProfile()}
-              className="mt-2 flex w-full items-center gap-2 rounded-[7px] px-1 py-1 text-left hover:bg-[var(--bg-secondary)]"
+              className={cn(
+                "mt-2 flex w-full items-center gap-2 rounded-[7px] px-1 py-1 text-left hover:bg-[var(--bg-secondary)]",
+                sidebarCollapsed && "justify-center",
+              )}
               aria-label="Manage account"
             >
               <span className="grid size-8 shrink-0 place-items-center overflow-hidden rounded-[7px] bg-[#d8d0fa] text-micro font-semibold text-[#3e327f]">
@@ -664,6 +694,7 @@ function ShellNavigation() {
                 )}
               </span>
               <span
+                data-sidebar-expanded=""
                 className={cn("min-w-0 flex-1", sidebarCollapsed && "sr-only")}
               >
                 <strong className="block truncate text-micro font-semibold text-[var(--text-primary)]">
@@ -972,6 +1003,13 @@ export function AppShell({
     pathname.startsWith("/library/");
 
   useLayoutEffect(() => {
+    // The persisted work session is deliberately restored after mount. This
+    // keeps SSR and the first client tree identical while still restoring tabs
+    // before the browser paints the settled shell.
+    void useSpectraContextStore.persist.rehydrate();
+  }, []);
+
+  useLayoutEffect(() => {
     setShellSidebarCollapsed(
       window.localStorage.getItem("spectra:sidebar-collapsed") === "true",
     );
@@ -986,6 +1024,7 @@ export function AppShell({
 
   return (
     <div
+      data-sidebar-collapsed={shellSidebarCollapsed}
       style={{
         minHeight: "100dvh",
         ...(noScroll ? { height: "100dvh", overflow: "hidden" } : {}),
@@ -1003,7 +1042,7 @@ export function AppShell({
           window.location.assign("/chat");
         }}
         onOpenSettings={() => {
-          window.dispatchEvent(new CustomEvent("ai-school:toggle-settings"));
+          window.location.assign("/settings");
         }}
         onFocusComposer={() => {
           const composer = document.querySelector<HTMLElement>(
@@ -1032,7 +1071,7 @@ export function AppShell({
         )}
       >
         {showTabRail ? (
-          <header className="hidden h-[44px] shrink-0 items-center gap-3 border-b border-[var(--border-default)] bg-[var(--bg-primary)] px-4 md:flex">
+          <header className="spectra-shell-tab-header hidden h-[44px] shrink-0 items-center gap-3 border-b border-[var(--border-default)] bg-[var(--bg-primary)] px-4 md:flex">
             <div
               className="flex min-w-0 flex-1 items-center overflow-hidden"
               id="spectra-shell-tab-slot"
@@ -1049,7 +1088,10 @@ export function AppShell({
             contentClassName,
           )}
         >
-          <div className="relative min-h-0 min-w-0 flex-1">{children}</div>
+          <div className="relative min-h-0 min-w-0 flex-1">
+            {children}
+            <GlobalRouteWorkbench />
+          </div>
           <RouteSidePanelHost />
           <ViewportContextPicker />
         </div>

@@ -15,12 +15,6 @@ import {
   editingRemainsAvailable,
   projectLegacyWorkSession,
 } from "@/features/spectra/work/session/session-controller";
-import {
-  inspectorController,
-  responsiveSurfaceController,
-  saveProjectionController,
-} from "@/features/spectra/work/session/controllers";
-import { getWorkDefinition } from "@/features/spectra/work/registry";
 
 describe("architectural kernel foundation", () => {
   it("registers every current work type with required contracts", () => {
@@ -109,24 +103,4 @@ describe("architectural kernel foundation", () => {
     ).toBe(true);
   });
 
-  it("keeps save, inspector, and responsive state under domain controllers", () => {
-    expect(
-      saveProjectionController({
-        localPending: 2,
-        connected: false,
-        synchronized: false,
-        projectionPending: true,
-        projectionDelayed: true,
-      }),
-    ).toEqual({ local: "pending", live: "offline", durable: "delayed" });
-    expect(
-      inspectorController(
-        { open: false, tab: "overview", width: 360 },
-        { type: "select_comment", commentId: "comment-1" },
-      ),
-    ).toMatchObject({ open: true, tab: "comments", selectedCommentId: "comment-1" });
-    expect(
-      responsiveSurfaceController(getWorkDefinition("sheets"), 400),
-    ).toEqual({ kind: "tab_fallback" });
-  });
 });

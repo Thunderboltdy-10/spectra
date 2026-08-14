@@ -1,5 +1,8 @@
 # Requirement traceability
 
+> **Historical document.** Completion claims here are superseded.
+> See `docs/spectra-hq/STATE.md` for current operational truth.
+
 The canonical requirement IDs are mirrored in `07_GOAL_CHECKLIST.md`. Each ID is completed only when this table can name implementation and code-only verification evidence.
 
 | Requirement                    | Implementation                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | Verification                                                                                                                                                                                               | Limitation                                                                                                                                | Status      |

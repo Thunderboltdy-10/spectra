@@ -14,6 +14,7 @@ import {
   AlertTriangle,
   BarChart3,
   CalendarDays,
+  ChevronDown,
   CircleDollarSign,
   CircleGauge,
   CloudCog,
@@ -43,13 +44,15 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { CommandBar } from "../components/command-bar";
 import {
   getAdministration,
   mutateAdministration,
   type PlatformAdministrationOverview,
 } from "@/features/spectra/administration/api";
 import { metricDefinition } from "@/features/spectra/administration/metric-registry";
+import { AuxiliaryRail, AuxiliaryRailTrigger } from "@/features/spectra/components/auxiliary-rail";
+import { ProductPageHeader } from "@/features/spectra/components/product-page-header";
+import { ProductSectionNav } from "@/features/spectra/components/product-section-nav";
 import {
   AdminButton,
   AdminCard,
@@ -300,9 +303,10 @@ function PlatformOverviewSurface({
     (sum, value) => sum + value,
     0,
   );
+  const [contextOpen, setContextOpen] = useState(true);
   return (
-    <div className="space-y-3">
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+    <div className="space-y-6">
+      <div className="grid gap-1 sm:grid-cols-2 xl:grid-cols-5">
         <MetricCard
           icon={School}
           label="Active schools"
@@ -350,16 +354,19 @@ function PlatformOverviewSurface({
         />
       </div>
 
-      <div className="grid gap-3 xl:grid-cols-[minmax(0,1.5fr)_minmax(260px,.65fr)_minmax(260px,.65fr)_300px]">
-        <AdminCard>
+      <div className={cn("grid min-w-0 gap-3", contextOpen && "xl:grid-cols-[minmax(0,1fr)_auto]")}>
+        <div className="min-w-0 space-y-3">
+        {!contextOpen ? <div className="flex justify-end"><AuxiliaryRailTrigger label="Platform context" onOpen={() => setContextOpen(true)} /></div> : null}
+        <section>
           <AdminSectionHeader
             title="Platform usage"
             detail={`Privacy-safe meters complete through ${data.usage.completeThrough}`}
             action={<StatusBadge tone="neutral">Daily</StatusBadge>}
           />
           <PlatformUsageChart data={data} />
-        </AdminCard>
-        <AdminCard className="p-4">
+        </section>
+        <div className="grid gap-8 md:grid-cols-2">
+        <section className="rounded-[10px] px-4 py-3 hover:bg-[var(--bg-secondary)]">
           <h2 className="font-[var(--font-serif)] text-[15px] font-medium">
             Storage & compute
           </h2>
@@ -387,8 +394,8 @@ function PlatformOverviewSurface({
           <AdminButton className="mt-5 w-full" onClick={() => onTab("usage")}>
             View usage & finance
           </AdminButton>
-        </AdminCard>
-        <AdminCard className="p-4">
+        </section>
+        <section className="rounded-[10px] px-4 py-3 hover:bg-[var(--bg-secondary)]">
           <h2 className="font-[var(--font-serif)] text-[15px] font-medium">
             Seats & access
           </h2>
@@ -424,9 +431,12 @@ function PlatformOverviewSurface({
           <AdminButton className="mt-5 w-full" onClick={() => onTab("schools")}>
             Manage schools
           </AdminButton>
-        </AdminCard>
-        <div className="space-y-3">
-          <AdminCard className="p-4">
+        </section>
+        </div>
+        </div>
+        {contextOpen ? <AuxiliaryRail label="Platform context" onClose={() => setContextOpen(false)}>
+          <div className="space-y-8 p-4">
+          <section>
             <div className="flex items-center justify-between gap-3">
               <h2 className="font-[var(--font-serif)] text-[15px] font-medium">
                 Service health
@@ -460,8 +470,8 @@ function PlatformOverviewSurface({
                 </div>
               ))}
             </div>
-          </AdminCard>
-          <AdminCard className="p-4">
+          </section>
+          <section>
             <h2 className="font-[var(--font-serif)] text-[15px] font-medium">
               Feedback overview
             </h2>
@@ -487,12 +497,13 @@ function PlatformOverviewSurface({
             <InlineLink onClick={() => onTab("requests")}>
               Review feedback
             </InlineLink>
-          </AdminCard>
-        </div>
+          </section>
+          </div>
+        </AuxiliaryRail> : null}
       </div>
 
-      <div className="grid gap-3 lg:grid-cols-4">
-        <AdminCard>
+      <div className="grid gap-8 md:grid-cols-2 xl:grid-cols-4">
+        <section>
           <AdminSectionHeader
             title="Model & agent usage"
             detail="Aggregate operational meters"
@@ -514,8 +525,8 @@ function PlatformOverviewSurface({
               </div>
             ))}
           </div>
-        </AdminCard>
-        <AdminCard>
+        </section>
+        <section>
           <AdminSectionHeader
             title="Operational queues"
             detail="Items awaiting attention"
@@ -541,7 +552,7 @@ function PlatformOverviewSurface({
                       : "operations",
                   )
                 }
-                className="flex w-full items-center justify-between rounded-[6px] border border-[var(--border-subtle)] px-3 py-2 text-micro hover:bg-[var(--bg-secondary)]"
+                className="flex w-full items-center justify-between rounded-[8px] px-3 py-2 text-micro hover:bg-[var(--bg-secondary)]"
               >
                 <span>{label}</span>
                 <StatusBadge
@@ -552,8 +563,8 @@ function PlatformOverviewSurface({
               </button>
             ))}
           </div>
-        </AdminCard>
-        <AdminCard>
+        </section>
+        <section>
           <AdminSectionHeader
             title="Top schools by usage"
             detail="Metered operational units"
@@ -572,8 +583,8 @@ function PlatformOverviewSurface({
               </div>
             ))}
           </div>
-        </AdminCard>
-        <AdminCard>
+        </section>
+        <section>
           <AdminSectionHeader
             title="Platform insights"
             detail="Directly derived operational signals"
@@ -595,9 +606,9 @@ function PlatformOverviewSurface({
               monitoring.
             </div>
           </div>
-        </AdminCard>
+        </section>
       </div>
-      <AdminCard>
+      <section className="mt-3">
         <AdminSectionHeader
           title="Recent activity"
           detail="Operational events derived from incidents and school requests."
@@ -610,7 +621,7 @@ function PlatformOverviewSurface({
         <div className="overflow-x-auto px-4 pb-4">
           <table className="w-full min-w-[720px] text-left text-micro">
             <thead className="text-[var(--text-tertiary)]">
-              <tr className="border-b border-[var(--border-subtle)]">
+              <tr>
                 <th className="pb-2 font-normal">Event</th>
                 <th className="pb-2 font-normal">Type</th>
                 <th className="pb-2 font-normal">Status</th>
@@ -639,7 +650,7 @@ function PlatformOverviewSurface({
                 .map((row) => (
                   <tr
                     key={row.id}
-                    className="border-b border-[var(--border-subtle)] last:border-0"
+                    className="rounded-[10px] transition-colors hover:bg-[var(--bg-secondary)]"
                   >
                     <td className="py-2.5 font-medium">{row.label}</td>
                     <td className="py-2.5 capitalize text-[var(--text-secondary)]">
@@ -658,25 +669,32 @@ function PlatformOverviewSurface({
             </tbody>
           </table>
         </div>
-      </AdminCard>
+      </section>
 
       <div className="flex flex-wrap items-center justify-end gap-2">
         <AdminButton tone="primary" onClick={() => onTab("schools")}>
           <Plus size={12} />
           Add school
         </AdminButton>
-        <AdminButton onClick={() => onTab("schools")}>
-          <UserPlus size={12} />
-          Invite users
-        </AdminButton>
-        <AdminButton onClick={() => onTab("usage")}>
-          <BarChart3 size={12} />
-          View reports
-        </AdminButton>
-        <AdminButton onClick={() => onTab("governance")}>
-          <Settings2 size={12} />
-          System settings
-        </AdminButton>
+        <label className="relative">
+          <span className="sr-only">More platform actions</span>
+          <select
+            aria-label="More platform actions"
+            defaultValue=""
+            onChange={(event) => {
+              const target = event.target.value as Tab;
+              if (target) onTab(target);
+              event.currentTarget.value = "";
+            }}
+            className="h-9 appearance-none rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] pl-3 pr-8 text-[11px] font-medium text-[var(--text-secondary)] outline-none hover:bg-[var(--bg-hover)]"
+          >
+            <option value="">More actions</option>
+            <option value="schools">Invite users</option>
+            <option value="usage">View reports</option>
+            <option value="governance">System settings</option>
+          </select>
+          <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 size-3.5 -translate-y-1/2 text-[var(--text-tertiary)]" />
+        </label>
       </div>
 
       <PrivacyNotice>{data.privacy}</PrivacyNotice>
@@ -751,57 +769,20 @@ export function SuperadminShell() {
   })();
 
   return (
-    <div className="spectra-wave-y spectra-admin-stage min-h-dvh bg-[var(--bg-primary)] pb-24">
-      <header className="border-b border-[var(--border-subtle)] bg-[color-mix(in_oklab,var(--bg-elevated)_88%,transparent)]">
-        <div className="flex min-h-12 items-center justify-end gap-4 px-5 lg:px-8">
-          <div className="flex items-center gap-2 text-micro text-[var(--text-tertiary)]">
-            <span className="hidden items-center gap-1.5 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 py-1.5 text-micro font-medium text-[var(--text-secondary)] sm:inline-flex">
-              <CalendarDays size={12} />
-              {rangeLabel}
-            </span>
-            <AdminButton
-              className="min-h-8"
-              onClick={() => setRefreshKey((value) => value + 1)}
-            >
-              <RefreshCw size={12} />
-              Refresh
-            </AdminButton>
-          </div>
-        </div>
-      </header>
+    <div className="spectra-wave-y spectra-admin-stage relative min-h-dvh bg-[var(--bg-primary)] pb-24">
       <div className="w-full px-4 py-5 sm:px-6 lg:px-8 xl:px-10">
-        <div className="mb-5">
-          <p className="text-micro font-semibold uppercase tracking-[.12em] text-[var(--text-tertiary)]">
-            Superadmin
-          </p>
-          <h1 className="mt-1 font-[var(--font-serif)] text-[34px] font-medium leading-none tracking-[-.035em]">
-            {tab === "overview"
-              ? "Superadmin Overview"
-              : tabs.find((item) => item.key === tab)?.label}
-          </h1>
-          <p className="mt-2 text-[11px] text-[var(--text-tertiary)]">
-            Monitor platform health, usage, and school operations without
-            accessing ordinary private content.
-          </p>
-        </div>
-        <nav className="mb-4 flex gap-1 overflow-x-auto border-b border-[var(--border-subtle)] pb-2">
-          {tabs.map(({ key, label, icon: Icon }) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setTab(key)}
-              className={cn(
-                "flex h-8 shrink-0 items-center gap-1.5 rounded-[6px] px-2.5 text-micro font-medium",
-                tab === key
-                  ? "bg-[var(--text-primary)] text-[var(--bg-primary)]"
-                  : "text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]",
-              )}
-            >
-              <Icon size={12} />
-              {label}
-            </button>
-          ))}
-        </nav>
+        <ProductPageHeader
+          className="mb-5"
+          title="Platform administration"
+          description="Monitor platform health, usage, and school operations without accessing ordinary private content."
+          actions={<><span className="hidden items-center gap-1.5 text-micro font-medium text-[var(--text-secondary)] sm:inline-flex"><CalendarDays size={12} />{rangeLabel}</span><AdminButton className="min-h-8" onClick={() => setRefreshKey((value) => value + 1)}><RefreshCw size={12} />Refresh</AdminButton></>}
+        />
+        <ProductSectionNav
+          label="Platform administration"
+          items={tabs}
+          active={tab}
+          onChange={setTab}
+        />
         {tab === "overview" ? (
           <PlatformOverviewSurface data={overview} onTab={setTab} />
         ) : (
@@ -812,28 +793,6 @@ export function SuperadminShell() {
             onRefresh={() => setRefreshKey((value) => value + 1)}
           />
         )}
-      </div>
-      <div className="pointer-events-none fixed bottom-4 left-1/2 z-20 w-[min(calc(100%-2rem),760px)] -translate-x-1/2 md:ml-[38px]">
-        <div className="pointer-events-auto">
-          <CommandBar
-            className="w-full"
-            placeholder="Ask Spectra about platform operations…"
-            onSubmit={(prompt) => {
-              router.push(
-                `/chat?prompt=${encodeURIComponent(
-                  `As a Spectra platform operator, ${prompt}`,
-                )}`,
-              );
-              return true;
-            }}
-            context={
-              <span className="flex h-full min-w-[88px] items-center gap-2 px-3 text-[11px] font-semibold text-[var(--text-primary)]">
-                <ShieldCheck className="size-3.5 shrink-0 text-[#725cf0]" />
-                Platform
-              </span>
-            }
-          />
-        </div>
       </div>
     </div>
   );

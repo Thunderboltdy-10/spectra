@@ -3,14 +3,12 @@
 import { useEffect } from "react";
 import { toast } from "sonner";
 import { spectraBus } from "../../events";
-import { disposeReusableBuildWorker } from "../build";
 import { disposeReusablePythonWorker } from "../../code/python-runtime";
 
 export function LocalComputeCacheController() {
   useEffect(
     () =>
       spectraBus.handle("settings.clearLocalComputeCache", () => {
-        disposeReusableBuildWorker();
         disposeReusablePythonWorker();
         for (let index = window.localStorage.length - 1; index >= 0; index -= 1) {
           const key = window.localStorage.key(index);

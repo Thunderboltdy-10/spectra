@@ -33,7 +33,7 @@ import type { LucideIcon } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { blueprintMeta, type ArtifactCardView } from "./artifact-card";
 import type { SpectraArtifact} from "../data/api";
-import { requireBlueprint, requireArtifactTypeManifest } from "../blueprints/registry";
+import { requireBlueprint, requireArtifactTypeManifest } from "../artifacts/blueprint-catalog";
 import type { ArtifactTypeKey } from "../artifacts/types";
 import { normalizeWhiteboardContent } from "../whiteboard/model";
 import { LocalAutocompleteTextarea } from "../compute/autocomplete";

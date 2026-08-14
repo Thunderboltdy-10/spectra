@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   BookOpen,
   Bot,
@@ -11,6 +11,7 @@ import {
   FileText,
   HelpCircle,
   MessageSquare,
+  MoreHorizontal,
   Presentation,
   Share2,
   Sparkles,
@@ -25,42 +26,9 @@ import {
   SpectraCard,
   type SpectraCardState,
 } from "./card-system";
+import { previewText } from "./preview-text";
 
 const AI_EDITED_FLASH_FALLBACK_MS = 90_000;
-
-function decodeEntityCodePoint(rawCode: string, radix: 10 | 16) {
-  const codePoint = Number.parseInt(rawCode, radix);
-  return Number.isInteger(codePoint) && codePoint >= 0 && codePoint <= 0x10ffff
-    ? String.fromCodePoint(codePoint)
-    : " ";
-}
-
-function readablePlainText(value: string) {
-  if (!/[<&]/.test(value)) return value;
-  const withSpacing = value
-    .replace(/<\s*br\s*\/?\s*>/gi, " ")
-    .replace(/<\s*\/\s*(?:p|div|li|h[1-6])\s*>/gi, " ")
-    .replace(/<[^>]*>/g, " ")
-    // Imported providers sometimes truncate rich text mid-tag. Do not leak the
-    // remaining markup into a compact Library card.
-    .replace(
-      /<(?:a|abbr|b|blockquote|br|code|div|em|h[1-6]|i|li|ol|p|pre|span|strong|table|tbody|td|th|thead|tr|u|ul)\b[^>]*$/gi,
-      " ",
-    );
-  return withSpacing
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .replace(/&quot;/gi, '"')
-    .replace(/&#(?:39|x27);/gi, "'")
-    .replace(/&#(\d+);/g, (_match, code) => decodeEntityCodePoint(code, 10))
-    .replace(/&#x([0-9a-f]+);/gi, (_match, code) =>
-      decodeEntityCodePoint(code, 16),
-    )
-    .replace(/\s+/g, " ")
-    .trim();
-}
 
 function resolveCardAiState(
   aiState: ArtifactCardView["aiState"] | undefined,
@@ -207,6 +175,17 @@ export function ArtifactCard({
     size === "compact" ? 0 : 4,
   );
   const [aiClock, setAiClock] = useState(0);
+  const [actionsOpen, setActionsOpen] = useState(false);
+  const actionsRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!actionsOpen) return;
+    const close = (event: PointerEvent) => {
+      if (!actionsRef.current?.contains(event.target as Node))
+        setActionsOpen(false);
+    };
+    document.addEventListener("pointerdown", close);
+    return () => document.removeEventListener("pointerdown", close);
+  }, [actionsOpen]);
   useEffect(() => {
     setAiClock(Date.now());
   }, []);
@@ -279,7 +258,7 @@ export function ArtifactCard({
       state={cardState}
       accent={artifact.pinned ? "var(--card-pinned)" : meta.color}
       className={cn(
-        "text-left",
+        "spectra-artifact-card min-w-0 overflow-hidden text-left",
         size === "large"
           ? "min-h-[216px] rounded-[9px] p-4"
           : "rounded-[8px] p-3.5",
@@ -318,11 +297,11 @@ export function ArtifactCard({
           <Check className="h-3.5 w-3.5" />
         </button>
       ) : null}
-      <div className="relative z-[1] flex items-start gap-3">
+      <div className="relative z-[1] flex min-w-0 items-start gap-2.5">
         <CardTypeIcon icon={Icon} color={meta.color} />
         <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 items-center gap-1.5 pr-5">
-            <span className="text-micro font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
+          <div className="flex min-w-0 items-center gap-1.5 overflow-hidden pr-4">
+            <span className="shrink-0 text-micro font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
               {meta.label}
             </span>
             {/* The generic chip is only for work we cannot yet describe. Once a
@@ -354,14 +333,15 @@ export function ArtifactCard({
                 <Share2 className="h-3 w-3" aria-hidden="true" />
               </span>
             ) : null}
-            <span className="text-micro text-[var(--text-tertiary)]">•</span>
-            <span className="min-w-0 truncate text-[11px] text-[var(--text-tertiary)]">
+            <span className="spectra-artifact-card-meta shrink-0 text-micro text-[var(--text-tertiary)]">•</span>
+            <span className="spectra-artifact-card-meta min-w-0 truncate text-[11px] text-[var(--text-tertiary)]">
               {artifact.meta}
             </span>
           </div>
           {interactive ? (
             <button
               type="button"
+              title={artifact.title}
               onClick={(event) => {
                 event.stopPropagation();
                 if (selectionMode && onToggleContext) onToggleContext();
@@ -370,19 +350,20 @@ export function ArtifactCard({
               className={cn(
                 "mt-2 block max-w-full rounded-[4px] text-left text-[var(--text-primary)] outline-none hover:text-[var(--accent-cyan)] focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--accent-cyan)_35%,transparent)]",
                 size === "large"
-                  ? "max-w-[14rem] text-[20px] font-semibold leading-[1.12] font-display"
-                  : "truncate text-[14px] font-semibold",
+                  ? "line-clamp-2 break-words text-[20px] font-semibold leading-[1.12] font-display"
+                  : "line-clamp-2 break-words text-[14px] font-semibold leading-[1.25]",
               )}
             >
               {artifact.title}
             </button>
           ) : (
             <h3
+              title={artifact.title}
               className={cn(
                 "mt-2 text-[var(--text-primary)]",
                 size === "large"
-                  ? "max-w-[14rem] text-[20px] font-semibold leading-[1.12] font-display"
-                  : "truncate text-[14px] font-semibold",
+                  ? "line-clamp-2 break-words text-[20px] font-semibold leading-[1.12] font-display"
+                  : "line-clamp-2 break-words text-[14px] font-semibold leading-[1.25]",
               )}
             >
               {artifact.title}
@@ -390,16 +371,16 @@ export function ArtifactCard({
           )}
           <p
             className={cn(
-              "mt-2 text-[12px] leading-5 text-[var(--text-secondary)]",
-              size === "large" ? "line-clamp-3 max-w-[16rem]" : "line-clamp-2",
+              "mt-1.5 text-[11px] leading-4 text-[var(--text-secondary)]",
+              size === "large" ? "line-clamp-3" : "line-clamp-2",
             )}
           >
-            {readablePlainText(artifact.summary)}
+            {previewText(artifact.summary)}
           </p>
           {artifact.accessExplanation ? (
             <div className="mt-2 flex min-w-0 items-center gap-1.5 text-micro text-[var(--text-tertiary)]">
               <Building2 className="h-3 w-3 shrink-0" />
-              <span className="truncate">{artifact.accessExplanation}</span>
+              <span className="truncate" title={artifact.accessExplanation}>{artifact.accessExplanation}</span>
             </div>
           ) : null}
           {liveAiActivity?.detail ? (
@@ -435,32 +416,46 @@ export function ArtifactCard({
             </div>
           ) : null}
           {metrics.length > 0 ? (
-            <div className="mt-5 grid grid-cols-3 gap-2">
+            <div className="spectra-artifact-card-metrics mt-4 grid min-w-0 grid-cols-3 gap-1.5">
               {metrics.slice(0, 3).map(([label, value]) => (
                 <div
                   key={label}
-                  className="border-l border-[var(--card-border-soft)] px-2 py-0.5 first:border-l-0 first:pl-0"
+                  className="min-w-0 overflow-hidden border-l border-[var(--card-border-soft)] px-2 py-0.5 first:border-l-0 first:pl-0"
                 >
-                  <div className="font-sans text-[12px] font-normal text-[var(--text-primary)]">
+                  <div className="truncate font-sans text-[12px] font-normal text-[var(--text-primary)]" title={String(value)}>
                     {value}
                   </div>
-                  <div className="text-micro text-[var(--text-tertiary)]">
+                  <div className="truncate text-micro text-[var(--text-tertiary)]" title={label}>
                     {label}
                   </div>
                 </div>
               ))}
             </div>
           ) : null}
-          <div className="mt-3 flex min-h-7 items-end justify-between gap-2">
+          <div className="mt-2.5 flex min-h-7 min-w-0 items-end justify-between gap-2">
             <div className="min-w-0 truncate text-[11px] text-[var(--text-tertiary)]">
               {artifact.placement === "workspace" ? "In workspace" : "General"}
             </div>
             {actions ? (
               <div
-                className="flex shrink-0 items-center gap-1.5"
+                ref={actionsRef}
+                className="relative shrink-0"
                 onClick={(event) => event.stopPropagation()}
               >
-                {actions}
+                <button
+                  type="button"
+                  className="grid size-7 place-items-center rounded-[7px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                  aria-label={`More actions for ${artifact.title}`}
+                  aria-expanded={actionsOpen}
+                  onClick={() => setActionsOpen((open) => !open)}
+                >
+                  <MoreHorizontal className="h-4 w-4" />
+                </button>
+                {actionsOpen ? (
+                  <div className="absolute bottom-[calc(100%+6px)] right-0 z-40 flex items-center gap-1 rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 shadow-[0_14px_32px_rgba(27,20,12,0.13)]">
+                    {actions}
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </div>

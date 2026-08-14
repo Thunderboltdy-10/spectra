@@ -1,9 +1,34 @@
-import {
-  browserComputeProfile,
-  chooseComputePath,
-  isConstrainedDevice,
-  type DeviceComputeProfile,
-} from "../broker";
+export type DeviceComputeProfile = {
+  worker: boolean;
+  wasm: boolean;
+  webAssemblyStreaming: boolean;
+  mobile: boolean;
+  logicalCores: number;
+  deviceMemoryGb?: number;
+  memoryPressure: "low" | "moderate" | "high" | "unknown";
+  batterySaver: boolean;
+  dataSaver: boolean;
+};
+
+function isConstrainedDevice(device: DeviceComputeProfile) {
+  return device.mobile || device.batterySaver || device.memoryPressure === "high" || (device.deviceMemoryGb !== undefined && device.deviceMemoryGb < 4) || device.logicalCores < 4;
+}
+
+function browserComputeProfile(): DeviceComputeProfile {
+  if (typeof navigator === "undefined") return { worker: false, wasm: false, webAssemblyStreaming: false, mobile: false, logicalCores: 1, memoryPressure: "unknown", batterySaver: false, dataSaver: false };
+  const nav = navigator as Navigator & { deviceMemory?: number; connection?: { saveData?: boolean }; userAgentData?: { mobile?: boolean } };
+  return {
+    worker: typeof Worker !== "undefined",
+    wasm: typeof WebAssembly !== "undefined",
+    webAssemblyStreaming: typeof WebAssembly !== "undefined" && "instantiateStreaming" in WebAssembly,
+    mobile: nav.userAgentData?.mobile ?? /Android|iPhone|iPad|Mobile/i.test(nav.userAgent),
+    logicalCores: Math.max(1, nav.hardwareConcurrency || 1),
+    ...(typeof nav.deviceMemory === "number" ? { deviceMemoryGb: nav.deviceMemory } : {}),
+    memoryPressure: "unknown",
+    batterySaver: false,
+    dataSaver: nav.connection?.saveData === true,
+  };
+}
 
 export type AutocompleteSurface =
   | "quick_chat"
@@ -145,15 +170,7 @@ export function requestLocalAutocomplete(
   device = browserComputeProfile(),
 ): LocalAutocompleteHandle {
   const tier = autocompleteTier(device);
-  const decision = chooseComputePath({
-    task: "autocomplete",
-    inputBytes: new TextEncoder().encode(context.value).byteLength,
-    preference: "auto",
-    device,
-    privacy: "local_required",
-    cancellable: true,
-  });
-  if (decision.path !== "local_worker") {
+  if (!device.worker || !device.wasm || new TextEncoder().encode(context.value).byteLength > 96_000) {
     return { result: Promise.resolve(null), cancel: () => {}, tier: 3 };
   }
   const worker = new Worker(new URL("./autocomplete.worker.ts", import.meta.url), {

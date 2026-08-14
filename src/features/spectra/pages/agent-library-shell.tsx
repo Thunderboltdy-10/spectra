@@ -11,12 +11,12 @@ import {
   FlaskConical,
   GraduationCap,
   Grid3X3,
-  LibraryBig,
   Loader2,
   MessageCircleQuestion,
   Plus,
   Search,
   ShieldCheck,
+  SlidersHorizontal,
   Sparkles,
   WandSparkles,
   X,
@@ -33,13 +33,6 @@ import {
   type ReactNode,
 } from "react";
 import { toast } from "sonner";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { createDefaultArtifactPayload } from "../components/artifact-blueprint-sheet";
 import { useArtifactStudioState } from "../components/artifact-studio-shell";
 import { CommandBar } from "../components/command-bar";
@@ -48,6 +41,7 @@ import {
   type ComposerFocusMode,
 } from "../components/context-controls";
 import { ShareDialog } from "../components/share-dialog";
+import { ProductPageHeader } from "../components/product-page-header";
 import { useSpectraRun } from "../ai/use-spectra-run";
 import { normalizeFoundryContent } from "../agents/foundry";
 import {
@@ -64,6 +58,7 @@ import {
   type SpectraWorkspace,
 } from "../data/api";
 import { formatRelativeTime } from "../components/spectra-view-model";
+import { WorkbenchLiveStack } from "./workbench-live-stack";
 
 const ArtifactStudio = dynamic(() =>
   import("../components/artifact-studio").then(
@@ -379,20 +374,7 @@ function LibrarySectionBlock({
           {cards.slice(0, limit).map(children)}
         </div>
       ) : (
-        <div className="flex min-h-28 items-center gap-3 rounded-[10px] border border-dashed border-[var(--border-default)] bg-[color-mix(in_oklab,var(--bg-elevated)_55%,transparent)] px-5">
-          <span className="grid size-9 shrink-0 place-items-center rounded-[9px] bg-[var(--bg-secondary)] text-[var(--text-tertiary)]">
-            <Sparkles className="size-4" />
-          </span>
-          <div>
-            <p className="text-[12px] font-semibold text-[var(--text-primary)]">
-              Nothing here yet
-            </p>
-            <p className="mt-0.5 text-micro text-[var(--text-secondary)]">
-              Create, accept, or explicitly add an agent to build this
-              collection.
-            </p>
-          </div>
-        </div>
+        <p className="flex items-center gap-2 py-4 text-[12px] text-[var(--text-secondary)]"><Sparkles className="size-4 text-[var(--text-tertiary)]" />No agents in this collection yet.</p>
       )}
     </section>
   );
@@ -416,6 +398,7 @@ export function AgentLibraryShell({
   const [subject, setSubject] = useState("all");
   const [capability, setCapability] = useState("all");
   const [sortMode, setSortMode] = useState<SortMode>("relevance");
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [expanded, setExpanded] = useState<Set<LibrarySection>>(
     () => new Set(),
   );
@@ -739,9 +722,7 @@ export function AgentLibraryShell({
     />
   );
   const artifactQuickChat = activeAgentArtifact ? (
-    <div className="agent-library-composer pointer-events-none">
-      <div className="pointer-events-auto w-full">
-        <CommandBar
+    <CommandBar
           className="w-full"
           placeholder={`Ask Spectra anything about ${activeAgentArtifact.title}…`}
           allowAttachments
@@ -756,9 +737,7 @@ export function AgentLibraryShell({
               selectedCount={1}
             />
           }
-        />
-      </div>
-    </div>
+    />
   ) : null;
 
   if (studio.mode === "tab" && studio.activeArtifact) {
@@ -779,7 +758,9 @@ export function AgentLibraryShell({
           onShare={(artifact) => setShareTarget(artifact)}
           onDirtyChange={studio.setDirty}
         />
-        {artifactQuickChat}
+        <WorkbenchLiveStack zIndex={220}>
+          {artifactQuickChat}
+        </WorkbenchLiveStack>
       </div>
     );
   }
@@ -787,57 +768,20 @@ export function AgentLibraryShell({
   return (
     <div className="spectra-wave-y relative flex h-full min-h-0 overflow-hidden bg-[var(--bg-primary)]">
       <div className="min-w-0 flex-1 overflow-y-auto pb-32">
-        <div className="agent-library-topbar">
-          <span className="flex items-center gap-2">
-            <Grid3X3 className="size-3.5" />
-            Home
-          </span>
-          <ChevronDown className="size-3 -rotate-90 text-[var(--text-tertiary)]" />
-          <span>Agents</span>
-          <ChevronDown className="size-3 -rotate-90 text-[var(--text-tertiary)]" />
-          <strong className="font-semibold text-[var(--text-primary)]">
-            Agent Library
-          </strong>
-          <span className="ml-auto hidden items-center gap-1.5 text-[11px] text-[var(--success)] sm:flex">
-            <CheckCircle2 className="size-3.5" />
-            Live collection
-          </span>
-          <button
-            type="button"
-            disabled={busyKey === "create"}
-            onClick={() => void createAgent()}
-            className="agent-library-create"
-          >
-            {busyKey === "create" ? (
-              <Loader2 className="size-3.5 animate-spin" />
-            ) : (
-              <Plus className="size-3.5" />
-            )}
-            New agent
-          </button>
-        </div>
-
         <main className="mx-auto w-full max-w-[1460px] px-5 py-6 sm:px-8 lg:px-10">
-          <header className="flex items-start gap-4">
-            <span className="grid size-10 shrink-0 place-items-center rounded-[10px] bg-[#e8f7f1] text-[#149a72]">
-              <LibraryBig className="size-5" />
-            </span>
-            <div className="min-w-0">
-              <span className="text-micro font-semibold uppercase tracking-[0.16em] text-[var(--text-tertiary)]">
-                Agent library
-              </span>
-              <h1 className="mt-1 font-display text-[31px] font-semibold leading-none text-[var(--text-primary)]">
-                Agent Library
-              </h1>
-              <p className="mt-2 text-[12px] text-[var(--text-secondary)]">
-                Discover, create, and add specialised agents without loading
-                every specialist into every conversation.
-              </p>
-            </div>
-          </header>
+          <ProductPageHeader
+            title="Agent library"
+            description="Discover, create, and add specialised agents without loading every specialist into every conversation."
+            actions={
+              <button type="button" disabled={busyKey === "create"} onClick={() => void createAgent()} className="agent-library-create">
+                {busyKey === "create" ? <Loader2 className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
+                New agent
+              </button>
+            }
+          />
 
-          <div className="mt-6 grid gap-2.5 lg:grid-cols-[minmax(320px,1fr)_190px_210px_160px]">
-            <label className="agent-library-filter min-w-0">
+          <div className="mt-6 flex items-center gap-2.5">
+            <label className="agent-library-filter min-w-0 flex-1">
               <Search className="size-4 shrink-0 text-[var(--text-tertiary)]" />
               <input
                 value={search}
@@ -855,72 +799,32 @@ export function AgentLibraryShell({
                 </button>
               ) : null}
             </label>
-            <div className="agent-library-filter">
-              <span className="sr-only">Subject</span>
-              <Select value={subject} onValueChange={setSubject}>
-                <SelectTrigger className="h-9 border-0 bg-transparent px-0 shadow-none hover:bg-transparent focus:border-transparent">
-                  <SelectValue placeholder="All subjects" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All subjects</SelectItem>
-                  {subjects.map((value) => (
-                    <SelectItem key={value} value={value}>
-                      {value}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="agent-library-filter">
-              <span className="sr-only">Capability</span>
-              <Select value={capability} onValueChange={setCapability}>
-                <SelectTrigger className="h-9 border-0 bg-transparent px-0 shadow-none hover:bg-transparent focus:border-transparent">
-                  <SelectValue placeholder="All capabilities" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All capabilities</SelectItem>
-                  {capabilities.map((value) => (
-                    <SelectItem key={value} value={value}>
-                      {value}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="agent-library-filter">
-              <span className="sr-only">Sort agents</span>
-              <Select
-                value={sortMode}
-                onValueChange={(value) => setSortMode(value as SortMode)}
-              >
-                <SelectTrigger className="h-9 border-0 bg-transparent px-0 shadow-none hover:bg-transparent focus:border-transparent">
-                  <SelectValue placeholder="Sort" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="relevance">Sort: Relevance</SelectItem>
-                  <SelectItem value="recent">Sort: Recent</SelectItem>
-                  <SelectItem value="title">Sort: Name</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+            <button
+              type="button"
+              className={`relative grid size-10 shrink-0 place-items-center rounded-[8px] border transition ${filtersOpen ? "border-[var(--text-primary)] bg-[var(--bg-secondary)] text-[var(--text-primary)]" : "border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"}`}
+              onClick={() => setFiltersOpen((value) => !value)}
+              aria-label="Filter and sort agents"
+              aria-expanded={filtersOpen}
+            >
+              <SlidersHorizontal className="size-4" />
+              {subject !== "all" || capability !== "all" || sortMode !== "relevance" ? <span className="absolute right-1.5 top-1.5 size-1.5 rounded-full bg-[var(--brand-primary)]" /> : null}
+            </button>
           </div>
+          {filtersOpen ? (
+            <div className="mt-2 flex flex-wrap gap-2.5">
+              <label className="agent-library-filter relative min-w-[180px]"><span className="sr-only">Subject</span><select aria-label="Subject" value={subject} onChange={(event) => setSubject(event.target.value)}><option value="all">All subjects</option>{subjects.map((value) => <option key={value} value={value}>{value}</option>)}</select><ChevronDown className="pointer-events-none size-3.5 text-[var(--text-tertiary)]" /></label>
+              <label className="agent-library-filter relative min-w-[200px]"><span className="sr-only">Capability</span><select aria-label="Capability" value={capability} onChange={(event) => setCapability(event.target.value)}><option value="all">All capabilities</option>{capabilities.map((value) => <option key={value} value={value}>{value}</option>)}</select><ChevronDown className="pointer-events-none size-3.5 text-[var(--text-tertiary)]" /></label>
+              <label className="agent-library-filter relative min-w-[160px]"><span className="sr-only">Sort agents</span><select aria-label="Sort agents" value={sortMode} onChange={(event) => setSortMode(event.target.value as SortMode)}><option value="relevance">Relevance</option><option value="recent">Recently updated</option><option value="title">Name</option></select><ChevronDown className="pointer-events-none size-3.5 text-[var(--text-tertiary)]" /></label>
+              {subject !== "all" || capability !== "all" || sortMode !== "relevance" ? (
+                <button type="button" className="h-10 px-2 text-[11px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)]" onClick={() => { setSubject("all"); setCapability("all"); setSortMode("relevance"); }}>
+                  Clear filters
+                </button>
+              ) : null}
+            </div>
+          ) : null}
 
           {loading ? (
-            <div className="mt-7 space-y-8">
-              {[0, 1, 2].map((section) => (
-                <div key={section}>
-                  <div className="mb-3 h-9 w-48 animate-pulse rounded-[7px] bg-[var(--bg-secondary)]" />
-                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-                    {[0, 1, 2, 3].map((card) => (
-                      <div
-                        key={card}
-                        className="h-[236px] animate-pulse rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)]"
-                      />
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
+            <div className="mt-8 flex items-center gap-2 text-[12px] text-[var(--text-secondary)]"><Loader2 className="size-4 animate-spin" /> Loading agents…</div>
           ) : (
             <>
               <LibrarySectionBlock
@@ -991,11 +895,14 @@ export function AgentLibraryShell({
           onDirtyChange={studio.setDirty}
         />
       ) : null}
-      {studio.mode === "split" ? artifactQuickChat : null}
+      {studio.mode === "split" ? (
+        <WorkbenchLiveStack zIndex={220}>
+          {artifactQuickChat}
+        </WorkbenchLiveStack>
+      ) : null}
 
       {!studio.activeArtifact ? (
-        <div className="agent-library-composer pointer-events-none">
-          <div className="pointer-events-auto w-full">
+        <WorkbenchLiveStack zIndex={220}>
             <CommandBar
               className="w-full"
               placeholder="Ask Spectra anything about agents…"
@@ -1022,8 +929,7 @@ export function AgentLibraryShell({
                 </button>
               }
             />
-          </div>
-        </div>
+        </WorkbenchLiveStack>
       ) : null}
 
       {placementTarget ? (

@@ -7,6 +7,7 @@
     "dev:web": "node --env-file=.env.local scripts/dev-web.mjs",
     "dev:collab": "node --env-file=.env.local scripts/dev-collaboration-gateway.mjs",
     "start:collab": "node scripts/collaboration-gateway.mjs",
+    "prebuild": "npm run check:secrets",
     "build": "next build",
     "start": "node --env-file=.env.local scripts/start-web.mjs",
     "lint": "eslint . --max-warnings=0",
@@ -16,6 +17,7 @@
     "check:architecture": "node scripts/check-spectra-architecture.mjs",
     "check:copy": "node scripts/check-user-facing-copy.mjs",
     "check:design-tokens": "node scripts/check-design-tokens.mjs",
+    "check:secrets": "node scripts/scan-secrets.mjs",
     "test:realtime": "vitest run workers/collaboration",
     "build:realtime": "wrangler deploy --dry-run --config workers/collaboration/wrangler.toml",
     "convex:dev": "convex dev"

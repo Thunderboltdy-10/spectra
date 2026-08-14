@@ -81,7 +81,7 @@ import {
   downloadDocumentBlob,
   downloadDocumentText,
 } from "./artifact-studio-file-utils";
-import { WorkbarSelect } from "./workbar-controls";
+import { WorkbarSelect } from "./artifact-workbar";
 
 export function FlashcardStudio({
   artifactId,

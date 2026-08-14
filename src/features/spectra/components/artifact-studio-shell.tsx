@@ -371,7 +371,7 @@ export function StudioSplitShell({
     <aside
       ref={panelRef}
       data-studio-panel
-      className="relative z-40 flex h-full min-w-[280px] max-w-[94vw] shrink-0 border-l border-[color-mix(in_oklab,var(--border-default)_55%,transparent)] bg-[var(--bg-primary)] min-[1920px]:min-w-[300px]"
+      className="relative z-40 flex h-full min-w-[280px] max-w-[94vw] shrink-0 border-l border-[color-mix(in_oklab,var(--border-default)_55%,transparent)] bg-[var(--bg-secondary)] min-[1920px]:min-w-[300px]"
       style={{ width, containerType: "inline-size" }}
       aria-label={ariaLabel}
     >
@@ -441,6 +441,10 @@ export function StudioTabRail({
         ? "border-[color-mix(in_oklab,var(--brand-primary)_36%,var(--border-default))] bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[inset_0_2px_var(--brand-primary),0_1px_6px_rgba(27,20,12,0.06)]"
         : "border-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
     }`;
+
+  // A single hub is the page itself, not a meaningful browser tab. Keeping an
+  // entire 44px rail for “All” added a second header before any work was open.
+  if (hubTabs.length === 1 && tabs.length === 0) return null;
 
   const rail = (
     <div

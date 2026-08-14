@@ -5,6 +5,7 @@ import type { CSSProperties, ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import type { SpectraThread } from "../data/api";
 import { formatRelativeTime } from "./spectra-view-model";
+import { previewText } from "./preview-text";
 
 export function ThreadCard({
   thread,
@@ -51,8 +52,8 @@ export function ThreadCard({
         </span>
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-1.5 text-micro font-semibold uppercase tracking-[0.09em] text-[#7256dc]"><span>Conversation</span>{continued ? <span className="rounded-full bg-[color-mix(in_oklab,#8b6ff0_10%,var(--bg-primary))] px-1.5 py-0.5 normal-case tracking-normal">Continues next</span> : running ? <span className="normal-case tracking-normal">Live</span> : waiting ? <span className="normal-case tracking-normal text-[var(--warning)]">Needs you</span> : null}</span>
-          <span className="mt-1.5 block truncate font-display text-[16px] font-semibold text-[var(--text-primary)]">{thread.title}</span>
-          {!compact ? <span className="mt-1.5 block line-clamp-2 text-[11px] leading-5 text-[var(--text-secondary)]">{thread.summaryShort?.trim() || "Continue the thinking and work captured in this conversation."}</span> : null}
+          <span className="mt-1.5 block truncate font-display text-[16px] font-semibold text-[var(--text-primary)]" title={thread.title}>{thread.title}</span>
+          {!compact ? <span className="mt-1.5 block line-clamp-2 text-[11px] leading-5 text-[var(--text-secondary)]">{previewText(thread.summaryShort, "Continue the thinking and work captured in this conversation.")}</span> : null}
           <span className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-micro text-[var(--text-tertiary)]"><span className="inline-flex items-center gap-1"><MessagesSquare className="h-3 w-3" />{thread.messageCount ?? 0} messages</span><span>{workspaceLabel ?? "Inbox"}</span><span>{formatRelativeTime(thread.lastMessageAt ?? thread.updatedAt)}</span></span>
         </span>
       </div>

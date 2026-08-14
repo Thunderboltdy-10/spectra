@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { normalizeArtifactContent } from "../ai/content-normalization";
-import { validateBlueprintContent } from "../blueprints/registry";
+import { validateBlueprintContent } from "../artifacts/blueprint-catalog";
 import { documentContentSchema } from "../blueprints/document";
 import { flashcardDeckContentSchema } from "../blueprints/flashcard-deck";
 import { plannerTaskContentSchema } from "../blueprints/planner-task";

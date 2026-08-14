@@ -370,6 +370,11 @@ export const useSpectraContextStore = create<SpectraContextState>()(persist((set
   storage: createJSONStorage(() => localStorage),
   partialize: (state) => ({ continuation: state.continuation, explicit: state.explicit, selectionDraft: state.selectionDraft, excludedVisibleKeys: state.excludedVisibleKeys, activeWorkspace: state.activeWorkspace, globalScope: state.globalScope, openObjects: state.openObjects, activeOpenObjectKey: state.activeOpenObjectKey, tileArtifactIds: state.tileArtifactIds, tileSizes: state.tileSizes, tilesIsolated: state.tilesIsolated, revision: state.revision }),
   version: 2,
+  // Rehydrate from the mounted shell so the server and the first client render
+  // share the same empty session. Reading storage during module evaluation made
+  // persisted artifact tabs appear only on the client and triggered a full
+  // hydration recovery on every reload.
+  skipHydration: true,
 }));
 
 export function activeArtifactContext(state: Pick<SpectraContextState, "explicit" | "visible" | "excludedVisibleKeys">) {

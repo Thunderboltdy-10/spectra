@@ -663,6 +663,12 @@ html[data-spectra-sidebar-collapsed="true"]
   display: none !important;
 }
 
+html[data-spectra-sidebar-collapsed="true"]
+  .spectra-shell-sidebar
+  [data-sidebar-expanded] {
+  display: none !important;
+}
+
 .presentation-toolbar {
   margin: 0 12px 8px !important;
   border: 0 !important;

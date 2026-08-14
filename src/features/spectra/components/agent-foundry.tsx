@@ -66,6 +66,7 @@ import {
 } from "../data/api";
 import { LocalAutocompleteTextarea } from "../compute/autocomplete";
 import { aiRegionAttr, pathTouches } from "./ai-region-path";
+import { ArtifactWorkbar, WorkbarRail } from "./artifact-workbar";
 import { targetAttrs } from "../collaboration/target-attributes";
 
 const FACET_LABEL: Record<FoundryFacet, string> = {
@@ -967,6 +968,8 @@ export function AgentFoundry({
     const blocked: string[] = [];
     if (!foundry.mission.objective.trim())
       blocked.push("The mission has no objective.");
+    if ((agent.instructions?.text ?? "").trim().length < 40)
+      blocked.push("The approved mission and skills need more actionable detail.");
     if (foundry.skills.length === 0)
       blocked.push("No skills are approved, so there is nothing to publish.");
     for (const skill of foundry.skills) blocked.push(...skillIssues(skill));
@@ -978,7 +981,7 @@ export function AgentFoundry({
       }
     }
     return [...new Set(blocked)];
-  }, [foundry.evidenceBindings, foundry.mission.objective, foundry.skills, passingEval]);
+  }, [agent.instructions?.text, foundry.evidenceBindings, foundry.mission.objective, foundry.skills, passingEval]);
 
   async function evaluate() {
     const result = await run("evaluate", () => evaluateSpectraAgent(artifactId));
@@ -1102,11 +1105,10 @@ export function AgentFoundry({
 
   return (
     <div className={`spectra-agent-foundry is-${mode}`}>
-      <div className="spectra-editor-workbar">
-        <span className="px-1 text-[12px] font-medium text-[var(--text-secondary)]">
-          Agent
-        </span>
-        <span className="ml-auto" />
+      <ArtifactWorkbar label="Agent tools">
+        <WorkbarRail>
+          <span className="px-1 text-[12px] font-medium text-[var(--text-secondary)]">Build</span>
+        </WorkbarRail>
         <button
           type="button"
           className="inline-flex h-8 items-center rounded-[6px] px-2.5 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-45"
@@ -1123,7 +1125,7 @@ export function AgentFoundry({
         >
           {busy === "compile" ? "Drafting…" : "Compile skills"}
         </button>
-      </div>
+      </ArtifactWorkbar>
       <div
         className="foundry-stream"
         data-ai-region={aiRegionAttr(pathTouches(aiChangedPaths, "/foundry"))}

@@ -91,7 +91,7 @@ import {
 } from "../presentation/io";
 import { aiRegionAttr, pathTouches } from "./ai-region-path";
 import { targetAttrs } from "../collaboration/target-attributes";
-import { WorkbarSelect } from "./workbar-controls";
+import { WorkbarSelect } from "./artifact-workbar";
 import {
   calculateWorkbook,
   coordinateToAddress,
@@ -2486,18 +2486,10 @@ export function PresentationStudio({
           </span>
           <button
             type="button"
-            className="presentation-secondary-action"
-            onClick={() => setSurface("preview")}
-          >
-            <MonitorPlay className="h-3.5 w-3.5" /> Preview
-          </button>
-          <button
-            type="button"
             className="presentation-present-action"
             onClick={() => startPresenting(false)}
           >
-            <Play className="h-3.5 w-3.5 fill-current" /> Present (
-            {deck.slides.length})
+            <Play className="h-3.5 w-3.5 fill-current" /> Present
           </button>
           <button
             type="button"

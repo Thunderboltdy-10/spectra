@@ -29,6 +29,7 @@ import { useNow } from "@/hooks/use-now";
 import { useSpectraContextStore } from "@/stores/spectra-context-store";
 import { PrismRunMark } from "@/components/spectra-prism-optic";
 import { SurfaceField, type FieldInfluence } from "../field/surface-field";
+import { useSpectraPreferences } from "../settings/preference-store";
 import { targetAttrs } from "../collaboration/target-attributes";
 import type { ResultCardStreamView } from "../ai/stream-events";
 import type { CommandAttachment } from "./command-bar";
@@ -441,6 +442,7 @@ export function LiveDock({
   const [revision, setRevision] = useState("");
   const [stopping, setStopping] = useState<Set<string>>(new Set());
   const now = useNow(60_000);
+  const { preferences } = useSpectraPreferences();
   const motionLevel = useSpectraMotion();
   /* Titles that have already been established (and revealed) — a run title
      must only stream once, on first arrival (RUN-010). */
@@ -493,7 +495,11 @@ export function LiveDock({
         if (activeStatuses.has(tab.run.status)) return true;
         if (continuation?.id === tab.threadId || openThreadId === tab.threadId)
           return true;
-        return now - tab.run.updatedAt < 30 * 60_000;
+        if (!preferences.ai.retainCompletedRunTabs) return false;
+        return (
+          now - tab.run.updatedAt <
+          preferences.ai.completedRunRetentionMinutes * 60_000
+        );
       })
       .filter(
         (tab, index, all) =>
@@ -527,6 +533,8 @@ export function LiveDock({
     continuation?.runId,
     now,
     openThreadId,
+    preferences.ai.completedRunRetentionMinutes,
+    preferences.ai.retainCompletedRunTabs,
     respondingInputRuns,
     story,
     tabs,
@@ -538,10 +546,12 @@ export function LiveDock({
     () => sources.filter((source) => !collapsedInputRuns.has(source.runId)),
     [collapsedInputRuns, sources],
   );
-  const selectedInputRunId = selectExpandedInputRun(
-    expandableSources,
-    expandedInputRunId,
-  );
+  const selectedInputRunId = preferences.ai.expandRequiredInput
+    ? selectExpandedInputRun(expandableSources, expandedInputRunId)
+    : expandedInputRunId &&
+        expandableSources.some((source) => source.runId === expandedInputRunId)
+      ? expandedInputRunId
+      : null;
   useEffect(
     () => setExpandedInputRunId(selectedInputRunId),
     [selectedInputRunId],
@@ -781,6 +791,7 @@ export function LiveDock({
                       }
                     }}
                     className="min-w-0 flex-1 py-1 text-left"
+                    title={model.title}
                   >
                     <span className="flex items-center gap-1.5">
                       <DockTitle
@@ -812,7 +823,11 @@ export function LiveDock({
                         ·{" "}
                       </span>
                       <span className="min-w-0 truncate">
-                        <CrossfadeText value={model.semanticStep} />
+                        {preferences.ai.showLiveDockProgress ? (
+                          <CrossfadeText value={model.semanticStep} />
+                        ) : (
+                          stateLabel ?? "Ready"
+                        )}
                       </span>
                     </span>
                   </button>

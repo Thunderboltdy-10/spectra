@@ -1,7 +1,7 @@
 "use client";
 
 import {
-  CalendarDays,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Clock3,
@@ -10,14 +10,18 @@ import {
   Link2,
   LoaderCircle,
   LockKeyhole,
+  Layers3,
   Plus,
   RefreshCw,
+  Search,
   Sparkles,
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { ProductErrorState } from "../../components/product-state";
+import { AuxiliaryRail, AuxiliaryRailTrigger } from "../../components/auxiliary-rail";
 import { spectraBus } from "../../events";
 import { CapabilityTruthBadge, CapabilityTruthState } from "../../integrations/status/capability-truth";
 import {
@@ -91,8 +95,24 @@ async function calendarPost(body: Record<string, unknown>) {
 }
 
 type DragPayload =
-  | { type: "task"; item: CalendarItem }
-  | { type: "block"; item: CalendarItem };
+  | { type: "task"; item: CalendarItem; grabOffsetMinutes: number }
+  | { type: "block"; item: CalendarItem; grabOffsetMinutes: number };
+
+type GesturePreview = {
+  itemId?: string;
+  title: string;
+  startAt: number;
+  endAt: number;
+  layer: CalendarLayerKey;
+};
+
+type ResizeGesture = {
+  item: CalendarItem;
+  edge: "start" | "end";
+  originY: number;
+  startAt: number;
+  endAt: number;
+};
 
 export function CalendarApplication() {
   const [anchor, setAnchor] = useState(() => new Date());
@@ -105,6 +125,12 @@ export function CalendarApplication() {
   const [visibleLayers, setVisibleLayers] = useState<Set<CalendarLayerKey>>(
     () => new Set(CALENDAR_LAYERS.map((layer) => layer.key)),
   );
+  const [sideOpen, setSideOpen] = useState(true);
+  const [layersOpen, setLayersOpen] = useState(false);
+  const [taskQuery, setTaskQuery] = useState("");
+  const [gesturePreview, setGesturePreview] = useState<GesturePreview | null>(null);
+  const [resizeGesture, setResizeGesture] = useState<ResizeGesture | null>(null);
+  const [pendingItemIds, setPendingItemIds] = useState<Set<string>>(() => new Set());
   const dragRef = useRef<DragPayload | null>(null);
   const days = useMemo(() => daysForWeek(anchor), [anchor]);
   const range = useMemo(
@@ -179,17 +205,77 @@ export function CalendarApplication() {
 
   async function commit(action: Record<string, unknown>) {
     try {
-      await calendarPost(action);
-      await load(true);
+      const wire = await calendarPost(action);
+      if (wire && typeof wire === "object" && typeof (wire as Record<string, unknown>).id === "string") {
+        const nextItem = calendarItemFromWire(wire as Record<string, unknown>);
+        replaceOverviewItem(nextItem);
+        setSelected((current) => current?.id === nextItem.id ? nextItem : current);
+      } else {
+        await load(true);
+      }
     } catch (nextError) {
-      toast.error(nextError instanceof Error ? nextError.message : "Calendar action failed.");
+      const message = nextError instanceof Error ? nextError.message : "Calendar action failed.";
+      if (message.includes("CALENDAR_GESTURE_CONFLICT")) {
+        await load(true);
+        setSelected(null);
+        toast.error("Calendar changed, so the latest block position was restored. Open it again to continue.");
+      } else {
+        toast.error(message);
+      }
+    }
+  }
+
+  function replaceOverviewItem(nextItem: CalendarItem) {
+    setOverview((current) => current ? {
+      ...current,
+      items: current.items.map((item) => item.id === nextItem.id ? nextItem : item),
+    } : current);
+  }
+
+  async function commitWorkGesture(item: CalendarItem, startAt: number, endAt: number) {
+    if (pendingItemIds.has(item.id)) return;
+    const optimistic = { ...item, startAt, endAt };
+    replaceOverviewItem(optimistic);
+    setPendingItemIds((current) => new Set(current).add(item.id));
+    try {
+      const wire = await calendarPost({
+        action: "moveWorkBlock",
+        itemId: item.id,
+        startAt,
+        endAt,
+        expectedRevision: item.revision,
+      });
+      replaceOverviewItem(calendarItemFromWire(wire as Record<string, unknown>));
+    } catch (nextError) {
+      replaceOverviewItem(item);
+      const message = nextError instanceof Error ? nextError.message : "Calendar action failed.";
+      if (message.includes("CALENDAR_GESTURE_CONFLICT")) {
+        await load(true);
+        toast.error("The block changed elsewhere, so Calendar restored its latest position.");
+      } else {
+        toast.error(message);
+      }
+    } finally {
+      setPendingItemIds((current) => {
+        const next = new Set(current);
+        next.delete(item.id);
+        return next;
+      });
+      setGesturePreview(null);
     }
   }
 
   function resolveDrop(event: React.DragEvent<HTMLDivElement>, day: Date) {
     const bounds = event.currentTarget.getBoundingClientRect();
     const ratio = Math.max(0, Math.min(1, (event.clientY - bounds.top) / bounds.height));
-    const minutes = Math.round((START_HOUR * 60 + ratio * (END_HOUR - START_HOUR) * 60) / 15) * 15;
+    const cursorMinutes = START_HOUR * 60 + ratio * (END_HOUR - START_HOUR) * 60;
+    const minutes = Math.max(
+      START_HOUR * 60,
+      Math.min(
+        END_HOUR * 60 - 15,
+        Math.round((cursorMinutes - (dragRef.current?.grabOffsetMinutes ?? 0)) / 15) * 15,
+      ),
+    );
     const startAt = new Date(day);
     startAt.setHours(Math.floor(minutes / 60), minutes % 60, 0, 0);
     return startAt.getTime();
@@ -199,6 +285,7 @@ export function CalendarApplication() {
     event.preventDefault();
     const payload = dragRef.current;
     dragRef.current = null;
+    setGesturePreview(null);
     if (!payload) return;
     const startAt = resolveDrop(event, day);
     if (payload.type === "task") {
@@ -214,85 +301,149 @@ export function CalendarApplication() {
       return;
     }
     const duration = Math.max(15 * 60_000, (payload.item.endAt ?? startAt + HOUR) - (payload.item.startAt ?? startAt));
-    void commit({
-      action: "moveWorkBlock",
-      itemId: payload.item.id,
+    void commitWorkGesture(payload.item, startAt, startAt + duration);
+  }
+
+  function previewDrop(event: React.DragEvent<HTMLDivElement>, day: Date) {
+    event.preventDefault();
+    const payload = dragRef.current;
+    if (!payload) return;
+    const startAt = resolveDrop(event, day);
+    const duration = payload.type === "task"
+      ? HOUR
+      : Math.max(15 * 60_000, (payload.item.endAt ?? startAt + HOUR) - (payload.item.startAt ?? startAt));
+    setGesturePreview({
+      itemId: payload.type === "block" ? payload.item.id : undefined,
+      title: payload.item.title,
       startAt,
       endAt: startAt + duration,
-      expectedRevision: payload.item.revision,
+      layer: payload.type === "block" ? layerFor(payload.item) : "work",
     });
   }
 
+  function beginResize(
+    event: React.PointerEvent<HTMLSpanElement>,
+    item: CalendarItem,
+    edge: "start" | "end",
+  ) {
+    if (item.startAt === undefined || item.endAt === undefined || pendingItemIds.has(item.id)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const gesture: ResizeGesture = {
+      item,
+      edge,
+      originY: event.clientY,
+      startAt: item.startAt,
+      endAt: item.endAt,
+    };
+    setResizeGesture(gesture);
+
+    const resolve = (clientY: number) => {
+      const delta = Math.round((((clientY - gesture.originY) / 52) * 60) / 15) * 15 * 60_000;
+      return edge === "start"
+        ? { startAt: Math.min(gesture.endAt - 15 * 60_000, gesture.startAt + delta), endAt: gesture.endAt }
+        : { startAt: gesture.startAt, endAt: Math.max(gesture.startAt + 15 * 60_000, gesture.endAt + delta) };
+    };
+    const move = (pointerEvent: PointerEvent) => {
+      const next = resolve(pointerEvent.clientY);
+      setGesturePreview({
+        itemId: item.id,
+        title: item.title,
+        ...next,
+        layer: layerFor(item),
+      });
+    };
+    const up = (pointerEvent: PointerEvent) => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      const next = resolve(pointerEvent.clientY);
+      setResizeGesture(null);
+      setGesturePreview(null);
+      if (next.startAt !== item.startAt || next.endAt !== item.endAt) {
+        void commitWorkGesture(item, next.startAt, next.endAt);
+      }
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up, { once: true });
+  }
+
+  const sourceBlocked = Boolean(
+    overview &&
+      [
+        "not_connected",
+        "permission_denied",
+        "unsupported",
+        "schema_incompatible",
+        "unavailable",
+      ].includes(overview.sourceState.kind),
+  );
+  const visibleUnscheduledTasks = (overview?.unscheduledTasks ?? []).filter((task) =>
+    task.title.toLocaleLowerCase().includes(taskQuery.trim().toLocaleLowerCase()),
+  );
+
   return (
     <main className="spectra-wave-y flex h-full min-h-0 flex-col overflow-hidden bg-[var(--bg-primary)] text-[var(--text-primary)]">
-      <header className="shrink-0 border-b border-[var(--border-subtle)] px-5 py-4 lg:px-7">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex min-w-0 items-center gap-3">
-            <span className="grid size-10 shrink-0 place-items-center rounded-xl border border-emerald-700/15 bg-emerald-500/10 text-emerald-800">
-              <CalendarDays className="size-5" />
-            </span>
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <h1 className="font-display text-[25px] font-semibold tracking-[-0.025em]">Calendar</h1>
-                {overview ? <CapabilityTruthBadge state={overview.sourceState} /> : null}
-              </div>
-              <p className="mt-0.5 text-[12px] text-[var(--text-secondary)]">
-                Official time stays fixed. Your tasks become movable work blocks.
-              </p>
-            </div>
+      <header className="shrink-0 px-5 py-3 lg:px-7">
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <h1 className="font-display text-[27px] font-semibold tracking-[-0.03em]">Calendar</h1>
+            {overview && overview.sourceState.kind !== "available" ? (
+              <CapabilityTruthBadge state={overview.sourceState} />
+            ) : null}
           </div>
-          <div className="flex items-center gap-2">
-            <button type="button" onClick={() => void load(true)} disabled={refreshing} className="inline-flex h-9 items-center gap-2 rounded-lg border border-[var(--border-default)] px-3 text-[12px] font-semibold hover:bg-[var(--bg-hover)] disabled:opacity-50">
+          <div className="flex min-w-0 flex-1 items-center justify-center gap-2">
+            <div className="flex items-center gap-0.5">
+              <button type="button" aria-label="Previous week" onClick={() => setAnchor((current) => new Date(current.getTime() - 7 * DAY))} className="grid size-7 place-items-center rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><ChevronLeft className="size-4" /></button>
+              <button type="button" onClick={() => setAnchor(new Date())} className="h-7 rounded-md px-2 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]">Today</button>
+              <button type="button" aria-label="Next week" onClick={() => setAnchor((current) => new Date(current.getTime() + 7 * DAY))} className="grid size-7 place-items-center rounded-md text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"><ChevronRight className="size-4" /></button>
+            </div>
+            <p className="truncate font-display text-[15px] font-semibold">
+              {new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(days[0])}
+              {" – "}
+              {new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(days[6])}
+            </p>
+          </div>
+          <div className="ml-auto flex items-center gap-1.5">
+            <span className="hidden text-[10px] text-[var(--text-tertiary)] xl:inline">{formatFreshness(overview?.lastUpdatedAt)}</span>
+            <button type="button" onClick={() => void load(true)} disabled={refreshing} className="inline-flex size-9 items-center justify-center rounded-lg border border-[var(--border-default)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-50" aria-label="Refresh calendar" title="Refresh calendar">
               {refreshing ? <LoaderCircle className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
-              Refresh
             </button>
+            {!sideOpen ? <AuxiliaryRailTrigger label="calendar tasks" onOpen={() => setSideOpen(true)} /> : null}
             <button type="button" onClick={() => setComposerOpen(true)} className="inline-flex h-9 items-center gap-2 rounded-lg bg-[var(--text-primary)] px-3.5 text-[12px] font-semibold text-[var(--bg-primary)]">
               <Plus className="size-3.5" />
               Add event
             </button>
           </div>
         </div>
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-1 rounded-lg border border-[var(--border-default)] p-1">
-            <button type="button" aria-label="Previous week" onClick={() => setAnchor((current) => new Date(current.getTime() - 7 * DAY))} className="grid size-7 place-items-center rounded-md hover:bg-[var(--bg-hover)]"><ChevronLeft className="size-4" /></button>
-            <button type="button" onClick={() => setAnchor(new Date())} className="h-7 rounded-md px-2.5 text-[11px] font-semibold hover:bg-[var(--bg-hover)]">Today</button>
-            <button type="button" aria-label="Next week" onClick={() => setAnchor((current) => new Date(current.getTime() + 7 * DAY))} className="grid size-7 place-items-center rounded-md hover:bg-[var(--bg-hover)]"><ChevronRight className="size-4" /></button>
-          </div>
-          <p className="font-display text-[16px] font-semibold">
-            {new Intl.DateTimeFormat(undefined, { month: "long", day: "numeric" }).format(days[0])}
-            {" – "}
-            {new Intl.DateTimeFormat(undefined, { month: "long", day: "numeric", year: "numeric" }).format(days[6])}
-          </p>
-          <span className="text-[11px] text-[var(--text-tertiary)]">{formatFreshness(overview?.lastUpdatedAt)}</span>
-        </div>
       </header>
 
-      {error ? (
-        <div role="alert" className="mx-5 mt-4 rounded-xl border border-rose-600/20 bg-rose-500/8 px-4 py-3 text-[12px] text-rose-800">{error}</div>
-      ) : null}
-
       <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
-        <aside className="order-2 flex w-full shrink-0 flex-col border-t border-[var(--border-subtle)] bg-[var(--bg-elevated)] lg:order-1 lg:w-[270px] lg:border-r lg:border-t-0">
-          <section className="border-b border-[var(--border-subtle)] p-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">Unscheduled</h2>
-              <span className="rounded-full bg-[var(--bg-secondary)] px-2 py-0.5 text-micro font-semibold">{overview?.unscheduledTasks.length ?? 0}</span>
-            </div>
-            <p className="mt-1 text-[11px] leading-4 text-[var(--text-secondary)]">Drag a task into the week. Its official deadline will not move.</p>
-          </section>
-          <div className="max-h-[220px] flex-1 space-y-2 overflow-y-auto p-3 lg:max-h-none">
+        {sideOpen ? <AuxiliaryRail label={`Unscheduled work · ${overview?.unscheduledTasks.length ?? 0}`} onClose={() => setSideOpen(false)} className="order-2 lg:order-2">
+          <p className="px-4 pb-2 pt-1 text-[11px] leading-5 text-[var(--text-secondary)]">Drag a task into the week. Its official deadline stays fixed.</p>
+          <label className="relative mx-3 mb-2 block">
+            <span className="sr-only">Search unscheduled work</span>
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-[var(--text-tertiary)]" />
+            <input value={taskQuery} onChange={(event) => setTaskQuery(event.target.value)} placeholder="Find a task" className="h-9 w-full rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-primary)] pl-8 pr-8 text-[11px] outline-none transition focus:border-[var(--border-strong)]" />
+            {taskQuery ? <button type="button" onClick={() => setTaskQuery("")} className="absolute right-1.5 top-1/2 grid size-6 -translate-y-1/2 place-items-center rounded-md text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]" aria-label="Clear task search"><X className="size-3" /></button> : null}
+          </label>
+          <div className="space-y-1 px-3 py-2">
             {loading ? <div className="flex items-center gap-2 p-3 text-[11px] text-[var(--text-tertiary)]"><LoaderCircle className="size-3.5 animate-spin" /> Loading tasks…</div> : null}
-            {!loading && !(overview?.unscheduledTasks.length) ? <div className="rounded-xl border border-dashed border-[var(--border-default)] p-4 text-center text-[11px] leading-5 text-[var(--text-tertiary)]">No unscheduled tasks. Create one here or from a Plan.</div> : null}
-            {overview?.unscheduledTasks.map((task) => (
-              <button key={task.id} type="button" draggable onDragStart={() => { dragRef.current = { type: "task", item: task }; }} onClick={() => setSelected(task)} className="group flex w-full items-start gap-2 rounded-xl border border-[var(--border-default)] bg-[var(--bg-primary)] p-2.5 text-left shadow-sm hover:border-amber-600/30">
+            {!loading && !(overview?.unscheduledTasks.length) ? <div className="p-4 text-center text-[11px] leading-5 text-[var(--text-tertiary)]">No unscheduled tasks. Create one here or from a Plan.</div> : null}
+            {!loading && taskQuery && !visibleUnscheduledTasks.length ? <div className="p-4 text-center text-[11px] leading-5 text-[var(--text-tertiary)]">No tasks match “{taskQuery}”.</div> : null}
+            {visibleUnscheduledTasks.map((task) => (
+              <button key={task.id} type="button" title={task.title} draggable onDragStart={() => { dragRef.current = { type: "task", item: task, grabOffsetMinutes: 0 }; }} onDragEnd={() => { dragRef.current = null; setGesturePreview(null); }} onClick={() => setSelected(task)} className="group flex w-full items-start gap-2 rounded-xl px-2 py-2.5 text-left transition-colors hover:bg-[var(--bg-hover)]">
                 <GripVertical className="mt-0.5 size-3.5 shrink-0 text-[var(--text-tertiary)]" />
-                <span className="min-w-0 flex-1"><span className="block truncate text-[12px] font-semibold">{task.title}</span><span className="mt-1 block text-micro text-[var(--text-tertiary)]">{task.planArtifactId ? "From Plan" : task.source?.provider ? "From school" : "Personal task"}</span></span>
+                <span className="min-w-0 flex-1"><span className="block truncate text-[12px] font-medium">{task.title}</span><span className="mt-0.5 block text-micro text-[var(--text-tertiary)]">{task.planArtifactId ? "From Plan" : task.source?.provider ? "From school" : "Personal task"}</span></span>
               </button>
             ))}
           </div>
-          <section className="border-t border-[var(--border-subtle)] p-4">
-            <h2 className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--text-tertiary)]">Layers</h2>
-            <div className="mt-2 space-y-1">
+          <section className="mt-3 px-3 pb-4">
+            <button type="button" onClick={() => setLayersOpen((open) => !open)} className="flex h-11 w-full items-center gap-2 px-4 text-left text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]" aria-expanded={layersOpen}>
+              <Layers3 className="size-3.5" />
+              <span className="flex-1">Layers</span>
+              <ChevronDown className={cn("size-3.5 transition-transform", layersOpen && "rotate-180")} />
+            </button>
+            {layersOpen ? <div className="space-y-1 px-3 pb-3">
               {CALENDAR_LAYERS.filter((layer) => layer.key !== "shared").map((layer) => (
                 <label key={layer.key} className="flex cursor-pointer items-center gap-2 rounded-lg px-1 py-1.5 text-[11px] hover:bg-[var(--bg-hover)]">
                   <input type="checkbox" checked={visibleLayers.has(layer.key)} onChange={() => setVisibleLayers((current) => { const next = new Set(current); if (next.has(layer.key)) next.delete(layer.key); else next.add(layer.key); return next; })} />
@@ -300,14 +451,22 @@ export function CalendarApplication() {
                   <span className="flex-1">{layer.label}</span>
                 </label>
               ))}
-            </div>
+            </div> : null}
           </section>
-        </aside>
+        </AuxiliaryRail> : null}
 
-        <section className="order-1 min-h-[520px] min-w-0 flex-1 overflow-auto lg:order-2 lg:min-h-0">
+        <section className="order-1 min-h-[520px] min-w-0 flex-1 overflow-auto lg:order-1 lg:min-h-0">
           <div className="min-w-[760px] p-3 lg:p-4">
-            {overview ? <CapabilityTruthState state={overview.sourceState} title="School calendar" onRetry={() => void load(true)} /> : null}
-            <div className="mt-3 grid grid-cols-[54px_repeat(7,minmax(96px,1fr))] overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)]">
+            {error ? (
+              <ProductErrorState
+                title="Calendar could not be loaded"
+                detail={error}
+                action={<button type="button" onClick={() => void load(true)} className="h-9 rounded-lg bg-[var(--text-primary)] px-3.5 text-[12px] font-semibold text-[var(--bg-primary)]">Try again</button>}
+              />
+            ) : sourceBlocked && overview ? (
+              <CapabilityTruthState state={overview.sourceState} title="School calendar" onRetry={() => void load(true)} />
+            ) : null}
+            {!error ? <div className={cn("grid grid-cols-[54px_repeat(7,minmax(96px,1fr))] overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-elevated)]", sourceBlocked && "mt-3")}>
               <div className="border-b border-r border-[var(--border-subtle)]" />
               {days.map((day) => {
                 const today = dayKey(day.getTime()) === dayKey(Date.now());
@@ -318,20 +477,35 @@ export function CalendarApplication() {
               </div>
               {days.map((day) => {
                 const dayItems = positioned.filter((item) => item.startAt !== undefined && dayKey(item.startAt) === dayKey(day.getTime()));
-                return <div key={day.toISOString()} onDragOver={(event) => event.preventDefault()} onDrop={(event) => dropOnDay(event, day)} className="relative border-r border-[var(--border-subtle)] last:border-r-0" style={{ height: (END_HOUR - START_HOUR) * 52 }}>
+                const preview = gesturePreview && dayKey(gesturePreview.startAt) === dayKey(day.getTime()) ? gesturePreview : null;
+                return <div key={day.toISOString()} onDragOver={(event) => previewDrop(event, day)} onDrop={(event) => dropOnDay(event, day)} className="relative border-r border-[var(--border-subtle)] last:border-r-0" style={{ height: (END_HOUR - START_HOUR) * 52 }}>
                   {Array.from({ length: END_HOUR - START_HOUR }, (_, index) => <div key={index} className="absolute inset-x-0 border-t border-[var(--border-subtle)]" style={{ top: index * 52 }} />)}
+                  {preview ? (() => {
+                    const layer = CALENDAR_LAYERS.find((candidate) => candidate.key === preview.layer)!;
+                    const top = Math.max(0, (((new Date(preview.startAt).getHours() + new Date(preview.startAt).getMinutes() / 60) - START_HOUR) / (END_HOUR - START_HOUR)) * 100);
+                    const height = Math.max(24, ((preview.endAt - preview.startAt) / HOUR) * 52);
+                    return <div className="pointer-events-none absolute inset-x-1 z-30 overflow-hidden rounded-lg border-2 border-dashed px-2 py-1.5 text-left shadow-lg" style={{ top: `${top}%`, height, borderColor: layer.color, background: `color-mix(in oklab, ${layer.color} 20%, var(--bg-elevated))`, color: layer.color }}>
+                      <span className="block text-micro font-bold">{formatTime(preview.startAt, timezone)} – {formatTime(preview.endAt, timezone)}</span>
+                      <span className="mt-0.5 block truncate text-micro font-semibold text-[var(--text-primary)]">{preview.title}</span>
+                    </div>;
+                  })() : null}
                   {dayItems.map((item) => {
                     const layer = CALENDAR_LAYERS.find((candidate) => candidate.key === layerFor(item))!;
                     const top = Math.max(0, (((new Date(item.startAt!).getHours() + new Date(item.startAt!).getMinutes() / 60) - START_HOUR) / (END_HOUR - START_HOUR)) * 100);
                     const duration = Math.max(30 * 60_000, item.endAt! - item.startAt!);
                     const height = Math.max(24, (duration / HOUR) * 52);
-                    return <button key={item.id} type="button" draggable={item.kind === "scheduled_work_block"} onDragStart={() => { if (item.kind === "scheduled_work_block") dragRef.current = { type: "block", item }; }} onClick={() => setSelected(item)} className="absolute inset-x-1 z-10 overflow-hidden rounded-lg border px-2 py-1.5 text-left shadow-sm hover:z-20 hover:shadow-md" style={{ top: `${top}%`, height, borderColor: `${layer.color}55`, background: `color-mix(in oklab, ${layer.color} 13%, var(--bg-elevated))`, color: layer.color }}>
-                      <span className="flex items-center gap-1 text-micro font-bold"><span className="truncate">{formatTime(item.startAt!, timezone)}</span>{item.sourceLocked ? <LockKeyhole className="size-2.5" /> : null}</span><span className="mt-0.5 block truncate text-micro font-semibold text-[var(--text-primary)]">{item.title}</span>
+                    const movable = item.kind === "scheduled_work_block";
+                    const previewing = gesturePreview?.itemId === item.id;
+                    return <button key={item.id} type="button" title={item.title} draggable={movable && !pendingItemIds.has(item.id) && !resizeGesture} onDragStart={(event) => { if (movable) { const bounds = event.currentTarget.getBoundingClientRect(); dragRef.current = { type: "block", item, grabOffsetMinutes: Math.round((((event.clientY - bounds.top) / 52) * 60) / 15) * 15 }; } }} onDragEnd={() => { dragRef.current = null; setGesturePreview(null); }} onClick={() => setSelected(item)} className={cn("group absolute inset-x-1 z-10 overflow-hidden rounded-lg border px-2 py-1.5 text-left shadow-sm transition hover:z-20 hover:shadow-md", previewing && "opacity-25", pendingItemIds.has(item.id) && "animate-pulse")} style={{ top: `${top}%`, height, borderColor: `${layer.color}55`, background: `color-mix(in oklab, ${layer.color} 13%, var(--bg-elevated))`, color: layer.color }}>
+                      {movable ? <span role="presentation" onPointerDown={(event) => beginResize(event, item, "start")} className="absolute inset-x-1 top-0 z-20 h-2 cursor-ns-resize rounded-t opacity-0 transition-opacity hover:bg-black/10 group-hover:opacity-100" /> : null}
+                      <span className="flex items-center gap-1 text-micro font-bold"><span className="truncate">{formatTime(item.startAt!, timezone)}{item.endAt ? ` – ${formatTime(item.endAt, timezone)}` : ""}</span>{item.sourceLocked ? <LockKeyhole className="size-2.5" /> : null}</span>
+                      <span className="mt-0.5 block truncate text-micro font-semibold text-[var(--text-primary)]">{item.title}</span>
+                      {movable ? <span role="presentation" onPointerDown={(event) => beginResize(event, item, "end")} className="absolute inset-x-1 bottom-0 z-20 h-2 cursor-ns-resize rounded-b opacity-0 transition-opacity hover:bg-black/10 group-hover:opacity-100" /> : null}
                     </button>;
                   })}
                 </div>;
               })}
-            </div>
+            </div> : null}
 
             {overview?.partialTimeItems.length ? <section className="mt-3 rounded-xl border border-amber-600/20 bg-amber-500/7 p-3"><div className="flex items-center gap-2 text-[11px] font-semibold text-amber-900"><Clock3 className="size-3.5" />Time not supplied by the source</div><div className="mt-2 flex flex-wrap gap-2">{overview.partialTimeItems.map((item) => <button key={item.id} type="button" onClick={() => setSelected(item)} className="rounded-lg border border-amber-700/20 bg-[var(--bg-elevated)] px-2.5 py-1.5 text-micro font-semibold text-[var(--text-primary)]">{item.title} · {item.timePrecision === "unknown" ? "period/date unavailable" : "date only"}</button>)}</div></section> : null}
           </div>

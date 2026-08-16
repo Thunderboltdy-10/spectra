@@ -14,7 +14,6 @@ import {
   AlertTriangle,
   BarChart3,
   CalendarDays,
-  ChevronDown,
   CircleDollarSign,
   CircleGauge,
   CloudCog,
@@ -53,6 +52,7 @@ import { metricDefinition } from "@/features/spectra/administration/metric-regis
 import { AuxiliaryRail, AuxiliaryRailTrigger } from "@/features/spectra/components/auxiliary-rail";
 import { ProductPageHeader } from "@/features/spectra/components/product-page-header";
 import { ProductSectionNav } from "@/features/spectra/components/product-section-nav";
+import { OverflowMenu } from "@/components/ui/dropdown-menu";
 import {
   AdminButton,
   AdminCard,
@@ -69,6 +69,8 @@ import {
   PrivacyNotice,
   SelectField,
   StatusBadge,
+  statusToneFor,
+  type StatusTone,
   TextAreaField,
   TextField,
 } from "@/features/spectra/administration/shared";
@@ -204,16 +206,6 @@ function dateRange() {
       .slice(0, 10),
     toDay: new Date().toISOString().slice(0, 10),
   };
-}
-
-function toneForStatus(status: string) {
-  if (["active", "operational", "completed", "resolved"].includes(status))
-    return "good" as const;
-  if (["failed", "critical", "blocked", "archived"].includes(status))
-    return "danger" as const;
-  if (["degraded", "suspended", "major", "awaiting_approval"].includes(status))
-    return "warn" as const;
-  return "neutral" as const;
 }
 
 function PlatformUsageChart({
@@ -464,7 +456,7 @@ function PlatformOverviewSurface({
                   <span className="min-w-0 flex-1 truncate">
                     {service.service}
                   </span>
-                  <StatusBadge tone={toneForStatus(service.status)}>
+                  <StatusBadge tone={statusToneFor(service.status)}>
                     {service.status}
                   </StatusBadge>
                 </div>
@@ -536,11 +528,11 @@ function PlatformOverviewSurface({
               [
                 "Failed AI runs",
                 data.queues.failedRuns24h,
-                data.queues.failedRuns24h === null ? "neutral" : "danger",
+                data.queues.failedRuns24h === null ? "unknown" : "failure",
               ],
-              ["Connector errors", data.queues.integrationErrors, "warn"],
-              ["Open feedback", data.queues.openFeedback, "blue"],
-              ["School requests", data.queues.openRequests, "good"],
+              ["Connector errors", data.queues.integrationErrors, "attention"],
+              ["Open feedback", data.queues.openFeedback, "neutral"],
+              ["School requests", data.queues.openRequests, "neutral"],
             ].map(([label, value, tone]) => (
               <button
                 key={String(label)}
@@ -555,9 +547,7 @@ function PlatformOverviewSurface({
                 className="flex w-full items-center justify-between rounded-[8px] px-3 py-2 text-micro hover:bg-[var(--bg-secondary)]"
               >
                 <span>{label}</span>
-                <StatusBadge
-                  tone={tone as "neutral" | "danger" | "warn" | "blue" | "good"}
-                >
+                <StatusBadge tone={tone as StatusTone}>
                   {formatCompact(value as number | null)}
                 </StatusBadge>
               </button>
@@ -657,7 +647,7 @@ function PlatformOverviewSurface({
                       {row.type}
                     </td>
                     <td className="py-2.5">
-                      <StatusBadge tone={toneForStatus(row.status)}>
+                      <StatusBadge tone={statusToneFor(row.status)}>
                         {row.status.replaceAll("_", " ")}
                       </StatusBadge>
                     </td>
@@ -676,25 +666,16 @@ function PlatformOverviewSurface({
           <Plus size={12} />
           Add school
         </AdminButton>
-        <label className="relative">
-          <span className="sr-only">More platform actions</span>
-          <select
-            aria-label="More platform actions"
-            defaultValue=""
-            onChange={(event) => {
-              const target = event.target.value as Tab;
-              if (target) onTab(target);
-              event.currentTarget.value = "";
-            }}
-            className="h-9 appearance-none rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] pl-3 pr-8 text-[11px] font-medium text-[var(--text-secondary)] outline-none hover:bg-[var(--bg-hover)]"
-          >
-            <option value="">More actions</option>
-            <option value="schools">Invite users</option>
-            <option value="usage">View reports</option>
-            <option value="governance">System settings</option>
-          </select>
-          <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 size-3.5 -translate-y-1/2 text-[var(--text-tertiary)]" />
-        </label>
+        <OverflowMenu
+          label="More platform actions"
+          size={36}
+          items={[
+            { key: "schools", label: "Invite users", icon: UserPlus },
+            { key: "usage", label: "View reports", icon: BarChart3 },
+            { key: "governance", label: "System settings", icon: Settings2 },
+          ]}
+          onSelect={(key) => onTab(key as Tab)}
+        />
       </div>
 
       <PrivacyNotice>{data.privacy}</PrivacyNotice>
@@ -1085,7 +1066,7 @@ function SchoolsSurface({
                       <strong className="text-[11px] font-medium">
                         {saga.schoolName}
                       </strong>
-                      <StatusBadge tone={toneForStatus(saga.status)}>
+                      <StatusBadge tone={statusToneFor(saga.status)}>
                         {saga.status}
                       </StatusBadge>
                     </div>
@@ -1178,7 +1159,7 @@ function SchoolsSurface({
                     <td className="py-3">{formatCompact(school.members)}</td>
                     <td className="py-3">
                       <StatusBadge
-                        tone={toneForStatus(school.integrationStatus)}
+                        tone={statusToneFor(school.integrationStatus)}
                       >
                         {school.integrationStatus.replaceAll("_", " ")}
                       </StatusBadge>
@@ -1187,15 +1168,15 @@ function SchoolsSurface({
                       <StatusBadge
                         tone={
                           school.limitEnforcement === "disabled"
-                            ? "good"
-                            : "warn"
+                            ? "healthy"
+                            : "attention"
                         }
                       >
                         {school.limitEnforcement}
                       </StatusBadge>
                     </td>
                     <td className="py-3">
-                      <StatusBadge tone={toneForStatus(school.status)}>
+                      <StatusBadge tone={statusToneFor(school.status)}>
                         {school.status}
                       </StatusBadge>
                     </td>
@@ -1520,7 +1501,7 @@ function SchoolsSurface({
                     <span>
                       {item.category.replaceAll("_", " ")} · {item.period}
                     </span>
-                    <StatusBadge tone={item.wouldBlock ? "danger" : "good"}>
+                    <StatusBadge tone={item.wouldBlock ? "failure" : "healthy"}>
                       {formatCompact(item.current)} /{" "}
                       {formatCompact(item.maximum)}
                     </StatusBadge>
@@ -1775,7 +1756,7 @@ function OperationsSurface({
                       {formatRelative(incident.updatedAt)}
                     </span>
                   </span>
-                  <StatusBadge tone={toneForStatus(incident.status)}>
+                  <StatusBadge tone={statusToneFor(incident.status)}>
                     {incident.status}
                   </StatusBadge>
                   <SelectField
@@ -1830,7 +1811,7 @@ function OperationsSurface({
                 className="flex items-center justify-between gap-3 rounded-[7px] border border-[var(--border-subtle)] px-3 py-2.5 text-micro"
               >
                 <span>{service.service}</span>
-                <StatusBadge tone={toneForStatus(service.status)}>
+                <StatusBadge tone={statusToneFor(service.status)}>
                   {service.status}
                 </StatusBadge>
               </div>
@@ -2030,13 +2011,13 @@ function RequestsSurface({
                 <StatusBadge
                   tone={
                     request.priority === "urgent" || request.priority === "high"
-                      ? "warn"
+                      ? "attention"
                       : "neutral"
                   }
                 >
                   {request.priority}
                 </StatusBadge>
-                <StatusBadge tone={toneForStatus(request.status)}>
+                <StatusBadge tone={statusToneFor(request.status)}>
                   {request.status.replaceAll("_", " ")}
                 </StatusBadge>
               </button>
@@ -2164,7 +2145,7 @@ function PlatformGovernanceSurface() {
                 <span className="grid size-8 shrink-0 place-items-center rounded-[8px] bg-[#eef8f4] text-[#16805f]">
                   <Icon size={15} />
                 </span>
-                <StatusBadge tone="good">Platform guarantee</StatusBadge>
+                <StatusBadge tone="healthy">Platform guarantee</StatusBadge>
               </div>
               <strong className="mt-3 block text-[11px]">{title}</strong>
               <p className="mt-1 text-micro leading-4 text-[var(--text-tertiary)]">
@@ -2322,7 +2303,7 @@ function SecuritySurface({
                           : "Operation-specific"}
                     </td>
                     <td className="py-3">
-                      <StatusBadge tone={toneForStatus(job.status)}>
+                      <StatusBadge tone={statusToneFor(job.status)}>
                         {job.status.replaceAll("_", " ")}
                       </StatusBadge>
                     </td>
@@ -2443,7 +2424,7 @@ function SecuritySurface({
                         {session.school.name}
                       </span>
                     </div>
-                    <StatusBadge tone={active ? "warn" : "neutral"}>
+                    <StatusBadge tone={active ? "attention" : "neutral"}>
                       {active ? session.mode : "ended"}
                     </StatusBadge>
                   </div>
@@ -2481,7 +2462,7 @@ function SecuritySurface({
                     </span>
                   </div>
                   <StatusBadge
-                    tone={toneForStatus(event.decision ?? "recorded")}
+                    tone={statusToneFor(event.decision ?? "recorded")}
                   >
                     {event.decision ?? event.targetType}
                   </StatusBadge>

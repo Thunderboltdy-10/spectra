@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { SelectField } from "@/components/ui/select";
 import {
   getSpectraShareState,
   getSpectraPublicLinks,
@@ -31,6 +32,17 @@ import {
 } from "../data/api";
 
 type ShareableResourceType = "workspace" | "artifact" | "agent";
+const SHARE_LEVEL_OPTIONS = [
+  { value: "read", label: "Read-only" },
+  { value: "modify", label: "Can modify" },
+] as const;
+
+const PUBLIC_EXPIRY_OPTIONS = [
+  { value: "never", label: "Never" },
+  { value: "7d", label: "7 days" },
+  { value: "30d", label: "30 days" },
+] as const;
+
 type ShareLevel = "read" | "modify";
 
 export function ShareDialog({
@@ -465,15 +477,14 @@ export function ShareDialog({
                 <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-[var(--text-tertiary)]" />
               ) : null}
             </div>
-            <select
+            <SelectField
+              ariaLabel="Invitation permission"
               value={level}
-              onChange={(event) => setLevel(event.target.value as ShareLevel)}
-              className="h-10 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 text-[12px] font-medium text-[var(--text-primary)] outline-none"
-              aria-label="Invitation permission"
-            >
-              <option value="read">Read-only</option>
-              <option value="modify">Can modify</option>
-            </select>
+              onChange={(next) => setLevel(next as ShareLevel)}
+              options={SHARE_LEVEL_OPTIONS}
+              size="lg"
+              triggerClassName="w-[132px] shrink-0"
+            />
           </div>
           <input
             value={note}
@@ -586,25 +597,23 @@ export function ShareDialog({
                         </div>
                       </div>
                       <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
-                        <select
+                        <SelectField
+                          ariaLabel={`Permission for ${request.requester?.name ?? "requester"}`}
                           value={
                             requestLevels[request.requestId] ??
                             request.requestedLevel
                           }
                           disabled={working}
-                          onChange={(event) =>
+                          onChange={(next) =>
                             setRequestLevels((current) => ({
                               ...current,
-                              [request.requestId]: event.target
-                                .value as ShareLevel,
+                              [request.requestId]: next as ShareLevel,
                             }))
                           }
-                          aria-label={`Permission for ${request.requester?.name ?? "requester"}`}
-                          className="h-8 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 text-micro text-[var(--text-primary)]"
-                        >
-                          <option value="read">Read-only</option>
-                          <option value="modify">Can modify</option>
-                        </select>
+                          options={SHARE_LEVEL_OPTIONS}
+                          size="sm"
+                          triggerClassName="w-[124px]"
+                        />
                         <button
                           type="button"
                           disabled={working}
@@ -685,20 +694,17 @@ export function ShareDialog({
                     </div>
                   </div>
                   {share.status === "accepted" ? (
-                    <select
+                    <SelectField
+                      ariaLabel={`Permission for ${share.account?.name ?? "member"}`}
                       value={share.level}
                       disabled={busyKey === `level:${share.invitationId}`}
-                      onChange={(event) =>
-                        void changeLevel(
-                          share,
-                          event.target.value as ShareLevel,
-                        )
+                      onChange={(next) =>
+                        void changeLevel(share, next as ShareLevel)
                       }
-                      className="h-8 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-[11px] text-[var(--text-primary)]"
-                    >
-                      <option value="read">Read-only</option>
-                      <option value="modify">Can modify</option>
-                    </select>
+                      options={SHARE_LEVEL_OPTIONS}
+                      size="sm"
+                      triggerClassName="w-[124px]"
+                    />
                   ) : (
                     <span className="rounded-[5px] bg-[var(--bg-secondary)] px-2 py-1 text-micro text-[var(--text-secondary)]">
                       {share.level === "modify" ? "Can modify" : "Read-only"}
@@ -781,32 +787,31 @@ export function ShareDialog({
                             : ""}
                         </div>
                       </div>
-                      <select
+                      <SelectField
+                        ariaLabel={`Access to this work for ${entry.account.name}`}
                         value={selected}
                         disabled={
                           busyKey === `inherited:${entry.account.accountId}`
                         }
-                        onChange={(event) =>
+                        onChange={(next) =>
                           void setInheritedAccess(
                             entry,
-                            event.target.value as "default" | "read" | "none",
+                            next as "default" | "read" | "none",
                           )
                         }
-                        aria-label={`Access to this work for ${entry.account.name}`}
-                        className="h-8 max-w-[160px] rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-micro text-[var(--text-primary)] outline-none"
-                      >
-                        <option value="default">
-                          Workspace default (
-                          {entry.inheritedLevel === "modify"
-                            ? "Can modify"
-                            : "Read-only"}
-                          )
-                        </option>
-                        {entry.inheritedLevel === "modify" ? (
-                          <option value="read">Read-only here</option>
-                        ) : null}
-                        <option value="none">No access here</option>
-                      </select>
+                        options={[
+                          {
+                            value: "default",
+                            label: `Workspace default (${entry.inheritedLevel === "modify" ? "Can modify" : "Read-only"})`,
+                          },
+                          ...(entry.inheritedLevel === "modify"
+                            ? [{ value: "read", label: "Read-only here" }]
+                            : []),
+                          { value: "none", label: "No access here" },
+                        ]}
+                        size="sm"
+                        triggerClassName="max-w-[196px]"
+                      />
                     </div>
                   );
                 })}
@@ -915,18 +920,17 @@ export function ShareDialog({
               >
                 Expiry
               </label>
-              <select
+              <SelectField
                 id="public-expiry"
+                ariaLabel="Expiry"
                 value={publicExpiry}
-                onChange={(event) =>
-                  setPublicExpiry(event.target.value as typeof publicExpiry)
+                onChange={(next) =>
+                  setPublicExpiry(next as typeof publicExpiry)
                 }
-                className="h-8 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 text-micro text-[var(--text-primary)]"
-              >
-                <option value="never">Never</option>
-                <option value="7d">7 days</option>
-                <option value="30d">30 days</option>
-              </select>
+                options={PUBLIC_EXPIRY_OPTIONS}
+                size="sm"
+                triggerClassName="w-[112px]"
+              />
               <button
                 type="button"
                 disabled={busyKey === "public:create"}

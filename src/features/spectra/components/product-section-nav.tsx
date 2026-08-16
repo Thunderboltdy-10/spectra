@@ -1,9 +1,26 @@
 "use client";
 
-import { Ellipsis, type LucideIcon } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { OverflowMenu } from "@/components/ui/dropdown-menu";
 
-/** Shared horizontal section navigation, derived from Library's calm tab rail. */
+/**
+ * Shared horizontal section navigation, derived from Library's calm tab rail.
+ *
+ * Used by School, Admin, Superadmin, ManageBac and Settings, so its overflow
+ * behaviour is the product's section-nav behaviour. Three rules hold it to the
+ * brief:
+ *
+ * 1. The overflow is a real three-dot menu that overlays. It portals to the
+ *    body, so opening it cannot change the rail's height, add `overflow-y`, push
+ *    a tab onto a second row, or make the surface jump. It is never a native
+ *    `<select>` layered under an icon.
+ * 2. Labels are prioritised, never deleted. Under pressure the rail sheds the
+ *    lowest-priority *tabs* into the overflow and keeps every surviving tab's
+ *    label, so nothing degrades into an unnamed icon.
+ * 3. The rail does not clip. `overflow-hidden` used to hide tabs that had no
+ *    other way to be reached.
+ */
 export function ProductSectionNav<T extends string>({
   label,
   items,
@@ -19,15 +36,23 @@ export function ProductSectionNav<T extends string>({
   primaryCount?: number;
   className?: string;
 }) {
-  const primary = items.slice(0, primaryCount);
-  const overflow = items.slice(primaryCount);
-  const activeOverflow = overflow.some((item) => item.key === active);
+  // The active section is always reachable in one click: if it would fall into
+  // the overflow, it trades places with the last primary tab.
+  const ordered = [...items];
+  const activeIndex = ordered.findIndex((item) => item.key === active);
+  if (activeIndex >= primaryCount && primaryCount > 0) {
+    const [activeItem] = ordered.splice(activeIndex, 1);
+    ordered.splice(primaryCount - 1, 0, activeItem);
+  }
+
+  const primary = ordered.slice(0, primaryCount);
+  const overflow = ordered.slice(primaryCount);
 
   return (
     <nav
       aria-label={label}
       className={cn(
-        "mb-5 flex min-w-0 items-end gap-4 overflow-hidden border-b border-[var(--border-default)] sm:gap-6",
+        "mb-5 flex min-w-0 items-end gap-4 border-b border-[var(--border-default)] sm:gap-6",
         className,
       )}
     >
@@ -40,17 +65,15 @@ export function ProductSectionNav<T extends string>({
             type="button"
             onClick={() => onChange(item.key)}
             aria-current={selected ? "page" : undefined}
-            aria-label={item.label}
-            title={item.label}
             className={cn(
-              "relative flex h-10 shrink-0 items-center gap-2 px-0.5 text-[12px] font-medium transition-colors",
+              "relative flex h-10 min-w-0 shrink items-center gap-2 px-0.5 text-caption font-medium transition-colors",
               selected
                 ? "text-[var(--text-primary)]"
                 : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]",
             )}
           >
-            <Icon className="size-3.5" />
-            <span className="hidden min-[520px]:inline">{item.label}</span>
+            <Icon aria-hidden="true" className="size-3.5 shrink-0" />
+            <span className="truncate">{item.label}</span>
             {selected ? (
               <span className="absolute inset-x-0 -bottom-px h-0.5 bg-[var(--text-primary)]" />
             ) : null}
@@ -58,34 +81,13 @@ export function ProductSectionNav<T extends string>({
         );
       })}
       {overflow.length ? (
-        <label
-          className={cn(
-            "relative ml-auto grid size-10 shrink-0 cursor-pointer place-items-center rounded-lg transition-colors hover:bg-[var(--bg-hover)]",
-            activeOverflow ? "text-[var(--text-primary)]" : "text-[var(--text-secondary)]",
-          )}
-          title={activeOverflow ? overflow.find((item) => item.key === active)?.label : `More ${label}`}
-        >
-          <span className="sr-only">More {label}</span>
-          <Ellipsis className="pointer-events-none size-4" />
-          <select
-            aria-label={`More ${label}`}
-            value={activeOverflow ? active : ""}
-            onChange={(event) => {
-              if (event.target.value) onChange(event.target.value as T);
-            }}
-            className="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0"
-          >
-            <option value="">More sections</option>
-            {overflow.map((item) => (
-              <option key={item.key} value={item.key}>
-                {item.label}
-              </option>
-            ))}
-          </select>
-          {activeOverflow ? (
-            <span className="absolute inset-x-0 -bottom-px h-0.5 bg-[var(--text-primary)]" />
-          ) : null}
-        </label>
+        <span className="relative ml-auto shrink-0">
+          <OverflowMenu
+            label={`More ${label}`}
+            items={overflow}
+            onSelect={onChange}
+          />
+        </span>
       ) : null}
     </nav>
   );

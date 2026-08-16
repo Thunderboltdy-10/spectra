@@ -3,21 +3,22 @@
 import { currentTimeMs } from "@/lib/unique-token";
 import {
   AlertCircle,
+  BarChart3,
   Check,
   CheckCircle2,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   Circle,
   Copy,
   Eye,
+  EyeOff,
   GripVertical,
   History,
   ImageIcon,
   Import,
   Loader2,
-  Minus,
-  MoreHorizontal,
   PanelLeft,
   Pencil,
   Plus,
@@ -27,7 +28,8 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { SelectField } from "@/components/ui/select";
 import { targetAttrs } from "../collaboration/target-attributes";
 import {
   abortArtifactImportUpload,
@@ -61,7 +63,7 @@ import {
   validateQuizForPublishing,
   type PortableQuizQuestion,
 } from "../quiz/interchange";
-import { availableWorkModes } from "../work/registry";
+
 import { aiRegionAttr, pathTouches } from "./ai-region-path";
 import {
   ArtifactRichTextEditor,
@@ -80,7 +82,52 @@ import {
 } from "./artifact-studio";
 import { artifactBlobSha256 } from "./artifact-studio-file-utils";
 import { formatShortDate } from "./spectra-view-model";
-import { WorkbarSelect } from "./artifact-workbar";
+import {
+  ArtifactWorkbar,
+  WorkbarItemSelector,
+  type WorkbarActionSpec,
+} from "./artifact-workbar";
+import { useStudioContract } from "./artifact-studio-shell";
+
+/**
+ * One name per question type, used by the type control, the question list and
+ * the printed sheet, so a type is never called two things in one product.
+ */
+const QUIZ_TYPE_LABELS: Record<QuizQuestion["type"], string> = {
+  multiple_choice: "Multiple choice",
+  true_false: "True or false",
+  select_all: "Select all that apply",
+  ordering: "Ordering",
+  short_answer: "Short answer",
+  numeric: "Numeric",
+  fill_blank: "Fill in the blank",
+  long_response: "Long response",
+  matching: "Matching",
+};
+
+const QUIZ_TYPE_OPTIONS = (
+  Object.keys(QUIZ_TYPE_LABELS) as Array<QuizQuestion["type"]>
+).map((type) => ({ value: type, label: QUIZ_TYPE_LABELS[type] }));
+
+/**
+ * `work/registry` mode ids to the quiz's own mode vocabulary. The registry is
+ * the authority on which modes exist and who may enter them, so this map is the
+ * only place the two names have to agree.
+ */
+const REGISTRY_QUIZ_MODES: Record<string, QuizMode> = {
+  build: "build",
+  preview_as_learner: "preview",
+  attempt: "attempt",
+  responses: "responses",
+  results: "results",
+};
+
+/**
+ * Matches `SelectField`'s own label, so a text input and a select sitting in the
+ * same settings grid read as one control grammar rather than two.
+ */
+const settingLabelClass =
+  "mb-1.5 block text-caption font-medium text-[var(--text-secondary)]";
 
 function QuizExperienceSection({
   experience,
@@ -106,7 +153,10 @@ function QuizExperienceSection({
         </p>
       </div>
 
-      <div className="mt-3 grid gap-2 sm:grid-cols-3">
+      <div
+        className="mt-3 grid gap-2"
+        style={{ gridTemplateColumns: "repeat(auto-fit,minmax(190px,1fr))" }}
+      >
         {QUIZ_PRESETS.map((candidate) => {
           const active = preset?.id === candidate.id;
           return (
@@ -151,65 +201,60 @@ function QuizExperienceSection({
       </button>
 
       {open ? (
-        <div className="mt-3 grid gap-3 border-t border-[var(--border-subtle)] pt-3 sm:grid-cols-2">
-          <label className="text-micro font-semibold text-[var(--text-secondary)]">
-            What is kept
-            <select
-              disabled={readOnly}
-              value={experience.persistence}
-              onChange={(event) =>
-                onChange({
-                  persistence: event.target
-                    .value as QuizExperience["persistence"],
-                })
-              }
-              className={`${inputClass()} mt-1`}
-            >
-              <option value="ephemeral">Nothing — answers clear on exit</option>
-              <option value="personal">Their own attempts</option>
-              <option value="submitted">Submitted attempts</option>
-            </select>
-          </label>
+        <div
+          className="mt-3 grid gap-3 border-t border-[var(--border-subtle)] pt-3"
+          style={{ gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))" }}
+        >
+          <SelectField
+            label="What is kept"
+            size="sm"
+            disabled={readOnly}
+            value={experience.persistence}
+            onChange={(value) =>
+              onChange({
+                persistence: value as QuizExperience["persistence"],
+              })
+            }
+            options={[
+              { value: "ephemeral", label: "Nothing, answers clear on exit" },
+              { value: "personal", label: "Their own attempts" },
+              { value: "submitted", label: "Submitted attempts" },
+            ]}
+          />
 
-          <label className="text-micro font-semibold text-[var(--text-secondary)]">
-            Who can sit it
-            <select
-              disabled={readOnly}
-              value={experience.identity}
-              onChange={(event) =>
-                onChange({
-                  identity: event.target.value as QuizExperience["identity"],
-                })
-              }
-              className={`${inputClass()} mt-1`}
-            >
-              <option value="anonymous">Anyone with the link</option>
-              <option value="signed_in">Anyone signed in</option>
-              <option value="assigned">People it is assigned to</option>
-            </select>
-          </label>
+          <SelectField
+            label="Who can sit it"
+            size="sm"
+            disabled={readOnly}
+            value={experience.identity}
+            onChange={(value) =>
+              onChange({ identity: value as QuizExperience["identity"] })
+            }
+            options={[
+              { value: "anonymous", label: "Anyone with the link" },
+              { value: "signed_in", label: "Anyone signed in" },
+              { value: "assigned", label: "People it is assigned to" },
+            ]}
+          />
 
-          <label className="text-micro font-semibold text-[var(--text-secondary)]">
-            Time
-            <select
-              disabled={readOnly}
-              value={experience.timing}
-              onChange={(event) =>
-                onChange({
-                  timing: event.target.value as QuizExperience["timing"],
-                })
-              }
-              className={`${inputClass()} mt-1`}
-            >
-              <option value="untimed">No time limit</option>
-              <option value="countdown">A countdown per attempt</option>
-              <option value="deadline">Closes at a deadline</option>
-            </select>
-          </label>
+          <SelectField
+            label="Time"
+            size="sm"
+            disabled={readOnly}
+            value={experience.timing}
+            onChange={(value) =>
+              onChange({ timing: value as QuizExperience["timing"] })
+            }
+            options={[
+              { value: "untimed", label: "No time limit" },
+              { value: "countdown", label: "A countdown per attempt" },
+              { value: "deadline", label: "Closes at a deadline" },
+            ]}
+          />
 
           {experience.timing === "countdown" ? (
-            <label className="text-micro font-semibold text-[var(--text-secondary)]">
-              Minutes per attempt
+            <label className="block min-w-0">
+              <span className={settingLabelClass}>Minutes per attempt</span>
               <input
                 type="number"
                 min={1}
@@ -227,12 +272,12 @@ function QuizExperienceSection({
                       ) * 60,
                   })
                 }
-                className={`${inputClass()} mt-1`}
+                className={inputClass()}
               />
             </label>
           ) : experience.timing === "deadline" ? (
-            <label className="text-micro font-semibold text-[var(--text-secondary)]">
-              Closes
+            <label className="block min-w-0">
+              <span className={settingLabelClass}>Closes</span>
               <input
                 type="datetime-local"
                 disabled={readOnly}
@@ -253,15 +298,15 @@ function QuizExperienceSection({
                       : undefined,
                   })
                 }
-                className={`${inputClass()} mt-1`}
+                className={inputClass()}
               />
             </label>
           ) : (
             <div />
           )}
 
-          <label className="text-micro font-semibold text-[var(--text-secondary)]">
-            Attempts
+          <label className="block min-w-0">
+            <span className={settingLabelClass}>Attempts</span>
             <input
               type="number"
               min={1}
@@ -281,48 +326,45 @@ function QuizExperienceSection({
                     : "unlimited",
                 })
               }
-              className={`${inputClass()} mt-1`}
+              className={inputClass()}
             />
           </label>
 
-          <label className="text-micro font-semibold text-[var(--text-secondary)]">
-            Answers shown
-            <select
-              disabled={readOnly}
-              value={experience.revealAnswers}
-              onChange={(event) =>
-                onChange({
-                  revealAnswers: event.target
-                    .value as QuizExperience["revealAnswers"],
-                })
-              }
-              className={`${inputClass()} mt-1`}
-            >
-              <option value="immediate">As they answer</option>
-              <option value="after_submit">After they submit</option>
-              <option value="after_deadline">After the deadline</option>
-              <option value="never">Never</option>
-            </select>
-          </label>
+          <SelectField
+            label="Answers shown"
+            size="sm"
+            disabled={readOnly}
+            value={experience.revealAnswers}
+            onChange={(value) =>
+              onChange({
+                revealAnswers: value as QuizExperience["revealAnswers"],
+              })
+            }
+            options={[
+              { value: "immediate", label: "As they answer" },
+              { value: "after_submit", label: "After they submit" },
+              { value: "after_deadline", label: "After the deadline" },
+              { value: "never", label: "Never" },
+            ]}
+          />
 
-          <label className="text-micro font-semibold text-[var(--text-secondary)]">
-            Results seen by
-            <select
-              disabled={readOnly}
-              value={experience.resultsVisibility}
-              onChange={(event) =>
-                onChange({
-                  resultsVisibility: event.target
-                    .value as QuizExperience["resultsVisibility"],
-                })
-              }
-              className={`${inputClass()} mt-1`}
-            >
-              <option value="learner">The learner</option>
-              <option value="teacher">The owner</option>
-              <option value="both">Both</option>
-            </select>
-          </label>
+          <SelectField
+            label="Results seen by"
+            size="sm"
+            disabled={readOnly}
+            value={experience.resultsVisibility}
+            onChange={(value) =>
+              onChange({
+                resultsVisibility:
+                  value as QuizExperience["resultsVisibility"],
+              })
+            }
+            options={[
+              { value: "learner", label: "The learner" },
+              { value: "teacher", label: "The owner" },
+              { value: "both", label: "Both" },
+            ]}
+          />
         </div>
       ) : null}
     </section>
@@ -413,6 +455,14 @@ export function QuizStudio({
   const [published, setPublished] = useState(
     record(content).published === true,
   );
+  /**
+   * When it was last published, which is what makes "unpublished edits" a fact
+   * we can state instead of a state change the owner has to infer.
+   */
+  const publishedAt =
+    typeof record(content).publishedAt === "number"
+      ? Number(record(content).publishedAt)
+      : undefined;
   const [quizAssets, setQuizAssets] = useState<SpectraArtifactAsset[]>([]);
   const [quizMediaError, setQuizMediaError] = useState<string>();
   const [uploadingQuizMedia, setUploadingQuizMedia] = useState(false);
@@ -425,12 +475,40 @@ export function QuizStudio({
   const [questionNavigatorOpen, setQuestionNavigatorOpen] = useState(
     mode === "tab",
   );
+  const [draggingQuestionId, setDraggingQuestionId] = useState<string>();
   const [questionDetailsOpen, setQuestionDetailsOpen] = useState(
     mode === "tab",
   );
   const [responseSummary, setResponseSummary] =
     useState<SpectraQuizResponseSummary>();
   const [responseSummaryError, setResponseSummaryError] = useState<string>();
+
+  /**
+   * What this person may do here, from `work/registry` through the shell
+   * contract rather than from the `readOnly` prop. Sharing grants Read-only or
+   * Edit; everything past viewing is derived from what the type can actually do,
+   * so a read-only learner still holds `attempt` and `submit` while losing
+   * `edit`. Read-only is never a consequence of surface or width (D1/D4).
+   */
+  const studio = useStudioContract();
+  const canEditQuiz = studio.can("edit") && !readOnly;
+  const canAttemptQuiz = studio.can("attempt");
+  const canSubmitQuiz = studio.can("submit");
+  /**
+   * The builder's columns, from the pane's measured density rather than the
+   * viewport. Three columns when there is room, two when the details panel has
+   * to go under the editor, one when even the navigator has to stack. Every one
+   * of them is fully editable: narrow is not read-only (CANON D4).
+   */
+  const threeColumnBuilder = "292px minmax(0,1fr) 210px";
+  const builderColumns =
+    studio.density === "tight"
+      ? undefined
+      : studio.density === "compact"
+        ? `${questionNavigatorOpen ? "228px" : "56px"} minmax(0,1fr)`
+        : questionNavigatorOpen
+          ? threeColumnBuilder
+          : "62px minmax(0,1fr) 210px";
 
   useEffect(() => {
     const reveal = (event: Event) => {
@@ -457,7 +535,7 @@ export function QuizStudio({
     return () => window.removeEventListener("spectra:reveal-target", reveal);
   }, [artifactId, questions]);
   const quizImportRef = useRef<HTMLInputElement>(null);
-  const quizWasReadOnly = useRef(readOnly);
+  const quizWasReadOnly = useRef(!canEditQuiz);
   const [practiceClockNow, setPracticeClockNow] = useState(0);
   // The last thing the server said about the clock, and when it said it.
   const [practiceClock, setPracticeClock] = useState<{
@@ -486,12 +564,13 @@ export function QuizStudio({
   }, [content]);
 
   useEffect(() => {
-    if (readOnly && (view === "builder" || view === "settings"))
+    // Authoring surfaces exist only for someone the capability model lets edit.
+    if (!canEditQuiz && (view === "builder" || view === "settings"))
       setView("preview");
-    if (quizWasReadOnly.current && !readOnly && !practiceAttempt)
+    if (quizWasReadOnly.current && canEditQuiz && !practiceAttempt)
       setView("builder");
-    quizWasReadOnly.current = readOnly;
-  }, [practiceAttempt, readOnly, view]);
+    quizWasReadOnly.current = !canEditQuiz;
+  }, [canEditQuiz, practiceAttempt, view]);
 
   useEffect(() => {
     const openPreview = (event: Event) => {
@@ -559,7 +638,7 @@ export function QuizStudio({
   useEffect(() => {
     // Cohort results are only fetched when the owner actually opens them, so a
     // quiz nobody is reporting on costs nothing to keep open.
-    if (view !== "summary" || readOnly) return;
+    if (view !== "summary" || !canEditQuiz) return;
     let active = true;
     setResponseSummaryError(undefined);
     void getSpectraQuizResponseSummary(artifactId)
@@ -577,7 +656,7 @@ export function QuizStudio({
     return () => {
       active = false;
     };
-  }, [artifactId, readOnly, view]);
+  }, [artifactId, canEditQuiz, view]);
 
   const quizAssetMap = new Map(
     quizAssets.map((asset) => [asset.assetId, asset]),
@@ -640,6 +719,30 @@ export function QuizStudio({
         question.id === questionId ? { ...question, ...patch } : question,
       ),
     );
+  }
+
+  /**
+   * Real reordering, from the pointer and from the keyboard. Order is what a
+   * learner sees, so a grip that only looked draggable was a lie. Region ids are
+   * keyed on the question id, not its index, so moving a question keeps every
+   * AI target and comment anchored to the same question.
+   */
+  function moveQuestion(fromIndex: number, toIndex: number) {
+    if (
+      !canEditQuiz ||
+      fromIndex === toIndex ||
+      fromIndex < 0 ||
+      toIndex < 0 ||
+      fromIndex >= questions.length ||
+      toIndex >= questions.length
+    )
+      return;
+    const next = [...questions];
+    const [moved] = next.splice(fromIndex, 1);
+    if (!moved) return;
+    next.splice(toIndex, 0, moved);
+    commit(next);
+    setActiveQuestionId(moved.id);
   }
 
   function addQuestion() {
@@ -852,6 +955,40 @@ export function QuizStudio({
     ),
   ]);
   /**
+   * Which questions actually carry an answer. Multi-value types are stored as a
+   * JSON array, and an empty array is not an answer, so a learner is never told
+   * a question is done when nothing was chosen.
+   */
+  const answeredQuestionIds = new Set(
+    displayedQuestions
+      .filter((question) => {
+        const answer = (answers[question.id] ?? "").trim();
+        if (!answer) return false;
+        if (!answer.startsWith("[")) return true;
+        try {
+          return (JSON.parse(answer) as unknown[]).length > 0;
+        } catch {
+          return true;
+        }
+      })
+      .map((question) => question.id),
+  );
+  const answeredQuestionCount = answeredQuestionIds.size;
+  const unansweredQuestionCount =
+    displayedQuestions.length - answeredQuestionCount;
+  /** The score as a percentage, from the server for a real attempt. */
+  const attemptPercentage =
+    practiceAttempt?.status === "submitted"
+      ? (practiceAttempt.percentage ?? undefined)
+      : submitted && displayedQuestions.length
+        ? Math.round(
+            (displayedQuestions.filter((question) => questionCorrect(question))
+              .length /
+              displayedQuestions.length) *
+              100,
+          )
+        : undefined;
+  /**
    * The countdown belongs to the server. The tab only interpolates between
    * anchors, so a refresh, a sleeping laptop or a clock that is minutes off
    * cannot buy extra time — the next anchor snaps the display back (§11C).
@@ -875,21 +1012,25 @@ export function QuizStudio({
     (attempt) => attempt.status === "submitted",
   );
   /**
-   * The modes this person can actually use (§11C). A learner never sees Build,
-   * and Responses only exists on a quiz that keeps them — an unusable tab is
-   * worse than a missing one, so unavailable modes are absent rather than
-   * disabled.
+   * The modes this person can actually use. Two questions, two authorities:
+   * `work/registry` says whether this role may do the thing at all, and
+   * `availableQuizModes` (§11C) says whether this quiz's own configuration
+   * offers it. A mode has to clear both, so a learner never sees Build and a
+   * teacher never sees Responses on a quiz that keeps nothing. An unusable mode
+   * is absent rather than disabled.
    */
-  const quizModes = availableQuizModes(quizSettings.experience, {
-    canEdit: !readOnly,
-    viewer: readOnly ? "learner" : "teacher",
+  const configuredQuizModes = availableQuizModes(quizSettings.experience, {
+    canEdit: canEditQuiz,
+    viewer: canEditQuiz ? "teacher" : "learner",
     hasSubmittedAttempt: Boolean(latestSubmittedAttempt),
   });
-  const workQuizModes = availableWorkModes(
-    "quiz",
-    readOnly ? "read_only" : "edit",
-  );
-  const canAttemptQuiz = workQuizModes.some((entry) => entry.id === "attempt");
+  const quizModes = useMemo(() => {
+    const configured = new Set(configuredQuizModes);
+    return studio.modes.flatMap((mode) => {
+      const quizMode = REGISTRY_QUIZ_MODES[mode.id];
+      return quizMode && configured.has(quizMode) ? [quizMode] : [];
+    });
+  }, [configuredQuizModes, studio.modes]);
   const activeQuizMode: QuizMode =
     view === "builder" || view === "settings"
       ? "build"
@@ -931,6 +1072,22 @@ export function QuizStudio({
     else setView("responses");
   }
 
+  /**
+   * The one-click way out of the Attempt activity (CANON D3). Nothing is
+   * discarded: responses are already on the server and an in-progress attempt
+   * stays resumable from Your attempts, so leaving is safe by construction.
+   * An owner lands back in authoring; a learner lands on their attempts.
+   */
+  function leaveAttempt() {
+    setPracticeAttempt(undefined);
+    setPracticeClock(undefined);
+    setAnswers({});
+    setSubmitted(false);
+    setPracticeFeedback({});
+    setPracticeError(undefined);
+    setView(canEditQuiz ? "builder" : "responses");
+  }
+
   function anchorPracticeClock(remainingMs: number | null | undefined) {
     setPracticeClock(
       typeof remainingMs === "number"
@@ -963,6 +1120,12 @@ export function QuizStudio({
   }
 
   async function beginPractice() {
+    // The bar already hides an action the viewer cannot perform; this is the
+    // same truth guarded at the action, so no other caller can route around it.
+    if (!canAttemptQuiz) {
+      setPracticeError("You do not have permission to attempt this quiz.");
+      return;
+    }
     if (!published) {
       setPracticeError(
         "Publish this formative quiz before starting a private attempt.",
@@ -1197,6 +1360,21 @@ export function QuizStudio({
     });
   }
 
+  /**
+   * Withdrawing a quiz on purpose. Attempts already taken are pinned to their
+   * own snapshot, so unpublishing stops new ones without touching old ones.
+   */
+  function unpublishQuiz() {
+    setPublished(false);
+    setPublishIssues([]);
+    onChange({
+      ...record(content),
+      questions,
+      settings: quizSettings,
+      published: false,
+    });
+  }
+
   async function importQuiz(file: File) {
     setQuizImporting(true);
     setQuizImportError(undefined);
@@ -1280,162 +1458,185 @@ export function QuizStudio({
     }
   }
 
+  /**
+   * One bar, declared rather than drawn. Modes are `[]` on purpose: Attempt and
+   * Preview as learner are activities, and CANON D3 forbids an activity as a
+   * peer tab beside authoring, so they are declared as actions with the
+   * capability each one needs. The bar decides what sheds and what promotes into
+   * `⋯`; this type only says what its controls mean.
+   */
+  const workbarActions: WorkbarActionSpec[] = canEditQuiz
+    ? [
+        activeQuizMode === "build"
+          ? {
+              id: "preview",
+              label: "Preview as learner",
+              icon: Eye,
+              priority: "essential",
+              onSelect: () => openQuizMode("preview"),
+            }
+          : {
+              id: "build",
+              label: "Back to build",
+              icon: Pencil,
+              priority: "essential",
+              keepLabel: true,
+              onSelect: () => openQuizMode("build"),
+            },
+        {
+          id: "settings",
+          label: "Quiz settings",
+          icon: SlidersHorizontal,
+          active: view === "settings",
+          // Every one of these is a toggle, not a one-way door: pressing the
+          // active control returns to authoring.
+          onSelect: () => setView(view === "settings" ? "builder" : "settings"),
+        },
+        ...(quizModes.includes("responses")
+          ? [
+              {
+                id: "cohort",
+                label: "Cohort responses",
+                icon: BarChart3,
+                active: view === "summary",
+                onSelect: () =>
+                  view === "summary"
+                    ? openQuizMode("build")
+                    : openQuizMode("responses"),
+              } as WorkbarActionSpec,
+            ]
+          : []),
+        {
+          id: "attempts",
+          label: "Your attempts",
+          icon: History,
+          active: view === "responses",
+          onSelect: () =>
+            setView(view === "responses" ? "builder" : "responses"),
+        },
+        {
+          id: "import",
+          label: quizImporting ? "Importing questions…" : "Import questions",
+          icon: quizImporting ? Loader2 : Import,
+          priority: "advanced",
+          disabled: quizImporting,
+          onSelect: () => quizImportRef.current?.click(),
+        },
+        ...(published
+          ? [
+              {
+                id: "unpublish",
+                label: "Unpublish",
+                icon: EyeOff,
+                priority: "advanced",
+                hint: "Stops new attempts; attempts already taken keep their own version",
+                onSelect: unpublishQuiz,
+              } as WorkbarActionSpec,
+            ]
+          : []),
+      ]
+    : [
+        {
+          id: "attempts",
+          label: "Your attempts",
+          icon: History,
+          priority: "essential",
+          active: view === "responses",
+          onSelect: () => setView("responses"),
+        },
+      ];
+
   return (
     <div className="spectra-quiz-studio bg-transparent">
-      <div className="spectra-editor-workbar flex min-h-10 items-center gap-1.5 px-2 py-1">
-        {view === "builder" && questions.length > 0 ? (
-          <div className="flex min-w-0 flex-1 items-center gap-1">
-            <button
-              type="button"
-              className={iconButtonClass()}
-              aria-label="Previous question"
-              disabled={activeQuestionIndex === 0}
-              onClick={() =>
-                setActiveQuestionId(
-                  questions[Math.max(0, activeQuestionIndex - 1)]?.id ?? "",
-                )
-              }
-            >
-              <ChevronLeft className="h-3.5 w-3.5" />
-            </button>
-            <WorkbarSelect
+      <ArtifactWorkbar
+        label="Quiz"
+        modes={[]}
+        selector={
+          view === "builder" && questions.length > 0 ? (
+            <WorkbarItemSelector
               ariaLabel="Current question"
-              className="min-w-0 flex-1"
+              itemNoun="question"
               value={activeQuestion?.id ?? ""}
-              options={questions.map((question, index) => ({
-                value: question.id,
-                label: `${index + 1} · ${
-                  plannerDescriptionText(question.prompt) || "Untitled question"
-                }`,
-              }))}
               onChange={setActiveQuestionId}
+              items={questions.map((question) => ({
+                value: question.id,
+                label:
+                  plannerDescriptionText(question.prompt) ||
+                  "Untitled question",
+              }))}
             />
-            <span className="shrink-0 text-micro text-[var(--text-tertiary)]">
-              {activeQuestionIndex + 1}/{questions.length}
-            </span>
-            <button
-              type="button"
-              className={iconButtonClass()}
-              aria-label="Next question"
-              disabled={activeQuestionIndex === questions.length - 1}
-              onClick={() =>
-                setActiveQuestionId(
-                  questions[
-                    Math.min(questions.length - 1, activeQuestionIndex + 1)
-                  ]?.id ?? "",
-                )
+          ) : undefined
+        }
+        actions={workbarActions}
+        primary={
+          // One verb, and it is whichever one is actually next: an unpublished
+          // quiz has to be published before anyone can sit it, and a published
+          // one is sat. A disabled primary would be a dead control.
+          published || !canEditQuiz
+            ? {
+                label: "Attempt",
+                icon: Radio,
+                requires: "attempt",
+                busy: practiceBusy,
+                disabled: !published || !synchronizationReady,
+                onSelect: () => openQuizMode("attempt"),
               }
-            >
-              <ChevronRight className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        ) : (
-          <div className="min-w-0 flex-1" />
-        )}
-        <div className="ml-auto flex shrink-0 items-center gap-0.5">
-          {!readOnly && activeQuizMode !== "build" ? (
-            <button
-              type="button"
-              className={iconButtonClass()}
-              aria-label="Back to build"
-              title="Back to build"
-              onClick={() => openQuizMode("build")}
-            >
-              <Pencil className="h-4 w-4" />
-            </button>
-          ) : !readOnly && quizModes.includes("preview") ? (
-            <button
-              type="button"
-              className={iconButtonClass()}
-              aria-label="Preview as learner"
-              title="Preview as learner"
-              onClick={() => openQuizMode("preview")}
-            >
-              <Eye className="h-4 w-4" />
-            </button>
-          ) : null}
-          {!readOnly ? (
-            <>
-              <input
-                ref={quizImportRef}
-                type="file"
-                hidden
-                accept=".json,.csv,.tsv,.xml,.zip,.qti,application/json,text/csv,text/tab-separated-values,application/xml,text/xml,application/zip"
-                onChange={(event) => {
-                  const file = event.currentTarget.files?.[0];
-                  if (file) void importQuiz(file);
-                }}
-              />
-              <details className="group relative">
-                <summary
-                  className={`${iconButtonClass()} list-none [&::-webkit-details-marker]:hidden`}
-                  aria-label="More quiz options"
-                >
-                  <MoreHorizontal className="h-4 w-4" />
-                </summary>
-                <div className="absolute right-0 top-[calc(100%+6px)] z-40 grid min-w-44 gap-1 rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-1.5 shadow-xl">
-                  <button
-                    type="button"
-                    className={smallActionClass()}
-                    onClick={() => setView("settings")}
-                  >
-                    <SlidersHorizontal className="h-3.5 w-3.5" />
-                    Quiz settings
-                  </button>
-                  <button
-                    type="button"
-                    className={smallActionClass()}
-                    onClick={() => setView("responses")}
-                  >
-                    <History className="h-3.5 w-3.5" />
-                    Your attempts
-                  </button>
-                  <button
-                    type="button"
-                    className={smallActionClass()}
-                    disabled={quizImporting}
-                    onClick={() => quizImportRef.current?.click()}
-                  >
-                    {quizImporting ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Import className="h-3.5 w-3.5" />
-                    )}
-                    Import questions
-                  </button>
-                </div>
-              </details>
-              <button
-                type="button"
-                className={`spectra-workbar-primary h-7 rounded-[6px] px-2 text-micro font-semibold ${published ? "border border-[var(--success)] text-[var(--success)]" : "bg-[var(--text-primary)] text-[var(--bg-primary)]"}`}
-                disabled={
-                  practiceBusy ||
-                  (published && (!synchronizationReady || !canAttemptQuiz))
-                }
-                onClick={() => {
-                  if (published) {
-                    void beginPractice();
-                    return;
-                  }
-                  publishQuiz();
-                }}
-              >
-                {practiceBusy ? "…" : published ? "Attempt" : "Publish"}
-              </button>
-            </>
-          ) : published && canAttemptQuiz ? (
-            <button
-              type="button"
-              className="spectra-workbar-primary h-7 rounded-[6px] bg-[#7560e8] px-2 text-micro font-semibold text-white"
-              disabled={practiceBusy || !synchronizationReady}
-              onClick={() => void beginPractice()}
-            >
-              {practiceBusy ? "…" : "Attempt"}
-            </button>
-          ) : null}
-        </div>
-      </div>
+            : {
+                label: publishedAt ? "Publish changes" : "Publish",
+                requires: "edit",
+                onSelect: publishQuiz,
+              }
+        }
+      />
+      {canEditQuiz ? (
+        <input
+          ref={quizImportRef}
+          type="file"
+          hidden
+          accept=".json,.csv,.tsv,.xml,.zip,.qti,application/json,text/csv,text/tab-separated-values,application/xml,text/xml,application/zip"
+          onChange={(event) => {
+            const file = event.currentTarget.files?.[0];
+            if (file) void importQuiz(file);
+          }}
+        />
+      ) : null}
       <div className="spectra-editor-body">
+        {/* Publish state is a fact about this quiz, so it is stated rather than
+            left to be inferred from which verb the primary happens to show.
+            Editing a published quiz withdraws it: attempts are pinned to the
+            version they started on, and the next attempt must not snapshot
+            questions nobody has re-validated. */}
+        {canEditQuiz && !publishIssues.length ? (
+          <p
+            className="border-b border-[var(--border-subtle)] px-4 py-2 text-[11px] leading-5 text-[var(--text-secondary)]"
+            role="status"
+          >
+            {published ? (
+              <>
+                <strong className="font-semibold text-[var(--success)]">
+                  Published
+                </strong>
+                {publishedAt ? ` on ${formatShortDate(publishedAt)}.` : "."}{" "}
+                Learners can attempt it now.
+              </>
+            ) : publishedAt ? (
+              <>
+                <strong className="font-semibold text-[var(--warning)]">
+                  Edits are not published.
+                </strong>{" "}
+                Learners keep the version published on{" "}
+                {formatShortDate(publishedAt)} until you publish again.
+              </>
+            ) : (
+              <>
+                <strong className="font-semibold text-[var(--text-primary)]">
+                  Draft.
+                </strong>{" "}
+                Nobody can attempt this quiz until you publish it.
+              </>
+            )}
+          </p>
+        ) : null}
         {quizImportReport || quizImportError || publishIssues.length ? (
           <div
             className={`border-b px-4 py-3 ${quizImportError || publishIssues.length ? "border-[color-mix(in_oklab,var(--danger)_28%,var(--border-default))] bg-[color-mix(in_oklab,var(--danger)_4%,var(--bg-primary))]" : "border-[color-mix(in_oklab,var(--success)_24%,var(--border-default))] bg-[color-mix(in_oklab,var(--success)_4%,var(--bg-primary))]"}`}
@@ -1495,15 +1696,26 @@ export function QuizStudio({
         {view === "preview" ? (
           <div className="p-5">
             <div className="mx-auto max-w-[760px] space-y-3">
-              <div className="mb-5 flex items-end justify-between">
-                <div>
-                  <h3 className="font-display text-[24px] font-semibold text-[var(--text-primary)]">
-                    {practiceAttempt
-                      ? practiceAttempt.status === "submitted"
-                        ? "Your result"
-                        : "Your attempt"
-                      : "Quiz preview"}
-                  </h3>
+              {/* An activity states what it is and how to leave it, from
+                  inside itself (CANON D3). The exit is a labelled verb, not an
+                  icon in the chrome, and leaving never discards work: the
+                  attempt lives on the server and stays resumable. */}
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="font-display text-[24px] font-semibold text-[var(--text-primary)]">
+                      {practiceAttempt
+                        ? practiceAttempt.status === "submitted"
+                          ? "Your result"
+                          : "Your attempt"
+                        : "Quiz preview"}
+                    </h3>
+                    {practiceAttempt?.status === "in_progress" ? (
+                      <span className="rounded-[6px] border border-[color-mix(in_oklab,var(--accent-cyan)_34%,var(--border-default))] px-2 py-0.5 text-micro font-semibold uppercase tracking-[0.07em] text-[var(--accent-cyan)]">
+                        In progress
+                      </span>
+                    ) : null}
+                  </div>
                   <p className="mt-1 text-[12px] text-[var(--text-secondary)]">
                     {practiceAttempt
                       ? practiceAttempt.status === "submitted"
@@ -1511,7 +1723,7 @@ export function QuizStudio({
                           ? "Submitted when the clock ran out. Everything you had answered was kept."
                           : "This result is yours. It is pinned to the version you answered."
                         : "Answers save as you write them. Reconnect before submitting if that is interrupted."
-                      : "Preview stays local. It does not create an attempt or spend one of yours."}
+                      : "Preview stays local. Attempt creates a private attempt pinned to this quiz version; preview does not, and does not spend one of yours."}
                   </p>
                   <p className="mt-1 text-[11px] text-[var(--text-tertiary)]">
                     {describeQuizExperience(
@@ -1519,38 +1731,68 @@ export function QuizStudio({
                     )}
                   </p>
                 </div>
-                {submitted ? (
-                  <div className="rounded-[8px] bg-[color-mix(in_oklab,var(--success)_9%,var(--bg-primary))] px-3 py-2 text-[12px] font-semibold text-[var(--success)]">
-                    {practiceAttempt?.status === "submitted"
-                      ? `${practiceAttempt.score ?? 0}/${practiceAttempt.maxScore ?? 0} points · ${practiceAttempt.percentage ?? 0}%`
-                      : `${displayedQuestions.filter((question) => questionCorrect(question)).length}/${displayedQuestions.length} correct`}
-                  </div>
-                ) : practiceSecondsRemaining !== null ? (
-                  <div
-                    className={`rounded-[8px] border px-3 py-2 text-right ${
-                      practiceSecondsRemaining > 60
-                        ? "border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-primary)]"
-                        : practiceSecondsRemaining > 0
-                          ? "border-[color-mix(in_oklab,var(--warning)_40%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_6%,var(--bg-primary))] text-[var(--warning)]"
-                          : "border-[color-mix(in_oklab,var(--danger)_40%,var(--border-default))] bg-[color-mix(in_oklab,var(--danger)_6%,var(--bg-primary))] text-[var(--danger)]"
-                    }`}
-                    role="timer"
-                    aria-live="off"
-                  >
-                    <strong className="block font-display text-[16px] tabular-nums">
-                      {practiceSecondsRemaining > 0
-                        ? quizClockLabel(practiceSecondsRemaining)
-                        : "0:00"}
-                    </strong>
-                    <span className="text-micro text-[var(--text-tertiary)]">
-                      {practiceSecondsRemaining > 0
-                        ? practiceExperience?.timing === "deadline"
-                          ? "Until this quiz closes"
-                          : "Left on this attempt"
-                        : "Submitting your answers"}
-                    </span>
-                  </div>
-                ) : null}
+                <div className="flex shrink-0 items-center gap-2">
+                  {submitted ? (
+                    <div className="rounded-[8px] bg-[color-mix(in_oklab,var(--success)_9%,var(--bg-primary))] px-3 py-2 text-right text-[12px] font-semibold text-[var(--success)]">
+                      {practiceAttempt?.status === "submitted"
+                        ? `${practiceAttempt.score ?? 0}/${practiceAttempt.maxScore ?? 0} points · ${practiceAttempt.percentage ?? 0}%`
+                        : `${displayedQuestions.filter((question) => questionCorrect(question)).length}/${displayedQuestions.length} correct`}
+                      {/* The practice target is set in settings, so a result
+                          that never mentions it made the setting decorative. */}
+                      {attemptPercentage !== undefined ? (
+                        <span className="mt-0.5 block text-micro font-medium text-[var(--text-secondary)]">
+                          {attemptPercentage >= quizSettings.targetScore
+                            ? `At or above your ${quizSettings.targetScore}% practice target`
+                            : `${quizSettings.targetScore - attemptPercentage} points below your ${quizSettings.targetScore}% practice target`}
+                        </span>
+                      ) : null}
+                    </div>
+                  ) : practiceSecondsRemaining !== null ? (
+                    <div
+                      className={`rounded-[8px] border px-3 py-2 text-right ${
+                        practiceSecondsRemaining > 60
+                          ? "border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-primary)]"
+                          : practiceSecondsRemaining > 0
+                            ? "border-[color-mix(in_oklab,var(--warning)_40%,var(--border-default))] bg-[color-mix(in_oklab,var(--warning)_6%,var(--bg-primary))] text-[var(--warning)]"
+                            : "border-[color-mix(in_oklab,var(--danger)_40%,var(--border-default))] bg-[color-mix(in_oklab,var(--danger)_6%,var(--bg-primary))] text-[var(--danger)]"
+                      }`}
+                      role="timer"
+                      aria-live="off"
+                    >
+                      <strong className="block font-display text-[16px] tabular-nums">
+                        {practiceSecondsRemaining > 0
+                          ? quizClockLabel(practiceSecondsRemaining)
+                          : "0:00"}
+                      </strong>
+                      <span className="text-micro text-[var(--text-tertiary)]">
+                        {practiceSecondsRemaining > 0
+                          ? practiceExperience?.timing === "deadline"
+                            ? "Until this quiz closes"
+                            : "Left on this attempt"
+                          : "Submitting your answers"}
+                      </span>
+                    </div>
+                  ) : null}
+                  {practiceAttempt ? (
+                    <button
+                      type="button"
+                      onClick={leaveAttempt}
+                      className="h-9 shrink-0 whitespace-nowrap rounded-[8px] border border-[var(--border-strong)] bg-[var(--bg-primary)] px-3 text-[12px] font-semibold text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
+                    >
+                      {practiceAttempt.status === "submitted"
+                        ? "Close result"
+                        : "Leave attempt"}
+                    </button>
+                  ) : canEditQuiz ? (
+                    <button
+                      type="button"
+                      onClick={() => openQuizMode("build")}
+                      className="h-9 shrink-0 whitespace-nowrap rounded-[8px] border border-[var(--border-strong)] bg-[var(--bg-primary)] px-3 text-[12px] font-semibold text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
+                    >
+                      Back to build
+                    </button>
+                  ) : null}
+                </div>
               </div>
               {practiceAttempt?.instructions || quizSettings.instructions ? (
                 <div className="rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-4 py-3 text-[11px] leading-5 text-[var(--text-secondary)]">
@@ -1577,90 +1819,89 @@ export function QuizStudio({
                   <span>{practiceError}</span>
                 </div>
               ) : null}
-              {!practiceAttempt && published ? (
-                <div className="flex flex-wrap items-center justify-between gap-3 rounded-[10px] border border-[color-mix(in_oklab,var(--accent-cyan)_28%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_5%,var(--bg-primary))] p-4">
-                  <div>
-                    <strong className="block text-[12px] text-[var(--text-primary)]">
-                      Ready for a real practice run?
-                    </strong>
-                    <span className="mt-1 block text-micro text-[var(--text-secondary)]">
-                      Creates a private attempt pinned to this quiz version.
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    disabled={practiceBusy}
-                    onClick={() => void beginPractice()}
-                    className="rounded-[8px] bg-[var(--text-primary)] px-3 py-2 text-[11px] font-semibold text-[var(--bg-primary)]"
-                  >
-                    {practiceBusy ? "Starting…" : "Start private practice"}
-                  </button>
-                </div>
-              ) : null}
-              <div className="flex items-center gap-2 rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-2">
-                <button
-                  type="button"
-                  className={iconButtonClass()}
-                  aria-label="Previous preview question"
-                  disabled={activeDisplayedQuestionIndex === 0}
-                  onClick={() =>
-                    setActiveQuestionId(
-                      displayedQuestions[
-                        Math.max(0, activeDisplayedQuestionIndex - 1)
-                      ]?.id ?? "",
-                    )
-                  }
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                </button>
-                <label className="grid min-w-0 flex-1 grid-cols-[auto_minmax(0,1fr)] items-center gap-2 px-1">
-                  <span className="text-micro font-semibold uppercase tracking-[0.07em] text-[var(--text-tertiary)]">
-                    Question
+              {/* Progress is the answer sheet, not a percentage: every question
+                  is reachable, and each one says whether it is answered and,
+                  once graded, whether it was right. */}
+              <div>
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <span className="text-micro font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)]">
+                    {practiceAttempt ? "Answer sheet" : "Questions"}
                   </span>
-                  <select
-                    aria-label="Current preview question"
-                    className="h-8 min-w-0 truncate bg-transparent text-[11px] font-medium text-[var(--text-primary)] outline-none"
-                    value={
-                      displayedQuestions[activeDisplayedQuestionIndex]?.id ?? ""
-                    }
-                    onChange={(event) =>
-                      setActiveQuestionId(event.target.value)
-                    }
-                  >
-                    {displayedQuestions.map((question, index) => (
-                      <option key={question.id} value={question.id}>
-                        {index + 1} ·{" "}
-                        {plannerDescriptionText(question.prompt) ||
-                          "Untitled question"}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <span className="shrink-0 text-micro text-[var(--text-tertiary)]">
-                  {activeDisplayedQuestionIndex + 1} of{" "}
-                  {displayedQuestions.length}
-                </span>
-                <button
-                  type="button"
-                  className={iconButtonClass()}
-                  aria-label="Next preview question"
-                  disabled={
-                    activeDisplayedQuestionIndex ===
-                    displayedQuestions.length - 1
-                  }
-                  onClick={() =>
-                    setActiveQuestionId(
-                      displayedQuestions[
-                        Math.min(
-                          displayedQuestions.length - 1,
-                          activeDisplayedQuestionIndex + 1,
-                        )
-                      ]?.id ?? "",
-                    )
-                  }
+                  <span className="text-micro text-[var(--text-secondary)]">
+                    {answeredQuestionCount} of {displayedQuestions.length}{" "}
+                    answered
+                  </span>
+                </div>
+                <div
+                  className="mt-1.5 h-1 overflow-hidden rounded-full bg-[var(--bg-secondary)]"
+                  role="progressbar"
+                  aria-label="Questions answered"
+                  aria-valuemin={0}
+                  aria-valuemax={displayedQuestions.length}
+                  aria-valuenow={answeredQuestionCount}
                 >
-                  <ChevronRight className="h-4 w-4" />
-                </button>
+                  <div
+                    className="h-full rounded-full bg-[var(--text-primary)] transition-[width] duration-300 ease-out motion-reduce:transition-none"
+                    style={{
+                      width: `${displayedQuestions.length ? (answeredQuestionCount / displayedQuestions.length) * 100 : 0}%`,
+                    }}
+                  />
+                </div>
+                <nav
+                  aria-label={
+                    practiceAttempt ? "Attempt questions" : "Preview questions"
+                  }
+                  className="mt-2.5 flex flex-wrap gap-1.5"
+                >
+                  {displayedQuestions.map((question, index) => {
+                    const graded = submitted
+                      ? practiceAttempt
+                        ? (revealedPracticeResultByQuestion.get(question.id)
+                            ?.correct ?? null)
+                        : question.type === "long_response"
+                          ? null
+                          : questionCorrect(question)
+                      : undefined;
+                    const answered = answeredQuestionIds.has(question.id);
+                    const active = index === activeDisplayedQuestionIndex;
+                    return (
+                      <button
+                        key={question.id}
+                        type="button"
+                        aria-current={active ? "true" : undefined}
+                        aria-label={`Question ${index + 1}${
+                          graded === true
+                            ? ", correct"
+                            : graded === false
+                              ? ", not correct"
+                              : graded === null
+                                ? ", awaiting review"
+                                : answered
+                                  ? ", answered"
+                                  : ", not answered yet"
+                        }`}
+                        title={
+                          plannerDescriptionText(question.prompt) ||
+                          `Question ${index + 1}`
+                        }
+                        onClick={() => setActiveQuestionId(question.id)}
+                        className={`h-8 min-w-8 rounded-[7px] border px-1.5 text-[12px] font-semibold tabular-nums ${
+                          active
+                            ? "border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-primary)]"
+                            : graded === true
+                              ? "border-[color-mix(in_oklab,var(--success)_48%,var(--border-default))] bg-[color-mix(in_oklab,var(--success)_8%,var(--bg-primary))] text-[var(--success)]"
+                              : graded === false
+                                ? "border-[color-mix(in_oklab,var(--danger)_44%,var(--border-default))] bg-[color-mix(in_oklab,var(--danger)_7%,var(--bg-primary))] text-[var(--danger)]"
+                                : answered
+                                  ? "border-[var(--border-strong)] bg-[var(--bg-primary)] text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
+                                  : "border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                        }`}
+                      >
+                        {index + 1}
+                      </button>
+                    );
+                  })}
+                </nav>
               </div>
               {displayedQuestions
                 .filter((_, index) => index === activeDisplayedQuestionIndex)
@@ -1822,46 +2063,48 @@ export function QuizStudio({
                                 (candidate) => candidate.right ?? "",
                               );
                             return (
-                              <label
+                              <div
                                 key={pair.id}
                                 className="grid grid-cols-[minmax(0,1fr)_18px_minmax(0,1fr)] items-center gap-2 rounded-[7px] border border-[var(--border-default)] px-3 py-2"
                               >
                                 <span className="text-[12px] font-medium text-[var(--text-primary)]">
                                   {pair.left || "Untitled prompt"}
                                 </span>
-                                <span className="text-center text-[var(--text-tertiary)]">
+                                <span
+                                  aria-hidden="true"
+                                  className="text-center text-[var(--text-tertiary)]"
+                                >
                                   →
                                 </span>
-                                <select
+                                <SelectField
+                                  ariaLabel={`Match for ${pair.left || "untitled prompt"}`}
+                                  size="sm"
                                   disabled={submitted}
+                                  placeholder="Choose a match"
                                   value={selected ?? ""}
-                                  onChange={(event) => {
+                                  onChange={(value) => {
                                     const next = current.filter(
-                                      (value) =>
-                                        !value.startsWith(`${pair.id}:`),
+                                      (entry) =>
+                                        !entry.startsWith(`${pair.id}:`),
                                     );
-                                    if (event.target.value)
-                                      next.push(
-                                        `${pair.id}:${event.target.value}`,
-                                      );
+                                    if (value) next.push(`${pair.id}:${value}`);
                                     void synchronizePracticeAnswer(
                                       question.id,
                                       JSON.stringify(next),
                                     );
                                   }}
-                                  className={inputClass()}
-                                >
-                                  <option value="">Choose a match</option>
-                                  {choices.map((choice, choiceIndex) => (
-                                    <option
-                                      key={`${pair.id}-${choice}-${choiceIndex}`}
-                                      value={choice}
-                                    >
-                                      {choice}
-                                    </option>
-                                  ))}
-                                </select>
-                              </label>
+                                  options={choices.map(
+                                    (choice, choiceIndex) => ({
+                                      value: choice,
+                                      label:
+                                        choice ||
+                                        `Match ${choiceIndex + 1}`,
+                                    }),
+                                  )}
+                                  className="min-w-0"
+                                  triggerClassName="w-full"
+                                />
+                              </div>
                             );
                           })}
                         </div>
@@ -1907,7 +2150,7 @@ export function QuizStudio({
                       )}
                     </div>
                     {revealedPracticeResultByQuestion.has(question.id) ||
-                    (submitted && !readOnly && !practiceAttempt) ? (
+                    (submitted && canEditQuiz && !practiceAttempt) ? (
                       <div className="mt-3 border-t border-[var(--border-subtle)] pt-3 text-[11px] leading-5 text-[var(--text-secondary)]">
                         <div>
                           <strong className="text-[var(--text-primary)]">
@@ -1937,7 +2180,7 @@ export function QuizStudio({
                                   )
                                   .join(" · ")
                               : question.type === "long_response"
-                                ? "Advisory review — no single auto-scored answer"
+                                ? "Advisory review, no single auto-scored answer"
                                 : question.type === "select_all" ||
                                     question.type === "ordering"
                                   ? (
@@ -1979,59 +2222,118 @@ export function QuizStudio({
                     ) : null}
                   </div>
                 ))}
-              <div className="flex justify-end gap-2 pt-3">
+              <div className="flex flex-wrap items-center gap-2 pt-3">
+                <button
+                  type="button"
+                  className={smallActionClass()}
+                  disabled={activeDisplayedQuestionIndex === 0}
+                  onClick={() =>
+                    setActiveQuestionId(
+                      displayedQuestions[
+                        Math.max(0, activeDisplayedQuestionIndex - 1)
+                      ]?.id ?? "",
+                    )
+                  }
+                >
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                  Previous
+                </button>
+                <button
+                  type="button"
+                  className={smallActionClass()}
+                  disabled={
+                    activeDisplayedQuestionIndex >=
+                    displayedQuestions.length - 1
+                  }
+                  onClick={() =>
+                    setActiveQuestionId(
+                      displayedQuestions[
+                        Math.min(
+                          displayedQuestions.length - 1,
+                          activeDisplayedQuestionIndex + 1,
+                        )
+                      ]?.id ?? "",
+                    )
+                  }
+                >
+                  Next
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </button>
                 {practiceSyncing.length ? (
-                  <span className="mr-auto inline-flex items-center gap-2 text-micro text-[var(--text-tertiary)]">
+                  <span className="ml-auto inline-flex items-center gap-2 text-micro text-[var(--text-tertiary)]">
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
                     Synchronizing {practiceSyncing.length} answer
                     {practiceSyncing.length === 1 ? "" : "s"}
                   </span>
                 ) : practiceAttempt?.status === "in_progress" ? (
-                  <span className="mr-auto inline-flex items-center gap-2 text-micro text-[var(--success)]">
+                  <span className="ml-auto inline-flex items-center gap-2 text-micro text-[var(--success)]">
                     <CheckCircle2 className="h-3.5 w-3.5" />
                     Current answers synchronized
                   </span>
-                ) : null}
+                ) : (
+                  <span className="ml-auto" />
+                )}
                 {submitted ? (
                   <button
                     type="button"
                     className={smallActionClass()}
                     onClick={() => {
-                      setPracticeAttempt(undefined);
+                      if (practiceAttempt) {
+                        leaveAttempt();
+                        return;
+                      }
                       setSubmitted(false);
                       setAnswers({});
                       setPracticeFeedback({});
                     }}
                   >
-                    {practiceAttempt ? "Return to preview" : "Try again"}
+                    {practiceAttempt ? "Close result" : "Try again"}
                   </button>
                 ) : (
-                  <button
-                    type="button"
-                    disabled={practiceBusy || practiceSyncing.length > 0}
-                    className="h-9 rounded-[8px] bg-[var(--text-primary)] px-3 text-[12px] font-medium text-[var(--bg-primary)]"
-                    onClick={() =>
-                      practiceAttempt
-                        ? void submitPracticeAttempt()
-                        : setSubmitted(true)
-                    }
-                  >
-                    {practiceBusy ? "Submitting safely…" : "Submit answers"}
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {unansweredQuestionCount > 0 ? (
+                      <span className="text-micro text-[var(--text-secondary)]">
+                        {unansweredQuestionCount} still blank
+                      </span>
+                    ) : null}
+                    <button
+                      type="button"
+                      disabled={
+                        practiceBusy ||
+                        practiceSyncing.length > 0 ||
+                        (Boolean(practiceAttempt) && !canSubmitQuiz)
+                      }
+                      className="h-9 shrink-0 whitespace-nowrap rounded-[8px] bg-[var(--text-primary)] px-3 text-[12px] font-medium text-[var(--bg-primary)] disabled:opacity-45"
+                      onClick={() =>
+                        practiceAttempt
+                          ? void submitPracticeAttempt()
+                          : setSubmitted(true)
+                      }
+                    >
+                      {practiceBusy
+                        ? "Submitting safely…"
+                        : practiceAttempt
+                          ? "Submit attempt"
+                          : "Check answers"}
+                    </button>
+                  </div>
                 )}
               </div>
             </div>
           </div>
         ) : view === "settings" ? (
-          <div className="mx-auto grid max-w-[900px] gap-4 p-6 md:grid-cols-2">
-            <div className="md:col-span-2">
+          <div
+            className="mx-auto grid max-w-[900px] gap-4 p-6"
+            style={{ gridTemplateColumns: "repeat(auto-fit,minmax(280px,1fr))" }}
+          >
+            <div style={{ gridColumn: "1 / -1" }}>
               <QuizExperienceSection
                 experience={quizSettings.experience}
                 onChange={commitExperience}
-                readOnly={readOnly}
+                readOnly={!canEditQuiz}
               />
             </div>
-            <div className="md:col-span-2">
+            <div style={{ gridColumn: "1 / -1" }}>
               <Field label="Learner instructions">
                 <textarea
                   value={quizSettings.instructions}
@@ -2105,25 +2407,27 @@ export function QuizStudio({
                 className={`h-5 w-5 ${quizSettings.allowResume ? "text-[var(--success)]" : "text-[var(--text-tertiary)]"}`}
               />
             </button>
-            <Field label="Timing accommodation">
+            <Field label="Printed sheet time allowance">
               <div className="rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-4">
-                <select
-                  value={quizSettings.defaultTimeMultiplier}
-                  onChange={(event) =>
-                    commitSettings({
-                      defaultTimeMultiplier: Number(event.target.value),
-                    })
+                <SelectField
+                  ariaLabel="Printed sheet time allowance"
+                  value={String(quizSettings.defaultTimeMultiplier)}
+                  onChange={(value) =>
+                    commitSettings({ defaultTimeMultiplier: Number(value) })
                   }
-                  className={inputClass()}
-                >
-                  <option value={1}>Standard guidance</option>
-                  <option value={1.25}>25% extra time</option>
-                  <option value={1.5}>50% extra time</option>
-                  <option value={2}>Double time</option>
-                </select>
+                  options={[
+                    { value: "1", label: "Standard guidance" },
+                    { value: "1.25", label: "25% extra time" },
+                    { value: "1.5", label: "50% extra time" },
+                    { value: "2", label: "Double time" },
+                  ]}
+                  triggerClassName="w-full"
+                />
                 <p className="mt-2 text-micro leading-4 text-[var(--text-tertiary)]">
-                  Applies on top of the time set above. Learner reduced-motion
-                  and text-size preferences are always respected independently.
+                  Scales the suggested duration printed on the paper sheet. The
+                  on-screen countdown is set by Time above and is held by the
+                  server, so it is not changed here. Learner reduced-motion and
+                  text-size preferences are always respected independently.
                 </p>
               </div>
             </Field>
@@ -2198,7 +2502,12 @@ export function QuizStudio({
               </div>
             ) : (
               <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <div
+                  className="grid gap-2"
+                  style={{
+                    gridTemplateColumns: "repeat(auto-fit,minmax(124px,1fr))",
+                  }}
+                >
                   {(
                     [
                       ["Submitted", String(responseSummary.submittedCount)],
@@ -2206,7 +2515,7 @@ export function QuizStudio({
                       [
                         "Average",
                         responseSummary.averagePercentage === undefined
-                          ? "—"
+                          ? "None yet"
                           : `${responseSummary.averagePercentage}%`,
                       ],
                       [
@@ -2246,7 +2555,7 @@ export function QuizStudio({
                             {entry.prompt}
                           </p>
                           <strong className="shrink-0 font-display text-[16px] tabular-nums text-[var(--text-primary)]">
-                            {entry.answered ? `${share}%` : "—"}
+                            {entry.answered ? `${share}%` : "No answers"}
                           </strong>
                         </div>
                         <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--bg-secondary)]">
@@ -2299,13 +2608,13 @@ export function QuizStudio({
                 </h3>
                 <p className="mt-1 max-w-[520px] text-[11px] leading-5 text-[var(--text-secondary)]">
                   Every attempt you have made on this quiz, newest first. Only
-                  you can open them — authors and collaborators see the group,
+                  you can open them. Authors and collaborators see the group,
                   not your answers.
                 </p>
               </div>
               <button
                 type="button"
-                disabled={!published || practiceBusy}
+                disabled={!published || practiceBusy || !canAttemptQuiz}
                 onClick={() => void beginPractice()}
                 className="rounded-[8px] bg-[var(--text-primary)] px-3 py-2 text-[11px] font-semibold text-[var(--bg-primary)] disabled:opacity-45"
               >
@@ -2386,17 +2695,25 @@ export function QuizStudio({
             )}
           </div>
         ) : (
+          // Columns come from the pane's measured density, never from the
+          // viewport: a quiz in a 420px right-hand panel is the same editor, and
+          // it stays fully editable (CANON D4).
           <div
-            className={`grid ${mode === "tab" ? `pr-[10px] ${questionNavigatorOpen ? "lg:grid-cols-[292px_minmax(0,1fr)_210px]" : "lg:grid-cols-[62px_minmax(0,1fr)_210px]"}` : "grid-cols-1"}`}
+            className="grid"
+            style={
+              builderColumns
+                ? { gridTemplateColumns: builderColumns, paddingRight: 10 }
+                : undefined
+            }
           >
             <aside
               data-quiz-panel="questions"
-              className={`${mode === "tab" ? "border-r p-3" : "border-b px-4 py-2.5"} border-[var(--border-default)]`}
+              className={`${builderColumns ? "border-r p-3" : "border-b px-4 py-2.5"} border-[var(--border-default)]`}
             >
               <div className="flex items-center justify-between gap-2">
                 <button
                   type="button"
-                  className={`flex min-w-0 items-center gap-2 text-left text-micro font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)] ${mode === "tab" && !questionNavigatorOpen ? "w-full justify-center" : ""}`}
+                  className={`flex min-w-0 items-center gap-2 text-left text-micro font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)] ${builderColumns && !questionNavigatorOpen ? "w-full justify-center" : ""}`}
                   onClick={() => setQuestionNavigatorOpen((open) => !open)}
                   aria-expanded={questionNavigatorOpen}
                   aria-label={
@@ -2406,13 +2723,15 @@ export function QuizStudio({
                   }
                 >
                   <PanelLeft className="h-3.5 w-3.5 shrink-0" />
-                  {mode === "tab" && !questionNavigatorOpen ? null : (
+                  {builderColumns && !questionNavigatorOpen ? null : (
+                    // Position is stated once, in the workbar. This is the
+                    // panel's own name and how much is in it.
                     <span className="truncate">
-                      Question {activeQuestionIndex + 1} of {questions.length}
+                      Questions · {questions.length}
                     </span>
                   )}
                 </button>
-                {!readOnly && questionNavigatorOpen ? (
+                {canEditQuiz && questionNavigatorOpen ? (
                   <button
                     type="button"
                     className={smallActionClass()}
@@ -2423,51 +2742,93 @@ export function QuizStudio({
                 ) : null}
               </div>
               {questionNavigatorOpen ? (
-                <div className="mt-2 max-h-[min(46vh,440px)] space-y-1.5 overflow-y-auto pr-0.5">
+                <ul className="mt-2 max-h-[min(46vh,440px)] space-y-1 overflow-y-auto pr-0.5">
                   {questions.map((question, index) => (
-                    <button
+                    <li
                       key={question.id}
-                      type="button"
-                      className={`grid min-h-11 w-full grid-cols-[28px_auto_minmax(0,1fr)_16px] items-center gap-2 rounded-[8px] border px-2 py-1.5 text-left ${
-                        activeQuestion?.id === question.id
-                          ? "border-[#8b6ff0] bg-[color-mix(in_oklab,#8b6ff0_6%,var(--bg-primary))]"
-                          : "border-[var(--border-default)] bg-[var(--bg-primary)] hover:bg-[var(--bg-hover)]"
-                      }`}
-                      onClick={() => setActiveQuestionId(question.id)}
-                      data-ai-region={aiRegionAttr(
-                        pathTouches(aiChangedPaths, `/questions/${index}`),
-                      )}
-                      {...targetAttrs(`/questions/${index}`)}
+                      draggable={canEditQuiz}
+                      onDragStart={(event) => {
+                        setDraggingQuestionId(question.id);
+                        event.dataTransfer.effectAllowed = "move";
+                        event.dataTransfer.setData("text/plain", question.id);
+                      }}
+                      onDragEnd={() => setDraggingQuestionId(undefined)}
+                      onDragOver={(event) => {
+                        if (!canEditQuiz || !draggingQuestionId) return;
+                        event.preventDefault();
+                        event.dataTransfer.dropEffect = "move";
+                      }}
+                      onDrop={(event) => {
+                        event.preventDefault();
+                        const movedId =
+                          event.dataTransfer.getData("text/plain") ||
+                          draggingQuestionId;
+                        setDraggingQuestionId(undefined);
+                        if (!movedId) return;
+                        moveQuestion(
+                          questions.findIndex(
+                            (candidate) => candidate.id === movedId,
+                          ),
+                          index,
+                        );
+                      }}
+                      className={
+                        draggingQuestionId === question.id ? "opacity-50" : ""
+                      }
                     >
-                      <span className="rounded-[6px] border border-[var(--border-default)] py-1 text-center text-[12px] text-[var(--text-secondary)]">
-                        {index + 1}
-                      </span>
-                      <span className="rounded-[5px] bg-[color-mix(in_oklab,#8b6ff0_8%,var(--bg-primary))] px-1.5 py-1 text-micro font-medium text-[#7560e8]">
-                        {
-                          {
-                            multiple_choice: "MCQ",
-                            short_answer: "Short answer",
-                            true_false: "True / False",
-                            select_all: "Select all",
-                            ordering: "Ordering",
-                            numeric: "Numeric",
-                            fill_blank: "Fill blank",
-                            long_response: "Long response",
-                            matching: "Matching",
-                          }[question.type]
-                        }
-                      </span>
-                      <span className="min-w-0">
-                        <span className="block truncate text-micro font-medium text-[var(--text-primary)]">
-                          {plannerDescriptionText(question.prompt) ||
-                            "Untitled question"}
+                      <button
+                        type="button"
+                        className={`grid min-h-11 w-full grid-cols-[26px_minmax(0,1fr)_14px] items-center gap-2 rounded-[8px] border px-2 py-1.5 text-left ${
+                          activeQuestion?.id === question.id
+                            ? "border-[var(--brand-primary)] bg-[color-mix(in_oklab,var(--brand-primary)_6%,var(--bg-primary))]"
+                            : "border-[var(--border-default)] bg-[var(--bg-primary)] hover:bg-[var(--bg-hover)]"
+                        }`}
+                        onClick={() => setActiveQuestionId(question.id)}
+                        onKeyDown={(event) => {
+                          if (!canEditQuiz || !event.altKey) return;
+                          if (event.key === "ArrowUp") {
+                            event.preventDefault();
+                            moveQuestion(index, index - 1);
+                          }
+                          if (event.key === "ArrowDown") {
+                            event.preventDefault();
+                            moveQuestion(index, index + 1);
+                          }
+                        }}
+                        data-ai-region={aiRegionAttr(
+                          pathTouches(aiChangedPaths, `/questions/${index}`),
+                        )}
+                        {...targetAttrs(`/questions/${index}`)}
+                      >
+                        <span className="text-center text-[12px] tabular-nums text-[var(--text-secondary)]">
+                          {index + 1}
                         </span>
-                      </span>
-                      <GripVertical className="h-3.5 w-3.5 text-[var(--text-tertiary)]" />
-                    </button>
+                        {/* Title first and on its own line: at 292px a type chip
+                            beside it truncated every prompt to a few words. */}
+                        <span className="min-w-0">
+                          <span className="block truncate text-[12px] font-medium text-[var(--text-primary)]">
+                            {plannerDescriptionText(question.prompt) ||
+                              "Untitled question"}
+                          </span>
+                          <span className="mt-0.5 block truncate text-micro text-[var(--text-secondary)]">
+                            {QUIZ_TYPE_LABELS[question.type]} ·{" "}
+                            {question.points ?? 1} point
+                            {(question.points ?? 1) === 1 ? "" : "s"}
+                          </span>
+                        </span>
+                        {canEditQuiz ? (
+                          <GripVertical
+                            aria-hidden="true"
+                            className="h-3.5 w-3.5 text-[var(--text-tertiary)]"
+                          />
+                        ) : (
+                          <span />
+                        )}
+                      </button>
+                    </li>
                   ))}
-                </div>
-              ) : mode === "tab" ? (
+                </ul>
+              ) : builderColumns ? (
                 <div className="mt-2 grid gap-1">
                   {questions.map((question, index) => (
                     <button
@@ -2490,7 +2851,7 @@ export function QuizStudio({
                   ))}
                 </div>
               ) : null}
-              {!readOnly && questionNavigatorOpen ? (
+              {canEditQuiz && questionNavigatorOpen ? (
                 <button
                   type="button"
                   className={`${smallActionClass()} mt-2`}
@@ -2502,7 +2863,7 @@ export function QuizStudio({
             </aside>
             <section
               data-quiz-panel="editor"
-              className={`min-w-0 ${mode === "tab" ? "border-r" : "border-b"} border-[var(--border-default)] p-4`}
+              className={`min-w-0 ${builderColumns === threeColumnBuilder ? "border-r" : "border-b"} border-[var(--border-default)] p-4`}
             >
               {activeQuestion ? (
                 <QuestionEditor
@@ -2529,14 +2890,29 @@ export function QuizStudio({
                           `${questionId}:option:${optionIndex + 1}`,
                       ),
                     };
-                    commit([...questions, duplicate]);
+                    // A duplicate belongs beside its original, not at the end of
+                    // a twelve-question set.
+                    const next = [...questions];
+                    next.splice(activeQuestionIndex + 1, 0, duplicate);
+                    commit(next);
                     setActiveQuestionId(questionId);
                   }}
+                  onMove={(toIndex) =>
+                    moveQuestion(activeQuestionIndex, toIndex)
+                  }
                 />
               ) : null}
             </section>
-            <aside data-quiz-panel="settings" className="p-3">
-              {mode === "split" ? (
+            <aside
+              data-quiz-panel="settings"
+              className="min-w-0 p-3"
+              style={
+                builderColumns === threeColumnBuilder
+                  ? undefined
+                  : { gridColumn: "1 / -1" }
+              }
+            >
+              {builderColumns === threeColumnBuilder ? null : (
                 <button
                   type="button"
                   className="mb-2 flex w-full items-center justify-between rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2 text-left text-[11px] font-semibold text-[var(--text-primary)]"
@@ -2545,11 +2921,11 @@ export function QuizStudio({
                 >
                   Question details
                   <ChevronDown
-                    className={`h-3.5 w-3.5 transition-transform ${questionDetailsOpen ? "rotate-180" : ""}`}
+                    className={`h-3.5 w-3.5 transition-transform motion-reduce:transition-none ${questionDetailsOpen ? "rotate-180" : ""}`}
                   />
                 </button>
-              ) : null}
-              {mode === "tab" || questionDetailsOpen ? (
+              )}
+              {builderColumns === threeColumnBuilder || questionDetailsOpen ? (
                 activeQuestion ? (
                   <div className="grid gap-3">
                     <Field
@@ -2560,20 +2936,22 @@ export function QuizStudio({
                       )}
                       path={`/questions/${questions.findIndex((question) => question.id === activeQuestion.id)}/difficulty`}
                     >
-                      <select
+                      <SelectField
+                        ariaLabel="Difficulty"
+                        size="sm"
                         value={activeQuestion.difficulty ?? "medium"}
-                        onChange={(event) =>
+                        onChange={(value) =>
                           updateQuestion(activeQuestion.id, {
-                            difficulty: event.target
-                              .value as QuizQuestion["difficulty"],
+                            difficulty: value as QuizQuestion["difficulty"],
                           })
                         }
-                        className={inputClass()}
-                      >
-                        <option value="easy">Easy</option>
-                        <option value="medium">Medium</option>
-                        <option value="hard">Hard</option>
-                      </select>
+                        options={[
+                          { value: "easy", label: "Easy" },
+                          { value: "medium", label: "Medium" },
+                          { value: "hard", label: "Hard" },
+                        ]}
+                        triggerClassName="w-full"
+                      />
                     </Field>
                     <Field
                       label="Points"
@@ -2596,7 +2974,7 @@ export function QuizStudio({
                       />
                     </Field>
                     <Field
-                      label="Time"
+                      label="Time (seconds)"
                       aiActive={pathTouches(
                         aiChangedPaths,
                         `/questions/${questions.findIndex((question) => question.id === activeQuestion.id)}/timeLimitSeconds`,
@@ -2623,24 +3001,27 @@ export function QuizStudio({
                       )}
                       path={`/questions/${questions.findIndex((question) => question.id === activeQuestion.id)}/bloomLevel`}
                     >
-                      <select
+                      <SelectField
+                        ariaLabel="Bloom's taxonomy level"
+                        size="sm"
                         value={activeQuestion.bloomLevel ?? "remember"}
-                        onChange={(event) =>
+                        onChange={(value) =>
                           updateQuestion(activeQuestion.id, {
-                            bloomLevel: event.target.value as NonNullable<
+                            bloomLevel: value as NonNullable<
                               QuizQuestion["bloomLevel"]
                             >,
                           })
                         }
-                        className={inputClass()}
-                      >
-                        <option value="remember">Remember</option>
-                        <option value="understand">Understand</option>
-                        <option value="apply">Apply</option>
-                        <option value="analyze">Analyze</option>
-                        <option value="evaluate">Evaluate</option>
-                        <option value="create">Create</option>
-                      </select>
+                        options={[
+                          { value: "remember", label: "Remember" },
+                          { value: "understand", label: "Understand" },
+                          { value: "apply", label: "Apply" },
+                          { value: "analyze", label: "Analyze" },
+                          { value: "evaluate", label: "Evaluate" },
+                          { value: "create", label: "Create" },
+                        ]}
+                        triggerClassName="w-full"
+                      />
                     </Field>
                     <Field label="Standards (optional)">
                       <div className="spectra-quiz-standard-editor">
@@ -2879,16 +3260,16 @@ export function QuizStudio({
                   <ul>
                     {question.options.map((option, index) => (
                       <li key={`${question.id}-print-${index}`}>
-                        {String.fromCharCode(65 + index)}. {option || "—"}
+                        {String.fromCharCode(65 + index)}. {option || "(blank)"}
                       </li>
                     ))}
                   </ul>
                 ) : (
                   <div className="spectra-quiz-print-response-lines" />
                 )}
-                {!readOnly ? (
+                {canEditQuiz ? (
                   <aside>
-                    <strong>Answer / review guidance:</strong>{" "}
+                    <strong>Answer and review guidance:</strong>{" "}
                     {question.type === "matching"
                       ? (question.matchingPairs ?? [])
                           .map((pair) => `${pair.left} → ${pair.right ?? ""}`)
@@ -2924,6 +3305,7 @@ function QuestionEditor({
   onChange,
   onRemove,
   onDuplicate,
+  onMove,
 }: {
   question: QuizQuestion;
   questionNumber: number;
@@ -2933,11 +3315,44 @@ function QuestionEditor({
   onChange: (patch: Partial<QuizQuestion>) => void;
   onRemove: () => void;
   onDuplicate: () => void;
+  /** Moves this question to `toIndex`. Bounds are enforced by the caller. */
+  onMove: (toIndex: number) => void;
 }) {
   const [tagDraft, setTagDraft] = useState("");
   const qPath = `/questions/${questionIndex}`;
   const aiField = (suffix: string) =>
     pathTouches(aiChangedPaths, `${qPath}/${suffix}`);
+  /** Ways this question's answer key cannot be resolved as written. */
+  const answerKeyProblems = (() => {
+    if (
+      !["multiple_choice", "true_false", "select_all", "ordering"].includes(
+        question.type,
+      )
+    )
+      return [];
+    const problems: string[] = [];
+    const filled = question.options.filter((option) => option.trim());
+    const duplicate = filled.find(
+      (option, index) =>
+        filled.findIndex(
+          (candidate) => candidate.trim() === option.trim(),
+        ) !== index,
+    );
+    if (duplicate)
+      problems.push(
+        `Two options both say "${duplicate.trim()}". The answer key cannot tell them apart, so make one of them different.`,
+      );
+    if (question.options.length !== filled.length)
+      problems.push(
+        "An empty option cannot be marked correct. Write it or remove it.",
+      );
+    if (question.type === "select_all") {
+      if (!(question.correctAnswers ?? []).length)
+        problems.push("Mark at least one option correct.");
+    } else if (question.type !== "ordering" && !question.correctAnswer?.trim())
+      problems.push("Mark the correct option.");
+    return problems;
+  })();
 
   function addTag() {
     const tag = tagDraft.trim().replace(/^#+/, "");
@@ -2968,10 +3383,32 @@ function QuestionEditor({
   return (
     <div className="spectra-quiz-question-editor">
       <div className="mb-4 flex items-center justify-between">
+        {/* Which question you are editing. The workbar already states the
+            position in the set, so this does not repeat "of N". */}
         <div className="text-[13px] font-semibold text-[var(--text-primary)]">
-          Question {questionNumber} of {questionCount}
+          Question {questionNumber}
         </div>
         <div className="flex items-center gap-1">
+          <button
+            type="button"
+            className={iconButtonClass()}
+            onClick={() => onMove(questionIndex - 1)}
+            disabled={questionIndex === 0}
+            aria-label="Move question earlier"
+            title="Move question earlier"
+          >
+            <ChevronUp className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            className={iconButtonClass()}
+            onClick={() => onMove(questionIndex + 1)}
+            disabled={questionIndex >= questionCount - 1}
+            aria-label="Move question later"
+            title="Move question later"
+          >
+            <ChevronDown className="h-4 w-4" />
+          </button>
           <button
             type="button"
             className={iconButtonClass()}
@@ -2992,57 +3429,55 @@ function QuestionEditor({
       </div>
       <div className="spectra-quiz-type-row">
         <span>Type</span>
-        <select
-          value={question.type}
+        <div
+          className="min-w-0"
           data-ai-region={aiRegionAttr(aiField("type"))}
           {...targetAttrs(`${qPath}/type`)}
-          onChange={(event) => {
-            const type = event.target.value as QuizQuestion["type"];
-            onChange({
-              type,
-              options:
-                type === "true_false"
-                  ? ["True", "False"]
-                  : ["multiple_choice", "select_all", "ordering"].includes(
-                        type,
-                      ) && question.options.length === 0
-                    ? ["", "", "", ""]
-                    : question.options,
-              optionIds:
-                type === "true_false"
-                  ? [id("option"), id("option")]
-                  : ["multiple_choice", "select_all", "ordering"].includes(
-                        type,
-                      ) && question.options.length === 0
-                    ? [id("option"), id("option"), id("option"), id("option")]
-                    : question.optionIds,
-              correctAnswers:
-                type === "select_all" ||
-                type === "ordering" ||
-                type === "fill_blank"
-                  ? (question.correctAnswers ?? [])
-                  : [],
-              matchingPairs:
-                type === "matching" && (question.matchingPairs ?? []).length < 2
-                  ? [
-                      { id: id("pair"), left: "", right: "" },
-                      { id: id("pair"), left: "", right: "" },
-                    ]
-                  : question.matchingPairs,
-            });
-          }}
-          className={inputClass()}
         >
-          <option value="multiple_choice">Multiple choice</option>
-          <option value="true_false">True / false</option>
-          <option value="select_all">Select all that apply</option>
-          <option value="ordering">Ordering</option>
-          <option value="short_answer">Short answer</option>
-          <option value="numeric">Numeric</option>
-          <option value="fill_blank">Fill in the blank</option>
-          <option value="long_response">Long response</option>
-          <option value="matching">Matching</option>
-        </select>
+          <SelectField
+            ariaLabel="Question type"
+            size="sm"
+            value={question.type}
+            onChange={(value) => {
+              const type = value as QuizQuestion["type"];
+              onChange({
+                type,
+                options:
+                  type === "true_false"
+                    ? ["True", "False"]
+                    : ["multiple_choice", "select_all", "ordering"].includes(
+                          type,
+                        ) && question.options.length === 0
+                      ? ["", "", "", ""]
+                      : question.options,
+                optionIds:
+                  type === "true_false"
+                    ? [id("option"), id("option")]
+                    : ["multiple_choice", "select_all", "ordering"].includes(
+                          type,
+                        ) && question.options.length === 0
+                      ? [id("option"), id("option"), id("option"), id("option")]
+                      : question.optionIds,
+                correctAnswers:
+                  type === "select_all" ||
+                  type === "ordering" ||
+                  type === "fill_blank"
+                    ? (question.correctAnswers ?? [])
+                    : [],
+                matchingPairs:
+                  type === "matching" &&
+                  (question.matchingPairs ?? []).length < 2
+                    ? [
+                        { id: id("pair"), left: "", right: "" },
+                        { id: id("pair"), left: "", right: "" },
+                      ]
+                    : question.matchingPairs,
+              });
+            }}
+            options={QUIZ_TYPE_OPTIONS}
+            triggerClassName="w-full"
+          />
+        </div>
       </div>
       <div className="mt-2">
         <Field
@@ -3218,9 +3653,9 @@ function QuestionEditor({
                           ).filter((answer) => answer !== removed),
                         });
                       }}
-                      aria-label="Remove option"
+                      aria-label={`Remove option ${index + 1}`}
                     >
-                      <Minus className="h-4 w-4" />
+                      <Trash2 className="h-4 w-4" />
                     </button>
                   ) : null}
                 </div>
@@ -3275,6 +3710,20 @@ function QuestionEditor({
                 ? "Select every correct option using the marker beside it."
                 : "Select the correct option using its marker."}
           </p>
+          {/* The answer key is matched on the option's text, so two options that
+              read the same are genuinely undecidable and a blank one can never
+              be the answer. Both are said here, while the author can still fix
+              them, rather than only at publish. */}
+          {answerKeyProblems.length ? (
+            <ul className="mt-2 space-y-1 text-[11px] leading-5 text-[var(--warning)]">
+              {answerKeyProblems.map((problem) => (
+                <li key={problem} className="flex items-start gap-1.5">
+                  <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <span>{problem}</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </section>
       ) : question.type === "matching" ? (
         <section className="mt-4">
@@ -3359,7 +3808,7 @@ function QuestionEditor({
                   }
                   aria-label={`Remove matching pair ${index + 1}`}
                 >
-                  <Minus className="h-4 w-4" />
+                  <Trash2 className="h-4 w-4" />
                 </button>
               </div>
             ))}
@@ -3389,7 +3838,10 @@ function QuestionEditor({
           </p>
         </div>
       ) : question.type === "numeric" ? (
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <div
+          className="mt-4 grid gap-3"
+          style={{ gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))" }}
+        >
           <Field
             label="Expected number"
             aiActive={aiField("correctAnswer")}

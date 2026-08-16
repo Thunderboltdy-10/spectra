@@ -22,23 +22,17 @@ import {
   AlignCenter,
   AlignLeft,
   AlignRight,
-  Bold,
   BookOpen,
   CheckCircle2,
   ChevronDown,
-  Code2,
   Eye,
   FileDown,
   FileText,
   Focus,
   Import,
-  Italic,
   LayoutTemplate,
-  Link2,
-  List,
   ListOrdered,
   Loader2,
-  MessageSquare,
   Minus,
   PanelLeft,
   Pencil,
@@ -50,7 +44,6 @@ import {
   Sparkles,
   Table2,
   Trash2,
-  Underline as UnderlineIcon,
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -96,14 +89,12 @@ import type { SourceRecord } from "../sources/records/source-record";
 import { createDocumentRelativeSelection } from "../work/models/yjs";
 import { availableWorkModes } from "../work/registry";
 import {
-  Divider,
+  RichTextFormatBar,
   ToolbarButton,
-  ToolbarTextButton,
   blocksFromJson,
   documentContentFromJson,
   documentJsonFromContent,
   record,
-  smallActionClass,
 } from "./artifact-studio";
 import {
   artifactBlobSha256,
@@ -112,7 +103,7 @@ import {
   markdownToDocumentHtml,
   sanitizeDocumentHtml,
 } from "./artifact-studio-file-utils";
-import { WorkbarSelect } from "./artifact-workbar";
+import { ArtifactWorkbar } from "./artifact-workbar";
 
 function documentMarkdown(json: JSONContent) {
   const renderInline = (node: JSONContent): string => {
@@ -198,8 +189,6 @@ export function DocumentStudio({
   );
   const [, refreshToolbar] = useState(0);
   const [importing, setImporting] = useState(false);
-  const [linkEditorOpen, setLinkEditorOpen] = useState(false);
-  const [linkDraft, setLinkDraft] = useState("https://");
   const [toolsOpen, setToolsOpen] = useState(false);
   const [outlineOpen, setOutlineOpen] = useState(false);
   const [findOpen, setFindOpen] = useState(false);
@@ -1057,249 +1046,167 @@ export function DocumentStudio({
       data-layout={pageLayout}
     >
       {!focusMode ? header : null}
-      <div className="spectra-editor-workbar spectra-document-toolbar sticky top-0 z-30 mx-5 flex min-h-11 flex-nowrap items-center gap-1 px-2 py-1 sm:mx-8">
-        {!readOnly && docMode !== "write" ? (
-          <button
-            type="button"
-            className="spectra-workbar-primary inline-flex h-8 items-center gap-1.5 rounded-[6px] bg-[var(--text-primary)] px-2.5 text-[11px] font-semibold text-[var(--bg-primary)]"
-            onClick={() => setDocMode("write")}
-          >
-            <Pencil className="h-3.5 w-3.5" />
-            Back to editing
-          </button>
-        ) : null}
-        {docMode !== "write" ? (
-          <>
-            <Divider />
-            <ToolbarButton
-              label="Outline"
-              icon={FileText}
-              active={outlineOpen}
-              onClick={() => setOutlineOpen((open) => !open)}
-            />
-            <ToolbarButton
-              label="Find"
-              icon={Search}
-              active={findOpen}
-              onClick={() => setFindOpen((open) => !open)}
-            />
-            <ToolbarButton
-              label="Sources"
-              icon={BookOpen}
-              active={sourcesOpen}
-              onClick={() => setSourcesOpen((open) => !open)}
-            />
-          </>
-        ) : null}
-        {docMode === "write" ? <Divider /> : null}
-        <fieldset
-          disabled={readOnly || docMode !== "write"}
-          className={docMode === "write" ? "contents" : "hidden"}
-        >
-          <WorkbarSelect
-            ariaLabel="Text style"
-            value={
-              editor?.isActive("heading", { level: 1 })
-                ? "h1"
-                : editor?.isActive("heading", { level: 2 })
-                  ? "h2"
-                  : editor?.isActive("heading", { level: 3 })
-                    ? "h3"
-                    : "paragraph"
-            }
-            options={[
-              { value: "paragraph", label: "Text" },
-              { value: "h1", label: "Heading 1" },
-              { value: "h2", label: "Heading 2" },
-              { value: "h3", label: "Heading 3" },
-            ]}
-            onChange={(value) => {
-              if (value === "paragraph")
-                editor?.chain().focus().setParagraph().run();
-              else
-                editor
-                  ?.chain()
-                  .focus()
-                  .setHeading({ level: Number(value.slice(1)) as 1 | 2 | 3 })
-                  .run();
-            }}
-          />
-          <Divider />
-          <ToolbarTextButton
-            label="Bold"
-            onClick={() => editor?.chain().focus().toggleBold().run()}
-            active={editor?.isActive("bold")}
-          >
-            <Bold className="h-4 w-4" />
-          </ToolbarTextButton>
-          <ToolbarTextButton
-            label="Italic"
-            onClick={() => editor?.chain().focus().toggleItalic().run()}
-            active={editor?.isActive("italic")}
-          >
-            <Italic className="h-4 w-4" />
-          </ToolbarTextButton>
-          <ToolbarTextButton
-            label="Underline"
-            onClick={() => editor?.chain().focus().toggleUnderline().run()}
-            active={editor?.isActive("underline")}
-          >
-            <UnderlineIcon className="h-4 w-4" />
-          </ToolbarTextButton>
-          <ToolbarTextButton
-            label="Strikethrough"
-            onClick={() => editor?.chain().focus().toggleStrike().run()}
-            active={editor?.isActive("strike")}
-          >
-            <span className="text-[14px] font-semibold line-through">S</span>
-          </ToolbarTextButton>
-          <ToolbarButton
-            label="Inline code"
-            onClick={() => editor?.chain().focus().toggleCode().run()}
-            active={editor?.isActive("code")}
-            icon={Code2}
-          />
-          <Divider />
-          <ToolbarButton
-            label="Bullet list"
-            onClick={() => editor?.chain().focus().toggleBulletList().run()}
-            active={editor?.isActive("bulletList")}
-            icon={List}
-          />
-          <ToolbarButton
-            label="Task list"
-            onClick={() => editor?.chain().focus().toggleTaskList().run()}
-            active={editor?.isActive("taskList")}
-            icon={CheckCircle2}
-          />
-          <ToolbarButton
-            label="Quote"
-            onClick={() => editor?.chain().focus().toggleBlockquote().run()}
-            active={editor?.isActive("blockquote")}
-            icon={MessageSquare}
-          />
-          <ToolbarButton
-            label="Insert equation"
-            onClick={() =>
-              editor
-                ?.chain()
-                .focus()
-                .insertContent({
-                  type: "equation",
-                  attrs: { latex: "", display: "block", alignment: "center" },
-                })
-                .run()
-            }
-            active={equationActive}
-            icon={Sigma}
-          />
-          <ToolbarButton
-            label="Link"
-            icon={Link2}
-            active={linkEditorOpen || editor?.isActive("link")}
-            onClick={() => {
-              setLinkDraft(
-                String(editor?.getAttributes("link").href ?? "https://"),
-              );
-              setLinkEditorOpen((open) => !open);
-            }}
-          />
-          <ToolbarButton
-            label="Insert callout"
-            icon={Sparkles}
-            onClick={() =>
-              editor
-                ?.chain()
-                .focus()
-                .insertContent({
-                  type: "callout",
-                  attrs: { tone: "info" },
-                  content: [
-                    {
-                      type: "paragraph",
-                      content: [{ type: "text", text: "Key idea" }],
-                    },
-                  ],
-                })
-                .run()
+      {/* One bar. Document's registry modes are Edit and Preview as reader, and
+          reader preview is an activity, not a peer view (CANON D3) — so it is
+          declared as an action, not as a mode tab. */}
+      <ArtifactWorkbar
+        label="Document tools"
+        modes={[]}
+        context={
+          docMode === "read"
+            ? `Reading · ${wordCount.toLocaleString()} words`
+            : `${wordCount.toLocaleString()} words · ${readingMinutes} min read`
+        }
+        {...(docMode === "write"
+          ? {}
+          : {
+              primary: {
+                label: "Back to editing",
+                icon: Pencil,
+                requires: "edit" as const,
+                onSelect: () => setDocMode("write"),
+              },
+            })}
+        actions={[
+          {
+            id: "outline",
+            label: "Outline",
+            icon: FileText,
+            priority: "essential",
+            active: outlineOpen,
+            onSelect: () => setOutlineOpen((open) => !open),
+          },
+          {
+            id: "find",
+            label: "Find",
+            icon: Search,
+            priority: "essential",
+            active: findOpen,
+            onSelect: () => setFindOpen((open) => !open),
+          },
+          {
+            id: "sources",
+            label: "Sources",
+            icon: BookOpen,
+            priority: "essential",
+            active: sourcesOpen,
+            onSelect: () => setSourcesOpen((open) => !open),
+          },
+          {
+            id: "import",
+            label: importing ? "Importing…" : "Import",
+            icon: importing ? Loader2 : Import,
+            priority: "secondary",
+            disabled: importing,
+            requires: "edit",
+            onSelect: () => importRef.current?.click(),
+          },
+          {
+            id: "options",
+            label: "Document options",
+            icon: SlidersHorizontal,
+            priority: "advanced",
+            active: toolsOpen,
+            hint: "Layout, templates, text appearance",
+            onSelect: () => setToolsOpen((open) => !open),
+          },
+        ]}
+      />
+      {/* Formatting belongs to the text, so it sits with the page rather than
+          becoming a second navbar under the workbar. Same component as every
+          other rich-text field in the product. */}
+      {docMode === "write" ? (
+        <div className="spectra-document-format-bar spectra-rich-text-editor">
+          <RichTextFormatBar
+            editor={editor}
+            disabled={readOnly}
+            label="Document formatting"
+            withTextStyle
+            trailing={
+              <>
+                <ToolbarButton
+                  label="Task list"
+                  onClick={() => editor?.chain().focus().toggleTaskList().run()}
+                  active={editor?.isActive("taskList")}
+                  icon={CheckCircle2}
+                />
+                <ToolbarButton
+                  label="Insert callout"
+                  icon={Sparkles}
+                  onClick={() =>
+                    editor
+                      ?.chain()
+                      .focus()
+                      .insertContent({
+                        type: "callout",
+                        attrs: { tone: "info" },
+                        content: [
+                          {
+                            type: "paragraph",
+                            content: [{ type: "text", text: "Key idea" }],
+                          },
+                        ],
+                      })
+                      .run()
+                  }
+                />
+                <ToolbarButton
+                  label="Insert table"
+                  icon={Table2}
+                  onClick={() =>
+                    editor
+                      ?.chain()
+                      .focus()
+                      .insertTable({ rows: 3, cols: 3, withHeaderRow: true })
+                      .run()
+                  }
+                />
+                {editor?.isActive("table") ? (
+                  <>
+                    <ToolbarButton
+                      label="Add table row"
+                      icon={Plus}
+                      onClick={() => editor.chain().focus().addRowAfter().run()}
+                    />
+                    <ToolbarButton
+                      label="Add table column"
+                      icon={Plus}
+                      onClick={() =>
+                        editor.chain().focus().addColumnAfter().run()
+                      }
+                    />
+                    <ToolbarButton
+                      label="Delete table row"
+                      icon={Minus}
+                      onClick={() => editor.chain().focus().deleteRow().run()}
+                    />
+                    <ToolbarButton
+                      label="Delete table column"
+                      icon={X}
+                      onClick={() => editor.chain().focus().deleteColumn().run()}
+                    />
+                    <ToolbarButton
+                      label="Delete table"
+                      icon={Trash2}
+                      onClick={() => editor.chain().focus().deleteTable().run()}
+                    />
+                  </>
+                ) : null}
+              </>
             }
           />
-          <ToolbarButton
-            label="Insert table"
-            icon={Table2}
-            onClick={() =>
-              editor
-                ?.chain()
-                .focus()
-                .insertTable({ rows: 3, cols: 3, withHeaderRow: true })
-                .run()
-            }
-          />
-          {editor?.isActive("table") ? (
-            <>
-              <ToolbarButton
-                label="Add table row"
-                icon={Plus}
-                onClick={() => editor.chain().focus().addRowAfter().run()}
-              />
-              <ToolbarButton
-                label="Add table column"
-                icon={Plus}
-                onClick={() => editor.chain().focus().addColumnAfter().run()}
-              />
-              <ToolbarButton
-                label="Delete table row"
-                icon={Minus}
-                onClick={() => editor.chain().focus().deleteRow().run()}
-              />
-              <ToolbarButton
-                label="Delete table column"
-                icon={X}
-                onClick={() => editor.chain().focus().deleteColumn().run()}
-              />
-              <ToolbarButton
-                label="Delete table"
-                icon={Trash2}
-                onClick={() => editor.chain().focus().deleteTable().run()}
-              />
-            </>
-          ) : null}
-        </fieldset>
-        <span className="ml-auto" />
-        <input
-          ref={importRef}
-          type="file"
-          accept=".docx,.odt,.pdf,.html,.htm,.txt,.md,.markdown"
-          hidden
-          onChange={(event) => {
-            const file = event.currentTarget.files?.[0];
-            if (file) void importDocument(file);
-          }}
-        />
-        {docMode === "write" ? (
-          <button
-            type="button"
-            onClick={() => importRef.current?.click()}
-            disabled={importing || readOnly}
-            className="inline-flex h-8 items-center gap-1.5 rounded-[6px] px-2.5 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-45"
-          >
-            {importing ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Import className="h-3.5 w-3.5" />
-            )}
-            Import
-          </button>
-        ) : null}
-        <ToolbarButton
-          label={
-            docMode === "write" ? "More formatting options" : "More options"
-          }
-          icon={SlidersHorizontal}
-          active={toolsOpen}
-          onClick={() => setToolsOpen((open) => !open)}
-        />
-      </div>
+        </div>
+      ) : null}
+      <input
+        ref={importRef}
+        type="file"
+        accept=".docx,.odt,.pdf,.html,.htm,.txt,.md,.markdown"
+        hidden
+        onChange={(event) => {
+          const file = event.currentTarget.files?.[0];
+          if (file) void importDocument(file);
+        }}
+      />
       <div className="spectra-editor-body">
         {toolsOpen ? (
           <div className="spectra-document-tools-popover">
@@ -1668,59 +1575,6 @@ export function DocumentStudio({
             </button>
           </div>
         ) : null}
-        {linkEditorOpen ? (
-          <div className="mx-5 mt-2 flex items-center gap-2 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-2 shadow-[0_12px_30px_-24px_rgba(27,20,12,.4)]">
-            <Link2 className="h-4 w-4 shrink-0 text-[var(--text-tertiary)]" />
-            <input
-              autoFocus
-              value={linkDraft}
-              onChange={(event) => setLinkDraft(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Escape") setLinkEditorOpen(false);
-                if (event.key === "Enter" && linkDraft.trim()) {
-                  event.preventDefault();
-                  editor
-                    ?.chain()
-                    .focus()
-                    .extendMarkRange("link")
-                    .setLink({ href: linkDraft.trim() })
-                    .run();
-                  setLinkEditorOpen(false);
-                }
-              }}
-              className="h-8 min-w-0 flex-1 bg-transparent px-1 text-[12px] text-[var(--text-primary)] outline-none"
-              aria-label="Link URL"
-            />
-            <button
-              type="button"
-              className={smallActionClass()}
-              onClick={() => {
-                if (!linkDraft.trim()) return;
-                editor
-                  ?.chain()
-                  .focus()
-                  .extendMarkRange("link")
-                  .setLink({ href: linkDraft.trim() })
-                  .run();
-                setLinkEditorOpen(false);
-              }}
-            >
-              Apply link
-            </button>
-            {editor?.isActive("link") ? (
-              <button
-                type="button"
-                className={smallActionClass()}
-                onClick={() => {
-                  editor.chain().focus().unsetLink().run();
-                  setLinkEditorOpen(false);
-                }}
-              >
-                Remove
-              </button>
-            ) : null}
-          </div>
-        ) : null}
         {equationActive && !readOnly ? (
           <div
             className="flex flex-wrap items-center gap-2 border-b border-[color-mix(in_oklab,var(--accent-cyan)_18%,var(--border-default))] bg-[color-mix(in_oklab,var(--accent-cyan)_4%,var(--bg-elevated))] px-4 py-2"
@@ -1902,22 +1756,11 @@ export function DocumentStudio({
                 <X className="h-3.5 w-3.5" /> Exit focus
               </button>
             ) : null}
-            <div className="spectra-document-editor-hint">
-              <span>
-                {docMode === "read" ? (
-                  "Reading"
-                ) : docMode === "review" ? (
-                  `${sourceNavigator.entries.length} source${sourceNavigator.entries.length === 1 ? "" : "s"} cited`
-                ) : (
-                  <>
-                    Type <kbd>/</kbd> for commands
-                  </>
-                )}
-              </span>
-              <span>
-                {wordCount.toLocaleString()} words · {readingMinutes} min read
-              </span>
-            </div>
+            {/* The hint row that used to sit here carried the word count and
+                the slash-command tip, and CSS hid it outright — so the one
+                number a writer checks constantly was in the DOM and invisible.
+                The count now lives in the work bar's context slot, where every
+                other studio puts its standing fact. */}
             <EditorContent
               editor={editor}
               className="tiptap-root mx-auto max-w-[920px] [&_.ProseMirror-focused]:outline-none [&_.ProseMirror]:outline-none [&_.ProseMirror_blockquote]:border-l-2 [&_.ProseMirror_blockquote]:border-[var(--border-default)] [&_.ProseMirror_blockquote]:pl-4 [&_.ProseMirror_h1]:font-display [&_.ProseMirror_h1]:text-[30px] [&_.ProseMirror_h1]:leading-tight [&_.ProseMirror_h2]:font-display [&_.ProseMirror_h2]:text-[23px] [&_.ProseMirror_h2]:leading-tight [&_.ProseMirror_li]:my-1 [&_.ProseMirror_p]:my-4"

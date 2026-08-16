@@ -5,25 +5,56 @@ import * as SelectPrimitive from "@radix-ui/react-select";
 import { Check, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+/**
+ * Spectra's one Select. Replaces every native `<select>`: an OS dropdown cannot
+ * match the product's menu grammar, hover, focus ring or radius scale.
+ *
+ * Prefer `SelectField` — it is a 1:1 mechanical replacement for a native
+ * `<select>` plus its `<option>` list. The parts below are exported for the
+ * rare case that needs groups, separators or custom item rendering.
+ */
+
 const Select = SelectPrimitive.Root;
 const SelectGroup = SelectPrimitive.Group;
 const SelectValue = SelectPrimitive.Value;
 
+/** Trigger heights match the three real densities in the product. */
+const triggerSizes = {
+  sm: "h-8 px-2.5 text-micro",
+  md: "h-9 px-3 text-caption",
+  lg: "h-10 px-3 text-ui",
+} as const;
+
+export type SelectSize = keyof typeof triggerSizes;
+
 const SelectTrigger = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Trigger>,
-  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Trigger>
->(({ className, children, ...props }, ref) => (
+  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Trigger> & {
+    size?: SelectSize;
+  }
+>(({ className, children, size = "md", ...props }, ref) => (
   <SelectPrimitive.Trigger
     ref={ref}
     className={cn(
-      "flex h-10 w-full items-center justify-between gap-2 rounded-[8px] border border-[var(--border-default)] bg-transparent px-3 text-[13px] text-[var(--text-primary)] outline-none transition hover:bg-[var(--bg-hover)] focus:border-[color-mix(in_oklab,var(--brand-primary)_45%,var(--border-default))] data-[placeholder]:text-[var(--text-tertiary)] disabled:cursor-not-allowed disabled:opacity-45",
+      "flex min-w-0 items-center justify-between gap-2 rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] font-medium text-[var(--text-primary)] outline-none transition-colors",
+      "hover:bg-[var(--bg-hover)]",
+      "focus-visible:border-[color-mix(in_oklab,var(--brand-primary)_45%,var(--border-default))] focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]",
+      // `--text-placeholder` and `--text-tertiary` both fail WCAG AA against
+      // the page surface; placeholder text uses `--text-secondary` (4.9:1).
+      "data-[placeholder]:font-normal data-[placeholder]:text-[var(--text-secondary)]",
+      "disabled:cursor-not-allowed disabled:opacity-45",
+      triggerSizes[size],
       className,
     )}
     {...props}
   >
-    {children}
+    {/* The value truncates; the trigger never grows a control bar. */}
+    <span className="min-w-0 truncate text-left">{children}</span>
     <SelectPrimitive.Icon asChild>
-      <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-55" />
+      <ChevronDown
+        aria-hidden="true"
+        className="size-3.5 shrink-0 text-[var(--text-secondary)]"
+      />
     </SelectPrimitive.Icon>
   </SelectPrimitive.Trigger>
 ));
@@ -37,8 +68,9 @@ const SelectContent = React.forwardRef<
     <SelectPrimitive.Content
       ref={ref}
       position={position}
+      sideOffset={4}
       className={cn(
-        "relative z-[340] max-h-72 min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[0_18px_48px_-28px_rgba(27,20,12,0.45)] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
+        "relative z-[340] max-h-72 min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[var(--shadow-lg)] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
         className,
       )}
       style={{
@@ -48,13 +80,9 @@ const SelectContent = React.forwardRef<
       }}
       {...props}
     >
-      <SelectPrimitive.Viewport
-        className={cn(
-          "p-1.5",
-          position === "popper" &&
-            "h-[var(--radix-select-trigger-height)] w-full min-w-[var(--radix-select-trigger-width)]",
-        )}
-      >
+      {/* The viewport must size to its content and scroll. Pinning it to
+          `--radix-select-trigger-height` clamps the list to one row. */}
+      <SelectPrimitive.Viewport className="max-h-72 overflow-y-auto p-1.5">
         {children}
       </SelectPrimitive.Viewport>
     </SelectPrimitive.Content>
@@ -69,14 +97,16 @@ const SelectItem = React.forwardRef<
   <SelectPrimitive.Item
     ref={ref}
     className={cn(
-      "relative flex w-full cursor-pointer select-none items-center rounded-[7px] py-2 pl-8 pr-3 text-[13px] outline-none data-[disabled]:pointer-events-none data-[highlighted]:bg-[var(--bg-hover)] data-[highlighted]:text-[var(--text-primary)] data-[disabled]:opacity-40",
+      "relative flex w-full cursor-pointer select-none items-center rounded-chip py-2 pl-8 pr-3 text-ui outline-none data-[disabled]:pointer-events-none data-[highlighted]:bg-[var(--bg-hover)] data-[highlighted]:text-[var(--text-primary)] data-[disabled]:opacity-40",
       className,
     )}
     {...props}
   >
-    <span className="absolute left-2.5 flex h-3.5 w-3.5 items-center justify-center">
+    {/* Selection is text-primary, matching the product's one active-state
+        treatment. A green check would read as a health signal. */}
+    <span className="absolute left-2.5 flex size-3.5 items-center justify-center">
       <SelectPrimitive.ItemIndicator>
-        <Check className="h-3.5 w-3.5 text-[var(--success)]" />
+        <Check className="size-3.5 text-[var(--text-primary)]" />
       </SelectPrimitive.ItemIndicator>
     </span>
     <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
@@ -91,7 +121,7 @@ const SelectLabel = React.forwardRef<
   <SelectPrimitive.Label
     ref={ref}
     className={cn(
-      "px-2 py-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]",
+      "px-2 py-1.5 text-micro font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)]",
       className,
     )}
     {...props}
@@ -110,6 +140,106 @@ const SelectSeparator = React.forwardRef<
   />
 ));
 SelectSeparator.displayName = SelectPrimitive.Separator.displayName;
+
+export type SelectOption = {
+  value: string;
+  label: string;
+  disabled?: boolean;
+};
+
+/**
+ * The drop-in replacement for a native `<select>`.
+ *
+ * `<select value={v} onChange={(e) => set(e.target.value)}>` plus its options
+ * becomes `<SelectField value={v} onChange={set} options={[…]} />`.
+ *
+ * Either `label` (rendered above the control) or `ariaLabel` is required, so a
+ * converted control can never lose its accessible name.
+ */
+export function SelectField({
+  label,
+  ariaLabel,
+  value,
+  onChange,
+  options,
+  placeholder,
+  size = "md",
+  disabled,
+  id,
+  className,
+  triggerClassName,
+  contentClassName,
+}: {
+  label?: string;
+  ariaLabel?: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: readonly SelectOption[];
+  placeholder?: string;
+  size?: SelectSize;
+  disabled?: boolean;
+  id?: string;
+  className?: string;
+  triggerClassName?: string;
+  contentClassName?: string;
+}) {
+  const uid = React.useId();
+  const labelId = label ? `${uid}-label` : undefined;
+  // Empty is a real state, and it belongs to the primitive rather than to each
+  // call site: with nothing to choose, the control says so and cannot be
+  // opened onto an empty menu.
+  const empty = options.length === 0;
+
+  const trigger = (
+    <SelectTrigger
+      id={id}
+      size={size}
+      disabled={disabled || empty}
+      aria-labelledby={labelId}
+      aria-label={labelId ? undefined : (ariaLabel ?? placeholder)}
+      className={cn(label ? "w-full" : undefined, triggerClassName)}
+    >
+      <SelectValue
+        placeholder={placeholder ?? (empty ? "Nothing to choose yet" : "Select")}
+      />
+    </SelectTrigger>
+  );
+
+  const control = (
+    <Select
+      value={value}
+      onValueChange={onChange}
+      disabled={disabled || empty}
+    >
+      {trigger}
+      <SelectContent className={contentClassName}>
+        {options.map((option) => (
+          <SelectItem
+            key={option.value}
+            value={option.value}
+            disabled={option.disabled}
+          >
+            {option.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+
+  if (!label) return className ? <div className={className}>{control}</div> : control;
+
+  return (
+    <div className={cn("block min-w-0", className)}>
+      <span
+        id={labelId}
+        className="mb-1.5 block text-caption font-medium text-[var(--text-secondary)]"
+      >
+        {label}
+      </span>
+      {control}
+    </div>
+  );
+}
 
 export {
   Select,

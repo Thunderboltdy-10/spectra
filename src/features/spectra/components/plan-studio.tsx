@@ -8,14 +8,19 @@ import {
   Check,
   ChevronRight,
   Download,
+  FileSpreadsheet,
   Import,
   Link2,
   ListTodo,
   Plus,
   Search,
+  SlidersHorizontal,
   Trash2,
   X,
 } from "lucide-react";
+import { SelectField } from "@/components/ui/select";
+import { ArtifactWorkbar } from "./artifact-workbar";
+import { useStudioContract } from "./artifact-studio-shell";
 import {
   normalizePlanContent,
   validatePlanDependencies,
@@ -49,12 +54,6 @@ import {
  * view and missing from another. This component draws those projections and
  * edits the single underlying model; it never keeps a per-view copy.
  */
-
-const VIEW_LABELS: Record<PlanViewKind, string> = {
-  list: "List",
-  board: "Board",
-  timeline: "Timeline",
-};
 
 const STATUS_TONE: Record<PlanStatus, string> = {
   backlog: "var(--text-tertiary)",
@@ -95,14 +94,6 @@ function dueLabel(task: PlanTask, now: number) {
   return shortDate(task.dueAt);
 }
 
-function pillClass(active: boolean) {
-  return `h-7 rounded-[6px] px-2.5 text-[11px] font-medium transition ${
-    active
-      ? "bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-[0_1px_2px_rgba(40,50,44,.09)]"
-      : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-  }`;
-}
-
 export function PlanStudio({
   mode,
   title,
@@ -136,6 +127,20 @@ export function PlanStudio({
   const [notice, setNotice] = useState<string>();
   const [problem, setProblem] = useState<string>();
   const importRef = useRef<HTMLInputElement>(null);
+  const quickAddRef = useRef<HTMLInputElement>(null);
+  const boardAddRef = useRef<HTMLInputElement>(null);
+  const [columnDraft, setColumnDraft] = useState<
+    Partial<Record<PlanStatus, string>>
+  >({});
+  const [dropStatus, setDropStatus] = useState<PlanStatus>();
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [pendingQuickAdd, setPendingQuickAdd] = useState(false);
+  const studio = useStudioContract();
+  const canEdit = studio.can("edit") && !readOnly;
+  const filtersActive =
+    statusFilter !== "all" || sectionFilter !== "all" || sourceFilter !== "all";
   // "Overdue" and "Tomorrow" are relative to a clock, so it ticks slowly
   // rather than being read once and left to go stale on a long-open tab.
   const [now, setNow] = useState(() => currentTimeMs());
@@ -144,6 +149,21 @@ export function PlanStudio({
     const timer = window.setInterval(() => setNow(currentTimeMs()), 60_000);
     return () => window.clearInterval(timer);
   }, []);
+
+  // The bar's Add task puts the caret in whichever field this view actually
+  // has: the list's quick-add row, or the board's To do column. Timeline has no
+  // add slot of its own, so it borrows the list. The focus waits for the view
+  // to mount instead of firing at a node that is not there yet.
+  useEffect(() => {
+    if (!pendingQuickAdd) return;
+    if (view === "list") {
+      quickAddRef.current?.focus();
+      setPendingQuickAdd(false);
+    } else if (view === "board") {
+      boardAddRef.current?.focus();
+      setPendingQuickAdd(false);
+    }
+  }, [pendingQuickAdd, view]);
 
   const filter: PlanFilter = useMemo(
     () => ({
@@ -166,6 +186,26 @@ export function PlanStudio({
     [filter, plan],
   );
   const timeline = useMemo(() => planTimelineView(plan, filter), [filter, plan]);
+  /**
+   * Four dates along the axis instead of two at the ends. Two labels a fortnight
+   * apart told the reader the range but not where anything sat inside it.
+   */
+  const axisTicks = useMemo(() => {
+    if (!timeline.window) return [];
+    const { from, to } = timeline.window;
+    const span = to - from || 1;
+    return [0, 1, 2, 3].map((step) => {
+      const at = from + (span * step) / 3;
+      return { at: (step / 3) * 100, label: shortDate(at) };
+    });
+  }, [timeline.window]);
+  /** Where "now" falls on the axis, or nothing when it is off the window. */
+  const todayAt = useMemo(() => {
+    if (!timeline.window) return undefined;
+    const { from, to } = timeline.window;
+    if (now < from || now > to) return undefined;
+    return ((now - from) / (to - from || 1)) * 100;
+  }, [now, timeline.window]);
   const visibleCount = useMemo(
     () => listSections.reduce((total, section) => total + section.rows.length, 0),
     [listSections],
@@ -206,8 +246,11 @@ export function PlanStudio({
     });
   }
 
-  function addTask(sectionId?: string) {
-    const title = draft.trim();
+  function addTask(options?: { sectionId?: string; status?: PlanStatus }) {
+    // The board types into its own column, the list into its quick-add row.
+    // Both land in the same model; only the draft they read from differs.
+    const status = options?.status;
+    const title = (status ? (columnDraft[status] ?? "") : draft).trim();
     if (!title) return;
     const order =
       plan.tasks.reduce((max, task) => Math.max(max, task.order), -1) + 1;
@@ -220,18 +263,20 @@ export function PlanStudio({
           title: title.slice(0, 500),
           description: "",
           dependencyIds: [],
-          status: "todo",
+          status: status ?? "todo",
           assigneeIds: [],
           referenceIds: [],
           sourceRefs: [],
           calendarBlockIds: [],
           checklist: [],
           order,
-          ...(sectionId ? { sectionId } : {}),
+          ...(options?.sectionId ? { sectionId: options.sectionId } : {}),
         },
       ],
     });
-    setDraft("");
+    if (status)
+      setColumnDraft((current) => ({ ...current, [status]: "" }));
+    else setDraft("");
   }
 
   function addSection() {
@@ -346,109 +391,188 @@ export function PlanStudio({
 
   return (
     <div className="spectra-plan-studio" data-mode={mode}>
-      <div className="spectra-editor-workbar spectra-plan-bar">
-        <div className="spectra-plan-views" role="tablist" aria-label="Plan views">
-          {(["list", "board", "timeline"] as const).map((kind) => (
-            <button
-              key={kind}
-              type="button"
-              role="tab"
-              aria-selected={view === kind}
-              className={pillClass(view === kind)}
-              onClick={() => setView(kind)}
-            >
-              {VIEW_LABELS[kind]}
-            </button>
-          ))}
-        </div>
-        <label className="spectra-plan-search">
-          <Search className="h-3.5 w-3.5" />
+      {/* One shared bar. The planner used to draw its own: a view tablist, a
+          search field, three native selects, an Import button and an Export
+          `<details>` on a single row that scrolled horizontally under pressure.
+          Views now come from `work/registry` through the studio contract, the
+          filters are `SelectField`s in a disclosure so they cost one slot
+          instead of three, and Export is a portaled `⋯` group. */}
+      <ArtifactWorkbar
+        label="Plan"
+        modes={{
+          registry: true,
+          value: view,
+          onChange: (modeId) => setView(modeId as PlanViewKind),
+        }}
+        context={
+          filtersActive || search ? `${visibleCount} shown` : undefined
+        }
+        primary={
+          canEdit
+            ? {
+                label: "Add task",
+                icon: Plus,
+                onSelect: () => {
+                  // Board and list each have their own add field. Timeline has
+                  // none, so it hands over to the list rather than pretending.
+                  if (view === "timeline") setView("list");
+                  setPendingQuickAdd(true);
+                },
+                requires: "edit",
+              }
+            : undefined
+        }
+        actions={[
+          {
+            id: "find",
+            label: "Find tasks",
+            icon: Search,
+            active: searchOpen,
+            onSelect: () => setSearchOpen((open) => !open),
+            priority: "essential",
+          },
+          {
+            id: "filters",
+            label: "Filters",
+            icon: SlidersHorizontal,
+            active: filtersOpen || filtersActive,
+            onSelect: () => setFiltersOpen((open) => !open),
+            priority: "essential",
+            ...(filtersActive ? { hint: "Some tasks are hidden" } : {}),
+          },
+          {
+            id: "import",
+            label: "Import tasks",
+            icon: Import,
+            onSelect: () => importRef.current?.click(),
+            priority: "secondary",
+            requires: "edit",
+            hint: "CSV or TSV",
+          },
+          {
+            id: "export-csv",
+            label: "Export as a spreadsheet",
+            icon: FileSpreadsheet,
+            onSelect: () => exportPlan("csv"),
+            priority: "advanced",
+          },
+          {
+            id: "export-ics",
+            label: "Export as calendar to-dos",
+            icon: CalendarClock,
+            onSelect: () => exportPlan("ics"),
+            priority: "advanced",
+          },
+          {
+            id: "export-json",
+            label: "Export the full plan",
+            icon: Download,
+            onSelect: () => exportPlan("json"),
+            priority: "advanced",
+          },
+        ]}
+      />
+      {readOnly ? null : (
+        <input
+          ref={importRef}
+          type="file"
+          className="sr-only"
+          tabIndex={-1}
+          aria-hidden="true"
+          accept=".csv,.tsv,text/csv,text/tab-separated-values"
+          onChange={(event) => {
+            const file = event.currentTarget.files?.[0];
+            if (file) void importPlan(file);
+            event.currentTarget.value = "";
+          }}
+        />
+      )}
+      {searchOpen ? (
+        <div className="spectra-plan-find">
+          <Search className="size-3.5 shrink-0 text-[var(--text-tertiary)]" />
           <input
+            autoFocus
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search tasks"
-            aria-label="Search tasks"
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.stopPropagation();
+                if (search) setSearch("");
+                else setSearchOpen(false);
+              }
+            }}
+            placeholder="Find tasks"
+            aria-label="Find tasks"
           />
-        </label>
-        <select
-          aria-label="Filter by status"
-          value={statusFilter}
-          onChange={(event) =>
-            setStatusFilter(event.target.value as PlanStatus | "all")
-          }
-        >
-          <option value="all">Any status</option>
-          {PLAN_STATUS_ORDER.map((status) => (
-            <option key={status} value={status}>
-              {PLAN_STATUS_LABELS[status]}
-            </option>
-          ))}
-        </select>
-        {plan.sections.length ? (
-          <select
-            aria-label="Filter by section"
-            value={sectionFilter}
-            onChange={(event) => setSectionFilter(event.target.value)}
-          >
-            <option value="all">Any section</option>
-            {plan.sections.map((section) => (
-              <option key={section.id} value={section.id}>
-                {section.title}
-              </option>
-            ))}
-          </select>
-        ) : null}
-        <select
-          aria-label="Filter by where the deadline came from"
-          value={sourceFilter}
-          onChange={(event) =>
-            setSourceFilter(event.target.value as "all" | "official" | "own")
-          }
-        >
-          <option value="all">Any deadline</option>
-          <option value="official">From school</option>
-          <option value="own">Your own</option>
-        </select>
-        <span className="ml-auto" />
-        {readOnly ? null : (
-          <>
-            <input
-              ref={importRef}
-              type="file"
-              hidden
-              accept=".csv,.tsv,text/csv,text/tab-separated-values"
-              onChange={(event) => {
-                const file = event.currentTarget.files?.[0];
-                if (file) void importPlan(file);
-                event.currentTarget.value = "";
-              }}
-            />
+          {search ? (
             <button
               type="button"
-              className="spectra-plan-action"
-              onClick={() => importRef.current?.click()}
+              aria-label="Clear the search"
+              onClick={() => setSearch("")}
             >
-              <Import className="h-3.5 w-3.5" /> Import
+              <X className="size-3.5" />
             </button>
-          </>
-        )}
-        <details className="spectra-plan-menu">
-          <summary aria-label="Export this plan">
-            <Download className="h-3.5 w-3.5" /> Export
-          </summary>
-          <div>
-            <button type="button" onClick={() => exportPlan("csv")}>
-              Spreadsheet (CSV)
+          ) : null}
+        </div>
+      ) : null}
+      {filtersOpen ? (
+        <div className="spectra-plan-filters">
+          <SelectField
+            label="Status"
+            size="sm"
+            value={statusFilter}
+            onChange={(value) => setStatusFilter(value as PlanStatus | "all")}
+            options={[
+              { value: "all", label: "Any status" },
+              ...PLAN_STATUS_ORDER.map((status) => ({
+                value: status,
+                label: PLAN_STATUS_LABELS[status],
+              })),
+            ]}
+          />
+          {plan.sections.length ? (
+            <SelectField
+              label="Section"
+              size="sm"
+              value={sectionFilter}
+              onChange={setSectionFilter}
+              options={[
+                { value: "all", label: "Any section" },
+                ...plan.sections.map((section) => ({
+                  value: section.id,
+                  label: section.title,
+                })),
+              ]}
+            />
+          ) : null}
+          <SelectField
+            label="Deadline set by"
+            size="sm"
+            value={sourceFilter}
+            onChange={(value) =>
+              setSourceFilter(value as "all" | "official" | "own")
+            }
+            options={[
+              { value: "all", label: "Anyone" },
+              { value: "official", label: "The school" },
+              { value: "own", label: "You" },
+            ]}
+          />
+          {filtersActive ? (
+            <button
+              type="button"
+              className="spectra-plan-filters-clear"
+              onClick={() => {
+                setStatusFilter("all");
+                setSectionFilter("all");
+                setSourceFilter("all");
+              }}
+            >
+              Show every task
             </button>
-            <button type="button" onClick={() => exportPlan("ics")}>
-              Calendar to-dos (ICS)
-            </button>
-            <button type="button" onClick={() => exportPlan("json")}>
-              Full plan (JSON)
-            </button>
-          </div>
-        </details>
-      </div>
+          ) : null}
+        </div>
+      ) : null}
 
       {problem ? (
         <div className="spectra-plan-problem" role="alert">
@@ -468,53 +592,44 @@ export function PlanStudio({
         </div>
       ) : null}
 
-      {selection.length && !readOnly ? (
+      {selection.length && canEdit ? (
         <div className="spectra-plan-bulk">
-          <strong>
-            {selection.length} selected
-          </strong>
-          <select
-            aria-label="Set status for selected tasks"
+          <strong>{selection.length} selected</strong>
+          <SelectField
+            ariaLabel="Set status for selected tasks"
+            size="sm"
             value=""
-            onChange={(event) => {
-              if (!event.target.value) return;
-              runBulk({
-                kind: "set_status",
-                status: event.target.value as PlanStatus,
-              });
-              event.target.value = "";
+            placeholder="Set status…"
+            onChange={(value) => {
+              if (!value) return;
+              runBulk({ kind: "set_status", status: value as PlanStatus });
             }}
-          >
-            <option value="">Set status…</option>
-            {PLAN_STATUS_ORDER.map((status) => (
-              <option key={status} value={status}>
-                {PLAN_STATUS_LABELS[status]}
-              </option>
-            ))}
-          </select>
+            options={PLAN_STATUS_ORDER.map((status) => ({
+              value: status,
+              label: PLAN_STATUS_LABELS[status],
+            }))}
+          />
           {plan.sections.length ? (
-            <select
-              aria-label="Move selected tasks to a section"
+            <SelectField
+              ariaLabel="Move selected tasks to a section"
+              size="sm"
               value=""
-              onChange={(event) => {
-                if (!event.target.value) return;
+              placeholder="Move to…"
+              onChange={(value) => {
+                if (!value) return;
                 runBulk({
                   kind: "move_to_section",
-                  ...(event.target.value === "__none"
-                    ? {}
-                    : { sectionId: event.target.value }),
+                  ...(value === "__none" ? {} : { sectionId: value }),
                 });
-                event.target.value = "";
               }}
-            >
-              <option value="">Move to…</option>
-              <option value="__none">No section</option>
-              {plan.sections.map((section) => (
-                <option key={section.id} value={section.id}>
-                  {section.title}
-                </option>
-              ))}
-            </select>
+              options={[
+                { value: "__none", label: "No section" },
+                ...plan.sections.map((section) => ({
+                  value: section.id,
+                  label: section.title,
+                })),
+              ]}
+            />
           ) : null}
           <button
             type="button"
@@ -523,7 +638,13 @@ export function PlanStudio({
           >
             <Trash2 className="h-3.5 w-3.5" /> Delete
           </button>
-          <button type="button" onClick={() => setSelection([])}>
+          <button
+            type="button"
+            onClick={() => {
+              setSelection([]);
+              setSelectionMode(false);
+            }}
+          >
             Clear
           </button>
         </div>
@@ -545,6 +666,7 @@ export function PlanStudio({
               }}
             >
               <input
+                ref={quickAddRef}
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
                 placeholder="First task"
@@ -556,27 +678,43 @@ export function PlanStudio({
         </div>
       ) : view === "list" ? (
         <div className="spectra-plan-list">
-          {!readOnly ? (
+          {canEdit ? (
             <div className="spectra-plan-listhead">
+              {selectionMode ? (
+                <button
+                  type="button"
+                  aria-label={allSelected ? "Clear selection" : "Select all shown"}
+                  data-checked={allSelected || undefined}
+                  onClick={() =>
+                    setSelection(
+                      allSelected
+                        ? []
+                        : listSections.flatMap((section) =>
+                            section.rows.map((row) => row.task.id),
+                          ),
+                    )
+                  }
+                >
+                  {allSelected ? <Check className="h-3 w-3" /> : null}
+                </button>
+              ) : null}
+              <span>
+                {/* "1 of 1 tasks" was a count arguing with itself. The total
+                    only earns its place when something is being held back. */}
+                {visibleCount === plan.tasks.length
+                  ? `${plan.tasks.length} ${plan.tasks.length === 1 ? "task" : "tasks"}`
+                  : `${visibleCount} of ${plan.tasks.length} tasks`}
+              </span>
               <button
                 type="button"
-                aria-label={allSelected ? "Clear selection" : "Select all shown"}
-                data-checked={allSelected || undefined}
-                onClick={() =>
-                  setSelection(
-                    allSelected
-                      ? []
-                      : listSections.flatMap((section) =>
-                          section.rows.map((row) => row.task.id),
-                        ),
-                  )
-                }
+                data-active={selectionMode || undefined}
+                onClick={() => {
+                  setSelectionMode((on) => !on);
+                  if (selectionMode) setSelection([]);
+                }}
               >
-                {allSelected ? <Check className="h-3 w-3" /> : null}
+                {selectionMode ? "Done selecting" : "Select"}
               </button>
-              <span>
-                {visibleCount} of {plan.tasks.length} tasks
-              </span>
               <button type="button" onClick={addSection}>
                 <Plus className="h-3.5 w-3.5" /> Section
               </button>
@@ -584,10 +722,15 @@ export function PlanStudio({
           ) : null}
           {listSections.map((section) => (
             <section key={section.id}>
-              <header>
-                <strong>{section.title}</strong>
-                <em>{section.rows.length}</em>
-              </header>
+              {/* A plan with no sections has nothing to distinguish, so the
+                  implicit bucket does not announce itself. Once a real section
+                  exists, the loose tasks need a name again. */}
+              {section.id === "__unsectioned" && listSections.length === 1 ? null : (
+                <header>
+                  <strong>{section.title}</strong>
+                  <em>{section.rows.length}</em>
+                </header>
+              )}
               {section.rows.map((row) => (
                 <article
                   key={row.task.id}
@@ -597,10 +740,10 @@ export function PlanStudio({
                   }
                   style={{ paddingLeft: 10 + row.depth * 18 }}
                 >
-                  {readOnly ? null : (
+                  {selectionMode && canEdit ? (
                     <button
                       type="button"
-                      className="spectra-plan-check"
+                      className="spectra-plan-select"
                       aria-label={`Select ${row.task.title}`}
                       data-checked={
                         selection.includes(row.task.id) || undefined
@@ -617,10 +760,42 @@ export function PlanStudio({
                         <Check className="h-3 w-3" />
                       ) : null}
                     </button>
-                  )}
+                  ) : null}
+                  {/* The box at the head of a task row completes the task. It
+                      used to add the task to a bulk selection, which is a false
+                      affordance on the one control every task list shares — and
+                      in a side panel the status control beside it was hidden, so
+                      there was no way to finish a task at all. Selecting many
+                      tasks is now its own mode, entered from the list header. */}
+                  <button
+                    type="button"
+                    className="spectra-plan-check"
+                    disabled={!canEdit}
+                    aria-pressed={row.task.status === "done"}
+                    aria-label={
+                      row.task.status === "done"
+                        ? `Mark ${row.task.title} as not done`
+                        : `Mark ${row.task.title} done`
+                    }
+                    onClick={() =>
+                      patchTask(row.task.id, {
+                        status: row.task.status === "done" ? "todo" : "done",
+                      })
+                    }
+                  >
+                    {row.task.status === "done" ? (
+                      <Check className="h-3 w-3" />
+                    ) : null}
+                  </button>
+                  {/* A native control, deliberately: this list can hold hundreds
+                      of rows, and a portaled popover per row costs far more than
+                      it returns. It is a tinted chip rather than an OS dropdown,
+                      and it stays in a side panel — statuses beyond done are the
+                      point of a plan, not a wide-screen luxury. */}
                   <select
+                    className="spectra-plan-status"
                     aria-label={`Status of ${row.task.title}`}
-                    disabled={readOnly}
+                    disabled={!canEdit}
                     value={row.task.status}
                     style={{ color: STATUS_TONE[row.task.status] }}
                     onChange={(event) =>
@@ -672,25 +847,38 @@ export function PlanStudio({
                       {row.task.calendarBlockIds.length}
                     </span>
                   ) : null}
-                  <input
-                    type="date"
-                    aria-label={`Due date of ${row.task.title}`}
-                    disabled={readOnly || Boolean(row.task.officialDeadlineRef)}
-                    value={dateInput(row.task.dueAt)}
-                    onChange={(event) =>
-                      setDue(row.task.id, event.target.value)
-                    }
-                  />
-                  <span className="spectra-plan-due" data-overdue={
-                    row.task.dueAt !== undefined &&
-                    row.task.dueAt < now &&
-                    row.task.status !== "done"
-                      ? true
-                      : undefined
-                  }>
-                    {dueLabel(row.task, now)}
+                  {/* One date, one slot. The row used to print "08/21/2026" and
+                      "5d" side by side — the same fact twice, in two registers.
+                      The relative reading is what a person scans for, so it
+                      holds the slot and the picker rises to meet the pointer. */}
+                  <span className="spectra-plan-date">
+                    <input
+                      type="date"
+                      aria-label={`Due date of ${row.task.title}`}
+                      disabled={
+                        readOnly || Boolean(row.task.officialDeadlineRef)
+                      }
+                      value={dateInput(row.task.dueAt)}
+                      onChange={(event) =>
+                        setDue(row.task.id, event.target.value)
+                      }
+                    />
+                    <span
+                      className="spectra-plan-due"
+                      data-overdue={
+                        row.task.dueAt !== undefined &&
+                        row.task.dueAt < now &&
+                        row.task.status !== "done"
+                          ? true
+                          : undefined
+                      }
+                    >
+                      {dueLabel(row.task, now) ||
+                        (canEdit && !row.task.officialDeadlineRef
+                          ? "Add date"
+                          : "")}
+                    </span>
                   </span>
-                  <ChevronRight className="h-3.5 w-3.5 opacity-40" />
                 </article>
               ))}
             </section>
@@ -711,6 +899,7 @@ export function PlanStudio({
             >
               <Plus className="h-3.5 w-3.5" />
               <input
+                ref={quickAddRef}
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
                 placeholder="Add a task"
@@ -724,10 +913,21 @@ export function PlanStudio({
           {boardColumns.map((column) => (
             <section
               key={column.status}
+              // Without this a card could be dragged across five identical
+              // columns with no sign of which one would take it.
+              data-dropping={dropStatus === column.status || undefined}
               onDragOver={(event) => {
-                if (!readOnly) event.preventDefault();
+                if (readOnly) return;
+                event.preventDefault();
+                setDropStatus(column.status);
               }}
+              onDragLeave={() =>
+                setDropStatus((current) =>
+                  current === column.status ? undefined : current,
+                )
+              }
               onDrop={(event) => {
+                setDropStatus(undefined);
                 const taskId = event.dataTransfer.getData("text/plain");
                 if (taskId && !readOnly)
                   patchTask(taskId, { status: column.status });
@@ -773,8 +973,38 @@ export function PlanStudio({
                   </span>
                 </button>
               ))}
-              {!column.tasks.length ? (
-                <p>Drop a task here to move it.</p>
+              {!column.tasks.length && !canEdit ? (
+                <p>Nothing here yet.</p>
+              ) : null}
+              {/* A board you can only read from is half a board. Adding here
+                  writes the column's own status, which is the whole point of
+                  putting the task in this column — and it means the plan's
+                  primary verb no longer has to throw the person back into the
+                  list to add one thing. */}
+              {canEdit ? (
+                <form
+                  className="spectra-plan-column-add"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    addTask({ status: column.status });
+                  }}
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  <input
+                    ref={
+                      column.status === "todo" ? boardAddRef : undefined
+                    }
+                    value={columnDraft[column.status] ?? ""}
+                    onChange={(event) =>
+                      setColumnDraft((current) => ({
+                        ...current,
+                        [column.status]: event.target.value,
+                      }))
+                    }
+                    placeholder="Add a task"
+                    aria-label={`Add a task to ${column.title}`}
+                  />
+                </form>
               ) : null}
             </section>
           ))}
@@ -782,61 +1012,111 @@ export function PlanStudio({
       ) : (
         <div className="spectra-plan-timeline">
           {timeline.window ? (
-            <>
+            // A lane per task, with the name in a column of its own.
+            //
+            // Bars used to be laid out inline and sized from the estimate, which
+            // on a fortnight axis made every task a 36px square holding one
+            // truncated letter ("C…"), stacked with no lane structure and
+            // overflowing the right edge. The name now lives outside the axis,
+            // so a mark on the axis only has to say *when* — and a deadline with
+            // no known start is drawn as a marker rather than as a bar whose
+            // length is a guess.
+            <div className="spectra-plan-lanes">
               <div className="spectra-plan-axis">
-                <span>{shortDate(timeline.window.from)}</span>
-                <span>{shortDate(timeline.window.to)}</span>
+                <span />
+                <div>
+                  {axisTicks.map((tick) => (
+                    <span key={tick.at} style={{ left: `${tick.at}%` }}>
+                      {tick.label}
+                    </span>
+                  ))}
+                </div>
               </div>
-              <div className="spectra-plan-bars">
-                {timeline.milestones.map((milestone) => {
-                  const span =
-                    timeline.window!.to - timeline.window!.from || 1;
-                  const left =
-                    ((milestone.at - timeline.window!.from) / span) * 100;
-                  return (
-                    <div
-                      key={milestone.id}
-                      className="spectra-plan-milestone"
-                      style={{ left: `${left}%` }}
-                      data-status={milestone.status}
-                    >
-                      <span>{milestone.title}</span>
-                    </div>
-                  );
-                })}
-                {timeline.bars.map((bar) => {
-                  const span = timeline.window!.to - timeline.window!.from || 1;
-                  const left = ((bar.startAt - timeline.window!.from) / span) * 100;
-                  const width = Math.max(
-                    2,
-                    ((bar.endAt - bar.startAt) / span) * 100,
-                  );
-                  return (
+              {timeline.bars.map((bar) => {
+                const span = timeline.window!.to - timeline.window!.from || 1;
+                const left =
+                  ((bar.startAt - timeline.window!.from) / span) * 100;
+                const width = ((bar.endAt - bar.startAt) / span) * 100;
+                return (
+                  <div className="spectra-plan-lane" key={bar.task.id}>
                     <button
-                      key={bar.task.id}
                       type="button"
-                      className="spectra-plan-bar"
-                      data-inferred={bar.inferred || undefined}
-                      data-status={bar.task.status}
-                      style={{ marginLeft: `${left}%`, width: `${width}%` }}
+                      className="spectra-plan-lane-name"
                       onClick={() =>
                         setOpenTaskId(
                           openTaskId === bar.task.id ? undefined : bar.task.id,
                         )
                       }
                     >
-                      <span>{bar.task.title}</span>
+                      {bar.task.title}
                     </button>
-                  );
-                })}
-              </div>
-              <p className="spectra-plan-axis-note">
-                Bars end at the deadline and are sized from the estimate, so
-                they show when work has to finish rather than when it is
-                scheduled. Schedule work blocks in Calendar to place them
-                exactly.
-              </p>
-            </>
+                    <div className="spectra-plan-lane-track">
+                      {todayAt !== undefined ? (
+                        <i
+                          className="spectra-plan-today"
+                          style={{ left: `${todayAt}%` }}
+                          aria-hidden="true"
+                        />
+                      ) : null}
+                      <button
+                        type="button"
+                        className="spectra-plan-bar"
+                        data-inferred={bar.inferred || undefined}
+                        data-status={bar.task.status}
+                        style={
+                          bar.inferred
+                            ? { left: `${((bar.endAt - timeline.window!.from) / span) * 100}%` }
+                            : { left: `${left}%`, width: `${width}%` }
+                        }
+                        aria-label={
+                          bar.inferred
+                            ? `${bar.task.title}, due ${shortDate(bar.endAt)}`
+                            : `${bar.task.title}, ${shortDate(bar.startAt)} to ${shortDate(bar.endAt)}`
+                        }
+                        onClick={() =>
+                          setOpenTaskId(
+                            openTaskId === bar.task.id
+                              ? undefined
+                              : bar.task.id,
+                          )
+                        }
+                      />
+                    </div>
+                    {/* The date sits in a column of its own. Overlaid on the
+                        right of the track it collided with any mark falling
+                        near the end of the window — which is exactly where a
+                        deadline tends to be. */}
+                    <span className="spectra-plan-lane-date">
+                      {shortDate(bar.endAt)}
+                    </span>
+                  </div>
+                );
+              })}
+              {timeline.milestones.length ? (
+                <div className="spectra-plan-lane">
+                  <span className="spectra-plan-lane-label">Milestones</span>
+                  <div className="spectra-plan-lane-track">
+                    {timeline.milestones.map((milestone) => {
+                      const span =
+                        timeline.window!.to - timeline.window!.from || 1;
+                      return (
+                        <span
+                          key={milestone.id}
+                          className="spectra-plan-milestone"
+                          data-status={milestone.status}
+                          style={{
+                            left: `${((milestone.at - timeline.window!.from) / span) * 100}%`,
+                          }}
+                        >
+                          {milestone.title}
+                        </span>
+                      );
+                    })}
+                  </div>
+                  <span />
+                </div>
+              ) : null}
+            </div>
           ) : (
             <p className="spectra-plan-none">
               No task in this plan has a date yet. Give one a due date and the
@@ -858,6 +1138,14 @@ export function PlanStudio({
                 </button>
               ))}
             </div>
+          ) : null}
+          {/* A footnote, not a preface. Four lines of explanation above the
+              content pushed the timeline itself below the fold. */}
+          {timeline.window ? (
+            <p className="spectra-plan-axis-note">
+              A dot marks a deadline on its own; a bar spans the estimated work
+              up to it. Schedule work blocks in Calendar to place them exactly.
+            </p>
           ) : null}
         </div>
       )}

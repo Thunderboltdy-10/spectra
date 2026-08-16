@@ -74,8 +74,19 @@ export function buildWhiteboardSvg(
     const from = byId.get(edge.from);
     const to = byId.get(edge.to);
     if (!from || !to) return [];
+    const x1 = from.x + from.width / 2;
+    const y1 = from.y + from.height / 2;
+    const x2 = to.x + to.width / 2;
+    const y2 = to.y + to.height / 2;
     return [
-      `<line x1="${from.x + from.width / 2}" y1="${from.y + from.height / 2}" x2="${to.x + to.width / 2}" y2="${to.y + to.height / 2}" stroke="#68736d" stroke-width="2" marker-end="url(#arrow)"/>`,
+      `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#68736d" stroke-width="2" marker-end="url(#arrow)"/>`,
+      // A concept map's meaning is in its labels. The export drew the lines and
+      // dropped every label, so "cause of" and "example of" left the file.
+      ...(edge.label
+        ? [
+            `<text x="${(x1 + x2) / 2}" y="${(y1 + y2) / 2}" fill="#5d6761" font-family="Inter, system-ui, sans-serif" font-size="12" text-anchor="middle" paint-order="stroke" stroke="#fbfbf8" stroke-width="4">${escapeXml(edge.label)}</text>`,
+          ]
+        : []),
     ];
   });
   const objects = [...pageNodes]

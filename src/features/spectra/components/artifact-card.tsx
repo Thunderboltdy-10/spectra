@@ -21,6 +21,7 @@ import {
 import { cn } from "@/lib/utils";
 import type { ArtifactTypeKey } from "../artifacts/types";
 import { useArtifactAiActivity } from "../collaboration/artifact-ai-activity";
+import { getWorkDefinition } from "../work/registry";
 import {
   CardTypeIcon,
   SpectraCard,
@@ -72,77 +73,96 @@ export type ArtifactCardView = {
   aiProgress?: number;
 };
 
-export const blueprintMeta: Record<
+/**
+ * The visual identity of each type: an icon and a colour.
+ *
+ * Names are deliberately absent. A type is named once, in `work/registry`, and
+ * every surface reads it from there. This map used to carry its own labels and
+ * they had drifted from the registry: a plan read as "Task", a calendar as
+ * "Timetable", a board as "Whiteboard" and flashcards as "Deck", so the same
+ * work answered to two different names depending on whether you were looking at
+ * a card or at the studio that opens it.
+ */
+const blueprintIdentity: Record<
   ArtifactCardView["blueprintKey"],
-  { label: string; icon: LucideIcon; color: string; soft: string }
+  { icon: LucideIcon; color: string; soft: string }
 > = {
   document: {
-    label: "Document",
     icon: FileText,
     color: "var(--mode-document)",
     soft: "color-mix(in oklab, var(--mode-document) 9%, var(--bg-elevated))",
   },
   thread_reference: {
-    label: "Thread",
     icon: MessageSquare,
     color: "#8b6ff0",
     soft: "color-mix(in oklab, #8b6ff0 10%, var(--bg-elevated))",
   },
   flashcard_deck: {
-    label: "Deck",
     icon: BookOpen,
     color: "var(--mode-document)",
     soft: "color-mix(in oklab, var(--mode-document) 9%, var(--bg-elevated))",
   },
   quiz: {
-    label: "Quiz",
     icon: HelpCircle,
     color: "var(--mode-quiz)",
     soft: "color-mix(in oklab, var(--mode-quiz) 9%, var(--bg-elevated))",
   },
   planner_task: {
-    label: "Task",
     icon: CalendarCheck2,
     color: "#d47a16",
     soft: "color-mix(in oklab, #d47a16 10%, var(--bg-elevated))",
   },
   agent: {
-    label: "Agent",
     icon: Bot,
     color: "#1785a5",
     soft: "color-mix(in oklab, #1785a5 9%, var(--bg-elevated))",
   },
   timetable: {
-    label: "Timetable",
     icon: CalendarDays,
     color: "#16735d",
     soft: "color-mix(in oklab, #16735d 9%, var(--bg-elevated))",
   },
   presentation: {
-    label: "Presentation",
     icon: Presentation,
     color: "#cf6d48",
     soft: "color-mix(in oklab, #cf6d48 9%, var(--bg-elevated))",
   },
   sheets: {
-    label: "Sheet",
     icon: Table2,
     color: "#2f855a",
     soft: "color-mix(in oklab, #2f855a 9%, var(--bg-elevated))",
   },
   code: {
-    label: "Code",
     icon: Code2,
     color: "#5166a8",
     soft: "color-mix(in oklab, #5166a8 9%, var(--bg-elevated))",
   },
   whiteboard: {
-    label: "Whiteboard",
     icon: Workflow,
     color: "#9a6a39",
     soft: "color-mix(in oklab, #9a6a39 9%, var(--bg-elevated))",
   },
 };
+
+export const blueprintMeta = Object.freeze(
+  Object.fromEntries(
+    Object.entries(blueprintIdentity).map(([key, identity]) => [
+      key,
+      {
+        ...identity,
+        // A thread is a conversation, not a work type, so it is the one label
+        // the registry does not own.
+        label:
+          key === "thread_reference"
+            ? "Thread"
+            : getWorkDefinition(key as ArtifactTypeKey).userFacingName,
+      },
+    ]),
+  ),
+) as Record<
+  ArtifactCardView["blueprintKey"],
+  { label: string; icon: LucideIcon; color: string; soft: string }
+>;
 
 export function ArtifactCard({
   artifact,

@@ -11,7 +11,10 @@ import {
   Copy,
   FileDown,
   Focus,
+  FolderPlus,
+  Gauge,
   Grid3X3,
+  GripVertical,
   ImageIcon,
   Import,
   LayoutTemplate,
@@ -29,11 +32,13 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import {
   useEffect,
   useMemo,
   useRef,
   useState,
+  type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { createPortal } from "react-dom";
@@ -55,7 +60,7 @@ import {
   type SpectraFlashcardStudyUpdate,
 } from "../data/api";
 import { parseDelimited } from "../sheets/model";
-import { availableWorkModes } from "../work/registry";
+import type { WorkCapability } from "../work/registry";
 import { aiRegionAttr, pathTouches } from "./ai-region-path";
 import {
   ArtifactRichTextEditor,
@@ -74,14 +79,65 @@ import {
   plannerDescriptionHtml,
   plannerDescriptionText,
   record,
-  smallActionClass,
 } from "./artifact-studio";
 import {
   artifactBlobSha256,
   downloadDocumentBlob,
   downloadDocumentText,
 } from "./artifact-studio-file-utils";
-import { WorkbarSelect } from "./artifact-workbar";
+import { useStudioContract } from "./artifact-studio-shell";
+import {
+  ArtifactWorkbar,
+  WorkbarItemSelector,
+  type WorkbarActionSpec,
+} from "./artifact-workbar";
+import {
+  Select,
+  SelectContent,
+  SelectField,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectSeparator,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
+/** The two ways of reading a deck without authoring it, in bar order. */
+const readingViews = [
+  { id: "browse", label: "Read the deck", icon: BookOpen },
+  { id: "progress", label: "Your progress", icon: Gauge, requires: "submit" },
+] as const satisfies ReadonlyArray<{
+  id: string;
+  label: string;
+  icon: LucideIcon;
+  requires?: WorkCapability;
+}>;
+
+/** Starting shapes for a new card, offered in the bar's overflow menu. */
+const deckTemplates = [
+  { kind: "concept", label: "Add a concept and cloze card" },
+  { kind: "language", label: "Add a vocabulary card" },
+  { kind: "formula", label: "Add a formula card" },
+] as const;
+
+/**
+ * Four confidence values, four appearances. The audited build painted "not
+ * rated yet" and "medium" the same amber, so the rail claimed every card had
+ * been judged. Colour is never the only carrier: each dot names its state.
+ */
+const cardConfidence = {
+  strong: { tone: "bg-[var(--success)]", label: "You find this one easy" },
+  medium: {
+    tone: "bg-[var(--warning)]",
+    label: "You are still working on this one",
+  },
+  weak: { tone: "bg-[var(--danger)]", label: "This one is giving you trouble" },
+  unknown: {
+    tone: "border border-[var(--text-tertiary)]",
+    label: "Not rated yet",
+  },
+} as const;
 
 export function FlashcardStudio({
   artifactId,
@@ -89,7 +145,6 @@ export function FlashcardStudio({
   content,
   onChange,
   aiChangedPaths = [],
-  readOnly = false,
   onActiveRegionChange,
 }: {
   artifactId: string;
@@ -97,6 +152,11 @@ export function FlashcardStudio({
   content: unknown;
   onChange: (content: unknown) => void;
   aiChangedPaths?: string[];
+  /**
+   * Superseded by the studio contract, which resolves the same value from
+   * `work/registry` permissions. Kept so the shell's call site keeps type
+   * checking; read `contract.can("edit")` instead of this.
+   */
   readOnly?: boolean;
   onActiveRegionChange?: (regionId: string) => void;
 }) {
@@ -130,14 +190,46 @@ export function FlashcardStudio({
   const [sectionNameDraft, setSectionNameDraft] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [deckTagDraft, setDeckTagDraft] = useState("");
-  const deckModes = availableWorkModes(
-    "flashcard_deck",
-    readOnly ? "read_only" : "edit",
+  /**
+   * Capability truth comes from the shell contract, which derives it from
+   * `work/registry` permissions — never from the pane's width and never from a
+   * local guess. `canEdit` gates every mutating affordance in this file, so a
+   * read-only viewer is not offered a control the registry denies them (an
+   * inert affordance is a defect) while an owner in a 560px split panel keeps
+   * all of them (CANON D1/D4).
+   */
+  const contract = useStudioContract();
+  const canEdit = contract.can("edit");
+  const canStudy = contract.can("attempt");
+  /**
+   * `submit` is the deck's recording step. Entering a session and turning cards
+   * over is `attempt`; committing a graded review to the server, which moves the
+   * card's schedule and this person's progress, is `submit`. Without it the
+   * session still runs as practice and says so, rather than grading into nothing
+   * and showing intervals that were never scheduled.
+   */
+  const canRecordStudy = contract.can("submit");
+  /**
+   * The registry declares four modes for a deck, and none of them is a peer tab.
+   * `build` is authoring, which is where an owner always starts (D1); `study` is
+   * an activity with its own session and exit, so it is the bar's primary verb;
+   * `browse` and `progress` are ways of reading the same deck, so they are
+   * toggles in the bar that turn themselves off again (D2/D3). The registry is
+   * still the authority on which of them exist for this viewer: a reader with no
+   * `edit` never gets `build`, so they open in `browse` rather than in an
+   * authoring surface they cannot use.
+   */
+  const deckViewModes = contract.modes.filter((entry) => entry.id !== "study");
+  const hasView = (id: string) =>
+    deckViewModes.some((entry) => entry.id === id);
+  const [studioView, setStudioView] = useState(
+    () => deckViewModes[0]?.id ?? "browse",
   );
-  const canStudy = deckModes.some((entry) => entry.id === "study");
-  const [studioView, setStudioView] = useState<"build" | "browse" | "progress">(
-    readOnly ? "browse" : "build",
-  );
+  // A viewer who loses `edit` mid-session must not be left on a surface the
+  // registry no longer grants them.
+  const activeView = hasView(studioView)
+    ? studioView
+    : (deckViewModes[0]?.id ?? "browse");
   const [previewRevealed, setPreviewRevealed] = useState(false);
   const [railCollapsed, setRailCollapsed] = useState(mode === "split");
   const [studyOpen, setStudyOpen] = useState(false);
@@ -164,7 +256,6 @@ export function FlashcardStudio({
   const [studyUpdate, setStudyUpdate] = useState<SpectraFlashcardStudyUpdate>();
   const [studyUpdateDismissed, setStudyUpdateDismissed] = useState(false);
   const [studyStateLoading, setStudyStateLoading] = useState(true);
-  const [deckMenuOpen, setDeckMenuOpen] = useState(false);
   const [deckImportReport, setDeckImportReport] = useState<string>();
   const [deckImportError, setDeckImportError] = useState<string>();
   const [deckActionError, setDeckActionError] = useState<string>();
@@ -206,6 +297,8 @@ export function FlashcardStudio({
     undefined,
   );
   const deckMediaInputRef = useRef<HTMLInputElement>(null);
+  const studioRef = useRef<HTMLDivElement>(null);
+  const focusCardIdRef = useRef<string>(undefined);
   const sections = useMemo(
     () => Array.from(new Set(cards.map((card) => card.section || "Section 1"))),
     [cards],
@@ -215,9 +308,27 @@ export function FlashcardStudio({
     0,
     cards.findIndex((card) => card.id === activeCard?.id),
   );
+  /**
+   * Adding a card is the deck editor's hot path: 28 cards is 28 trips between a
+   * button and a field. A new card takes the caret into its own front side, and
+   * Ctrl or Cmd with Enter from either side creates the next one, so a whole
+   * sitting can be typed without reaching for the pointer. The rich text editor
+   * owns its own DOM, so the caret is placed through the face's `data-card-face`
+   * hook rather than by threading a ref through the shared primitive.
+   */
+  useEffect(() => {
+    if (!focusCardIdRef.current || focusCardIdRef.current !== activeCard?.id)
+      return;
+    focusCardIdRef.current = undefined;
+    studioRef.current
+      ?.querySelector<HTMLElement>(
+        '[data-card-face="front"] [contenteditable="true"], [data-card-face="front"] textarea',
+      )
+      ?.focus();
+  }, [activeCard?.id]);
   useEffect(() => {
     setPreviewRevealed(false);
-  }, [activeCardId, studioView]);
+  }, [activeCardId, activeView]);
   const advancedAiPath = aiChangedPaths.find((path) =>
     /^\/cards\/\d+\/(?:variant|difficulty|confidence|section|language|media|explanation|acceptedAlternatives|learningObjective|sourceRefs|bidirectional)(?:\/|$)/.test(
       path,
@@ -341,7 +452,7 @@ export function FlashcardStudio({
       );
     if (retained)
       parts.push(
-        `${retained} card${retained === 1 ? "" : "s"} left the deck — your progress is kept in case ${retained === 1 ? "it returns" : "they return"}`,
+        `${retained} card${retained === 1 ? "" : "s"} left the deck, and your progress is kept in case ${retained === 1 ? "it returns" : "they return"}`,
       );
     return `${parts.join(". ")}.`;
   })();
@@ -761,6 +872,7 @@ export function FlashcardStudio({
     commit([...cards, card]);
     setActiveCardId(card.id);
     setActiveSection(section);
+    focusCardIdRef.current = card.id;
   }
 
   function toggleCardSelection(cardId: string) {
@@ -856,6 +968,29 @@ export function FlashcardStudio({
     commit(next);
     setActiveSection(target.section ?? "Section 1");
     setDraggedCardId(undefined);
+  }
+
+  /**
+   * Order is content, so it has to be reachable without a pointer: dragging is
+   * the only reorder affordance a mouse user needs and the only one a keyboard
+   * user cannot use at all. Alt+Arrow moves the focused card one place and keeps
+   * focus on the row, so a run of moves is one held modifier.
+   */
+  function nudgeCard(cardId: string, direction: -1 | 1) {
+    const index = cards.findIndex((card) => card.id === cardId);
+    const target = index + direction;
+    if (index < 0 || target < 0 || target >= cards.length) return;
+    const next = [...cards];
+    const [moved] = next.splice(index, 1);
+    if (!moved) return;
+    // Crossing a section boundary adopts the neighbour's section, which is the
+    // same rule dragging follows.
+    next.splice(target, 0, {
+      ...moved,
+      section: cards[target]?.section ?? moved.section,
+    });
+    commit(next);
+    setActiveCardId(cardId);
   }
 
   function renameSection(section: string, requestedName = sectionNameDraft) {
@@ -1511,7 +1646,6 @@ export function FlashcardStudio({
     commit([...cards, template]);
     setActiveCardId(template.id);
     setActiveSection(section);
-    setDeckMenuOpen(false);
   }
 
   function exportDeck(format: "csv" | "tsv") {
@@ -1565,7 +1699,6 @@ export function FlashcardStudio({
         : "text/tab-separated-values;charset=utf-8",
       `\uFEFF${rows.map((row) => row.map(escape).join(delimiter)).join("\r\n")}`,
     );
-    setDeckMenuOpen(false);
   }
 
   async function exportDeckPackage() {
@@ -1630,7 +1763,6 @@ export function FlashcardStudio({
           type: "application/zip",
         }),
       );
-      setDeckMenuOpen(false);
     } catch (error) {
       setDeckActionError(
         error instanceof Error
@@ -1676,22 +1808,24 @@ export function FlashcardStudio({
     setStudyError(undefined);
     try {
       const now = currentTimeMs();
-      const result = await reviewSpectraFlashcard({
-        artifactId,
-        cardId: activeStudyCard.id,
-        direction: activeStudyItem.direction,
-        rating,
-        clientReviewId: `review-${uniqueToken()}`,
-        elapsedMs: Math.max(0, now - studyCardStartedAt),
-      });
-      setStudyStates((current) => {
-        const next = new Map(current);
-        next.set(
-          deckStudyKey(result.state.cardId, result.state.direction),
-          result.state,
-        );
-        return next;
-      });
+      if (canRecordStudy) {
+        const result = await reviewSpectraFlashcard({
+          artifactId,
+          cardId: activeStudyCard.id,
+          direction: activeStudyItem.direction,
+          rating,
+          clientReviewId: `review-${uniqueToken()}`,
+          elapsedMs: Math.max(0, now - studyCardStartedAt),
+        });
+        setStudyStates((current) => {
+          const next = new Map(current);
+          next.set(
+            deckStudyKey(result.state.cardId, result.state.direction),
+            result.state,
+          );
+          return next;
+        });
+      }
       setStudyRatings((current) => ({
         ...current,
         [rating]: current[rating] + 1,
@@ -1830,67 +1964,232 @@ export function FlashcardStudio({
     plannerDescriptionHtml(activePreviewSource),
   );
 
+  // The rail and the card editor are the two authoring panes. Browse and
+  // Progress read the deck, so they get the whole width instead of inheriting a
+  // 300px track that nothing occupies.
+  const twoPane = mode === "tab" && activeView === "build";
+  const spanBoth = twoPane ? "lg:col-span-2" : "";
+  const selectAllLabel =
+    filteredCards.length === cards.length
+      ? "Select every card"
+      : `Select the ${filteredCards.length} cards shown`;
+  const studyPrimaryLabel = studyStateLoading
+    ? "Study"
+    : dueStudyCount
+      ? `Study ${dueStudyCount} due`
+      : studyCards.length
+        ? "Study ahead"
+        : "Study";
+  /**
+   * Why this card is not in the study queue, in the owner's terms. `studyCards`
+   * silently drops a card that cannot be answered, so without this the Study
+   * count and the deck size disagreed and nothing said why.
+   */
+  const activeCardStudyBlocker = !activeCard
+    ? ""
+    : activeCard.variant === "cloze" &&
+        clozeParts(activeCard.front).length === 0
+      ? "Make one answer on the front a cloze deletion before this card can be studied."
+      : activeCard.variant === "image_occlusion" &&
+          (!activeCard.media || (activeCard.occlusions?.length ?? 0) === 0)
+        ? "Add an image and hide at least one region before this card can be studied."
+        : !activeCard.front.trim() || !activeCard.back.trim()
+          ? "Needs a prompt and an answer before it can be studied."
+          : "";
+
+  // One declaration of what this type's controls mean. The bar decides which of
+  // them survive the pane's width, so the deck can no longer grow a second row
+  // under pressure the way the audited build did.
+  const deckActions: WorkbarActionSpec[] = [
+    {
+      id: "add-card",
+      label: "Add card",
+      icon: Plus,
+      priority: "essential",
+      keepLabel: true,
+      requires: "edit",
+      hint: "Ctrl or Cmd and Enter",
+      onSelect: () => addCard(),
+    },
+    ...(activeView === "build"
+      ? ([
+          {
+            id: "rail",
+            label: railCollapsed ? "Show cards" : "Hide cards",
+            icon: PanelLeft,
+            priority: "essential",
+            active: !railCollapsed,
+            onSelect: () => setRailCollapsed((collapsed) => !collapsed),
+          },
+          {
+            // One control for one binary choice, named after what it does next
+            // rather than two buttons competing to look selected.
+            id: "rail-view",
+            label:
+              railView === "list" ? "Show cards as a grid" : "Show cards as a list",
+            icon: railView === "list" ? Grid3X3 : List,
+            disabled: railCollapsed,
+            onSelect: () =>
+              setRailView(railView === "list" ? "grid" : "list"),
+          },
+        ] satisfies WorkbarActionSpec[])
+      : []),
+    // Reading views are toggles, and the one you are inside stays in the bar at
+    // every width, so leaving it is never hidden behind a menu (D3). `requires`
+    // ties progress to whoever may record a review: no recording, no progress.
+    ...readingViews.flatMap<WorkbarActionSpec>((view) =>
+      hasView(view.id)
+        ? [
+            {
+              ...view,
+              label: activeView === view.id ? "Back to the deck" : view.label,
+              priority: activeView === view.id ? "essential" : "secondary",
+              active: activeView === view.id,
+              onSelect: () =>
+                setStudioView(activeView === view.id ? "build" : view.id),
+            },
+          ]
+        : [],
+    ),
+    {
+      id: "import",
+      label: "Import cards",
+      icon: Import,
+      requires: "edit",
+      hint: "CSV, TSV, Markdown, or an Anki package",
+      onSelect: () => deckImportRef.current?.click(),
+    },
+    {
+      id: "add-section",
+      label: "Add section",
+      icon: FolderPlus,
+      priority: "advanced",
+      requires: "edit",
+      onSelect: () => {
+        const section = `Section ${sections.length + 1}`;
+        setActiveSection(section);
+        addCard(section);
+      },
+    },
+    ...deckTemplates.map<WorkbarActionSpec>((template) => ({
+      id: `template-${template.kind}`,
+      label: template.label,
+      icon: LayoutTemplate,
+      priority: "advanced",
+      requires: "edit",
+      onSelect: () => applyDeckTemplate(template.kind),
+    })),
+    ...(["csv", "tsv"] as const).map<WorkbarActionSpec>((format) => ({
+      id: `export-${format}`,
+      label: `Export as ${format.toUpperCase()}`,
+      icon: FileDown,
+      priority: "advanced",
+      onSelect: () => exportDeck(format),
+    })),
+    {
+      id: "export-package",
+      label: "Export a portable deck package",
+      icon: Archive,
+      priority: "advanced",
+      onSelect: () => void exportDeckPackage(),
+    },
+    {
+      id: "print",
+      label: "Print or save as PDF",
+      icon: Printer,
+      priority: "advanced",
+      onSelect: () => window.print(),
+    },
+  ];
+
+  /**
+   * Keyboard flow for fast entry, matching `keyboardOperations.flashcard_deck`
+   * in `work/registry`. Ctrl or Cmd and Enter starts the next card from
+   * anywhere, including mid-sentence in a card face, because that is the hot
+   * path when someone is typing a deck. Alt with the arrows moves between cards
+   * and Alt and Shift moves the card itself, but both stand down inside a text
+   * field: Option and arrow is word-wise caret movement on macOS, and stealing
+   * it would break typing to add a shortcut nobody asked for. Reading the deck
+   * has no text entry to protect, so there the bare arrows turn the pages.
+   */
+  function onStudioKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.defaultPrevented) return;
+    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+      if (!canEdit) return;
+      event.preventDefault();
+      addCard(activeCard?.section);
+      return;
+    }
+    if (
+      activeView === "browse" &&
+      !event.altKey &&
+      !event.metaKey &&
+      !event.ctrlKey &&
+      (event.key === "ArrowLeft" || event.key === "ArrowRight")
+    ) {
+      const step = event.key === "ArrowRight" ? 1 : -1;
+      const nextCard = cards[activeCardIndex + step];
+      if (!nextCard) return;
+      event.preventDefault();
+      setActiveCardId(nextCard.id);
+      return;
+    }
+    if (!event.altKey || event.metaKey || event.ctrlKey) return;
+    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+    const target = event.target as HTMLElement | null;
+    if (target?.closest('input, textarea, [contenteditable="true"]')) return;
+    if (!activeCard) return;
+    const direction = event.key === "ArrowDown" ? 1 : -1;
+    event.preventDefault();
+    if (event.shiftKey) {
+      if (canEdit) nudgeCard(activeCard.id, direction);
+      return;
+    }
+    const next = cards[activeCardIndex + direction];
+    if (next) setActiveCardId(next.id);
+  }
+
   return (
     <div
-      className={`spectra-flashcard-studio ml-2.5 grid min-h-[720px] min-w-0 gap-3 ${mode === "tab" ? "lg:grid-cols-[330px_minmax(0,1fr)]" : "grid-cols-1"}`}
-      data-studio-view={studioView}
+      ref={studioRef}
+      className={`spectra-flashcard-studio ml-2.5 grid min-w-0 gap-3 ${twoPane ? "lg:grid-cols-[minmax(0,300px)_minmax(0,1fr)]" : "grid-cols-1"}`}
+      data-studio-view={activeView}
       data-rail-collapsed={railCollapsed || undefined}
+      onKeyDown={onStudioKeyDown}
     >
-      <input
-        ref={deckMediaInputRef}
-        type="file"
-        accept="image/png,image/jpeg,image/webp,image/gif"
-        hidden
-        onChange={(event) => {
-          const file = event.target.files?.[0];
-          if (file) void uploadDeckMedia(file);
+      {/* Study is the bar's one verb, not a fourth tab: a deck's activity has
+          its own session and its own exit, so it can never look like a place
+          the owner might get stuck (CANON D2, D3). */}
+      <ArtifactWorkbar
+        label="Deck"
+        className={spanBoth}
+        modes={[]}
+        selector={
+          activeView === "progress" || !cards.length ? undefined : (
+            <WorkbarItemSelector
+              ariaLabel="Current card"
+              itemNoun="card"
+              value={activeCard?.id ?? ""}
+              onChange={setActiveCardId}
+              items={cards.map((card) => ({
+                value: card.id,
+                label: plannerDescriptionText(card.front) || "Untitled card",
+              }))}
+            />
+          )
+        }
+        primary={{
+          label: studyPrimaryLabel,
+          icon: Play,
+          onSelect: () => beginStudySession(),
+          disabled: !studyCards.length,
+          requires: "attempt",
         }}
+        actions={deckActions}
       />
-      <div
-        className={`spectra-deck-metrics grid w-[580px] max-w-full min-w-0 grid-cols-2 overflow-hidden rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] ${mode === "tab" ? "ml-11 sm:grid-cols-5 lg:col-span-2" : ""}`}
-      >
-        <div className="px-3 py-2">
-          <strong className="block font-display text-[16px] leading-5 text-[var(--text-primary)]">
-            {cards.length}
-          </strong>
-          <span className="text-micro text-[var(--text-tertiary)]">Cards</span>
-        </div>
-        <div className="border-l border-[var(--border-subtle)] px-3 py-2">
-          <strong className="block font-display text-[16px] leading-5 text-[var(--text-primary)]">
-            {sections.length}
-          </strong>
-          <span className="text-micro text-[var(--text-tertiary)]">
-            Sections
-          </span>
-        </div>
-        <div className="border-l border-[var(--border-subtle)] px-3 py-2">
-          <strong className="block font-display text-[16px] leading-5 text-[var(--text-primary)]">
-            {studyStateLoading ? "—" : `${personalMastery}%`}
-          </strong>
-          <span className="text-micro text-[var(--text-tertiary)]">
-            Personal mastery
-          </span>
-        </div>
-        <div className="border-l border-[var(--border-subtle)] px-3 py-2">
-          <strong className="block font-display text-[16px] leading-5 text-[var(--text-primary)]">
-            {studyStateLoading ? "—" : dueStudyCount}
-          </strong>
-          <span className="text-micro text-[var(--text-tertiary)]">
-            Due now
-          </span>
-        </div>
-        <div className="border-l border-[var(--border-subtle)] px-3 py-2">
-          <strong className="block rounded-[5px] bg-[color-mix(in_oklab,var(--success)_10%,var(--bg-primary))] px-2 py-1 text-center text-micro font-semibold text-[var(--success)]">
-            Active
-          </strong>
-          <span className="mt-0.5 block text-center text-micro text-[var(--text-tertiary)]">
-            Ready
-          </span>
-        </div>
-      </div>
       {deckUpdateNotice ? (
         <div
-          className={`spectra-deck-update-notice ${mode === "tab" ? "lg:col-span-2" : ""}`}
+          className={`spectra-deck-update-notice ${spanBoth}`}
           role="status"
         >
           <RefreshCw className="h-3.5 w-3.5" />
@@ -1900,170 +2199,17 @@ export function FlashcardStudio({
           </button>
         </div>
       ) : null}
-      <div
-        className={`spectra-editor-workbar spectra-deck-toolbar flex min-w-0 flex-wrap items-center gap-2 ${mode === "tab" ? "lg:col-span-2" : ""}`}
-      >
-        <button
-          type="button"
-          onClick={() => addCard()}
-          className="spectra-workbar-primary inline-flex h-8 items-center gap-1.5 rounded-[6px] bg-[var(--text-primary)] px-2.5 text-[11px] font-semibold text-[var(--bg-primary)]"
-        >
-          <Plus className="h-3.5 w-3.5" />
-          Add card
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            const section = `Section ${sections.length + 1}`;
-            setActiveSection(section);
-            addCard(section);
-          }}
-          className="inline-flex h-8 items-center gap-1.5 rounded-[6px] px-2.5 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-        >
-          <Plus className="h-3.5 w-3.5" />
-          Add section
-        </button>
-        <input
-          ref={deckImportRef}
-          type="file"
-          accept=".csv,.tsv,.txt,.md,.markdown,.apkg,.zip,.spectra-deck"
-          hidden
-          onChange={(event) => {
-            const file = event.currentTarget.files?.[0];
-            if (file) void importCards(file);
-          }}
-        />
-        <button
-          type="button"
-          onClick={() => deckImportRef.current?.click()}
-          className="inline-flex h-8 items-center gap-1.5 rounded-[6px] px-2.5 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-        >
-          <Import className="h-3.5 w-3.5" />
-          Import
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            beginStudySession();
-          }}
-          disabled={!canStudy || !studyCards.length}
-          className="inline-flex h-8 items-center gap-1.5 rounded-[6px] px-2.5 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-40"
-          aria-label={
-            !studyStateLoading && dueStudyCount
-              ? `Study flashcards, ${dueStudyCount} cards due`
-              : "Study flashcards"
-          }
-        >
-          <Play className="h-4 w-4" />
-          Study
-          {!studyStateLoading && dueStudyCount ? ` · ${dueStudyCount}` : ""}
-        </button>
-        <button
-          type="button"
-          onClick={() => setDeckMenuOpen(!deckMenuOpen)}
-          data-active={deckMenuOpen || undefined}
-          className="spectra-deck-edit-action spectra-deck-menu-trigger inline-flex h-9 items-center gap-2 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-primary)]"
-          aria-label="Deck templates, study settings, and export"
-          title="Templates and export"
-        >
-          <LayoutTemplate className="h-4 w-4" />
-          <span className="hidden sm:inline">Templates</span>
-        </button>
-        {studioView === "build" ? (
-          <button
-            type="button"
-            className="spectra-deck-rail-toggle"
-            aria-expanded={!railCollapsed}
-            onClick={() => setRailCollapsed((collapsed) => !collapsed)}
-          >
-            <PanelLeft className="h-3.5 w-3.5" />
-            {railCollapsed ? "Show cards" : "Hide cards"}
-          </button>
-        ) : null}
-        <span className="ml-auto" />
-        <div
-          className={`spectra-deck-pagination ${mode === "split" ? "w-full justify-between border-t border-[var(--border-subtle)] pt-2" : ""} flex min-w-0 items-center gap-1 text-[11px] text-[var(--text-secondary)]`}
-        >
-          <button
-            type="button"
-            aria-label="Previous card"
-            disabled={
-              !activeCard ||
-              cards.findIndex((card) => card.id === activeCard.id) === 0
-            }
-            onClick={() => {
-              const index = cards.findIndex(
-                (card) => card.id === activeCard?.id,
-              );
-              if (index > 0) setActiveCardId(cards[index - 1]!.id);
-            }}
-            className={iconButtonClass()}
-          >
-            <ChevronDown className="h-4 w-4 rotate-90" />
-          </button>
-          <WorkbarSelect
-            ariaLabel="Current card"
-            className="min-w-0 max-w-[220px] flex-1"
-            value={activeCard?.id ?? ""}
-            options={cards.map((card, index) => ({
-              value: card.id,
-              label: `${index + 1} · ${
-                plannerDescriptionText(card.front) || "Untitled card"
-              }`,
-            }))}
-            onChange={setActiveCardId}
-          />
-          <span className="whitespace-nowrap">
-            {activeCardIndex + 1} of {cards.length}
-          </span>
-          <button
-            type="button"
-            aria-label="Next card"
-            disabled={
-              !activeCard ||
-              cards.findIndex((card) => card.id === activeCard.id) ===
-                cards.length - 1
-            }
-            onClick={() => {
-              const index = cards.findIndex(
-                (card) => card.id === activeCard?.id,
-              );
-              if (index >= 0 && index < cards.length - 1)
-                setActiveCardId(cards[index + 1]!.id);
-            }}
-            className={iconButtonClass()}
-          >
-            <ChevronDown className="h-4 w-4 -rotate-90" />
-          </button>
-        </div>
-        <div className="spectra-deck-edit-action spectra-deck-view-switch flex items-center rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-0.5">
-          <button
-            type="button"
-            data-active={railView === "list" || undefined}
-            onClick={() => setRailView("list")}
-            aria-label="List view"
-          >
-            <List className="h-3.5 w-3.5" />
-          </button>
-          <button
-            type="button"
-            data-active={railView === "grid" || undefined}
-            onClick={() => setRailView("grid")}
-            aria-label="Grid view"
-          >
-            <Grid3X3 className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      </div>
-      {studioView === "browse" && activeCard ? (
+      {activeView === "browse" && activeCard ? (
         <section
           className="spectra-deck-viewer"
           aria-label={`Flashcard ${activeCardIndex + 1} of ${cards.length}`}
         >
           <div className="spectra-deck-viewer-context">
             <span>{activeCard.section || "Section 1"}</span>
+            {/* The bar's selector already counts the cards. What a reader
+                cannot see while flipping is how this card has been going. */}
             <strong>
-              {activeCardIndex + 1} of {cards.length}
+              {cardConfidence[activeCard.confidence ?? "unknown"].label}
             </strong>
           </div>
           <button
@@ -2095,7 +2241,7 @@ export function FlashcardStudio({
           </button>
         </section>
       ) : null}
-      {studioView === "progress" ? (
+      {activeView === "progress" ? (
         <section className="spectra-deck-progress" aria-label="Your progress">
           <header>
             <div>
@@ -2105,14 +2251,16 @@ export function FlashcardStudio({
                 other people studying the same deck have their own.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={() => beginStudySession()}
-              disabled={!studyCards.length}
-            >
-              <Play className="h-3.5 w-3.5" />
-              Study {dueStudyCount ? `${dueStudyCount} due` : "ahead"}
-            </button>
+            {canStudy ? (
+              <button
+                type="button"
+                onClick={() => beginStudySession()}
+                disabled={!studyCards.length}
+              >
+                <Play className="h-3.5 w-3.5" />
+                Study {dueStudyCount ? `${dueStudyCount} due` : "ahead"}
+              </button>
+            ) : null}
           </header>
           {studyStateLoading ? (
             <p className="spectra-deck-progress-empty">
@@ -2123,18 +2271,31 @@ export function FlashcardStudio({
               <strong>Nothing to study yet</strong>
               <p>
                 A card needs a prompt and an answer before it can be studied.
-                {readOnly
-                  ? " Ask whoever maintains this deck to finish its cards."
-                  : " Finish a card in Build and it appears here."}
+                {canEdit
+                  ? " Finish a card in Build and it appears here."
+                  : " Ask whoever maintains this deck to finish its cards."}
               </p>
-              {readOnly ? null : (
+              {canEdit ? (
                 <button type="button" onClick={() => setStudioView("build")}>
                   Go to Build
                 </button>
-              )}
+              ) : null}
             </div>
           ) : (
             <>
+              {/* Recall strength used to sit in a metrics strip above the
+                  toolbar, where it competed with the authoring controls and
+                  told an owner nothing they could act on. It belongs next to
+                  the bands that explain it. */}
+              <p className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                <strong className="font-display text-metric leading-none text-[var(--text-primary)]">
+                  {personalMastery}%
+                </strong>
+                <span className="text-caption text-[var(--text-secondary)]">
+                  recall strength, counting a card as held once you can leave it
+                  for three weeks
+                </span>
+              </p>
               <div className="spectra-deck-progress-bands">
                 {deckProgressBands.map((band) => (
                   <div key={band.key} data-band={band.key}>
@@ -2173,81 +2334,9 @@ export function FlashcardStudio({
           )}
         </section>
       ) : null}
-      {deckMenuOpen ? (
-        <div className="spectra-deck-menu">
-          <strong>Start from a template</strong>
-          <button type="button" onClick={() => applyDeckTemplate("concept")}>
-            <LayoutTemplate className="h-4 w-4" />
-            Concept and cloze cards
-          </button>
-          <button type="button" onClick={() => applyDeckTemplate("language")}>
-            <LayoutTemplate className="h-4 w-4" />
-            Vocabulary cards
-          </button>
-          <button type="button" onClick={() => applyDeckTemplate("formula")}>
-            <LayoutTemplate className="h-4 w-4" />
-            Formula cards
-          </button>
-          <strong>Study preferences</strong>
-          <label className="flex items-center gap-2 px-2 py-1.5 text-[11px] text-[var(--text-secondary)]">
-            <input
-              type="checkbox"
-              checked={deckSettings.shuffle !== false}
-              onChange={(event) =>
-                updateDeckSettings({ shuffle: event.target.checked })
-              }
-            />
-            Shuffle each due queue
-          </label>
-          <label className="flex items-center gap-2 px-2 py-1.5 text-[11px] text-[var(--text-secondary)]">
-            <input
-              type="checkbox"
-              checked={deckSettings.showHints !== false}
-              onChange={(event) =>
-                updateDeckSettings({ showHints: event.target.checked })
-              }
-            />
-            Show hints before reveal
-          </label>
-          <label className="flex items-center justify-between gap-3 px-2 py-1.5 text-[11px] text-[var(--text-secondary)]">
-            Recall style
-            <select
-              value={deckSettings.revealMode === "type" ? "type" : "click"}
-              onChange={(event) =>
-                updateDeckSettings({
-                  revealMode: event.target.value as "click" | "type",
-                })
-              }
-              className="h-7 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-micro text-[var(--text-primary)] outline-none"
-            >
-              <option value="click">Reveal</option>
-              <option value="type">Type answer</option>
-            </select>
-          </label>
-          <strong>Export</strong>
-          <button type="button" onClick={() => exportDeck("csv")}>
-            <FileDown className="h-4 w-4" /> CSV
-          </button>
-          <button type="button" onClick={() => exportDeck("tsv")}>
-            <FileDown className="h-4 w-4" /> TSV
-          </button>
-          <button type="button" onClick={() => void exportDeckPackage()}>
-            <Archive className="h-4 w-4" /> Portable deck package
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setDeckMenuOpen(false);
-              window.print();
-            }}
-          >
-            <Printer className="h-4 w-4" /> Print / PDF
-          </button>
-        </div>
-      ) : null}
       {deckImportReport || deckImportError || deckActionError ? (
         <div
-          className="spectra-deck-import-report"
+          className={`spectra-deck-import-report ${spanBoth}`}
           data-error={Boolean(deckImportError || deckActionError) || undefined}
           role="status"
         >
@@ -2275,68 +2364,123 @@ export function FlashcardStudio({
           </button>
         </div>
       ) : null}
-      <aside className="min-w-0 overflow-hidden rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)]">
-        <div className="flex items-center justify-between border-b border-[var(--border-default)] px-3 py-3">
-          <div>
-            <h3 className="text-[13px] font-semibold text-[var(--text-primary)]">
-              Cards
-            </h3>
-            <p className="text-[11px] text-[var(--text-secondary)]">
-              {cards.length} {cards.length === 1 ? "card" : "cards"} across{" "}
-              {sections.length} {sections.length === 1 ? "section" : "sections"}
-            </p>
-          </div>
-          <button
-            type="button"
-            className={smallActionClass()}
-            onClick={() => addCard()}
-          >
-            <Plus className="h-3.5 w-3.5" />
-            Add
-          </button>
-        </div>
-        <div className="spectra-deck-searchbar">
-          <label>
-            <Search className="h-3.5 w-3.5" />
+      {/* Both file pickers live next to the pane that uses them and stay out of
+          the grid. They are hidden inputs, so they take no track. */}
+      <input
+        ref={deckMediaInputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp,image/gif"
+        hidden
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (file) void uploadDeckMedia(file);
+        }}
+      />
+      <input
+        ref={deckImportRef}
+        type="file"
+        accept=".csv,.tsv,.txt,.md,.markdown,.apkg,.zip,.spectra-deck"
+        hidden
+        onChange={(event) => {
+          const file = event.currentTarget.files?.[0];
+          if (file) void importCards(file);
+        }}
+      />
+      <aside className="min-w-0 overflow-hidden rounded-card">
+        {/* A `header`, not a `div`: the shared stylesheet hides the rail's first
+            child when it is a div, which is why the audited build had a rail
+            with no heading and an unreachable Add button. */}
+        <header className="flex items-baseline justify-between gap-2 px-3 pb-2 pt-3">
+          <h3 className="text-ui font-semibold text-[var(--text-primary)]">
+            Cards
+          </h3>
+          <p className="text-caption text-[var(--text-secondary)]">
+            {filteredCards.length === cards.length
+              ? `${cards.length} ${cards.length === 1 ? "card" : "cards"}${
+                  sections.length > 1 ? ` in ${sections.length} sections` : ""
+                }`
+              : `${filteredCards.length} of ${cards.length} shown`}
+          </p>
+        </header>
+        <div
+          className={`grid items-center gap-1.5 border-b border-[var(--border-subtle)] px-2 pb-2 ${
+            canEdit
+              ? "grid-cols-[minmax(0,1fr)_minmax(96px,0.8fr)_auto]"
+              : "grid-cols-[minmax(0,1fr)_minmax(96px,0.8fr)]"
+          }`}
+        >
+          <label className="flex h-8 min-w-0 items-center gap-1.5 rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-[var(--text-secondary)] focus-within:border-[color-mix(in_oklab,var(--brand-primary)_45%,var(--border-default))]">
+            <Search className="size-3.5 shrink-0" />
             <input
               value={deckSearch}
               onChange={(event) => setDeckSearch(event.target.value)}
               placeholder="Find cards"
+              aria-label="Find cards"
+              className="min-w-0 flex-1 bg-transparent text-micro text-[var(--text-primary)] outline-none placeholder:text-[var(--text-secondary)]"
             />
           </label>
-          <label>
-            <SlidersHorizontal className="h-3.5 w-3.5" />
-            <select
-              value={deckFilter}
-              onChange={(event) =>
-                setDeckFilter(event.target.value as typeof deckFilter)
-              }
-            >
-              <option value="all">All cards</option>
-              <option value="incomplete">Incomplete</option>
-              <option value="duplicate">Duplicates</option>
-              <option value="easy">Easy</option>
-              <option value="medium">Medium</option>
-              <option value="hard">Hard</option>
-              <optgroup label="Your progress">
-                <option value="due">Due now</option>
-                <option value="unstudied">Not studied yet</option>
-                <option value="struggling">Giving you trouble</option>
-                <option value="changed">Changed since you studied</option>
-              </optgroup>
-            </select>
-          </label>
-          <button
-            type="button"
-            onClick={() =>
-              setSelectedCardIds(new Set(filteredCards.map((card) => card.id)))
+          {/* Filtering by your own recall is a different question from filtering
+              the deck's contents, so the list says which is which instead of
+              flattening ten options into one run. */}
+          <Select
+            value={deckFilter}
+            onValueChange={(next) =>
+              setDeckFilter(next as typeof deckFilter)
             }
-            disabled={!filteredCards.length}
-            aria-label="Select all filtered cards"
-            title="Select all filtered cards"
           >
-            <Check className="h-3.5 w-3.5" />
-          </button>
+            <SelectTrigger size="sm" aria-label="Filter cards" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectLabel>This deck</SelectLabel>
+                <SelectItem value="all">All cards</SelectItem>
+                <SelectItem value="incomplete">Incomplete</SelectItem>
+                <SelectItem value="duplicate">Duplicates</SelectItem>
+              </SelectGroup>
+              <SelectSeparator />
+              <SelectGroup>
+                <SelectLabel>Difficulty</SelectLabel>
+                <SelectItem value="easy">Easy</SelectItem>
+                <SelectItem value="medium">Medium</SelectItem>
+                <SelectItem value="hard">Hard</SelectItem>
+              </SelectGroup>
+              {/* These four read your recorded reviews. Without the capability
+                  to record one there is nothing behind them, so they are absent
+                  rather than always empty. */}
+              {canRecordStudy ? (
+                <>
+                  <SelectSeparator />
+                  <SelectGroup>
+                    <SelectLabel>Your progress</SelectLabel>
+                    <SelectItem value="due">Due now</SelectItem>
+                    <SelectItem value="unstudied">Not studied yet</SelectItem>
+                    <SelectItem value="struggling">
+                      Giving you trouble
+                    </SelectItem>
+                    <SelectItem value="changed">
+                      Changed since you studied
+                    </SelectItem>
+                  </SelectGroup>
+                </>
+              ) : null}
+            </SelectContent>
+          </Select>
+          {/* Selecting cards exists to act on them in bulk, which is an edit. */}
+          {canEdit ? (
+            <button
+              type="button"
+              onClick={() =>
+                setSelectedCardIds(new Set(filteredCards.map((card) => card.id)))
+              }
+              disabled={!filteredCards.length}
+              aria-label={selectAllLabel}
+              title={selectAllLabel}
+              className="grid size-8 place-items-center rounded-control text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-40"
+            >
+              <Check className="size-3.5" />
+            </button>
+          ) : null}
         </div>
         {selectedCardIds.size ? (
           <div
@@ -2344,48 +2488,48 @@ export function FlashcardStudio({
             role="toolbar"
             aria-label="Bulk card actions"
           >
-            <strong>{selectedCardIds.size} selected</strong>
-            <select
-              aria-label="Move selected cards to section"
-              value=""
-              onChange={(event) => {
-                if (event.target.value) moveSelectedCards(event.target.value);
-              }}
-            >
-              <option value="">Move to…</option>
-              {sections.map((section) => (
-                <option key={section} value={section}>
-                  {section}
-                </option>
-              ))}
-            </select>
-            <select
-              aria-label="Set selected card difficulty"
-              value=""
-              onChange={(event) => {
-                if (
-                  event.target.value === "easy" ||
-                  event.target.value === "medium" ||
-                  event.target.value === "hard"
-                )
-                  setSelectedDifficulty(event.target.value);
-              }}
-            >
-              <option value="">Difficulty…</option>
-              <option value="easy">Easy</option>
-              <option value="medium">Medium</option>
-              <option value="hard">Hard</option>
-            </select>
-            <button type="button" onClick={deleteSelectedCards}>
-              <Trash2 className="h-3.5 w-3.5" /> Delete
-            </button>
+            <strong>
+              {selectedCardIds.size} of {cards.length} selected
+            </strong>
+            {canEdit ? (
+              <>
+                <SelectField
+                  ariaLabel="Move selected cards to section"
+                  size="sm"
+                  placeholder="Move to"
+                  value=""
+                  onChange={moveSelectedCards}
+                  options={sections.map((section) => ({
+                    value: section,
+                    label: section,
+                  }))}
+                />
+                <SelectField
+                  ariaLabel="Set the difficulty of the selected cards"
+                  size="sm"
+                  placeholder="Difficulty"
+                  value=""
+                  onChange={(next) =>
+                    setSelectedDifficulty(next as "easy" | "medium" | "hard")
+                  }
+                  options={[
+                    { value: "easy", label: "Easy" },
+                    { value: "medium", label: "Medium" },
+                    { value: "hard", label: "Hard" },
+                  ]}
+                />
+                <button type="button" onClick={deleteSelectedCards}>
+                  <Trash2 className="size-3.5" /> Delete
+                </button>
+              </>
+            ) : null}
             <button type="button" onClick={() => setSelectedCardIds(new Set())}>
               Clear
             </button>
           </div>
         ) : null}
         <div
-          className="max-h-[650px] overflow-y-auto p-2"
+          className="max-h-[min(68vh,660px)] overflow-y-auto px-2 pb-2"
           data-rail-view={railView}
         >
           {sections.map((section) => (
@@ -2445,22 +2589,24 @@ export function FlashcardStudio({
                         className={`h-3.5 w-3.5 text-[var(--text-tertiary)] transition-transform ${collapsedSections.has(section) ? "-rotate-90" : ""}`}
                       />
                     </button>
-                    <button
-                      type="button"
-                      aria-label={`Rename ${section}`}
-                      title="Rename section"
-                      onClick={() => {
-                        setRenamingSection(section);
-                        setSectionNameDraft(section);
-                      }}
-                    >
-                      <Pencil className="h-3.5 w-3.5" />
-                    </button>
+                    {canEdit ? (
+                      <button
+                        type="button"
+                        aria-label={`Rename ${section}`}
+                        title="Rename section"
+                        onClick={() => {
+                          setRenamingSection(section);
+                          setSectionNameDraft(section);
+                        }}
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                    ) : null}
                   </>
                 )}
               </div>
               {!collapsedSections.has(section) ? (
-                <div className="space-y-1">
+                <div className="space-y-px">
                   {cards
                     .filter(
                       (card) =>
@@ -2477,26 +2623,32 @@ export function FlashcardStudio({
                         aiChangedPaths,
                         `/cards/${canonicalIndex}`,
                       );
+                      const incomplete =
+                        !card.front.trim() || !card.back.trim();
+                      const duplicate = duplicateKeys.has(
+                        `${card.front.trim().toLocaleLowerCase()}|${card.back.trim().toLocaleLowerCase()}`,
+                      );
+                      const active = card.id === activeCard?.id;
+                      const confidence =
+                        cardConfidence[card.confidence ?? "unknown"];
                       return (
                         <button
                           key={card.id}
                           type="button"
-                          draggable
+                          draggable={canEdit}
                           data-bulk-selected={
                             selectedCardIds.has(card.id) || undefined
                           }
-                          data-invalid={
-                            !card.front.trim() || !card.back.trim() || undefined
-                          }
-                          data-duplicate={
-                            duplicateKeys.has(
-                              `${card.front.trim().toLocaleLowerCase()}|${card.back.trim().toLocaleLowerCase()}`,
-                            ) || undefined
-                          }
-                          className={`grid w-full grid-cols-[24px_minmax(0,1fr)_auto] items-center gap-2 rounded-[7px] border px-2 py-2 text-left ${
-                            card.id === activeCard?.id
-                              ? "border-[#8b6ff0] bg-[color-mix(in_oklab,#8b6ff0_6%,var(--bg-primary))]"
-                              : "border-transparent hover:bg-[var(--bg-hover)]"
+                          data-invalid={incomplete || undefined}
+                          data-duplicate={duplicate || undefined}
+                          aria-current={active || undefined}
+                          /* Selection is a tint and an edge, not a box: 28
+                             outlined pills in a 300px rail read as 28 competing
+                             objects rather than one list. */
+                          className={`group grid w-full grid-cols-[22px_minmax(0,1fr)_auto] items-center gap-2 rounded-control px-2 py-1.5 text-left ${
+                            active
+                              ? "bg-[color-mix(in_oklab,var(--brand-primary)_9%,var(--bg-primary))] shadow-[inset_2px_0_0_var(--brand-primary)]"
+                              : "hover:bg-[var(--bg-hover)]"
                           }`}
                           onClick={(event) => {
                             if (event.ctrlKey || event.metaKey) {
@@ -2543,28 +2695,55 @@ export function FlashcardStudio({
                           onDragEnd={() => setDraggedCardId(undefined)}
                           data-ai-region={aiChanging || undefined}
                         >
-                          <span className="text-center text-[12px] text-[var(--text-secondary)]">
-                            {index + 1}
+                          {/* The position doubles as the drag handle, so the
+                              grip appears where the hand already is without
+                              adding a column the grid view has to absorb. */}
+                          <span className="relative grid h-4 place-items-center text-caption text-[var(--text-secondary)]">
+                            <span
+                              className={
+                                canEdit
+                                  ? "transition-opacity group-hover:opacity-0 motion-reduce:transition-none"
+                                  : undefined
+                              }
+                            >
+                              {index + 1}
+                            </span>
+                            {canEdit ? (
+                              <GripVertical
+                                aria-hidden="true"
+                                className="pointer-events-none absolute size-3.5 opacity-0 transition-opacity group-hover:opacity-100 motion-reduce:transition-none"
+                              />
+                            ) : null}
                           </span>
-                          <span className="min-w-0 truncate text-[12px] font-medium text-[var(--text-primary)]">
+                          <span className="spectra-deck-card-front min-w-0 truncate text-caption font-medium text-[var(--text-primary)]">
                             {plannerDescriptionText(card.front) ||
                               "Untitled card"}
                           </span>
-                          {!card.front.trim() || !card.back.trim() ? (
+                          {/* The grid earns its slot by showing the answer.
+                              Two columns of the same truncated question the
+                              list already shows, at ragged heights, fits fewer
+                              cards on screen and tells the reader less. */}
+                          {railView === "grid" ? (
+                            <span className="spectra-deck-card-back min-w-0 text-micro text-[var(--text-secondary)]">
+                              {plannerDescriptionText(card.back) ||
+                                "No answer yet"}
+                            </span>
+                          ) : null}
+                          {incomplete ? (
                             <AlertCircle
-                              className="h-3.5 w-3.5 text-[var(--danger)]"
+                              className="spectra-deck-card-flag size-3.5 text-[var(--danger)]"
                               aria-label="Incomplete card"
                             />
-                          ) : duplicateKeys.has(
-                              `${card.front.trim().toLocaleLowerCase()}|${card.back.trim().toLocaleLowerCase()}`,
-                            ) ? (
+                          ) : duplicate ? (
                             <Copy
-                              className="h-3.5 w-3.5 text-[#d88922]"
+                              className="spectra-deck-card-flag size-3.5 text-[var(--warning)]"
                               aria-label="Duplicate card"
                             />
                           ) : (
                             <span
-                              className={`h-1.5 w-1.5 rounded-full ${card.confidence === "strong" ? "bg-[var(--success)]" : card.confidence === "weak" ? "bg-[var(--danger)]" : "bg-[#d88922]"}`}
+                              aria-label={confidence.label}
+                              title={confidence.label}
+                              className={`spectra-deck-card-flag size-1.5 rounded-full ${confidence.tone}`}
                             />
                           )}
                         </button>
@@ -2579,103 +2758,167 @@ export function FlashcardStudio({
               <Search className="h-5 w-5" />
               <strong>No matching cards</strong>
               <span>
-                Change the search or filter without altering the deck.
+                {cards.length
+                  ? "Change the search or filter without altering the deck."
+                  : "This deck has no cards yet."}
               </span>
             </div>
           ) : null}
-          <button
-            type="button"
-            className="mt-2 flex h-9 w-full items-center justify-center gap-2 rounded-[8px] border border-dashed border-[var(--border-default)] text-[12px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-            onClick={() => {
-              const section = `Section ${sections.length + 1}`;
-              setActiveSection(section);
-              addCard(section);
-            }}
-          >
-            <Plus className="h-3.5 w-3.5" />
-            Add section
-          </button>
+          {canEdit ? (
+            <button
+              type="button"
+              className="mt-2 flex h-9 w-full items-center justify-center gap-2 rounded-control border border-dashed border-[var(--border-default)] text-caption text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+              onClick={() => addCard()}
+            >
+              <Plus className="size-3.5" />
+              Add card
+            </button>
+          ) : null}
         </div>
+        {canEdit ? (
+          <footer className="border-t border-[var(--border-subtle)] px-3 py-3">
+            <h4 className="text-caption font-semibold text-[var(--text-primary)]">
+              Study settings
+            </h4>
+            <p className="mt-0.5 text-micro text-[var(--text-secondary)]">
+              These apply to everyone who studies this deck, not only you.
+            </p>
+            <label className="mt-2 flex items-center gap-2 text-caption text-[var(--text-secondary)]">
+              <input
+                type="checkbox"
+                className="size-3.5 accent-[var(--brand-primary)]"
+                checked={deckSettings.shuffle !== false}
+                onChange={(event) =>
+                  updateDeckSettings({ shuffle: event.target.checked })
+                }
+              />
+              Shuffle each due queue
+            </label>
+            <label className="mt-1.5 flex items-center gap-2 text-caption text-[var(--text-secondary)]">
+              <input
+                type="checkbox"
+                className="size-3.5 accent-[var(--brand-primary)]"
+                checked={deckSettings.showHints !== false}
+                onChange={(event) =>
+                  updateDeckSettings({ showHints: event.target.checked })
+                }
+              />
+              Show hints before the answer
+            </label>
+            <SelectField
+              label="Recall style"
+              size="sm"
+              className="mt-2"
+              value={deckSettings.revealMode === "type" ? "type" : "click"}
+              onChange={(next) =>
+                updateDeckSettings({ revealMode: next as "click" | "type" })
+              }
+              options={[
+                { value: "click", label: "Reveal the answer" },
+                { value: "type", label: "Type the answer" },
+              ]}
+            />
+          </footer>
+        ) : null}
       </aside>
-      <section className="spectra-deck-card-editor min-w-0 overflow-hidden rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
+      <section className="spectra-deck-card-editor min-w-0 overflow-hidden rounded-card border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
         {activeCard ? (
           <div>
-            <div className="spectra-deck-card-heading mb-4 flex items-center justify-between">
-              <div className="text-[12px] text-[var(--text-secondary)]">
-                Card {cards.findIndex((card) => card.id === activeCard.id) + 1}{" "}
-                of {cards.length}
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  className={iconButtonClass()}
-                  onClick={() => {
-                    const copy: DeckCard = {
-                      ...activeCard,
-                      id: id("card"),
-                      front: `${activeCard.front}${activeCard.front ? " (copy)" : ""}`,
-                      review: undefined,
-                    };
-                    const index = cards.findIndex(
-                      (card) => card.id === activeCard.id,
-                    );
-                    const next = [...cards];
-                    next.splice(index + 1, 0, copy);
-                    commit(next);
-                    setActiveCardId(copy.id);
-                  }}
-                  aria-label="Duplicate card"
-                >
-                  <Copy className="h-4 w-4" />
-                </button>
-                <button
-                  type="button"
-                  className={iconButtonClass()}
-                  onClick={() => {
-                    const next = cards.filter(
-                      (card) => card.id !== activeCard.id,
-                    );
-                    const replacement =
-                      next.length > 0
-                        ? next
-                        : [
-                            {
-                              id: id("card"),
-                              front: "",
-                              back: "",
-                              hint: "",
-                              section: activeSection,
-                              confidence: "unknown" as const,
-                              difficulty: "medium" as const,
-                            },
-                          ];
-                    commit(replacement);
-                    releaseUnusedDeckMedia([activeCard], replacement);
-                    setActiveCardId(replacement[0]!.id);
-                  }}
-                  aria-label="Remove card"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
-              </div>
+            <div className="spectra-deck-card-heading mb-4 flex items-center justify-between gap-3">
+              {/* The bar already says which card this is, so this line answers
+                  the question the bar cannot: whether the card is fit to study.
+                  An incomplete card is silently excluded from the queue, and
+                  before this the owner had no way to find out why. */}
+              {duplicateKeys.has(
+                `${activeCard.front.trim().toLocaleLowerCase()}|${activeCard.back.trim().toLocaleLowerCase()}`,
+              ) ? (
+                <p className="flex min-w-0 items-center gap-1.5 text-caption text-[var(--warning)]">
+                  <Copy className="size-3.5 shrink-0" aria-hidden="true" />
+                  Another card has the same prompt and answer.
+                </p>
+              ) : activeCardStudyBlocker ? (
+                <p className="flex min-w-0 items-center gap-1.5 text-caption text-[var(--text-secondary)]">
+                  <AlertCircle className="size-3.5 shrink-0" aria-hidden="true" />
+                  {activeCardStudyBlocker}
+                </p>
+              ) : (
+                <p className="min-w-0 truncate text-caption text-[var(--text-secondary)]">
+                  {activeCard.section || "Section 1"}
+                </p>
+              )}
+              {canEdit ? (
+                <div className="flex shrink-0 items-center gap-2">
+                  <button
+                    type="button"
+                    className={iconButtonClass()}
+                    onClick={() => {
+                      const copy: DeckCard = {
+                        ...activeCard,
+                        id: id("card"),
+                        front: `${activeCard.front}${activeCard.front ? " (copy)" : ""}`,
+                        review: undefined,
+                      };
+                      const next = [...cards];
+                      next.splice(activeCardIndex + 1, 0, copy);
+                      commit(next);
+                      setActiveCardId(copy.id);
+                    }}
+                    aria-label="Duplicate card"
+                    title="Duplicate card"
+                  >
+                    <Copy className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    className={iconButtonClass()}
+                    onClick={() => {
+                      const next = cards.filter(
+                        (card) => card.id !== activeCard.id,
+                      );
+                      const replacement =
+                        next.length > 0
+                          ? next
+                          : [
+                              {
+                                id: id("card"),
+                                front: "",
+                                back: "",
+                                hint: "",
+                                section: activeSection,
+                                confidence: "unknown" as const,
+                                difficulty: "medium" as const,
+                              },
+                            ];
+                      commit(replacement);
+                      releaseUnusedDeckMedia([activeCard], replacement);
+                      setActiveCardId(replacement[0]!.id);
+                    }}
+                    aria-label="Remove card"
+                    title="Remove card"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              ) : null}
             </div>
             <CardFace
               label="Front"
               value={activeCard.front}
               placeholder="Question or prompt"
+              disabled={!canEdit}
               onChange={(value) => updateCard(activeCard.id, { front: value })}
               onFocus={() => onActiveRegionChange?.(`${activeCard.id}:front`)}
               clozeMode={activeCard.variant === "cloze"}
               aiActive={pathTouches(
                 aiChangedPaths,
-                `/cards/${cards.findIndex((card) => card.id === activeCard.id)}/front`,
+                `/cards/${activeCardIndex}/front`,
               )}
-              path={`/cards/${cards.findIndex((card) => card.id === activeCard.id)}/front`}
+              path={`/cards/${activeCardIndex}/front`}
             />
             {activeCard.variant !== "image_occlusion" &&
             activeCard.media?.placement !== "back" &&
             activeDeckMedia?.downloadUrl ? (
-              <div className="mt-3 overflow-hidden rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-secondary)] p-2">
+              <div className="mt-3 overflow-hidden rounded-card border border-[var(--border-default)] bg-[var(--bg-secondary)] p-2">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={activeDeckMedia.downloadUrl}
@@ -2684,15 +2927,15 @@ export function FlashcardStudio({
                     activeCard.media?.name ||
                     "Card image"
                   }
-                  className="mx-auto block max-h-[360px] max-w-full rounded-[6px] object-contain"
+                  className="mx-auto block max-h-[360px] max-w-full rounded-chip object-contain"
                 />
               </div>
             ) : null}
             {activeCard.variant === "image_occlusion" ? (
-              <section className="mt-3 rounded-[10px] border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3">
+              <section className="mt-3 rounded-card border border-[var(--border-default)] bg-[var(--bg-secondary)] p-3">
                 <div className="mb-2 flex items-start gap-3">
                   <div className="min-w-0 flex-1">
-                    <strong className="block text-[12px] text-[var(--text-primary)]">
+                    <strong className="block text-caption text-[var(--text-primary)]">
                       Image occlusion
                     </strong>
                     <span className="text-micro leading-4 text-[var(--text-tertiary)]">
@@ -2702,8 +2945,8 @@ export function FlashcardStudio({
                   </div>
                   <button
                     type="button"
-                    className="inline-flex h-8 items-center gap-1.5 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 text-micro font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-                    disabled={deckMediaBusy}
+                    className="inline-flex h-8 items-center gap-1.5 rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 text-micro font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                    disabled={deckMediaBusy || !canEdit}
                     onClick={() => deckMediaInputRef.current?.click()}
                   >
                     {deckMediaBusy ? (
@@ -2717,7 +2960,7 @@ export function FlashcardStudio({
                     <button
                       type="button"
                       className={iconButtonClass()}
-                      disabled={deckMediaBusy}
+                      disabled={deckMediaBusy || !canEdit}
                       onClick={() => void removeDeckMedia()}
                       aria-label="Remove image"
                     >
@@ -2728,10 +2971,10 @@ export function FlashcardStudio({
                 {activeDeckMedia?.downloadUrl ? (
                   <>
                     <div
-                      className="relative mx-auto max-h-[440px] w-fit touch-none select-none overflow-hidden rounded-[8px] border border-[var(--border-default)] bg-[#17191d] cursor-crosshair"
-                      onPointerDown={beginMask}
-                      onPointerMove={moveMask}
-                      onPointerUp={finishMask}
+                      className={`relative mx-auto max-h-[440px] w-fit touch-none select-none overflow-hidden rounded-control border border-[var(--border-default)] bg-[#17191d] ${canEdit ? "cursor-crosshair" : ""}`}
+                      onPointerDown={canEdit ? beginMask : undefined}
+                      onPointerMove={canEdit ? moveMask : undefined}
+                      onPointerUp={canEdit ? finishMask : undefined}
                       onPointerCancel={() => setMaskDraft(undefined)}
                     >
                       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -2799,10 +3042,12 @@ export function FlashcardStudio({
                         />
                       </Field>
                       <Field label="Hidden regions">
-                        <div className="flex h-10 items-center rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-[11px] text-[var(--text-secondary)]">
+                        <div className="flex h-10 items-center rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-micro text-[var(--text-secondary)]">
                           {(activeCard.occlusions ?? []).length
                             ? `${activeCard.occlusions!.length} ready to reveal`
-                            : "Drag on the image to add the first mask"}
+                            : canEdit
+                              ? "Drag on the image to add the first mask"
+                              : "None yet"}
                         </div>
                       </Field>
                     </div>
@@ -2811,9 +3056,9 @@ export function FlashcardStudio({
                         {(activeCard.occlusions ?? []).map((mask, index) => (
                           <div
                             key={mask.id}
-                            className="flex items-center gap-2 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-1.5"
+                            className="flex items-center gap-2 rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] p-1.5"
                           >
-                            <span className="grid h-7 w-7 shrink-0 place-items-center rounded-[5px] bg-[#252a32] text-micro font-bold text-white">
+                            <span className="grid h-7 w-7 shrink-0 place-items-center rounded-chip bg-[#252a32] text-micro font-bold text-white">
                               {index + 1}
                             </span>
                             <input
@@ -2831,13 +3076,15 @@ export function FlashcardStudio({
                                   ),
                                 })
                               }
-                              className="min-w-0 flex-1 bg-transparent px-1 text-[11px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
+                              className="min-w-0 flex-1 bg-transparent px-1 text-micro text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
                               placeholder="Optional revealed label"
+                              readOnly={!canEdit}
                               aria-label={`Label for hidden region ${index + 1}`}
                             />
+                            {canEdit ? (
                             <button
                               type="button"
-                              className="grid h-7 w-7 shrink-0 place-items-center rounded-[5px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--danger)]"
+                              className="grid h-7 w-7 shrink-0 place-items-center rounded-chip text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--danger)]"
                               onClick={() =>
                                 updateCard(activeCard.id, {
                                   occlusions: (
@@ -2851,20 +3098,21 @@ export function FlashcardStudio({
                             >
                               <X className="h-3.5 w-3.5" />
                             </button>
+                            ) : null}
                           </div>
                         ))}
                       </div>
                     ) : null}
                   </>
-                ) : (
+                ) : canEdit ? (
                   <button
                     type="button"
-                    className="grid min-h-40 w-full place-items-center rounded-[8px] border border-dashed border-[var(--border-default)] bg-[var(--bg-primary)] text-center"
+                    className="grid min-h-40 w-full place-items-center rounded-control border border-dashed border-[var(--border-default)] bg-[var(--bg-primary)] text-center"
                     onClick={() => deckMediaInputRef.current?.click()}
                   >
                     <span>
                       <ImageIcon className="mx-auto mb-2 h-5 w-5 text-[var(--text-tertiary)]" />
-                      <strong className="block text-[12px] text-[var(--text-primary)]">
+                      <strong className="block text-caption text-[var(--text-primary)]">
                         Add the diagram or image to study
                       </strong>
                       <small className="mt-1 block text-micro text-[var(--text-tertiary)]">
@@ -2872,10 +3120,14 @@ export function FlashcardStudio({
                       </small>
                     </span>
                   </button>
+                ) : (
+                  <p className="grid min-h-40 w-full place-items-center rounded-control border border-dashed border-[var(--border-default)] bg-[var(--bg-primary)] text-center text-caption text-[var(--text-secondary)]">
+                    This card has no image yet.
+                  </p>
                 )}
                 {deckMediaError ? (
                   <div
-                    className="mt-2 flex items-center gap-2 rounded-[7px] bg-[color-mix(in_oklab,var(--danger)_8%,var(--bg-primary))] px-2.5 py-2 text-micro text-[var(--danger)]"
+                    className="mt-2 flex items-center gap-2 rounded-control bg-[color-mix(in_oklab,var(--danger)_8%,var(--bg-primary))] px-2.5 py-2 text-micro text-[var(--danger)]"
                     role="alert"
                   >
                     <AlertCircle className="h-3.5 w-3.5" />
@@ -2890,26 +3142,34 @@ export function FlashcardStudio({
                 ) : null}
               </section>
             ) : null}
-            <div className="my-3 flex justify-center">
-              <button
-                type="button"
-                className="spectra-deck-swap"
-                onClick={() =>
-                  updateCard(activeCard.id, {
-                    front: activeCard.back,
-                    back: activeCard.front,
-                  })
-                }
-                aria-label="Swap front and back"
-                title="Swap front and back"
-              >
-                <RotateCcw className="h-4 w-4" />
-              </button>
-            </div>
+            {canEdit ? (
+              <div className="my-3 flex justify-center">
+                {/* The audited build left this as a bare circle on the seam
+                    between the two faces, so the one control that rewrites both
+                    of them was a guess. The shared width is overridden here
+                    rather than in the stylesheet because the label belongs to
+                    this button, not to every pill in the product. */}
+                <button
+                  type="button"
+                  className="spectra-deck-swap !w-auto gap-1.5 !px-3 text-micro font-semibold"
+                  onClick={() =>
+                    updateCard(activeCard.id, {
+                      front: activeCard.back,
+                      back: activeCard.front,
+                    })
+                  }
+                  title="Swap front and back"
+                >
+                  <RotateCcw className="h-4 w-4 shrink-0" />
+                  Swap sides
+                </button>
+              </div>
+            ) : null}
             <CardFace
               label="Back"
               value={activeCard.back}
               placeholder="Answer"
+              disabled={!canEdit}
               onChange={(value) => updateCard(activeCard.id, { back: value })}
               onFocus={() => onActiveRegionChange?.(`${activeCard.id}:back`)}
               noteValue={activeCard.hint ?? ""}
@@ -2918,74 +3178,88 @@ export function FlashcardStudio({
               }
               aiActive={pathTouches(
                 aiChangedPaths,
-                `/cards/${cards.findIndex((card) => card.id === activeCard.id)}/back`,
+                `/cards/${activeCardIndex}/back`,
               )}
               aiNoteActive={pathTouches(
                 aiChangedPaths,
-                `/cards/${cards.findIndex((card) => card.id === activeCard.id)}/hint`,
+                `/cards/${activeCardIndex}/hint`,
               )}
-              path={`/cards/${cards.findIndex((card) => card.id === activeCard.id)}/back`}
-              notePath={`/cards/${cards.findIndex((card) => card.id === activeCard.id)}/hint`}
+              path={`/cards/${activeCardIndex}/back`}
+              notePath={`/cards/${activeCardIndex}/hint`}
             />
             {activeCard.variant !== "image_occlusion" &&
             activeCard.media?.placement === "back" &&
             activeDeckMedia?.downloadUrl ? (
-              <div className="mt-3 overflow-hidden rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-secondary)] p-2">
+              <div className="mt-3 overflow-hidden rounded-card border border-[var(--border-default)] bg-[var(--bg-secondary)] p-2">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={activeDeckMedia.downloadUrl}
                   alt={activeCard.media.altText || activeCard.media.name}
-                  className="mx-auto block max-h-[360px] max-w-full rounded-[6px] object-contain"
+                  className="mx-auto block max-h-[360px] max-w-full rounded-chip object-contain"
                 />
               </div>
             ) : null}
             <div className="spectra-deck-tag-field mt-3">
-              <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
+              <span className="text-micro font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
                 Tags
               </span>
               <div className="mt-2 flex min-h-9 flex-wrap items-center gap-1.5">
                 {(activeCard.tags ?? []).map((tag) => (
                   <span
                     key={tag}
-                    className="inline-flex h-7 items-center gap-1 rounded-[6px] border border-[color-mix(in_oklab,#8b6ff0_20%,var(--border-default))] bg-[color-mix(in_oklab,#8b6ff0_6%,var(--bg-elevated))] px-2 text-micro text-[var(--text-secondary)]"
+                    className="inline-flex h-7 items-center gap-1 rounded-chip border border-[color-mix(in_oklab,var(--brand-primary)_20%,var(--border-default))] bg-[color-mix(in_oklab,var(--brand-primary)_6%,var(--bg-elevated))] px-2 text-micro text-[var(--text-secondary)]"
                   >
                     {tag}
-                    <button
-                      type="button"
-                      className="grid size-4 place-items-center rounded text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--danger)]"
-                      onClick={() =>
-                        updateCard(activeCard.id, {
-                          tags: (activeCard.tags ?? []).filter(
-                            (candidate) => candidate !== tag,
-                          ),
-                        })
-                      }
-                      aria-label={`Remove ${tag}`}
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
+                    {canEdit ? (
+                      <button
+                        type="button"
+                        className="grid size-4 place-items-center rounded text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--danger)]"
+                        onClick={() =>
+                          updateCard(activeCard.id, {
+                            tags: (activeCard.tags ?? []).filter(
+                              (candidate) => candidate !== tag,
+                            ),
+                          })
+                        }
+                        aria-label={`Remove ${tag}`}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    ) : null}
                   </span>
                 ))}
-                <input
-                  value={deckTagDraft}
-                  onChange={(event) => setDeckTagDraft(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      addActiveCardTag();
-                    }
-                  }}
-                  className="h-7 min-w-24 flex-1 bg-transparent px-1 text-micro text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
-                  placeholder="Add tag"
-                  aria-label="Add card tag"
-                />
-                <button
-                  type="button"
-                  className="inline-flex h-7 items-center gap-1 rounded-[6px] px-2 text-micro text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-                  onClick={addActiveCardTag}
-                >
-                  <Plus className="h-3 w-3" /> Add tag
-                </button>
+                {canEdit ? (
+                  <>
+                    <input
+                      value={deckTagDraft}
+                      onChange={(event) => setDeckTagDraft(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          addActiveCardTag();
+                        }
+                      }}
+                      // Not flex-1: stretching the field threw its own Add
+                      // button to the far edge of a 1200px column, so the two
+                      // halves of one control sat a screen apart.
+                      className="h-7 w-40 min-w-24 bg-transparent px-1 text-micro text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
+                      placeholder="Add tag"
+                      aria-label="Add card tag"
+                    />
+                    <button
+                      type="button"
+                      className="inline-flex h-7 items-center gap-1 rounded-chip px-2 text-micro text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                      onClick={addActiveCardTag}
+                      disabled={!deckTagDraft.trim()}
+                    >
+                      <Plus className="h-3 w-3" /> Add
+                    </button>
+                  </>
+                ) : (activeCard.tags ?? []).length ? null : (
+                  <span className="text-micro text-[var(--text-secondary)]">
+                    No tags
+                  </span>
+                )}
               </div>
             </div>
             <button
@@ -3004,103 +3278,87 @@ export function FlashcardStudio({
             {advancedOpen ? (
               <div className="spectra-deck-advanced">
                 <div>
-                  <Field
+                  <CardChoice
                     label="Card type"
+                    path={`/cards/${activeCardIndex}/variant`}
                     aiActive={pathTouches(
                       aiChangedPaths,
-                      `/cards/${cards.findIndex((card) => card.id === activeCard.id)}/variant`,
+                      `/cards/${activeCardIndex}/variant`,
                     )}
-                    path={`/cards/${cards.findIndex((card) => card.id === activeCard.id)}/variant`}
-                  >
-                    <select
-                      value={activeCard.variant ?? "basic"}
-                      onChange={(event) => {
-                        const variant = event.target
-                          .value as DeckCard["variant"];
-                        updateCard(activeCard.id, {
-                          variant,
-                          ...(variant !== "basic"
-                            ? { bidirectional: false }
-                            : {}),
-                        });
-                      }}
-                      className={inputClass()}
-                    >
-                      <option value="basic">Basic front / back</option>
-                      <option value="cloze">Cloze deletion</option>
-                      <option value="image_occlusion">Image occlusion</option>
-                    </select>
-                  </Field>
-                  <Field
+                    disabled={!canEdit}
+                    value={activeCard.variant ?? "basic"}
+                    onChange={(next) => {
+                      const variant = next as DeckCard["variant"];
+                      updateCard(activeCard.id, {
+                        variant,
+                        ...(variant !== "basic"
+                          ? { bidirectional: false }
+                          : {}),
+                      });
+                    }}
+                    options={[
+                      { value: "basic", label: "Basic front and back" },
+                      { value: "cloze", label: "Cloze deletion" },
+                      { value: "image_occlusion", label: "Image occlusion" },
+                    ]}
+                  />
+                  <CardChoice
                     label="Difficulty"
+                    path={`/cards/${activeCardIndex}/difficulty`}
                     aiActive={pathTouches(
                       aiChangedPaths,
-                      `/cards/${cards.findIndex((card) => card.id === activeCard.id)}/difficulty`,
+                      `/cards/${activeCardIndex}/difficulty`,
                     )}
-                    path={`/cards/${cards.findIndex((card) => card.id === activeCard.id)}/difficulty`}
-                  >
-                    <select
-                      value={activeCard.difficulty ?? "medium"}
-                      onChange={(event) =>
-                        updateCard(activeCard.id, {
-                          difficulty: event.target
-                            .value as DeckCard["difficulty"],
-                        })
-                      }
-                      className={inputClass()}
-                    >
-                      <option value="easy">Easy</option>
-                      <option value="medium">Medium</option>
-                      <option value="hard">Hard</option>
-                    </select>
-                  </Field>
-                  <Field
+                    disabled={!canEdit}
+                    value={activeCard.difficulty ?? "medium"}
+                    onChange={(next) =>
+                      updateCard(activeCard.id, {
+                        difficulty: next as DeckCard["difficulty"],
+                      })
+                    }
+                    options={[
+                      { value: "easy", label: "Easy" },
+                      { value: "medium", label: "Medium" },
+                      { value: "hard", label: "Hard" },
+                    ]}
+                  />
+                  <CardChoice
                     label="Confidence"
+                    path={`/cards/${activeCardIndex}/confidence`}
                     aiActive={pathTouches(
                       aiChangedPaths,
-                      `/cards/${cards.findIndex((card) => card.id === activeCard.id)}/confidence`,
+                      `/cards/${activeCardIndex}/confidence`,
                     )}
-                    path={`/cards/${cards.findIndex((card) => card.id === activeCard.id)}/confidence`}
-                  >
-                    <select
-                      value={activeCard.confidence ?? "unknown"}
-                      onChange={(event) =>
-                        updateCard(activeCard.id, {
-                          confidence: event.target
-                            .value as DeckCard["confidence"],
-                        })
-                      }
-                      className={inputClass()}
-                    >
-                      <option value="unknown">Unknown</option>
-                      <option value="weak">Weak</option>
-                      <option value="medium">Medium</option>
-                      <option value="strong">Strong</option>
-                    </select>
-                  </Field>
-                  <Field
+                    disabled={!canEdit}
+                    value={activeCard.confidence ?? "unknown"}
+                    onChange={(next) =>
+                      updateCard(activeCard.id, {
+                        confidence: next as DeckCard["confidence"],
+                      })
+                    }
+                    options={[
+                      { value: "unknown", label: "Not rated yet" },
+                      { value: "weak", label: "Giving you trouble" },
+                      { value: "medium", label: "Still working on it" },
+                      { value: "strong", label: "You find it easy" },
+                    ]}
+                  />
+                  <CardChoice
                     label="Section"
-                    path={`/cards/${cards.findIndex((card) => card.id === activeCard.id)}/section`}
-                  >
-                    <select
-                      value={activeCard.section ?? "Section 1"}
-                      onChange={(event) =>
-                        updateCard(activeCard.id, {
-                          section: event.target.value,
-                        })
-                      }
-                      className={inputClass()}
-                    >
-                      {sections.map((section) => (
-                        <option key={section} value={section}>
-                          {section}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
+                    path={`/cards/${activeCardIndex}/section`}
+                    disabled={!canEdit}
+                    value={activeCard.section ?? "Section 1"}
+                    onChange={(next) =>
+                      updateCard(activeCard.id, { section: next })
+                    }
+                    options={sections.map((section) => ({
+                      value: section,
+                      label: section,
+                    }))}
+                  />
                   <Field
                     label="Language"
-                    path={`/cards/${cards.findIndex((card) => card.id === activeCard.id)}/language`}
+                    path={`/cards/${activeCardIndex}/language`}
                   >
                     <input
                       value={activeCard.language ?? ""}
@@ -3111,14 +3369,15 @@ export function FlashcardStudio({
                       }
                       className={inputClass()}
                       placeholder="e.g. English, Spanish"
+                      disabled={!canEdit}
                     />
                   </Field>
                 </div>
                 {activeCard.variant !== "image_occlusion" ? (
-                  <div className="rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] p-3">
+                  <div className="rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] p-3">
                     <div className="flex items-start gap-3">
                       <div className="min-w-0 flex-1">
-                        <strong className="block text-[11px] text-[var(--text-primary)]">
+                        <strong className="block text-micro text-[var(--text-primary)]">
                           Card image
                         </strong>
                         <span className="text-micro leading-4 text-[var(--text-tertiary)]">
@@ -3127,8 +3386,8 @@ export function FlashcardStudio({
                       </div>
                       <button
                         type="button"
-                        className="inline-flex h-8 items-center gap-1.5 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 text-micro font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-                        disabled={deckMediaBusy}
+                        className="inline-flex h-8 items-center gap-1.5 rounded-control border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 text-micro font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+                        disabled={deckMediaBusy || !canEdit}
                         onClick={() => deckMediaInputRef.current?.click()}
                       >
                         {deckMediaBusy ? (
@@ -3142,7 +3401,7 @@ export function FlashcardStudio({
                         <button
                           type="button"
                           className={iconButtonClass()}
-                          disabled={deckMediaBusy}
+                          disabled={deckMediaBusy || !canEdit}
                           onClick={() => void removeDeckMedia()}
                           aria-label="Remove card image"
                         >
@@ -3152,32 +3411,29 @@ export function FlashcardStudio({
                     </div>
                     {activeCard.media ? (
                       <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                        <Field
+                        <CardChoice
                           label="Place image on"
-                          path={`/cards/${cards.findIndex((card) => card.id === activeCard.id)}/media/placement`}
-                        >
-                          <select
-                            value={activeCard.media.placement ?? "front"}
-                            onChange={(event) =>
-                              updateCard(activeCard.id, {
-                                media: activeCard.media
-                                  ? {
-                                      ...activeCard.media,
-                                      placement: event.target.value as
-                                        "front" | "back",
-                                    }
-                                  : undefined,
-                              })
-                            }
-                            className={inputClass()}
-                          >
-                            <option value="front">Prompt / front</option>
-                            <option value="back">Answer / back</option>
-                          </select>
-                        </Field>
+                          path={`/cards/${activeCardIndex}/media/placement`}
+                          disabled={!canEdit}
+                          value={activeCard.media.placement ?? "front"}
+                          onChange={(next) =>
+                            updateCard(activeCard.id, {
+                              media: activeCard.media
+                                ? {
+                                    ...activeCard.media,
+                                    placement: next as "front" | "back",
+                                  }
+                                : undefined,
+                            })
+                          }
+                          options={[
+                            { value: "front", label: "The prompt" },
+                            { value: "back", label: "The answer" },
+                          ]}
+                        />
                         <Field
                           label="Image description"
-                          path={`/cards/${cards.findIndex((card) => card.id === activeCard.id)}/media/altText`}
+                          path={`/cards/${activeCardIndex}/media/altText`}
                         >
                           <input
                             value={activeCard.media.altText ?? ""}
@@ -3206,7 +3462,7 @@ export function FlashcardStudio({
                 ) : null}
                 <Field
                   label="Explanation"
-                  path={`/cards/${cards.findIndex((card) => card.id === activeCard.id)}/explanation`}
+                  path={`/cards/${activeCardIndex}/explanation`}
                 >
                   <textarea
                     value={activeCard.explanation ?? ""}
@@ -3221,7 +3477,7 @@ export function FlashcardStudio({
                 </Field>
                 <Field
                   label="Accepted alternatives"
-                  path={`/cards/${cards.findIndex((card) => card.id === activeCard.id)}/acceptedAlternatives`}
+                  path={`/cards/${activeCardIndex}/acceptedAlternatives`}
                 >
                   <input
                     value={(activeCard.acceptedAlternatives ?? []).join("; ")}
@@ -3239,7 +3495,7 @@ export function FlashcardStudio({
                 </Field>
                 <Field
                   label="Learning objective"
-                  path={`/cards/${cards.findIndex((card) => card.id === activeCard.id)}/learningObjective`}
+                  path={`/cards/${activeCardIndex}/learningObjective`}
                 >
                   <input
                     value={activeCard.learningObjective ?? ""}
@@ -3254,7 +3510,7 @@ export function FlashcardStudio({
                 </Field>
                 <Field
                   label="Sources / provenance"
-                  path={`/cards/${cards.findIndex((card) => card.id === activeCard.id)}/sourceRefs`}
+                  path={`/cards/${activeCardIndex}/sourceRefs`}
                 >
                   <input
                     value={(activeCard.sourceRefs ?? []).join(", ")}
@@ -3274,7 +3530,7 @@ export function FlashcardStudio({
                   <input
                     type="checkbox"
                     {...targetAttrs(
-                      `/cards/${cards.findIndex((card) => card.id === activeCard.id)}/bidirectional`,
+                      `/cards/${activeCardIndex}/bidirectional`,
                     )}
                     checked={activeCard.bidirectional === true}
                     disabled={activeCard.variant !== "basic"}
@@ -3291,32 +3547,7 @@ export function FlashcardStudio({
               </div>
             ) : null}
             <div className="spectra-deck-sync-actions">
-              <span
-                data-invalid={
-                  !activeCard.front.trim() ||
-                  !activeCard.back.trim() ||
-                  (activeCard.variant === "cloze" &&
-                    clozeParts(activeCard.front).length === 0) ||
-                  (activeCard.variant === "image_occlusion" &&
-                    (!activeCard.media ||
-                      (activeCard.occlusions?.length ?? 0) === 0)) ||
-                  undefined
-                }
-              >
-                {activeCard.variant === "cloze" &&
-                clozeParts(activeCard.front).length === 0
-                  ? "Select an answer on the front and make it a cloze"
-                  : activeCard.variant === "image_occlusion" &&
-                      (!activeCard.media ||
-                        (activeCard.occlusions?.length ?? 0) === 0)
-                    ? "Add an image and at least one hidden region"
-                    : !activeCard.front.trim() || !activeCard.back.trim()
-                      ? "Add both sides before studying this card"
-                      : activeCardDirty
-                        ? "Syncing changes…"
-                        : "Synchronized"}
-              </span>
-              {activeCardDirty ? (
+              {activeCardDirty && canEdit ? (
                 <button
                   type="button"
                   onClick={() => {
@@ -3331,7 +3562,7 @@ export function FlashcardStudio({
                     );
                   }}
                 >
-                  Revert card
+                  Revert this card
                 </button>
               ) : null}
             </div>
@@ -3433,7 +3664,7 @@ export function FlashcardStudio({
                   {(
                     [
                       ["Space", "Reveal the answer"],
-                      ["1 – 4", "Grade: again, hard, good, easy"],
+                      ["1 to 4", "Grade it: again, hard, good, or easy"],
                       ["N", "Write a private note"],
                       ["S or →", "Skip without grading"],
                       ["←", "Go back a card"],
@@ -3468,9 +3699,9 @@ export function FlashcardStudio({
                   </span>
                   <h3>Study queue complete</h3>
                   <p>
-                    Every result was synchronized to your private scheduler.
-                    Other collaborators cannot see your answers or review
-                    history.
+                    {canRecordStudy
+                      ? "Every result went to your own scheduler. Nobody else can see your answers or your review history."
+                      : "This was practice. Nothing was recorded, so the deck's schedule and your progress are unchanged."}
                   </p>
                   <div>
                     {(["again", "hard", "good", "easy"] as const).map(
@@ -3496,6 +3727,12 @@ export function FlashcardStudio({
                         : ""}
                     </span>
                     <strong>{activeStudyPrompt}</strong>
+                    {canRecordStudy ? null : (
+                      <small>
+                        Practice only. Grades are not recorded here, so nothing
+                        changes your progress.
+                      </small>
+                    )}
                     {activeStudyCard.variant !== "image_occlusion" &&
                     activeStudyCard.media?.placement !== "back" &&
                     activeStudyMedia?.downloadUrl ? (
@@ -3507,12 +3744,12 @@ export function FlashcardStudio({
                           activeStudyCard.media?.name ||
                           "Card image"
                         }
-                        className="mx-auto mt-4 block max-h-[42vh] max-w-full rounded-[9px] border border-[var(--border-default)] object-contain"
+                        className="mx-auto mt-4 block max-h-[42vh] max-w-full rounded-card border border-[var(--border-default)] object-contain"
                       />
                     ) : null}
                     {activeStudyCard.variant === "image_occlusion" &&
                     activeStudyMedia?.downloadUrl ? (
-                      <div className="relative mx-auto mt-4 w-fit max-w-full overflow-hidden rounded-[9px] border border-[var(--border-default)] bg-[#17191d]">
+                      <div className="relative mx-auto mt-4 w-fit max-w-full overflow-hidden rounded-card border border-[var(--border-default)] bg-[#17191d]">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={activeStudyMedia.downloadUrl}
@@ -3526,7 +3763,7 @@ export function FlashcardStudio({
                           (mask, index) => (
                             <span
                               key={mask.id}
-                              className={`absolute grid place-items-center border text-[11px] font-bold transition-[background-color,border-color,color] ${
+                              className={`absolute grid place-items-center border text-micro font-bold transition-[background-color,border-color,color] ${
                                 studyRevealed
                                   ? "border-[var(--success)] bg-[color-mix(in_oklab,var(--success)_12%,transparent)] text-[var(--success)]"
                                   : "border-white/65 bg-[#252a32] text-white shadow-[0_2px_8px_rgba(0,0,0,0.24)]"
@@ -3566,7 +3803,7 @@ export function FlashcardStudio({
                             activeStudyCard.media.altText ||
                             activeStudyCard.media.name
                           }
-                          className="mx-auto mt-3 block max-h-[36vh] max-w-full rounded-[9px] border border-[var(--border-default)] object-contain"
+                          className="mx-auto mt-3 block max-h-[36vh] max-w-full rounded-card border border-[var(--border-default)] object-contain"
                         />
                       ) : null}
                       {activeStudyCard.variant === "cloze" &&
@@ -3581,7 +3818,7 @@ export function FlashcardStudio({
                           className={
                             studyTypedCorrect
                               ? "text-[var(--success)]"
-                              : "text-[#d88922]"
+                              : "text-[var(--warning)]"
                           }
                         >
                           {studyTypedCorrect
@@ -3619,7 +3856,7 @@ export function FlashcardStudio({
                           onChange={(event) =>
                             setStudyTypedAnswer(event.target.value)
                           }
-                          className="h-10 min-w-0 flex-1 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-[13px] text-[var(--text-primary)] outline-none focus:border-[color-mix(in_oklab,#8b6ff0_55%,var(--border-default))]"
+                          className="h-10 min-w-0 flex-1 rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-ui text-[var(--text-primary)] outline-none focus:border-[color-mix(in_oklab,var(--brand-primary)_55%,var(--border-default))]"
                           placeholder="Recall before revealing"
                         />
                         <button type="button" onClick={revealStudyAnswer}>
@@ -3658,7 +3895,9 @@ export function FlashcardStudio({
                         <strong>
                           {rating[0]!.toUpperCase() + rating.slice(1)}
                         </strong>
-                        <small>{studyIntervalLabels[rating]}</small>
+                        {canRecordStudy ? (
+                          <small>{studyIntervalLabels[rating]}</small>
+                        ) : null}
                       </button>
                     ),
                   )}
@@ -3752,13 +3991,54 @@ export function FlashcardStudio({
 }
 
 /**
- * How this quiz is used (§11C).
+ * One card-level choice.
  *
- * Three presets carry the whole contract, because almost every quiz is one of
- * them. The six fields underneath stay folded away until someone wants a
- * combination the presets do not cover — advanced power without a wall of
- * dropdowns on the way in.
+ * `path` is applied to the trigger rather than to the label wrapper, so an AI
+ * edit or a peer's target resolves to the control that actually changes the
+ * card (brief §3.3). `Field` can only decorate native tags, and a Radix trigger
+ * is a component, so the annotation is made here instead of being handed over
+ * and silently downgraded to the label's padding box.
  */
+function CardChoice({
+  label,
+  path,
+  aiActive = false,
+  disabled,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  path: string;
+  aiActive?: boolean;
+  disabled?: boolean;
+  value: string;
+  onChange: (value: string) => void;
+  options: readonly { value: string; label: string }[];
+}) {
+  return (
+    <Field label={label}>
+      <Select value={value} onValueChange={onChange} disabled={disabled}>
+        <SelectTrigger
+          size="sm"
+          aria-label={label}
+          className="w-full"
+          data-ai-region={aiRegionAttr(aiActive)}
+          {...targetAttrs(path)}
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((option) => (
+            <SelectItem key={option.value} value={option.value}>
+              {option.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </Field>
+  );
+}
 
 function CardFace({
   label,
@@ -3767,6 +4047,7 @@ function CardFace({
   onChange,
   onFocus,
   clozeMode = false,
+  disabled = false,
   noteValue,
   onNoteChange,
   aiActive = false,
@@ -3780,6 +4061,8 @@ function CardFace({
   onChange: (value: string) => void;
   onFocus?: () => void;
   clozeMode?: boolean;
+  /** The viewer lacks `edit`. The face still reads; it does not accept typing. */
+  disabled?: boolean;
   noteValue?: string;
   onNoteChange?: (value: string) => void;
   aiActive?: boolean;
@@ -3813,20 +4096,22 @@ function CardFace({
 
   return (
     <section data-card-face={label.toLowerCase()}>
-      <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
+      <div className="mb-2 flex items-center gap-2 text-micro font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
         <span>{label}</span>
         {clozeMode ? (
           <>
+            {disabled ? null : (
             <button
               type="button"
               onClick={markCloze}
-              className="ml-auto inline-flex h-7 items-center gap-1.5 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 text-micro font-semibold normal-case tracking-normal text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+              className="ml-auto inline-flex h-7 items-center gap-1.5 rounded-chip border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2 text-micro font-semibold normal-case tracking-normal text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
               title="Select text, then create a cloze deletion"
             >
               <Focus className="h-3.5 w-3.5" />
               Make cloze
             </button>
-            <span className="normal-case tracking-normal text-[var(--text-tertiary)]">
+            )}
+            <span className="ml-auto normal-case tracking-normal text-[var(--text-tertiary)]">
               {clozeParts(value).length}{" "}
               {clozeParts(value).length === 1 ? "deletion" : "deletions"}
             </span>
@@ -3842,7 +4127,8 @@ function CardFace({
             onFocus={() => onFocus?.()}
             data-ai-region={aiRegionAttr(aiActive)}
             {...(path ? targetAttrs(path) : {})}
-            className="min-h-[180px] w-full resize-none rounded-[9px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-6 py-8 text-center font-serif text-[24px] leading-snug text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[color-mix(in_oklab,#8b6ff0_55%,var(--border-default))]"
+            readOnly={disabled}
+            className="min-h-[112px] w-full resize-none rounded-card border border-[var(--border-default)] bg-[var(--bg-primary)] px-6 py-6 text-center font-serif text-metric leading-snug text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)] focus:border-[color-mix(in_oklab,var(--brand-primary)_55%,var(--border-default))]"
             placeholder={placeholder}
           />
         ) : (
@@ -3854,6 +4140,7 @@ function CardFace({
               path={path}
               placeholder={placeholder}
               variant="card"
+              disabled={disabled}
             />
           </div>
         )}
@@ -3865,13 +4152,14 @@ function CardFace({
             data-ai-region={aiRegionAttr(aiNoteActive)}
             {...(notePath ? targetAttrs(notePath) : {})}
             className="spectra-card-face-note"
-            placeholder="Add a note (optional)"
+            readOnly={disabled}
+            placeholder={disabled ? "" : "Add a note (optional)"}
             aria-label="Note or hint"
           />
         ) : null}
       </div>
       {clozeMode && clozeParts(value).length ? (
-        <div className="mt-2 rounded-[7px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2">
+        <div className="mt-2 rounded-control border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2">
           <span className="mb-1 block text-micro font-semibold uppercase tracking-[0.08em] text-[var(--text-tertiary)]">
             Study preview
           </span>

@@ -74,9 +74,26 @@ import {
   SelectField,
   Sparkline,
   StatusBadge,
+  statusToneFor,
   TextAreaField,
   TextField,
 } from "@/features/spectra/administration/shared";
+
+const MEMBER_ROLE_OPTIONS = [
+  { value: "student", label: "Student" },
+  { value: "teacher", label: "Teacher" },
+  { value: "school_admin", label: "School admin" },
+] as const;
+
+const MEMBER_STATUS_OPTIONS = [
+  { value: "active", label: "Active" },
+  // `invited` is set by sending an invitation, never by an administrator
+  // picking it, but it has to be visible or a pending member's row would show
+  // no status at all.
+  { value: "invited", label: "Invited", disabled: true },
+  { value: "suspended", label: "Suspended" },
+  { value: "ended", label: "Ended" },
+] as const;
 
 type Tab =
   | "overview"
@@ -365,7 +382,7 @@ function OverviewSurface({
                       {item.subject}
                     </span>
                     <StatusBadge
-                      tone={item.status === "new" ? "warn" : "neutral"}
+                      tone={item.status === "new" ? "attention" : "neutral"}
                     >
                       {item.category.replaceAll("_", " ")}
                     </StatusBadge>
@@ -404,7 +421,7 @@ function OverviewSurface({
                     {actionLabel(event.action)}
                   </span>
                   {event.operator ? (
-                    <StatusBadge tone="blue">Operator</StatusBadge>
+                    <StatusBadge tone="neutral">Operator</StatusBadge>
                   ) : null}
                   <span className="text-micro text-[var(--text-tertiary)]">
                     {formatRelative(event.createdAt)}
@@ -475,7 +492,7 @@ function OverviewSurface({
           </div>
           <div className="mt-3">
             <StatusBadge
-              tone={data.integration?.status === "active" ? "good" : "warn"}
+              tone={statusToneFor(data.integration?.status)}
             >
               {data.integration?.status ?? "Not configured"}
             </StatusBadge>
@@ -666,7 +683,7 @@ export function SchoolAdminShell() {
           actions={
             <>
             {overview.school.status !== "active" ? (
-              <StatusBadge tone="warn">{overview.school.status}</StatusBadge>
+              <StatusBadge tone="attention">{overview.school.status}</StatusBadge>
             ) : null}
             <AdminButton className="min-h-8" onClick={() => setRefreshKey((value) => value + 1)}><RefreshCw size={12} />Refresh</AdminButton>
             </>
@@ -946,48 +963,40 @@ function PeopleSurface({
                       </div>
                     </td>
                     <td className="py-2.5">
-                      <select
+                      <SelectField
+                        ariaLabel={`Role for ${person.name}`}
                         value={person.role}
                         disabled={busy === `member-${person.membershipId}`}
-                        onChange={(event) =>
+                        onChange={(role) =>
                           void mutate(
                             `member-${person.membershipId}`,
                             "changeMember",
-                            {
-                              membershipId: person.membershipId,
-                              role: event.target.value,
-                            },
+                            { membershipId: person.membershipId, role },
                             "Member role updated.",
                           ).then(onRefresh)
                         }
-                        className="h-8 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2"
-                      >
-                        <option value="student">Student</option>
-                        <option value="teacher">Teacher</option>
-                        <option value="school_admin">School admin</option>
-                      </select>
+                        options={MEMBER_ROLE_OPTIONS}
+                        size="sm"
+                        triggerClassName="w-[132px]"
+                      />
                     </td>
                     <td className="py-2.5">
-                      <select
+                      <SelectField
+                        ariaLabel={`Status for ${person.name}`}
                         value={person.status}
                         disabled={busy === `member-${person.membershipId}`}
-                        onChange={(event) =>
+                        onChange={(status) =>
                           void mutate(
                             `member-${person.membershipId}`,
                             "changeMember",
-                            {
-                              membershipId: person.membershipId,
-                              status: event.target.value,
-                            },
+                            { membershipId: person.membershipId, status },
                             "Member status updated.",
                           ).then(onRefresh)
                         }
-                        className="h-8 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2"
-                      >
-                        <option value="active">Active</option>
-                        <option value="suspended">Suspended</option>
-                        <option value="ended">Ended</option>
-                      </select>
+                        options={MEMBER_STATUS_OPTIONS}
+                        size="sm"
+                        triggerClassName="w-[124px]"
+                      />
                     </td>
                     <td className="py-2.5 text-[var(--text-secondary)]">
                       {formatRelative(person.lastSeenAt)}
@@ -1031,7 +1040,7 @@ function PeopleSurface({
                   </span>
                 </span>
                 <StatusBadge
-                  tone={invite.status === "pending" ? "warn" : "neutral"}
+                  tone={invite.status === "pending" ? "attention" : "neutral"}
                 >
                   {invite.status}
                 </StatusBadge>
@@ -1217,9 +1226,7 @@ function GroupsSurface({
                   <span className="grid size-9 place-items-center rounded-[9px] bg-[#eaf6f0] text-[#16805f]">
                     <UsersRound size={16} />
                   </span>
-                  <StatusBadge
-                    tone={group.source === "managebac" ? "blue" : "neutral"}
-                  >
+                  <StatusBadge tone="neutral">
                     {group.source}
                   </StatusBadge>
                 </div>
@@ -1451,17 +1458,7 @@ function CommunicationSurface({
                       {row.failed ? ` · ${row.failed} failed` : ""}
                     </td>
                     <td className="py-3">
-                      <StatusBadge
-                        tone={
-                          row.status === "sent"
-                            ? "good"
-                            : row.status === "scheduled"
-                              ? "blue"
-                              : row.status === "cancelled"
-                                ? "neutral"
-                                : "warn"
-                        }
-                      >
+                      <StatusBadge tone={statusToneFor(row.status)}>
                         {row.status}
                       </StatusBadge>
                     </td>
@@ -1946,7 +1943,7 @@ function IntegrationsSurface({
           detail="Read-only school data with verified tenant capabilities, exact identity matching, provenance, quarantine, and safe later synchronization."
           action={
             <StatusBadge
-              tone={overview.integration?.status === "active" ? "good" : "warn"}
+              tone={statusToneFor(overview.integration?.status)}
             >
               {overview.integration?.status ?? "Not configured"}
             </StatusBadge>
@@ -2075,7 +2072,7 @@ function GovernanceSurface() {
                 <span className="grid size-8 shrink-0 place-items-center rounded-[8px] bg-[#eef8f4] text-[#16805f]">
                   <Icon size={15} />
                 </span>
-                <StatusBadge tone="good">Always available</StatusBadge>
+                <StatusBadge tone="healthy">Always available</StatusBadge>
               </div>
               <strong className="mt-3 block text-[11px]">{title}</strong>
               <p className="mt-1 text-micro leading-4 text-[var(--text-tertiary)]">
@@ -2174,7 +2171,7 @@ function FeedbackSurface({
                     {formatRelative(item.createdAt)}
                   </span>
                 </span>
-                <StatusBadge tone={item.status === "new" ? "warn" : "neutral"}>
+                <StatusBadge tone={item.status === "new" ? "attention" : "neutral"}>
                   {item.status.replaceAll("_", " ")}
                 </StatusBadge>
               </button>
@@ -2481,7 +2478,7 @@ function AuditSurface({
                   </td>
                   <td className="py-2.5">
                     {event.operatorSessionId ? (
-                      <StatusBadge tone="blue">Scoped operator</StatusBadge>
+                      <StatusBadge tone="neutral">Scoped operator</StatusBadge>
                     ) : (
                       "Local"
                     )}

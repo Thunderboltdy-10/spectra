@@ -37,6 +37,7 @@ import { requireBlueprint, requireArtifactTypeManifest } from "../artifacts/blue
 import type { ArtifactTypeKey } from "../artifacts/types";
 import { normalizeWhiteboardContent } from "../whiteboard/model";
 import { LocalAutocompleteTextarea } from "../compute/autocomplete";
+import { SelectField } from "@/components/ui/select";
 
 type EditableBlueprintKey = ArtifactTypeKey;
 type SheetMode = "create" | "edit";
@@ -710,8 +711,8 @@ function QuizEditor({ questions, setQuestions }: { questions: QuizQuestion[]; se
             </div>
           </div>
           <div className="grid gap-3 sm:grid-cols-3">
-            <Field label="Type"><select value={activeQuestion.type ?? "short_answer"} onChange={(event) => { const type = event.target.value as QuizQuestion["type"]; updateQuestion(activeQuestion.id, type === "multiple_choice" ? { type, options: (activeQuestion.options?.length ?? 0) >= 2 ? activeQuestion.options : ["", "", "", ""] } : { type, options: [] }); }} className={inputClass()}><option value="multiple_choice">Multiple choice</option><option value="short_answer">Short answer</option></select></Field>
-            <Field label="Difficulty"><select value={activeQuestion.difficulty ?? "medium"} onChange={(event) => updateQuestion(activeQuestion.id, { difficulty: event.target.value as QuizQuestion["difficulty"] })} className={inputClass()}><option value="easy">Easy</option><option value="medium">Medium</option><option value="hard">Hard</option></select></Field>
+            <SelectField label="Type" value={activeQuestion.type ?? "short_answer"} onChange={(next) => { const type = next as QuizQuestion["type"]; updateQuestion(activeQuestion.id, type === "multiple_choice" ? { type, options: (activeQuestion.options?.length ?? 0) >= 2 ? activeQuestion.options : ["", "", "", ""] } : { type, options: [] }); }} options={[{ value: "multiple_choice", label: "Multiple choice" }, { value: "short_answer", label: "Short answer" }]} size="lg" />
+            <SelectField label="Difficulty" value={activeQuestion.difficulty ?? "medium"} onChange={(next) => updateQuestion(activeQuestion.id, { difficulty: next as QuizQuestion["difficulty"] })} options={[{ value: "easy", label: "Easy" }, { value: "medium", label: "Medium" }, { value: "hard", label: "Hard" }]} size="lg" />
             <Field label="Points"><input type="number" min={1} max={100} value={activeQuestion.points ?? 1} onChange={(event) => updateQuestion(activeQuestion.id, { points: Math.max(1, Number(event.target.value) || 1) })} className={inputClass()} /></Field>
           </div>
           <Field label="Question"><LocalAutocompleteTextarea surface="quiz_card_text" value={activeQuestion.prompt} onValueChange={(prompt) => updateQuestion(activeQuestion.id, { prompt })} className="w-full" textareaClassName={textareaClass("min-h-[100px] text-[15px] leading-6")} placeholder="What should the learner answer?" /></Field>

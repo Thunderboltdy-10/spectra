@@ -9,21 +9,23 @@ import {
   ChevronDown,
   Copy,
   Filter,
-  CheckCircle2,
-  Circle,
   Italic,
-  Loader2,
-  MoreHorizontal,
+  Palette,
   Plus,
   Redo2,
   Search,
   Sigma,
+  Snowflake,
   SortAsc,
   SortDesc,
   Trash2,
+  TriangleAlert,
   Underline,
   Undo2,
   Upload,
+  X,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-react";
 import {
   Area,
@@ -93,14 +95,90 @@ import {
   sheetsAiTouchesCell,
   sheetsAiTouchesColumn,
 } from "./ai-region-path";
-import { targetAttrs } from "../collaboration/target-attributes";
-import { WorkbarSelect } from "./artifact-workbar";
+import { partAttrs, targetAttrs } from "../collaboration/target-attributes";
+import { SelectField } from "@/components/ui/select";
+import {
+  ArtifactWorkbar,
+  WorkbarItemSelector,
+  type WorkbarActionSpec,
+} from "./artifact-workbar";
+import { getWorkDefinition } from "../work/registry";
+import {
+  useComposerSafeArea,
+  useStudioContract,
+  type StudioContract,
+} from "./artifact-studio-shell";
 
 const ROW_HEIGHT = 31;
 const COLUMN_WIDTH = 122;
 const ROW_HEADER_WIDTH = 46;
 const COLUMN_HEADER_HEIGHT = 30;
+const MIN_COLUMN_WIDTH = 34;
+const MIN_ROW_HEIGHT = 20;
 const CHART_COLORS = ["#169b69", "#7066ed", "#db7b27", "#2f8fd2", "#b85d7a"];
+
+/** The registry owns the empty-state words, so every surface says the same one. */
+const emptyState = getWorkDefinition("sheets").emptyState;
+
+/**
+ * One shape rule for the inspector: the rail itself is flush with the frame it
+ * overlays, every control inside it is `rounded-control`, and the only filled
+ * button is the one that commits. Kept as constants so a new panel cannot
+ * quietly introduce a fourth button treatment.
+ */
+const PANEL_BUTTON =
+  "inline-flex h-8 shrink-0 items-center justify-center rounded-control border border-[var(--border-default)] px-2.5 text-caption font-semibold text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-hover)] active:translate-y-px disabled:pointer-events-none disabled:opacity-45";
+const PANEL_PRIMARY =
+  "inline-flex h-8 shrink-0 items-center justify-center whitespace-nowrap rounded-control bg-[var(--text-primary)] px-2.5 text-caption font-semibold text-[var(--bg-primary)] transition-opacity hover:opacity-90 active:translate-y-px disabled:pointer-events-none disabled:opacity-45";
+const PANEL_INPUT =
+  "h-8 w-full min-w-0 rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] px-2.5 text-ui text-[var(--text-primary)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus-ring-color)]";
+const PANEL_LABEL =
+  "mb-1.5 block text-caption font-medium text-[var(--text-secondary)]";
+
+/**
+ * Cumulative pixel offsets for a run of tracks, so a column the user has
+ * widened moves every column after it instead of overlapping its neighbour.
+ * `offsets[i]` is the start of track `i` and `offsets[count]` is the total.
+ */
+function trackOffsets(
+  count: number,
+  size: (index: number) => number,
+): number[] {
+  const offsets = new Array<number>(count + 1);
+  offsets[0] = 0;
+  for (let index = 0; index < count; index += 1)
+    offsets[index + 1] = offsets[index]! + size(index);
+  return offsets;
+}
+
+/** The track containing a scroll offset. Binary search: 26 columns or 100,000. */
+function trackAtOffset(offsets: number[], value: number) {
+  let low = 0;
+  let high = offsets.length - 2;
+  while (low < high) {
+    const middle = (low + high + 1) >> 1;
+    if (offsets[middle]! <= value) low = middle;
+    else high = middle - 1;
+  }
+  return Math.max(0, low);
+}
+
+/**
+ * The studio contract, or `null` when there is no shell above us.
+ *
+ * `useStudioContract` throws by design, and the landing page renders this exact
+ * studio outside the provider so the marketing surface is the product rather
+ * than a replica (D19). Catching here keeps one implementation (D21) instead of
+ * forking a landing-only sheet; the hook itself still runs on every render, so
+ * hook order never changes.
+ */
+function useShellContract(): StudioContract | null {
+  try {
+    return useStudioContract();
+  } catch {
+    return null;
+  }
+}
 
 async function sheetsBlobSha256(blob: Blob) {
   const digest = await crypto.subtle.digest(
@@ -120,7 +198,6 @@ type Viewport = {
   scrollLeft: number;
   scrollTop: number;
 };
-type MenuName = "file" | "edit" | "view" | "insert" | "format" | "data" | null;
 
 function sameContent(left: SheetsContent, right: SheetsContent) {
   return JSON.stringify(left) === JSON.stringify(right);
@@ -395,7 +472,7 @@ function histogramDataset(
     Math.min(6, Math.ceil(-Math.log10(Math.abs(width))) + 1),
   );
   return bins.map((bin) => ({
-    bucket: `${bin.lower.toFixed(precision)}–${bin.upper.toFixed(precision)}`,
+    bucket: `${bin.lower.toFixed(precision)} to ${bin.upper.toFixed(precision)}`,
     count: bin.count,
   }));
 }
@@ -629,6 +706,50 @@ function ToolbarButton({
   );
 }
 
+/**
+ * The grip a column or row is resized by. It is a descendant of the header it
+ * belongs to and carries `data-spectra-part`, which is what
+ * `control-descriptors` already declares for `/sheets/*\/columns/*` (`handle:e`)
+ * and `/sheets/*\/rows/*` (`handle:s`) — the attribute used to sit on the header
+ * button itself, where `resolvePart` could never find it.
+ */
+function SheetsTrackGrip({
+  axis,
+  label,
+  onBegin,
+  onReset,
+}: {
+  axis: "column" | "row";
+  label: string;
+  onBegin: (event: ReactPointerEvent) => void;
+  onReset: () => void;
+}) {
+  return (
+    <span
+      {...partAttrs(axis === "column" ? "handle:e" : "handle:s")}
+      role="separator"
+      aria-orientation={axis === "column" ? "vertical" : "horizontal"}
+      aria-label={label}
+      title={`${label}. Double click to reset.`}
+      onPointerDown={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onBegin(event);
+      }}
+      onDoubleClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onReset();
+      }}
+      className={
+        axis === "column"
+          ? "absolute inset-y-0 right-0 z-10 w-[7px] cursor-col-resize"
+          : "absolute inset-x-0 bottom-0 z-10 h-[7px] cursor-row-resize"
+      }
+    />
+  );
+}
+
 type SheetsCellHandlers = {
   onPointerDown: (
     coordinate: CellCoordinate,
@@ -715,7 +836,10 @@ export function SheetsStudio({
   readOnly = false,
   mode = "tab",
   synchronizationReady = true,
-  syncMessage = "Auto-saved",
+  // Save state belongs to the shared rail above this studio, not to a status bar
+  // of our own. The prop stays in the signature because the shell passes it to
+  // every type; the sheet deliberately does not print it a second time.
+  syncMessage: _syncMessage = "Auto-saved",
   onActiveRegionChange,
 }: {
   artifactId: string;
@@ -729,6 +853,20 @@ export function SheetsStudio({
   syncMessage?: string;
   onActiveRegionChange?: (regionId: string) => void;
 }) {
+  /**
+   * Permissions come from the shell contract and nowhere else: not from `mode`,
+   * not from the pane width, not from this file's own opinion. A side panel and
+   * a fullscreen tab have identical capabilities (D4).
+   */
+  const contract = useShellContract();
+  const rootRef = useRef<HTMLDivElement>(null);
+  useComposerSafeArea(rootRef);
+  const canEditCells = contract ? contract.can("edit") : !readOnly;
+  const locked = readOnly || !canEditCells;
+  const density = contract?.density ?? "comfortable";
+  /** Registry-declared peer views. Both edit; neither is a reading mode (D2). */
+  const [sheetMode, setSheetMode] = useState("grid");
+  const analysing = sheetMode === "analysis";
   const incoming = useMemo(() => normalizeSheetsContent(content), [content]);
   const [workbook, setWorkbook] = useState(incoming);
   const [range, setRange] = useState<CellRange>({
@@ -740,17 +878,31 @@ export function SheetsStudio({
   const [formulaDraft, setFormulaDraft] = useState("");
   const [nameDraft, setNameDraft] = useState("A1");
   const [zoom, setZoom] = useState(1);
-  const [menu, setMenu] = useState<MenuName>(null);
-  const [searchOpen, setSearchOpen] = useState(false);
+  /**
+   * One inspector, seven jobs. Formatting, naming a range, validating entries,
+   * writing a conditional rule, finding a value, renaming the sheet and choosing
+   * filter values used to be six separate bars plus a panel, each of which
+   * pushed the grid down as it opened. They are the same shape of task, so they
+   * are one overlay that never moves a cell (M4 §5.3).
+   */
+  const [inspector, setInspector] = useState<
+    | "format"
+    | "name"
+    | "validate"
+    | "conditional"
+    | "find"
+    | "sheet"
+    | "filter"
+    | null
+  >(null);
+  const [renameDraft, setRenameDraft] = useState("");
   const [search, setSearch] = useState("");
-  const [namedRangeOpen, setNamedRangeOpen] = useState(false);
+  const [searchCursor, setSearchCursor] = useState(0);
   const [namedRangeDraft, setNamedRangeDraft] = useState("");
-  const [validationOpen, setValidationOpen] = useState(false);
   const [validationKind, setValidationKind] = useState<
     "list" | "number" | "checkbox"
   >("list");
   const [validationDraft, setValidationDraft] = useState("");
-  const [conditionalOpen, setConditionalOpen] = useState(false);
   const [conditionalKind, setConditionalKind] = useState<
     "color_scale" | "greater_than" | "less_than" | "equal_to"
   >("color_scale");
@@ -762,14 +914,35 @@ export function SheetsStudio({
     id: string;
     position: SheetChart["position"];
   }>();
+  /** A resize in flight, in zoomed pixels, so the grid tracks the pointer. */
+  const [trackGesture, setTrackGesture] = useState<{
+    axis: "column" | "row";
+    index: number;
+    size: number;
+  } | null>(null);
+  const trackGestureRef = useRef(trackGesture);
+  trackGestureRef.current = trackGesture;
   const [filterEditor, setFilterEditor] = useState<{
     tableId: string;
     column: number;
   } | null>(null);
   const [filterValues, setFilterValues] = useState<SheetScalar[]>([]);
-  const [importNotice, setImportNotice] = useState<string | null>(null);
-  const [renamingSheetId, setRenamingSheetId] = useState<string | null>(null);
-  const [renameDraft, setRenameDraft] = useState("");
+  /**
+   * Notices are not `role="status"`: the shared rail owns save state and
+   * `spectra-app.css` hides `[role="status"]` inside this studio to stop the
+   * duplicate, which silently hid every import result and validation error too.
+   * `aria-live` announces without matching that selector.
+   */
+  const [notice, setNotice] = useState<{
+    tone: "info" | "warning";
+    message: string;
+  } | null>(null);
+  const setImportNotice = useCallback(
+    (message: string | null, tone: "info" | "warning" = "info") =>
+      setNotice(message ? { tone, message } : null),
+    [setNotice],
+  );
+  const [importing, setImporting] = useState(false);
   const [viewport, setViewport] = useState<Viewport>({
     rowStart: 0,
     rowEnd: 32,
@@ -815,14 +988,14 @@ export function SheetsStudio({
     rangeRef.current = range;
   }, [range]);
 
+  // Losing the grant closes every editing surface rather than leaving a panel
+  // open over cells it can no longer change.
   useEffect(() => {
-    if (!readOnly) return;
-    setNamedRangeOpen(false);
-    setValidationOpen(false);
-    setConditionalOpen(false);
+    if (!locked) return;
+    setInspector(null);
     setFilterEditor(null);
     setEditingAddress(null);
-  }, [readOnly]);
+  }, [locked]);
 
   useEffect(() => {
     const incomingKey = JSON.stringify(incoming);
@@ -842,12 +1015,25 @@ export function SheetsStudio({
     setWorkbook(incoming);
   }, [incoming]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  /**
+   * Which sheet you are looking at is navigation, not authorship. It persists to
+   * content when you may write (so it follows the artifact and the AI sees the
+   * same sheet you do) and stays local when you may not, because a read-only
+   * viewer who cannot leave sheet one has lost a capability every role holds.
+   */
+  const [localSheetId, setLocalSheetId] = useState<string | null>(null);
   const activeSheet =
+    workbook.sheets.find(
+      (sheet) => sheet.id === (localSheetId ?? workbook.activeSheetId),
+    ) ??
     workbook.sheets.find((sheet) => sheet.id === workbook.activeSheetId) ??
     workbook.sheets[0]!;
   const activeSheetIndex = workbook.sheets.findIndex(
     (sheet) => sheet.id === activeSheet.id,
   );
+  useEffect(() => {
+    setLocalSheetId(null);
+  }, [workbook.activeSheetId]);
   const bounds = useMemo(() => usedBounds(activeSheet), [activeSheet]);
   const calculated = useMemo(() => calculateWorkbook(workbook), [workbook]);
   const mergedCellMap = useMemo(() => {
@@ -965,8 +1151,43 @@ export function SheetsStudio({
     () => rangeAddresses(normalizedSelection),
     [normalizedSelection],
   );
-  const rowHeight = ROW_HEIGHT * zoom;
-  const columnWidth = COLUMN_WIDTH * zoom;
+  /**
+   * Stored widths and heights are honoured, not just persisted. The xlsx
+   * importer has always written `columnWidths`, and the grid has always drawn
+   * every column at 122px anyway, so an imported sheet lost its layout the
+   * moment it opened.
+   */
+  const columnOffsets = useMemo(
+    () =>
+      trackOffsets(bounds.columns, (column) =>
+        trackGesture?.axis === "column" && trackGesture.index === column
+          ? trackGesture.size
+          : (activeSheet.columnWidths?.[String(column)] ?? COLUMN_WIDTH) * zoom,
+      ),
+    [activeSheet.columnWidths, bounds.columns, trackGesture, zoom],
+  );
+  const rowOffsets = useMemo(
+    () =>
+      trackOffsets(visibleRowIndices.length, (position) => {
+        const row = visibleRowIndices[position]!;
+        return trackGesture?.axis === "row" && trackGesture.index === row
+          ? trackGesture.size
+          : (activeSheet.rowHeights?.[String(row)] ?? ROW_HEIGHT) * zoom;
+      }),
+    [activeSheet.rowHeights, trackGesture, visibleRowIndices, zoom],
+  );
+  const gridWidth = columnOffsets[bounds.columns] ?? 0;
+  const gridHeight = rowOffsets[visibleRowIndices.length] ?? 0;
+  const columnSpan = useCallback(
+    (column: number) =>
+      (columnOffsets[column + 1] ?? 0) - (columnOffsets[column] ?? 0),
+    [columnOffsets],
+  );
+  const rowSpan = useCallback(
+    (position: number) =>
+      (rowOffsets[position + 1] ?? 0) - (rowOffsets[position] ?? 0),
+    [rowOffsets],
+  );
 
   useEffect(() => {
     setFormulaDraft(cellInput(activeCell));
@@ -1000,7 +1221,9 @@ export function SheetsStudio({
 
   const commit = useCallback(
     (next: SheetsContent, remember = true) => {
-      if (readOnly) return;
+      // One gate for every write in this file. A capability that is not granted
+      // stops the change here rather than at each of forty call sites.
+      if (locked) return;
       setWorkbook((current) => {
         if (sameContent(current, next)) return current;
         if (remember) {
@@ -1014,7 +1237,16 @@ export function SheetsStudio({
         return next;
       });
     },
-    [onChange, readOnly, rememberEmitted],
+    [locked, onChange, rememberEmitted],
+  );
+
+  const showSheet = useCallback(
+    (sheetId: string) => {
+      setLocalSheetId(sheetId);
+      commit({ ...workbook, activeSheetId: sheetId }, false);
+      setRange({ start: { row: 0, column: 0 }, end: { row: 0, column: 0 } });
+    },
+    [commit, workbook],
   );
 
   const updateActiveSheet = useCallback(
@@ -1170,11 +1402,14 @@ export function SheetsStudio({
       (normalizedSelection.end.row - normalizedSelection.start.row + 1) *
       (normalizedSelection.end.column - normalizedSelection.start.column + 1);
     if (area < 2) {
-      setImportNotice("Select at least two cells to merge.");
+      setImportNotice("Select at least two cells to merge.", "warning");
       return;
     }
     if (area > 10_000) {
-      setImportNotice("Merge a smaller region of up to 10,000 cells.");
+      setImportNotice(
+        "Merge a smaller region of up to 10,000 cells.",
+        "warning",
+      );
       return;
     }
     const anchor = coordinateToAddress(normalizedSelection.start);
@@ -1190,6 +1425,7 @@ export function SheetsStudio({
     if (occupied.length) {
       setImportNotice(
         `Merge stopped: ${occupied.length} non-anchor cell${occupied.length === 1 ? " contains" : "s contain"} content. Clear or move it first so no data is discarded.`,
+        "warning",
       );
       return;
     }
@@ -1214,7 +1450,10 @@ export function SheetsStudio({
       return parsed ? rangesOverlap(parsed, normalizedSelection) : false;
     });
     if (!affected.length) {
-      setImportNotice("The selected region does not contain merged cells.");
+      setImportNotice(
+        "The selected region does not contain merged cells.",
+        "warning",
+      );
       return;
     }
     updateActiveSheet((sheet) => ({
@@ -1242,7 +1481,10 @@ export function SheetsStudio({
     else {
       const value = Number(conditionalThreshold);
       if (!Number.isFinite(value)) {
-        setImportNotice("Conditional formatting needs a valid numeric value.");
+        setImportNotice(
+          "Conditional formatting needs a valid numeric value.",
+          "warning",
+        );
         return;
       }
       rule = {
@@ -1259,12 +1501,12 @@ export function SheetsStudio({
       ...sheet,
       conditionalFormats: [...(sheet.conditionalFormats ?? []), rule],
     }));
-    setConditionalOpen(false);
+    setInspector(null);
     setImportNotice(`Conditional formatting applied to ${selectionLabel}.`);
   }
 
   function undo() {
-    if (readOnly) return;
+    if (locked) return;
     const previous = undoRef.current.pop();
     if (!previous) return;
     redoRef.current.push(workbook);
@@ -1276,7 +1518,7 @@ export function SheetsStudio({
   }
 
   function redo() {
-    if (readOnly) return;
+    if (locked) return;
     const next = redoRef.current.pop();
     if (!next) return;
     undoRef.current.push(workbook);
@@ -1338,7 +1580,7 @@ export function SheetsStudio({
   }
 
   async function pasteSelection() {
-    if (readOnly) return;
+    if (locked) return;
     const rows = parseDelimited(await navigator.clipboard.readText(), "\t");
     updateActiveSheet((sheet) => {
       const cells = { ...sheet.cells };
@@ -1360,7 +1602,7 @@ export function SheetsStudio({
   }
 
   function clearSelection() {
-    if (readOnly) return;
+    if (locked) return;
     updateActiveSheet((sheet) => {
       const cells = { ...sheet.cells };
       selectedAddresses.forEach((address) => delete cells[address]);
@@ -1397,6 +1639,21 @@ export function SheetsStudio({
       formatSelection({ bold: !activeCell?.format?.bold });
       return;
     }
+    if (command && event.key.toLowerCase() === "i") {
+      event.preventDefault();
+      formatSelection({ italic: !activeCell?.format?.italic });
+      return;
+    }
+    if (command && event.key.toLowerCase() === "u") {
+      event.preventDefault();
+      formatSelection({ underline: !activeCell?.format?.underline });
+      return;
+    }
+    if (command && event.key.toLowerCase() === "f") {
+      event.preventDefault();
+      setInspector("find");
+      return;
+    }
     if (event.key === "ArrowUp") {
       event.preventDefault();
       moveSelection(-1, 0, event.shiftKey);
@@ -1425,27 +1682,107 @@ export function SheetsStudio({
     }
   }
 
-  function updateViewport() {
+  const updateViewport = useCallback(() => {
     const element = gridRef.current;
     if (!element) return;
-    const rowStart = Math.max(0, Math.floor(element.scrollTop / rowHeight) - 3);
+    // Offsets, not division: a column the user widened makes the window past it
+    // narrower, and dividing by a nominal 122px would render the wrong range.
+    const rowStart = Math.max(0, trackAtOffset(rowOffsets, element.scrollTop) - 3);
     const columnStart = Math.max(
       0,
-      Math.floor(element.scrollLeft / columnWidth) - 2,
+      trackAtOffset(columnOffsets, element.scrollLeft) - 2,
     );
     setViewport({
       rowStart,
       rowEnd: Math.min(
         visibleRowIndices.length - 1,
-        rowStart + Math.ceil(element.clientHeight / rowHeight) + 7,
+        trackAtOffset(rowOffsets, element.scrollTop + element.clientHeight) + 6,
       ),
       columnStart,
       columnEnd: Math.min(
         bounds.columns - 1,
-        columnStart + Math.ceil(element.clientWidth / columnWidth) + 5,
+        trackAtOffset(columnOffsets, element.scrollLeft + element.clientWidth) +
+          4,
       ),
       scrollLeft: element.scrollLeft,
       scrollTop: element.scrollTop,
+    });
+  }, [bounds.columns, columnOffsets, rowOffsets, visibleRowIndices.length]);
+
+  /**
+   * The window was only ever recomputed on scroll, so the first paint always
+   * used the hard-coded 32 rows by 10 columns and columns past K stayed blank
+   * at 1440px until someone happened to scroll. Mount and every resize of the
+   * grid itself now recompute it.
+   */
+  useEffect(() => {
+    updateViewport();
+    const element = gridRef.current;
+    if (!element || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => updateViewport());
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [updateViewport]);
+
+
+  /**
+   * Column and row resizing, persisted. The drag paints from local state so the
+   * pointer never waits on a commit, and writes the final size once on release
+   * (D20) — the same shape as the chart gesture.
+   */
+  function beginTrackResize(
+    axis: "column" | "row",
+    index: number,
+    event: ReactPointerEvent,
+  ) {
+    if (locked) return;
+    const startPointer = axis === "column" ? event.clientX : event.clientY;
+    const startSize =
+      axis === "column"
+        ? ((activeSheet.columnWidths?.[String(index)] ?? COLUMN_WIDTH) * zoom)
+        : ((activeSheet.rowHeights?.[String(index)] ?? ROW_HEIGHT) * zoom);
+    const minimum = (axis === "column" ? MIN_COLUMN_WIDTH : MIN_ROW_HEIGHT) * zoom;
+    setTrackGesture({ axis, index, size: startSize });
+    const move = (pointer: PointerEvent) => {
+      const delta =
+        (axis === "column" ? pointer.clientX : pointer.clientY) - startPointer;
+      setTrackGesture({
+        axis,
+        index,
+        size: Math.max(minimum, Math.round(startSize + delta)),
+      });
+    };
+    const stop = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+      const gesture = trackGestureRef.current;
+      setTrackGesture(null);
+      if (!gesture) return;
+      const stored = Math.round(gesture.size / zoom);
+      updateActiveSheet((sheet) =>
+        axis === "column"
+          ? {
+              ...sheet,
+              columnWidths: { ...sheet.columnWidths, [String(index)]: stored },
+            }
+          : {
+              ...sheet,
+              rowHeights: { ...sheet.rowHeights, [String(index)]: stored },
+            },
+      );
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", stop);
+  }
+
+  function resetTrackSize(axis: "column" | "row", index: number) {
+    updateActiveSheet((sheet) => {
+      if (axis === "column") {
+        const { [String(index)]: _removed, ...rest } = sheet.columnWidths ?? {};
+        return { ...sheet, columnWidths: rest };
+      }
+      const { [String(index)]: _removed, ...rest } = sheet.rowHeights ?? {};
+      return { ...sheet, rowHeights: rest };
     });
   }
 
@@ -1501,7 +1838,7 @@ export function SheetsStudio({
   });
 
   function addSheet() {
-    if (readOnly) return;
+    if (locked) return;
     const id = `sheet-${crypto.randomUUID()}`;
     const sheet: WorkbookSheet = {
       id,
@@ -1529,7 +1866,7 @@ export function SheetsStudio({
   }
 
   function removeActiveSheet() {
-    if (readOnly) return;
+    if (locked) return;
     if (workbook.sheets.length <= 1) return;
     const sheets = workbook.sheets.filter(
       (sheet) => sheet.id !== activeSheet.id,
@@ -1538,7 +1875,7 @@ export function SheetsStudio({
   }
 
   function createChart() {
-    if (readOnly) return;
+    if (locked) return;
     // A new chart lands just past the selection it was made from, so the
     // relationship between the numbers and the picture is visible without
     // scrolling anywhere (§11F).
@@ -1582,7 +1919,7 @@ export function SheetsStudio({
     chart: SheetChart,
     kind: "move" | "resize",
   ) {
-    if (readOnly) return;
+    if (locked) return;
     event.preventDefault();
     event.stopPropagation();
     setSelectedChartId(chart.id);
@@ -1642,7 +1979,7 @@ export function SheetsStudio({
   }
 
   function sortSelection(direction: "asc" | "desc") {
-    if (readOnly) return;
+    if (locked) return;
     const selectedRange = normalizeRange(range);
     const matchingTable = activeSheet.tables.find(
       (table) => table.range === rangeLabel(selectedRange),
@@ -1705,7 +2042,7 @@ export function SheetsStudio({
   }
 
   async function importDelimited(file: File) {
-    if (readOnly) throw new Error("This workbook is read-only.");
+    if (locked) throw new Error("This workbook is read-only.");
     const rows = parseDelimited(
       await file.text(),
       file.name.toLowerCase().endsWith(".tsv") ? "\t" : ",",
@@ -1749,7 +2086,7 @@ export function SheetsStudio({
   }
 
   async function importExcel(file: File) {
-    if (readOnly) throw new Error("This workbook is read-only.");
+    if (locked) throw new Error("This workbook is read-only.");
     if (/\.(?:xlsm|xlsb|xls)$/i.test(file.name)) {
       throw new Error(
         "Macro-enabled, binary, and legacy Excel files are quarantined and never executed. Export a clean .xlsx copy to import its supported content.",
@@ -1921,6 +2258,7 @@ export function SheetsStudio({
     } catch (error) {
       setImportNotice(
         `Could not import ${file.name}. The original remains untouched. ${error instanceof Error ? error.message : "Try exporting a clean .xlsx copy."}`,
+        "warning",
       );
       throw error;
     }
@@ -1930,15 +2268,18 @@ export function SheetsStudio({
     if (!synchronizationReady) {
       setImportNotice(
         "Finish synchronizing the current sheet before replacing it with an import. You can keep editing cells while Spectra reconnects.",
+        "warning",
       );
       return;
     }
     if (file.size < 1 || file.size > 100 * 1024 * 1024) {
       setImportNotice(
         "Import quarantined: the file is empty or exceeds the 100 MB parsing safety ceiling.",
+        "warning",
       );
       return;
     }
+    setImporting(true);
     const extension = file.name.split(".").pop()?.toLowerCase() ?? "unknown";
     let jobId: string | undefined;
     try {
@@ -1966,7 +2307,7 @@ export function SheetsStudio({
           ? await importExcel(file)
           : extension === "ods"
             ? await (async () => {
-                if (readOnly) throw new Error("This workbook is read-only.");
+                if (locked) throw new Error("This workbook is read-only.");
                 const imported = importOds(await file.arrayBuffer(), workbook);
                 commit(imported.next);
                 setRange({
@@ -2031,7 +2372,10 @@ export function SheetsStudio({
         });
       setImportNotice(
         `Import quarantined: ${message} The original remains retained for recovery.`,
+        "warning",
       );
+    } finally {
+      setImporting(false);
     }
   }
 
@@ -2104,936 +2448,592 @@ export function SheetsStudio({
         )
       : [];
 
+  const numberText = (value: number) =>
+    value.toLocaleString(workbook.workbook.locale, {
+      maximumFractionDigits: 4,
+    });
+  /**
+   * Analysis is a second view of the same cells, not a reading mode: descriptive
+   * statistics measured from the calculated workbook, so every figure here is a
+   * real result of the sheet's own formulas.
+   */
+  const analysis = (() => {
+    if (!selectedNumbers.length) return null;
+    const count = selectedNumbers.length;
+    const sum = selectedNumbers.reduce((total, value) => total + value, 0);
+    const mean = sum / count;
+    return {
+      count,
+      sum,
+      mean,
+      minimum: selectedNumbers.reduce((low, value) => Math.min(low, value)),
+      maximum: selectedNumbers.reduce((high, value) => Math.max(high, value)),
+      deviation: Math.sqrt(
+        count > 1
+          ? selectedNumbers.reduce(
+              (total, value) => total + (value - mean) ** 2,
+              0,
+            ) /
+              (count - 1)
+          : 0,
+      ),
+      blanks: selectedAddresses.filter(
+        (address) => cellInput(activeSheet.cells[address]) === "",
+      ).length,
+    };
+  })();
+  /**
+   * Find reads calculated results as well as entered text, so searching for a
+   * number finds the cells that compute it and not only the ones that hold it.
+   * Matches come back in reading order so "Find next" walks the sheet the way a
+   * person does.
+   */
+  const searchMatches = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    if (!needle) return [];
+    return Object.entries(activeSheet.cells)
+      .filter(
+        ([address, cell]) =>
+          cellInput(cell).toLowerCase().includes(needle) ||
+          formatCalculatedCell(
+            cell,
+            calculated.get(`${activeSheet.id}:${address}`),
+            workbook.workbook.locale,
+          )
+            .toLowerCase()
+            .includes(needle),
+      )
+      .map(([address]) => address)
+      .sort((left, right) => {
+        const a = parseAddress(left);
+        const b = parseAddress(right);
+        if (!a || !b) return 0;
+        return a.row - b.row || a.column - b.column;
+      });
+  }, [
+    activeSheet.cells,
+    activeSheet.id,
+    calculated,
+    search,
+    workbook.workbook.locale,
+  ]);
+  const sheetIsEmpty =
+    !Object.keys(activeSheet.cells).length && !activeSheet.charts.length;
+  /**
+   * The selection readout. It used to sit in a 28px bar of its own that also
+   * repeated the address already shown in the name box; it is one readout in the
+   * bar now, and the address is stated once.
+   */
+  const summaryLabel = summary
+    ? `Sum ${numberText(summary.sum)} · Mean ${numberText(summary.average)}`
+    : selectedAddresses.length > 1
+      ? `${selectedAddresses.length} cells selected`
+      : undefined;
+  const dimensionLabel = filteredOutRows.size
+    ? `${visibleRowIndices.length.toLocaleString()} of ${bounds.rows.toLocaleString()} rows · ${bounds.columns.toLocaleString()} columns`
+    : `${bounds.rows.toLocaleString()} rows · ${bounds.columns.toLocaleString()} columns`;
+  const frozenRowCount = activeSheet.frozenRows ?? 0;
+  const frozenColumnCount = activeSheet.frozenColumns ?? 0;
+  const freezeRowTarget = normalizedSelection.start.row + 1;
+  const freezeColumnTarget = normalizedSelection.start.column + 1;
+  const filterableHere = activeSheet.tables.some(
+    (table) => table.range === selectionLabel,
+  );
+  const toggleInspector = (panel: NonNullable<typeof inspector>) =>
+    setInspector((current) => (current === panel ? null : panel));
+  /**
+   * One rail, one open panel. Analysis is a mode rather than an inspector, so it
+   * is the resting content of the rail in that view and an inspector opened on
+   * top of it wins — there is never a second panel beside it.
+   */
+  const panelMode = inspector ?? (analysing ? "analysis" : null);
+  const panelTitle = {
+    format: `Format ${selectionLabel}`,
+    name: `Name ${selectionLabel}`,
+    validate: `Validate ${selectionLabel}`,
+    conditional: `Conditional format ${selectionLabel}`,
+    find: `Find in ${activeSheet.name}`,
+    sheet: "Rename sheet",
+    filter: filterEditor
+      ? `Filter ${columnName(filterEditor.column)}`
+      : "Filter",
+    analysis: `Analysis of ${selectionLabel}`,
+  }[panelMode ?? "analysis"];
+  /**
+   * Character emphasis and cell alignment, declared once so the row cannot grow
+   * a seventh toggle with a seventh button treatment. Every entry writes a real
+   * cell format.
+   */
+  const emphasisControls: Array<{
+    label: string;
+    icon: typeof Bold;
+    active?: boolean;
+    onClick: () => void;
+  }> = [
+    {
+      label: "Bold",
+      icon: Bold,
+      active: activeCell?.format?.bold,
+      onClick: () => formatSelection({ bold: !activeCell?.format?.bold }),
+    },
+    {
+      label: "Italic",
+      icon: Italic,
+      active: activeCell?.format?.italic,
+      onClick: () => formatSelection({ italic: !activeCell?.format?.italic }),
+    },
+    {
+      label: "Underline",
+      icon: Underline,
+      active: activeCell?.format?.underline,
+      onClick: () =>
+        formatSelection({ underline: !activeCell?.format?.underline }),
+    },
+    ...(
+      [
+        ["Align left", "left", AlignLeft],
+        ["Align centre", "center", AlignCenter],
+        ["Align right", "right", AlignRight],
+      ] as const
+    ).map(([label, align, icon]) => ({
+      label,
+      icon,
+      active: activeCell?.format?.align === align,
+      onClick: () => formatSelection({ align }),
+    })),
+  ];
+  const changeZoom = (next: number) => {
+    setZoom(next);
+    requestAnimationFrame(updateViewport);
+  };
+
+  /**
+   * The six bars became one declared action list. Priority decides where each
+   * entry lives at a given density and it is rendered in exactly one place, so
+   * nothing is ever listed twice and nothing is deleted at a narrow width.
+   * `requires` is the enforcement: an action a role cannot perform is absent,
+   * not disabled.
+   */
+  const actions: WorkbarActionSpec[] = [
+    {
+      id: "undo",
+      label: "Undo",
+      icon: Undo2,
+      priority: "essential",
+      requires: "edit",
+      disabled: !canUndo,
+      onSelect: undo,
+    },
+    {
+      id: "redo",
+      label: "Redo",
+      icon: Redo2,
+      priority: "essential",
+      requires: "edit",
+      disabled: !canRedo,
+      onSelect: redo,
+    },
+    {
+      id: "format",
+      label: "Format",
+      icon: Palette,
+      priority: "essential",
+      requires: "edit",
+      hint: `Number, font and fill for ${selectionLabel}`,
+      active: inspector === "format",
+      onSelect: () => toggleInspector("format"),
+    },
+    {
+      id: "chart",
+      label: "Chart",
+      icon: BarChart3,
+      priority: "essential",
+      requires: "edit",
+      hint: `Read ${selectionLabel}`,
+      onSelect: createChart,
+    },
+    {
+      id: "find",
+      label: "Find",
+      icon: Search,
+      hint: "Ctrl F",
+      active: inspector === "find",
+      onSelect: () => toggleInspector("find"),
+    },
+    {
+      id: "sort",
+      label: "Sort",
+      icon: SortAsc,
+      requires: "edit",
+      hint: `Ascending by ${columnName(normalizedSelection.start.column)}`,
+      onSelect: () => sortSelection("asc"),
+    },
+    {
+      id: "filter",
+      label: "Filter",
+      icon: Filter,
+      requires: "edit",
+      active: filterableHere,
+      hint: `Filterable table over ${selectionLabel}`,
+      onSelect: toggleTable,
+    },
+    {
+      id: "freeze-rows",
+      label: "Freeze rows",
+      icon: Snowflake,
+      requires: "edit",
+      active: frozenRowCount > 0,
+      hint:
+        frozenRowCount === freezeRowTarget
+          ? "Unfreeze"
+          : `Through row ${freezeRowTarget}`,
+      onSelect: () =>
+        updateActiveSheet((sheet) => ({
+          ...sheet,
+          frozenRows:
+            frozenRowCount === freezeRowTarget
+              ? 0
+              : Math.min(100, freezeRowTarget),
+        })),
+    },
+    {
+      id: "freeze-columns",
+      label: "Freeze columns",
+      icon: Snowflake,
+      priority: "advanced",
+      requires: "edit",
+      active: frozenColumnCount > 0,
+      hint:
+        frozenColumnCount === freezeColumnTarget
+          ? "Unfreeze"
+          : `Through column ${columnName(normalizedSelection.start.column)}`,
+      onSelect: () =>
+        updateActiveSheet((sheet) => ({
+          ...sheet,
+          frozenColumns:
+            frozenColumnCount === freezeColumnTarget
+              ? 0
+              : Math.min(50, freezeColumnTarget),
+        })),
+    },
+    {
+      id: "sort-descending",
+      label: "Sort descending",
+      icon: SortDesc,
+      priority: "advanced",
+      requires: "edit",
+      onSelect: () => sortSelection("desc"),
+    },
+    {
+      id: "name-range",
+      label: "Name this range",
+      icon: Sigma,
+      priority: "advanced",
+      requires: "edit",
+      onSelect: () => {
+        setNamedRangeDraft("");
+        setInspector("name");
+      },
+    },
+    {
+      id: "validation",
+      label: "Data validation",
+      icon: Filter,
+      priority: "advanced",
+      requires: "edit",
+      onSelect: () => {
+        const existing = activeCell?.validation;
+        setValidationKind(existing?.kind ?? "list");
+        setValidationDraft(
+          existing?.kind === "list"
+            ? existing.options.join(", ")
+            : existing?.kind === "number"
+              ? `${existing.minimum ?? ""}, ${existing.maximum ?? ""}`
+              : "",
+        );
+        setInspector("validate");
+      },
+    },
+    {
+      id: "conditional",
+      label: "Conditional formatting",
+      icon: BarChart3,
+      priority: "advanced",
+      requires: "edit",
+      onSelect: () => setInspector("conditional"),
+    },
+    {
+      id: "insert-row",
+      label: "Insert row above",
+      priority: "advanced",
+      requires: "edit",
+      onSelect: () =>
+        updateActiveSheet((sheet) =>
+          mutateSheetAxis(sheet, "row", normalizedSelection.start.row, 1),
+        ),
+    },
+    {
+      id: "insert-column",
+      label: "Insert column left",
+      priority: "advanced",
+      requires: "edit",
+      onSelect: () =>
+        updateActiveSheet((sheet) =>
+          mutateSheetAxis(sheet, "column", normalizedSelection.start.column, 1),
+        ),
+    },
+    {
+      id: "delete-row",
+      label: "Delete selected row",
+      priority: "advanced",
+      requires: "edit",
+      onSelect: () =>
+        updateActiveSheet((sheet) =>
+          mutateSheetAxis(sheet, "row", normalizedSelection.start.row, -1),
+        ),
+    },
+    {
+      id: "delete-column",
+      label: "Delete selected column",
+      priority: "advanced",
+      requires: "edit",
+      onSelect: () =>
+        updateActiveSheet((sheet) =>
+          mutateSheetAxis(sheet, "column", normalizedSelection.start.column, -1),
+        ),
+    },
+    {
+      id: "copy",
+      label: "Copy selection",
+      icon: Copy,
+      priority: "advanced",
+      onSelect: () => void copySelection(),
+    },
+    {
+      id: "clear",
+      label: "Clear selection",
+      icon: Trash2,
+      priority: "advanced",
+      requires: "edit",
+      onSelect: clearSelection,
+    },
+    {
+      id: "zoom-in",
+      label: "Zoom in",
+      icon: ZoomIn,
+      priority: "advanced",
+      disabled: zoom >= 1.5,
+      hint: `${Math.round(zoom * 100)}%`,
+      onSelect: () => changeZoom(Math.min(1.5, zoom + 0.25)),
+    },
+    {
+      id: "zoom-out",
+      label: "Zoom out",
+      icon: ZoomOut,
+      priority: "advanced",
+      disabled: zoom <= 0.75,
+      hint: `${Math.round(zoom * 100)}%`,
+      onSelect: () => changeZoom(Math.max(0.75, zoom - 0.25)),
+    },
+    {
+      id: "sheet-new",
+      label: "New sheet",
+      icon: Plus,
+      priority: "advanced",
+      requires: "edit",
+      onSelect: addSheet,
+    },
+    {
+      id: "sheet-rename",
+      label: "Rename sheet",
+      priority: "advanced",
+      requires: "edit",
+      onSelect: () => {
+        setRenameDraft(activeSheet.name);
+        setInspector("sheet");
+      },
+    },
+    {
+      id: "sheet-delete",
+      label: "Delete sheet",
+      icon: Trash2,
+      priority: "advanced",
+      requires: "edit",
+      disabled: workbook.sheets.length <= 1,
+      onSelect: removeActiveSheet,
+    },
+    {
+      id: "import",
+      label: "Import spreadsheet",
+      icon: Upload,
+      priority: "advanced",
+      requires: "edit",
+      disabled: !synchronizationReady || importing,
+      hint: importing
+        ? "Importing"
+        : synchronizationReady
+          ? "CSV, TSV, Excel or OpenDocument"
+          : "Finish synchronizing first",
+      onSelect: () => importRef.current?.click(),
+    },
+  ];
+
   return (
     <div
-      className="spectra-sheets-studio min-w-0 overflow-hidden"
+      ref={rootRef}
+      className="spectra-sheets-studio flex min-w-0 flex-col overflow-hidden"
       data-compact={mode === "split" || undefined}
+      data-sheets-density={density}
     >
-      <div className="spectra-editor-workbar sheets-top-bars">
-        <div className="sheets-menu-bar">
-          {(["file", "edit", "view", "insert", "format", "data"] as const).map(
-            (name) => (
-              <div key={name} className="relative">
-                <button
-                  type="button"
-                  className="sheets-menu-trigger"
-                  onClick={() =>
-                    setMenu((current) => (current === name ? null : name))
-                  }
-                >
-                  {name[0]!.toUpperCase() + name.slice(1)}
-                </button>
-                {menu === name ? (
-                  <div className="sheets-menu-popover">
-                    {name === "file" ? (
-                      <>
-                        <button
-                          type="button"
-                          disabled={readOnly || !synchronizationReady}
-                          title={
-                            !synchronizationReady
-                              ? "Finish synchronizing before importing"
-                              : undefined
-                          }
-                          onClick={() => importRef.current?.click()}
-                        >
-                          <Upload />
-                          Import spreadsheet
-                        </button>
-                      </>
-                    ) : null}
-                    {name === "edit" ? (
-                      <>
-                        <button
-                          type="button"
-                          disabled={!canUndo}
-                          onClick={undo}
-                        >
-                          <Undo2 />
-                          Undo
-                        </button>
-                        <button
-                          type="button"
-                          disabled={!canRedo}
-                          onClick={redo}
-                        >
-                          <Redo2 />
-                          Redo
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void copySelection()}
-                        >
-                          <Copy />
-                          Copy selection
-                        </button>
-                        <button
-                          type="button"
-                          disabled={readOnly}
-                          onClick={clearSelection}
-                        >
-                          <Trash2 />
-                          Clear selection
-                        </button>
-                      </>
-                    ) : null}
-                    {name === "view" ? (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => setSearchOpen((value) => !value)}
-                        >
-                          <Search />
-                          Find cells
-                        </button>
-                        <button
-                          type="button"
-                          disabled={readOnly}
-                          onClick={() =>
-                            updateActiveSheet((sheet) => ({
-                              ...sheet,
-                              frozenRows: Math.min(
-                                100,
-                                normalizedSelection.start.row + 1,
-                              ),
-                            }))
-                          }
-                        >
-                          Freeze rows through{" "}
-                          {normalizedSelection.start.row + 1}
-                        </button>
-                        <button
-                          type="button"
-                          disabled={readOnly}
-                          onClick={() =>
-                            updateActiveSheet((sheet) => ({
-                              ...sheet,
-                              frozenColumns: Math.min(
-                                50,
-                                normalizedSelection.start.column + 1,
-                              ),
-                            }))
-                          }
-                        >
-                          Freeze columns through{" "}
-                          {columnName(normalizedSelection.start.column)}
-                        </button>
-                        {(activeSheet.frozenRows ?? 0) > 0 ||
-                        (activeSheet.frozenColumns ?? 0) > 0 ? (
-                          <button
-                            type="button"
-                            disabled={readOnly}
-                            onClick={() =>
-                              updateActiveSheet((sheet) => ({
-                                ...sheet,
-                                frozenRows: 0,
-                                frozenColumns: 0,
-                              }))
-                            }
-                          >
-                            Unfreeze panes
-                          </button>
-                        ) : null}
-                      </>
-                    ) : null}
-                    {name === "insert" ? (
-                      <>
-                        <button type="button" onClick={addSheet}>
-                          <Plus />
-                          New sheet
-                        </button>
-                        <button
-                          type="button"
-                          disabled={readOnly}
-                          onClick={() =>
-                            updateActiveSheet((sheet) =>
-                              mutateSheetAxis(
-                                sheet,
-                                "row",
-                                normalizedSelection.start.row,
-                                1,
-                              ),
-                            )
-                          }
-                        >
-                          Insert row above
-                        </button>
-                        <button
-                          type="button"
-                          disabled={readOnly}
-                          onClick={() =>
-                            updateActiveSheet((sheet) =>
-                              mutateSheetAxis(
-                                sheet,
-                                "column",
-                                normalizedSelection.start.column,
-                                1,
-                              ),
-                            )
-                          }
-                        >
-                          Insert column left
-                        </button>
-                        <button
-                          type="button"
-                          disabled={readOnly}
-                          onClick={() =>
-                            updateActiveSheet((sheet) =>
-                              mutateSheetAxis(
-                                sheet,
-                                "row",
-                                normalizedSelection.start.row,
-                                -1,
-                              ),
-                            )
-                          }
-                        >
-                          Delete selected row
-                        </button>
-                        <button
-                          type="button"
-                          disabled={readOnly}
-                          onClick={() =>
-                            updateActiveSheet((sheet) =>
-                              mutateSheetAxis(
-                                sheet,
-                                "column",
-                                normalizedSelection.start.column,
-                                -1,
-                              ),
-                            )
-                          }
-                        >
-                          Delete selected column
-                        </button>
-                        <button type="button" onClick={createChart}>
-                          <BarChart3 />
-                          Chart from selection
-                        </button>
-                      </>
-                    ) : null}
-                    {name === "format" ? (
-                      <>
-                        <button
-                          type="button"
-                          disabled={readOnly}
-                          onClick={() =>
-                            formatSelection({ numberFormat: "currency" })
-                          }
-                        >
-                          Currency
-                        </button>
-                        <button
-                          type="button"
-                          disabled={readOnly}
-                          onClick={() =>
-                            formatSelection({ numberFormat: "percent" })
-                          }
-                        >
-                          Percent
-                        </button>
-                        <button
-                          type="button"
-                          disabled={readOnly}
-                          onClick={() =>
-                            formatSelection({ numberFormat: "date" })
-                          }
-                        >
-                          Date
-                        </button>
-                        <button
-                          type="button"
-                          disabled={readOnly}
-                          onClick={mergeSelection}
-                        >
-                          Merge selected cells
-                        </button>
-                        <button
-                          type="button"
-                          disabled={readOnly}
-                          onClick={unmergeSelection}
-                        >
-                          Unmerge selected cells
-                        </button>
-                      </>
-                    ) : null}
-                    {name === "data" ? (
-                      <>
-                        <button
-                          type="button"
-                          disabled={readOnly}
-                          onClick={() => sortSelection("asc")}
-                        >
-                          <SortAsc />
-                          Sort ascending
-                        </button>
-                        <button
-                          type="button"
-                          disabled={readOnly}
-                          onClick={() => sortSelection("desc")}
-                        >
-                          <SortDesc />
-                          Sort descending
-                        </button>
-                        <button
-                          type="button"
-                          disabled={readOnly}
-                          onClick={toggleTable}
-                        >
-                          <Filter />
-                          Toggle filterable table
-                        </button>
-                        <button
-                          type="button"
-                          disabled={readOnly}
-                          onClick={() => {
-                            setNamedRangeOpen(true);
-                            setNamedRangeDraft("");
-                            setMenu(null);
-                          }}
-                        >
-                          <Sigma />
-                          Name selected range
-                        </button>
-                        <button
-                          type="button"
-                          disabled={readOnly}
-                          onClick={() => {
-                            const existing = activeCell?.validation;
-                            setValidationKind(existing?.kind ?? "list");
-                            setValidationDraft(
-                              existing?.kind === "list"
-                                ? existing.options.join(", ")
-                                : existing?.kind === "number"
-                                  ? `${existing.minimum ?? ""}, ${existing.maximum ?? ""}`
-                                  : "",
-                            );
-                            setValidationOpen(true);
-                            setMenu(null);
-                          }}
-                        >
-                          <Filter />
-                          Data validation
-                        </button>
-                        <button
-                          type="button"
-                          disabled={readOnly}
-                          onClick={() => {
-                            setConditionalOpen(true);
-                            setMenu(null);
-                          }}
-                        >
-                          <BarChart3 />
-                          Conditional formatting
-                        </button>
-                      </>
-                    ) : null}
-                  </div>
-                ) : null}
+      {/* One bar. Modes, the sheet selector, the selection readout and every
+          action come from the shared contract, so this type no longer owns a
+          menu row, a format rail or a responsive rule of its own. */}
+      {contract ? (
+        <ArtifactWorkbar
+          label="Sheet tools"
+          modes={{ registry: true, value: sheetMode, onChange: setSheetMode }}
+          selector={
+            /* Two hooks, nested, both in the DOM: `/sheets` is the collection a
+               per-sheet path falls back to, and `/activeSheetId` is the control
+               that changes it. The old tab rail carried `/sheets/{i}` per tab and
+               nothing for `/activeSheetId`, so that declared control could never
+               resolve. Neither may move inside the portaled list. */
+            <div
+              className="flex min-w-0 flex-1 items-center"
+              {...targetAttrs("/sheets")}
+            >
+              <div
+                className="flex min-w-0 flex-1 items-center"
+                {...targetAttrs("/activeSheetId")}
+              >
+                <WorkbarItemSelector
+                  ariaLabel="Sheet"
+                  itemNoun="sheet"
+                  items={workbook.sheets.map((sheet) => ({
+                    value: sheet.id,
+                    label: sheet.name,
+                  }))}
+                  value={activeSheet.id}
+                  onChange={showSheet}
+                />
               </div>
-            ),
-          )}
-          <span
-            className="ml-auto hidden items-center gap-1.5 text-micro text-[var(--text-secondary)] md:inline-flex"
-            role="status"
-            aria-live="polite"
-          >
-            {syncMessage === "Auto-saved" ? (
-              <CheckCircle2 className="h-3.5 w-3.5 text-[var(--success)]" />
-            ) : syncMessage === "Synchronizing" ||
-              syncMessage === "Reconnecting" ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-cyan)]" />
-            ) : (
-              <Circle className="h-3 w-3 fill-[#d88922] text-[#d88922]" />
-            )}
-            {syncMessage}
-          </span>
-          <span className="text-micro text-[var(--text-tertiary)] md:ml-2">
-            {filteredOutRows.size
-              ? `${visibleRowIndices.length.toLocaleString()} of ${bounds.rows.toLocaleString()}`
-              : bounds.rows.toLocaleString()}{" "}
-            rows · {bounds.columns.toLocaleString()} columns
-          </span>
-        </div>
-        <input
-          ref={importRef}
-          type="file"
-          accept=".csv,.tsv,.xlsx,.xls,.xlsm,.xlsb,.ods,text/csv,text/tab-separated-values,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.oasis.opendocument.spreadsheet"
-          hidden
-          onChange={(event) => {
-            const file = event.currentTarget.files?.[0];
-            if (file) void importWorkbookFile(file);
-            event.currentTarget.value = "";
-          }}
+            </div>
+          }
+          context={dimensionLabel}
+          trailing={
+            summaryLabel ? (
+              <span className="spectra-workbar-count max-w-[24ch]">
+                {summaryLabel}
+              </span>
+            ) : undefined
+          }
+          actions={actions}
         />
-        <div className="sheets-format-bar">
-          <ToolbarButton
-            label="Undo"
-            onClick={undo}
-            disabled={readOnly || !canUndo}
-          >
-            <Undo2 />
-          </ToolbarButton>
-          <ToolbarButton
-            label="Redo"
-            onClick={redo}
-            disabled={readOnly || !canRedo}
-          >
-            <Redo2 />
-          </ToolbarButton>
-          <span className="sheets-toolbar-divider" />
-          <WorkbarSelect
-            ariaLabel="Zoom"
-            value={String(Math.round(zoom * 100))}
-            options={[
-              { value: "75", label: "75%" },
-              { value: "100", label: "100%" },
-              { value: "125", label: "125%" },
-              { value: "150", label: "150%" },
-            ]}
-            onChange={(next) => {
-              setZoom(Number(next) / 100);
-              requestAnimationFrame(updateViewport);
+      ) : null}
+      <input
+        ref={importRef}
+        type="file"
+        accept=".csv,.tsv,.xlsx,.xls,.xlsm,.xlsb,.ods,text/csv,text/tab-separated-values,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.oasis.opendocument.spreadsheet"
+        hidden
+        onChange={(event) => {
+          const file = event.currentTarget.files?.[0];
+          if (file) void importWorkbookFile(file);
+          event.currentTarget.value = "";
+        }}
+      />
+      {/* The formula bar is the working surface, not chrome: it is where a cell
+          is actually written, and it carries the cell's AI target hook. */}
+      <div className="sheets-formula-bar">
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            const parsed = parseRange(formulaDraft);
+            if (parsed && !formulaDraft.startsWith("=")) {
+              setRange(parsed);
+              return;
+            }
+            commitInput(activeAddress, formulaDraft);
+          }}
+          className="contents"
+        >
+          <input
+            aria-label="Name box"
+            value={nameDraft}
+            onChange={(event) => setNameDraft(event.target.value.toUpperCase())}
+            onBlur={() => {
+              const parsed = parseRange(nameDraft);
+              const named = Object.entries(
+                workbook.workbook.namedRanges ?? {},
+              ).find(
+                ([name]) =>
+                  name.toUpperCase() === nameDraft.trim().toUpperCase(),
+              )?.[1];
+              const namedAddress = named?.split("!").at(-1);
+              const namedSheet = named?.includes("!")
+                ? named.slice(0, named.lastIndexOf("!")).replace(/^'|'$/g, "")
+                : activeSheet.name;
+              const namedParsed = namedAddress
+                ? parseRange(namedAddress)
+                : null;
+              if (parsed) setRange(parsed);
+              else if (namedParsed) {
+                const targetSheet = workbook.sheets.find(
+                  (sheet) =>
+                    sheet.name.toUpperCase() === namedSheet?.toUpperCase(),
+                );
+                if (targetSheet && targetSheet.id !== activeSheet.id)
+                  showSheet(targetSheet.id);
+                setRange(namedParsed);
+              } else setNameDraft(selectionLabel);
             }}
-          />
-          <span className="sheets-toolbar-divider" />
-          <ToolbarButton
-            label="Currency"
-            active={activeCell?.format?.numberFormat === "currency"}
-            onClick={() => formatSelection({ numberFormat: "currency" })}
-            disabled={readOnly}
-          >
-            $
-          </ToolbarButton>
-          <ToolbarButton
-            label="Percent"
-            active={activeCell?.format?.numberFormat === "percent"}
-            onClick={() => formatSelection({ numberFormat: "percent" })}
-            disabled={readOnly}
-          >
-            %
-          </ToolbarButton>
-          <ToolbarButton
-            label="Decrease decimal places"
-            onClick={() =>
-              formatSelection({
-                decimals: Math.max(0, (activeCell?.format?.decimals ?? 2) - 1),
-              })
-            }
-            disabled={readOnly}
-          >
-            .0←
-          </ToolbarButton>
-          <ToolbarButton
-            label="Increase decimal places"
-            onClick={() =>
-              formatSelection({
-                decimals: Math.min(12, (activeCell?.format?.decimals ?? 2) + 1),
-              })
-            }
-            disabled={readOnly}
-          >
-            .0→
-          </ToolbarButton>
-          <WorkbarSelect
-            ariaLabel="Number format"
-            disabled={readOnly}
-            value={activeCell?.format?.numberFormat ?? "general"}
-            options={[
-              { value: "general", label: "General" },
-              { value: "number", label: "Number" },
-              { value: "currency", label: "Currency" },
-              { value: "percent", label: "Percent" },
-              { value: "date", label: "Date" },
-            ]}
-            onChange={(next) =>
-              formatSelection({
-                numberFormat: next as NonNullable<
-                  SheetCell["format"]
-                >["numberFormat"],
-              })
-            }
-          />
-          <span className="sheets-toolbar-divider" />
-          <WorkbarSelect
-            ariaLabel="Font"
-            disabled={readOnly}
-            value={activeCell?.format?.fontFamily ?? "sans"}
-            options={[
-              { value: "sans", label: "Spectra Sans" },
-              { value: "serif", label: "Spectra Serif" },
-              { value: "mono", label: "Monospace" },
-            ]}
-            onChange={(next) =>
-              formatSelection({
-                fontFamily: next as NonNullable<
-                  SheetCell["format"]
-                >["fontFamily"],
-              })
-            }
-          />
-          <WorkbarSelect
-            ariaLabel="Font size"
-            disabled={readOnly}
-            value={String(activeCell?.format?.fontSize ?? 11)}
-            options={["9", "10", "11", "12", "14", "16"].map((size) => ({
-              value: size,
-              label: size,
-            }))}
-            onChange={(next) => formatSelection({ fontSize: Number(next) })}
-          />
-          <ToolbarButton
-            label="Bold"
-            active={activeCell?.format?.bold}
-            onClick={() => formatSelection({ bold: !activeCell?.format?.bold })}
-            disabled={readOnly}
-          >
-            <Bold />
-          </ToolbarButton>
-          <ToolbarButton
-            label="Italic"
-            active={activeCell?.format?.italic}
-            onClick={() =>
-              formatSelection({ italic: !activeCell?.format?.italic })
-            }
-            disabled={readOnly}
-          >
-            <Italic />
-          </ToolbarButton>
-          <ToolbarButton
-            label="Underline"
-            active={activeCell?.format?.underline}
-            onClick={() =>
-              formatSelection({ underline: !activeCell?.format?.underline })
-            }
-            disabled={readOnly}
-          >
-            <Underline />
-          </ToolbarButton>
-          <label className="sheets-color-control" title="Text color">
-            <span>A</span>
-            <input
-              type="color"
-              value={activeCell?.format?.textColor ?? "#222522"}
-              disabled={readOnly}
-              onChange={(event) =>
-                formatSelection({ textColor: event.target.value })
-              }
-              aria-label="Text color"
-            />
-          </label>
-          <label className="sheets-color-control" title="Cell fill color">
-            <span>◆</span>
-            <input
-              type="color"
-              value={activeCell?.format?.fillColor ?? "#ffffff"}
-              disabled={readOnly}
-              onChange={(event) =>
-                formatSelection({ fillColor: event.target.value })
-              }
-              aria-label="Cell fill color"
-            />
-          </label>
-          <span className="sheets-toolbar-divider" />
-          <ToolbarButton
-            label="Align left"
-            active={activeCell?.format?.align === "left"}
-            onClick={() => formatSelection({ align: "left" })}
-            disabled={readOnly}
-          >
-            <AlignLeft />
-          </ToolbarButton>
-          <ToolbarButton
-            label="Align center"
-            active={activeCell?.format?.align === "center"}
-            onClick={() => formatSelection({ align: "center" })}
-            disabled={readOnly}
-          >
-            <AlignCenter />
-          </ToolbarButton>
-          <ToolbarButton
-            label="Align right"
-            active={activeCell?.format?.align === "right"}
-            onClick={() => formatSelection({ align: "right" })}
-            disabled={readOnly}
-          >
-            <AlignRight />
-          </ToolbarButton>
-          <ToolbarButton
-            label="Functions"
-            onClick={() => {
-              setEditingAddress(activeAddress);
-              setEditingValue("=SUM(");
+            onKeyDown={(event) => {
+              if (event.key === "Enter") event.currentTarget.blur();
             }}
-            disabled={readOnly}
-          >
-            <Sigma />
-          </ToolbarButton>
-          <ToolbarButton
-            label="Filter"
-            active={activeSheet.tables.some(
-              (table) => table.range === selectionLabel,
+            className="sheets-name-box"
+          />
+          <span aria-hidden="true" className="sheets-formula-icon">
+            fx
+          </span>
+          <input
+            aria-label={`Formula for ${activeAddress}`}
+            value={formulaDraft}
+            readOnly={locked}
+            aria-readonly={locked}
+            {...targetAttrs(
+              `/sheets/${activeSheetIndex}/cells/${activeAddress}/${
+                formulaDraft.startsWith("=") || activeCell?.formula
+                  ? "formula"
+                  : "value"
+              }`,
             )}
-            onClick={toggleTable}
-            disabled={readOnly}
+            onChange={(event) => setFormulaDraft(event.target.value)}
+            className="sheets-formula-input"
+          />
+        </form>
+        {locked ? (
+          <span
+            title="Read-only. Copy and charts are available; cells cannot change."
+            className="min-w-0 shrink truncate px-2.5 text-micro text-[var(--text-secondary)]"
           >
-            <Filter />
-          </ToolbarButton>
-          <ToolbarButton
-            label="More formatting"
-            onClick={() => setMenu("format")}
-          >
-            <MoreHorizontal />
-          </ToolbarButton>
-        </div>
-        <div className="sheets-formula-bar">
-          <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              const parsed = parseRange(formulaDraft);
-              if (parsed && !formulaDraft.startsWith("=")) {
-                setRange(parsed);
-                return;
-              }
-              commitInput(activeAddress, formulaDraft);
-            }}
-            className="contents"
-          >
-            <input
-              aria-label="Name box"
-              value={nameDraft}
-              onChange={(event) =>
-                setNameDraft(event.target.value.toUpperCase())
-              }
-              onBlur={() => {
-                const parsed = parseRange(nameDraft);
-                const named = Object.entries(
-                  workbook.workbook.namedRanges ?? {},
-                ).find(
-                  ([name]) =>
-                    name.toUpperCase() === nameDraft.trim().toUpperCase(),
-                )?.[1];
-                const namedAddress = named?.split("!").at(-1);
-                const namedSheet = named?.includes("!")
-                  ? named.slice(0, named.lastIndexOf("!")).replace(/^'|'$/g, "")
-                  : activeSheet.name;
-                const namedParsed = namedAddress
-                  ? parseRange(namedAddress)
-                  : null;
-                if (parsed) setRange(parsed);
-                else if (namedParsed) {
-                  const targetSheet = workbook.sheets.find(
-                    (sheet) =>
-                      sheet.name.toUpperCase() === namedSheet?.toUpperCase(),
-                  );
-                  if (targetSheet && targetSheet.id !== activeSheet.id)
-                    commit(
-                      { ...workbook, activeSheetId: targetSheet.id },
-                      false,
-                    );
-                  setRange(namedParsed);
-                } else setNameDraft(selectionLabel);
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") event.currentTarget.blur();
-              }}
-              className="sheets-name-box"
-            />
-            <span aria-hidden="true" className="sheets-formula-icon">
-              Æ’x
-            </span>
-            <input
-              aria-label={`Formula for ${activeAddress}`}
-              value={formulaDraft}
-              readOnly={readOnly}
-              {...targetAttrs(
-                `/sheets/${activeSheetIndex}/cells/${activeAddress}/${
-                  formulaDraft.startsWith("=") || activeCell?.formula
-                    ? "formula"
-                    : "value"
-                }`,
-              )}
-              onChange={(event) => setFormulaDraft(event.target.value)}
-              className="sheets-formula-input"
-            />
-          </form>
-        </div>
+            Read-only. Copy and charts are available; cells cannot change.
+          </span>
+        ) : null}
       </div>
-      {namedRangeOpen ? (
-        <div className="sheets-named-range-bar">
-          <Sigma />
-          <div className="min-w-0 flex-1">
-            <strong>Name {selectionLabel}</strong>
-            <span>
-              Use the name in formulas and links instead of a fragile address.
-            </span>
-          </div>
-          <input
-            autoFocus
-            value={namedRangeDraft}
-            onChange={(event) => setNamedRangeDraft(event.target.value)}
-            placeholder="experiment_rates"
-            aria-label="Named range name"
-          />
-          <button
-            type="button"
-            onClick={() => {
-              const name = namedRangeDraft.trim();
-              if (
-                !/^[A-Za-z_][A-Za-z0-9_.]*$/.test(name) ||
-                parseAddress(name)
-              ) {
-                setImportNotice(
-                  "Named ranges must begin with a letter or underscore and cannot look like a cell address.",
-                );
-                return;
-              }
-              const sheetName = `'${activeSheet.name.replaceAll("'", "''")}'`;
-              commit({
-                ...workbook,
-                workbook: {
-                  ...workbook.workbook,
-                  namedRanges: {
-                    ...workbook.workbook.namedRanges,
-                    [name]: `${sheetName}!${selectionLabel}`,
-                  },
-                },
-              });
-              setNameDraft(name.toUpperCase());
-              setNamedRangeOpen(false);
-              setNamedRangeDraft("");
-              setImportNotice(`Named ${selectionLabel} as ${name}.`);
-            }}
-          >
-            Save name
-          </button>
-          <button type="button" onClick={() => setNamedRangeOpen(false)}>
-            Cancel
-          </button>
-        </div>
-      ) : null}
-      {validationOpen ? (
-        <div className="sheets-validation-bar">
-          <Filter />
-          <div className="min-w-0 flex-1">
-            <strong>Validate {selectionLabel}</strong>
-            <span>
-              Invalid entries are rejected before they reach live state.
-            </span>
-          </div>
-          <select
-            value={validationKind}
-            onChange={(event) =>
-              setValidationKind(
-                event.target.value as "list" | "number" | "checkbox",
-              )
-            }
-          >
-            <option value="list">List</option>
-            <option value="number">Number range</option>
-            <option value="checkbox">Checkbox</option>
-          </select>
-          {validationKind !== "checkbox" ? (
-            <input
-              value={validationDraft}
-              onChange={(event) => setValidationDraft(event.target.value)}
-              placeholder={
-                validationKind === "list"
-                  ? "Draft, Ready, Complete"
-                  : "minimum, maximum"
-              }
-              aria-label="Validation values"
-            />
-          ) : null}
-          <button
-            type="button"
-            onClick={() => {
-              let validation: SheetValidation;
-              if (validationKind === "list") {
-                const options = validationDraft
-                  .split(",")
-                  .map((value) => value.trim())
-                  .filter(Boolean);
-                if (!options.length) {
-                  setImportNotice("List validation needs at least one value.");
-                  return;
-                }
-                validation = { kind: "list", options, rejectInvalid: true };
-              } else if (validationKind === "number") {
-                const [minimumText, maximumText] = validationDraft.split(
-                  ",",
-                  2,
-                );
-                const minimum = minimumText?.trim()
-                  ? Number(minimumText)
-                  : undefined;
-                const maximum = maximumText?.trim()
-                  ? Number(maximumText)
-                  : undefined;
-                if (
-                  (minimum !== undefined && !Number.isFinite(minimum)) ||
-                  (maximum !== undefined && !Number.isFinite(maximum)) ||
-                  (minimum !== undefined &&
-                    maximum !== undefined &&
-                    minimum > maximum)
-                ) {
-                  setImportNotice(
-                    "Enter a valid minimum and maximum separated by a comma.",
-                  );
-                  return;
-                }
-                validation = {
-                  kind: "number",
-                  ...(minimum !== undefined ? { minimum } : {}),
-                  ...(maximum !== undefined ? { maximum } : {}),
-                  rejectInvalid: true,
-                };
-              } else validation = { kind: "checkbox", rejectInvalid: true };
-              updateActiveSheet((sheet) => ({
-                ...sheet,
-                cells: {
-                  ...sheet.cells,
-                  ...Object.fromEntries(
-                    selectedAddresses.map((address) => [
-                      address,
-                      { ...sheet.cells[address], validation },
-                    ]),
-                  ),
-                },
-              }));
-              setValidationOpen(false);
-              setImportNotice(`Validation applied to ${selectionLabel}.`);
-            }}
-          >
-            Apply
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              updateActiveSheet((sheet) => ({
-                ...sheet,
-                cells: Object.fromEntries(
-                  Object.entries(sheet.cells).map(([address, cell]) => [
-                    address,
-                    selectedAddresses.includes(address)
-                      ? { ...cell, validation: undefined }
-                      : cell,
-                  ]),
-                ),
-              }));
-              setValidationOpen(false);
-            }}
-          >
-            Remove
-          </button>
-          <button type="button" onClick={() => setValidationOpen(false)}>
-            Cancel
-          </button>
-        </div>
-      ) : null}
-      {conditionalOpen ? (
-        <div className="sheets-validation-bar">
-          <BarChart3 />
-          <div className="min-w-0 flex-1">
-            <strong>Format {selectionLabel}</strong>
-            <span>
-              Rules follow the range as values and formulas recalculate.
-            </span>
-          </div>
-          <select
-            value={conditionalKind}
-            onChange={(event) =>
-              setConditionalKind(
-                event.target.value as
-                  "color_scale" | "greater_than" | "less_than" | "equal_to",
-              )
-            }
-            aria-label="Conditional formatting rule"
-          >
-            <option value="color_scale">Green colour scale</option>
-            <option value="greater_than">Greater than</option>
-            <option value="less_than">Less than</option>
-            <option value="equal_to">Equal to</option>
-          </select>
-          {conditionalKind !== "color_scale" ? (
-            <input
-              type="number"
-              value={conditionalThreshold}
-              onChange={(event) => setConditionalThreshold(event.target.value)}
-              placeholder="Value"
-              aria-label="Conditional formatting comparison value"
-            />
-          ) : null}
-          <button type="button" onClick={applyConditionalFormat}>
-            Apply
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              updateActiveSheet((sheet) => ({
-                ...sheet,
-                conditionalFormats: (sheet.conditionalFormats ?? []).filter(
-                  (rule) => {
-                    const parsed = parseRange(rule.range);
-                    return parsed
-                      ? !rangesOverlap(parsed, normalizedSelection)
-                      : false;
-                  },
-                ),
-              }));
-              setConditionalOpen(false);
-              setImportNotice(
-                `Conditional formatting removed from ${selectionLabel}.`,
-              );
-            }}
-          >
-            Remove in selection
-          </button>
-          <button type="button" onClick={() => setConditionalOpen(false)}>
-            Cancel
-          </button>
-        </div>
-      ) : null}
-      {searchOpen ? (
-        <div className="sheets-find-bar">
-          <Search />
-          <input
-            autoFocus
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Find values or formulas"
-          />
-          <button
-            type="button"
-            onClick={() => {
-              const match = Object.entries(activeSheet.cells).find(([, cell]) =>
-                cellInput(cell).toLowerCase().includes(search.toLowerCase()),
-              );
-              const coordinate = match ? parseAddress(match[0]) : null;
-              if (coordinate) setRange({ start: coordinate, end: coordinate });
-            }}
-          >
-            Find next
-          </button>
-          <button type="button" onClick={() => setSearchOpen(false)}>
-            Close
-          </button>
-        </div>
-      ) : null}
-      {importNotice ? (
-        <div className="sheets-import-notice" role="status">
-          <span>{importNotice}</span>
-          <button type="button" onClick={() => setImportNotice(null)}>
-            Dismiss
-          </button>
-        </div>
-      ) : null}
+      {/* The frame grows to fill a pane that has a height of its own, and it is
+          the positioning context for the inspector, so opening a panel overlays
+          the grid instead of pushing it below the fold (CANON D8). The floor
+          stays for a tab whose parent has no definite height; a split pane keeps
+          none, so a short pane shrinks the grid rather than overflowing it. */}
       <div
         className="sheets-grid-frame"
         style={
           {
             "--sheet-row-header": `${ROW_HEADER_WIDTH}px`,
             "--sheet-column-header": `${COLUMN_HEADER_HEIGHT}px`,
+            position: "relative",
+            flex: "1 1 auto",
+            height: "auto",
+            minHeight: mode === "split" ? 0 : "max(420px, 52dvh)",
           } as CSSProperties
         }
       >
@@ -3041,7 +3041,7 @@ export function SheetsStudio({
         <div className="sheets-column-headers">
           <div
             style={{
-              width: bounds.columns * columnWidth,
+              width: gridWidth,
               transform: `translateX(${-viewport.scrollLeft}px)`,
             }}
           >
@@ -3049,10 +3049,7 @@ export function SheetsStudio({
               <button
                 type="button"
                 key={column}
-                {...targetAttrs(
-                  `/sheets/${activeSheetIndex}/columns/${column}`,
-                  "handle:e",
-                )}
+                {...targetAttrs(`/sheets/${activeSheetIndex}/columns/${column}`)}
                 onClick={() =>
                   setRange({
                     start: { row: 0, column },
@@ -3074,8 +3071,8 @@ export function SheetsStudio({
                   column === (activeSheet.frozenColumns ?? 0) - 1 || undefined
                 }
                 style={{
-                  left: column * columnWidth,
-                  width: columnWidth,
+                  left: columnOffsets[column],
+                  width: columnSpan(column),
                   transform:
                     column < (activeSheet.frozenColumns ?? 0)
                       ? `translateX(${viewport.scrollLeft}px)`
@@ -3083,6 +3080,16 @@ export function SheetsStudio({
                 }}
               >
                 {columnName(column)}
+                {locked ? null : (
+                  <SheetsTrackGrip
+                    axis="column"
+                    label={`Resize column ${columnName(column)}`}
+                    onBegin={(event) =>
+                      beginTrackResize("column", column, event)
+                    }
+                    onReset={() => resetTrackSize("column", column)}
+                  />
+                )}
               </button>
             ))}
           </div>
@@ -3090,7 +3097,7 @@ export function SheetsStudio({
         <div className="sheets-row-headers">
           <div
             style={{
-              height: visibleRowIndices.length * rowHeight,
+              height: gridHeight,
               transform: `translateY(${-viewport.scrollTop}px)`,
             }}
           >
@@ -3098,10 +3105,7 @@ export function SheetsStudio({
               <button
                 type="button"
                 key={row}
-                {...targetAttrs(
-                  `/sheets/${activeSheetIndex}/rows/${row}`,
-                  "handle:s",
-                )}
+                {...targetAttrs(`/sheets/${activeSheetIndex}/rows/${row}`)}
                 onClick={() =>
                   setRange({
                     start: { row, column: 0 },
@@ -3114,8 +3118,8 @@ export function SheetsStudio({
                   row === (activeSheet.frozenRows ?? 0) - 1 || undefined
                 }
                 style={{
-                  top: position * rowHeight,
-                  height: rowHeight,
+                  top: rowOffsets[position],
+                  height: rowSpan(position),
                   transform:
                     row < (activeSheet.frozenRows ?? 0)
                       ? `translateY(${viewport.scrollTop}px)`
@@ -3123,6 +3127,14 @@ export function SheetsStudio({
                 }}
               >
                 {row + 1}
+                {locked ? null : (
+                  <SheetsTrackGrip
+                    axis="row"
+                    label={`Resize row ${row + 1}`}
+                    onBegin={(event) => beginTrackResize("row", row, event)}
+                    onReset={() => resetTrackSize("row", row)}
+                  />
+                )}
               </button>
             ))}
           </div>
@@ -3141,8 +3153,8 @@ export function SheetsStudio({
           <div
             className="relative"
             style={{
-              width: bounds.columns * columnWidth,
-              height: visibleRowIndices.length * rowHeight,
+              width: gridWidth,
+              height: gridHeight,
             }}
           >
             {rows.flatMap(({ row, position }) =>
@@ -3239,21 +3251,20 @@ export function SheetsStudio({
                     className="sheets-cell"
                     style={{
                       left:
-                        column * columnWidth +
+                        columnOffsets[column]! +
                         (isFrozenColumn ? viewport.scrollLeft : 0),
                       top:
-                        position * rowHeight +
+                        rowOffsets[position]! +
                         (isFrozenRow ? viewport.scrollTop : 0),
                       width: merged
-                        ? (merged.range.end.column -
-                            merged.range.start.column +
-                            1) *
-                          columnWidth
-                        : columnWidth,
+                        ? columnOffsets[merged.range.end.column + 1]! -
+                          columnOffsets[merged.range.start.column]!
+                        : columnSpan(column),
                       height: merged
-                        ? (merged.range.end.row - merged.range.start.row + 1) *
-                          rowHeight
-                        : rowHeight,
+                        ? rowOffsets[
+                            position + merged.range.end.row - merged.range.start.row + 1
+                          ]! - rowOffsets[position]!
+                        : rowSpan(position),
                       zIndex:
                         isFrozenRow && isFrozenColumn
                           ? 9
@@ -3284,7 +3295,7 @@ export function SheetsStudio({
                         conditionalStyle?.backgroundColor ?? style?.fillColor,
                     }}
                     onDoubleClick={() => {
-                      if (!readOnly) {
+                      if (!locked) {
                         setEditingAddress(address);
                         setEditingValue(cellInput(cell));
                       }
@@ -3335,7 +3346,7 @@ export function SheetsStudio({
                       <button
                         type="button"
                         className="sheets-table-filter"
-                        disabled={readOnly}
+                        disabled={locked}
                         aria-label={`Filter ${formatCalculatedCell(cell, calculatedCell, workbook.workbook.locale) || columnName(column)}`}
                         aria-pressed={Boolean(tableFilter)}
                         onPointerDown={(event) => event.stopPropagation()}
@@ -3369,12 +3380,13 @@ export function SheetsStudio({
                           setFilterValues(
                             tableFilter?.allowedValues ?? options,
                           );
+                          setInspector("filter");
                         }}
                       >
                         <ChevronDown />
                       </button>
                     ) : null}
-                    {isFillAnchor && !isEditing && !readOnly ? (
+                    {isFillAnchor && !isEditing && !locked ? (
                       <SheetsFillHandle
                         handlersRef={cellHandlersRef}
                         selection={normalizedSelection}
@@ -3427,37 +3439,43 @@ export function SheetsStudio({
                   >
                     <input
                       value={chart.title}
-                      readOnly={readOnly}
+                      readOnly={locked}
                       aria-label="Chart title"
                       onPointerDown={(event) => event.stopPropagation()}
                       onChange={(event) =>
                         patchChart(chart.id, { title: event.target.value })
                       }
                     />
-                    <select
-                      value={chart.type}
-                      disabled={readOnly}
-                      aria-label={`Chart type for ${chart.title}`}
-                      onPointerDown={(event) => event.stopPropagation()}
-                      onChange={(event) =>
-                        patchChart(chart.id, {
-                          type: event.target.value as SheetChart["type"],
-                        })
-                      }
-                    >
-                      <option value="line">Line</option>
-                      <option value="column">Column</option>
-                      <option value="bar">Bar</option>
-                      <option value="area">Area</option>
-                      <option value="pie">Pie / donut</option>
-                      <option value="scatter">Scatter</option>
-                      <option value="combo">Combination</option>
-                      <option value="histogram">Histogram</option>
-                    </select>
+                    {/* Spectra's own select, so the list is portaled and the
+                        chart object cannot clip it. `onPointerDown` still stops
+                        here or opening it would start a move gesture. */}
+                    <span onPointerDown={(event) => event.stopPropagation()}>
+                      <SelectField
+                        ariaLabel={`Chart type for ${chart.title}`}
+                        size="sm"
+                        disabled={locked}
+                        value={chart.type}
+                        onChange={(next) =>
+                          patchChart(chart.id, {
+                            type: next as SheetChart["type"],
+                          })
+                        }
+                        options={[
+                          { value: "line", label: "Line" },
+                          { value: "column", label: "Column" },
+                          { value: "bar", label: "Bar" },
+                          { value: "area", label: "Area" },
+                          { value: "pie", label: "Pie or donut" },
+                          { value: "scatter", label: "Scatter" },
+                          { value: "combo", label: "Combination" },
+                          { value: "histogram", label: "Histogram" },
+                        ]}
+                      />
+                    </span>
                     <button
                       type="button"
                       aria-label={`Delete ${chart.title}`}
-                      disabled={readOnly}
+                      disabled={locked}
                       onPointerDown={(event) => event.stopPropagation()}
                       onClick={() =>
                         updateActiveSheet((sheet) => ({
@@ -3494,14 +3512,15 @@ export function SheetsStudio({
                     >
                       {chart.sourceRange}
                     </button>
+                    {/* An unknown mean says why it is unknown instead of
+                        printing a dash the reader has to interpret. */}
                     <span>
-                      n {statistics.count} · mean{" "}
                       {statistics.mean === null
-                        ? "—"
-                        : statistics.mean.toLocaleString(
+                        ? `n ${statistics.count} · no numeric values`
+                        : `n ${statistics.count} · mean ${statistics.mean.toLocaleString(
                             workbook.workbook.locale,
                             { maximumFractionDigits: 3 },
-                          )}
+                          )}`}
                     </span>
                   </footer>
                   <p className="sr-only">
@@ -3511,7 +3530,8 @@ export function SheetsStudio({
                     maximum {statistics.max ?? "no"}, and standard deviation{" "}
                     {statistics.standardDeviation ?? "no"} value.
                   </p>
-                  {readOnly ? null : (
+
+                  {locked ? null : (
                     <span
                       className="sheets-chart-resize"
                       role="presentation"
@@ -3525,201 +3545,803 @@ export function SheetsStudio({
             })}
           </div>
         </div>
-      </div>
-      {filterEditor && activeFilterTable ? (
-        <div className="sheets-filter-panel">
-          <div>
-            <strong>
-              Filter {columnName(filterEditor.column)} in{" "}
-              {activeFilterTable.name}
-            </strong>
-            <span>{activeFilterOptions.length} distinct values</span>
-          </div>
-          <div className="sheets-filter-values">
-            {activeFilterOptions.map((value) => {
-              const key = JSON.stringify(value);
-              const checked = filterValues.some(
-                (candidate) => JSON.stringify(candidate) === key,
-              );
-              return (
-                <label key={key}>
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={() =>
-                      setFilterValues((current) =>
-                        checked
-                          ? current.filter(
-                              (candidate) => JSON.stringify(candidate) !== key,
-                            )
-                          : [...current, value],
-                      )
-                    }
-                  />
-                  {value === null ? "(blank)" : String(value)}
-                </label>
-              );
-            })}
-          </div>
-          <button
-            type="button"
-            onClick={() => setFilterValues(activeFilterOptions)}
+        {/* One inspector rail. It overlays the grid instead of pushing it down,
+            which is what the four bars it replaces used to do, and it stays in
+            the DOM (never portaled) so its AI target hooks keep resolving. */}
+        {panelMode ? (
+          <aside
+            aria-label={panelTitle}
+            className="absolute inset-y-0 right-0 z-[45] flex w-[min(312px,calc(100%-44px))] flex-col gap-3 overflow-y-auto border-l border-[var(--border-default)] bg-[var(--bg-elevated)] p-3 shadow-[var(--shadow-lg)] motion-safe:animate-surface-in"
           >
-            Select all
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              updateActiveSheet((sheet) => ({
-                ...sheet,
-                tables: sheet.tables.map((table) =>
-                  table.id === filterEditor.tableId
-                    ? {
-                        ...table,
-                        filters: (table.filters ?? []).filter(
-                          (filter) => filter.column !== filterEditor.column,
-                        ),
-                      }
-                    : table,
-                ),
-              }));
-              setFilterEditor(null);
-            }}
-          >
-            Clear
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              updateActiveSheet((sheet) => ({
-                ...sheet,
-                tables: sheet.tables.map((table) =>
-                  table.id === filterEditor.tableId
-                    ? {
-                        ...table,
-                        filters: [
-                          ...(table.filters ?? []).filter(
-                            (filter) => filter.column !== filterEditor.column,
+            <header className="flex items-center gap-2">
+              <h2 className="min-w-0 flex-1 truncate text-caption font-semibold text-[var(--text-primary)]">
+                {panelTitle}
+              </h2>
+              {inspector ? (
+                <button
+                  type="button"
+                  aria-label="Close panel"
+                  onClick={() => {
+                    if (inspector === "find") setSearch("");
+                    if (inspector === "filter") setFilterEditor(null);
+                    setInspector(null);
+                  }}
+                  className="grid size-7 shrink-0 place-items-center rounded-control text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+                >
+                  <X className="size-4" />
+                </button>
+              ) : null}
+            </header>
+
+            {panelMode === "format" ? (
+              <>
+                <SelectField
+                  label="Number format"
+                  size="sm"
+                  value={activeCell?.format?.numberFormat ?? "general"}
+                  onChange={(next) =>
+                    formatSelection({
+                      numberFormat: next as NonNullable<
+                        SheetCell["format"]
+                      >["numberFormat"],
+                    })
+                  }
+                  options={[
+                    { value: "general", label: "General" },
+                    { value: "number", label: "Number" },
+                    { value: "currency", label: "Currency" },
+                    { value: "percent", label: "Percent" },
+                    { value: "date", label: "Date" },
+                  ]}
+                />
+                <div>
+                  <span className={PANEL_LABEL}>Decimal places</span>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      className={PANEL_BUTTON}
+                      onClick={() =>
+                        formatSelection({
+                          decimals: Math.max(
+                            0,
+                            (activeCell?.format?.decimals ?? 2) - 1,
                           ),
-                          {
-                            column: filterEditor.column,
-                            allowedValues: filterValues,
-                          },
-                        ],
+                        })
                       }
-                    : table,
-                ),
-              }));
-              setFilterEditor(null);
-            }}
-          >
-            Apply
-          </button>
-          <button type="button" onClick={() => setFilterEditor(null)}>
-            Cancel
-          </button>
-        </div>
-      ) : null}
-      <div className="sheets-status-bar">
-        <span>{rangeLabel(normalizedSelection)}</span>
-        {summary ? (
-          <>
-            <span>Count {summary.count}</span>
-            <span>
-              Sum{" "}
-              {summary.sum.toLocaleString(workbook.workbook.locale, {
-                maximumFractionDigits: 4,
-              })}
-            </span>
-            <span>
-              Average{" "}
-              {summary.average.toLocaleString(workbook.workbook.locale, {
-                maximumFractionDigits: 4,
-              })}
-            </span>
-          </>
-        ) : (
-          <span>{selectedAddresses.length} selected</span>
-        )}
-      </div>
-      <footer className="sheets-tabs-bar">
-        <button
-          type="button"
-          onClick={addSheet}
-          disabled={readOnly}
-          className="sheets-add-tab"
-          aria-label="Add sheet"
-        >
-          <Plus />
-        </button>
-        {workbook.sheets.map((sheet, sheetIndex) => (
-          <div
-            key={sheet.id}
-            className={`sheets-tab ${sheet.id === activeSheet.id ? "is-active" : ""}`}
-            data-ai-region={aiRegionAttr(
-              pathTouches(aiChangedPaths, `/sheets/${sheetIndex}`),
-            )}
-          >
-            <button
-              type="button"
-              {...targetAttrs(`/sheets/${sheetIndex}`)}
-              onDoubleClick={() => {
-                if (readOnly) return;
-                setRenamingSheetId(sheet.id);
-                setRenameDraft(sheet.name);
-              }}
-              onClick={() => {
-                commit({ ...workbook, activeSheetId: sheet.id }, false);
-                setRange({
-                  start: { row: 0, column: 0 },
-                  end: { row: 0, column: 0 },
-                });
-              }}
-            >
-              {renamingSheetId === sheet.id ? (
-                <input
-                  autoFocus
-                  value={renameDraft}
-                  {...targetAttrs(`/sheets/${sheetIndex}/name`)}
-                  onClick={(event) => event.stopPropagation()}
-                  onChange={(event) => setRenameDraft(event.target.value)}
-                  onBlur={() => {
-                    const name = renameDraft.trim();
-                    if (name)
+                    >
+                      Fewer
+                    </button>
+                    <span className="w-8 text-center text-ui tabular-nums text-[var(--text-primary)]">
+                      {activeCell?.format?.decimals ?? 2}
+                    </span>
+                    <button
+                      type="button"
+                      className={PANEL_BUTTON}
+                      onClick={() =>
+                        formatSelection({
+                          decimals: Math.min(
+                            12,
+                            (activeCell?.format?.decimals ?? 2) + 1,
+                          ),
+                        })
+                      }
+                    >
+                      More
+                    </button>
+                  </div>
+                </div>
+                <div>
+                  <span className={PANEL_LABEL}>Emphasis and alignment</span>
+                  <div className="flex items-center gap-1">
+                    {emphasisControls.map(({ label, icon: Icon, ...control }) => (
+                      <ToolbarButton key={label} label={label} {...control}>
+                        <Icon />
+                      </ToolbarButton>
+                    ))}
+                  </div>
+                </div>
+                <SelectField
+                  label="Typeface"
+                  size="sm"
+                  value={activeCell?.format?.fontFamily ?? "sans"}
+                  onChange={(next) =>
+                    formatSelection({
+                      fontFamily: next as NonNullable<
+                        SheetCell["format"]
+                      >["fontFamily"],
+                    })
+                  }
+                  options={[
+                    { value: "sans", label: "Spectra Sans" },
+                    { value: "serif", label: "Spectra Serif" },
+                    { value: "mono", label: "Monospace" },
+                  ]}
+                />
+                <SelectField
+                  label="Size"
+                  size="sm"
+                  value={String(activeCell?.format?.fontSize ?? 11)}
+                  onChange={(next) =>
+                    formatSelection({ fontSize: Number(next) })
+                  }
+                  options={["9", "10", "11", "12", "14", "16"].map((size) => ({
+                    value: size,
+                    label: `${size} px`,
+                  }))}
+                />
+                <div className="grid grid-cols-2 gap-2">
+                  {(
+                    [
+                      ["Text", "textColor", "#222522"],
+                      ["Fill", "fillColor", "#ffffff"],
+                    ] as const
+                  ).map(([label, key, fallback]) => (
+                    <label key={key} className="block">
+                      <span className={PANEL_LABEL}>{label}</span>
+                      <input
+                        type="color"
+                        value={activeCell?.format?.[key] ?? fallback}
+                        onChange={(event) =>
+                          formatSelection({ [key]: event.target.value })
+                        }
+                        className="h-8 w-full cursor-pointer rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] p-1"
+                      />
+                    </label>
+                  ))}
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    className={PANEL_BUTTON}
+                    onClick={mergeSelection}
+                  >
+                    Merge cells
+                  </button>
+                  <button
+                    type="button"
+                    className={PANEL_BUTTON}
+                    onClick={unmergeSelection}
+                  >
+                    Unmerge
+                  </button>
+                </div>
+              </>
+            ) : null}
+
+            {panelMode === "name" ? (
+              <>
+                <p className="text-caption text-[var(--text-secondary)]">
+                  Use the name in formulas and links instead of an address that
+                  moves when rows are inserted.
+                </p>
+                <label className="block">
+                  <span className={PANEL_LABEL}>Name</span>
+                  <input
+                    autoFocus
+                    value={namedRangeDraft}
+                    onChange={(event) => setNamedRangeDraft(event.target.value)}
+                    placeholder="class_means"
+                    className={PANEL_INPUT}
+                  />
+                </label>
+                <div className="flex gap-1.5">
+                  <button
+                    type="button"
+                    className={PANEL_PRIMARY}
+                    onClick={() => {
+                      const name = namedRangeDraft.trim();
+                      if (
+                        !/^[A-Za-z_][A-Za-z0-9_.]*$/.test(name) ||
+                        parseAddress(name)
+                      ) {
+                        setImportNotice(
+                          "Named ranges must begin with a letter or underscore and cannot look like a cell address.",
+                          "warning",
+                        );
+                        return;
+                      }
+                      const sheetName = `'${activeSheet.name.replaceAll("'", "''")}'`;
+                      commit({
+                        ...workbook,
+                        workbook: {
+                          ...workbook.workbook,
+                          namedRanges: {
+                            ...workbook.workbook.namedRanges,
+                            [name]: `${sheetName}!${selectionLabel}`,
+                          },
+                        },
+                      });
+                      setNameDraft(name.toUpperCase());
+                      setInspector(null);
+                      setNamedRangeDraft("");
+                      setImportNotice(`Named ${selectionLabel} as ${name}.`);
+                    }}
+                  >
+                    Save name
+                  </button>
+                </div>
+                {Object.keys(workbook.workbook.namedRanges ?? {}).length ? (
+                  <div>
+                    <span className={PANEL_LABEL}>Names in this workbook</span>
+                    <ul className="flex flex-col gap-1">
+                      {Object.entries(workbook.workbook.namedRanges ?? {}).map(
+                        ([name, target]) => (
+                          <li
+                            key={name}
+                            className="flex items-baseline justify-between gap-2 text-caption"
+                          >
+                            <span className="min-w-0 truncate font-semibold text-[var(--text-primary)]">
+                              {name}
+                            </span>
+                            <span className="shrink-0 tabular-nums text-[var(--text-secondary)]">
+                              {target}
+                            </span>
+                          </li>
+                        ),
+                      )}
+                    </ul>
+                  </div>
+                ) : null}
+              </>
+            ) : null}
+
+            {panelMode === "validate" ? (
+              <>
+                <p className="text-caption text-[var(--text-secondary)]">
+                  Invalid entries are rejected before they reach live state.
+                </p>
+                <SelectField
+                  label="Rule"
+                  size="sm"
+                  value={validationKind}
+                  onChange={(next) =>
+                    setValidationKind(next as "list" | "number" | "checkbox")
+                  }
+                  options={[
+                    { value: "list", label: "List of values" },
+                    { value: "number", label: "Number range" },
+                    { value: "checkbox", label: "Checkbox" },
+                  ]}
+                />
+                {validationKind !== "checkbox" ? (
+                  <label className="block">
+                    <span className={PANEL_LABEL}>
+                      {validationKind === "list"
+                        ? "Allowed values, comma separated"
+                        : "Minimum and maximum, comma separated"}
+                    </span>
+                    <input
+                      value={validationDraft}
+                      onChange={(event) =>
+                        setValidationDraft(event.target.value)
+                      }
+                      placeholder={
+                        validationKind === "list"
+                          ? "Draft, Ready, Complete"
+                          : "0, 50"
+                      }
+                      className={PANEL_INPUT}
+                    />
+                  </label>
+                ) : null}
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    className={PANEL_PRIMARY}
+                    onClick={() => {
+                      let validation: SheetValidation;
+                      if (validationKind === "list") {
+                        const options = validationDraft
+                          .split(",")
+                          .map((value) => value.trim())
+                          .filter(Boolean);
+                        if (!options.length) {
+                          setImportNotice(
+                            "List validation needs at least one value.",
+                            "warning",
+                          );
+                          return;
+                        }
+                        validation = {
+                          kind: "list",
+                          options,
+                          rejectInvalid: true,
+                        };
+                      } else if (validationKind === "number") {
+                        const [minimumText, maximumText] =
+                          validationDraft.split(",", 2);
+                        const minimum = minimumText?.trim()
+                          ? Number(minimumText)
+                          : undefined;
+                        const maximum = maximumText?.trim()
+                          ? Number(maximumText)
+                          : undefined;
+                        if (
+                          (minimum !== undefined && !Number.isFinite(minimum)) ||
+                          (maximum !== undefined && !Number.isFinite(maximum)) ||
+                          (minimum !== undefined &&
+                            maximum !== undefined &&
+                            minimum > maximum)
+                        ) {
+                          setImportNotice(
+                            "Enter a valid minimum and maximum separated by a comma.",
+                            "warning",
+                          );
+                          return;
+                        }
+                        validation = {
+                          kind: "number",
+                          ...(minimum !== undefined ? { minimum } : {}),
+                          ...(maximum !== undefined ? { maximum } : {}),
+                          rejectInvalid: true,
+                        };
+                      } else
+                        validation = { kind: "checkbox", rejectInvalid: true };
+                      updateActiveSheet((sheet) => ({
+                        ...sheet,
+                        cells: {
+                          ...sheet.cells,
+                          ...Object.fromEntries(
+                            selectedAddresses.map((address) => [
+                              address,
+                              { ...sheet.cells[address], validation },
+                            ]),
+                          ),
+                        },
+                      }));
+                      setInspector(null);
+                      setImportNotice(
+                        `Validation applied to ${selectionLabel}.`,
+                      );
+                    }}
+                  >
+                    Apply
+                  </button>
+                  <button
+                    type="button"
+                    className={PANEL_BUTTON}
+                    onClick={() => {
+                      updateActiveSheet((sheet) => ({
+                        ...sheet,
+                        cells: Object.fromEntries(
+                          Object.entries(sheet.cells).map(([address, cell]) => [
+                            address,
+                            selectedAddresses.includes(address)
+                              ? { ...cell, validation: undefined }
+                              : cell,
+                          ]),
+                        ),
+                      }));
+                      setInspector(null);
+                    }}
+                  >
+                    Remove
+                  </button>
+                </div>
+              </>
+            ) : null}
+
+            {panelMode === "conditional" ? (
+              <>
+                <p className="text-caption text-[var(--text-secondary)]">
+                  Rules follow the range as values and formulas recalculate.
+                </p>
+                <SelectField
+                  label="Rule"
+                  size="sm"
+                  value={conditionalKind}
+                  onChange={(next) =>
+                    setConditionalKind(
+                      next as
+                        | "color_scale"
+                        | "greater_than"
+                        | "less_than"
+                        | "equal_to",
+                    )
+                  }
+                  options={[
+                    { value: "color_scale", label: "Green colour scale" },
+                    { value: "greater_than", label: "Greater than" },
+                    { value: "less_than", label: "Less than" },
+                    { value: "equal_to", label: "Equal to" },
+                  ]}
+                />
+                {conditionalKind !== "color_scale" ? (
+                  <label className="block">
+                    <span className={PANEL_LABEL}>Compare with</span>
+                    <input
+                      type="number"
+                      value={conditionalThreshold}
+                      onChange={(event) =>
+                        setConditionalThreshold(event.target.value)
+                      }
+                      className={PANEL_INPUT}
+                    />
+                  </label>
+                ) : null}
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    className={PANEL_PRIMARY}
+                    onClick={applyConditionalFormat}
+                  >
+                    Apply
+                  </button>
+                  <button
+                    type="button"
+                    className={PANEL_BUTTON}
+                    onClick={() => {
+                      updateActiveSheet((sheet) => ({
+                        ...sheet,
+                        conditionalFormats: (
+                          sheet.conditionalFormats ?? []
+                        ).filter((rule) => {
+                          const parsed = parseRange(rule.range);
+                          return parsed
+                            ? !rangesOverlap(parsed, normalizedSelection)
+                            : false;
+                        }),
+                      }));
+                      setInspector(null);
+                      setImportNotice(
+                        `Conditional formatting removed from ${selectionLabel}.`,
+                      );
+                    }}
+                  >
+                    Remove here
+                  </button>
+                </div>
+              </>
+            ) : null}
+
+            {panelMode === "find" ? (
+              <>
+                <label className="block">
+                  <span className={PANEL_LABEL}>Value or formula</span>
+                  <input
+                    autoFocus
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                    placeholder="24.09 or AVERAGE"
+                    className={PANEL_INPUT}
+                  />
+                </label>
+                <p className="text-caption text-[var(--text-secondary)]">
+                  {search
+                    ? `${searchMatches.length} ${searchMatches.length === 1 ? "cell matches" : "cells match"} in ${activeSheet.name}.`
+                    : "Matches highlight in the grid as you type."}
+                </p>
+                <div className="flex gap-1.5">
+                  <button
+                    type="button"
+                    className={PANEL_PRIMARY}
+                    disabled={!searchMatches.length}
+                    onClick={() => {
+                      const next =
+                        searchMatches[searchCursor % searchMatches.length];
+                      const coordinate = next ? parseAddress(next) : null;
+                      if (coordinate)
+                        setRange({ start: coordinate, end: coordinate });
+                      setSearchCursor((current) => current + 1);
+                    }}
+                  >
+                    Find next
+                  </button>
+                </div>
+              </>
+            ) : null}
+
+            {panelMode === "sheet" ? (
+              <>
+                <label className="block">
+                  <span className={PANEL_LABEL}>Sheet name</span>
+                  <input
+                    autoFocus
+                    value={renameDraft}
+                    {...targetAttrs(`/sheets/${activeSheetIndex}/name`)}
+                    onChange={(event) => setRenameDraft(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") event.currentTarget.blur();
+                    }}
+                    className={PANEL_INPUT}
+                  />
+                </label>
+                <div className="flex gap-1.5">
+                  <button
+                    type="button"
+                    className={PANEL_PRIMARY}
+                    onClick={() => {
+                      const name = renameDraft.trim();
+                      if (!name) {
+                        setImportNotice("A sheet needs a name.", "warning");
+                        return;
+                      }
                       commit({
                         ...workbook,
                         sheets: workbook.sheets.map((candidate) =>
-                          candidate.id === sheet.id
+                          candidate.id === activeSheet.id
                             ? { ...candidate, name }
                             : candidate,
                         ),
                       });
-                    setRenamingSheetId(null);
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") event.currentTarget.blur();
-                  }}
-                />
-              ) : (
+                      setInspector(null);
+                    }}
+                  >
+                    Rename
+                  </button>
+                </div>
+              </>
+            ) : null}
+
+            {panelMode === "filter" && filterEditor && activeFilterTable ? (
+              <>
+                <p className="text-caption text-[var(--text-secondary)]">
+                  {activeFilterOptions.length} distinct values in{" "}
+                  {activeFilterTable.name}.
+                </p>
+                <div className="flex max-h-56 flex-col gap-1 overflow-y-auto">
+                  {activeFilterOptions.map((value) => {
+                    const key = JSON.stringify(value);
+                    const checked = filterValues.some(
+                      (candidate) => JSON.stringify(candidate) === key,
+                    );
+                    return (
+                      <label
+                        key={key}
+                        className="flex items-center gap-2 rounded-chip px-1 py-1 text-ui text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() =>
+                            setFilterValues((current) =>
+                              checked
+                                ? current.filter(
+                                    (candidate) =>
+                                      JSON.stringify(candidate) !== key,
+                                  )
+                                : [...current, value],
+                            )
+                          }
+                        />
+                        <span className="min-w-0 flex-1 truncate">
+                          {value === null ? "Blank" : String(value)}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    className={PANEL_PRIMARY}
+                    onClick={() => {
+                      updateActiveSheet((sheet) => ({
+                        ...sheet,
+                        tables: sheet.tables.map((table) =>
+                          table.id === filterEditor.tableId
+                            ? {
+                                ...table,
+                                filters: [
+                                  ...(table.filters ?? []).filter(
+                                    (filter) =>
+                                      filter.column !== filterEditor.column,
+                                  ),
+                                  {
+                                    column: filterEditor.column,
+                                    allowedValues: filterValues,
+                                  },
+                                ],
+                              }
+                            : table,
+                        ),
+                      }));
+                      setFilterEditor(null);
+                      setInspector(null);
+                    }}
+                  >
+                    Apply
+                  </button>
+                  <button
+                    type="button"
+                    className={PANEL_BUTTON}
+                    onClick={() => setFilterValues(activeFilterOptions)}
+                  >
+                    Select all
+                  </button>
+                  <button
+                    type="button"
+                    className={PANEL_BUTTON}
+                    onClick={() => {
+                      updateActiveSheet((sheet) => ({
+                        ...sheet,
+                        tables: sheet.tables.map((table) =>
+                          table.id === filterEditor.tableId
+                            ? {
+                                ...table,
+                                filters: (table.filters ?? []).filter(
+                                  (filter) =>
+                                    filter.column !== filterEditor.column,
+                                ),
+                              }
+                            : table,
+                        ),
+                      }));
+                      setFilterEditor(null);
+                      setInspector(null);
+                    }}
+                  >
+                    Clear
+                  </button>
+                </div>
+              </>
+            ) : null}
+
+            {panelMode === "analysis" ? (
+              analysis ? (
                 <>
-                  <span className="sheets-tab-icon">▦</span>
-                  {sheet.name}
-                  <ChevronDown />
+                  <dl className="flex flex-col gap-1.5">
+                    {(
+                      [
+                        ["Numbers", String(analysis.count)],
+                        ["Blank cells", String(analysis.blanks)],
+                        ["Sum", numberText(analysis.sum)],
+                        ["Mean", numberText(analysis.mean)],
+                        ["Minimum", numberText(analysis.minimum)],
+                        ["Maximum", numberText(analysis.maximum)],
+                        ["Range", numberText(analysis.maximum - analysis.minimum)],
+                        [
+                          "Standard deviation",
+                          analysis.count > 1
+                            ? numberText(analysis.deviation)
+                            : "Needs two or more values",
+                        ],
+                      ] as const
+                    ).map(([term, value]) => (
+                      <div
+                        key={term}
+                        className="flex items-baseline justify-between gap-3 text-caption"
+                      >
+                        <dt className="min-w-0 truncate text-[var(--text-secondary)]">
+                          {term}
+                        </dt>
+                        <dd className="shrink-0 tabular-nums font-semibold text-[var(--text-primary)]">
+                          {value}
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                  <p className="text-caption text-[var(--text-secondary)]">
+                    Measured from {selectionLabel} after the workbook
+                    recalculated. {dimensionLabel}.
+                  </p>
+                  {activeSheet.charts.length ? (
+                    <div>
+                      <span className={PANEL_LABEL}>Charts on this sheet</span>
+                      <ul className="flex flex-col gap-1">
+                        {activeSheet.charts.map((chart) => (
+                          <li key={chart.id}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedChartId(chart.id);
+                                const parsed = parseRange(
+                                  chart.sourceRange.split("!").at(-1) ?? "",
+                                );
+                                if (parsed) setRange(parsed);
+                              }}
+                              className="flex w-full items-baseline justify-between gap-2 rounded-chip px-1 py-1 text-left text-caption hover:bg-[var(--bg-hover)]"
+                            >
+                              <span className="min-w-0 truncate text-[var(--text-primary)]">
+                                {chart.title}
+                              </span>
+                              <span className="shrink-0 tabular-nums text-[var(--text-secondary)]">
+                                {chart.sourceRange}
+                              </span>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                  <button
+                    type="button"
+                    className={PANEL_BUTTON}
+                    onClick={createChart}
+                  >
+                    Chart this range
+                  </button>
                 </>
+              ) : (
+                <p className="text-caption text-[var(--text-secondary)]">
+                  {selectionLabel} holds no numbers, so there is nothing to
+                  measure yet. Select cells with values and the statistics
+                  appear here.
+                </p>
+              )
+            ) : null}
+          </aside>
+        ) : null}
+
+        {/* The empty state invites rather than blocks: the grid underneath is
+            live, so the first keystroke lands in A1. */}
+        {sheetIsEmpty && !importing ? (
+          <div className="pointer-events-none absolute inset-x-0 top-[34%] z-[44] flex justify-center px-6">
+            <div className="pointer-events-auto max-w-[302px] text-center">
+              <p className="text-subhead font-semibold text-[var(--text-primary)]">
+                {emptyState.headline}
+              </p>
+              <p className="mt-1 text-caption text-[var(--text-secondary)]">
+                {emptyState.body}
+              </p>
+              {locked ? null : (
+                <button
+                  type="button"
+                  disabled={!synchronizationReady}
+                  onClick={() => importRef.current?.click()}
+                  className="mt-2.5 inline-flex h-8 items-center rounded-control bg-[var(--text-primary)] px-3 text-caption font-semibold text-[var(--bg-primary)] transition-opacity hover:opacity-90 disabled:opacity-45"
+                >
+                  {emptyState.action}
+                </button>
               )}
+            </div>
+          </div>
+        ) : null}
+
+        {/* Importing replaces the whole workbook, so the wait is stated over the
+            grid it is about to change rather than in a corner. */}
+        {importing ? (
+          <div
+            aria-live="polite"
+            className="absolute inset-0 z-[47] grid place-items-center bg-[color-mix(in_oklab,var(--bg-primary)_76%,transparent)] px-6"
+          >
+            <div className="flex flex-col items-center gap-2.5 text-center">
+              <span className="block h-1 w-40 overflow-hidden rounded-pill bg-[var(--bg-secondary)]">
+                <span className="block h-full w-1/2 rounded-pill bg-[var(--brand-primary)] motion-safe:animate-pulse" />
+              </span>
+              <span className="text-caption text-[var(--text-secondary)]">
+                Reading the file and checking every sheet before it replaces
+                this one.
+              </span>
+            </div>
+          </div>
+        ) : null}
+
+        {/* Not `role="status"`: the shared rail owns save state, and the rule
+            that hides `[role="status"]` in this studio was hiding every import
+            result and validation error with it. */}
+        {notice ? (
+          <div
+            aria-live="polite"
+            className="absolute left-1/2 z-[46] flex max-w-[min(430px,calc(100%-28px))] -translate-x-1/2 items-start gap-2 rounded-card border bg-[var(--bg-elevated)] px-3 py-2 text-caption shadow-[var(--shadow-lg)] motion-safe:animate-surface-in"
+            style={{
+              bottom: "calc(12px + var(--spectra-composer-safe-area, 0px))",
+              borderColor:
+                notice.tone === "warning"
+                  ? "color-mix(in oklab, var(--warning) 46%, var(--border-default))"
+                  : "var(--border-default)",
+            }}
+          >
+            {notice.tone === "warning" ? (
+              <TriangleAlert
+                aria-hidden="true"
+                className="mt-0.5 size-4 shrink-0 text-[var(--warning)]"
+              />
+            ) : null}
+            <span className="min-w-0 flex-1 text-[var(--text-primary)]">
+              {notice.message}
+            </span>
+            <button
+              type="button"
+              aria-label="Dismiss"
+              onClick={() => setNotice(null)}
+              className="grid size-6 shrink-0 place-items-center rounded-chip text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
+            >
+              <X className="size-3.5" />
             </button>
           </div>
-        ))}
-        <button
-          type="button"
-          onClick={removeActiveSheet}
-          disabled={workbook.sheets.length <= 1 || readOnly}
-          className="sheets-remove-tab"
-          aria-label="Delete active sheet"
-        >
-          <Trash2 />
-        </button>
-      </footer>
+        ) : null}
+      </div>
     </div>
   );
 }

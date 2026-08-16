@@ -571,23 +571,24 @@ html[data-spectra-motion="none"] .spectra-field-wake::before {
 }
 
 /* One instrument bar across every work type. It stays in the editor chrome
-   rather than overlaying the scrolling page, so content cannot pass behind it. */
+   rather than overlaying the scrolling page, so content cannot pass behind it.
+   Height, wrapping and overflow belong to the M4 workbar system in
+   `spectra-app.css`; this block only places the bar. It used to also declare
+   `width: auto !important`, `min-height: 44px` and `overflow-x: auto`, which
+   silently overrode that system: the document's centred bar collapsed to 24px
+   (auto width plus auto margins plus inline-size containment shrink-wraps to
+   nothing), every bar grew 2px taller than the contract, and controls scrolled
+   sideways instead of shedding into `⋯`. */
 .spectra-editor-workbar {
   position: relative !important;
   z-index: 12 !important;
   top: auto !important;
   display: flex;
-  min-height: 44px;
-  width: auto !important;
   margin: 8px 12px 0 !important;
   flex-shrink: 0;
   flex-wrap: nowrap !important;
   align-items: center;
   gap: 4px;
-  overflow-x: auto;
-  scrollbar-width: thin;
-  scrollbar-color: color-mix(in oklab, var(--border-default) 28%, transparent)
-    transparent;
   border: 1px solid var(--border-default) !important;
   border-radius: 12px !important;
   background: var(--bg-elevated) !important;

@@ -231,6 +231,7 @@ export function GuidedTour({ open, steps, onClose, onComplete }: GuidedTourProps
             </Button>
             <Button
               type="button"
+              variant="primary"
               size="sm"
               onClick={() => {
                 if (isLastStep) {

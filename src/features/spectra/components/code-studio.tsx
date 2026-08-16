@@ -1,14 +1,16 @@
 "use client";
 
 import CodeMirror from "@uiw/react-codemirror";
+import { indentWithTab } from "@codemirror/commands";
 import { css } from "@codemirror/lang-css";
 import { html } from "@codemirror/lang-html";
 import { javascript } from "@codemirror/lang-javascript";
 import { json } from "@codemirror/lang-json";
 import { markdown } from "@codemirror/lang-markdown";
 import { python } from "@codemirror/lang-python";
+import { linter, type Diagnostic } from "@codemirror/lint";
 import { openSearchPanel } from "@codemirror/search";
-import { Decoration, EditorView } from "@codemirror/view";
+import { Decoration, EditorView, keymap } from "@codemirror/view";
 import { yCollab } from "y-codemirror.next";
 import { Awareness } from "y-protocols/awareness";
 import type * as Y from "yjs";
@@ -19,9 +21,9 @@ import {
   CheckCircle2,
   CircleStop,
   CloudUpload,
-  Code2,
-  Columns2,
+  Copy,
   Download,
+  Eraser,
   Eye,
   File,
   FileArchive,
@@ -30,12 +32,12 @@ import {
   FileImage,
   FilePlus2,
   FileText,
+  Flag,
   FlaskConical,
   FolderOpen,
   Import,
   Loader2,
   Maximize2,
-  MoreHorizontal,
   PanelBottom,
   Pencil,
   Play,
@@ -58,6 +60,13 @@ import {
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
+import { Button } from "@/components/ui/button";
+import {
+  OverflowMenu,
+  type OverflowItem,
+} from "@/components/ui/dropdown-menu";
+import { SelectField } from "@/components/ui/select";
 import {
   codeRuntimeVersion,
   codeContentKey,
@@ -119,6 +128,11 @@ import {
   type SpectraRuntimeStatus,
 } from "./sandboxed-artifact-runtime";
 import { aiRegionAttr, pathTouches } from "./ai-region-path";
+import {
+  ArtifactWorkbar,
+  type WorkbarActionSpec,
+} from "./artifact-workbar";
+import { useStudioContract } from "./artifact-studio-shell";
 import { targetAttrs } from "../collaboration/target-attributes";
 import { codeFileText } from "../work/models/yjs/code-adapter";
 
@@ -153,6 +167,26 @@ type TestResult = {
   name: string;
   status: "running" | "passed" | "failed";
   message?: string;
+};
+
+type CodeSurface = "preview" | "code" | "split" | "settings";
+
+/**
+ * The registry owns which views exist and who may enter them, so the studio
+ * translates its own surface names to the registry's mode ids rather than
+ * declaring a second, parallel list of tabs.
+ */
+const SURFACE_BY_MODE_ID: Record<string, CodeSurface> = {
+  code: "code",
+  visualisation: "preview",
+  both: "split",
+  settings: "settings",
+};
+const MODE_ID_BY_SURFACE: Record<CodeSurface, string> = {
+  code: "code",
+  preview: "visualisation",
+  split: "both",
+  settings: "settings",
 };
 
 const MAX_CONSOLE_ENTRIES = 180;
@@ -270,6 +304,18 @@ function runtimeLabel(runtime: CodeRuntime) {
   return "Source only";
 }
 
+/** Internal run states are not readable words, so the readout says what happened. */
+function runStateLabel(state: RunState) {
+  if (state === "building") return "Building";
+  if (state === "loading") return "Starting";
+  if (state === "running") return "Running";
+  if (state === "ready") return "Running in a sandbox";
+  if (state === "error") return "Stopped on an error";
+  if (state === "limited") return "Stopped at a safety limit";
+  if (state === "cancelled") return "Stopped";
+  return "Not running";
+}
+
 function cellCoordinates(address: string) {
   const match = address
     .trim()
@@ -379,7 +425,7 @@ export function CodeStudio({
   content,
   onChange,
   aiChangedPaths = [],
-  readOnly,
+  readOnly: readOnlyProp,
   collaborationDocument,
   synchronizationReady,
   syncMessage: _syncMessage = "Auto-saved",
@@ -397,6 +443,12 @@ export function CodeStudio({
   syncMessage?: string;
   onActiveRegionChange?: (regionId: string) => void;
 }) {
+  // The work registry is the single authority on what this viewer may do.
+  // Running is not editing: a read-only reviewer may still execute the project,
+  // so the two gates are separate and neither is derived from a width or a mode.
+  const contract = useStudioContract();
+  const canExecute = contract.can("execute");
+  const readOnly = readOnlyProp || contract.readOnly;
   const incoming = useMemo(() => normalizeCodeContent(content), [content]);
   const collaborationAwareness = useMemo(
     () =>
@@ -414,16 +466,13 @@ export function CodeStudio({
   const [workbook, setWorkbook] = useState<CodeContent>(incoming);
   const lastEmittedKeyRef = useRef<string | null>(null);
   const [activeFileId, setActiveFileId] = useState(incoming.entryFileId);
-  const [surface, setSurface] = useState<
-    "preview" | "code" | "split" | "settings"
-  >(
+  const [surface, setSurface] = useState<CodeSurface>(
     incoming.visualisation.openMode === "preview"
       ? "preview"
       : incoming.visualisation.openMode === "split"
         ? "split"
         : "code",
   );
-  const [mobilePane, setMobilePane] = useState<"source" | "preview">("source");
   const [sourceMode, setSourceMode] = useState<"code" | "parameters">("code");
   const [fileQuery, setFileQuery] = useState("");
   const [fileSearchMode, setFileSearchMode] = useState<"paths" | "content">(
@@ -475,7 +524,6 @@ export function CodeStudio({
   const [formatting, setFormatting] = useState(false);
   const [splitPercent, setSplitPercent] = useState(43);
   const [fullPreview, setFullPreview] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
   const [publishedBuild, setPublishedBuild] =
     useState<PublishedCodeBuildProjection | null>(null);
   const [publishedContentKey, setPublishedContentKey] = useState<string | null>(
@@ -969,6 +1017,70 @@ export function CodeStudio({
     setDeleteFileId(null);
   }
 
+  function duplicateFile(id: string) {
+    const source = workbook.files.find((file) => file.id === id);
+    if (!source || readOnly) return;
+    const dot = source.path.lastIndexOf(".");
+    const stem = dot > 0 ? source.path.slice(0, dot) : source.path;
+    const extension = dot > 0 ? source.path.slice(dot) : "";
+    let path = `${stem}-copy${extension}`;
+    let attempt = 2;
+    while (
+      workbook.files.some(
+        (file) => file.path.toLowerCase() === path.toLowerCase(),
+      )
+    ) {
+      path = `${stem}-copy-${attempt}${extension}`;
+      attempt += 1;
+    }
+    const nextId = uid("file");
+    mutate((draft) =>
+      draft.files.push({
+        id: nextId,
+        path,
+        language: languageForPath(path),
+        source: source.source,
+        lineIds: reconcileLineIds("", undefined, source.source),
+        ...(source.mediaType ? { mediaType: source.mediaType } : {}),
+      }),
+    );
+    setActiveFileId(nextId);
+  }
+
+  function setEntryFile(id: string) {
+    if (readOnly || workbook.entryFileId === id) return;
+    mutate((draft) => {
+      draft.entryFileId = id;
+    });
+  }
+
+  /**
+   * Every file action acts on the row it was opened from. Reaching them through
+   * a menu rather than a hover-only glyph is what makes them available to the
+   * keyboard and to touch.
+   */
+  function fileRowActions(file: CodeFile) {
+    const isEntry = workbook.entryFileId === file.id;
+    return [
+      { key: "rename" as const, label: "Rename", icon: Pencil },
+      {
+        key: "entry" as const,
+        label: "Set as entry",
+        icon: Flag,
+        disabled: isEntry,
+        ...(isEntry ? { hint: "Current" } : {}),
+      },
+      { key: "duplicate" as const, label: "Duplicate", icon: Copy },
+      {
+        key: "delete" as const,
+        label: "Delete",
+        icon: Trash2,
+        disabled: workbook.files.length === 1,
+        ...(workbook.files.length === 1 ? { hint: "Only file" } : {}),
+      },
+    ] satisfies OverflowItem<"rename" | "entry" | "duplicate" | "delete">[];
+  }
+
   async function formatActiveFile() {
     const parser = parserFor(activeFile);
     if (!parser || readOnly) return;
@@ -1434,6 +1546,7 @@ export function CodeStudio({
 
   useEffect(() => {
     if (
+      !canExecute ||
       workbook.preview?.autoRun === false ||
       workbook.runtime === "python" ||
       workbook.runtime === "none"
@@ -1441,7 +1554,7 @@ export function CodeStudio({
       return;
     const timer = window.setTimeout(() => void run(), 850);
     return () => window.clearTimeout(timer);
-  }, [run, workbook.preview?.autoRun, workbook.runtime]);
+  }, [canExecute, run, workbook.preview?.autoRun, workbook.runtime]);
 
   async function handleSandboxEvent(event: SpectraSandboxFrameMessage) {
     if (event.type === "spectra:console") {
@@ -1470,12 +1583,24 @@ export function CodeStudio({
         setExportError(event.message);
         setExportJob(null);
       }
+      // The sandbox reports the line it threw on, but that line only maps back
+      // to a source file when there is exactly one script to have thrown it.
+      // Guessing otherwise would send someone to the wrong file, so with more
+      // than one script the problem is recorded without a file.
+      const scripts = workbook.files.filter(
+        (file) => file.language === "javascript",
+      );
+      const attributed =
+        event.code === "runtime_error" && event.line && scripts.length === 1
+          ? scripts[0]
+          : null;
       setProblems((current) => [
         ...current,
         {
           id: uid("problem"),
           severity: "error",
           message: event.message,
+          ...(attributed ? { file: attributed.path } : {}),
           ...(event.line ? { line: event.line } : {}),
         },
       ]);
@@ -1642,7 +1767,6 @@ export function CodeStudio({
     }
     setExportError(null);
     setExportJob({ id: uid("export"), target });
-    setMenuOpen(false);
   }
 
   function handleRuntimeStatus(
@@ -1670,6 +1794,9 @@ export function CodeStudio({
       setRunMessage(
         message ?? "The preview stopped safely. Source remains unchanged.",
       );
+      // A failure the reader cannot see is a failure the reader cannot fix, so
+      // the panel that holds the detail opens itself.
+      setPanel("problems");
     }
   }
 
@@ -1862,7 +1989,6 @@ export function CodeStudio({
 
   function exportStandalonePreview() {
     if (!previewFiles) return;
-    setMenuOpen(false);
     const output = buildSpectraSandboxDocument({
       files: previewFiles,
       channel: "spectra-standalone-export",
@@ -1892,7 +2018,6 @@ export function CodeStudio({
     const unavailable = (workbook.assets ?? []).filter(
       (reference) => !loadedIds.has(reference.id),
     );
-    setMenuOpen(false);
     if (unavailable.length || assetDiagnostics.length) {
       const names = unavailable
         .slice(0, 3)
@@ -2057,8 +2182,90 @@ export function CodeStudio({
           borderBottom: "1px solid var(--border-default)",
           color: "var(--text-primary)",
         },
+        // A failing line is marked where it fails, in the same tones the output
+        // panel uses for the same severity.
+        ".cm-lintRange-error": {
+          backgroundImage: "none",
+          borderBottom: "2px solid var(--danger)",
+        },
+        ".cm-lintRange-warning": {
+          backgroundImage: "none",
+          borderBottom: "2px solid var(--warning)",
+        },
+        ".cm-lintRange-info": {
+          backgroundImage: "none",
+          borderBottom: "2px solid var(--accent-cyan)",
+        },
+        ".cm-diagnostic": {
+          borderLeft: "3px solid transparent",
+          padding: "5px 8px",
+          fontFamily: "inherit",
+          whiteSpace: "pre-wrap",
+        },
+        ".cm-diagnostic-error": { borderLeftColor: "var(--danger)" },
+        ".cm-diagnostic-warning": { borderLeftColor: "var(--warning)" },
+        ".cm-diagnostic-info": { borderLeftColor: "var(--accent-cyan)" },
       }),
     [],
+  );
+  /**
+   * Tab indents, Shift-Tab outdents, and Escape hands the next Tab back to the
+   * page so the editor cannot trap a keyboard user.
+   */
+  const keyboardExtension = useMemo(
+    () =>
+      keymap.of([
+        indentWithTab,
+        {
+          key: "Escape",
+          run: (view) => {
+            view.setTabFocusMode(2000);
+            return false;
+          },
+        },
+      ]),
+    [],
+  );
+  const activeProblems = useMemo(
+    () =>
+      problems.filter(
+        (problem) =>
+          problem.file === activeFile.path &&
+          typeof problem.line === "number" &&
+          problem.line > 0,
+      ),
+    [problems, activeFile.path],
+  );
+  /**
+   * Problems that name a line are drawn on that line. The build service and the
+   * sandbox are the only sources — nothing here invents a diagnostic of its own.
+   */
+  const diagnosticsExtension = useMemo(
+    () =>
+      linter(
+        (view) =>
+          activeProblems.map<Diagnostic>((problem) => {
+            const line = view.state.doc.line(
+              Math.max(1, Math.min(problem.line!, view.state.doc.lines)),
+            );
+            return {
+              from:
+                problem.column === undefined
+                  ? line.from
+                  : Math.min(line.to, line.from + Math.max(0, problem.column)),
+              to: line.to,
+              severity:
+                problem.severity === "warning"
+                  ? "warning"
+                  : problem.severity === "info"
+                    ? "info"
+                    : "error",
+              message: problem.message,
+            };
+          }),
+        { delay: 60 },
+      ),
+    [activeProblems],
   );
   const presenceExtension = useMemo(
     () =>
@@ -2097,41 +2304,71 @@ export function CodeStudio({
   const preview = (
     <div className="code-preview-surface relative flex min-h-0 flex-1 flex-col bg-[var(--bg-primary)]">
       <div className="flex h-11 shrink-0 items-center justify-between gap-2 border-b border-[var(--border-subtle)] px-3">
-        <div className="flex min-w-0 items-center gap-2">
-          <span
-            className={`h-2 w-2 rounded-full ${runState === "ready" ? "bg-[var(--success)]" : runState === "error" || runState === "limited" ? "bg-[var(--danger)]" : runState === "loading" || runState === "running" || runState === "building" ? "animate-pulse bg-[var(--accent-cyan)] motion-reduce:animate-none" : "bg-[var(--text-tertiary)]"}`}
-          />
-          <span className="truncate text-micro font-medium text-[var(--text-primary)]">
-            {runMessage}
-          </span>
-        </div>
+        {/* When the run failed, the status line is the way into the detail:
+            without it, the Visualisation view can report a failure it gives you
+            no route to read. */}
+        {runState === "error" || runState === "limited" ? (
+          <button
+            type="button"
+            onClick={() => {
+              setFullPreview(false);
+              if (surface !== "split" && surface !== "code")
+                setSurface("split");
+              setPanel("problems");
+            }}
+            className="flex min-w-0 items-center gap-2 rounded-chip px-1 text-left hover:bg-[var(--bg-hover)]"
+          >
+            <span className="h-2 w-2 shrink-0 rounded-full bg-[var(--danger)]" />
+            <span className="truncate text-micro font-medium text-[var(--text-primary)]">
+              {runMessage}
+            </span>
+            <span className="shrink-0 text-micro text-[var(--text-secondary)] underline">
+              Show problems
+            </span>
+          </button>
+        ) : (
+          <div className="flex min-w-0 items-center gap-2">
+            <span
+              className={`h-2 w-2 shrink-0 rounded-full ${runState === "ready" ? "bg-[var(--success)]" : runState === "loading" || runState === "running" || runState === "building" ? "animate-pulse bg-[var(--accent-cyan)] motion-reduce:animate-none" : "bg-[var(--text-tertiary)]"}`}
+            />
+            <span className="truncate text-micro font-medium text-[var(--text-primary)]">
+              {runMessage}
+            </span>
+          </div>
+        )}
         <div className="flex shrink-0 items-center gap-1">
-          {runState === "building" ||
-          runState === "loading" ||
-          runState === "running" ? (
-            <button
-              type="button"
-              onClick={() => stopRun()}
-              className="code-icon-action"
-              aria-label="Stop run"
-            >
-              <CircleStop className="h-3.5 w-3.5" />
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => void run()}
-              className="code-icon-action"
-              aria-label="Run preview"
-            >
-              <RefreshCw className="h-3.5 w-3.5" />
-            </button>
-          )}
+          {canExecute ? (
+            runState === "building" ||
+            runState === "loading" ||
+            runState === "running" ? (
+              <button
+                type="button"
+                onClick={() => stopRun()}
+                className="code-icon-action"
+                aria-label="Stop run"
+                title="Stop run"
+              >
+                <CircleStop className="h-3.5 w-3.5" />
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => void run()}
+                className="code-icon-action"
+                aria-label="Run preview again"
+                title="Run preview again"
+                disabled={workbook.runtime === "none"}
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+              </button>
+            )
+          ) : null}
           <button
             type="button"
             onClick={() => setFullPreview(true)}
             className="code-icon-action"
             aria-label="Open full preview"
+            title="Open full preview"
           >
             <Maximize2 className="h-3.5 w-3.5" />
           </button>
@@ -2258,317 +2495,257 @@ export function CodeStudio({
     </div>
   );
 
+  const sourcePaneVisible = surface === "code" || surface === "split";
+  const editingSource = sourcePaneVisible && sourceMode === "code";
+  const running =
+    runState === "building" || runState === "loading" || runState === "running";
+  const exportReady = Boolean(previewFiles) && runState === "ready";
+  /**
+   * Control grammar: modes lead, the active file is the context chip, tools sit
+   * in the trail, the primary verb is last before `⋯`. Priorities are what the
+   * bar sheds under pressure — an icon tool drops its label, the primary verb
+   * keeps its own, and nothing is deleted from the surface at any width.
+   */
+  const workbarActions: WorkbarActionSpec[] = [
+    ...(sourcePaneVisible
+      ? [
+          {
+            id: "controls",
+            label: sourceMode === "parameters" ? "Source" : "Controls",
+            icon: SlidersHorizontal,
+            priority: "secondary" as const,
+            active: sourceMode === "parameters",
+            hint: "Edit the parameters a reader can change",
+            onSelect: () =>
+              setSourceMode(sourceMode === "code" ? "parameters" : "code"),
+          },
+        ]
+      : []),
+    ...(editingSource
+      ? [
+          {
+            id: "files",
+            label: "Files",
+            icon: FolderOpen,
+            priority: "essential" as const,
+            active: fileRailOpen,
+            onSelect: () => setFileRailOpen((value) => !value),
+          },
+          {
+            id: "find",
+            label: "Find",
+            icon: Search,
+            priority: "essential" as const,
+            onSelect: () => {
+              const view = editorViewRef.current;
+              if (!view) return;
+              openSearchPanel(view);
+              view.focus();
+            },
+          },
+          ...(parserFor(activeFile)
+            ? [
+                {
+                  id: "format",
+                  label: "Format",
+                  icon: formatting ? Loader2 : Sparkles,
+                  priority: "secondary" as const,
+                  disabled: readOnly || formatting,
+                  requires: "edit" as const,
+                  onSelect: () => void formatActiveFile(),
+                },
+              ]
+            : []),
+        ]
+      : []),
+    {
+      id: "publish",
+      label:
+        publishState === "publishing"
+          ? "Publishing"
+          : publishedBuild && !publishedStale
+            ? "Published"
+            : publishedStale
+              ? "Publish update"
+              : "Publish",
+      icon:
+        publishState === "publishing"
+          ? Loader2
+          : publishedBuild && !publishedStale
+            ? Check
+            : CloudUpload,
+      priority: "essential" as const,
+      keepLabel: true,
+      requires: "edit" as const,
+      active: Boolean(publishedBuild && !publishedStale),
+      disabled:
+        publishState !== "idle" ||
+        workbook.runtime === "none" ||
+        !synchronizationReady ||
+        Boolean(publishedBuild && !publishedStale),
+      hint: !synchronizationReady
+        ? "Available once live synchronization settles"
+        : publishedBuild && !publishedStale
+          ? "This source is the current published build"
+          : publishedStale
+            ? "Publish the latest source as a new retained build"
+            : "Publish a retained runtime build",
+      onSelect: () => void publishRuntime(),
+    },
+    {
+      id: "import-files",
+      label: "Import source or ZIP",
+      icon: Import,
+      priority: "advanced" as const,
+      requires: "edit" as const,
+      disabled: importing,
+      onSelect: () => importRef.current?.click(),
+    },
+    {
+      id: "import-folder",
+      label: "Import source folder",
+      icon: FolderOpen,
+      priority: "advanced" as const,
+      requires: "edit" as const,
+      disabled: importing,
+      onSelect: () => folderImportRef.current?.click(),
+    },
+    {
+      id: "export-archive",
+      label: "Export source archive",
+      icon: FileArchive,
+      priority: "advanced" as const,
+      onSelect: exportSourceArchive,
+    },
+    {
+      id: "export-html",
+      label: "Export isolated HTML",
+      icon: Eye,
+      priority: "advanced" as const,
+      disabled: !previewFiles,
+      onSelect: exportStandalonePreview,
+    },
+    {
+      id: "export-svg",
+      label: "Export rendered SVG",
+      icon: FileImage,
+      priority: "advanced" as const,
+      disabled: !exportReady || Boolean(exportJob),
+      onSelect: () => requestVisualExport("svg"),
+    },
+    {
+      id: "export-png",
+      label: "Export rendered PNG",
+      icon: FileImage,
+      priority: "advanced" as const,
+      disabled: !exportReady || Boolean(exportJob),
+      onSelect: () => requestVisualExport("png"),
+    },
+    {
+      id: "export-pdf",
+      label: "Export rendered PDF",
+      icon: FileText,
+      priority: "advanced" as const,
+      disabled: !exportReady || Boolean(exportJob),
+      onSelect: () => requestVisualExport("pdf"),
+    },
+    {
+      id: "export-webm",
+      label: "Export canvas video",
+      icon: Video,
+      priority: "advanced" as const,
+      disabled: !exportReady || Boolean(exportJob),
+      hint: "Records three seconds of a canvas experience",
+      onSelect: () => requestVisualExport("webm"),
+    },
+    {
+      id: "download-file",
+      label: "Download current file",
+      icon: Download,
+      priority: "advanced" as const,
+      onSelect: () =>
+        downloadBlob(
+          new Blob([activeFile.source], {
+            type: activeFile.mediaType || "text/plain;charset=utf-8",
+          }),
+          activeFile.path.split("/").pop() || "source.txt",
+        ),
+    },
+    ...(publishedBuild
+      ? [
+          {
+            id: "unpublish",
+            label: "Unpublish live build",
+            icon: publishState === "unpublishing" ? Loader2 : X,
+            priority: "advanced" as const,
+            requires: "edit" as const,
+            disabled: publishState !== "idle",
+            onSelect: () => void unpublishRuntime(),
+          },
+        ]
+      : []),
+  ];
+
   return (
     <div className="code-studio w-full overflow-hidden">
-      <div className="spectra-editor-workbar code-workbar flex min-h-12 flex-wrap items-center gap-2 px-3 py-2">
-        <div
-          className="flex shrink-0 items-center gap-1"
-          role="tablist"
-          aria-label="Code artifact views"
-        >
-          {(["preview", "code", "split", "settings"] as const).map((value) => (
-            <button
-              key={value}
-              type="button"
-              role="tab"
-              aria-selected={surface === value}
-              onClick={() => {
-                setSurface(value);
-                if (value !== "settings")
-                  mutate((draft) => {
-                    draft.visualisation.openMode =
-                      value === "code"
-                        ? "source"
-                        : value === "preview"
-                          ? "preview"
-                          : "split";
-                  });
-              }}
-              className={`code-top-tab ${surface === value ? "is-active" : ""}`}
-            >
-              {value === "code" ? (
-                <Code2 className="h-3.5 w-3.5" />
-              ) : value === "settings" ? (
-                <Settings2 className="h-3.5 w-3.5" />
-              ) : value === "split" ? (
-                <Columns2 className="h-3.5 w-3.5" />
-              ) : (
-                <Eye className="h-3.5 w-3.5" />
-              )}
-              {value === "preview"
-                ? "Visualisation"
-                : value === "split"
-                  ? "Both"
-                  : value[0]!.toUpperCase() + value.slice(1)}
-            </button>
-          ))}
-        </div>
-        {(surface === "code" || surface === "split") && mobilePane === "source" ? (
-          <div className="code-workbar-source flex min-w-0 flex-1 items-center gap-1">
-            <span className="mx-1 h-5 w-px shrink-0 bg-[var(--border-subtle)]" />
-            <button
-              type="button"
-              aria-pressed={sourceMode === "parameters"}
-              onClick={() => setSourceMode(sourceMode === "code" ? "parameters" : "code")}
-              className={`code-pane-tab shrink-0 ${sourceMode === "parameters" ? "is-active" : ""}`}
-            >
-              <SlidersHorizontal className="h-3 w-3" />
-              {sourceMode === "parameters" ? "Code" : "Controls"}
-            </button>
-            {sourceMode === "code" ? (
-              <>
-                <FileCode2 className="h-3.5 w-3.5 shrink-0 text-[var(--accent-cyan)]" />
-                <span className="max-w-36 truncate text-micro font-semibold text-[var(--text-primary)]">
-                  {activeFile.path}
-                </span>
-                {workbook.entryFileId === activeFile.id ? (
-                  <span className="shrink-0 rounded-full bg-[color-mix(in_oklab,var(--success)_10%,transparent)] px-1.5 py-0.5 text-micro font-bold uppercase tracking-[.09em] text-[var(--success)]">
-                    Entry
-                  </span>
-                ) : null}
-              </>
-            ) : null}
-          </div>
-        ) : (
-          <span className="min-w-0 flex-1" />
-        )}
-        <div className="ml-auto flex shrink-0 items-center gap-1.5">
-          {(surface === "code" || surface === "split") &&
-          mobilePane === "source" &&
-          sourceMode === "code" ? (
-            <>
-              <button
-                type="button"
-                className="code-files-toggle code-small-action"
-                onClick={() => setFileRailOpen((value) => !value)}
-                aria-expanded={fileRailOpen}
-              >
-                <FolderOpen className="h-3 w-3" /> Files
-              </button>
-              <button
-                type="button"
-                className="code-small-action"
-                onClick={() =>
-                  editorViewRef.current &&
-                  (openSearchPanel(editorViewRef.current),
-                  editorViewRef.current.focus())
-                }
-              >
-                <Search className="h-3 w-3" /> Find
-              </button>
-              {parserFor(activeFile) ? (
-                <button
-                  type="button"
-                  className="code-small-action"
-                  onClick={() => void formatActiveFile()}
-                  disabled={readOnly || formatting}
-                >
-                  {formatting ? (
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                  ) : (
-                    <Sparkles className="h-3 w-3" />
-                  )}
-                  Format
-                </button>
-              ) : null}
-            </>
-          ) : null}
-          <button
-            type="button"
-            onClick={() => void run()}
-            disabled={
-              runState === "building" ||
-              runState === "loading" ||
-              runState === "running" ||
-              workbook.runtime === "none"
-            }
-            className="code-primary-action"
-          >
-            <Play className="h-3.5 w-3.5 fill-current" />
-            Run
-          </button>
-          <button
-            type="button"
-            onClick={() => void publishRuntime()}
-            disabled={
-              readOnly ||
-              publishState !== "idle" ||
-              workbook.runtime === "none" ||
-              !synchronizationReady ||
-              Boolean(publishedBuild && !publishedStale)
-            }
-            className={`code-publish-action ${publishedBuild && !publishedStale ? "is-published" : ""}`}
-            title={
-              !synchronizationReady
-                ? "Wait for live synchronization before publishing"
-                : publishedBuild && !publishedStale
-                  ? "This source is the current published build"
-                  : publishedStale
-                    ? "Publish the latest source as a new retained build"
-                    : "Publish a retained runtime build"
-            }
-          >
-            {publishState === "publishing" ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" />
-            ) : publishedBuild && !publishedStale ? (
-              <Check className="h-3.5 w-3.5" />
-            ) : (
-              <CloudUpload className="h-3.5 w-3.5" />
-            )}
-            {publishState === "publishing"
-              ? "Publishing"
-              : publishedBuild && !publishedStale
-                ? "Published"
-                : publishedStale
-                  ? "Publish update"
-                  : "Publish"}
-          </button>
-          <div className="relative">
-            <button
-              type="button"
-              className="code-icon-action border border-[var(--border-default)]"
-              aria-label="More code actions"
-              onClick={() => setMenuOpen((value) => !value)}
-            >
-              <MoreHorizontal className="h-4 w-4" />
-            </button>
-            {menuOpen ? (
-              <div className="code-action-menu">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    importRef.current?.click();
-                  }}
-                  disabled={readOnly || importing}
-                >
-                  <Import className="h-3.5 w-3.5" />
-                  Import source or ZIP
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    folderImportRef.current?.click();
-                  }}
-                  disabled={readOnly || importing}
-                >
-                  <FolderOpen className="h-3.5 w-3.5" />
-                  Import source folder
-                </button>
-                <button type="button" onClick={exportSourceArchive}>
-                  <FileArchive className="h-3.5 w-3.5" />
-                  Export source archive
-                </button>
-                <button
-                  type="button"
-                  disabled={!previewFiles}
-                  onClick={() => {
-                    setMenuOpen(false);
-                    exportStandalonePreview();
-                  }}
-                >
-                  <Eye className="h-3.5 w-3.5" />
-                  Export isolated HTML
-                </button>
-                <button
-                  type="button"
-                  disabled={
-                    !previewFiles || runState !== "ready" || Boolean(exportJob)
-                  }
-                  onClick={() => requestVisualExport("svg")}
-                >
-                  <FileImage className="h-3.5 w-3.5" />
-                  Export rendered SVG
-                </button>
-                <button
-                  type="button"
-                  disabled={
-                    !previewFiles || runState !== "ready" || Boolean(exportJob)
-                  }
-                  onClick={() => requestVisualExport("png")}
-                >
-                  <FileImage className="h-3.5 w-3.5" />
-                  Export rendered PNG
-                </button>
-                <button
-                  type="button"
-                  disabled={
-                    !previewFiles || runState !== "ready" || Boolean(exportJob)
-                  }
-                  onClick={() => requestVisualExport("pdf")}
-                >
-                  <FileText className="h-3.5 w-3.5" />
-                  Export rendered PDF
-                </button>
-                <button
-                  type="button"
-                  disabled={
-                    !previewFiles || runState !== "ready" || Boolean(exportJob)
-                  }
-                  onClick={() => requestVisualExport("webm")}
-                  title="Records three seconds when the rendered experience uses a canvas"
-                >
-                  <Video className="h-3.5 w-3.5" />
-                  Export canvas video
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    downloadBlob(
-                      new Blob([activeFile.source], {
-                        type:
-                          activeFile.mediaType || "text/plain;charset=utf-8",
-                      }),
-                      activeFile.path.split("/").pop() || "source.txt",
-                    );
-                  }}
-                >
-                  <Download className="h-3.5 w-3.5" />
-                  Download current file
-                </button>
-                {publishedBuild ? (
-                  <button
-                    type="button"
-                    disabled={readOnly || publishState !== "idle"}
-                    onClick={() => {
-                      setMenuOpen(false);
-                      void unpublishRuntime();
-                    }}
-                  >
-                    {publishState === "unpublishing" ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" />
-                    ) : (
-                      <X className="h-3.5 w-3.5" />
-                    )}
-                    Unpublish live build
-                  </button>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
-          <input
-            ref={importRef}
-            type="file"
-            multiple
-            className="hidden"
-            accept=".zip,.tar,.tgz,.tar.gz,.ipynb,.html,.htm,.css,.js,.mjs,.jsx,.ts,.tsx,.py,.json,.md,.txt,.csv,.xml,.yaml,.yml,.sql,.rb,.php,.lua,.r,.sh,.ps1,.java,.kt,.swift,.go,.rs,.c,.h,.cpp,.cc,.hpp,.cs,.png,.jpg,.jpeg,.gif,.webp,.avif,.mp3,.ogg,.wav,.mp4,.webm,.woff,.woff2,.ttf,.otf"
-            onChange={(event) => void handleImport(event.target.files)}
-          />
-          <input
-            ref={folderImportRef}
-            type="file"
-            multiple
-            className="hidden"
-            {...({
-              webkitdirectory: "",
-              directory: "",
-            } as React.InputHTMLAttributes<HTMLInputElement>)}
-            onChange={(event) => void handleImport(event.target.files)}
-          />
-        </div>
-      </div>
+      {/* The legacy `code-workbar` hook is deliberately not passed: it carried
+          the transitional `overflow-x: auto` rail, and the shared bar must not
+          scroll. */}
+      <ArtifactWorkbar
+        label="Code actions"
+        modes={{
+          registry: true,
+          value: MODE_ID_BY_SURFACE[surface],
+          onChange: (modeId) => {
+            const next = SURFACE_BY_MODE_ID[modeId];
+            if (!next) return;
+            setSurface(next);
+            if (next !== "settings")
+              mutate((draft) => {
+                draft.visualisation.openMode =
+                  next === "code"
+                    ? "source"
+                    : next === "preview"
+                      ? "preview"
+                      : "split";
+              });
+          },
+        }}
+        context={
+          editingSource
+            ? workbook.entryFileId === activeFile.id
+              ? `${activeFile.path} · entry`
+              : activeFile.path
+            : undefined
+        }
+        actions={workbarActions}
+        primary={{
+          label: running ? "Stop" : "Run",
+          icon: running ? CircleStop : Play,
+          requires: "execute",
+          disabled: !running && workbook.runtime === "none",
+          onSelect: () => (running ? stopRun() : void run()),
+        }}
+      />
+      <input
+        ref={importRef}
+        type="file"
+        multiple
+        className="hidden"
+        accept=".zip,.tar,.tgz,.tar.gz,.ipynb,.html,.htm,.css,.js,.mjs,.jsx,.ts,.tsx,.py,.json,.md,.txt,.csv,.xml,.yaml,.yml,.sql,.rb,.php,.lua,.r,.sh,.ps1,.java,.kt,.swift,.go,.rs,.c,.h,.cpp,.cc,.hpp,.cs,.png,.jpg,.jpeg,.gif,.webp,.avif,.mp3,.ogg,.wav,.mp4,.webm,.woff,.woff2,.ttf,.otf"
+        onChange={(event) => void handleImport(event.target.files)}
+      />
+      <input
+        ref={folderImportRef}
+        type="file"
+        multiple
+        className="hidden"
+        {...({
+          webkitdirectory: "",
+          directory: "",
+        } as React.InputHTMLAttributes<HTMLInputElement>)}
+        onChange={(event) => void handleImport(event.target.files)}
+      />
 
       <div className="spectra-editor-body">
       {importing ? (
@@ -2650,33 +2827,10 @@ export function CodeStudio({
         />
       ) : null}
       {surface === "preview" ? (
-        <div className="code-preview-pane min-h-[650px] p-3">{preview}</div>
+        <div className="flex min-h-[650px] flex-col p-3">{preview}</div>
       ) : null}
       {surface === "code" || surface === "split" ? (
         <>
-          <div
-            data-surface={surface}
-            className={`code-mobile-switch h-10 items-center justify-between border-b border-[var(--border-subtle)] px-2 sm:hidden ${
-              surface === "split" ? "flex" : "hidden"
-            }`}
-          >
-            <button
-              type="button"
-              onClick={() => setMobilePane("source")}
-              className={`code-pane-tab ${mobilePane === "source" ? "is-active" : ""}`}
-            >
-              <Code2 className="h-3.5 w-3.5" />
-              Code
-            </button>
-            <button
-              type="button"
-              onClick={() => setMobilePane("preview")}
-              className={`code-pane-tab ${mobilePane === "preview" ? "is-active" : ""}`}
-            >
-              <Eye className="h-3.5 w-3.5" />
-              Visualisation
-            </button>
-          </div>
           <div
             className={`code-editor-grid ${
               surface === "code" ? "is-code-only" : ""
@@ -2692,10 +2846,15 @@ export function CodeStudio({
               draggingRef.current = false;
             }}
           >
+            {/* Both panes are always present and always editable (D4). Below
+                the container's split threshold the grid becomes a block and
+                stacks them; `data-code-pane-active` is what the container query
+                keeps visible, so it now means "this pane is rendered" rather
+                than "this pane won a tab switch". There is no second bar. */}
             <section
               data-code-pane="source"
-              data-code-pane-active={mobilePane === "source" || undefined}
-              className={`${mobilePane === "source" ? "flex" : "hidden"} min-h-0 min-w-0 flex-col sm:flex`}
+              data-code-pane-active
+              className="flex min-h-0 min-w-0 flex-col"
             >
               {sourceMode === "code" ? (
                 <div
@@ -2883,18 +3042,27 @@ export function CodeStudio({
                                 ) : null}
                               </button>
                               {!readOnly && renamingFileId !== file.id ? (
-                                <button
-                                  type="button"
-                                  className="hidden h-5 w-5 items-center justify-center rounded text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] group-hover:flex"
-                                  onClick={() => {
-                                    setRenamingFileId(file.id);
-                                    setRenameDraft(file.path);
+                                <OverflowMenu
+                                  label={`Actions for ${file.path}`}
+                                  size={24}
+                                  triggerClassName={`shrink-0 transition-opacity motion-reduce:transition-none ${
+                                    selected
+                                      ? ""
+                                      : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+                                  }`}
+                                  items={fileRowActions(file)}
+                                  onSelect={(key) => {
+                                    if (key === "rename") {
+                                      setRenamingFileId(file.id);
+                                      setRenameDraft(file.path);
+                                    } else if (key === "entry")
+                                      setEntryFile(file.id);
+                                    else if (key === "duplicate")
+                                      duplicateFile(file.id);
+                                    else if (key === "delete")
+                                      setDeleteFileId(file.id);
                                   }}
-                                  aria-label={`Rename ${file.path}`}
-                                  title={`Rename ${file.path}`}
-                                >
-                                  <Pencil className="h-3 w-3" />
-                                </button>
+                                />
                               ) : null}
                             </div>
                           );
@@ -2937,17 +3105,12 @@ export function CodeStudio({
                         </div>
                       ) : null}
                     </div>
-                    <div className="flex min-h-9 items-center justify-between border-t border-[var(--border-subtle)] px-2 text-micro text-[var(--text-tertiary)]">
+                    <div className="flex min-h-9 items-center justify-between gap-2 border-t border-[var(--border-subtle)] px-2 text-micro text-[var(--text-tertiary)]">
                       <span>{formatBytes(sourceBytes)}</span>
-                      <button
-                        type="button"
-                        className="code-icon-action h-6 w-6"
-                        disabled={readOnly || workbook.files.length === 1}
-                        onClick={() => setDeleteFileId(activeFile.id)}
-                        aria-label="Delete active file"
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </button>
+                      <span>
+                        {workbook.files.length} file
+                        {workbook.files.length === 1 ? "" : "s"}
+                      </span>
                     </div>
                   </aside>
                   <div
@@ -2965,6 +3128,8 @@ export function CodeStudio({
                       extensions={[
                         languageExtension(activeFile),
                         editorTheme,
+                        keyboardExtension,
+                        diagnosticsExtension,
                         presenceExtension,
                         aiLineExtension,
                         ...(activeSharedText && collaborationAwareness
@@ -3004,7 +3169,7 @@ export function CodeStudio({
               <>
                 <button
                   type="button"
-                  className="code-split-handle hidden sm:flex"
+                  className="code-split-handle flex"
                   onPointerDown={pointerResize}
                   aria-label="Resize source and preview panes"
                 >
@@ -3012,8 +3177,8 @@ export function CodeStudio({
                 </button>
                 <section
                   data-code-pane="preview"
-                  data-code-pane-active={mobilePane === "preview" || undefined}
-                  className={`${mobilePane === "preview" ? "flex" : "hidden"} min-h-0 min-w-0 sm:flex`}
+                  data-code-pane-active
+                  className="flex min-h-0 min-w-0"
                 >
                   {preview}
                 </section>
@@ -3056,7 +3221,13 @@ export function CodeStudio({
                   panel === "tests" ? setPanel(null) : void run(true)
                 }
                 className={`code-panel-tab ${panel === "tests" ? "is-active" : ""}`}
+                title={
+                  canExecute
+                    ? "Run the declared tests"
+                    : "Running tests needs the execute capability"
+                }
                 disabled={
+                  !canExecute ||
                   runState === "building" ||
                   runState === "loading" ||
                   runState === "running"
@@ -3068,13 +3239,33 @@ export function CodeStudio({
                   <span>{workbook.tests.length}</span>
                 ) : null}
               </button>
-              <span className="ml-auto text-micro text-[var(--text-tertiary)]">
-                {runtimeLabel(workbook.runtime)} · {runState}
+              <span className="ml-auto truncate text-micro text-[var(--text-tertiary)]">
+                {runtimeLabel(workbook.runtime)} · {runStateLabel(runState)}
               </span>
+              {panel === "problems" && problems.length ? (
+                <button
+                  type="button"
+                  onClick={() => setProblems([])}
+                  className="code-small-action shrink-0"
+                >
+                  <Eraser className="h-3 w-3" />
+                  Clear
+                </button>
+              ) : null}
+              {panel === "console" && consoleEntries.length ? (
+                <button
+                  type="button"
+                  onClick={() => setConsoleEntries([])}
+                  className="code-small-action shrink-0"
+                >
+                  <Eraser className="h-3 w-3" />
+                  Clear
+                </button>
+              ) : null}
               <button
                 type="button"
                 onClick={() => setPanel(null)}
-                className="code-icon-action h-6 w-6"
+                className="code-icon-action h-6 w-6 shrink-0"
                 aria-label="Close output panel"
               >
                 <PanelBottom className="h-3 w-3" />
@@ -3095,8 +3286,22 @@ export function CodeStudio({
                             workbook.files.find(
                               (candidate) => candidate.path === problem.file,
                             );
-                          if (file) setActiveFileId(file.id);
-                          editorViewRef.current?.focus();
+                          if (!file) {
+                            editorViewRef.current?.focus();
+                            return;
+                          }
+                          // Land on the reported position, not merely in the
+                          // right file: a problem you have to hunt for is a
+                          // problem the panel only half reported.
+                          setSourceMode("code");
+                          setActiveFileId(file.id);
+                          if (problem.line)
+                            setPendingSearchTarget({
+                              fileId: file.id,
+                              line: problem.line,
+                              column: problem.column ?? 0,
+                            });
+                          else editorViewRef.current?.focus();
                         }}
                       >
                         <span
@@ -3183,7 +3388,10 @@ export function CodeStudio({
 
       {deleteFileId ? (
         <ConfirmDialog
-          title="Delete this source file?"
+          title={`Delete ${
+            workbook.files.find((file) => file.id === deleteFileId)?.path ??
+            "this file"
+          }?`}
           detail={
             workbook.files.length === 1
               ? "Every artifact needs at least one source file."
@@ -3196,8 +3404,9 @@ export function CodeStudio({
           onConfirm={deleteFile}
         />
       ) : null}
-      {fullPreview ? (
-        <div className="fixed inset-0 z-[90] flex flex-col bg-[var(--bg-primary)]">
+      {fullPreview
+        ? createPortal(
+            <div className="fixed inset-0 z-[90] flex flex-col bg-[var(--bg-primary)]">
           <header className="flex h-14 shrink-0 items-center justify-between border-b border-[var(--border-default)] px-5">
             <div>
               <p className="text-[11px] font-semibold text-[var(--text-primary)]">
@@ -3217,8 +3426,10 @@ export function CodeStudio({
             </button>
           </header>
           <div className="min-h-0 flex-1 overflow-auto p-4">{preview}</div>
-        </div>
-      ) : null}
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }
@@ -3266,10 +3477,10 @@ function CodeParameterPanel({
               .
             </p>
           </div>
-          <button
-            type="button"
+          <Button
+            variant="primary"
+            size="sm"
             disabled={readOnly || parameters.length >= 80}
-            className="code-primary-action"
             onClick={() =>
               onChange((draft) => {
                 const ordinal = (draft.parameters?.length ?? 0) + 1;
@@ -3290,7 +3501,7 @@ function CodeParameterPanel({
             }
           >
             <FilePlus2 className="h-3.5 w-3.5" /> Add control
-          </button>
+          </Button>
         </div>
         <div className="mt-3 space-y-2.5">
           {parameters.map((parameter, index) => {
@@ -3321,16 +3532,22 @@ function CodeParameterPanel({
                       }
                     />
                   </label>
-                  <label className="code-field-label m-0">
+                  <div className="code-field-label m-0">
                     Control type
-                    <select
-                      className="code-field-control"
+                    <SelectField
+                      ariaLabel="Control type"
+                      size="sm"
                       value={parameter.type}
                       disabled={readOnly}
-                      onChange={(event) =>
+                      options={[
+                        { value: "number", label: "Number / slider" },
+                        { value: "text", label: "Text" },
+                        { value: "boolean", label: "Toggle" },
+                        { value: "select", label: "Choice" },
+                      ]}
+                      onChange={(next) =>
                         changeParameter(index, (draft) => {
-                          const type = event.target
-                            .value as CodeParameter["type"];
+                          const type = next as CodeParameter["type"];
                           draft.type = type;
                           if (type === "number") {
                             draft.value = 0;
@@ -3359,13 +3576,8 @@ function CodeParameterPanel({
                           }
                         })
                       }
-                    >
-                      <option value="number">Number / slider</option>
-                      <option value="text">Text</option>
-                      <option value="boolean">Toggle</option>
-                      <option value="select">Choice</option>
-                    </select>
-                  </label>
+                    />
+                  </div>
                   <button
                     type="button"
                     disabled={readOnly}
@@ -3528,25 +3740,24 @@ function CodeParameterPanel({
                     </label>
                   ) : parameter.type === "select" ? (
                     <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
-                      <label className="code-field-label m-0">
+                      <div className="code-field-label m-0">
                         Current choice
-                        <select
-                          className="code-field-control"
+                        <SelectField
+                          ariaLabel="Current choice"
+                          size="sm"
                           value={String(parameter.value)}
                           disabled={readOnly}
-                          onChange={(event) =>
+                          options={(parameter.options ?? []).map((option) => ({
+                            value: option,
+                            label: option,
+                          }))}
+                          onChange={(next) =>
                             changeParameter(index, (draft) => {
-                              draft.value = event.target.value;
+                              draft.value = next;
                             })
                           }
-                        >
-                          {(parameter.options ?? []).map((option) => (
-                            <option key={option} value={option}>
-                              {option}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
+                        />
+                      </div>
                       <label className="code-field-label m-0">
                         Options, separated by commas
                         <input
@@ -3934,25 +4145,24 @@ function CodeSettings({
             These settings affect the live artifact and its embedded
             representation.
           </p>
-          <label className="code-field-label">
+          <div className="code-field-label">
             Entry file
-            <select
+            <SelectField
+              ariaLabel="Entry file"
+              size="sm"
               value={content.entryFileId}
               disabled={readOnly}
-              onChange={(event) =>
+              options={content.files.map((file) => ({
+                value: file.id,
+                label: file.path,
+              }))}
+              onChange={(next) =>
                 onChange((draft) => {
-                  draft.entryFileId = event.target.value;
+                  draft.entryFileId = next;
                 })
               }
-              className="code-field-control"
-            >
-              {content.files.map((file) => (
-                <option key={file.id} value={file.id}>
-                  {file.path}
-                </option>
-              ))}
-            </select>
-          </label>
+            />
+          </div>
           <label className="mt-3 flex items-center justify-between gap-3 text-micro text-[var(--text-primary)]">
             <span>
               <strong className="block font-semibold">
@@ -4061,44 +4271,48 @@ function CodeSettings({
             />
           </label>
           <div className="grid gap-2 sm:grid-cols-2">
-            <label className="code-field-label">
+            <div className="code-field-label">
               Opens in
-              <select
+              <SelectField
+                ariaLabel="Opens in"
+                size="sm"
                 value={content.visualisation.openMode ?? "source"}
                 disabled={readOnly}
-                className="code-field-control"
-                onChange={(event) =>
+                options={[
+                  { value: "source", label: "Code" },
+                  { value: "preview", label: "Visualisation" },
+                  { value: "split", label: "Both" },
+                ]}
+                onChange={(next) =>
                   onChange((draft) => {
-                    draft.visualisation.openMode = event.target.value as
-                      "source" | "preview" | "split";
+                    draft.visualisation.openMode = next as
+                      | "source"
+                      | "preview"
+                      | "split";
                   })
                 }
-              >
-                <option value="source">Source workspace</option>
-                <option value="preview">Rendered experience</option>
-                <option value="split">Code and visualisation</option>
-              </select>
-            </label>
-            <label className="code-field-label">
+              />
+            </div>
+            <div className="code-field-label">
               Preferred aspect
-              <select
+              <SelectField
+                ariaLabel="Preferred aspect"
+                size="sm"
                 value={String(content.visualisation.aspectRatio ?? 1.7778)}
                 disabled={readOnly}
-                className="code-field-control"
-                onChange={(event) =>
+                options={[
+                  { value: "1.7778", label: "16:9 landscape" },
+                  { value: "1.3333", label: "4:3 standard" },
+                  { value: "1", label: "Square" },
+                  { value: "0.75", label: "Portrait" },
+                ]}
+                onChange={(next) =>
                   onChange((draft) => {
-                    draft.visualisation.aspectRatio = Number(
-                      event.target.value,
-                    );
+                    draft.visualisation.aspectRatio = Number(next);
                   })
                 }
-              >
-                <option value="1.7778">16:9 landscape</option>
-                <option value="1.3333">4:3 standard</option>
-                <option value="1">Square</option>
-                <option value="0.75">Portrait</option>
-              </select>
-            </label>
+              />
+            </div>
           </div>
         </section>
         <section
@@ -4849,21 +5063,18 @@ function CodeSettings({
             ) : null}
           </div>
           <div className="mt-3 grid gap-2 rounded-[9px] bg-[var(--bg-secondary)] p-3 sm:grid-cols-[minmax(0,1fr)_minmax(120px,.35fr)_auto]">
-            <select
+            <SelectField
+              ariaLabel="Artifact to bind"
+              size="sm"
+              placeholder="Choose accessible work"
               value={bindingArtifactId}
               disabled={readOnly}
-              className="code-field-control"
-              aria-label="Artifact to bind"
-              onChange={(event) => setBindingArtifactId(event.target.value)}
-            >
-              <option value="">Choose accessible work…</option>
-              {availableArtifacts.map((artifact) => (
-                <option key={artifact._id} value={artifact._id}>
-                  {artifact.title} ·{" "}
-                  {artifact.blueprintKey.replaceAll("_", " ")}
-                </option>
-              ))}
-            </select>
+              options={availableArtifacts.map((artifact) => ({
+                value: artifact._id,
+                label: `${artifact.title} · ${artifact.blueprintKey.replaceAll("_", " ")}`,
+              }))}
+              onChange={setBindingArtifactId}
+            />
             {selectedBindingArtifact?.blueprintKey === "sheets" ? (
               <input
                 value={bindingRange}
@@ -5224,7 +5435,10 @@ function ConfirmDialog({
   useEffect(() => {
     cancelRef.current?.focus();
   }, []);
-  return (
+  // Portaled to the body: the studio root is a query container, and layout
+  // containment makes it the containing block for fixed descendants, so a
+  // modal rendered in place would be clipped to the editor pane.
+  return createPortal(
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center bg-black/20 p-4 backdrop-blur-[2px]"
       role="dialog"
@@ -5292,6 +5506,7 @@ function ConfirmDialog({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

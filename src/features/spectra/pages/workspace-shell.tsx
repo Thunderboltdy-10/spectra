@@ -10,6 +10,7 @@ import {
   Atom,
   Brain,
   Calculator,
+  Download,
   ExternalLink,
   FileText,
   Files,
@@ -33,6 +34,7 @@ import {
   Sparkles,
   Sprout,
   Trash2,
+  Users,
   X,
   Presentation,
   Table2,
@@ -54,6 +56,8 @@ import {
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { useNow } from "@/hooks/use-now";
+import { describeFailure } from "@/components/ui/truthful-state";
+import { OverflowMenu } from "@/components/ui/dropdown-menu";
 import { useSpectraContextStore } from "@/stores/spectra-context-store";
 import { useSpectraRun } from "../ai/use-spectra-run";
 import { useSpectraContext } from "../hooks/use-spectra-context";
@@ -126,6 +130,7 @@ import {
   type SpectraWorkspaceItem,
 } from "../data/api";
 import type { ArtifactTypeKey } from "../artifacts/types";
+import { getWorkDefinition } from "../work/registry";
 import {
   readSharedWorkbenchSession,
   updateWorkbenchSurface,
@@ -468,21 +473,29 @@ function workspaceHubTab(
   };
 }
 
+// Icons here, names from `work/registry` — the same rule the cards follow, so
+// "New work" can never offer a type by a name the studio does not use.
 const createTypes: Array<{
   key: ArtifactTypeKey;
   label: string;
   icon: LucideIcon;
-}> = [
-  { key: "document", label: "Document", icon: FileText },
-  { key: "flashcard_deck", label: "Deck", icon: BookOpen },
-  { key: "quiz", label: "Quiz", icon: HelpCircle },
-  { key: "planner_task", label: "Task", icon: CalendarCheck2 },
-  { key: "agent", label: "Agent", icon: Bot },
-  { key: "presentation", label: "Presentation", icon: Presentation },
-  { key: "sheets", label: "Sheet", icon: Table2 },
-  { key: "code", label: "Code & visualisation", icon: Code2 },
-  { key: "whiteboard", label: "Whiteboard", icon: Workflow },
-];
+}> = (
+  [
+    ["document", FileText],
+    ["flashcard_deck", BookOpen],
+    ["quiz", HelpCircle],
+    ["planner_task", CalendarCheck2],
+    ["agent", Bot],
+    ["presentation", Presentation],
+    ["sheets", Table2],
+    ["code", Code2],
+    ["whiteboard", Workflow],
+  ] satisfies Array<[ArtifactTypeKey, LucideIcon]>
+).map(([key, icon]) => ({
+  key,
+  icon,
+  label: getWorkDefinition(key).userFacingName,
+}));
 
 const viewModes: Array<{ key: ViewMode; label: string; icon: LucideIcon }> = [
   { key: "list", label: "List", icon: List },
@@ -552,45 +565,19 @@ function WorkspaceHome({
   overview,
   onSelect,
   onOpenArtifact,
-  onOpenThread,
-  onAddArtifactToWorkspace,
   onMoveArtifactToWorkspace,
-  onMoveArtifactToInbox,
-  onCreateArtifact,
-  onDeleteArtifact,
   selectionMode,
-  selectedContextIds,
   selectedObjectKeys,
-  onToggleContext,
-  hideActivityRail = false,
-  activityRailCollapsed = false,
-  onToggleActivityRail,
 }: {
   overview: SpectraOverview | null;
   onSelect: (workspaceId: string) => void;
   onOpenArtifact: (artifact: SpectraArtifact) => void;
-  onOpenThread: (thread: SpectraThread) => void;
-  onAddArtifactToWorkspace: (
-    artifact: SpectraArtifact,
-    workspaceId: string,
-  ) => void;
   onMoveArtifactToWorkspace: (
     artifact: SpectraArtifact,
     workspaceId: string,
   ) => void;
-  onMoveArtifactToInbox: (artifact: SpectraArtifact) => void;
-  onCreateArtifact: (
-    blueprintKey: ArtifactTypeKey,
-    workspaceId?: string,
-  ) => void;
-  onDeleteArtifact: (artifact: SpectraArtifact) => void;
   selectionMode: boolean;
-  selectedContextIds: Set<string>;
   selectedObjectKeys: Set<string>;
-  onToggleContext: (artifact: SpectraArtifact) => void;
-  hideActivityRail?: boolean;
-  activityRailCollapsed?: boolean;
-  onToggleActivityRail?: () => void;
 }) {
   const selectedObjects = useSpectraContextStore(
     (state) => state.selectionDraft,
@@ -600,7 +587,7 @@ function WorkspaceHome({
   );
   const [pinnedOpen, setPinnedOpen] = useState(true);
   const [dropWorkspaceId, setDropWorkspaceId] = useState<string | null>(null);
-  const [homeThreads, setHomeThreads] = useState<SpectraThread[]>([]);
+  const router = useRouter();
   const now = useNow(60_000);
   useEffect(() => {
     setPinnedOpen(
@@ -610,24 +597,6 @@ function WorkspaceHome({
   useEffect(() => {
     window.localStorage.setItem("spectra.home.pinned.open", String(pinnedOpen));
   }, [pinnedOpen]);
-  useEffect(() => {
-    let cancelled = false;
-    const loadThreads = () => {
-      void getSpectraThreads({ limit: 200 })
-        .then((result) => {
-          if (!cancelled) setHomeThreads(result.threads);
-        })
-        .catch(() => {
-          if (!cancelled) setHomeThreads([]);
-        });
-    };
-    loadThreads();
-    window.addEventListener("spectra:threads-changed", loadThreads);
-    return () => {
-      cancelled = true;
-      window.removeEventListener("spectra:threads-changed", loadThreads);
-    };
-  }, []);
   const workspaces = overview?.workspaces ?? [];
   // Calendar owns timetable state. Preserve legacy timetable records for the
   // compatibility route, but keep them out of generic work listings and totals.
@@ -651,17 +620,7 @@ function WorkspaceHome({
       artifact,
     }))
     .sort((a, b) => b.time - a.time)
-    .slice(0, 6);
-  const visibleTags = Array.from(
-    new Set(artifacts.flatMap((artifact) => artifact.tags ?? [])),
-  ).slice(0, 8);
-  const metricCards: Array<{
-    label: string;
-    count: number;
-    delta: number;
-    icon: typeof FileText;
-    color: string;
-  }> = [];
+    .slice(0, 10);
 
   function artifactFromDrag(event: DragEvent<HTMLElement>) {
     const artifactId =
@@ -684,46 +643,9 @@ function WorkspaceHome({
   return (
     <main
       data-selection-count={selectedObjectKeys.size}
-      className="spectra-mission-control relative flex min-h-0 flex-1 flex-col overflow-y-auto xl:flex-row xl:overflow-hidden"
+      className="spectra-mission-control relative flex min-h-0 flex-1 flex-col overflow-y-auto"
     >
-      <div className="min-w-0 flex-1 px-6 pb-[170px] pt-6 sm:px-9 xl:h-full xl:overflow-y-auto">
-        <div className="hidden">
-          <div className="mt-6 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
-            {metricCards.map(
-              ({ label, count, delta, icon: MetricIcon, color }) => (
-                <div
-                  key={label}
-                  className="spectra-metric-card flex min-h-[80px] items-center gap-3 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3.5"
-                >
-                  <span
-                    className="spectra-metric-icon grid size-9 shrink-0 place-items-center rounded-[8px]"
-                    style={{
-                      background: `color-mix(in oklab, ${color} 11%, white)`,
-                      color,
-                    }}
-                  >
-                    <MetricIcon size={16} />
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block truncate text-[12px] text-[var(--text-secondary)]">
-                      {label}
-                    </span>
-                    <strong className="block font-sans text-[20px] font-normal leading-6 tracking-[-0.01em] text-[var(--text-primary)]">
-                      {count}
-                    </strong>
-                    <span className="spectra-metric-delta-full block truncate text-[11px] font-medium text-[var(--success)]">
-                      {delta ? `+${delta} this week` : "No change"}
-                    </span>
-                    <span className="spectra-metric-delta-short block truncate text-[11px] font-medium text-[var(--success)]">
-                      {delta ? `+${delta}` : "—"}
-                    </span>
-                  </span>
-                </div>
-              ),
-            )}
-          </div>
-        </div>
-
+      <div className="mx-auto w-full max-w-[1180px] min-w-0 flex-1 px-6 pb-[170px] pt-6 sm:px-9">
         <div>
           <h1 className="font-display text-[34px] font-semibold leading-[1.05] tracking-[-.025em] text-[var(--text-primary)]">
             Workspace
@@ -733,7 +655,7 @@ function WorkspaceHome({
           </p>
         </div>
 
-        <div className="spectra-workspace-home-grid mt-8">
+        <div className="mt-8">
           <section className="spectra-mission-control-workspaces">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-[12px] font-semibold text-[var(--text-primary)]">
@@ -911,250 +833,118 @@ function WorkspaceHome({
             </div>
           </section>
 
-          <div
-            id="spectra-mission-all-work"
-            className="spectra-mission-control-library mt-9 scroll-mt-6"
-          >
-            <ObjectLibrary
-              entries={[
-                ...artifacts.map((artifact) => ({ artifact })),
-                ...homeThreads.map((thread) => ({ thread })),
-              ]}
-              workspaces={workspaces}
-              groupBy="workspace"
-              title="All work"
-              subtitle="Work and conversations across your workspaces"
-              showHeader={false}
-              flatTable
-              showInbox={false}
-              onOpen={(entry) => {
-                if (entry.thread) onOpenThread(entry.thread);
-                else if (entry.artifact) onOpenArtifact(entry.artifact);
-              }}
-              onAddToWorkspace={(entry, workspaceId) => {
-                if (entry.artifact)
-                  onAddArtifactToWorkspace(entry.artifact, workspaceId);
-              }}
-              onMoveToWorkspace={(entry, workspaceId) => {
-                if (entry.artifact)
-                  onMoveArtifactToWorkspace(entry.artifact, workspaceId);
-              }}
-              onMoveToInbox={(entry) => {
-                if (entry.artifact) onMoveArtifactToInbox(entry.artifact);
-              }}
-              onCreateArtifact={onCreateArtifact}
-              onDelete={(entry) => {
-                if (entry.artifact) onDeleteArtifact(entry.artifact);
-              }}
-              selectionMode={selectionMode}
-              selectedContextIds={selectedContextIds}
-              onToggleContext={(entry) => {
-                if (entry.artifact) onToggleContext(entry.artifact);
-              }}
-            />
-          </div>
-        </div>
-      </div>
-
-      {hideActivityRail ? null : activityRailCollapsed ? (
-        onToggleActivityRail ? (
-          <button
-            type="button"
-            aria-label="Show recent activity"
-            title="Show recent activity"
-            onClick={onToggleActivityRail}
-            className="absolute right-3 top-3 z-10 flex h-8 w-8 items-center justify-center rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-primary)] text-[var(--text-tertiary)] shadow-[0_1px_4px_rgba(27,20,12,0.06)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-          >
-            <PanelRight className="h-3.5 w-3.5" />
-          </button>
-        ) : null
-      ) : (
-        <aside className="spectra-mission-control-rail w-full shrink-0 space-y-6 border-t border-[var(--border-default)] bg-[var(--mission-rail)] px-5 py-6 xl:h-full xl:w-[320px] xl:overflow-y-auto xl:border-l xl:border-t-0">
-          <section>
-            <div className="flex items-center justify-between px-1">
-              <h2 className="text-[13px] font-semibold text-[var(--text-primary)]">
-                Recent activity
-              </h2>
-              <div className="flex items-center gap-2">
+          {pinnedArtifacts.length ? (
+            <section className="mt-9">
+              <div className="flex items-center justify-between">
                 <button
                   type="button"
-                  className="text-[12px] font-medium text-[var(--text-tertiary)] transition hover:text-[var(--text-primary)]"
-                  onClick={() => {
-                    document
-                      .getElementById("spectra-mission-all-work")
-                      ?.scrollIntoView({ behavior: "smooth", block: "start" });
-                  }}
+                  onClick={() => setPinnedOpen((open) => !open)}
+                  aria-expanded={pinnedOpen}
+                  className="group flex items-center gap-1.5 text-[12px] font-semibold text-[var(--text-primary)]"
                 >
-                  View all
+                  <ChevronDown
+                    className={`h-3.5 w-3.5 text-[var(--text-tertiary)] transition-transform ${pinnedOpen ? "" : "-rotate-90"}`}
+                    aria-hidden="true"
+                  />
+                  Pinned
+                  <span className="font-normal text-[var(--text-tertiary)]">
+                    {pinnedArtifacts.length}
+                  </span>
                 </button>
-                {onToggleActivityRail ? (
-                  <button
-                    type="button"
-                    aria-label="Hide recent activity"
-                    title="Hide recent activity"
-                    onClick={onToggleActivityRail}
-                    className="flex h-7 w-7 items-center justify-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-                  >
-                    <PanelRightClose className="h-3.5 w-3.5" />
-                  </button>
-                ) : null}
               </div>
-            </div>
-            <div className="mt-2 grid gap-0.5">
-              {activity.map((entry) => {
-                const meta = blueprintMeta[entry.artifact.blueprintKey];
-                const ActivityIcon = meta.icon;
-                return (
-                  <button
-                    key={entry.id}
-                    type="button"
-                    className="flex min-h-10 w-full items-start gap-2.5 rounded-[7px] px-1.5 py-1.5 text-left hover:bg-[var(--bg-hover)]"
-                    onClick={() => onOpenArtifact(entry.artifact)}
-                  >
-                    <span
-                      className="mt-0.5 grid size-5.5 shrink-0 place-items-center rounded-[6px]"
-                      style={{
-                        background: `color-mix(in oklab, ${meta.color} 10%, var(--bg-elevated))`,
-                        color: meta.color,
-                      }}
-                    >
-                      <ActivityIcon size={12} />
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-[12px] font-semibold text-[var(--text-primary)]">
-                        {entry.title}
-                      </div>
-                      <div className="mt-px text-[11px] text-[var(--text-secondary)]">
-                        You {entry.detail.toLowerCase()}{" "}
-                        {meta.label
-                          ? `a ${meta.label.toLowerCase()}`
-                          : "a work item"}
-                      </div>
-                    </div>
-                    <span className="mt-0.5 shrink-0 text-[11px] tabular-nums text-[var(--text-tertiary)]">
-                      {formatRelativeTime(entry.time)}
-                    </span>
-                  </button>
-                );
-              })}
-              {activity.length === 0 ? (
-                <div className="px-1.5 text-micro text-[var(--text-secondary)]">
-                  No activity yet.
+              {pinnedOpen ? (
+                <div className="mt-2 grid gap-0.5 md:grid-cols-2 xl:grid-cols-3">
+                  {pinnedArtifacts.map((artifact) => {
+                    const meta = blueprintMeta[artifact.blueprintKey];
+                    const ArtifactIcon = meta.icon;
+                    return (
+                      <button
+                        type="button"
+                        key={artifact._id}
+                        onClick={() => onOpenArtifact(artifact)}
+                        className="flex min-h-9 w-full items-center gap-2.5 rounded-[7px] px-1.5 py-1.5 text-left hover:bg-[var(--bg-hover)]"
+                      >
+                        <span
+                          className="grid size-5.5 shrink-0 place-items-center rounded-[6px]"
+                          style={{
+                            background: `color-mix(in oklab, ${meta.color} 10%, var(--bg-elevated))`,
+                            color: meta.color,
+                          }}
+                        >
+                          <ArtifactIcon size={12} />
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-[var(--text-primary)]">
+                          {artifact.title}
+                        </span>
+                        <span className="shrink-0 text-[11px] text-[var(--text-tertiary)]">
+                          {meta.label}
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
               ) : null}
+            </section>
+          ) : null}
+
+          <section className="mt-9">
+            <div className="mb-2 flex items-center justify-between">
+              <h2 className="text-[12px] font-semibold text-[var(--text-primary)]">
+                Recent activity
+              </h2>
+              <button
+                type="button"
+                className="text-[12px] font-medium text-[var(--text-tertiary)] transition hover:text-[var(--text-primary)]"
+                onClick={() => router.push("/artifacts")}
+              >
+                View all work
+              </button>
             </div>
-          </section>
-          {pinnedArtifacts.length ? (
-            <section>
-              <div className="flex items-center justify-between px-1">
-                <h2 className="text-[13px] font-semibold text-[var(--text-primary)]">
-                  Pinned
-                </h2>
-                <button
-                  type="button"
-                  className="text-[12px] font-medium text-[var(--text-tertiary)] transition hover:text-[var(--text-primary)]"
-                  onClick={() => {
-                    document
-                      .getElementById("spectra-mission-all-work")
-                      ?.scrollIntoView({ behavior: "smooth", block: "start" });
-                    const firstPinned = pinnedArtifacts[0];
-                    if (firstPinned) onOpenArtifact(firstPinned);
-                  }}
-                >
-                  Manage
-                </button>
-              </div>
-              <div className="mt-2 space-y-0.5">
-                {pinnedArtifacts.slice(0, 4).map((artifact) => {
-                  const meta = blueprintMeta[artifact.blueprintKey];
-                  const ArtifactIcon = meta.icon;
+            {activity.length ? (
+              <div className="grid gap-0.5 md:grid-cols-2">
+                {activity.map((entry) => {
+                  const meta = blueprintMeta[entry.artifact.blueprintKey];
+                  const ActivityIcon = meta.icon;
                   return (
                     <button
+                      key={entry.id}
                       type="button"
-                      key={artifact._id}
-                      onClick={() => onOpenArtifact(artifact)}
-                      className="flex w-full items-center gap-2.5 rounded-[7px] px-1.5 py-1.5 text-left hover:bg-[var(--bg-hover)]"
+                      className="flex min-h-10 w-full items-start gap-2.5 rounded-[7px] px-1.5 py-1.5 text-left hover:bg-[var(--bg-hover)]"
+                      onClick={() => onOpenArtifact(entry.artifact)}
                     >
                       <span
-                        className="grid size-5.5 shrink-0 place-items-center rounded-[6px]"
+                        className="mt-0.5 grid size-5.5 shrink-0 place-items-center rounded-[6px]"
                         style={{
                           background: `color-mix(in oklab, ${meta.color} 10%, var(--bg-elevated))`,
                           color: meta.color,
                         }}
                       >
-                        <ArtifactIcon size={12} />
+                        <ActivityIcon size={12} />
                       </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[12px] font-semibold text-[var(--text-primary)]">
-                          {artifact.title}
-                        </span>
-                        <span className="block text-[11px] text-[var(--text-tertiary)]">
-                          {meta.label}
-                        </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-[12px] font-medium text-[var(--text-primary)]">
+                          {entry.title}
+                        </div>
+                        <div className="mt-px text-[11px] text-[var(--text-secondary)]">
+                          {entry.detail}{" "}
+                          {meta.label ? meta.label.toLowerCase() : "work item"}
+                        </div>
+                      </div>
+                      <span className="mt-0.5 shrink-0 text-[11px] tabular-nums text-[var(--text-tertiary)]">
+                        {formatRelativeTime(entry.time)}
                       </span>
                     </button>
                   );
                 })}
               </div>
-            </section>
-          ) : null}
-          <section>
-            <div className="flex items-center justify-between px-1">
-              <h2 className="text-[13px] font-semibold text-[var(--text-primary)]">
-                Tags
-              </h2>
-              <button
-                type="button"
-                className="text-[12px] font-medium text-[var(--text-tertiary)] transition hover:text-[var(--text-primary)]"
-                onClick={() => {
-                  document
-                    .getElementById("spectra-mission-all-work")
-                    ?.scrollIntoView({ behavior: "smooth", block: "start" });
-                }}
-              >
-                Manage
-              </button>
-            </div>
-            <div className="mt-2 flex flex-wrap gap-1.5 px-1">
-              {visibleTags.length ? (
-                visibleTags.map((tag) => (
-                  <span
-                    key={tag}
-                    className="rounded-[6px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-2 py-1 text-[11px] font-medium text-[var(--text-secondary)]"
-                  >
-                    {tag}
-                  </span>
-                ))
-              ) : (
-                <span className="text-[12px] text-[var(--text-tertiary)]">
-                  Tags appear as you organise work.
-                </span>
-              )}
-            </div>
+            ) : (
+              <p className="text-[12px] text-[var(--text-secondary)]">
+                Nothing has changed yet. Work you create or edit shows up here.
+              </p>
+            )}
           </section>
-          <section>
-            <h2 className="px-1 text-[13px] font-semibold text-[var(--text-primary)]">
-              Quick actions
-            </h2>
-            <div className="mt-2 space-y-0.5">
-              {createTypes.map(({ key, label, icon: QuickIcon }) => (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => onCreateArtifact(key)}
-                  className="flex h-9 w-full items-center gap-2.5 rounded-[8px] px-1.5 text-[13px] font-medium text-[var(--text-secondary)] transition hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-                >
-                  <QuickIcon
-                    size={14}
-                    className="text-[var(--text-tertiary)]"
-                  />
-                  New {label.toLowerCase()}
-                </button>
-              ))}
-            </div>
-          </section>
-        </aside>
-      )}
+        </div>
+      </div>
     </main>
   );
 }
@@ -1165,28 +955,28 @@ function WorkspaceHeader({
   runs,
   optimisticActive,
   optimisticRunId,
-  viewMode,
   busy,
+  scope,
+  onScopeChange,
   onCreateArtifact,
   onEditWorkspace,
   onShareWorkspace,
-  onExportWorkspace: _onExportWorkspace,
-  onArchiveWorkspace: _onArchiveWorkspace,
-  onViewModeChange,
+  onExportWorkspace,
+  onArchiveWorkspace,
 }: {
   workspace: SpectraWorkspace | null;
   items: SpectraWorkspaceItem[];
   runs: SpectraRun[];
   optimisticActive?: boolean;
   optimisticRunId?: string;
-  viewMode: ViewMode;
   busy: string | null;
+  scope: "all" | WorkspaceObjectType;
+  onScopeChange: (scope: "all" | WorkspaceObjectType) => void;
   onCreateArtifact: (type: ArtifactTypeKey) => void;
   onEditWorkspace: () => void;
   onShareWorkspace: () => void;
   onExportWorkspace: () => void;
   onArchiveWorkspace: () => void;
-  onViewModeChange: (view: ViewMode) => void;
 }) {
   const [createOpen, setCreateOpen] = useState(false);
   const createRef = useOutsideClick<HTMLDivElement>(createOpen, () =>
@@ -1208,8 +998,17 @@ function WorkspaceHeader({
     (!optimisticRunId || !runs.some((run) => run._id === optimisticRunId))
       ? 1
       : 0);
-  const primaryLabel =
-    viewMode === "list" ? "Library" : viewMode === "board" ? "Board" : "Canvas";
+  // The workspace's horizontal nav navigates the workspace's own work. It
+  // carries only scopes that exist in the data, and each one is driven by the
+  // same type filter the toolbar uses, so the two can never disagree.
+  const scopes: Array<{
+    key: "all" | WorkspaceObjectType;
+    label: string;
+    count: number;
+  }> = [
+    { key: "all", label: "All work", count: artifactCount },
+    { key: "thread", label: "Threads", count: threadCount },
+  ];
 
   return (
     <header
@@ -1232,14 +1031,6 @@ function WorkspaceHeader({
                   aria-label="Shared workspace"
                 />
               ) : null}
-              <button
-                type="button"
-                onClick={onEditWorkspace}
-                aria-label="Favorite workspace"
-                className="grid size-7 place-items-center rounded-[6px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-              >
-                <Sparkles className="size-3.5" />
-              </button>
             </div>
             <p className="mt-1.5 max-w-[52ch] text-[14px] leading-relaxed text-[var(--text-secondary)]">
               {workspace?.description ?? "All your work, organized and ready."}
@@ -1289,48 +1080,64 @@ function WorkspaceHeader({
               </div>
             ) : null}
           </div>
+          {/* People and Settings are compact disclosing actions, not sections:
+              they open a dialog, so they do not belong in the work nav. */}
           <button
             type="button"
-            onClick={onEditWorkspace}
-            aria-label="Workspace settings"
-            title="Workspace settings"
-            className="grid size-9 place-items-center rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
+            onClick={onShareWorkspace}
+            className="flex h-9 items-center gap-2 rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-3 text-[12px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
           >
-            <PencilLine className="size-4" />
+            <Users className="size-3.5 text-[var(--text-secondary)]" />
+            People
+            {workspace?.sharedWithCount ? (
+              <span className="tabular-nums text-[var(--text-secondary)]">
+                {workspace.sharedWithCount}
+              </span>
+            ) : null}
           </button>
+          <OverflowMenu
+            label="More workspace actions"
+            items={[
+              {
+                key: "settings",
+                label: "Workspace settings",
+                icon: PencilLine,
+              },
+              { key: "export", label: "Export workspace", icon: Download },
+              { key: "archive", label: "Archive workspace", icon: Trash2 },
+            ]}
+            onSelect={(key) => {
+              if (key === "settings") onEditWorkspace();
+              else if (key === "export") onExportWorkspace();
+              else if (key === "archive") onArchiveWorkspace();
+            }}
+            size={36}
+          />
         </div>
       </div>
       <nav
-        className="mt-2 flex min-w-0 items-center gap-7 overflow-x-auto"
-        aria-label="Workspace sections"
+        className="mt-2 flex min-w-0 items-center gap-6"
+        aria-label="Workspace work"
       >
-        <button
-          type="button"
-          className="relative h-11 shrink-0 text-[13px] font-semibold text-[var(--brand-primary)] after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:rounded-full after:bg-[var(--brand-primary)]"
-          onClick={() => onViewModeChange(viewMode)}
-          aria-current="page"
-        >
-          {primaryLabel}
-        </button>
-        <button
-          type="button"
-          className="flex h-11 shrink-0 items-center gap-1.5 text-[13px] font-medium text-[var(--text-secondary)] transition hover:text-[var(--text-primary)]"
-          onClick={onShareWorkspace}
-        >
-          People
-          {workspace?.sharedWithCount ? (
-            <span className="rounded-full bg-[color-mix(in_oklab,var(--accent-violet)_12%,var(--bg-secondary))] px-1.5 py-0.5 text-[11px] text-[var(--accent-violet)]">
-              {workspace.sharedWithCount}
-            </span>
-          ) : null}
-        </button>
-        <button
-          type="button"
-          className="h-10 shrink-0 text-[12px] font-medium text-[var(--text-secondary)] transition hover:text-[var(--text-primary)]"
-          onClick={onEditWorkspace}
-        >
-          Settings
-        </button>
+        {scopes.map((item) => {
+          const current = scope === item.key;
+          return (
+            <button
+              key={item.key}
+              type="button"
+              onClick={() => onScopeChange(item.key)}
+              aria-current={current ? "page" : undefined}
+              className={`relative flex h-11 shrink-0 items-center gap-1.5 text-[13px] transition ${current ? "font-semibold text-[var(--text-primary)] after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:rounded-full after:bg-[var(--text-primary)]" : "font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)]"}`}
+            >
+              {item.label}
+              {item.count ? (
+                <span className="tabular-nums text-[var(--text-tertiary)]">
+                  {item.count}
+                </span>
+              ) : null}
+            </button>
+          );
+        })}
       </nav>
     </header>
   );
@@ -2717,51 +2524,24 @@ function EmptyWorkspaceState({
 }
 
 function Inspector({
-  workspace,
   artifacts,
-  workspaceArtifacts,
   selectedArtifact,
   selectedRun,
-  runs,
   onClose,
   onHide,
-  onCreateArtifact,
-  onArchiveWorkspace,
   onOpenArtifact,
-  collapsed = false,
-  onToggleCollapsed,
 }: {
-  workspace: SpectraWorkspace | null;
   artifacts: SpectraArtifact[];
-  workspaceArtifacts?: SpectraArtifact[];
   selectedArtifact: SpectraArtifact | null;
   selectedRun: SpectraRun | null;
-  runs: SpectraRun[];
   onClose: () => void;
   onHide: () => void;
-  onCreateArtifact: (type: ArtifactTypeKey) => void;
-  onArchiveWorkspace: () => void;
   onOpenArtifact: (artifact: SpectraArtifact) => void;
-  collapsed?: boolean;
-  onToggleCollapsed?: () => void;
 }) {
-  if (collapsed) {
-    // Fully free the main column — no residual right rail. The reopen control
-    // is rendered by the parent as an overlay when details are hidden.
-    return null;
-  }
-
-  const collapseControl = onToggleCollapsed ? (
-    <button
-      type="button"
-      aria-label="Hide details panel"
-      title="Hide details panel"
-      onClick={onToggleCollapsed}
-      className="flex h-7 w-7 items-center justify-center rounded-[6px] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)]"
-    >
-      <PanelRightClose className="h-3.5 w-3.5" />
-    </button>
-  ) : null;
+  // D7: a specific workspace has no permanent right details/activity column.
+  // This panel is selection-driven only — it appears for a selected run or a
+  // selected work item, and closing it returns the full width to the work.
+  if (!selectedRun && !selectedArtifact) return null;
 
   if (selectedRun) {
     const affected =
@@ -2769,11 +2549,7 @@ function Inspector({
       null;
     return (
       <aside className="hidden w-[318px] shrink-0 border-l border-[var(--border-default)] bg-[var(--bg-primary)] px-5 py-6 xl:block">
-        <InspectorTitle
-          title="Selected run"
-          onClose={onClose}
-          trailing={collapseControl}
-        />
+        <InspectorTitle title="Selected run" onClose={onClose} />
         <div className="mt-5 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] p-4">
           <div className="flex items-center justify-between text-[12px] text-[var(--text-secondary)]">
             <span>{formatShortDate(selectedRun.createdAt)}</span>
@@ -2805,11 +2581,7 @@ function Inspector({
     const selectedPlacements = artifactPlacements(selectedArtifact);
     return (
       <aside className="hidden w-[318px] shrink-0 border-l border-[var(--border-default)] bg-[var(--bg-primary)] px-5 py-6 xl:block">
-        <InspectorTitle
-          title="Selected work"
-          onClose={onClose}
-          trailing={collapseControl}
-        />
+        <InspectorTitle title="Selected work" onClose={onClose} />
         <WorkbenchInspectorTabs
           work={selectedArtifact}
           overview={
@@ -2868,9 +2640,8 @@ function Inspector({
                   ))}
                   {selectedPlacements.length === 0 ? (
                     <div className="rounded-[8px] border border-dashed border-[var(--border-default)] p-3 text-[11px] leading-5 text-[var(--text-secondary)]">
-                      This work is unplaced. Add it to{" "}
-                      {workspace?.title ?? "a workspace"} to keep it near
-                      related context.
+                      This work is unplaced. Add it to a workspace to keep it
+                      near related context.
                     </div>
                   ) : null}
                 </div>
@@ -2916,188 +2687,7 @@ function Inspector({
     );
   }
 
-  const scopedWorkspaceArtifacts =
-    workspaceArtifacts ??
-    artifacts.filter(
-      (artifact) =>
-        !workspace ||
-        artifactPlacements(artifact).some(
-          (placement) => placement.workspaceId === workspace._id,
-        ),
-    );
-  const recentActivity = [...scopedWorkspaceArtifacts]
-    .sort((a, b) => b.updatedAt - a.updatedAt)
-    .slice(0, 5);
-  const workspaceTags = Array.from(
-    new Set(
-      scopedWorkspaceArtifacts.flatMap((artifact) => artifact.tags ?? []),
-    ),
-  ).slice(0, 12);
-  const activeRuns = runs.filter(
-    (run) => run.status === "queued" || run.status === "running",
-  ).length;
-  const sharedWithCount = workspace?.sharedWithCount ?? 0;
-  const workspaceSources = Array.from(
-    new Set(
-      scopedWorkspaceArtifacts.flatMap((work) => [
-        ...(work.createdFrom?.sourceAttachmentNames ?? []),
-        ...(work.createdFrom?.source
-          ? [work.createdFrom.source.replaceAll("_", " ")]
-          : []),
-      ]),
-    ),
-  ).slice(0, 8);
-
-  return (
-    <aside className="hidden w-[320px] shrink-0 border-l border-[var(--border-default)] bg-[var(--bg-primary)] px-5 py-6 xl:block">
-      <div className="flex items-center justify-between gap-2">
-        <h2 className="text-[14px] font-semibold text-[var(--text-primary)]">
-          {workspace?.title ?? "Workspace"} details
-        </h2>
-        <div className="flex items-center gap-1.5">{collapseControl}</div>
-      </div>
-
-      <section className="mt-5 space-y-3 text-[13px]">
-        {workspace?.description ? (
-          <p className="leading-5 text-[var(--text-secondary)]">
-            {workspace.description}
-          </p>
-        ) : null}
-        <MetricRow
-          label="Created"
-          value={workspace ? formatShortDate(workspace.createdAt) : "—"}
-        />
-        {sharedWithCount > 0 ? (
-          <MetricRow label="Shared with" value={String(sharedWithCount)} />
-        ) : null}
-        <MetricRow
-          label="Work"
-          value={String(scopedWorkspaceArtifacts.length)}
-        />
-        <MetricRow label="Active runs" value={String(activeRuns)} />
-      </section>
-
-      <InspectorSection title="Recent activity">
-        <div className="space-y-1">
-          {recentActivity.map((artifact) => {
-            const meta = blueprintMeta[artifact.blueprintKey];
-            return (
-              <button
-                key={artifact._id}
-                type="button"
-                className="flex w-full items-start gap-2.5 rounded-[8px] px-1.5 py-1.5 text-left transition hover:bg-[var(--bg-hover)]"
-                onClick={() => onOpenArtifact(artifact)}
-              >
-                <span className="mt-0.5 min-w-0 flex-1">
-                  <span className="block truncate text-[12px] font-medium text-[var(--text-primary)]">
-                    {artifact.title}
-                  </span>
-                  <span className="block text-[11px] text-[var(--text-tertiary)]">
-                    {meta.label} · updated{" "}
-                    {formatRelativeTime(artifact.updatedAt)}
-                  </span>
-                </span>
-              </button>
-            );
-          })}
-          {recentActivity.length === 0 ? (
-            <p className="text-[13px] text-[var(--text-secondary)]">
-              No activity yet.
-            </p>
-          ) : null}
-        </div>
-      </InspectorSection>
-
-      <InspectorSection title="People and access">
-        <MetricRow
-          label="Your access"
-          value={workspace?.accessLevel === "read" ? "Read-only" : "Edit"}
-        />
-        <MetricRow label="Collaborators" value={String(sharedWithCount)} />
-        <MetricRow
-          label="Sharing"
-          value={workspace?.isShared ? "Shared" : "Private"}
-        />
-      </InspectorSection>
-
-      <InspectorSection title="Workspace context and sources">
-        <p className="text-[11px] leading-5 text-[var(--text-secondary)]">
-          {workspace?.description ||
-            "Add a description to give people and Spectra durable workspace context."}
-        </p>
-        <div className="mt-2 space-y-1">
-          {workspaceSources.map((source) => (
-            <div
-              key={source}
-              className="truncate rounded-[6px] bg-[var(--bg-secondary)] px-2 py-1.5 text-micro text-[var(--text-secondary)]"
-            >
-              {source}
-            </div>
-          ))}
-          {workspaceSources.length === 0 ? (
-            <p className="text-micro text-[var(--text-tertiary)]">
-              No workspace sources attached yet.
-            </p>
-          ) : null}
-        </div>
-      </InspectorSection>
-
-      <InspectorSection title="Arrangement">
-        <p className="text-[11px] leading-5 text-[var(--text-secondary)]">
-          Pinned work, the current view, split ratios, tabs, and inspector state
-          are preserved for this workbench.
-        </p>
-      </InspectorSection>
-
-      {workspaceTags.length ? (
-        <InspectorSection title="Tags">
-          <div className="flex flex-wrap gap-1.5">
-            {workspaceTags.map((tag) => (
-              <span
-                key={tag}
-                className="rounded-[6px] border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-2 py-1 text-[11px] font-medium text-[var(--text-secondary)]"
-              >
-                {tag}
-              </span>
-            ))}
-          </div>
-        </InspectorSection>
-      ) : null}
-
-      <InspectorSection title="Quick actions">
-        <ActionRow
-          icon={FileText}
-          label="New document"
-          onClick={() => onCreateArtifact("document")}
-        />
-        <ActionRow
-          icon={HelpCircle}
-          label="New quiz"
-          onClick={() => onCreateArtifact("quiz")}
-        />
-        <ActionRow
-          icon={BookOpen}
-          label="New deck"
-          onClick={() => onCreateArtifact("flashcard_deck")}
-        />
-        <ActionRow
-          icon={CalendarCheck2}
-          label="New task"
-          onClick={() => onCreateArtifact("planner_task")}
-        />
-        {workspace ? (
-          <button
-            type="button"
-            className={smallButtonClass("danger")}
-            onClick={onArchiveWorkspace}
-          >
-            <Trash2 className="h-4 w-4" />
-            Archive workspace
-          </button>
-        ) : null}
-      </InspectorSection>
-    </aside>
-  );
+  return null;
 }
 
 function InspectorTitle({
@@ -3312,8 +2902,6 @@ export function WorkspaceShell({
     "workspace-home-default",
   );
   const [hubTabsRestored, setHubTabsRestored] = useState(false);
-  const [homeActivityRailCollapsed, setHomeActivityRailCollapsed] =
-    useState(false);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
   const [navCursor, setNavCursor] = useState(-1);
   const navStackRef = useRef<
@@ -3402,9 +2990,9 @@ export function WorkspaceShell({
       } catch (error) {
         if (sequence !== overviewRequestSequence.current) return null;
         toast.error(
-          error instanceof Error
-            ? error.message
-            : "Could not load Spectra workspace.",
+          describeFailure(error, {
+            fallback: "Could not load Spectra workspace.",
+          }).message,
         );
         if (workspaceId) {
           setSelectedWorkspaceId(undefined);
@@ -3471,8 +3059,9 @@ export function WorkspaceShell({
         if (sequence !== workspaceRequestSequence.current) return;
         setSelectedWorkspaceId(undefined);
         setSelection(null);
-        const message =
-          error instanceof Error ? error.message : "Could not load workspace.";
+        const message = describeFailure(error, {
+          fallback: "Could not load workspace.",
+        }).message;
         toast.error(
           message.includes("Workspace not found")
             ? "That workspace is no longer available. Refreshed workspace home."
@@ -3538,10 +3127,6 @@ export function WorkspaceShell({
   }, [activeHubTabId, hubTabsRestored, selectedWorkspaceId]);
   useEffect(() => {
     try {
-      setHomeActivityRailCollapsed(
-        window.localStorage.getItem("spectra.home.activityRail.collapsed") ===
-          "true",
-      );
       setInspectorCollapsed(
         window.localStorage.getItem("spectra.workspace.inspector.collapsed") ===
           "true",
@@ -3550,12 +3135,6 @@ export function WorkspaceShell({
       /* ignore */
     }
   }, []);
-  useEffect(() => {
-    window.localStorage.setItem(
-      "spectra.home.activityRail.collapsed",
-      String(homeActivityRailCollapsed),
-    );
-  }, [homeActivityRailCollapsed]);
   useEffect(() => {
     window.localStorage.setItem(
       "spectra.workspace.inspector.collapsed",
@@ -4504,7 +4083,8 @@ export function WorkspaceShell({
       setActiveRunPanelId(runId, title);
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : `Could not open ${title}.`,
+        describeFailure(error, { fallback: `Could not open ${title}.` })
+          .message,
       );
     }
   }
@@ -4973,9 +4553,9 @@ export function WorkspaceShell({
       }
     } catch (error) {
       toast.error(
-        error instanceof Error
-          ? error.message
-          : `Could not create ${label.toLowerCase()}.`,
+        describeFailure(error, {
+          fallback: `Could not create ${label.toLowerCase()}.`,
+        }).message,
       );
     } finally {
       setBusyKey(null);
@@ -4994,7 +4574,8 @@ export function WorkspaceShell({
       await loadOverview(selectedWorkspaceId, true);
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : "Could not archive artifact.",
+        describeFailure(error, { fallback: "Could not archive artifact." })
+          .message,
       );
     } finally {
       setBusyKey(null);
@@ -5018,7 +4599,8 @@ export function WorkspaceShell({
       await loadOverview(selectedWorkspaceId, true);
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : "Could not delete artifact.",
+        describeFailure(error, { fallback: "Could not delete artifact." })
+          .message,
       );
     } finally {
       setBusyKey(null);
@@ -5053,9 +4635,8 @@ export function WorkspaceShell({
     } catch (error) {
       setOverview(previousOverview);
       toast.error(
-        error instanceof Error
-          ? error.message
-          : "Could not remove workspace card.",
+        describeFailure(error, { fallback: "Could not remove workspace card." })
+          .message,
       );
     } finally {
       setBusyKey(null);
@@ -5078,9 +4659,9 @@ export function WorkspaceShell({
         await loadWorkspace(workspaceId, true);
     } catch (error) {
       toast.error(
-        error instanceof Error
-          ? error.message
-          : "Could not add object to workspace.",
+        describeFailure(error, {
+          fallback: "Could not add object to workspace.",
+        }).message,
       );
     } finally {
       setBusyKey(null);
@@ -5103,7 +4684,7 @@ export function WorkspaceShell({
       else await loadOverview(undefined, true);
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : "Could not move object.",
+        describeFailure(error, { fallback: "Could not move object." }).message,
       );
     } finally {
       setBusyKey(null);
@@ -5122,9 +4703,8 @@ export function WorkspaceShell({
       else await loadOverview(undefined, true);
     } catch (error) {
       toast.error(
-        error instanceof Error
-          ? error.message
-          : "Could not move object to Inbox.",
+        describeFailure(error, { fallback: "Could not move object to Inbox." })
+          .message,
       );
     } finally {
       setBusyKey(null);
@@ -5142,7 +4722,7 @@ export function WorkspaceShell({
       if (selectedWorkspaceId) await loadWorkspace(selectedWorkspaceId, true);
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : "Could not update pin.",
+        describeFailure(error, { fallback: "Could not update pin." }).message,
       );
     } finally {
       setBusyKey(null);
@@ -5171,7 +4751,8 @@ export function WorkspaceShell({
       await loadOverview(result.workspaceId);
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : "Could not create workspace.",
+        describeFailure(error, { fallback: "Could not create workspace." })
+          .message,
       );
     } finally {
       setBusyKey(null);
@@ -5231,9 +4812,9 @@ export function WorkspaceShell({
       toast.error(
         error instanceof SyntaxError
           ? "This file is not valid JSON and has been left unchanged."
-          : error instanceof Error
-            ? error.message
-            : "Could not import this workspace.",
+          : describeFailure(error, {
+              fallback: "Could not import this workspace.",
+            }).message,
       );
     } finally {
       setBusyKey(null);
@@ -5270,7 +4851,8 @@ export function WorkspaceShell({
       );
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : "Could not export workspace.",
+        describeFailure(error, { fallback: "Could not export workspace." })
+          .message,
       );
     } finally {
       setBusyKey(null);
@@ -5300,7 +4882,8 @@ export function WorkspaceShell({
       await loadOverview(workspaceHeader._id, true);
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : "Could not update workspace.",
+        describeFailure(error, { fallback: "Could not update workspace." })
+          .message,
       );
     } finally {
       setBusyKey(null);
@@ -5327,7 +4910,8 @@ export function WorkspaceShell({
       await loadOverview(undefined, true);
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : "Could not delete workspace.",
+        describeFailure(error, { fallback: "Could not delete workspace." })
+          .message,
       );
     } finally {
       setBusyKey(null);
@@ -5386,6 +4970,7 @@ export function WorkspaceShell({
           }
           onGoBack={navigateShellBack}
           onGoForward={navigateShellForward}
+          persistent
         />
         <div className="spectra-workbench-frame relative flex min-h-0 flex-1">
           {pendingCreateType ? (
@@ -5799,36 +5384,11 @@ export function WorkspaceShell({
                 overview={overview ? { ...overview, workspaces } : overview}
                 onSelect={goToWorkspaceHub}
                 onOpenArtifact={openArtifactPanel}
-                onOpenThread={openThreadPanel}
-                onAddArtifactToWorkspace={(artifact, workspaceId) =>
-                  void addArtifactToWorkspace(artifact, workspaceId)
-                }
                 onMoveArtifactToWorkspace={(artifact, workspaceId) =>
                   void moveArtifactToWorkspace(artifact, workspaceId)
                 }
-                onMoveArtifactToInbox={(artifact) =>
-                  void moveArtifactToInbox(artifact)
-                }
-                onCreateArtifact={(blueprintKey, workspaceId) =>
-                  workspaceId
-                    ? void createArtifact(
-                        createDefaultArtifactPayload(blueprintKey),
-                        workspaceId,
-                      )
-                    : openCreateArtifact(blueprintKey)
-                }
-                onDeleteArtifact={(artifact) =>
-                  void permanentlyDeleteArtifact(artifact)
-                }
                 selectionMode={multiSelectMode}
-                selectedContextIds={selectedContextIds}
                 selectedObjectKeys={selectedObjectKeys}
-                onToggleContext={toggleContextArtifact}
-                hideActivityRail={studio.isOpen}
-                activityRailCollapsed={homeActivityRailCollapsed}
-                onToggleActivityRail={() =>
-                  setHomeActivityRailCollapsed((value) => !value)
-                }
               />
               {studio.mode === "split" && studio.activeArtifact ? (
                 <ArtifactStudio
@@ -5898,13 +5458,13 @@ export function WorkspaceShell({
                       runEngine.liveExchange.status !== "failed",
                     )}
                     optimisticRunId={runEngine.liveExchange?.runId}
-                    viewMode={viewMode}
                     busy={busyKey}
+                    scope={workspaceType}
+                    onScopeChange={setWorkspaceType}
                     onCreateArtifact={openCreateArtifact}
                     onEditWorkspace={openWorkspaceEdit}
                     onShareWorkspace={() => setWorkspaceShareOpen(true)}
                     onExportWorkspace={() => void exportWorkspaceManifest()}
-                    onViewModeChange={setViewMode}
                     onArchiveWorkspace={() => {
                       setWorkspaceDeleteConfirmation("");
                       setWorkspaceDeleteOpen(true);
@@ -6093,44 +5653,17 @@ export function WorkspaceShell({
                 {!studio.isOpen &&
                 !liveThread &&
                 tiledArtifacts.length === 0 ? (
-                  <>
-                    <Inspector
-                      workspace={workspace}
-                      artifacts={allArtifacts}
-                      workspaceArtifacts={entries.flatMap((entry) =>
-                        entry.artifact ? [entry.artifact] : [],
-                      )}
-                      selectedArtifact={selectedArtifact}
-                      selectedRun={selectedRun}
-                      runs={workspaceRuns}
-                      onClose={() => setSelection(null)}
-                      onHide={() => {
-                        if (selection?.type === "artifact")
-                          void hideWorkspaceItem(selection.itemId);
-                      }}
-                      onCreateArtifact={openCreateArtifact}
-                      onArchiveWorkspace={() => {
-                        setWorkspaceDeleteConfirmation("");
-                        setWorkspaceDeleteOpen(true);
-                      }}
-                      onOpenArtifact={openArtifactPanel}
-                      collapsed={inspectorCollapsed}
-                      onToggleCollapsed={() =>
-                        setInspectorCollapsed((value) => !value)
-                      }
-                    />
-                    {inspectorCollapsed ? (
-                      <button
-                        type="button"
-                        aria-label="Show workspace details"
-                        title="Show workspace details"
-                        onClick={() => setInspectorCollapsed(false)}
-                        className="absolute right-3 top-3 z-30 hidden h-8 w-8 items-center justify-center rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-secondary)] shadow-[0_6px_18px_-14px_rgba(20,26,32,0.45)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] xl:flex"
-                      >
-                        <PanelRight className="h-4 w-4" />
-                      </button>
-                    ) : null}
-                  </>
+                  <Inspector
+                    artifacts={allArtifacts}
+                    selectedArtifact={selectedArtifact}
+                    selectedRun={selectedRun}
+                    onClose={() => setSelection(null)}
+                    onHide={() => {
+                      if (selection?.type === "artifact")
+                        void hideWorkspaceItem(selection.itemId);
+                    }}
+                    onOpenArtifact={openArtifactPanel}
+                  />
                 ) : null}
                 {studio.mode === "tab" && studio.activeArtifact ? (
                   <ArtifactStudio
@@ -6415,9 +5948,10 @@ export function WorkspaceShell({
                     window.dispatchEvent(new Event("spectra:threads-changed"));
                   } catch (error) {
                     toast.message(
-                      error instanceof Error
-                        ? error.message
-                        : "Could not select this thread for continuation.",
+                      describeFailure(error, {
+                        fallback:
+                          "Could not select this thread for continuation.",
+                      }).message,
                     );
                   }
                 })();

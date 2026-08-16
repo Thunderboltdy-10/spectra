@@ -1,8 +1,9 @@
 ﻿"use client";
 
 import { Tooltip } from "@/components/ui/tooltip";
+import { describeFailure } from "@/components/ui/truthful-state";
 import { uniqueToken } from "@/lib/unique-token";
-import type { JSONContent } from "@tiptap/core";
+import type { Editor as TiptapEditor, JSONContent } from "@tiptap/core";
 import TiptapLink from "@tiptap/extension-link";
 import Placeholder from "@tiptap/extension-placeholder";
 import Underline from "@tiptap/extension-underline";
@@ -129,7 +130,7 @@ import { normalizeSheetsContent, parseAddress } from "../sheets/model";
 import { sharedTimetableContent } from "../timetable/model";
 import { normalizeWhiteboardContent } from "../whiteboard/model";
 import { encodeDocumentRelativeSelection } from "../work/models/yjs";
-import { getWorkDefinition, workCan } from "../work/registry";
+import { getWorkDefinition, workCan, type WorkType } from "../work/registry";
 import {
   aiRegionAttr,
   contentDerivedHighlightPaths,
@@ -147,13 +148,23 @@ import {
 import { ArtifactEmbedsPanel } from "./artifact-embeds-panel";
 import {
   WorkbarMore,
+  WorkbarSelect,
   workbarMenuItemClass,
 } from "./artifact-workbar";
 import {
   markdownToDocumentHtml,
   sanitizeDocumentHtml,
 } from "./artifact-studio-file-utils";
-import { StudioSplitShell, type StudioTab } from "./artifact-studio-shell";
+import {
+  StudioContractProvider,
+  StudioSplitShell,
+  useComposerSafeArea,
+  useStudioContractValue,
+  useStudioDensity,
+  type StudioInspectorPanel,
+  type StudioSyncState,
+  type StudioTab,
+} from "./artifact-studio-shell";
 import { tagsFromDraft } from "./artifact-studio-value-utils";
 export { tagsFromDraft } from "./artifact-studio-value-utils";
 import {
@@ -3022,7 +3033,14 @@ export function ArtifactStudio({
       onWidthChange={onPanelWidthChange}
       ariaLabel="Work studio"
       cssWidthVariable="--spectra-studio-width"
-      minWidth={560}
+      // The registry states how narrow this type can get before it stops
+      // working; the panel floor comes from there rather than from one number
+      // that has to suit a flashcard and a spreadsheet equally.
+      minWidth={
+        isArtifactTypeKey(artifact.blueprintKey)
+          ? getWorkDefinition(artifact.blueprintKey).responsive.minInlineSize
+          : 560
+      }
     >
       {contextualBody}
     </StudioSplitShell>
@@ -3093,6 +3111,17 @@ function ArtifactStudioEditor({
       ? `${artifact.aiRunId}:${artifact.updatedAt}`
       : null,
   );
+  const liveRecovery = useMemo(
+    () =>
+      describeFailure(
+        live.initializationError ?? live.modelSnapshot.error ?? "unknown",
+        {
+          fallback:
+            "Part of this work was saved in a shape Spectra no longer recognises, so live editing is paused. Your saved content is intact — reload, and tell your teacher or an administrator if it keeps happening.",
+        },
+      ),
+    [live.initializationError, live.modelSnapshot.error],
+  );
   const liveDescriptor = useCallback(
     (regionId: string) => {
       if (!live.modelSnapshot.initialized) return undefined;
@@ -3122,6 +3151,24 @@ function ArtifactStudioEditor({
   const [title, setTitle] = useState(artifact.title);
   const [summary, setSummary] = useState(artifact.summary ?? "");
   const [summaryExpanded, setSummaryExpanded] = useState(false);
+  // Whether the collapsed summary is actually cut off. This has to be measured,
+  // not guessed from a character count: the same 60-character sentence fits on
+  // one line in a wide tab and wraps to three in a narrow split pane, so a
+  // length threshold either hides the reveal on text the reader cannot finish
+  // or offers it on text that is already whole.
+  const summaryRef = useRef<HTMLTextAreaElement | null>(null);
+  const [summaryClipped, setSummaryClipped] = useState(false);
+  useEffect(() => {
+    const element = summaryRef.current;
+    if (!element) return;
+    const measure = () => {
+      setSummaryClipped(element.scrollHeight > element.clientHeight + 1);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [summary, summaryExpanded]);
   const [tagDraft, setTagDraft] = useState((artifact.tags ?? []).join(", "));
   const [content, setContent] = useState<unknown>(artifact.content);
   const [baseline, setBaseline] = useState(() =>
@@ -4607,6 +4654,16 @@ function ArtifactStudioEditor({
       ) {
         return;
       }
+      // Escape dismisses one layer at a time. Anything transient that is open
+      // takes it first: closing the whole work because a dropdown had focus is
+      // how a keystroke turned into data loss.
+      if (
+        document.querySelector(
+          '[data-state="open"][aria-haspopup], [role="menu"][data-state="open"], [role="listbox"], [role="dialog"][data-state="open"], details[open], [aria-expanded="true"][aria-haspopup]',
+        )
+      ) {
+        return;
+      }
       if (historyOpen) {
         setHistoryOpen(false);
         return;
@@ -4938,10 +4995,9 @@ function ArtifactStudioEditor({
       ? "mx-auto grid w-[calc(100%+10px)] max-w-[1690px] gap-3 xl:grid-cols-[minmax(0,1fr)_302px]"
       : "grid gap-3 min-[560px]:grid-cols-[minmax(0,1fr)_min(240px,38%)]"
     : "block";
-  const mainClass =
-    artifact.blueprintKey === "document"
-      ? "min-h-0 flex-1 overflow-y-auto pb-5"
-      : "min-h-0 flex-1 overflow-y-auto pb-5 pl-[15px] pr-0 pt-1";
+  // The scrollport's padding lives in CSS so one rule can reserve room for the
+  // fixed composer for every type at once (`--spectra-composer-safe-area`).
+  const mainClass = "min-h-0 flex-1";
   const liveConflictLabel = liveConflict?.regionId
     ? liveDescriptor(liveConflict.regionId)?.label
     : undefined;
@@ -4993,12 +5049,96 @@ function ArtifactStudioEditor({
         : syncBusy || dirty
           ? "Saving…"
           : "Saved";
-  const visibleIdentityTags = tagDraft
-    .split(",")
-    .map((tag) => tag.trim())
-    .filter(Boolean)
-    .slice(0, 3);
   const artifactSyncMessage = studioSyncMessage(syncLabel);
+
+  /* ---- the studio contract ------------------------------------------
+     One shell answer for permissions, modes, density and inspectors,
+     handed to whichever studio renders. A studio that derives its own
+     answers is the failure this replaces. */
+  // thread_reference is not a registered work type and does not consume the
+  // contract; the fallback only keeps the hooks below unconditional.
+  const contractType: WorkType = workType ?? "document";
+  const responsiveContract = useMemo(
+    () => getWorkDefinition(contractType).responsive,
+    [contractType],
+  );
+  const studioDensity = useStudioDensity(studioSurfaceRef, responsiveContract);
+  useComposerSafeArea(studioSurfaceRef);
+  const loadVersionHistory = useCallback(() => {
+    setHistoryOpen(true);
+    void getSpectraArtifactVersions(artifact._id, 100).then((result) => {
+      setVersions(result.versions);
+      setPreviewVersion(
+        result.versions.find((version) => version.after) ??
+          result.versions[0] ??
+          null,
+      );
+    });
+  }, [artifact._id]);
+  const showInspector = useCallback(
+    (panel: StudioInspectorPanel) => {
+      if (panel === "history") {
+        loadVersionHistory();
+        return;
+      }
+      if (panel === "comments") {
+        setCommentsOpen(true);
+        return;
+      }
+      if (panel === "references") {
+        setEmbedsOpen(true);
+        return;
+      }
+      detailsPinnedRef.current = true;
+      setDetailsOpen(true);
+    },
+    [loadVersionHistory],
+  );
+  const hideInspector = useCallback(() => {
+    setHistoryOpen(false);
+    setCommentsOpen(false);
+    setEmbedsOpen(false);
+    setDetailsOpen(false);
+  }, []);
+  const openInspector: StudioInspectorPanel | null = historyOpen
+    ? "history"
+    : commentsOpen
+      ? "comments"
+      : embedsOpen
+        ? "references"
+        : showDetails
+          ? "details"
+          : null;
+  const inspector = useMemo(
+    () => ({ open: openInspector, show: showInspector, hide: hideInspector }),
+    [hideInspector, openInspector, showInspector],
+  );
+  const syncState: StudioSyncState = readOnly
+    ? "read_only"
+    : syncLabel === "Reconnecting"
+      ? "offline"
+      : syncLabel === "Synchronizing" || syncLabel === "Waiting to sync"
+        ? "pending"
+        : syncLabel === "Needs attention"
+          ? "error"
+          : syncLabel === "Saving…"
+            ? "saving"
+            : syncLabel === "Live"
+              ? "live"
+              : "saved";
+  const syncTruth = useMemo(
+    () => ({ state: syncState, label: syncLabel }),
+    [syncLabel, syncState],
+  );
+  const studioContract = useStudioContractValue({
+    artifactId: artifact._id,
+    type: contractType,
+    role: sharingRole,
+    surface: mode === "tab" ? "full" : "panel",
+    sync: syncTruth,
+    density: studioDensity,
+    inspector,
+  });
   const identityBlock = (
     <div
       className="spectra-artifact-identity flex min-w-0 flex-1 items-start"
@@ -5023,13 +5163,14 @@ function ArtifactStudioEditor({
                     effect.regionIds.includes("metadata:title"),
                   )),
             )}
-            className={`spectra-artifact-title min-h-6 w-full resize-none overflow-hidden bg-transparent font-display font-semibold leading-tight text-[var(--text-primary)] outline-none [field-sizing:content] ${compact ? "text-[18px]" : "text-[21px]"}`}
+            className="spectra-artifact-title min-h-6 w-full resize-none overflow-hidden bg-transparent font-display font-semibold leading-tight text-[var(--text-primary)] outline-none [field-sizing:content]"
             placeholder="Untitled work"
           />
         </div>
         <div className="mt-0.5 rounded-[7px]">
           <div className="relative">
             <textarea
+              ref={summaryRef}
               value={presencePreview?.summary ?? summary}
               readOnly={readOnly}
               rows={summaryExpanded ? 4 : 1}
@@ -5051,45 +5192,24 @@ function ArtifactStudioEditor({
                       effect.regionIds.includes("metadata:summary"),
                     )),
               )}
-              className={`w-full resize-none overflow-hidden bg-transparent text-[11px] leading-[15px] text-[var(--text-secondary)] outline-none placeholder:text-[var(--text-tertiary)] [field-sizing:content] ${summaryExpanded ? "" : "max-h-[15px]"}`}
+              className={`spectra-artifact-summary w-full resize-none overflow-hidden bg-transparent text-[var(--text-secondary)] outline-none placeholder:text-[var(--text-tertiary)] [field-sizing:content]${summaryExpanded ? " is-expanded" : ""}`}
               placeholder="Short useful summary"
             />
-            {!summaryExpanded &&
-            (presencePreview?.summary ?? summary).length > 84 ? (
+            {!summaryExpanded && summaryClipped ? (
               <button
                 type="button"
-                className="absolute bottom-0 right-0 bg-[var(--bg-primary)] pl-2 text-[11px] font-semibold tracking-wide text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
+                className="absolute bottom-0 right-0 bg-[var(--bg-primary)] pl-2 text-micro font-semibold tracking-wide text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
                 onMouseDown={(event) => {
                   event.preventDefault();
                   setSummaryExpanded(true);
                 }}
-                aria-label="Expand summary"
+                aria-label="Read the full summary"
               >
                 …
               </button>
             ) : null}
           </div>
         </div>
-        {artifact.blueprintKey === "quiz" && visibleIdentityTags.length ? (
-          <div className="mt-2 flex flex-wrap items-center gap-1.5">
-            {visibleIdentityTags.map((tag) => (
-              <span
-                key={tag}
-                className="rounded-[6px] bg-[#eaf8f2] px-2 py-1 text-micro font-medium text-[#27836a]"
-              >
-                {tag}
-              </span>
-            ))}
-            <button
-              type="button"
-              aria-label="Add quiz tag"
-              className="grid size-6 place-items-center rounded-[6px] border border-[var(--border-default)] text-[var(--text-tertiary)] hover:bg-[var(--bg-hover)]"
-              onClick={() => setDetailsOpen(true)}
-            >
-              <Plus className="h-3 w-3" />
-            </button>
-          </div>
-        ) : null}
       </div>
     </div>
   );
@@ -5105,6 +5225,7 @@ function ArtifactStudioEditor({
       onWheelCapture={noteStudioInteraction}
       onTouchStartCapture={noteStudioInteraction}
       data-studio-mode={mode}
+      data-studio-density={studioDensity}
       data-ai-state={
         artifact.aiState === "creating" && visibleAiWorking
           ? "creating"
@@ -5325,17 +5446,7 @@ function ArtifactStudioEditor({
                 className={workbarMenuItemClass()}
                 onClick={() => {
                   setHeaderMoreOpen(false);
-                  setHistoryOpen(true);
-                  void getSpectraArtifactVersions(artifact._id, 100).then(
-                    (result) => {
-                      setVersions(result.versions);
-                      setPreviewVersion(
-                        result.versions.find((version) => version.after) ??
-                          result.versions[0] ??
-                          null,
-                      );
-                    },
-                  );
+                  loadVersionHistory();
                 }}
               >
                 <History className="h-4 w-4" /> Version history
@@ -5423,13 +5534,19 @@ function ArtifactStudioEditor({
       {isCollaborativeArtifact &&
       (live.initializationError ||
         live.modelSnapshot.validity === "invalid") ? (
+        // The raw reason used to be printed here, which put Zod's own words on
+        // screen ("Invalid input: expected number, received undefined"). A
+        // person cannot act on that. They get the sentence and a reference they
+        // can quote; the raw text stays in the console outside production.
         <div
           role="status"
-          className="shrink-0 border-y border-[color-mix(in_oklab,#d88922_20%,var(--border-subtle))] bg-[color-mix(in_oklab,#d88922_5%,var(--bg-primary))] px-5 py-2 text-[11px] text-[var(--text-secondary)]"
+          className="flex shrink-0 items-center gap-2 border-y border-[color-mix(in_oklab,#d88922_20%,var(--border-subtle))] bg-[color-mix(in_oklab,#d88922_5%,var(--bg-primary))] px-5 py-2 text-[11px] text-[var(--text-secondary)]"
         >
-          {live.initializationError ??
-            live.modelSnapshot.error ??
-            "The live artifact state needs recovery before editing can continue."}
+          <AlertCircle className="h-3.5 w-3.5 shrink-0 text-[#d88922]" />
+          <span className="min-w-0 flex-1">{liveRecovery.message}</span>
+          <span className="shrink-0 font-mono text-[10px] text-[var(--text-tertiary)]">
+            {liveRecovery.reference}
+          </span>
         </div>
       ) : null}
       {remoteConflict ? (
@@ -5457,7 +5574,8 @@ function ArtifactStudioEditor({
           </div>
         </div>
       ) : null}
-      <main
+      <section
+        aria-label="Work surface"
         ref={presenceSurfaceRef}
         className={`spectra-artifact-main ${mainClass}`}
         data-spectra-surface="artifact"
@@ -5481,6 +5599,7 @@ function ArtifactStudioEditor({
         />
         <div className={`spectra-editor-layout ${editorLayoutClass}`}>
           <section className="min-w-0">
+            <StudioContractProvider value={studioContract}>
             {artifact.blueprintKey === "document" ? (
               <DocumentStudio
                 key={`${artifact._id}:document`}
@@ -5631,6 +5750,7 @@ function ArtifactStudioEditor({
             {artifact.blueprintKey === "thread_reference" ? (
               <ThreadReferenceStudio content={content} />
             ) : null}
+            </StudioContractProvider>
           </section>
           {showDetails ? (
             <StudioDetails
@@ -5643,7 +5763,7 @@ function ArtifactStudioEditor({
             />
           ) : null}
         </div>
-      </main>
+      </section>
       {/* Pinned to the pane, not to the scrolling content: the reason an edit
           was declined must not scroll away from the user who triggered it. */}
       {heldNotice ? (
@@ -5743,8 +5863,6 @@ export function ArtifactRichTextEditor({
   const contentKeyRef = useRef(plannerDescriptionHtml(value));
   const focusedRef = useRef(false);
   const debounceRef = useRef<number | null>(null);
-  const [linkOpen, setLinkOpen] = useState(false);
-  const [linkDraft, setLinkDraft] = useState("https://");
   const [initialContent] = useState(() => plannerDescriptionHtml(value));
   useEffect(() => {
     onChangeRef.current = onChange;
@@ -5765,7 +5883,9 @@ export function ArtifactRichTextEditor({
       attributes: {
         class:
           variant === "card"
-            ? "min-h-[180px] px-6 py-8 text-center font-serif text-[24px] leading-snug text-[var(--text-primary)] outline-none"
+            ? // 180px left a single-line answer floating in an almost empty
+              // box; two of them pushed the note, tags and settings off screen.
+              "min-h-[112px] px-6 py-6 text-center font-serif text-[24px] leading-snug text-[var(--text-primary)] outline-none"
             : variant === "planner"
               ? "min-h-[136px] px-4 py-3 text-[13px] leading-6 text-[var(--text-primary)] outline-none"
               : "min-h-[62px] px-3 py-2 text-[13px] leading-5 text-[var(--text-primary)] outline-none",
@@ -5816,13 +5936,6 @@ export function ArtifactRichTextEditor({
     [],
   );
 
-  function applyLink() {
-    const href = linkDraft.trim();
-    if (!editor || !href) return;
-    editor.chain().focus().extendMarkRange("link").setLink({ href }).run();
-    setLinkOpen(false);
-  }
-
   return (
     <div
       className="spectra-planner-description spectra-rich-text-editor"
@@ -5832,109 +5945,186 @@ export function ArtifactRichTextEditor({
       data-spectra-hidden-target={collapsible ? "true" : undefined}
       {...(path ? targetAttrs(path) : {})}
     >
-      <div role="toolbar" aria-label="Text formatting">
-        <ToolbarTextButton
-          label="Bold"
-          onClick={() => editor?.chain().focus().toggleBold().run()}
-          active={editor?.isActive("bold")}
-        >
-          <Bold className="h-3.5 w-3.5" />
-        </ToolbarTextButton>
-        <ToolbarTextButton
-          label="Italic"
-          onClick={() => editor?.chain().focus().toggleItalic().run()}
-          active={editor?.isActive("italic")}
-        >
-          <Italic className="h-3.5 w-3.5" />
-        </ToolbarTextButton>
-        <ToolbarTextButton
-          label="Underline"
-          onClick={() => editor?.chain().focus().toggleUnderline().run()}
-          active={editor?.isActive("underline")}
-        >
-          <UnderlineIcon className="h-3.5 w-3.5" />
-        </ToolbarTextButton>
-        <ToolbarTextButton
-          label="Strikethrough"
-          onClick={() => editor?.chain().focus().toggleStrike().run()}
-          active={editor?.isActive("strike")}
-        >
-          <span className="text-[12px] font-semibold line-through">S</span>
-        </ToolbarTextButton>
-        <ToolbarButton
-          label="Bullet list"
-          icon={List}
-          active={editor?.isActive("bulletList")}
-          onClick={() => editor?.chain().focus().toggleBulletList().run()}
-        />
-        <ToolbarButton
-          label="Numbered list"
-          icon={ListOrdered}
-          active={editor?.isActive("orderedList")}
-          onClick={() => editor?.chain().focus().toggleOrderedList().run()}
-        />
-        <ToolbarButton
-          label="Quote"
-          icon={MessageSquare}
-          active={editor?.isActive("blockquote")}
-          onClick={() => editor?.chain().focus().toggleBlockquote().run()}
-        />
-        <ToolbarButton
-          label="Inline code"
-          icon={Code2}
-          active={editor?.isActive("code")}
-          onClick={() => editor?.chain().focus().toggleCode().run()}
-        />
-        <ToolbarButton
-          label="Link"
-          icon={Link2}
-          active={linkOpen || editor?.isActive("link")}
-          onClick={() => {
-            setLinkDraft(
-              String(editor?.getAttributes("link").href ?? "https://"),
-            );
-            setLinkOpen((open) => !open);
-          }}
-        />
-        <ToolbarButton
-          label="Inline equation"
-          icon={Sigma}
-          active={editor?.isActive("inlineEquation")}
-          onClick={() =>
-            editor
-              ?.chain()
-              .focus()
-              .insertContent({
-                type: "inlineEquation",
-                attrs: { latex: "x" },
-              })
-              .run()
-          }
-        />
-        <ToolbarTextButton
-          label="Block equation"
-          onClick={() =>
-            editor
-              ?.chain()
-              .focus()
-              .insertContent({
-                type: "equation",
-                attrs: {
-                  latex: "x",
-                  display: "block",
-                  alignment: "center",
-                },
-              })
-              .run()
-          }
-          active={editor?.isActive("equation")}
-        >
-          <span className="text-micro font-semibold">fx</span>
-        </ToolbarTextButton>
-        <span>Format</span>
-      </div>
+      <RichTextFormatBar editor={editor} disabled={disabled} />
+      <EditorContent editor={editor} />
+    </div>
+  );
+}
+
+/**
+ * Spectra's one rich-text format bar.
+ *
+ * There used to be two: this inline row, and a separate `.spectra-document-
+ * toolbar` that carried the same twelve verbs with different markup, different
+ * heights and its own CSS. They drifted until the document one collapsed to
+ * 24px and stopped rendering at any width. One component, both surfaces.
+ *
+ * It is attached to a text field, not bolted under the shared workbar: the
+ * controls apply to the selection, so they belong to the surface that holds it.
+ */
+export function RichTextFormatBar({
+  editor,
+  disabled,
+  label = "Text formatting",
+  withTextStyle = false,
+  trailing,
+}: {
+  editor: TiptapEditor | null;
+  disabled?: boolean;
+  label?: string;
+  /** Adds the Text/Heading 1-3 selector. Documents have headings; captions do not. */
+  withTextStyle?: boolean;
+  /** Type-specific inserts (tables, callouts). Kept after the shared verbs. */
+  trailing?: ReactNode;
+}) {
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [linkDraft, setLinkDraft] = useState("https://");
+  const textStyle = editor?.isActive("heading", { level: 1 })
+    ? "h1"
+    : editor?.isActive("heading", { level: 2 })
+      ? "h2"
+      : editor?.isActive("heading", { level: 3 })
+        ? "h3"
+        : "paragraph";
+  function applyLink() {
+    const href = linkDraft.trim();
+    if (!editor || !href) return;
+    editor.chain().focus().extendMarkRange("link").setLink({ href }).run();
+    setLinkOpen(false);
+  }
+  return (
+    <>
+      <fieldset
+        disabled={disabled}
+        className="spectra-rich-text-format-bar contents"
+      >
+        <div role="toolbar" aria-label={label}>
+          {withTextStyle ? (
+            <WorkbarSelect
+              ariaLabel="Text style"
+              value={textStyle}
+              options={[
+                { value: "paragraph", label: "Text" },
+                { value: "h1", label: "Heading 1" },
+                { value: "h2", label: "Heading 2" },
+                { value: "h3", label: "Heading 3" },
+              ]}
+              onChange={(value) => {
+                if (value === "paragraph")
+                  editor?.chain().focus().setParagraph().run();
+                else
+                  editor
+                    ?.chain()
+                    .focus()
+                    .setHeading({ level: Number(value.slice(1)) as 1 | 2 | 3 })
+                    .run();
+              }}
+            />
+          ) : null}
+          <ToolbarTextButton
+            label="Bold"
+            onClick={() => editor?.chain().focus().toggleBold().run()}
+            active={editor?.isActive("bold")}
+          >
+            <Bold className="h-3.5 w-3.5" />
+          </ToolbarTextButton>
+          <ToolbarTextButton
+            label="Italic"
+            onClick={() => editor?.chain().focus().toggleItalic().run()}
+            active={editor?.isActive("italic")}
+          >
+            <Italic className="h-3.5 w-3.5" />
+          </ToolbarTextButton>
+          <ToolbarTextButton
+            label="Underline"
+            onClick={() => editor?.chain().focus().toggleUnderline().run()}
+            active={editor?.isActive("underline")}
+          >
+            <UnderlineIcon className="h-3.5 w-3.5" />
+          </ToolbarTextButton>
+          <ToolbarTextButton
+            label="Strikethrough"
+            onClick={() => editor?.chain().focus().toggleStrike().run()}
+            active={editor?.isActive("strike")}
+          >
+            <span className="text-caption font-semibold line-through">S</span>
+          </ToolbarTextButton>
+          <ToolbarButton
+            label="Bullet list"
+            icon={List}
+            active={editor?.isActive("bulletList")}
+            onClick={() => editor?.chain().focus().toggleBulletList().run()}
+          />
+          <ToolbarButton
+            label="Numbered list"
+            icon={ListOrdered}
+            active={editor?.isActive("orderedList")}
+            onClick={() => editor?.chain().focus().toggleOrderedList().run()}
+          />
+          <ToolbarButton
+            label="Quote"
+            icon={MessageSquare}
+            active={editor?.isActive("blockquote")}
+            onClick={() => editor?.chain().focus().toggleBlockquote().run()}
+          />
+          <ToolbarButton
+            label="Inline code"
+            icon={Code2}
+            active={editor?.isActive("code")}
+            onClick={() => editor?.chain().focus().toggleCode().run()}
+          />
+          <ToolbarButton
+            label="Link"
+            icon={Link2}
+            active={linkOpen || editor?.isActive("link")}
+            onClick={() => {
+              setLinkDraft(
+                String(editor?.getAttributes("link").href ?? "https://"),
+              );
+              setLinkOpen((open) => !open);
+            }}
+          />
+          <ToolbarButton
+            label="Inline equation"
+            icon={Sigma}
+            active={editor?.isActive("inlineEquation")}
+            onClick={() =>
+              editor
+                ?.chain()
+                .focus()
+                .insertContent({
+                  type: "inlineEquation",
+                  attrs: { latex: "x" },
+                })
+                .run()
+            }
+          />
+          <ToolbarTextButton
+            label="Block equation"
+            onClick={() =>
+              editor
+                ?.chain()
+                .focus()
+                .insertContent({
+                  type: "equation",
+                  attrs: {
+                    latex: "x",
+                    display: "block",
+                    alignment: "center",
+                  },
+                })
+                .run()
+            }
+            active={editor?.isActive("equation")}
+          >
+            <span className="text-micro font-semibold">fx</span>
+          </ToolbarTextButton>
+          {trailing}
+        </div>
+      </fieldset>
       {linkOpen ? (
         <form
+          className="spectra-rich-text-link-form"
           onSubmit={(event) => {
             event.preventDefault();
             applyLink();
@@ -5948,7 +6138,7 @@ export function ArtifactRichTextEditor({
             onKeyDown={(event) => {
               if (event.key === "Escape") setLinkOpen(false);
             }}
-            aria-label="Description link URL"
+            aria-label="Link URL"
           />
           <button type="submit">Apply</button>
           {editor?.isActive("link") ? (
@@ -5964,8 +6154,7 @@ export function ArtifactRichTextEditor({
           ) : null}
         </form>
       ) : null}
-      <EditorContent editor={editor} />
-    </div>
+    </>
   );
 }
 

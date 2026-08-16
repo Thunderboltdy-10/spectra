@@ -3,7 +3,6 @@
 import {
   Bell,
   Check,
-  ChevronDown,
   CornerUpLeft,
   Loader2,
   MapPin,
@@ -28,6 +27,8 @@ import {
 import { formatRelativeTime } from "./spectra-view-model";
 import { SpectraRichContent } from "./spectra-rich-content";
 import { LocalAutocompleteTextarea } from "../compute/autocomplete";
+import { OverflowMenu } from "@/components/ui/dropdown-menu";
+import { SelectField } from "@/components/ui/select";
 
 export type ArtifactCommentRegion = {
   regionId: string;
@@ -36,6 +37,15 @@ export type ArtifactCommentRegion = {
 };
 
 type NotificationMode = "all" | "mentions_replies" | "off";
+
+const NOTIFICATION_MODE_ITEMS: ReadonlyArray<{
+  key: NotificationMode;
+  label: string;
+}> = [
+  { key: "all", label: "All comments" },
+  { key: "mentions_replies", label: "Mentions and replies" },
+  { key: "off", label: "Off" },
+];
 
 function initials(name?: string) {
   return (name || "?").split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
@@ -298,7 +308,7 @@ export function ArtifactCommentsPanel({
           </div>
           {comment.status !== "deleted" ? <div className={`mt-3 rounded-[7px] border px-2.5 py-2 ${orphaned ? "border-[color-mix(in_oklab,#d88922_35%,var(--border-default))] bg-[color-mix(in_oklab,#d88922_6%,var(--bg-elevated))]" : "border-[var(--border-subtle)] bg-[var(--bg-elevated)]"}`}>
             <div className="flex items-center gap-1.5 text-micro text-[var(--text-secondary)]"><MapPin className="h-3 w-3" /><span className="min-w-0 flex-1 truncate">{orphaned ? "Original region changed or was removed" : regionLabel(regions, comment.anchor.regionId)}</span>{orphaned ? <button type="button" onClick={() => { setReanchoringId(comment._id); setReanchorRegionId(regions[0]?.regionId ?? ""); }} className="font-semibold text-[var(--text-primary)]">Reattach</button> : null}</div>
-            {reanchoringId === comment._id ? <div className="mt-2 flex gap-1.5"><select value={reanchorRegionId} onChange={(event) => setReanchorRegionId(event.target.value)} className="h-8 min-w-0 flex-1 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2 text-micro text-[var(--text-primary)]">{regions.map((region) => <option key={region.regionId} value={region.regionId}>{region.label}</option>)}</select><button type="button" disabled={!reanchorRegionId || busy === `anchor:${comment._id}`} onClick={() => void reanchor(comment)} className="rounded-[6px] bg-[var(--text-primary)] px-2.5 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-45">Attach</button></div> : null}
+            {reanchoringId === comment._id ? <div className="mt-2 flex gap-1.5"><SelectField ariaLabel="Reattach to region" value={reanchorRegionId} onChange={setReanchorRegionId} options={regions.map((region) => ({ value: region.regionId, label: region.label }))} size="sm" className="min-w-0 flex-1" triggerClassName="w-full" /><button type="button" disabled={!reanchorRegionId || busy === `anchor:${comment._id}`} onClick={() => void reanchor(comment)} className="rounded-[6px] bg-[var(--text-primary)] px-2.5 text-micro font-semibold text-[var(--bg-primary)] disabled:opacity-45">Attach</button></div> : null}
           </div> : null}
         </div>
       </article>
@@ -316,7 +326,7 @@ export function ArtifactCommentsPanel({
       <aside role="dialog" aria-modal="true" aria-labelledby="artifact-comments-title" className="flex h-full w-full max-w-[410px] flex-col border-l border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[-20px_0_60px_rgba(27,20,12,0.12)]" onPointerDown={(event) => event.stopPropagation()}>
         <header className="flex shrink-0 items-start justify-between border-b border-[var(--border-default)] px-4 py-4">
           <div className="flex min-w-0 items-start gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[9px] bg-[color-mix(in_oklab,var(--accent-cyan)_9%,var(--bg-secondary))] text-[var(--accent-cyan)]"><MessageSquare className="h-4 w-4" /></span><div className="min-w-0"><h2 id="artifact-comments-title" className="font-display text-[18px] font-semibold text-[var(--text-primary)]">Comments</h2><p className="mt-0.5 truncate text-micro text-[var(--text-tertiary)]">{artifactTitle}</p></div></div>
-          <div className="flex items-center gap-1"><label className="relative flex h-8 items-center gap-1.5 rounded-[7px] px-2 text-micro text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"><Bell className="h-3.5 w-3.5" /><span className="sr-only">Comment notifications</span><select value={notificationMode} onChange={(event) => void changeNotifications(event.target.value as NotificationMode)} className="absolute inset-0 cursor-pointer opacity-0" aria-label="Comment notifications"><option value="all">All comments</option><option value="mentions_replies">Mentions and replies</option><option value="off">Off</option></select><ChevronDown className="h-3 w-3" /></label><button type="button" onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" aria-label="Close comments"><X className="h-4 w-4" /></button></div>
+          <div className="flex items-center gap-1"><OverflowMenu label="Comment notifications" icon={Bell} items={NOTIFICATION_MODE_ITEMS} value={notificationMode} onSelect={(next) => void changeNotifications(next)} size={32} /><button type="button" onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-[7px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" aria-label="Close comments"><X className="h-4 w-4" /></button></div>
         </header>
 
         <div className="flex min-h-0 flex-1 flex-col">
@@ -331,7 +341,7 @@ export function ArtifactCommentsPanel({
               <LocalAutocompleteTextarea surface="comment" value={body} onValueChange={setBody} onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === "Enter") void createComment(); }} placeholder={replyTo ? "Write a reply…" : "Add a comment…"} className="min-h-[76px] w-full" textareaClassName="min-h-[76px] w-full resize-none px-3 pt-2.5 text-[12px] leading-5 text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]" />
               {mentions.length ? <div className="flex flex-wrap gap-1 px-3 pb-2">{mentions.map((member) => <button type="button" key={member.accountId} onClick={() => setMentions((current) => current.filter((entry) => entry.accountId !== member.accountId))} className="inline-flex items-center gap-1 rounded-full bg-[var(--bg-secondary)] px-2 py-1 text-micro text-[var(--text-secondary)]">@{member.name}<X className="h-2.5 w-2.5" /></button>)}</div> : null}
               <div className="flex items-center gap-1.5 border-t border-[var(--border-subtle)] px-2 py-2">
-                <div className="relative min-w-0 flex-1"><MapPin className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-[var(--text-tertiary)]" /><select value={replyTo?.anchor.regionId ?? regionId} disabled={Boolean(replyTo)} onChange={(event) => setRegionId(event.target.value)} className="h-8 w-full min-w-0 appearance-none truncate rounded-[6px] bg-[var(--bg-secondary)] pl-7 pr-6 text-micro text-[var(--text-secondary)] outline-none disabled:opacity-70">{regions.map((region) => <option key={region.regionId} value={region.regionId}>{region.label}</option>)}{regions.length === 0 ? <option value="artifact:structure">Whole work</option> : null}</select><ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-3 w-3 -translate-y-1/2 text-[var(--text-tertiary)]" /></div>
+                <div className="relative min-w-0 flex-1"><MapPin className="pointer-events-none absolute left-2 top-1/2 z-10 h-3 w-3 -translate-y-1/2 text-[var(--text-tertiary)]" /><SelectField ariaLabel="Region this comment is about" value={replyTo?.anchor.regionId ?? regionId} disabled={Boolean(replyTo)} onChange={setRegionId} options={regions.length ? regions.map((region) => ({ value: region.regionId, label: region.label })) : [{ value: "artifact:structure", label: "Whole work" }]} size="sm" triggerClassName="w-full border-0 bg-[var(--bg-secondary)] pl-7 font-normal text-[var(--text-secondary)]" /></div>
                 <div className="relative"><button type="button" className="flex h-8 w-8 items-center justify-center rounded-[6px] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]" aria-label="Mention a collaborator" onClick={() => document.getElementById(`comment-mention-${artifactId}`)?.focus()}><UserPlus className="h-3.5 w-3.5" /></button></div>
                 <button type="button" disabled={!body.trim() || busy === "create"} onClick={() => void createComment()} className="flex h-8 w-8 items-center justify-center rounded-[7px] bg-[var(--text-primary)] text-[var(--bg-primary)] disabled:opacity-35" aria-label="Post comment">{busy === "create" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}</button>
               </div>

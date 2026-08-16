@@ -34,6 +34,7 @@ import { SpectraMark } from "@/components/spectra-mark";
 import { SpectraRichContent } from "./spectra-rich-content";
 import { useStreamingReveal } from "../runs/streaming/use-streaming-reveal";
 import { cn } from "@/lib/utils";
+import { SelectField } from "@/components/ui/select";
 import { useSpectraRun, type SpectraLiveExchange } from "../ai/use-spectra-run";
 import { operationCounts, useRunLedger } from "../collaboration/run-ledger";
 import { pastTenseProgressTitle } from "./progress-title";
@@ -1680,45 +1681,44 @@ function AgentRoutingControl({ trace }: { trace: SpectraThreadTrace }) {
       {feedbackOpen ? (
         <div className="mt-1.5 grid gap-2 rounded-[8px] border border-[var(--border-subtle)] bg-[var(--bg-elevated)] p-2.5 text-micro shadow-[var(--shadow-sm)]">
           <div className="grid grid-cols-[auto_1fr] gap-2">
-            <label className="grid gap-1">
+            <div className="grid gap-1">
               <span className="font-semibold text-[var(--text-secondary)]">
                 Rating
               </span>
-              <select
-                value={feedbackRating}
-                onChange={(event) =>
-                  setFeedbackRating(Number(event.target.value))
-                }
-                className="h-8 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2"
-              >
-                {[5, 4, 3, 2, 1].map((rating) => (
-                  <option key={rating} value={rating}>
-                    {rating} / 5
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="grid gap-1">
+              <SelectField
+                ariaLabel="Rating"
+                value={String(feedbackRating)}
+                onChange={(next) => setFeedbackRating(Number(next))}
+                options={[5, 4, 3, 2, 1].map((rating) => ({
+                  value: String(rating),
+                  label: `${rating} / 5`,
+                }))}
+                size="sm"
+                triggerClassName="w-[84px]"
+              />
+            </div>
+            <div className="grid gap-1">
               <span className="font-semibold text-[var(--text-secondary)]">
                 Category
               </span>
-              <select
+              <SelectField
+                ariaLabel="Category"
                 value={feedbackCategory}
-                onChange={(event) =>
-                  setFeedbackCategory(
-                    event.target.value as typeof feedbackCategory,
-                  )
+                onChange={(next) =>
+                  setFeedbackCategory(next as typeof feedbackCategory)
                 }
-                className="h-8 rounded-[6px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-2"
-              >
-                <option value="helpful">Helpfulness</option>
-                <option value="accuracy">Accuracy</option>
-                <option value="clarity">Clarity</option>
-                <option value="safety">Safety</option>
-                <option value="resource_quality">Source quality</option>
-                <option value="other">Other</option>
-              </select>
-            </label>
+                options={[
+                  { value: "helpful", label: "Helpfulness" },
+                  { value: "accuracy", label: "Accuracy" },
+                  { value: "clarity", label: "Clarity" },
+                  { value: "safety", label: "Safety" },
+                  { value: "resource_quality", label: "Source quality" },
+                  { value: "other", label: "Other" },
+                ]}
+                size="sm"
+                triggerClassName="w-full"
+              />
+            </div>
           </div>
           <textarea
             value={feedbackComment}

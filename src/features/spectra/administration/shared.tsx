@@ -5,7 +5,6 @@ import {
   AlertCircle,
   ArrowUpRight,
   CheckCircle2,
-  ChevronDown,
   LoaderCircle,
   X,
   type LucideIcon,
@@ -14,6 +13,19 @@ import { cn } from "@/lib/utils";
 import type { CapabilityState } from "@/features/spectra/core/capability-truth";
 import { CapabilityTruthBadge } from "@/features/spectra/integrations/status/capability-truth";
 import { ProductEmptyState, ProductErrorState } from "@/features/spectra/components/product-state";
+import { Button } from "@/components/ui/button";
+import { SelectField } from "@/components/ui/select";
+import {
+  MetricValue,
+  readingFromCapability,
+} from "@/components/ui/truthful-state";
+
+/* Administration consumes the product primitives; it does not keep its own kit.
+   `StatusBadge` and `SelectField` used to be forks living here — a parallel
+   status vocabulary and a hand-rolled native `<select>`. Both are now the shared
+   primitives, re-exported so existing call sites keep importing from one place. */
+export { StatusBadge, statusToneFor, type StatusTone } from "@/components/ui/badge";
+export { SelectField };
 
 function userFacingMetricSource(source: string) {
   if (/usageMeters/i.test(source)) return "Daily usage meter";
@@ -31,7 +43,7 @@ export function AdminCard({
   return (
     <section
       className={cn(
-        "rounded-[10px] bg-transparent",
+        "rounded-card bg-transparent",
         className,
       )}
     >
@@ -52,7 +64,7 @@ export function AdminSectionHeader({
   return (
     <header className="flex min-h-14 items-start justify-between gap-4 px-4 pb-2 pt-4">
       <div>
-        <h2 className="font-[var(--font-serif)] text-[15px] font-medium tracking-[-.01em] text-[var(--text-primary)]">
+        <h2 className="font-[var(--font-serif)] text-subhead font-medium tracking-[-.01em] text-[var(--text-primary)]">
           {title}
         </h2>
         {detail ? (
@@ -86,28 +98,34 @@ export function MetricCard({
   source?: string;
 }) {
   const toneClass = {
-    green: "text-[#15906b]",
-    violet: "text-[#7a58ee]",
-    orange: "text-[#c66a2d]",
-    blue: "text-[#537fe7]",
+    green: "text-[var(--accent-mint)]",
+    violet: "text-[var(--accent-violet)]",
+    orange: "text-[var(--accent-orange)]",
+    blue: "text-[var(--accent-cyan)]",
   }[tone];
   return (
     <section
-      className="group min-w-0 rounded-[10px] px-4 py-3 transition-colors hover:bg-[var(--bg-secondary)]"
+      className="group min-w-0 rounded-card px-4 py-3 transition-colors hover:bg-[var(--bg-secondary)]"
       title={source ? `Source: ${userFacingMetricSource(source)}` : undefined}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2 text-[var(--text-secondary)]">
             <Icon size={14} className={toneClass} strokeWidth={1.8} />
-            <p className="text-[11px]">{label}</p>
+            <p className="text-micro">{label}</p>
             {state && state.kind !== "available" ? (
               <CapabilityTruthBadge state={state} className="min-h-5 px-2 text-micro" />
             ) : null}
           </div>
-          <strong className="mt-2 block truncate font-sans text-[24px] font-normal leading-none tracking-[-.02em] text-[var(--text-primary)]">
-            {value}
-          </strong>
+          {/* S8: the value is rendered through `MetricValue`, so a capability
+              that could not supply a number cannot print one. `/admin` → Usage
+              stamping `Collaboration 0 B` as complete is the defect this
+              closes at the component level. */}
+          <MetricValue
+            reading={readingFromCapability(state, value)}
+            className="mt-2 flex"
+            valueClassName="min-w-0 leading-none"
+          />
           <p className="mt-2 text-micro leading-4 text-[var(--text-secondary)]">
             {detail}
           </p>
@@ -122,30 +140,7 @@ export function MetricCard({
   );
 }
 
-export function StatusBadge({
-  children,
-  tone = "neutral",
-}: {
-  children: ReactNode;
-  tone?: "good" | "warn" | "danger" | "blue" | "neutral";
-}) {
-  return (
-    <span
-      className={cn(
-        "inline-flex min-h-5 items-center rounded-[5px] px-2 text-micro font-semibold capitalize",
-        tone === "good" && "bg-[#e5f5ee] text-[#278066]",
-        tone === "warn" && "bg-[#fff3df] text-[#a9651f]",
-        tone === "danger" && "bg-[#fff0ed] text-[#b54a3d]",
-        tone === "blue" && "bg-[#edf3ff] text-[#4b72c8]",
-        tone === "neutral" &&
-          "bg-[var(--bg-secondary)] text-[var(--text-secondary)]",
-      )}
-    >
-      {children}
-    </span>
-  );
-}
-
+/** Administration's button is the product button. Tones map onto its variants. */
 export function AdminButton({
   children,
   onClick,
@@ -162,25 +157,23 @@ export function AdminButton({
   className?: string;
 }) {
   return (
-    <button
+    <Button
       type={type}
       onClick={onClick}
       disabled={disabled}
-      className={cn(
-        "inline-flex min-h-9 items-center justify-center gap-2 rounded-[7px] border px-3 text-[11px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--brand-primary)] disabled:cursor-not-allowed disabled:opacity-50",
-        tone === "neutral" &&
-          "border-[var(--border-default)] bg-[var(--bg-elevated)] text-[var(--text-primary)] hover:bg-[var(--bg-secondary)]",
-        tone === "primary" &&
-          "border-[var(--text-primary)] bg-[var(--text-primary)] text-[var(--bg-primary)] hover:opacity-90",
-        tone === "danger" &&
-          "border-[#e8b8b2] bg-[#fff5f3] text-[#a84035] hover:bg-[#ffece8]",
-        tone === "ghost" &&
-          "border-transparent bg-transparent text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)]",
-        className,
-      )}
+      variant={
+        tone === "primary"
+          ? "primary"
+          : tone === "danger"
+            ? "destructive"
+            : tone === "ghost"
+              ? "ghost"
+              : "secondary"
+      }
+      className={className}
     >
       {children}
-    </button>
+    </Button>
   );
 }
 
@@ -210,7 +203,7 @@ export function TextField({
         required={required}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
-        className="h-10 w-full rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-[12px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-placeholder)] focus:border-[var(--brand-primary)]"
+        className="h-10 w-full rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-caption text-[var(--text-primary)] outline-none placeholder:text-[var(--text-placeholder)] focus:border-[var(--brand-primary)]"
       />
     </label>
   );
@@ -239,34 +232,8 @@ export function TextAreaField({
         rows={rows}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
-        className="w-full resize-y rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2.5 text-[12px] leading-5 text-[var(--text-primary)] outline-none placeholder:text-[var(--text-placeholder)] focus:border-[var(--brand-primary)]"
+        className="w-full resize-y rounded-control border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 py-2.5 text-caption leading-5 text-[var(--text-primary)] outline-none placeholder:text-[var(--text-placeholder)] focus:border-[var(--brand-primary)]"
       />
-    </label>
-  );
-}
-
-export function SelectField({
-  label,
-  value,
-  onChange,
-  options,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  options: Array<{ value: string; label: string }>;
-}) {
-  return (
-    <label className="block">
-      <span className="mb-1.5 block text-[12px] font-medium text-[var(--text-secondary)]">
-        {label}
-      </span>
-      <span className="relative block">
-        <select aria-label={label} value={value} onChange={(event) => onChange(event.target.value)} className="h-9 w-full appearance-none rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] py-0 pl-3 pr-9 text-[12px] font-medium text-[var(--text-primary)] outline-none transition hover:bg-[var(--bg-hover)] focus-visible:ring-2 focus-visible:ring-[var(--brand-primary)]">
-          {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-        </select>
-        <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-3.5 -translate-y-1/2 text-[var(--text-tertiary)]" />
-      </span>
     </label>
   );
 }
@@ -291,7 +258,7 @@ export function AdminDialog({
   if (!open) return null;
   return (
     <div
-      className="fixed inset-0 z-[120] grid place-items-center bg-[rgba(28,25,21,.28)] p-4 backdrop-blur-[2px]"
+      className="fixed inset-0 z-[120] grid place-items-center bg-[var(--bg-overlay)] p-4 backdrop-blur-[2px]"
       role="presentation"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
@@ -301,21 +268,21 @@ export function AdminDialog({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="max-h-[min(86dvh,760px)] w-full max-w-[540px] overflow-hidden rounded-[14px] border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[0_30px_90px_rgba(31,25,18,.22)]"
+        className="max-h-[min(86dvh,760px)] w-full max-w-[540px] overflow-hidden rounded-surface border border-[var(--border-default)] bg-[var(--bg-elevated)] shadow-[0_30px_90px_rgba(31,25,18,.22)]"
       >
         <header className="flex items-start justify-between gap-4 border-b border-[var(--border-subtle)] px-5 py-4">
           <div className="flex gap-3">
             {danger ? (
-              <span className="grid size-9 shrink-0 place-items-center rounded-[9px] bg-[#fff0ed] text-[#b54a3d]">
+              <span className="grid size-9 shrink-0 place-items-center rounded-control bg-[color-mix(in_oklab,var(--danger)_10%,var(--bg-secondary))] text-[color-mix(in_oklab,var(--danger)_80%,var(--text-primary))]">
                 <AlertCircle size={17} />
               </span>
             ) : null}
             <div>
-              <h2 className="font-[var(--font-serif)] text-[19px] font-medium text-[var(--text-primary)]">
+              <h2 className="font-[var(--font-serif)] text-heading font-medium text-[var(--text-primary)]">
                 {title}
               </h2>
               {detail ? (
-                <p className="mt-1 max-w-md text-[11px] leading-5 text-[var(--text-tertiary)]">
+                <p className="mt-1 max-w-md text-micro leading-5 text-[var(--text-tertiary)]">
                   {detail}
                 </p>
               ) : null}
@@ -324,7 +291,7 @@ export function AdminDialog({
           <button
             type="button"
             onClick={onClose}
-            className="grid size-8 place-items-center rounded-[8px] text-[var(--text-tertiary)] hover:bg-[var(--bg-secondary)]"
+            className="grid size-8 place-items-center rounded-control text-[var(--text-tertiary)] hover:bg-[var(--bg-secondary)]"
             aria-label="Close"
           >
             <X size={16} />
@@ -345,7 +312,7 @@ export function AdminDialog({
 
 export function LoadingPanel({ label = "Loading" }: { label?: string }) {
   return (
-    <div className="flex min-h-56 items-center justify-center gap-2 text-[12px] text-[var(--text-tertiary)]">
+    <div className="flex min-h-56 items-center justify-center gap-2 text-caption text-[var(--text-tertiary)]">
       <LoaderCircle size={16} className="animate-spin" />
       {label}
     </div>
@@ -387,7 +354,7 @@ export function InlineLink({
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex items-center gap-1 text-micro font-medium text-[#705df2] hover:underline"
+      className="inline-flex items-center gap-1 text-micro font-medium text-[var(--brand-primary)] hover:underline"
     >
       {children}
       <ArrowUpRight size={11} />
@@ -397,7 +364,7 @@ export function InlineLink({
 
 export function PrivacyNotice({ children }: { children: ReactNode }) {
   return (
-    <div className="flex items-start gap-2 rounded-[7px] border border-[#dbeae4] bg-[#f2faf6] px-3 py-2.5 text-micro leading-4 text-[#3b705f]">
+    <div className="flex items-start gap-2 rounded-control border border-[color-mix(in_oklab,var(--success)_18%,var(--border-subtle))] bg-[color-mix(in_oklab,var(--success)_7%,var(--bg-secondary))] px-3 py-2.5 text-micro leading-4 text-[color-mix(in_oklab,var(--success)_78%,var(--text-primary))]">
       <CheckCircle2 size={13} className="mt-0.5 shrink-0" />
       <span>{children}</span>
     </div>
@@ -434,7 +401,7 @@ export function formatRelative(timestamp?: number) {
 
 export function Sparkline({
   values,
-  color = "#29a17a",
+  color = "var(--accent-mint)",
 }: {
   values: number[];
   color?: string;

@@ -43,6 +43,7 @@ import type {
 } from "../data/api";
 import type { ArtifactTypeKey } from "../artifacts/types";
 import { previewText } from "./preview-text";
+import { SelectField } from "@/components/ui/select";
 
 export type ObjectLibraryEntry = {
   artifact?: SpectraArtifact;
@@ -704,18 +705,16 @@ export function ObjectLibrary({
         <div
           className={`mt-5 flex flex-wrap items-center gap-2 pb-1 ${flatTable ? "spectra-object-flat-toolbar" : ""}`}
         >
-          <label className="relative shrink-0">
-            <span className="sr-only">Work type</span>
-            <select
-              aria-label="Work type"
-              value={activeType}
-              onChange={(event) => setActiveType(event.target.value as "all" | ObjectType)}
-              className="h-9 min-w-[168px] appearance-none rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-elevated)] py-0 pl-3 pr-9 text-[12px] font-medium text-[var(--text-primary)] outline-none transition hover:bg-[var(--bg-hover)] focus-visible:ring-2 focus-visible:ring-[var(--brand-primary)]"
-            >
-              {types.map((type) => <option key={type.key} value={type.key}>{flatTable && type.key === "all" ? "All work" : type.label}</option>)}
-            </select>
-            <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-3.5 -translate-y-1/2 text-[var(--text-tertiary)]" />
-          </label>
+          <SelectField
+            ariaLabel="Work type"
+            value={activeType}
+            onChange={(next) => setActiveType(next as "all" | ObjectType)}
+            options={types.map((type) => ({
+              value: type.key,
+              label: flatTable && type.key === "all" ? "All work" : type.label,
+            }))}
+            triggerClassName="w-[176px] shrink-0 bg-[var(--bg-elevated)]"
+          />
           <div className="ml-auto flex items-center gap-2">
             <div className="relative w-[210px] shrink-0">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-tertiary)]" />

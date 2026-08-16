@@ -2,7 +2,6 @@
 
 import {
   Check,
-  ChevronDown,
   Link2,
   Loader2,
   Plus,
@@ -30,6 +29,7 @@ import { getWorkDefinition } from "../work/registry";
 import { spectraBus } from "../events";
 import { useSpectraMotion } from "../motion/motion-level";
 import { transitionFor } from "../motion/grammar";
+import { SelectField } from "@/components/ui/select";
 
 type Interaction = "read" | "interact" | "edit";
 
@@ -645,40 +645,3 @@ export function ArtifactEmbedsPanel({
   );
 }
 
-function SelectField({
-  label,
-  value,
-  onChange,
-  options,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  options: Array<{ value: string; label: string }>;
-}) {
-  return (
-    <label>
-      <span className="text-micro font-semibold uppercase tracking-[.09em] text-[var(--text-tertiary)]">
-        {label}
-      </span>
-      <span className="relative mt-1.5 block">
-        <select
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          className="h-9 w-full appearance-none rounded-[7px] border border-[var(--border-default)] bg-[var(--bg-elevated)] px-2.5 pr-7 text-micro text-[var(--text-primary)] outline-none"
-        >
-          {options.length ? (
-            options.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))
-          ) : (
-            <option value="">No options available</option>
-          )}
-        </select>
-        <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-3 w-3 -translate-y-1/2 text-[var(--text-tertiary)]" />
-      </span>
-    </label>
-  );
-}

@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import { Bot, ChevronDown, LockKeyhole, Palette, RotateCcw, Sparkles } from "lucide-react";
+import { Bot, LockKeyhole, Palette, RotateCcw, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { SelectField } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { useTheme } from "@/components/theme-provider";
 import { useSpectraPreferences } from "../preference-store";
@@ -17,6 +18,13 @@ const SECTIONS = [
   { id: "writing", label: "Writing", icon: Sparkles },
   { id: "appearance", label: "Appearance", icon: Palette },
   { id: "privacy", label: "Privacy and data", icon: LockKeyhole },
+] as const;
+
+const RETENTION_OPTIONS = [
+  { value: "15", label: "15 minutes" },
+  { value: "30", label: "30 minutes" },
+  { value: "60", label: "1 hour" },
+  { value: "240", label: "4 hours" },
 ] as const;
 
 type SectionId = (typeof SECTIONS)[number]["id"];
@@ -54,13 +62,7 @@ function ToggleRow({ label, description, checked, onCheckedChange }: { label: st
 function SelectRow({ label, description, value, options, onChange }: { label: string; description?: string; value: string; options: ReadonlyArray<{ value: string; label: string }>; onChange: (value: string) => void }) {
   return (
     <SettingRow label={label} description={description} control={
-      <label className="relative block">
-        <span className="sr-only">{label}</span>
-        <select value={value} onChange={(event) => onChange(event.target.value)} className="h-9 min-w-[156px] appearance-none rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] py-0 pl-3 pr-8 text-[12px] font-medium text-[var(--text-primary)] outline-none hover:bg-[var(--bg-hover)] focus-visible:ring-2 focus-visible:ring-[var(--brand-primary)]">
-          {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-        </select>
-        <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 size-3.5 -translate-y-1/2 text-[var(--text-tertiary)]" />
-      </label>
+      <SelectField ariaLabel={label} value={value} onChange={onChange} options={options} triggerClassName="min-w-[164px]" />
     } />
   );
 }
@@ -77,7 +79,7 @@ function ConversationSettings({ p, update }: SectionProps<"ai">) {
       <ToggleRow label="Show progress in Live Dock" checked={p.showLiveDockProgress} onCheckedChange={(showLiveDockProgress) => update({ showLiveDockProgress })} />
       <ToggleRow label="Open requests for input" description="Required questions expand automatically while the run waits for you." checked={p.expandRequiredInput} onCheckedChange={(expandRequiredInput) => update({ expandRequiredInput })} />
       <ToggleRow label="Keep completed runs nearby" checked={p.retainCompletedRunTabs} onCheckedChange={(retainCompletedRunTabs) => update({ retainCompletedRunTabs })} />
-      {p.retainCompletedRunTabs ? <SettingRow label="Keep completed runs for" control={<select aria-label="Keep completed runs for" value={p.completedRunRetentionMinutes} onChange={(event) => update({ completedRunRetentionMinutes: Number(event.target.value) })} className="h-9 rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] px-3 text-[12px]"><option value={15}>15 minutes</option><option value={30}>30 minutes</option><option value={60}>1 hour</option><option value={240}>4 hours</option></select>} /> : null}
+      {p.retainCompletedRunTabs ? <SettingRow label="Keep completed runs for" control={<SelectField ariaLabel="Keep completed runs for" value={String(p.completedRunRetentionMinutes)} onChange={(next) => update({ completedRunRetentionMinutes: Number(next) })} options={RETENTION_OPTIONS} triggerClassName="min-w-[144px]" />} /> : null}
     </SettingGroup>
   );
 }

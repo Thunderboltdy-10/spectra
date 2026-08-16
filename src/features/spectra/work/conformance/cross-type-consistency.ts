@@ -98,15 +98,20 @@ export function checkReadingModesStayReading(): readonly CrossTypeIssue[] {
 
 /**
  * Every type's primary mode is the mode a person opens the work to do. Making
- * types (document, deck, quiz, plan, agent) lead with their making mode; the
- * rest lead with their type's defining mode.
+ * types (document, deck, quiz, agent) lead with their making mode; the rest
+ * lead with their type's defining mode.
+ *
+ * The rule catches a type that opens into a reading when it should open into
+ * authoring, which needs the type to *have* a reading/writing pair. Plan and
+ * whiteboard do not: every plan view and the board canvas are edited in place,
+ * so requiring `edit` on their first mode would only force them to withhold
+ * their own content from a read-only collaborator.
  */
 export function checkPrimaryModes(): readonly CrossTypeIssue[] {
   const making = new Set<ArtifactTypeKey>([
     "document",
     "flashcard_deck",
     "quiz",
-    "planner_task",
     "agent",
     "code",
   ]);

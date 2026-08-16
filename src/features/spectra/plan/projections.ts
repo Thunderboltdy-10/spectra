@@ -278,10 +278,27 @@ export function planTimelineView(
     bars,
     milestones,
     unscheduled,
-    window: points.length
-      ? { from: Math.min(...points), to: Math.max(...points) }
-      : null,
+    window: points.length ? paddedWindow(points) : null,
   };
+}
+
+/**
+ * A window wide enough to draw on.
+ *
+ * One task with one deadline gives `from === to`, which printed the same date at
+ * both ends of the axis — a timeline that reads as a rendering fault — and made
+ * every bar fill the full width because its span was the whole window. The
+ * window is padded to at least a fortnight, centred on the work, so a single
+ * deadline sits somewhere sensible along a real span.
+ */
+function paddedWindow(points: readonly number[]): { from: number; to: number } {
+  const MINIMUM_SPAN_MS = 14 * 24 * 60 * 60 * 1000;
+  const from = Math.min(...points);
+  const to = Math.max(...points);
+  const shortfall = MINIMUM_SPAN_MS - (to - from);
+  if (shortfall <= 0) return { from, to };
+  const pad = Math.round(shortfall / 2);
+  return { from: from - pad, to: to + pad };
 }
 
 /**

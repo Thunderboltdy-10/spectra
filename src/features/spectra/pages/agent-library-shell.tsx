@@ -6,7 +6,6 @@ import {
   Bot,
   BookOpen,
   CheckCircle2,
-  ChevronDown,
   FilePenLine,
   FlaskConical,
   GraduationCap,
@@ -59,6 +58,8 @@ import {
 } from "../data/api";
 import { formatRelativeTime } from "../components/spectra-view-model";
 import { WorkbenchLiveStack } from "./workbench-live-stack";
+import { Button } from "@/components/ui/button";
+import { SelectField } from "@/components/ui/select";
 
 const ArtifactStudio = dynamic(() =>
   import("../components/artifact-studio").then(
@@ -305,11 +306,17 @@ function AgentCard({
             ))}
         </span>
       </button>
-      <button
-        type="button"
+      {/* One action treatment. This used to be tinted with `--agent-color`, a
+          decorative tone picked by hashing the card id, so the same action was
+          rose on one card and cyan on the next and "Open agent" read as
+          destructive. The card's colour stays on the icon tile, where it is
+          identity rather than instruction. */}
+      <Button
+        variant="secondary"
+        size="sm"
         disabled={busy}
         onClick={onPrimary}
-        className={`agent-library-card__action${card.section === "installed" ? " is-added" : ""}`}
+        className="mx-2.5 mb-2.5 w-[calc(100%-20px)]"
       >
         {busy ? (
           <Loader2 className="size-3.5 animate-spin" />
@@ -322,7 +329,7 @@ function AgentCard({
           <Bot className="size-3.5" />
         )}
         {primaryLabel}
-      </button>
+      </Button>
     </article>
   );
 }
@@ -812,9 +819,40 @@ export function AgentLibraryShell({
           </div>
           {filtersOpen ? (
             <div className="mt-2 flex flex-wrap gap-2.5">
-              <label className="agent-library-filter relative min-w-[180px]"><span className="sr-only">Subject</span><select aria-label="Subject" value={subject} onChange={(event) => setSubject(event.target.value)}><option value="all">All subjects</option>{subjects.map((value) => <option key={value} value={value}>{value}</option>)}</select><ChevronDown className="pointer-events-none size-3.5 text-[var(--text-tertiary)]" /></label>
-              <label className="agent-library-filter relative min-w-[200px]"><span className="sr-only">Capability</span><select aria-label="Capability" value={capability} onChange={(event) => setCapability(event.target.value)}><option value="all">All capabilities</option>{capabilities.map((value) => <option key={value} value={value}>{value}</option>)}</select><ChevronDown className="pointer-events-none size-3.5 text-[var(--text-tertiary)]" /></label>
-              <label className="agent-library-filter relative min-w-[160px]"><span className="sr-only">Sort agents</span><select aria-label="Sort agents" value={sortMode} onChange={(event) => setSortMode(event.target.value as SortMode)}><option value="relevance">Relevance</option><option value="recent">Recently updated</option><option value="title">Name</option></select><ChevronDown className="pointer-events-none size-3.5 text-[var(--text-tertiary)]" /></label>
+              <SelectField
+                ariaLabel="Subject"
+                value={subject}
+                onChange={setSubject}
+                options={[
+                  { value: "all", label: "All subjects" },
+                  ...subjects.map((value) => ({ value, label: value })),
+                ]}
+                size="lg"
+                triggerClassName="min-w-[180px] bg-[var(--bg-elevated)]"
+              />
+              <SelectField
+                ariaLabel="Capability"
+                value={capability}
+                onChange={setCapability}
+                options={[
+                  { value: "all", label: "All capabilities" },
+                  ...capabilities.map((value) => ({ value, label: value })),
+                ]}
+                size="lg"
+                triggerClassName="min-w-[200px] bg-[var(--bg-elevated)]"
+              />
+              <SelectField
+                ariaLabel="Sort agents"
+                value={sortMode}
+                onChange={(next) => setSortMode(next as SortMode)}
+                options={[
+                  { value: "relevance", label: "Relevance" },
+                  { value: "recent", label: "Recently updated" },
+                  { value: "title", label: "Name" },
+                ]}
+                size="lg"
+                triggerClassName="min-w-[160px] bg-[var(--bg-elevated)]"
+              />
               {subject !== "all" || capability !== "all" || sortMode !== "relevance" ? (
                 <button type="button" className="h-10 px-2 text-[11px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)]" onClick={() => { setSubject("all"); setCapability("all"); setSortMode("relevance"); }}>
                   Clear filters

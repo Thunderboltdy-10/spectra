@@ -96,6 +96,7 @@ export function CookieConsentManager() {
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <Button
               type="button"
+              variant="primary"
               onClick={() =>
                 persist({
                   necessary: true,
@@ -176,6 +177,7 @@ export function CookieConsentManager() {
             <div className="mt-4 flex flex-wrap gap-2">
               <Button
                 type="button"
+                variant="primary"
                 onClick={() =>
                   persist({
                     necessary: true,

@@ -5,26 +5,31 @@ import {
   AlignLeft,
   AlignRight,
   BoxSelect,
-  CheckCircle2,
-  Circle,
   CircleDot,
   Eye,
   EyeOff,
-  Frame,
+  FileCode,
+  FileText,
   FileUp,
-  Grid3X3,
+  Frame,
   Group,
   Hand,
+  Image as ImageIcon,
   ImagePlus,
   Layers3,
   LayoutTemplate,
   Link2,
+  ListTree,
   Loader2,
   Lock,
-  Maximize2,
+  Magnet,
   MousePointer2,
+  Package,
   Plus,
+  Presentation,
   Redo2,
+  Repeat2,
+  Scan,
   Search,
   SlidersHorizontal,
   Square,
@@ -39,7 +44,9 @@ import {
   X,
   ZoomIn,
   ZoomOut,
+  type LucideIcon,
 } from "lucide-react";
+import { createPortal } from "react-dom";
 import {
   useCallback,
   useEffect,
@@ -47,6 +54,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type WheelEvent as ReactWheelEvent,
@@ -67,6 +75,7 @@ import {
   whiteboardNodeText,
   withWhiteboardNodeText,
   type WhiteboardContent,
+  type WhiteboardEdge,
   type WhiteboardNode,
   type WhiteboardNodeType,
 } from "../whiteboard/model";
@@ -76,13 +85,19 @@ import {
   importWhiteboardFile,
 } from "../whiteboard/io";
 import { uniqueToken } from "@/lib/unique-token";
+import { SelectField } from "@/components/ui/select";
+import { getWorkDefinition } from "../work/registry";
 import { aiRegionAttr, pathTouches } from "./ai-region-path";
 import { targetAttrs } from "../collaboration/target-attributes";
-import { WorkbarMore, workbarMenuItemClass } from "./artifact-workbar";
+import { useStudioContract } from "./artifact-studio-shell";
+import {
+  ArtifactWorkbar,
+  type WorkbarActionSpec,
+} from "./artifact-workbar";
 
 type Tool = "select" | "hand" | "connector" | WhiteboardNodeType;
 type Drag = {
-  mode: "node" | "pan" | "resize";
+  mode: "node" | "pan" | "resize" | "marquee";
   pointerId: number;
   nodeId?: string;
   startClientX: number;
@@ -93,11 +108,108 @@ type Drag = {
   startHeight?: number;
   nodeStarts?: Record<string, { x: number; y: number }>;
   snapshot: WhiteboardContent;
+  /** True once a node drag has actually moved, so a click is not a no-op edit. */
+  moved?: boolean;
 };
+/** Live alignment guides in world coordinates, shown only while dragging. */
+type Guides = { x?: number; y?: number };
+type Marquee = { x: number; y: number; width: number; height: number };
+
+/**
+ * User-facing nouns for the object types. The type key is a schema key, and
+ * printing it at a reader is exactly what D13 rules out ("embed", "planner_task").
+ */
+const NODE_NOUNS: Record<WhiteboardNodeType, string> = {
+  text: "Text",
+  note: "Sticky note",
+  shape: "Shape",
+  image: "Image",
+  embed: "Linked work",
+  frame: "Frame",
+  group: "Group",
+  table: "Table",
+  card: "Card",
+  drawing: "Drawing",
+};
+
+/** How close, in screen pixels, an edge or centre has to be to snap. */
+
+const SNAP_PIXELS = 7;
+
+/**
+ * The tools, in the order they matter. The first four stay in the bar at every
+ * width; the rest promote into the overflow menu when the pane is tight.
+ */
+const BOARD_PALETTE = [
+  ["select", MousePointer2, "Select"],
+  ["hand", Hand, "Pan"],
+  ["note", StickyNote, "Sticky note"],
+  ["connector", CircleDot, "Connector"],
+  ["text", TextCursorInput, "Text"],
+  ["shape", Square, "Shape"],
+] as const satisfies readonly (readonly [Tool, LucideIcon, string])[];
+
+/** Object tools that always live in the overflow menu. */
+const BOARD_OBJECTS = [
+  ["frame", Frame, "Frame"],
+  ["card", BoxSelect, "Card"],
+  ["table", Table2, "Table"],
+  // D15: "artifact" is not a user-facing word. This inserts a live reference to
+  // other work, which is what the label now says.
+  ["embed", Link2, "Embed work"],
+] as const satisfies readonly (readonly [Tool, LucideIcon, string])[];
+
+/** The side panels, in the order the menu lists them. `true` means it edits. */
+const BOARD_PANELS = [
+  ["layers", Layers3, "Pages and layers", false],
+  ["templates", LayoutTemplate, "Templates", true],
+  ["search", Search, "Find on board", false],
+  ["outline", ListTree, "Accessible outline", false],
+] as const satisfies readonly (readonly [
+  "layers" | "templates" | "search" | "outline",
+  LucideIcon,
+  string,
+  boolean,
+])[];
+
+/** One icon per format, so the export group is readable at a glance (D16). */
+
+const BOARD_EXPORTS = [
+  ["png", ImageIcon, "Export PNG image"],
+  ["svg", FileCode, "Export editable SVG"],
+  ["pdf", FileText, "Export PDF"],
+  ["package", Package, "Export portable board"],
+] as const satisfies readonly (readonly [
+  "png" | "svg" | "pdf" | "package",
+  LucideIcon,
+  string,
+])[];
 
 function clone<T>(value: T): T {
   return structuredClone(value);
 }
+
+function centerX(node: WhiteboardNode) {
+  return node.x + node.width / 2;
+}
+function centerY(node: WhiteboardNode) {
+  return node.y + node.height / 2;
+}
+
+/**
+ * The bounding box of a set of objects, in world coordinates. Used by fit,
+ * by the minimap and by export scoping, so all three agree on where the work is.
+ */
+function boundsOf(nodes: readonly WhiteboardNode[]) {
+  if (!nodes.length) return undefined;
+  return {
+    left: Math.min(...nodes.map((node) => node.x)),
+    top: Math.min(...nodes.map((node) => node.y)),
+    right: Math.max(...nodes.map((node) => node.x + node.width)),
+    bottom: Math.max(...nodes.map((node) => node.y + node.height)),
+  };
+}
+
 
 function styleValue(
   node: WhiteboardNode,
@@ -110,6 +222,28 @@ function styleValue(
     : fallback;
 }
 
+/**
+ * One resolution order for every painted property: the node's `style` wins,
+ * then a matching key on its own content, then the type default. Imported
+ * boards carry appearance on `content`, native ones on `style`, and both have
+ * to render the same way.
+ */
+function visual(
+  node: WhiteboardNode,
+  content: Record<string, unknown>,
+  key: string,
+  contentKeys: readonly string[],
+  fallback: string | number,
+) {
+  const fromContent = contentKeys
+    .map((name) => content[name])
+    .find((value) => typeof value === typeof fallback) as
+    | string
+    | number
+    | undefined;
+  return styleValue(node, key, fromContent ?? fallback);
+}
+
 async function sha256Blob(blob: Blob) {
   const digest = await crypto.subtle.digest(
     "SHA-256",
@@ -120,10 +254,23 @@ async function sha256Blob(blob: Blob) {
     .join("");
 }
 
+/**
+ * The registry's one user-facing type name. A board that embeds other work must
+ * never print a raw blueprint key at the reader (`planner_task`, "flashcard
+ * deck"): D13, and D15 for the word "artifact".
+ */
+function workTypeName(artifact?: SpectraArtifact) {
+  if (!artifact) return undefined;
+  return getWorkDefinition(
+    artifact.blueprintKey as Parameters<typeof getWorkDefinition>[0],
+  )?.userFacingName;
+}
+
 function BoardNode({
   node,
   artifact,
   asset,
+  assetsLoading,
   selected,
   aiActive,
   readOnly,
@@ -138,6 +285,8 @@ function BoardNode({
   node: WhiteboardNode;
   artifact?: SpectraArtifact;
   asset?: SpectraArtifactAsset;
+  /** Board media is still being fetched, so "unavailable" would be a lie. */
+  assetsLoading: boolean;
   selected: boolean;
   aiActive: boolean;
   readOnly: boolean;
@@ -211,53 +360,25 @@ function BoardNode({
         zIndex: node.zIndex,
         transform: `rotate(${node.rotation}deg)`,
         background: String(
-          styleValue(
+          visual(
             node,
+            content,
             "fill",
-            typeof content.fill === "string"
-              ? content.fill
-              : node.type === "note"
-                ? "#fff3c9"
-                : "#ffffff",
+            ["fill"],
+            node.type === "note" ? "#fff3c9" : "#ffffff",
           ),
         ),
         borderColor: String(
-          styleValue(
-            node,
-            "stroke",
-            typeof content.stroke === "string"
-              ? content.stroke
-              : "#d5d7d2",
-          ),
+          visual(node, content, "stroke", ["stroke"], "#d5d7d2"),
         ),
         borderWidth: Number(
-          styleValue(
-            node,
-            "strokeWidth",
-            typeof content.strokeWidth === "number"
-              ? content.strokeWidth
-              : 1,
-          ),
+          visual(node, content, "strokeWidth", ["strokeWidth"], 1),
         ),
         borderRadius: Number(
-          styleValue(
-            node,
-            "borderRadius",
-            typeof content.borderRadius === "number"
-              ? content.borderRadius
-              : 11,
-          ),
+          visual(node, content, "borderRadius", ["borderRadius"], 11),
         ),
         color: String(
-          styleValue(
-            node,
-            "color",
-            typeof content.textColor === "string"
-              ? content.textColor
-              : typeof content.color === "string"
-                ? content.color
-                : "#29352f",
-          ),
+          visual(node, content, "color", ["textColor", "color"], "#29352f"),
         ),
       }}
       onClick={(event) => {
@@ -298,10 +419,7 @@ function BoardNode({
         >
           <Link2 className="h-4 w-4" />
           <strong>{artifact?.title ?? "Access unavailable"}</strong>
-          <small>
-            {artifact?.blueprintKey.replaceAll("_", " ") ??
-              "Source permission changed"}
-          </small>
+          <small>{workTypeName(artifact) ?? "Source permission changed"}</small>
         </div>
       ) : node.type === "table" ? (
         <table>
@@ -353,8 +471,17 @@ function BoardNode({
           />
         ) : (
           <div className="whiteboard-empty-media">
-            <ImagePlus className="h-5 w-5" />
-            Image unavailable
+            {assetsLoading ? (
+              <>
+                <Loader2 className="h-5 w-5 animate-spin" />
+                Loading image
+              </>
+            ) : (
+              <>
+                <ImagePlus className="h-5 w-5" />
+                Image unavailable
+              </>
+            )}
           </div>
         )
       ) : node.type === "group" ? (
@@ -420,27 +547,25 @@ function BoardNode({
           onChange={(event) => onTextChange(event.target.value)}
           style={{
             fontSize: Number(
-              styleValue(
+              visual(
                 node,
+                content,
                 "fontSize",
-                typeof content.fontSize === "number"
-                  ? content.fontSize
-                  : node.type === "text"
-                    ? 30
-                    : 14,
+                ["fontSize"],
+                node.type === "text" ? 30 : 14,
               ),
             ),
             fontWeight: Number(
-              styleValue(
+              visual(
                 node,
+                content,
                 "fontWeight",
-                typeof content.fontWeight === "number"
-                  ? content.fontWeight
-                  : content.fontWeight === "bold"
-                    ? 700
-                    : node.type === "text"
-                      ? 650
-                      : 500,
+                ["fontWeight"],
+                content.fontWeight === "bold"
+                  ? 700
+                  : node.type === "text"
+                    ? 650
+                    : 500,
               ),
             ),
             fontStyle:
@@ -502,9 +627,11 @@ export function WhiteboardStudio({
   content,
   onChange,
   aiChangedPaths = [],
-  readOnly,
+  readOnly: readOnlyProp,
   synchronizationReady: _synchronizationReady = true,
-  syncMessage = "Auto-saved",
+  // Sync truth belongs to the shell's identity row. The board used to print it
+  // a second time inside its own bar; one artifact says one thing once.
+  syncMessage: _syncMessage = "Auto-saved",
   onActiveRegionChange,
 }: {
   artifactId: string;
@@ -517,6 +644,20 @@ export function WhiteboardStudio({
   syncMessage?: string;
   onActiveRegionChange?: (regionId: string) => void;
 }) {
+  // Registry truth, resolved once by the shell: what this viewer may do, how
+  // wide the pane actually is, and which inspectors exist. A studio that
+  // re-derives any of these is how nine editors ended up disagreeing.
+  const contract = useStudioContract();
+  const definition = getWorkDefinition("whiteboard");
+  // CANON D1/D4: read-only means the viewer genuinely lacks `edit`. It is never
+  // a consequence of pane width, so a split panel edits like fullscreen.
+  const readOnly = readOnlyProp || contract.readOnly;
+  const canEdit = contract.can("edit") && !readOnlyProp;
+  // The registry grants `present` from the type's own capabilities, so presenting
+  // is not something reaching the bar implies. The state is gated too, not just
+  // the control: an ungranted role must not be able to be in Present at all.
+  const canPresent = contract.can("present");
+  const tight = contract.density === "tight";
   const board = useMemo(() => normalizeWhiteboardContent(content), [content]);
   // Viewport is personal presence, never shared artifact content. Panning or
   // zooming in one differently-sized pane must not move every collaborator.
@@ -527,6 +668,8 @@ export function WhiteboardStudio({
   const setSelectedNodeId = useCallback((nodeId?: string) => {
     setSelectedNodeIds(nodeId ? [nodeId] : []);
   }, []);
+  // A connector is an object too: it can be selected, labelled and deleted.
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string>();
   const [connectorFrom, setConnectorFrom] = useState<string>();
   const [panel, setPanel] = useState<
     "none" | "layers" | "outline" | "templates" | "search"
@@ -535,14 +678,16 @@ export function WhiteboardStudio({
   const [undo, setUndo] = useState<WhiteboardContent[]>([]);
   const [redo, setRedo] = useState<WhiteboardContent[]>([]);
   const [presenting, setPresenting] = useState(false);
-  const [moreToolsOpen, setMoreToolsOpen] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [assets, setAssets] = useState<SpectraArtifactAsset[]>([]);
+  const [assetsLoading, setAssetsLoading] = useState(true);
   const [assetError, setAssetError] = useState<string>();
   const [uploadingImage, setUploadingImage] = useState(false);
   const [ioNotice, setIoNotice] = useState<string>();
   const [ioBusy, setIoBusy] = useState<string>();
   const [canvasSize, setCanvasSize] = useState({ width: 1280, height: 800 });
+  const [guides, setGuides] = useState<Guides>({});
+  const [marquee, setMarquee] = useState<Marquee>();
   const dragRef = useRef<Drag | undefined>(undefined);
   const canvasRef = useRef<HTMLDivElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -608,14 +753,19 @@ export function WhiteboardStudio({
   const selectedNodes = board.nodes.filter((node) =>
     selectedNodeIds.includes(node.id),
   );
+  const selectedEdge = board.edges.find((edge) => edge.id === selectedEdgeId);
+  const nodeById = useMemo(
+    () => new Map(board.nodes.map((node) => [node.id, node])),
+    [board.nodes],
+  );
   const artifactMap = new Map(
     artifacts.map((artifact) => [artifact._id, artifact]),
   );
   const assetMap = new Map(assets.map((asset) => [asset.assetId, asset]));
 
   useEffect(() => {
-    if (!selectedNodeId) setInspectorOpen(false);
-  }, [selectedNodeId]);
+    if (!selectedNodeId && !selectedEdgeId) setInspectorOpen(false);
+  }, [selectedEdgeId, selectedNodeId]);
 
   useEffect(() => {
     setViewport(board.viewport);
@@ -623,6 +773,7 @@ export function WhiteboardStudio({
 
   useEffect(() => {
     let active = true;
+    setAssetsLoading(true);
     void getArtifactAssets(artifactId)
       .then((result) => {
         if (active) setAssets(result.assets);
@@ -634,6 +785,9 @@ export function WhiteboardStudio({
               ? error.message
               : "Board media is unavailable.",
           );
+      })
+      .finally(() => {
+        if (active) setAssetsLoading(false);
       });
     return () => {
       active = false;
@@ -683,11 +837,199 @@ export function WhiteboardStudio({
         (clientY - (bounds?.top ?? 0)) / viewport.zoom + viewport.y,
     };
   };
+  const gridSize = board.settings?.gridSize ?? 24;
+  const snapToGrid = board.settings?.snapToGrid !== false;
   const snap = (value: number) =>
-    board.settings?.snapToGrid === false
-      ? value
-      : Math.round(value / (board.settings?.gridSize ?? 24)) *
-        (board.settings?.gridSize ?? 24);
+    snapToGrid ? Math.round(value / gridSize) * gridSize : value;
+
+  /**
+   * Object-aware snapping. A grid cannot line a note up with the note beside it,
+   * which is the alignment a board actually needs, so a drag is also pulled onto
+   * the edges and centres of the objects it is not moving, and reports the guide
+   * to draw. Tolerance is screen pixels converted to world units, so the pull
+   * feels identical at every zoom instead of getting stickier as you zoom out.
+   */
+  function alignDrag(
+    starts: Record<string, { x: number; y: number }>,
+    deltaX: number,
+    deltaY: number,
+  ) {
+    const moving = Object.entries(starts).flatMap(([id, start]) => {
+      const node = nodeById.get(id);
+      return node ? [{ ...node, x: start.x, y: start.y }] : [];
+    });
+    const box = boundsOf(moving);
+    if (!box) return { deltaX, deltaY, guides: {} as Guides };
+    const tolerance = SNAP_PIXELS / viewport.zoom;
+    const edgesX = [box.left + deltaX, box.right + deltaX];
+    edgesX.push((edgesX[0]! + edgesX[1]!) / 2);
+    const edgesY = [box.top + deltaY, box.bottom + deltaY];
+    edgesY.push((edgesY[0]! + edgesY[1]!) / 2);
+    const guides: Guides = {};
+    let adjustX = 0;
+    let adjustY = 0;
+    let bestX = tolerance;
+    let bestY = tolerance;
+    for (const other of nodes) {
+      if (starts[other.id]) continue;
+      for (const target of [other.x, centerX(other), other.x + other.width])
+        for (const edge of edgesX) {
+          const distance = Math.abs(target - edge);
+          if (distance < bestX) {
+            bestX = distance;
+            adjustX = target - edge;
+            guides.x = target;
+          }
+        }
+      for (const target of [other.y, centerY(other), other.y + other.height])
+        for (const edge of edgesY) {
+          const distance = Math.abs(target - edge);
+          if (distance < bestY) {
+            bestY = distance;
+            adjustY = target - edge;
+            guides.y = target;
+          }
+        }
+    }
+    return {
+      deltaX: deltaX + adjustX,
+      deltaY: deltaY + adjustY,
+      guides,
+      lockedX: guides.x !== undefined,
+      lockedY: guides.y !== undefined,
+    };
+  }
+
+  /**
+   * The overview map, in the same coordinates the board is actually in. It used
+   * to place every dot at `50% + x/100` and draw a hardcoded `inset: 20% 22%`
+   * rectangle, so it agreed with the canvas only by accident: the box never moved
+   * when you panned. Now both come from real geometry, and clicking it moves the
+   * view, which is the only reason to draw a map at all.
+   */
+  const minimap = useMemo(() => {
+    const box = boundsOf(nodes);
+    if (!box) return undefined;
+    const width = Math.max(1, canvasSize.width / viewport.zoom);
+    const height = Math.max(1, canvasSize.height / viewport.zoom);
+    // Union with the viewport so the frame is always inside the map, even after
+    // panning off into empty space.
+    const left = Math.min(box.left, viewport.x) - 60;
+    const top = Math.min(box.top, viewport.y) - 60;
+    const right = Math.max(box.right, viewport.x + width) + 60;
+    const bottom = Math.max(box.bottom, viewport.y + height) + 60;
+    const scale = Math.min(114 / (right - left), 74 / (bottom - top));
+    const project = (x: number, y: number) => ({
+      x: (x - left) * scale,
+      y: (y - top) * scale,
+    });
+    const selected = new Set(selectedNodeIds);
+    return {
+      view: { ...project(viewport.x, viewport.y), width: width * scale, height: height * scale },
+      toWorld: (x: number, y: number) => ({
+        x: left + x / scale,
+        y: top + y / scale,
+      }),
+      dots: nodes
+        .filter(
+          (_node, index) =>
+            nodes.length <= 400 ||
+            index % Math.ceil(nodes.length / 400) === 0,
+        )
+        .map((node) => ({
+          id: node.id,
+          ...project(node.x, node.y),
+          width: Math.max(2, node.width * scale),
+          height: Math.max(2, node.height * scale),
+          selected: selected.has(node.id),
+        })),
+    };
+  }, [
+    canvasSize.height,
+    canvasSize.width,
+    nodes,
+    selectedNodeIds,
+    viewport.x,
+    viewport.y,
+    viewport.zoom,
+  ]);
+
+  /** Moves the viewport so a rectangle of the board is centred and in frame. */
+  const frameBox = useCallback(
+    (
+      box: { left: number; top: number; right: number; bottom: number },
+      options?: { zoom?: boolean },
+    ) => {
+      const width = Math.max(1, canvasSize.width);
+      const height = Math.max(1, canvasSize.height);
+      setViewport((current) => {
+        const zoom = options?.zoom
+          ? Math.max(
+              0.1,
+              Math.min(
+                1.5,
+                Math.min(
+                  width / Math.max(1, box.right - box.left + 160),
+                  height / Math.max(1, box.bottom - box.top + 160),
+                ),
+              ),
+            )
+          : current.zoom;
+        return {
+          ...current,
+          zoom,
+          x: (box.left + box.right) / 2 - width / zoom / 2,
+          y: (box.top + box.bottom) / 2 - height / zoom / 2,
+        };
+      });
+    },
+    [canvasSize.height, canvasSize.width],
+  );
+
+  /** `0` and the bar's Fit control: every object on the page, in frame, once. */
+  const fitToContent = useCallback(() => {
+    const box = boundsOf(nodes);
+    if (box) frameBox(box, { zoom: true });
+  }, [frameBox, nodes]);
+
+  /** Reveals one object: selects it and brings it into view without a zoom jump. */
+  const revealNode = useCallback(
+    (node: WhiteboardNode) => {
+      if (node.pageId !== viewport.pageId)
+        setViewport((current) => ({ ...current, pageId: node.pageId }));
+      setSelectedNodeIds([node.id]);
+      setSelectedEdgeId(undefined);
+      onActiveRegionChange?.(node.id);
+      // Only move the view if the object is not already in it. Recentring on
+      // something the user can already see is the jump that makes outline
+      // navigation feel broken.
+      const width = canvasSize.width / viewport.zoom;
+      const height = canvasSize.height / viewport.zoom;
+      if (
+        node.x >= viewport.x &&
+        node.y >= viewport.y &&
+        node.x + node.width <= viewport.x + width &&
+        node.y + node.height <= viewport.y + height
+      )
+        return;
+      frameBox({
+        left: node.x,
+        top: node.y,
+        right: node.x + node.width,
+        bottom: node.y + node.height,
+      });
+    },
+    [
+      canvasSize.height,
+      canvasSize.width,
+      frameBox,
+      onActiveRegionChange,
+      viewport.pageId,
+      viewport.x,
+      viewport.y,
+      viewport.zoom,
+    ],
+  );
 
   function addNode(type: WhiteboardNodeType, x?: number, y?: number) {
     const layer = layers.find(
@@ -715,8 +1057,15 @@ export function WhiteboardStudio({
   }
   function canvasClick(event: ReactPointerEvent<HTMLDivElement>) {
     if ((event.target as HTMLElement).closest(".whiteboard-node")) return;
+    // A drag that moved already said what the user meant. Without this, letting
+    // go of a rubber-band or a pan cleared the selection it had just made.
+    if (selectionHandledRef.current) {
+      selectionHandledRef.current = false;
+      return;
+    }
     if (tool === "select" || tool === "hand" || tool === "connector") {
       setSelectedNodeId(undefined);
+      setSelectedEdgeId(undefined);
       setConnectorFrom(undefined);
       return;
     }
@@ -733,10 +1082,13 @@ export function WhiteboardStudio({
         const layer = layers.find(
           (candidate) => !candidate.locked && candidate.visible,
         );
-        if (layer)
+        if (layer) {
+          // `Date.now()` collided whenever two connectors were drawn inside the
+          // same millisecond, which duplicated a React key and an RFC-6901 path.
+          const edgeId = `edge-${uniqueToken()}`;
           mutate((draft) =>
             draft.edges.push({
-              id: `edge-${Date.now().toString(36)}`,
+              id: edgeId,
               pageId: page.id,
               layerId: layer.id,
               from: connectorFrom,
@@ -744,11 +1096,18 @@ export function WhiteboardStudio({
               zIndex: -1,
             }),
           );
+          // A connector is drawn to say something, so it is selected with its
+          // label field ready rather than left as an anonymous line.
+          setSelectedNodeIds([]);
+          setSelectedEdgeId(edgeId);
+          setInspectorOpen(true);
+        }
       }
       setConnectorFrom(undefined);
       setTool("select");
       return;
     }
+    setSelectedEdgeId(undefined);
     setSelectedNodeIds((current) =>
       additive
         ? current.includes(node.id)
@@ -758,6 +1117,32 @@ export function WhiteboardStudio({
     );
     onActiveRegionChange?.(node.id);
   }
+  /**
+   * A group moves, duplicates and deletes with everything nested inside it,
+   * however it was picked. One expansion, so dragging and deleting can never
+   * disagree about what a group contains.
+   */
+  const withDescendants = useCallback(
+    (ids: Iterable<string>) => {
+      const result = new Set(ids);
+      let expanded = true;
+      while (expanded) {
+        expanded = false;
+        for (const node of board.nodes)
+          if (
+            node.parentId &&
+            result.has(node.parentId) &&
+            !result.has(node.id)
+          ) {
+            result.add(node.id);
+            expanded = true;
+          }
+      }
+      return result;
+    },
+    [board.nodes],
+  );
+
   function beginNodeDrag(
     node: WhiteboardNode,
     event: ReactPointerEvent<HTMLDivElement>,
@@ -772,6 +1157,7 @@ export function WhiteboardStudio({
     event.preventDefault();
     event.stopPropagation();
     selectionHandledRef.current = true;
+    setSelectedEdgeId(undefined);
     event.currentTarget.setPointerCapture(event.pointerId);
     if (event.shiftKey) {
       setSelectedNodeIds((current) =>
@@ -784,20 +1170,7 @@ export function WhiteboardStudio({
     const movingIds = selectedNodeIds.includes(node.id)
       ? selectedNodeIds
       : [node.id];
-    const movingNodeIds = new Set(movingIds);
-    let expanded = true;
-    while (expanded) {
-      expanded = false;
-      for (const candidate of board.nodes)
-        if (
-          candidate.parentId &&
-          movingNodeIds.has(candidate.parentId) &&
-          !movingNodeIds.has(candidate.id)
-        ) {
-          movingNodeIds.add(candidate.id);
-          expanded = true;
-        }
-    }
+    const movingNodeIds = withDescendants(movingIds);
     setSelectedNodeIds(movingIds);
     dragRef.current = {
       mode: "node",
@@ -844,21 +1217,41 @@ export function WhiteboardStudio({
       snapshot: clone(board),
     };
   }
-  function beginPan(event: ReactPointerEvent<HTMLDivElement>) {
-    if (
-      (event.target as HTMLElement).closest(".whiteboard-node") ||
-      (tool !== "hand" && event.button !== 1)
-    )
-      return;
+  /**
+   * One pointer entry point for the empty canvas: hand tool or middle button
+   * pans, the select tool rubber-bands. Both were missing, so the only way to
+   * select several objects was to shift-click each one.
+   */
+  function beginCanvasPointer(event: ReactPointerEvent<HTMLDivElement>) {
+    if ((event.target as HTMLElement).closest(".whiteboard-node")) return;
+    // Self-heal: a drag released outside the window never produces a click, so
+    // the suppression flag from the last gesture is cleared on the next press
+    // rather than swallowing it.
+    selectionHandledRef.current = false;
+    const panning = tool === "hand" || event.button === 1;
+    if (!panning && (tool !== "select" || event.button !== 0)) return;
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
+    if (panning) {
+      dragRef.current = {
+        mode: "pan",
+        pointerId: event.pointerId,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        startX: viewport.x,
+        startY: viewport.y,
+        snapshot: clone(board),
+      };
+      return;
+    }
+    const point = worldPoint(event.clientX, event.clientY);
     dragRef.current = {
-      mode: "pan",
+      mode: "marquee",
       pointerId: event.pointerId,
       startClientX: event.clientX,
       startClientY: event.clientY,
-      startX: viewport.x,
-      startY: viewport.y,
+      startX: point.x,
+      startY: point.y,
       snapshot: clone(board),
     };
   }
@@ -875,12 +1268,37 @@ export function WhiteboardStudio({
           drag.startY -
           (event.clientY - drag.startClientY) / current.zoom,
       }));
-    else if (drag.mode === "resize")
+    else if (drag.mode === "marquee") {
+      const point = worldPoint(event.clientX, event.clientY);
+      const box = {
+        x: Math.min(drag.startX, point.x),
+        y: Math.min(drag.startY, point.y),
+        width: Math.abs(point.x - drag.startX),
+        height: Math.abs(point.y - drag.startY),
+      };
+      if (box.width < 3 && box.height < 3) return;
+      drag.moved = true;
+      setMarquee(box);
+      // Selection follows the band live, so you can see what you are catching.
+      setSelectedNodeIds(
+        nodes
+          .filter(
+            (node) =>
+              node.x + node.width >= box.x &&
+              node.y + node.height >= box.y &&
+              node.x <= box.x + box.width &&
+              node.y <= box.y + box.height,
+          )
+          .map((node) => node.id),
+      );
+      setSelectedEdgeId(undefined);
+    } else if (drag.mode === "resize")
       mutate((draft) => {
         const node = draft.nodes.find(
           (candidate) => candidate.id === drag.nodeId,
         );
         if (node) {
+          drag.moved = true;
           node.width = Math.max(
             48,
             snap(
@@ -897,24 +1315,43 @@ export function WhiteboardStudio({
           );
         }
       }, false);
-    else
+    else {
+      const starts = drag.nodeStarts ?? {};
+      const aligned = alignDrag(
+        starts,
+        (event.clientX - drag.startClientX) / viewport.zoom,
+        (event.clientY - drag.startClientY) / viewport.zoom,
+      );
+      setGuides(aligned.guides);
       mutate((draft) => {
-        const deltaX =
-          (event.clientX - drag.startClientX) / viewport.zoom;
-        const deltaY =
-          (event.clientY - drag.startClientY) / viewport.zoom;
-        for (const [nodeId, start] of Object.entries(drag.nodeStarts ?? {})) {
+        for (const [nodeId, start] of Object.entries(starts)) {
           const node = draft.nodes.find((candidate) => candidate.id === nodeId);
           if (!node || node.locked) continue;
-          node.x = snap(start.x + deltaX);
-          node.y = snap(start.y + deltaY);
+          drag.moved = true;
+          // An object snap already placed the edge exactly; re-rounding it to the
+          // grid would drag it back off the guide the user is looking at.
+          node.x = aligned.lockedX
+            ? start.x + aligned.deltaX
+            : snap(start.x + aligned.deltaX);
+          node.y = aligned.lockedY
+            ? start.y + aligned.deltaY
+            : snap(start.y + aligned.deltaY);
         }
       }, false);
+    }
   }
   function finishPointer(event: ReactPointerEvent<HTMLDivElement>) {
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
     dragRef.current = undefined;
+    setGuides({});
+    setMarquee(undefined);
+    if (drag.moved) selectionHandledRef.current = true;
+    // Panning and rubber-banding change what you are looking at, not the board,
+    // so they must never consume an undo step. Neither must a click that moved
+    // nothing: the bar's Undo used to walk back through identical states.
+    if (drag.mode !== "node" && drag.mode !== "resize") return;
+    if (!drag.moved) return;
     setUndo((stack) => [...stack.slice(-79), drag.snapshot]);
     setRedo([]);
   }
@@ -959,21 +1396,12 @@ export function WhiteboardStudio({
     });
   }
   function deleteSelected() {
-    if (!selectedNodeIds.length) return;
-    const removing = new Set(selectedNodeIds);
-    let expanded = true;
-    while (expanded) {
-      expanded = false;
-      for (const node of board.nodes)
-        if (
-          node.parentId &&
-          removing.has(node.parentId) &&
-          !removing.has(node.id)
-        ) {
-          removing.add(node.id);
-          expanded = true;
-        }
+    if (selectedEdgeId && !selectedNodeIds.length) {
+      deleteEdge(selectedEdgeId);
+      return;
     }
+    if (!selectedNodeIds.length) return;
+    const removing = withDescendants(selectedNodeIds);
     mutate((draft) => {
       draft.nodes = draft.nodes.filter((node) => !removing.has(node.id));
       draft.edges = draft.edges.filter(
@@ -1091,11 +1519,230 @@ export function WhiteboardStudio({
     });
     setSelectedNodeIds(childIds);
   }
+  /**
+   * A connector is an object, not decoration: it can be relabelled, reversed and
+   * deleted. Before this, an edge could only be created, and a mislabelled one
+   * could only be fixed by deleting the notes it joined.
+   */
+  function updateEdge(edgeId: string, recipe: (edge: WhiteboardEdge) => void) {
+    mutate((draft) => {
+      const edge = draft.edges.find((candidate) => candidate.id === edgeId);
+      if (edge) recipe(edge);
+    });
+  }
+  function deleteEdge(edgeId: string) {
+    mutate((draft) => {
+      draft.edges = draft.edges.filter((edge) => edge.id !== edgeId);
+    });
+    setSelectedEdgeId(undefined);
+  }
+
+  /**
+   * Duplicate: the copies land offset and selected, and connectors that ran
+   * between the copied objects are copied too, so duplicating a labelled cluster
+   * gives you a labelled cluster rather than loose notes.
+   */
+  function duplicateSelected() {
+    const originals = board.nodes.filter((node) =>
+      selectedNodeIds.includes(node.id),
+    );
+    if (!originals.length || readOnly) return;
+    const offset = gridSize * 2;
+    const idMap = new Map(
+      originals.map((node) => [node.id, `${node.type}-${uniqueToken()}`]),
+    );
+    const top = board.nodes.length + 1;
+    mutate((draft) => {
+      originals.forEach((node, index) => {
+        draft.nodes.push({
+          ...clone(node),
+          id: idMap.get(node.id)!,
+          x: node.x + offset,
+          y: node.y + offset,
+          zIndex: top + index,
+          parentId: node.parentId ? idMap.get(node.parentId) : undefined,
+          frameId: node.frameId ? (idMap.get(node.frameId) ?? node.frameId) : undefined,
+        });
+      });
+      for (const edge of draft.edges.filter(
+        (candidate) => idMap.has(candidate.from) && idMap.has(candidate.to),
+      ))
+        draft.edges.push({
+          ...clone(edge),
+          id: `edge-${uniqueToken()}`,
+          from: idMap.get(edge.from)!,
+          to: idMap.get(edge.to)!,
+        });
+    });
+    setSelectedNodeIds([...idMap.values()]);
+    setSelectedEdgeId(undefined);
+  }
+
   const setZoom = (zoom: number) =>
     setViewport((current) => ({
       ...current,
       zoom: Math.max(0.1, Math.min(4, zoom)),
     }));
+
+  /**
+   * The page's objects in reading order: declared accessibility order first,
+   * then top-to-bottom, left-to-right. The outline, keyboard traversal and the
+   * screen-reader summary all use this one order, so what you hear, what you
+   * read and what Tab reaches cannot disagree.
+   */
+  const outlineNodes = useMemo(
+    () =>
+      [...nodes].sort(
+        (a, b) =>
+          (a.accessibilityOrder ?? 0) - (b.accessibilityOrder ?? 0) ||
+          a.y - b.y ||
+          a.x - b.x,
+      ),
+    [nodes],
+  );
+
+  /** Reveals a connector: selects it and frames both objects it joins. */
+  const revealEdge = useCallback(
+    (edge: WhiteboardEdge) => {
+      const from = nodeById.get(edge.from);
+      const to = nodeById.get(edge.to);
+      setSelectedNodeIds([]);
+      setSelectedEdgeId(edge.id);
+      setInspectorOpen(true);
+      const box = boundsOf([from, to].filter(Boolean) as WhiteboardNode[]);
+      if (box) frameBox(box);
+    },
+    [frameBox, nodeById],
+  );
+
+  /** Arrow-key move. One pixel for precision, one grid step with Shift. */
+
+
+  function nudgeSelected(deltaX: number, deltaY: number) {
+    const movable = selectedNodes.filter(
+      (node) =>
+        !node.locked &&
+        !layers.find((layer) => layer.id === node.layerId)?.locked,
+    );
+    if (!movable.length || readOnly) return false;
+    const moving = withDescendants(movable.map((node) => node.id));
+    mutate((draft) => {
+      for (const node of draft.nodes)
+        if (moving.has(node.id)) {
+          node.x += deltaX;
+          node.y += deltaY;
+        }
+    });
+    return true;
+  }
+
+  /**
+   * The board's keyboard layer. `work/registry` promises a pointer-free path
+   * through this type, so every operation it declares is here: move, pan, zoom,
+   * fit, select all, duplicate, group, delete, undo and redo.
+   */
+  function canvasKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (
+      (event.target as HTMLElement).matches(
+        "input, textarea, [contenteditable='true']",
+      )
+    )
+      return;
+    const step = event.shiftKey ? gridSize : 1;
+    const accel = event.ctrlKey || event.metaKey;
+    const key = event.key;
+    const arrows: Record<string, [number, number]> = {
+      ArrowUp: [0, -1],
+      ArrowDown: [0, 1],
+      ArrowLeft: [-1, 0],
+      ArrowRight: [1, 0],
+    };
+    const arrow = arrows[key];
+    if (key === "Tab" && !accel) {
+      // `spatial outline and keyboard node traversal` is the declared
+      // accessibility model for this type, so Tab walks the objects in reading
+      // order and reveals each one. It deliberately does not wrap: at either end
+      // the selection is released and focus leaves the canvas normally, so this
+      // is traversal rather than a keyboard trap.
+      const at = outlineNodes.findIndex((node) => node.id === selectedNodeId);
+      const next = event.shiftKey
+        ? at < 0
+          ? outlineNodes.length - 1
+          : at - 1
+        : at + 1;
+      const target = outlineNodes[next];
+      if (!target) {
+        setSelectedNodeIds([]);
+        return;
+      }
+      event.preventDefault();
+      revealNode(target);
+      return;
+    }
+    if (arrow && !accel) {
+      event.preventDefault();
+      // With nothing selected the same keys pan, so the canvas is reachable
+      // without a pointer instead of trapping keyboard users at the origin.
+      if (!nudgeSelected(arrow[0] * step, arrow[1] * step))
+        setViewport((current) => ({
+          ...current,
+          x: current.x + (arrow[0] * 120) / current.zoom,
+          y: current.y + (arrow[1] * 120) / current.zoom,
+        }));
+      return;
+    }
+    if (key === "Escape") {
+      setSelectedNodeIds([]);
+      setSelectedEdgeId(undefined);
+      setConnectorFrom(undefined);
+      return;
+    }
+    if (
+      (key === "Delete" || key === "Backspace") &&
+      (selectedNodeIds.length || selectedEdgeId)
+    ) {
+      event.preventDefault();
+      deleteSelected();
+      return;
+    }
+    // Zoom keys stay off the modifier: Ctrl+Plus, Ctrl+Minus and Ctrl+0 are the
+    // browser's own zoom, and a canvas has no business taking them.
+    if ((key === "+" || key === "=") && !accel) {
+      event.preventDefault();
+      setZoom(viewport.zoom * 1.2);
+      return;
+    }
+    if ((key === "-" || key === "_") && !accel) {
+      event.preventDefault();
+      setZoom(viewport.zoom / 1.2);
+      return;
+    }
+    if (key === "0" && !accel) {
+      event.preventDefault();
+      fitToContent();
+      return;
+    }
+    if (!accel) return;
+    const letter = key.toLowerCase();
+    if (letter === "g") {
+      event.preventDefault();
+      if (event.shiftKey) ungroupSelected();
+      else groupSelected();
+    } else if (letter === "d") {
+      event.preventDefault();
+      duplicateSelected();
+    } else if (letter === "a") {
+      event.preventDefault();
+      setSelectedNodeIds(nodes.map((node) => node.id));
+    } else if (letter === "z") {
+      event.preventDefault();
+      if (event.shiftKey) redoAction();
+      else undoAction();
+    } else if (letter === "y") {
+      event.preventDefault();
+      redoAction();
+    }
+  }
 
   async function insertImage(file: File) {
     if (readOnly) return;
@@ -1617,9 +2264,9 @@ export function WhiteboardStudio({
         },
       );
       if (kind === "concept") {
-        created.slice(1).forEach((node, index) =>
+        created.slice(1).forEach((node) =>
           draft.edges.push({
-            id: `edge-${Date.now().toString(36)}-${index}`,
+            id: `edge-${uniqueToken()}`,
             pageId: page.id,
             layerId: layer.id,
             from: created[0]!.id,
@@ -1650,40 +2297,12 @@ export function WhiteboardStudio({
           } as CSSProperties
         }
         onClick={compact ? undefined : canvasClick}
-        onPointerDown={compact ? undefined : beginPan}
+        onPointerDown={compact ? undefined : beginCanvasPointer}
         onPointerMove={compact ? undefined : movePointer}
         onPointerUp={compact ? undefined : finishPointer}
         onPointerCancel={compact ? undefined : finishPointer}
         onWheel={compact ? undefined : wheel}
-        onKeyDown={
-          compact
-            ? undefined
-            : (event) => {
-                if (
-                  (event.target as HTMLElement).matches(
-                    "input, textarea, select, [contenteditable='true']",
-                  )
-                )
-                  return;
-                if (event.key === "Escape") {
-                  setSelectedNodeIds([]);
-                  setConnectorFrom(undefined);
-                } else if (
-                  (event.key === "Delete" || event.key === "Backspace") &&
-                  selectedNodeIds.length
-                ) {
-                  event.preventDefault();
-                  deleteSelected();
-                } else if (
-                  (event.ctrlKey || event.metaKey) &&
-                  event.key.toLowerCase() === "g"
-                ) {
-                  event.preventDefault();
-                  if (event.shiftKey) ungroupSelected();
-                  else groupSelected();
-                }
-              }
-        }
+        onKeyDown={compact ? undefined : canvasKeyDown}
       >
         <div
           className="whiteboard-world"
@@ -1693,35 +2312,136 @@ export function WhiteboardStudio({
         >
           <svg className="whiteboard-edges" aria-label="Connectors">
             {renderedEdges.map((edge) => {
-              const from = nodes.find((node) => node.id === edge.from);
-              const to = nodes.find((node) => node.id === edge.to);
-              if (!from || !to) return null;
+              const from = nodeById.get(edge.from);
+              const to = nodeById.get(edge.to);
+              if (
+                !from ||
+                !to ||
+                !visibleLayerIds.has(from.layerId) ||
+                !visibleLayerIds.has(to.layerId)
+              )
+                return null;
               const index = edgeIndexById.get(edge.id) ?? -1;
               const changed =
                 index >= 0 &&
                 (pathTouches(aiChangedPaths, `/edges/${index}`) ||
                   pathTouches(aiChangedPaths, `/edges/${edge.id}`));
+              // Both ends are read from the live nodes, so a connector follows
+              // whatever it is attached to, and the label sits on the midpoint of
+              // the line that is actually drawn rather than floating beside it.
+              const x1 = centerX(from);
+              const y1 = centerY(from);
+              const x2 = centerX(to);
+              const y2 = centerY(to);
+              const selected = !compact && selectedEdgeId === edge.id;
               return (
-                <g key={edge.id} data-ai-region={aiRegionAttr(changed)}>
+                <g
+                  key={edge.id}
+                  data-ai-region={aiRegionAttr(changed)}
+                  data-selected={selected || undefined}
+                  {...(index >= 0 ? targetAttrs(`/edges/${index}`) : {})}
+                >
                   <line
-                    x1={from.x + from.width / 2}
-                    y1={from.y + from.height / 2}
-                    x2={to.x + to.width / 2}
-                    y2={to.y + to.height / 2}
+                    x1={x1}
+                    y1={y1}
+                    x2={x2}
+                    y2={y2}
+                    style={
+                      selected
+                        ? { stroke: "var(--brand-primary)", strokeWidth: 2.5 }
+                        : undefined
+                    }
                   />
                   <circle
-                    cx={to.x + to.width / 2}
-                    cy={to.y + to.height / 2}
+                    cx={x2}
+                    cy={y2}
                     r="3"
+                    style={
+                      selected ? { fill: "var(--brand-primary)" } : undefined
+                    }
                   />
                   {edge.label ? (
-                    <text x={(from.x + to.x) / 2} y={(from.y + to.y) / 2}>
+                    <text x={(x1 + x2) / 2} y={(y1 + y2) / 2}>
                       {edge.label}
                     </text>
                   ) : null}
+                  {compact ? null : (
+                    <line
+                      x1={x1}
+                      y1={y1}
+                      x2={x2}
+                      y2={y2}
+                      // A 1.35px line is not a pointer target. This invisible
+                      // twin is what makes a connector selectable at all.
+                      style={{
+                        stroke: "transparent",
+                        strokeWidth: 16,
+                        vectorEffect: "non-scaling-stroke",
+                        pointerEvents: "stroke",
+                        cursor: "pointer",
+                      }}
+                      onPointerDown={(event) => {
+                        event.stopPropagation();
+                        selectionHandledRef.current = true;
+                        setSelectedNodeIds([]);
+                        setSelectedEdgeId(edge.id);
+                        setInspectorOpen(true);
+                      }}
+                    >
+                      <title>
+                        {edge.label
+                          ? `Connector: ${edge.label}`
+                          : `Connector from ${whiteboardNodeText(from) || "object"} to ${whiteboardNodeText(to) || "object"}`}
+                      </title>
+                    </line>
+                  )}
                 </g>
               );
             })}
+            {guides.x !== undefined || guides.y !== undefined ? (
+              <g
+                style={{
+                  stroke: "var(--brand-primary)",
+                  strokeWidth: 1,
+                  strokeDasharray: "5 4",
+                  opacity: 0.9,
+                }}
+              >
+                {guides.x !== undefined ? (
+                  <line
+                    x1={guides.x}
+                    x2={guides.x}
+                    y1={viewport.y}
+                    y2={viewport.y + canvasSize.height / viewport.zoom}
+                    style={{ stroke: "var(--brand-primary)" }}
+                  />
+                ) : null}
+                {guides.y !== undefined ? (
+                  <line
+                    y1={guides.y}
+                    y2={guides.y}
+                    x1={viewport.x}
+                    x2={viewport.x + canvasSize.width / viewport.zoom}
+                    style={{ stroke: "var(--brand-primary)" }}
+                  />
+                ) : null}
+              </g>
+            ) : null}
+            {marquee ? (
+              <rect
+                x={marquee.x}
+                y={marquee.y}
+                width={marquee.width}
+                height={marquee.height}
+                vectorEffect="non-scaling-stroke"
+                style={{
+                  fill: "color-mix(in srgb, var(--brand-primary) 10%, transparent)",
+                  stroke: "var(--brand-primary)",
+                  strokeWidth: 1,
+                  strokeDasharray: "4 3",
+                }}
+              />
+            ) : null}
           </svg>
           {[...renderedNodes]
             .sort((a, b) => a.zIndex - b.zIndex)
@@ -1751,6 +2471,7 @@ export function WhiteboardStudio({
                         ? assetMap.get(source.assetId)
                         : undefined
                     }
+                    assetsLoading={assetsLoading}
                     selected={
                       !compact &&
                       (selectedNodeIds.includes(node.id) ||
@@ -1802,31 +2523,206 @@ export function WhiteboardStudio({
               );
             })}
         </div>
-        {!compact ? (
-          <div className="whiteboard-minimap" aria-label="Board minimap">
-            {nodes
-              .filter(
-                (_node, index) =>
-                  nodes.length <= 500 ||
-                  index % Math.ceil(nodes.length / 500) === 0,
-              )
-              .map((node) => (
-                <i
-                  key={node.id}
-                  style={{
-                    left: `${50 + node.x / 100}%`,
-                    top: `${50 + node.y / 100}%`,
-                    width: Math.max(2, node.width / 120),
-                    height: Math.max(2, node.height / 120),
-                  }}
-                />
-              ))}
-            <span />
-          </div>
+        {!compact && minimap ? (
+          <button
+            type="button"
+            className="whiteboard-minimap"
+            aria-label="Board overview"
+            title="Click to move the view. Enter fits the whole board."
+            style={{
+              // The composer floats over the canvas, so a fixed 15px inset put
+              // the overview underneath it. The shell publishes its height.
+              bottom: "calc(15px + var(--spectra-composer-safe-area, 0px))",
+              cursor: "pointer",
+            }}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation();
+              selectionHandledRef.current = true;
+              // Keyboard activation has no coordinates, so Enter fits instead of
+              // silently jumping the view to the top-left corner.
+              if (event.detail === 0) {
+                fitToContent();
+                return;
+              }
+              const bounds = event.currentTarget.getBoundingClientRect();
+              const point = minimap.toWorld(
+                event.clientX - bounds.left,
+                event.clientY - bounds.top,
+              );
+              frameBox({
+                left: point.x,
+                top: point.y,
+                right: point.x,
+                bottom: point.y,
+              });
+            }}
+          >
+            {minimap.dots.map((dot) => (
+              <i
+                key={dot.id}
+                style={{
+                  left: dot.x,
+                  top: dot.y,
+                  width: dot.width,
+                  height: dot.height,
+                  transform: "none",
+                  background: dot.selected
+                    ? "var(--brand-primary)"
+                    : undefined,
+                }}
+              />
+            ))}
+            <span
+              style={{
+                inset: "auto",
+                left: minimap.view.x,
+                top: minimap.view.y,
+                width: minimap.view.width,
+                height: minimap.view.height,
+              }}
+            />
+          </button>
         ) : null}
       </div>
     );
   }
+
+  // The tool palette. The bar keeps the four tools a board is actually built
+  // with; at `tight` the other two promote into the one overflow menu rather
+  // than being clipped by a rail that scrolls sideways.
+  const barPalette = tight ? BOARD_PALETTE.slice(0, 4) : BOARD_PALETTE;
+  const menuPalette = BOARD_PALETTE.slice(barPalette.length);
+  const openPanel = (next: typeof panel) =>
+    setPanel(panel === next ? "none" : next);
+  /**
+   * Every board control the bar can show, declared once. `essential` is capped at
+   * five by the contract, `advanced` is the single `More tools` menu, and every
+   * item appears in exactly one of them, which is what kept two overflow menus
+   * from being open at the same time in the audit shot.
+   */
+  const boardActions: WorkbarActionSpec[] = [
+    {
+      id: "undo",
+      label: "Undo",
+      icon: Undo2,
+      priority: "essential",
+      requires: "edit",
+      disabled: !canEdit || !undo.length,
+      hint: "Ctrl+Z",
+      onSelect: undoAction,
+    },
+    {
+      id: "redo",
+      label: "Redo",
+      icon: Redo2,
+      priority: "essential",
+      requires: "edit",
+      disabled: !canEdit || !redo.length,
+      hint: "Ctrl+Shift+Z",
+      onSelect: redoAction,
+    },
+    {
+      id: "zoom-out",
+      label: "Zoom out",
+      icon: ZoomOut,
+      priority: "essential",
+      hint: "Minus",
+      onSelect: () => setZoom(viewport.zoom / 1.2),
+    },
+    {
+      id: "zoom-in",
+      label: "Zoom in",
+      icon: ZoomIn,
+      priority: "essential",
+      hint: "Plus",
+      onSelect: () => setZoom(viewport.zoom * 1.2),
+    },
+    {
+      id: "fit",
+      label: "Fit to content",
+      icon: Scan,
+      priority: "essential",
+      disabled: !nodes.length,
+      hint: "0",
+      onSelect: fitToContent,
+    },
+    ...[...menuPalette, ...BOARD_OBJECTS].map(([id, icon, label]) => ({
+      id: `tool-${id}`,
+      label,
+      icon,
+      priority: "advanced" as const,
+      requires: "edit" as const,
+      active: tool === id,
+      disabled: !canEdit,
+      onSelect: () => setTool(id),
+    })),
+    {
+      id: "add-image",
+      label: uploadingImage ? "Adding image" : "Add image",
+      icon: uploadingImage ? Upload : ImagePlus,
+      priority: "advanced",
+      requires: "edit",
+      disabled: !canEdit || uploadingImage,
+      onSelect: () => imageInputRef.current?.click(),
+    },
+    {
+      id: "import",
+      label: "Import board",
+      icon: FileUp,
+      priority: "advanced",
+      requires: "edit",
+      disabled: !canEdit,
+      onSelect: () => boardInputRef.current?.click(),
+    },
+    {
+      id: "snap",
+      label: "Snap to grid",
+      icon: Magnet,
+      // A set-and-forget board setting, not a per-second control, and keeping it
+      // out of the bar leaves the trailing cluster inside the narrowest pane the
+      // registry allows (460) without the tool rail clipping.
+      priority: "advanced",
+      requires: "edit",
+      active: snapToGrid,
+      disabled: !canEdit,
+      hint: "Aligns moves and resizes to the board grid",
+      onSelect: () =>
+        mutate((draft) => {
+          draft.settings = { ...draft.settings, snapToGrid: !snapToGrid };
+        }),
+    },
+    ...BOARD_PANELS.map(([id, icon, label, needsEdit]) => ({
+      id: `panel-${id}`,
+      label,
+      icon,
+      priority: "advanced" as const,
+      active: panel === id,
+      ...(needsEdit
+        ? { requires: "edit" as const, disabled: !canEdit }
+        : undefined),
+      onSelect: () => openPanel(id),
+    })),
+    {
+      id: "present",
+      label: "Present board",
+      icon: Presentation,
+      priority: "advanced",
+      // A viewing activity with an obvious exit, not a peer mode (D2). The bar
+      // removes it outright for anyone without the capability.
+      requires: "present",
+      keepLabel: true,
+      onSelect: () => setPresenting(canPresent),
+    },
+    ...BOARD_EXPORTS.map(([format, icon, label]) => ({
+      id: `export-${format}`,
+      label,
+      icon,
+      priority: "advanced" as const,
+      disabled: Boolean(ioBusy),
+      onSelect: () => void exportBoard(format),
+    })),
+  ];
 
   return (
     <section className="whiteboard-studio">
@@ -1850,117 +2746,42 @@ export function WhiteboardStudio({
           if (file) void importBoard(file);
         }}
       />
-      <header className="spectra-editor-workbar whiteboard-toolbar" aria-label="Whiteboard tools">
-        <div className="whiteboard-core-tools">
-          {(
-            [
-              ["select", MousePointer2, "Select"],
-              ["hand", Hand, "Pan"],
-              ["text", TextCursorInput, "Text"],
-              ["note", StickyNote, "Sticky"],
-              ["shape", Square, "Shape"],
-              ["connector", CircleDot, "Connector"],
-            ] as const
-          ).map(([id, Icon, label]) => (
+      <ArtifactWorkbar
+        label="Board tools"
+        // CANON D2/D3: a board has no genuine peer views. Edit and View were a
+        // permission printed as a tab pair, which is exactly what D1 forbids.
+        modes={[]}
+        context={board.pages.length > 1 ? page.name : undefined}
+        className="mx-3 mt-2.5 shrink-0"
+        actions={boardActions}
+        trailing={
+          <span className="spectra-workbar-count" title="Zoom level">
+            {Math.round(viewport.zoom * 100)}%
+          </span>
+        }
+      >
+        <div
+          className="spectra-artifact-workbar-rail"
+          role="group"
+          aria-label="Object tools"
+        >
+          {barPalette.map(([id, Icon, label]) => (
             <button
               key={id}
               type="button"
+              className="spectra-artifact-workbar-action"
               data-active={tool === id || undefined}
-              disabled={readOnly && id !== "select" && id !== "hand"}
+              aria-pressed={tool === id}
+              disabled={!canEdit && id !== "select" && id !== "hand"}
               aria-label={label}
               title={label}
               onClick={() => setTool(id)}
             >
-              <Icon className="h-4 w-4" />
+              <Icon className="size-4 shrink-0" />
             </button>
           ))}
         </div>
-        <WorkbarMore open={moreToolsOpen} onOpenChange={setMoreToolsOpen}>
-            {([ ["frame", Frame, "Frame"], ["card", BoxSelect, "Card"], ["table", Table2, "Table"], ["embed", Link2, "Embed artifact"] ] as const).map(([id, Icon, label]) => <button key={id} type="button" role="menuitem" disabled={readOnly} className={workbarMenuItemClass()} onClick={() => { setTool(id); setMoreToolsOpen(false); }}><Icon className="size-3.5" />{label}</button>)}
-            <button type="button" role="menuitem" disabled={readOnly || uploadingImage} className={workbarMenuItemClass()} onClick={() => { imageInputRef.current?.click(); setMoreToolsOpen(false); }}>{uploadingImage ? <Upload className="size-3.5 animate-pulse" /> : <ImagePlus className="size-3.5" />}Add image</button>
-            <button type="button" role="menuitem" disabled={readOnly} className={workbarMenuItemClass()} onClick={() => { boardInputRef.current?.click(); setMoreToolsOpen(false); }}><FileUp className="size-3.5" />Import board</button>
-            <span className="my-1 block border-t border-[var(--border-subtle)]" />
-            {([
-              ["layers", Layers3, "Pages & layers"],
-              ["templates", LayoutTemplate, "Templates"],
-              ["search", Search, "Search board"],
-              ["outline", Grid3X3, "Accessible outline"],
-            ] as const).map(([panelKey, Icon, label]) => (
-              <button
-                key={panelKey}
-                type="button"
-                role="menuitem"
-                disabled={readOnly && panelKey === "templates"}
-                data-active={panel === panelKey || undefined}
-                className={workbarMenuItemClass()}
-                onClick={() => {
-                  setPanel(panel === panelKey ? "none" : panelKey);
-                  setMoreToolsOpen(false);
-                }}
-              >
-                <Icon className="size-3.5" />
-                {label}
-              </button>
-            ))}
-            <span className="my-1 block border-t border-[var(--border-subtle)]" />
-            {([ ["png", "PNG image"], ["svg", "Editable SVG"], ["pdf", "PDF"], ["package", "Portable board"] ] as const).map(([format, label]) => <button key={format} type="button" role="menuitem" disabled={Boolean(ioBusy)} className={workbarMenuItemClass()} onClick={() => { void exportBoard(format); setMoreToolsOpen(false); }}><FileUp className="size-3.5" />{label}</button>)}
-        </WorkbarMore>
-        <span />
-        <div className="whiteboard-utility-tools">
-          <span
-            className="hidden items-center gap-1.5 px-1 text-micro text-[var(--text-secondary)] xl:inline-flex"
-            role="status"
-            aria-live="polite"
-          >
-            {syncMessage === "Auto-saved" ? (
-              <CheckCircle2 className="h-3.5 w-3.5 text-[var(--success)]" />
-            ) : syncMessage === "Synchronizing" || syncMessage === "Reconnecting" ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent-cyan)]" />
-            ) : (
-              <Circle className="h-3 w-3 fill-[#d88922] text-[#d88922]" />
-            )}
-            {syncMessage}
-          </span>
-          <button
-            type="button"
-            aria-label="Undo board change"
-            onClick={undoAction}
-            disabled={readOnly || !undo.length}
-          >
-            <Undo2 className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            aria-label="Redo board change"
-            onClick={redoAction}
-            disabled={readOnly || !redo.length}
-          >
-            <Redo2 className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            aria-label="Zoom out"
-            onClick={() => setZoom(viewport.zoom - 0.1)}
-          >
-            <ZoomOut className="h-4 w-4" />
-          </button>
-          <strong>{Math.round(viewport.zoom * 100)}%</strong>
-          <button
-            type="button"
-            aria-label="Zoom in"
-            onClick={() => setZoom(viewport.zoom + 0.1)}
-          >
-            <ZoomIn className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            onClick={() => setPresenting(true)}
-            title="Present board"
-          >
-            <Maximize2 className="h-4 w-4" />
-          </button>
-        </div>
-      </header>
+      </ArtifactWorkbar>
 
       {assetError ? (
         <div className="whiteboard-asset-error" role="status">
@@ -1994,11 +2815,11 @@ export function WhiteboardStudio({
             <header>
               <strong>
                 {panel === "layers"
-                  ? "Pages & layers"
+                  ? "Pages and layers"
                   : panel === "outline"
-                    ? "Object outline"
+                    ? "Accessible outline"
                     : panel === "search"
-                      ? "Search board"
+                      ? "Find on board"
                       : "Templates"}
               </strong>
               <button type="button" onClick={() => setPanel("none")}>
@@ -2023,23 +2844,15 @@ export function WhiteboardStudio({
                     <button
                       key={node.id}
                       type="button"
-                      onClick={() => {
-                        setSelectedNodeId(node.id);
-                        setViewport((current) => ({
-                          ...current,
-                          x: node.x - 300,
-                          y: node.y - 200,
-                        }));
-                      }}
+                      data-active={node.id === selectedNodeId || undefined}
+                      onClick={() => revealNode(node)}
                     >
                       <strong>
                         {whiteboardNodeText(node) ||
                           node.semanticLabel ||
-                          node.type}
+                          NODE_NOUNS[node.type]}
                       </strong>
-                      <small>
-                        {Math.round(node.x)}, {Math.round(node.y)}
-                      </small>
+                      <small>{NODE_NOUNS[node.type]}</small>
                     </button>
                   ))}
               </>
@@ -2174,36 +2987,96 @@ export function WhiteboardStudio({
                 </button>
               </div>
             ) : (
-              [...nodes]
-                .sort(
-                  (a, b) =>
-                    (a.accessibilityOrder ?? 0) - (b.accessibilityOrder ?? 0),
-                )
-                .map((node, index) => (
-                  <button
-                    key={node.id}
-                    type="button"
-                    data-active={node.id === selectedNodeId || undefined}
-                    onClick={() => setSelectedNodeId(node.id)}
-                  >
-                    <span>{index + 1}</span>
-                    <strong>
-                      {node.semanticLabel ||
-                        whiteboardNodeText(node) ||
-                        node.type}
-                    </strong>
-                    <small>
-                      {node.type}
-                      {node.locked ? " · locked" : ""}
-                    </small>
-                  </button>
-                ))
+              <>
+                {outlineNodes.map((node, index) => {
+                  const connections = board.edges.filter(
+                    (edge) => edge.from === node.id || edge.to === node.id,
+                  ).length;
+                  return (
+                    <button
+                      key={node.id}
+                      type="button"
+                      data-active={node.id === selectedNodeId || undefined}
+                      onClick={() => revealNode(node)}
+                    >
+                      <strong>
+                        {index + 1}.{" "}
+                        {node.semanticLabel ||
+                          whiteboardNodeText(node) ||
+                          NODE_NOUNS[node.type]}
+                      </strong>
+                      {/* Honest metadata only: what it is, how many connectors
+                          reach it, and whether it can be moved. */}
+                      <small>
+                        {NODE_NOUNS[node.type]}
+                        {connections
+                          ? ` · ${connections} connector${connections === 1 ? "" : "s"}`
+                          : ""}
+                        {node.locked ? " · locked" : ""}
+                      </small>
+                    </button>
+                  );
+                })}
+                {edges.map((edge) => {
+                  const from = nodeById.get(edge.from);
+                  const to = nodeById.get(edge.to);
+                  if (!from || !to) return null;
+                  return (
+                    <button
+                      key={edge.id}
+                      type="button"
+                      data-active={edge.id === selectedEdgeId || undefined}
+                      onClick={() => revealEdge(edge)}
+                    >
+                      <strong>{edge.label || "Connector"}</strong>
+                      <small>
+                        {whiteboardNodeText(from) ||
+                          from.semanticLabel ||
+                          NODE_NOUNS[from.type]}{" "}
+                        to{" "}
+                        {whiteboardNodeText(to) ||
+                          to.semanticLabel ||
+                          NODE_NOUNS[to.type]}
+                      </small>
+                    </button>
+                  );
+                })}
+                {!outlineNodes.length ? (
+                  <p className="px-3 py-2 text-caption text-[var(--text-secondary)]">
+                    This page has nothing on it yet.
+                  </p>
+                ) : null}
+              </>
             )}
           </aside>
         ) : null}
 
         <main>
           {renderCanvas()}
+          {!board.nodes.some((node) => node.pageId === page.id) ? (
+            /* The registry owns this copy, so an empty board says the same
+               thing here, in a tile and in a reference (D14). */
+            <div className="pointer-events-none absolute inset-0 grid place-items-center p-6">
+              <div className="pointer-events-auto flex max-w-[330px] flex-col items-center gap-2 rounded-card border border-[var(--border-subtle)] bg-[var(--bg-elevated)] px-5 py-4 text-center">
+                <strong className="text-ui font-semibold text-[var(--text-primary)]">
+                  {definition.emptyState.headline}
+                </strong>
+                <p className="text-caption text-[var(--text-secondary)]">
+                  {definition.emptyState.body}
+                </p>
+                {canEdit ? (
+                  <button
+                    type="button"
+                    className="spectra-workbar-primary mt-1 inline-flex h-8 items-center gap-1.5 whitespace-nowrap rounded-control px-3 text-caption font-semibold"
+                    onClick={() => addNode("note")}
+                  >
+                    <StickyNote className="size-3.5" />
+                    {definition.emptyState.action}
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
           {!readOnly &&
           (selectedNodeIds.length > 1 || selectedNode?.type === "group") ? (
             <div
@@ -2285,13 +3158,75 @@ export function WhiteboardStudio({
               <span>{inspectorOpen ? "Hide details" : "Object details"}</span>
             </button>
           ) : null}
+          {selectedEdge && inspectorOpen ? (
+            /* A connector is editable in the same panel its objects are, so
+               labelling the line joining two notes does not mean deleting it. */
+            <div className="whiteboard-inspector">
+              <div>
+                <strong>Connector</strong>
+                <button
+                  type="button"
+                  title="Reverse direction"
+                  disabled={!canEdit}
+                  onClick={() =>
+                    updateEdge(selectedEdge.id, (edge) => {
+                      const from = edge.from;
+                      edge.from = edge.to;
+                      edge.to = from;
+                    })
+                  }
+                >
+                  <Repeat2 className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  title="Delete connector"
+                  disabled={!canEdit}
+                  onClick={() => deleteEdge(selectedEdge.id)}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              <label>
+                Label
+                <input
+                  value={selectedEdge.label ?? ""}
+                  disabled={!canEdit}
+                  placeholder="How these connect"
+                  onChange={(event) =>
+                    updateEdge(selectedEdge.id, (edge) => {
+                      edge.label = event.target.value || undefined;
+                    })
+                  }
+                />
+              </label>
+              <label>
+                Layer
+                <SelectField
+                  ariaLabel="Connector layer"
+                  size="sm"
+                  value={selectedEdge.layerId}
+                  disabled={!canEdit}
+                  options={layers.map((layer) => ({
+                    value: layer.id,
+                    label: layer.name,
+                  }))}
+                  onChange={(value) =>
+                    updateEdge(selectedEdge.id, (edge) => {
+                      edge.layerId = value;
+                    })
+                  }
+                />
+              </label>
+            </div>
+          ) : null}
           {selectedNode &&
           selectedNodeIds.length === 1 &&
           inspectorOpen ? (
             <div className="whiteboard-inspector">
               <div>
                 <strong>
-                  {selectedNode.semanticLabel || selectedNode.type}
+                  {selectedNode.semanticLabel || NODE_NOUNS[selectedNode.type]}
                 </strong>
                 <button
                   type="button"
@@ -2347,21 +3282,21 @@ export function WhiteboardStudio({
               </div>
               <label>
                 Layer
-                <select
+                <SelectField
+                  ariaLabel="Object layer"
+                  size="sm"
                   value={selectedNode.layerId}
                   disabled={readOnly || selectedNode.locked}
-                  onChange={(event) =>
+                  options={layers.map((layer) => ({
+                    value: layer.id,
+                    label: layer.name,
+                  }))}
+                  onChange={(value) =>
                     updateSelected((node) => {
-                      node.layerId = event.target.value;
+                      node.layerId = value;
                     })
                   }
-                >
-                  {layers.map((layer) => (
-                    <option key={layer.id} value={layer.id}>
-                      {layer.name}
-                    </option>
-                  ))}
-                </select>
+                />
               </label>
               <div className="whiteboard-color-fields">
                 <label>
@@ -2401,32 +3336,37 @@ export function WhiteboardStudio({
               </div>
               {selectedNode.type === "embed" ? (
                 <label>
-                  Linked artifact
-                  <select
-                    value={String(
-                      (selectedNode.content as Record<string, unknown>)
-                        ?.artifactId ?? "",
-                    )}
+                  Linked work
+                  <SelectField
+                    ariaLabel="Linked work"
+                    size="sm"
                     disabled={readOnly}
-                    onChange={(event) =>
+                    value={
+                      String(
+                        (selectedNode.content as Record<string, unknown>)
+                          ?.artifactId ?? "",
+                      ) || "none"
+                    }
+                    options={[
+                      { value: "none", label: "No source" },
+                      ...artifacts
+                        .filter(
+                          (artifact) =>
+                            artifact._id !== artifactId &&
+                            artifact.status === "active",
+                        )
+                        .map((artifact) => ({
+                          value: artifact._id,
+                          label: artifact.title,
+                        })),
+                    ]}
+                    onChange={(value) =>
                       updateSelected((node) => {
-                        node.content = { artifactId: event.target.value };
+                        node.content =
+                          value === "none" ? {} : { artifactId: value };
                       })
                     }
-                  >
-                    <option value="">No source</option>
-                    {artifacts
-                      .filter(
-                        (artifact) =>
-                          artifact._id !== artifactId &&
-                          artifact.status === "active",
-                      )
-                      .map((artifact) => (
-                        <option key={artifact._id} value={artifact._id}>
-                          {artifact.title}
-                        </option>
-                      ))}
-                  </select>
+                  />
                 </label>
               ) : null}
             </div>
@@ -2434,17 +3374,24 @@ export function WhiteboardStudio({
         </main>
       </div>
 
-      {presenting ? (
-        <div className="whiteboard-presenter" role="dialog" aria-modal="true">
-          <div className="whiteboard-presenter-bar">
-            <strong>{page.name}</strong>
-            <button type="button" onClick={() => setPresenting(false)}>
-              <X className="h-5 w-5" /> Exit presentation
-            </button>
-          </div>
-          {renderCanvas(true)}
-        </div>
-      ) : null}
+      {presenting && canPresent
+        ? // The studio root is now a container query context, which makes it the
+          // containing block for `position: fixed` descendants: an in-tree
+          // presenter would be trapped inside the pane instead of covering the
+          // window. Present is a full-window activity, so it renders to the body.
+          createPortal(
+            <div className="whiteboard-presenter" role="dialog" aria-modal="true">
+              <div className="whiteboard-presenter-bar">
+                <strong>{page.name}</strong>
+                <button type="button" onClick={() => setPresenting(false)}>
+                  <X className="h-5 w-5" /> Exit presentation
+                </button>
+              </div>
+              {renderCanvas(true)}
+            </div>,
+            document.body,
+          )
+        : null}
     </section>
   );
 }

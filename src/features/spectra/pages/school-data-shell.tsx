@@ -591,6 +591,26 @@ function Overview({
               ))}
             </div>
           </>
+        ) : payload.classes.length ? (
+          // Records did arrive; none of them carry a date. That is a school
+          // with nothing scheduled, not a school with no data, and saying
+          // otherwise contradicts the Classes section directly.
+          <div className="mt-6 rounded-[10px] bg-[var(--bg-secondary)] px-5 py-7">
+            <p className="text-[13px] font-medium">Nothing is scheduled</p>
+            <p className="mt-1 text-[11px] text-[var(--text-secondary)]">
+              {payload.classes.length} verified{" "}
+              {payload.classes.length === 1 ? "class" : "classes"} arrived from
+              school. None of them currently have a deadline or an upcoming
+              item attached.
+            </p>
+            <button
+              type="button"
+              onClick={() => onSelect("classes")}
+              className="mt-4 text-[11px] font-medium text-[var(--text-primary)] hover:underline"
+            >
+              View classes
+            </button>
+          </div>
         ) : (
           <div className="mt-6 rounded-[10px] bg-[var(--bg-secondary)] px-5 py-7">
             <p className="text-[13px] font-medium">

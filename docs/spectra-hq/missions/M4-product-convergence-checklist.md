@@ -289,3 +289,167 @@ cross-route critique.
       spaces, inventory, contextual activity, and centered Dock now own the view.
 - [ ] Continue the same critique across every artifact family in split and
       fullscreen modes before treating these route-level improvements as settled.
+
+## 9. Superseding direction — current M4 decisions (2026-08-16)
+
+**This section wins.** It is the latest M4 direction and it overrides earlier
+items in this file and earlier M4 experimentation wherever they conflict. Earlier
+sections are preserved as history: they record what was tried and why, and most
+of their rules still hold. Where a rule below contradicts one above, the rule
+below is the product decision. Companion file:
+`M4-artifact-rebuild-brief.md` (durable audit findings, architecture
+constraints, per-type problems, ownership of shared primitives).
+
+This direction **expands** `M4-one-product.md`; it does not replace or narrow it.
+Product hygiene, wire-or-delete, one shell, documentation reset, STATE §2.E
+resolution, Golden Flows and evidence remain mandatory.
+
+### 9.1 The artifact editors are the primary mission
+
+- [ ] After the baseline, the majority of implementation effort goes to the
+      artifact editors. They are the most regressed part of the product.
+- [ ] Every editor has **one** authoring identity and **one** adaptive control
+      hierarchy. A per-type toolbar bolted under the shared artifact header is a
+      defect, not a layout: today all ten studios render a second `.spectra-editor-workbar`
+      under `.spectra-artifact-header` (sheets renders six bars, flashcards three
+      rows, presentation and code two).
+- [ ] Menus **overlay** the workbar. A menu may never increase toolbar height,
+      create vertical overflow, push controls onto another row, or make the
+      editor jump.
+- [ ] Essential actions stay directly reachable at every width. Rare, advanced
+      and destructive actions live behind a real ellipsis menu, inspector or
+      contextual surface. At constrained widths controls simplify deliberately —
+      they do not disappear, collapse to a stub, or overflow off-screen.
+- [ ] Each type is measured against a real functional bar, not against the other
+      Spectra editors: Document ~ Notion/Google Docs · Decks ~ Quizlet/Anki ·
+      Quiz authoring and Attempt ~ Quizizz/Kahoot · Presentations ~ PowerPoint/
+      Google Slides · Sheets ~ Excel/Google Sheets · Whiteboards ~ Miro/FigJam ·
+      Code ~ VS Code/Replit plus a genuinely usable visual-output workflow ·
+      Tasks ~ Todoist/Notion tasks · Calendar ~ Google/Notion Calendar. Agents
+      is measured against serious modern agent builders **after** discovering the
+      current product intent from code, not from a guessed feature set.
+- [ ] The goal is one Spectra grammar with purpose-built tools — not ten
+      identical editors and not ten inventions. Quiz is the internal reference
+      for simplicity; Whiteboard is the reference for mature control
+      choreography. Neither is copied blindly.
+- [ ] The editor body matters as much as its chrome: useful work visible on
+      open, real behaviour at narrow and large widths, long titles and
+      descriptions handled, credible creation flows, direct selection, expected
+      control placement, real empty and populated states, clear hover/focus.
+- [ ] Functionality must be real from UI through persistence and collaboration.
+      A missing capability that belongs is implemented properly, including its
+      underlying model; it is never mocked as an inert control.
+
+### 9.2 Route-level right rails are removed
+
+- [ ] Outside artifact fullscreen inspectors, permanent route-level right
+      columns disappear. **Do not preserve a rail because code now shares a
+      `RightRail`/`AuxiliaryRail` primitive.** Sharing an implementation is not
+      a justification for the pattern.
+- [ ] Supersedes §1's auxiliary-rail rule, §4's "Artifact/thread panels take
+      real width" as a route pattern, §6's ManageBac and Calendar
+      "Workspace-style fully dismissible auxiliary context", and Review 2's
+      recommendation to propagate the unscheduled-work rail. `AuxiliaryRail`
+      consumers to resolve: `calendar-application.tsx`, `school-data`,
+      `managebac`, `school-admin`, `superadmin`.
+- [ ] **One exception:** the Calendar/Timetable working-surface right column
+      stays, because it genuinely serves scheduling. Its tone and background are
+      fixed so it reads as native product surface rather than a white slab.
+- [ ] Artifact **fullscreen** inspectors — History, Comments, References,
+      Details — remain valid. They must adapt and must never reduce the editor
+      to an unusable strip.
+- [ ] Workspace home loses its right column entirely. Recent activity survives
+      but moves into the main composition, beneath the workspace overview,
+      toggle and cards. Tags and Quick actions are **removed or
+      re-contextualised, not relocated**.
+- [ ] Workspace home loses the bottom global work inventory. Library owns global
+      inventory. A workspace shows its own work.
+- [ ] A specific workspace loses its permanent right details/activity column.
+      People and Settings become compact disclosing actions, not peer navigation.
+      The workspace's horizontal nav navigates the workspace's own work — its
+      types and its genuinely primary collections.
+
+### 9.3 The Library rail is the navigation reference
+
+- [ ] Library's horizontal collection rail keeps its clean horizontal character
+      at every width. **It must not degrade into a generic full dropdown when
+      space tightens.** Adapt through typography, icons, prioritisation and a
+      genuine three-dot overflow.
+- [ ] Supersedes §2's "Replace the overflowing Library collection tabs with the
+      shared adaptive selector at constrained widths" and §3's "tabs when there
+      is room, a mature compact selector when there is not" — the compact
+      fallback may not be a full dropdown replacement of the rail.
+- [ ] Current defect to fix: at ~682 px the rail drops every label but keeps the
+      counts, while the type selector, sort label and three view labels keep full
+      text. Priority is inverted.
+- [ ] Library's compact icon-driven artifact-type selector stays conceptually as
+      it is — a filter menu is the right home for type in Library. It needs one
+      shared active-state treatment (today it uses a third one: a green check),
+      and "Select objects for AI" does not belong inside a type filter.
+- [ ] Extract and reuse these interaction patterns where the semantic role
+      matches, with route-specific contents. Standardise the grammar, not the
+      information architecture. Do not blindly reuse the same nouns everywhere.
+- [ ] Audit every navigation selector, segmented control, search/filter popover
+      and option rail product-wide against the mature Library patterns.
+      Consolidate. No route-local inventions for the same concept.
+
+### 9.4 Library List density
+
+- [ ] Library List was cleaned too aggressively. Rows waste vertical space:
+      `min-h-[64px]` rows at ~94 px pitch show seven rows per 900 px viewport for
+      three data points, and push type and date ~990 px away from the title.
+- [ ] Find the balance: denser and more productive, without returning to a
+      crammed card wall. Title, type, workspace and dates must be effortless to
+      scan. Rows are real links, not `<button>` elements — deep linking,
+      middle-click and keyboard navigation must work.
+
+### 9.5 List / Board / Canvas are one product concept
+
+- [ ] There are currently five independent implementations (Canvas duplicated
+      ~95 % between `artifacts-shell` and `workspace-shell`; Board three ways;
+      List sharing nothing across four renderers; three sort enums; two type
+      filter lists). Build the best hybrid and share controls, behaviour, data
+      model and interaction language, while preserving each view's genuine
+      visual purpose.
+- [ ] They must be truthful modes: List renders rows, Board renders columns,
+      Canvas renders a spatial surface. No card grid while List is selected.
+- [ ] Library ⇄ Workspace switching preserves the work session: open work, open
+      threads and the CANON D7 state survive the transition.
+
+### 9.6 Operational routes gain functionality, not exposure
+
+- [ ] Admin, Superadmin, Usage, School, ManageBac, Settings, Agents and
+      Analytics keep developing. Complexity is available without being dumped
+      into the first viewport.
+- [ ] Admin and Superadmin should contain much more useful information and real
+      control, delivered through meaningful sections, disclosed detail,
+      drill-downs and task-oriented flows — not summary-card walls.
+      **Less exposed UI does not mean less functionality.**
+- [ ] Review every section, not only Overview. An inert affordance is a defect.
+
+### 9.7 Product truth that outranks any prompt
+
+- [ ] **Timetable is retired as creatable work.** Confirmed in the product:
+      `spectraArtifacts:create` throws for `blueprintKey: "timetable"`, the type
+      is absent from `WORK_TYPE_KEYS`, from `listBlueprints()` and from the
+      Library type filter, while `ARTIFACT_TYPE_KEYS` still carries it and seven
+      legacy objects remain editable. Reconcile route, legacy objects and
+      registry. Do not reintroduce a creatable Timetable type.
+- [ ] The nine creatable types are document, flashcard_deck, quiz,
+      planner_task, agent, presentation, sheets, code, whiteboard. `plan-studio`
+      serves `planner_task`; there is no separate `plan` type. `thread_reference`
+      exists in `blueprintMeta` only.
+- [ ] Preserve and extend the human/AI collaboration model. Semantic hooks are
+      preserved or deliberately migrated; no type-specific AI shortcut is added
+      to make a test pass; new capability goes through the shared typed
+      capability and choreography system.
+
+### 9.8 Controlled test data
+
+- [ ] The M4 QA workspace `M4 QA — Artifact Rebuild` holds one realistically
+      populated example of all nine creatable types. It exists because the
+      pre-existing inventory was placeholder shells ("New Sheet", "New Deck",
+      "New Presentation") that cannot support an editor audit. IDs are recorded
+      in `M4-artifact-rebuild-brief.md`.
+- [ ] Real user work is not used for destructive testing. The QA workspace is
+      cleaned up at mission close.

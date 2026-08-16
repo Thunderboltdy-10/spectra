@@ -11,17 +11,70 @@ nextjs-portal {
 /* ---------------------------------------------------------------------------
    Spectra design-token → Tailwind v4 wiring.
 
-   The canonical custom properties live in the single `:root` block below.
-   `@theme inline` maps them onto utilities so TSX consumes the system instead
-   of arbitrary values:
-     text-micro / text-caption / text-ui / text-body / text-editor /
-     text-title / text-display        (approved type scale)
+   The canonical colour, spacing and raw-radius custom properties live in the
+   `:root` block in `spectra-app.css`. This file owns the two *semantic*
+   systems layered on top of them — the radius hierarchy and the type scale —
+   and maps both onto Tailwind utilities so TSX consumes the system instead of
+   arbitrary values:
+     text-micro / text-caption / text-ui / text-body / text-subhead /
+     text-editor / text-title / text-heading / text-metric / text-display
+                                      (the type scale — see §Type scale)
+     rounded-chip / rounded-control / rounded-card / rounded-surface /
+     rounded-pill                     (the radius hierarchy — see §Radius)
      font-sans / font-mono            (Manrope / IBM Plex Mono — real stacks)
      bg-brand text-brand border-brand + color-mint/cyan/violet/gold/orange/
      coral/danger/success/warning     (brand, accent and status colors)
-     shadow-soft / shadow-card / shadow-hover, rounded-card
+     shadow-soft / shadow-card / shadow-hover
      ease-standard / ease-out-expo    (motion grammar easings)
+
+   Why these are tokens and not literals: every `text-[Npx]` literal also
+   bypasses the `data-spectra-interface-text="large"` override below, so a user
+   who asks for larger interface text gets a partially-scaled product. Token
+   adoption is an accessibility fix, not a cosmetic one.
    --------------------------------------------------------------------------- */
+
+/* §Radius — one semantic hierarchy. The rule is that radius scales with the
+   size of the surface, and there are exactly five steps:
+
+     chip     6px   badges, tags, status markers, menu items      (~20-28px tall)
+     control  8px   buttons, inputs, selects, icon buttons        (~32-44px tall)
+     card    10px   cards, panels, popovers, menus, list rows
+     surface 14px   dialogs, sheets, modal surfaces
+     pill   999px   pills and circular controls only
+
+   `--card-radius` and `--radius-pill` already exist in `spectra-app.css`; the
+   two new steps are named to match that convention (`--*-radius`) so the
+   Tailwind theme key (`--radius-*`) never self-references. */
+:root {
+  --chip-radius: 6px;
+  --control-radius: 8px;
+  --surface-radius: 14px;
+}
+
+/* §Type scale — the existing seven steps (micro 11 / caption 12 / ui 13 /
+   body 14 / editor 16 / title 17 / display 30) were too sparse to absorb the
+   real call sites, which is why hundreds of `text-[Npx]` literals grew around
+   them. These three steps close the gaps the literals were filling: 15px
+   emphasis, 18-20px headings, and 21-24px metric numerals. */
+:root {
+  --text-subhead: 15px;
+  --text-heading: 19px;
+  --text-metric: 24px;
+}
+
+/* Larger interface text scaled only micro…body, leaving every heading and
+   metric frozen — which compressed hierarchy instead of enlarging it. The
+   steps this file owns are scaled here to match. `--text-editor` is
+   deliberately excluded: it has its own `data-spectra-editor-text` control and
+   must not be scaled twice. */
+:root[data-spectra-interface-text="large"] {
+  --text-subhead: 16px;
+  --text-title: 18px;
+  --text-heading: 20px;
+  --text-metric: 26px;
+  --text-display: 32px;
+}
+
 @theme inline {
   --font-sans: var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-plex-mono), ui-monospace, monospace;
@@ -34,10 +87,16 @@ nextjs-portal {
   --text-ui--line-height: 1.45;
   --text-body: var(--text-body);
   --text-body--line-height: 1.55;
+  --text-subhead: var(--text-subhead);
+  --text-subhead--line-height: 1.5;
   --text-editor: var(--text-editor);
   --text-editor--line-height: 1.65;
   --text-title: var(--text-title);
   --text-title--line-height: 1.35;
+  --text-heading: var(--text-heading);
+  --text-heading--line-height: 1.3;
+  --text-metric: var(--text-metric);
+  --text-metric--line-height: 1.1;
   --text-display: var(--text-display);
   --text-display--line-height: 1.15;
 
@@ -56,7 +115,13 @@ nextjs-portal {
   --shadow-card: var(--shadow-card);
   --shadow-hover: var(--shadow-hover);
 
+  --radius-chip: var(--chip-radius);
+  --radius-control: var(--control-radius);
   --radius-card: var(--card-radius);
+  --radius-surface: var(--surface-radius);
+  /* Pill is a constant, not a themeable step — stated as a literal so the
+     theme key never self-references `--radius-pill` in `spectra-app.css`. */
+  --radius-pill: 999px;
 
   --ease-standard: var(--ease-standard);
   --ease-out-expo: var(--ease-out-expo);

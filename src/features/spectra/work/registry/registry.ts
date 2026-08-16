@@ -48,21 +48,39 @@ const modes = {
   ],
   quiz: [
     ["Build", "edit"],
+    // Reading stays at `view`: a read-only collaborator may legitimately look at
+    // the learner-facing form. Whether a *learner* is offered it is the quiz's
+    // own configuration question, answered by `availableQuizModes`.
     ["Preview as learner", "view"],
     ["Attempt", "attempt"],
-    ["Responses", "submit"],
+    // The cohort report is owner-only on the server: `quizPractice.aggregateForOwner`
+    // requires `modify`. Declaring it at `submit` offered a read-only learner a
+    // door the backend then refused to open.
+    ["Responses", "edit"],
     ["Results", "view"],
   ],
   planner_task: [
-    ["List", "edit"],
-    ["Board", "edit"],
-    ["Timeline", "edit"],
-    ["Review", "interact"],
+    // Three readings of one task set, each editable in place. There is no
+    // reading/writing twin here the way a document has Edit and Preview, so
+    // none of these is a permission printed as a tab (D1/D2) and all three are
+    // `view` — a read-only collaborator could previously open a shared plan
+    // only in `Review`, which no surface implemented. `Review` is gone rather
+    // than left as a door onto nothing.
+    ["List", "view"],
+    ["Board", "view"],
+    ["Timeline", "view"],
   ],
+  // Build is how an agent is read as well as written: it is the mission, the
+  // approved skills and the sources, and declaring it `edit` left a read-only
+  // viewer with Releases and no way to see what the agent actually is. Checks
+  // is `edit` because the server agrees — `agents.evalRuns` and
+  // `agents.analytics` both require `modify`. Using the agent is not a mode: an
+  // agent is used in a conversation, which is a surface of its own, and the
+  // Foundry has no single-turn invoke route behind it (the same reasoning that
+  // keeps Present off presentation and Run off code).
   agent: [
-    ["Build", "edit"],
-    ["Use", "interact"],
-    ["Evaluate", "edit"],
+    ["Build", "view"],
+    ["Checks", "edit"],
     ["Releases", "view"],
   ],
   timetable: [
@@ -70,27 +88,46 @@ const modes = {
     ["Tasks", "edit"],
     ["Agenda", "view"],
   ],
+  // Slides and Notes are the two things a deck is looked at through, and both
+  // are readable by anyone the deck is shared with — an editor edits in place
+  // rather than entering an editing mode (CANON D1). Presenting is not here on
+  // purpose: it is an activity with an obvious exit, reached from the primary
+  // verb under the `present` capability, not a peer tab beside authoring (D2/D3).
   presentation: [
-    ["Edit", "edit"],
-    ["Present", "present"],
-    ["Notes", "edit"],
+    ["Slides", "view"],
+    ["Notes", "view"],
   ],
+  // Grid and Analysis are the two things a sheet is looked at through, and both
+  // are readable by anyone it is shared with: an editor edits in place rather
+  // than entering an editing mode (D1), and a compact or read-only pane is the
+  // same view without a grant, not a different one (D4). `Edit`/`View` was a
+  // permission printed as a tab pair, which is exactly what D1 rules out, and
+  // `Analyse` at `interact` was a door onto nothing — the studio never
+  // implemented it. Analysis is real now: descriptive statistics measured from
+  // the calculated workbook, plus the charts that read from the sheet.
   sheets: [
-    ["Edit", "edit"],
-    ["Analyse", "interact"],
-    ["View", "view"],
+    ["Grid", "view"],
+    ["Analysis", "view"],
   ],
+  // Code and Both are how source is looked at, so both are readable by anyone
+  // the artifact is shared with: an editor edits in place (D1) and Both is never
+  // a read-only split (D4). Declaring them as `edit` was a real defect — a
+  // read-only viewer lost the source view entirely and was left with the
+  // rendered output. Running is not a mode: it is an action gated on `execute`,
+  // reached from the primary verb, not a peer tab beside authoring (D2/D3).
   code: [
-    ["Source", "edit"],
-    ["Preview", "interact"],
-    ["Split", "edit"],
-    ["Run", "execute"],
+    ["Code", "view"],
+    ["Visualisation", "interact"],
+    ["Both", "view"],
     ["Settings", "edit"],
   ],
-  whiteboard: [
-    ["Edit", "edit"],
-    ["View", "view"],
-  ],
+  // A board has one surface: the canvas. `Edit` and `View` were a permission
+  // printed as a tab pair, which is what D1 rules out — an owner edits in place
+  // and never enters an editing mode, and a read-only viewer is not looking at a
+  // different view of the board, only at the same one without a grant. Present
+  // is not here for the same reason it is absent from presentation: it is an
+  // activity reached under the `present` capability, not a peer tab (D2/D3).
+  whiteboard: [["Canvas", "view"]],
 } satisfies Record<
   ArtifactTypeKey,
   readonly (readonly [string, WorkCapability])[]
@@ -101,7 +138,12 @@ const responsive = {
   flashcard_deck: [340, 720],
   quiz: [360, 760],
   planner_task: [360, 800],
-  agent: [380, 840],
+  // The Foundry's competence ledger and its authoring stream stop fitting side
+  // by side at 1020px, where the stylesheet stacks them. 840 told the studio the
+  // pane was comfortable while the layout had already broken, which is what lost
+  // the authoring surface between 840 and 1020: the preferred size has to be the
+  // width the two-column layout actually needs.
+  agent: [380, 1040],
   timetable: [420, 920],
   presentation: [480, 960],
   sheets: [520, 1040],
@@ -171,6 +213,10 @@ const keyboardOperations = {
     "run the project",
     "read diagnostics",
   ],
+  // All five are real in `whiteboard-studio.tsx`: Tab walks the objects in
+  // reading order and reveals each one, the outline panel lists objects and
+  // connectors with their metadata, arrow keys nudge (Shift for a grid step),
+  // Ctrl+G groups, and arrow keys pan with `+`/`-`/`0` for zoom and fit.
   whiteboard: [
     "move between objects",
     "read the spatial outline",

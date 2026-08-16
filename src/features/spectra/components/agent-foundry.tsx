@@ -4,30 +4,54 @@
  * Agent Foundry
  * Phase 10 §10.1–§10.14 — replaces the fixed six-step wizard.
  *
- * The surface has three regions: the foundation and adaptive build stream on
- * the left, the competence ledger on the right, and the release strip beneath.
- * Nothing here is a numbered wizard step; which sections exist is decided by
- * the mission, and every one of them can be dismissed and restored.
+ * The Foundry is a compiler, not a settings form. Two opening answers are
+ * compiled into a mission; every question after them is generated from what the
+ * mission still lacks. Three things follow from that and are load-bearing here:
+ *
+ *  1. The operating brief the runtime reads (`instructions.text`) is *derived*
+ *     from the mission and the approved skills by `projectFoundryToLegacy`. It
+ *     is never typed. `publishAgent` requires 40 characters of it, so the brief
+ *     is shown, counted and reconciled here rather than left invisible.
+ *  2. Granted capabilities are the one part of the compiled agent the runtime
+ *     reads straight from `content.tools` (`/api/spectra/run` builds its tool
+ *     grants from it), so answering the capabilities question writes there.
+ *  3. Build, Checks and Releases are views of one draft, not three editors.
+ *     Modes come from `work/registry` through the studio contract, and the
+ *     competence ledger travels with the authoring surface rather than
+ *     displacing it when the pane narrows.
  */
 
 import {
   AlertTriangle,
   ArrowRight,
   Check,
+  ChevronDown,
   CircleSlash,
   FlaskConical,
   Loader2,
+  Lock,
   Plus,
   RotateCcw,
+  ScrollText,
   ShieldAlert,
   Trash2,
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { StatusBadge, statusToneFor } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  MetricValue,
+  describeFailure,
+  metricCaption,
+  type DescribedFailure,
+  type MetricReading,
+} from "@/components/ui/truthful-state";
 import {
   addSection,
   answerSection,
   assessSufficiency,
+  buildEvaluationSuite,
   compileRuntimePackage,
   compilerProgress,
   compilerStatusLabel,
@@ -41,6 +65,7 @@ import {
   skillIssues,
   summarizeEvidence,
   type AgentFoundryContent,
+  type EvaluationLayer,
   type EvidenceBinding,
   type EvidenceExtraction,
   type FoundryFacet,
@@ -48,17 +73,20 @@ import {
   type FoundrySectionValue,
   type SpectraSkill,
 } from "../agents/foundry";
+import type { AgentTool } from "../agents/model";
 import {
   compileSpectraAgentFoundation,
   compileSpectraFoundrySkills,
   evaluateSpectraAgent,
   extractSpectraFoundryEvidence,
+  getSpectraAgentAnalytics,
   getSpectraAgentEvalRuns,
   getSpectraAgentReleases,
   getSpectraFoundryCompilerJob,
   manageSpectraAgentRelease,
   nextSpectraFoundrySection,
   publishSpectraAgent,
+  type SpectraAgentAnalytics,
   type SpectraAgentEvalRun,
   type SpectraAgentRelease,
   type SpectraArtifact,
@@ -66,7 +94,8 @@ import {
 } from "../data/api";
 import { LocalAutocompleteTextarea } from "../compute/autocomplete";
 import { aiRegionAttr, pathTouches } from "./ai-region-path";
-import { ArtifactWorkbar, WorkbarRail } from "./artifact-workbar";
+import { ArtifactWorkbar, type WorkbarActionSpec } from "./artifact-workbar";
+import { useStudioContract } from "./artifact-studio-shell";
 import { targetAttrs } from "../collaboration/target-attributes";
 
 const FACET_LABEL: Record<FoundryFacet, string> = {
@@ -83,15 +112,45 @@ const FACET_LABEL: Record<FoundryFacet, string> = {
   evaluation: "Checks",
 };
 
-const TOOL_CHOICES = [
+/**
+ * The capabilities Spectra can actually grant. This list is the runtime's
+ * allowlist (`AgentTool["key"]`, enforced again by `publishAgent`), not a menu
+ * of plausible ones: the previous list offered "Run code" and "Read files",
+ * which the runtime has no tool for, so both were dropped on save and would
+ * have failed publish. Everything here reaches a real tool.
+ */
+const TOOL_CHOICES: ReadonlyArray<{
+  id: AgentTool["key"];
+  label: string;
+  detail: string;
+}> = [
   { id: "artifact_search", label: "Find work", detail: "Search what the person asking can already see" },
-  { id: "artifact_read", label: "Read work", detail: "Open and quote permissioned items" },
+  { id: "artifact_read", label: "Read work", detail: "Open and quote items they can already open" },
   { id: "artifact_create", label: "Create work", detail: "Start new typed Spectra work" },
   { id: "artifact_edit", label: "Edit work", detail: "Propose region-safe changes" },
+  { id: "memory_retrieve", label: "Recall context", detail: "Read what they asked Spectra to remember" },
+  { id: "school_data", label: "Read school data", detail: "Timetable and results they may already see" },
   { id: "web_search", label: "Search the web", detail: "Look things up outside Spectra" },
-  { id: "code_execution", label: "Run code", detail: "Compute in a sandbox" },
-  { id: "file_analysis", label: "Read files", detail: "Analyse uploaded documents" },
-] as const;
+];
+
+const TOOL_LABEL = new Map<string, string>(
+  TOOL_CHOICES.map((tool) => [tool.id, tool.label]),
+);
+
+/** What each evaluation layer establishes, in the creator's terms (§10.10). */
+const LAYER_LABEL: Record<EvaluationLayer, string> = {
+  contract: "Keeps its output contract",
+  held_out: "Handles unseen requests",
+  mission_truth: "Matches your worked examples",
+  tool_sandbox: "Stays honest without its tools",
+  adversarial: "Resists instructions hidden in material",
+  regression: "Has not lost old behaviour",
+  independent_judge: "Judged by a second model",
+};
+
+/** The server's publish gates, stated once so the copy cannot drift from them. */
+const BRIEF_MINIMUM = 40;
+const ROUTING_MINIMUM = 30;
 
 const EVIDENCE_KINDS = [
   { id: "rubric", label: "Rubric or mark scheme" },
@@ -107,22 +166,44 @@ function identifier(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`;
 }
 
-function errorText(error: unknown) {
-  return error instanceof Error ? error.message : "That did not work.";
+function whenText(at: number) {
+  const minutes = Math.round((Date.now() - at) / 60_000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
 }
+
 
 /* ------------------------------------------------------------------ */
 /* Competence ledger — the one loud element on this surface            */
 /* ------------------------------------------------------------------ */
 
+/**
+ * What this agent knows, and what it cannot do yet.
+ *
+ * Two rules the previous version broke. First, weight and achievement are
+ * different facts: the bars encoded pursuit weight as length and coverage as
+ * fill, so nine bars sat 30–75% full under the heading `COMPETENCE 0%`. A
+ * teacher read the bars as progress. There is no bar now — the weight is a
+ * number and the state is a word, and the headline is a count rather than a
+ * percentage. Second, this panel is not more important than the work: below the
+ * two-column threshold it collapses to its headline so the authoring surface
+ * stays on screen, and every row remains reachable by opening it (CANON D4).
+ */
 function CompetenceLedger({
   content,
   skills,
   evidence,
+  extraGaps,
+  startCollapsed,
 }: {
   content: AgentFoundryContent;
   skills: SpectraSkill[];
   evidence: EvidenceBinding[];
+  extraGaps: string[];
+  startCollapsed: boolean;
 }) {
   const weights = useMemo(
     () => planFacetWeights(content.foundry.mission),
@@ -133,6 +214,9 @@ function CompetenceLedger({
     [content.foundry.mission, content.foundry.state],
   );
   const evidenceSummary = useMemo(() => summarizeEvidence(evidence), [evidence]);
+  const [open, setOpen] = useState(!startCollapsed);
+  const [allGaps, setAllGaps] = useState(false);
+  useEffect(() => setOpen(!startCollapsed), [startCollapsed]);
 
   const rows = sufficiency.pursuedFacets
     .map((facet) => ({
@@ -141,12 +225,11 @@ function CompetenceLedger({
       covered: !sufficiency.missingFacets.includes(facet),
     }))
     .sort((left, right) => right.weight - left.weight);
-
-  const maxWeight = rows.reduce((high, row) => Math.max(high, row.weight), 1);
+  const established = rows.filter((row) => row.covered).length;
 
   const gaps: string[] = [];
   for (const facet of sufficiency.missingFacets) {
-    gaps.push(`${FACET_LABEL[facet]} is not established.`);
+    gaps.push(`${FACET_LABEL[facet]}: not established yet.`);
   }
   if (skills.length === 0) {
     gaps.push("No skills compiled, so the agent has nothing specific to do.");
@@ -169,83 +252,139 @@ function CompetenceLedger({
       `${evidenceSummary.unresolvedContradictions} contradiction${evidenceSummary.unresolvedContradictions === 1 ? "" : "s"} between sources are unresolved.`,
     );
   }
+  gaps.push(...extraGaps);
+  const shown = allGaps ? gaps : gaps.slice(0, 6);
 
   return (
     <aside className="foundry-ledger" aria-label="What this agent knows">
       <header className="foundry-ledger-head">
         <span className="foundry-ledger-eyebrow">Competence</span>
         <span className="foundry-ledger-figure">
-          {Math.round(sufficiency.coverage * 100)}
-          <span className="foundry-ledger-unit">%</span>
+          {established}
+          <span className="foundry-ledger-unit"> of {rows.length || 0}</span>
         </span>
       </header>
 
-      <ul className="foundry-ledger-rows">
-        {rows.map((row) => (
-          <li
-            key={row.facet}
-            className={`foundry-ledger-row${row.covered ? " is-covered" : ""}`}
-          >
-            <span className="foundry-ledger-name">{FACET_LABEL[row.facet]}</span>
-            <span className="foundry-ledger-bar" aria-hidden>
-              <span
-                className="foundry-ledger-bar-track"
-                style={{ width: `${(row.weight / maxWeight) * 100}%` }}
+      <p className="foundry-ledger-note">
+        {rows.length === 0
+          ? "This mission pursues no facets yet."
+          : `${established} of ${rows.length} facets established. ${gaps.length} thing${gaps.length === 1 ? "" : "s"} it cannot do yet.`}
+        {startCollapsed ? (
+          <>
+            {" "}
+            <button
+              type="button"
+              className="foundry-text-button"
+              aria-expanded={open}
+              onClick={() => setOpen((value) => !value)}
+            >
+              <ChevronDown
+                size={13}
+                style={{ transform: open ? "rotate(0deg)" : "rotate(-90deg)" }}
+              />
+              {open ? "Hide the detail" : "Show the detail"}
+            </button>
+          </>
+        ) : null}
+      </p>
+
+      {open ? (
+        <>
+          <ul className="foundry-ledger-rows">
+            {rows.map((row) => (
+              <li
+                key={row.facet}
+                className={`foundry-ledger-row${row.covered ? " is-covered" : ""}`}
+                /* The name had 82px of a 296px panel and truncated to
+                   `Source mater…`. It takes the free space now that no bar
+                   competes for it. */
+                style={{ gridTemplateColumns: "minmax(0, 1fr) auto auto" }}
               >
-                <span className="foundry-ledger-bar-fill" />
-              </span>
-            </span>
-            <span className="foundry-ledger-weight">{row.weight}</span>
-          </li>
-        ))}
-      </ul>
-
-      {sufficiency.notApplicable.length > 0 && (
-        <p className="foundry-ledger-note">
-          Not pursued for this mission:{" "}
-          {sufficiency.notApplicable.map((facet) => FACET_LABEL[facet]).join(", ")}.
-        </p>
-      )}
-
-      <section className="foundry-ledger-block">
-        <h4>Holdings</h4>
-        <dl className="foundry-ledger-stats">
-          <div>
-            <dt>Skills</dt>
-            <dd>{skills.length}</dd>
-          </div>
-          <div>
-            <dt>Sources</dt>
-            <dd>{evidenceSummary.sourceCount}</dd>
-          </div>
-          <div>
-            <dt>Criteria</dt>
-            <dd>{evidenceSummary.criteriaCount}</dd>
-          </div>
-          <div>
-            <dt>Rules</dt>
-            <dd>{evidenceSummary.ruleCount}</dd>
-          </div>
-        </dl>
-      </section>
-
-      <section className="foundry-ledger-block">
-        <h4>Can&rsquo;t do yet</h4>
-        {gaps.length === 0 ? (
-          <p className="foundry-ledger-clear">
-            Nothing outstanding. The agent does what the mission describes.
-          </p>
-        ) : (
-          <ul className="foundry-gap-list">
-            {gaps.slice(0, 8).map((gap, index) => (
-              <li key={index}>{gap}</li>
+                <span className="foundry-ledger-name">
+                  {FACET_LABEL[row.facet]}
+                </span>
+                <span className="foundry-ledger-weight" title="How much this mission depends on it">
+                  {row.weight}
+                </span>
+                <span className="foundry-ledger-name" style={{ textAlign: "right" }}>
+                  {row.covered ? "Established" : "Not yet"}
+                </span>
+              </li>
             ))}
           </ul>
-        )}
-      </section>
+
+          {rows.length > 0 && (
+            <p className="foundry-ledger-note">
+              The number is how much this mission depends on the facet, not how
+              far you have got with it.
+            </p>
+          )}
+
+          {sufficiency.notApplicable.length > 0 && (
+            <p className="foundry-ledger-note">
+              Not pursued for this mission:{" "}
+              {sufficiency.notApplicable
+                .map((facet) => FACET_LABEL[facet])
+                .join(", ")}
+              .
+            </p>
+          )}
+
+          <section className="foundry-ledger-block">
+            <h4>Holdings</h4>
+            <dl className="foundry-ledger-stats">
+              <div>
+                <dt>Skills</dt>
+                <dd>{skills.length}</dd>
+              </div>
+              <div>
+                <dt>Sources</dt>
+                <dd>{evidenceSummary.sourceCount}</dd>
+              </div>
+              <div>
+                <dt>Criteria</dt>
+                <dd>{evidenceSummary.criteriaCount}</dd>
+              </div>
+              <div>
+                <dt>Rules</dt>
+                <dd>{evidenceSummary.ruleCount}</dd>
+              </div>
+            </dl>
+          </section>
+
+          <section className="foundry-ledger-block">
+            <h4>Can&rsquo;t do yet</h4>
+            {gaps.length === 0 ? (
+              <p className="foundry-ledger-clear">
+                Nothing outstanding. The agent does what the mission describes.
+              </p>
+            ) : (
+              <>
+                <ul className="foundry-gap-list">
+                  {shown.map((gap, index) => (
+                    <li key={index}>{gap}</li>
+                  ))}
+                </ul>
+                {gaps.length > shown.length || allGaps ? (
+                  <button
+                    type="button"
+                    className="foundry-text-button"
+                    onClick={() => setAllGaps((value) => !value)}
+                  >
+                    {allGaps
+                      ? "Show fewer"
+                      : `Show all ${gaps.length}`}
+                  </button>
+                ) : null}
+              </>
+            )}
+          </section>
+        </>
+      ) : null}
     </aside>
   );
 }
+
 
 /* ------------------------------------------------------------------ */
 /* Section editors                                                     */
@@ -304,32 +443,39 @@ function SectionEditor({
   if (section.kind === "permission_selection") {
     const selected = draft.kind === "permissions" ? draft.toolIds : [];
     return (
-      <ul className="foundry-choices">
-        {TOOL_CHOICES.map((tool) => {
-          const active = selected.includes(tool.id);
-          return (
-            <li key={tool.id}>
-              <button
-                type="button"
-                className={`foundry-choice${active ? " is-active" : ""}`}
-                disabled={disabled}
-                onClick={() =>
-                  onDraft({
-                    kind: "permissions",
-                    toolIds: active
-                      ? selected.filter((id) => id !== tool.id)
-                      : [...selected, tool.id],
-                  })
-                }
-              >
-                <span className="foundry-choice-label">{tool.label}</span>
-                <span className="foundry-choice-detail">{tool.detail}</span>
-                {active && <Check size={14} className="foundry-choice-mark" />}
-              </button>
-            </li>
-          );
-        })}
-      </ul>
+      <>
+        <ul className="foundry-choices">
+          {TOOL_CHOICES.map((tool) => {
+            const active = selected.includes(tool.id);
+            return (
+              <li key={tool.id}>
+                <button
+                  type="button"
+                  className={`foundry-choice${active ? " is-active" : ""}`}
+                  disabled={disabled}
+                  aria-pressed={active}
+                  onClick={() =>
+                    onDraft({
+                      kind: "permissions",
+                      toolIds: active
+                        ? selected.filter((id) => id !== tool.id)
+                        : [...selected, tool.id],
+                    })
+                  }
+                >
+                  <span className="foundry-choice-label">{tool.label}</span>
+                  <span className="foundry-choice-detail">{tool.detail}</span>
+                  {active && <Check size={14} className="foundry-choice-mark" />}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+        <p className="foundry-section-detail">
+          Whatever you grant, the agent works inside the permissions of whoever
+          asks, and Spectra asks that person before anything consequential.
+        </p>
+      </>
     );
   }
 
@@ -516,9 +662,7 @@ function summarizeValue(value: FoundrySectionValue): string {
       return `${value.pairs.length} worked example${value.pairs.length === 1 ? "" : "s"}`;
     case "permissions":
       return value.toolIds
-        .map(
-          (id) => TOOL_CHOICES.find((tool) => tool.id === id)?.label ?? id,
-        )
+        .map((id) => TOOL_LABEL.get(id) ?? id)
         .join(", ");
     case "confirmation":
       return value.accepted ? "Confirmed" : "Marked as not quite right";
@@ -619,6 +763,246 @@ function CompilerTrace({
   );
 }
 
+/** One failure, in the interface's voice, with a reference support can trace. */
+function FoundryProblem({ problem }: { problem?: DescribedFailure }) {
+  if (!problem) return null;
+  return (
+    <p className="foundry-problem" role="alert">
+      <AlertTriangle size={14} />
+      {problem.message} Reference {problem.reference}.
+    </p>
+  );
+}
+
+/**
+ * The capability grant the runtime reads. Deselecting revokes, which is why the
+ * list is rebuilt from the selection rather than merged into it.
+ */
+function toolGrantsFrom(
+  toolIds: readonly string[],
+  existing: readonly AgentTool[],
+): AgentTool[] {
+  return TOOL_CHOICES.filter((tool) => toolIds.includes(tool.id)).map((tool) => {
+    const previous = existing.find((entry) => entry.key === tool.id);
+    return {
+      id: previous?.id ?? identifier("tool"),
+      key: tool.id,
+      enabled: true,
+      approval: previous?.approval ?? ("consequential" as const),
+    };
+  });
+}
+
+function releaseLabel(release: SpectraAgentRelease) {
+  const rollout = release.rollout ?? "published";
+  if (release.status !== "published") return release.status;
+  if (rollout === "internal_test") return "you only";
+  if (rollout === "limited") return "on request";
+  return "live";
+}
+
+/**
+ * `statusToneFor` reads the settled product vocabulary, and an eval run says
+ * `passed`, which that vocabulary does not list, so a green run was rendered as
+ * neutral grey. Mapped here rather than by inventing a second tone scale; A1
+ * owns the word list.
+ */
+function runTone(status: string) {
+  if (status === "passed") return "succeeded";
+  if (status === "failed") return "failed";
+  return status;
+}
+
+/* ------------------------------------------------------------------ */
+/* Checks — the one place a run can be tested before it is released    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The suite and its runs. Both were already real and neither was reachable:
+ * `evaluateSpectraAgent` runs a layered suite against the live model with the
+ * agent's own compiled brief, stores every case with its verdict, reason and
+ * the answer it got, and the surface then displayed one sentence and threw the
+ * rest away. A failure a creator cannot read is a failure they cannot fix.
+ */
+function ChecksView({
+  suite,
+  runs,
+  currentHash,
+  canEdit,
+  loading,
+}: {
+  suite: ReturnType<typeof buildEvaluationSuite>;
+  runs: SpectraAgentEvalRun[];
+  currentHash: string;
+  canEdit: boolean;
+  loading: boolean;
+}) {
+  const [openRunId, setOpenRunId] = useState<string | null>(null);
+  const [showPassed, setShowPassed] = useState(false);
+  const activeId = openRunId ?? runs[0]?._id ?? null;
+  const active = runs.find((run) => run._id === activeId) ?? null;
+
+  const layers = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const entry of suite)
+      counts.set(entry.layer, (counts.get(entry.layer) ?? 0) + 1);
+    return (Object.keys(LAYER_LABEL) as EvaluationLayer[])
+      .filter((layer) => layer !== "independent_judge")
+      .map((layer) => ({ layer, count: counts.get(layer) ?? 0 }));
+  }, [suite]);
+
+  const cases = active?.results ?? [];
+  const failed = cases.filter((entry) => !entry.passed);
+  const shown = showPassed ? cases : failed;
+
+  return (
+    <>
+      <section className="foundry-block">
+        <div className="foundry-block-head">
+          <h3>What gets checked</h3>
+          <span className="foundry-block-count">
+            {suite.length} check{suite.length === 1 ? "" : "s"}
+          </span>
+        </div>
+        <p className="foundry-block-lede">
+          The suite is built from this agent&rsquo;s own mission, skills and
+          sources, so it changes as they do. Every check runs against the live
+          model using the brief the runtime will use.
+        </p>
+        {suite.length === 0 ? (
+          <p className="foundry-empty">
+            Nothing to check yet. Approve at least one skill and the suite is
+            built from it.
+          </p>
+        ) : (
+          <ol className="foundry-compile-stages">
+            {layers.map((entry) => (
+              <li
+                key={entry.layer}
+                className={entry.count === 0 ? "is-skipped" : "is-completed"}
+              >
+                <span className="foundry-compile-stage-label">
+                  {LAYER_LABEL[entry.layer]}
+                </span>
+                <span className="foundry-compile-stage-detail">
+                  {entry.count === 0 ? "not covered" : `${entry.count}`}
+                </span>
+              </li>
+            ))}
+          </ol>
+        )}
+      </section>
+
+      <section className="foundry-block">
+        <div className="foundry-block-head">
+          <h3>Runs</h3>
+          <span className="foundry-block-count">
+            {runs.length} recorded
+          </span>
+        </div>
+
+        {loading ? (
+          <p className="foundry-empty">Reading the run history.</p>
+        ) : !canEdit ? (
+          <p className="foundry-empty">
+            Run history is available to people who can edit this agent.
+          </p>
+        ) : runs.length === 0 ? (
+          <p className="foundry-empty">
+            No checks have run yet. Run them once and every case, including the
+            ones that fail, is kept here.
+          </p>
+        ) : (
+          <ul className="foundry-releases">
+            {runs.slice(0, 8).map((run) => {
+              const stale = Boolean(currentHash) && run.contentHash !== currentHash;
+              return (
+                <li key={run._id}>
+                  <span className="foundry-release-number">
+                    {run.passedCount}/{run.caseCount}
+                  </span>
+                  <StatusBadge tone={statusToneFor(runTone(run.status))}>
+                    {run.status}
+                  </StatusBadge>
+                  <span className="foundry-release-notes">
+                    {whenText(run.completedAt ?? run.startedAt)} ·{" "}
+                    {run.modelId.split("/").pop()} ·{" "}
+                    {stale ? "an earlier draft" : "this draft"}
+                  </span>
+                  <button
+                    type="button"
+                    className="foundry-text-button"
+                    aria-expanded={run._id === activeId}
+                    onClick={() =>
+                      setOpenRunId(run._id === activeId ? "" : run._id)
+                    }
+                  >
+                    {run._id === activeId ? "Hide" : "Open"}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+
+        {active && (
+          <>
+            <p className="foundry-block-lede">
+              {failed.length === 0
+                ? `Every check passed. Average score ${active.averageScore.toFixed(2)} against a ${active.threshold.toFixed(2)} threshold.`
+                : `${failed.length} of ${active.caseCount} check${active.caseCount === 1 ? "" : "s"} failed. Average score ${active.averageScore.toFixed(2)} against a ${active.threshold.toFixed(2)} threshold.`}
+            </p>
+            <ul className="foundry-skill-list">
+              {shown.map((entry) => (
+                <li
+                  key={entry.caseId}
+                  className={`foundry-skill${entry.passed ? " is-approved" : ""}`}
+                >
+                  <div className="foundry-skill-head">
+                    <span className="foundry-skill-name">
+                      {LAYER_LABEL[entry.category as EvaluationLayer] ??
+                        entry.category}
+                    </span>
+                    <span className="foundry-skill-state">
+                      {entry.passed ? "passed" : "failed"} ·{" "}
+                      {entry.score.toFixed(2)}
+                      {entry.required ? " · required" : ""}
+                    </span>
+                  </div>
+                  <p className="foundry-skill-purpose">
+                    {entry.reason || "No reason was recorded for this case."}
+                  </p>
+                  {entry.responseExcerpt && (
+                    <p className="foundry-skill-contract">
+                      It answered: {entry.responseExcerpt.slice(0, 320)}
+                      {entry.responseExcerpt.length > 320 ? "…" : ""}
+                    </p>
+                  )}
+                </li>
+              ))}
+            </ul>
+            {cases.length > failed.length && (
+              <button
+                type="button"
+                className="foundry-text-button"
+                onClick={() => setShowPassed((value) => !value)}
+              >
+                {showPassed
+                  ? "Failures only"
+                  : `Show the ${cases.length - failed.length} that passed`}
+              </button>
+            )}
+            <p className="foundry-ledger-note">
+              Spectra also records how each answer was judged and what the run
+              could not establish. This screen does not read those yet.
+            </p>
+          </>
+        )}
+      </section>
+    </>
+  );
+}
+
 export function AgentFoundry({
   artifactId,
   artifactTitle,
@@ -642,16 +1026,30 @@ export function AgentFoundry({
   canPublish?: boolean;
   onActiveRegionChange?: (regionId: string) => void;
 }) {
+  /* Registry truth: which modes exist, who may enter them, and how much room
+     this pane has. The type declares nothing about permissions itself. */
+  const contract = useStudioContract();
+  // `readOnly` and `contract.readOnly` are the same fact from the same shell
+  // resolution; both are read so a future divergence fails closed.
+  const canEdit = contract.can("edit") && !readOnly;
+  /* Below the width where the ledger and the stream stop fitting side by side,
+     the stylesheet moves the ledger above the workbar. That is what deleted the
+     authoring surface at 850: a 400px status panel arrived first and pushed the
+     mission, the open question and Save and continue off the pane. The ledger
+     collapses to its headline here instead. */
+  const compressLedger = contract.density !== "comfortable";
+
   const normalized = useMemo(() => normalizeFoundryContent(content), [content]);
   const [agent, setAgent] = useState(normalized);
   useEffect(() => setAgent(normalized), [normalized]);
 
+  const [view, setView] = useState<string>("build");
   const [objective, setObjective] = useState("");
   const [interaction, setInteraction] = useState("");
   const [drafts, setDrafts] = useState<Record<string, FoundrySectionValue>>({});
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string>();
-  const [problem, setProblem] = useState<string>();
+  const [problem, setProblem] = useState<DescribedFailure>();
   const [proposed, setProposed] = useState<SpectraSkill[]>([]);
   const [evidenceText, setEvidenceText] = useState("");
   const [evidenceLabel, setEvidenceLabel] = useState("");
@@ -660,18 +1058,46 @@ export function AgentFoundry({
   const [evidenceOpen, setEvidenceOpen] = useState(false);
   const [releases, setReleases] = useState<SpectraAgentRelease[]>([]);
   const [evalRuns, setEvalRuns] = useState<SpectraAgentEvalRun[]>([]);
+  const [runsLoading, setRunsLoading] = useState(!readOnly);
   const [currentHash, setCurrentHash] = useState("");
   const [showDismissed, setShowDismissed] = useState(false);
+  const [showBrief, setShowBrief] = useState(false);
+  const [analytics, setAnalytics] = useState<SpectraAgentAnalytics | null>(null);
+  const [analyticsState, setAnalyticsState] = useState<
+    "idle" | "loading" | "ready" | "failed"
+  >("idle");
   const [compilerJob, setCompilerJob] =
     useState<SpectraFoundryCompilerJob | null>(null);
   const streamEnd = useRef<HTMLDivElement>(null);
+  const reconciled = useRef<string | null>(null);
 
   const foundry = agent.foundry;
   const established = foundry.foundationEstablished;
 
+  // A mode the viewer cannot enter is never left selected.
   useEffect(() => {
-    onActiveRegionChange?.(established ? "build" : "foundation");
-  }, [established, onActiveRegionChange]);
+    if (!contract.modes.some((entry) => entry.id === view))
+      setView(contract.modes[0]?.id ?? "build");
+  }, [contract.modes, view]);
+
+  useEffect(() => {
+    onActiveRegionChange?.(established ? view : "foundation");
+  }, [established, onActiveRegionChange, view]);
+
+  /* Re-reads the check runs and, with them, the hash of the draft they ran
+     against. Every gate that mentions checks depends on that hash being current,
+     so this is called on mount, on entering Releases, after a run, and from the
+     bar. */
+  const reloadRuns = useCallback(async () => {
+    setRunsLoading(true);
+    const response = await getSpectraAgentEvalRuns(artifactId).catch(() => null);
+    if (response) {
+      setEvalRuns(response.runs);
+      setCurrentHash(response.currentContentHash);
+    }
+    setRunsLoading(false);
+    return response !== null;
+  }, [artifactId]);
 
   useEffect(() => {
     let active = true;
@@ -685,7 +1111,8 @@ export function AgentFoundry({
           setEvalRuns(response.runs);
           setCurrentHash(response.currentContentHash);
         })
-        .catch(() => undefined);
+        .catch(() => undefined)
+        .finally(() => active && setRunsLoading(false));
     // The last compilation is state the creator left behind, not a Live Dock
     // tab, so it is restored with the surface (§10.8).
     if (!readOnly)
@@ -696,6 +1123,32 @@ export function AgentFoundry({
       active = false;
     };
   }, [artifactId, readOnly]);
+
+  // Usage is only asked for when the release view is opened, because opening an
+  // editor should not cost a query nobody is looking at.
+  useEffect(() => {
+    if (view !== "releases" || readOnly || analyticsState !== "idle") return;
+    setAnalyticsState("loading");
+    let active = true;
+    void getSpectraAgentAnalytics(artifactId)
+      .then((response) => {
+        if (!active) return;
+        setAnalytics(response.analytics);
+        setAnalyticsState("ready");
+      })
+      .catch(() => active && setAnalyticsState("failed"));
+    return () => {
+      active = false;
+    };
+  }, [analyticsState, artifactId, readOnly, view]);
+
+  /* The check gate is keyed to a hash of the draft, so a run that passed before
+     the last edit stops counting. Re-reading it on entering Releases is what
+     keeps the blocker list and the Publish verb honest rather than optimistic. */
+  useEffect(() => {
+    if (view !== "releases" || readOnly) return;
+    void reloadRuns();
+  }, [readOnly, reloadRuns, view]);
 
   const commit = useCallback(
     (next: AgentFoundryContent) => {
@@ -714,13 +1167,28 @@ export function AgentFoundry({
     [agent, commit],
   );
 
-  async function run<T>(key: string, task: () => Promise<T>) {
+  /* The operating brief is compiled, never typed, so it can fall behind a
+     mission that was changed by something other than this surface (an AI edit,
+     an import, an older draft). Publish reads the stored field, so a stale
+     brief fails on a field the creator cannot see. Reconcile once per artifact
+     on open. */
+  const compiled = useMemo(() => projectFoundryToLegacy(agent), [agent]);
+  const brief = compiled.instructions.text.trim();
+  const briefBehind = brief !== (agent.instructions?.text ?? "").trim();
+  useEffect(() => {
+    if (!canEdit || !established || !briefBehind) return;
+    if (reconciled.current === artifactId) return;
+    reconciled.current = artifactId;
+    commit(agent);
+  }, [agent, artifactId, briefBehind, canEdit, commit, established]);
+
+  async function run<T>(key: string, fallback: string, task: () => Promise<T>) {
     setBusy(key);
     setProblem(undefined);
     try {
       return await task();
     } catch (error) {
-      setProblem(errorText(error));
+      setProblem(describeFailure(error, { fallback }));
       return undefined;
     } finally {
       setBusy(null);
@@ -730,8 +1198,15 @@ export function AgentFoundry({
   /* -------------------- foundation -------------------- */
 
   async function establishFoundation() {
-    const result = await run("foundation", () =>
-      compileSpectraAgentFoundation({ agentId: artifactId, objective, interaction }),
+    const result = await run(
+      "foundation",
+      "Spectra could not read the foundation. Try rewording the objective, then set it again.",
+      () =>
+        compileSpectraAgentFoundation({
+          agentId: artifactId,
+          objective,
+          interaction,
+        }),
     );
     if (!result) return;
 
@@ -757,7 +1232,11 @@ export function AgentFoundry({
 
   const requestSection = useCallback(
     async (base?: AgentFoundryContent) => {
-      const result = await run("next", () => nextSpectraFoundrySection(artifactId));
+      const result = await run(
+        "next",
+        "Spectra could not work out what to ask next. Try again, or add a source in the meantime.",
+        () => nextSpectraFoundrySection(artifactId),
+      );
       if (!result) return;
       const source = base ?? agent;
       if (result.sufficient || !result.section) {
@@ -792,15 +1271,29 @@ export function AgentFoundry({
   function saveSection(section: FoundrySection) {
     const draft = drafts[section.id] ?? section.value;
     if (isEmptyValue(draft)) return;
-    patchFoundry({
-      state: answerSection(foundry.state, section.id, draft, Date.now()),
-    });
+    const state = answerSection(foundry.state, section.id, draft, Date.now());
+    /* Capabilities are the one answer the runtime reads from outside the Foundry
+       document: `/api/spectra/run` builds its tool grants from `content.tools`,
+       and nothing was writing there, so every capability a creator granted was
+       discarded on save. The grant is written in the same commit as the answer. */
+    const next: AgentFoundryContent =
+      draft.kind === "permissions"
+        ? {
+            ...agent,
+            tools: toolGrantsFrom(draft.toolIds, agent.tools),
+            foundry: { ...foundry, state },
+          }
+        : { ...agent, foundry: { ...foundry, state } };
+    commit(next);
     setDrafts((current) => {
-      const next = { ...current };
-      delete next[section.id];
-      return next;
+      const rest = { ...current };
+      delete rest[section.id];
+      return rest;
     });
-    void requestSection();
+    // The answer has to travel with the request: `requestSection` adds the next
+    // section to the draft it was given, and the draft in scope here is the only
+    // one that contains what was just answered.
+    void requestSection(next);
   }
 
   /* -------------------- evidence -------------------- */
@@ -811,13 +1304,16 @@ export function AgentFoundry({
     if (!text) return;
 
     const sourceId = identifier("src");
-    const result = await run("evidence", () =>
-      extractSpectraFoundryEvidence({
-        agentId: artifactId,
-        sourceId,
-        kind: evidenceKind,
-        text,
-      }),
+    const result = await run(
+      "evidence",
+      `Spectra could not read "${label}". Check the text you pasted, then read it again.`,
+      () =>
+        extractSpectraFoundryEvidence({
+          agentId: artifactId,
+          sourceId,
+          kind: evidenceKind,
+          text,
+        }),
     );
     if (!result) return;
 
@@ -866,8 +1362,10 @@ export function AgentFoundry({
   /* -------------------- compile -------------------- */
 
   async function compile() {
-    const result = await run("compile", () =>
-      compileSpectraFoundrySkills(artifactId),
+    const result = await run(
+      "compile",
+      "The skill compiler stopped before it finished. The stages below show where.",
+      () => compileSpectraFoundrySkills(artifactId),
     );
     // Whether or not compilation succeeded, the job record explains what
     // happened, so read it back either way.
@@ -964,58 +1462,169 @@ export function AgentFoundry({
       entry.contentHash === currentHash,
   );
 
-  const publishBlockers = useMemo(() => {
-    const blocked: string[] = [];
+  const suite = useMemo(
+    () =>
+      buildEvaluationSuite({
+        agentId: artifactId,
+        mission: foundry.mission,
+        skills: foundry.skills,
+        bindings: foundry.evidenceBindings,
+      }),
+    [artifactId, foundry.evidenceBindings, foundry.mission, foundry.skills],
+  );
+
+  /* Capabilities a skill's procedure asks for that the agent has not been
+     granted. The runtime resolves these as unmet and makes the agent decline,
+     so they belong in the incapability ledger rather than in a console. */
+  const ungranted = useMemo(() => {
+    const granted = new Set(
+      agent.tools.filter((tool) => tool.enabled).map((tool) => tool.key),
+    );
+    const wanted = new Set(
+      foundry.skills.flatMap((skill) =>
+        skill.procedure.flatMap((step) => step.tools ?? []),
+      ),
+    );
+    return [...wanted].filter(
+      (tool) => TOOL_LABEL.has(tool) && !granted.has(tool as AgentTool["key"]),
+    );
+  }, [agent.tools, foundry.skills]);
+
+  const routingDescription = agent.routing.description.trim();
+  const routingRequired =
+    agent.routing.enabled && routingDescription.length < ROUTING_MINIMUM;
+
+  /* Everything the server will refuse, in the server's own order, phrased as the
+     thing to do about it. Two lists because the gates differ: `publishAgent`
+     requires a passing check run only when the rollout is not `internal_test`,
+     so a private release to yourself is reachable before checks pass. Offering
+     one verb against the stricter list would have hidden the escape hatch that
+     lets a creator try the agent before committing it to the school. */
+  const { blockers: publishBlockers, privateBlockers } = useMemo(() => {
+    const shared: string[] = [];
     if (!foundry.mission.objective.trim())
-      blocked.push("The mission has no objective.");
-    if ((agent.instructions?.text ?? "").trim().length < 40)
-      blocked.push("The approved mission and skills need more actionable detail.");
+      shared.push("The mission has no objective. Answer the first question to set one.");
+    if (brief.length < BRIEF_MINIMUM)
+      shared.push(
+        `The operating brief is ${brief.length} character${brief.length === 1 ? "" : "s"} and the runtime needs ${BRIEF_MINIMUM}. It is compiled from the mission and the approved skills, so answer more of the mission or approve a skill.`,
+      );
     if (foundry.skills.length === 0)
-      blocked.push("No skills are approved, so there is nothing to publish.");
-    for (const skill of foundry.skills) blocked.push(...skillIssues(skill));
-    if (!passingEval)
-      blocked.push("No evaluation has passed against the current draft.");
+      shared.push("No skills are approved, so there is nothing to publish. Compile skills, then approve the ones that match how you work.");
+    for (const skill of foundry.skills) shared.push(...skillIssues(skill));
+    if (routingRequired)
+      shared.push(
+        `Automatic routing needs ${ROUTING_MINIMUM} characters describing when to choose this agent, and it has ${routingDescription.length}. Compiling skills drafts it.`,
+      );
     for (const binding of foundry.evidenceBindings) {
       if (binding.extraction && !binding.confirmed) {
-        blocked.push(`"${binding.label}" has not been confirmed as read correctly.`);
+        shared.push(`"${binding.label}" has not been confirmed as read correctly.`);
       }
     }
-    return [...new Set(blocked)];
-  }, [agent.instructions?.text, foundry.evidenceBindings, foundry.mission.objective, foundry.skills, passingEval]);
+    const privateOnly = [...new Set(shared)];
+    return {
+      privateBlockers: privateOnly,
+      blockers: passingEval
+        ? privateOnly
+        : [
+            ...privateOnly,
+            "No check run has passed against this exact draft. Run the checks, or release it to yourself first.",
+          ],
+    };
+  }, [
+    brief.length,
+    foundry.evidenceBindings,
+    foundry.mission.objective,
+    foundry.skills,
+    passingEval,
+    routingDescription.length,
+    routingRequired,
+  ]);
+
+  const ledgerGaps = useMemo(() => {
+    const gaps: string[] = [];
+    if (routingRequired)
+      gaps.push(
+        "Spectra cannot choose this agent automatically until routing has a description.",
+      );
+    for (const tool of ungranted)
+      gaps.push(
+        `${TOOL_LABEL.get(tool)}: a skill needs it and it is not granted, so the agent will say it cannot.`,
+      );
+    if (brief.length > 0 && brief.length < BRIEF_MINIMUM)
+      gaps.push(
+        `The operating brief is ${brief.length} of the ${BRIEF_MINIMUM} characters a release needs.`,
+      );
+    return gaps;
+  }, [brief.length, routingRequired, ungranted]);
 
   async function evaluate() {
-    const result = await run("evaluate", () => evaluateSpectraAgent(artifactId));
+    const result = await run(
+      "evaluate",
+      "The check run did not finish. Nothing was released, and you can run it again.",
+      () => evaluateSpectraAgent(artifactId),
+    );
+    // The run list is re-read whether or not the request succeeded: a run that
+    // failed halfway is still a run, and the cases it did get through are the
+    // most useful thing on the screen.
+    await reloadRuns();
     if (!result) return;
-    const runs = await getSpectraAgentEvalRuns(artifactId).catch(() => null);
-    if (runs) {
-      setEvalRuns(runs.runs);
-      setCurrentHash(runs.currentContentHash);
-    }
     setNotice(
       result.status === "passed"
         ? `Passed ${result.passedCount} of ${result.caseCount} checks.`
-        : `Failed. ${result.passedCount} of ${result.caseCount} checks passed.`,
+        : `Failed. ${result.passedCount} of ${result.caseCount} checks passed. Every case is in Checks, including what the agent answered.`,
     );
   }
 
-  async function publish() {
-    const result = await run("publish", () =>
-      publishSpectraAgent(artifactId, foundry.draftReleaseNotes || undefined),
+  async function publish(rollout: "internal_test" | "published") {
+    const result = await run(
+      rollout === "internal_test" ? "release-private" : "publish",
+      rollout === "internal_test"
+        ? "The private release was not created. Nothing changed for anyone else."
+        : "The release was not published and the current release is untouched. If you have changed the draft since the last passing run, run the checks again first.",
+      () =>
+        publishSpectraAgent(
+          artifactId,
+          foundry.draftReleaseNotes || undefined,
+          rollout,
+        ),
+    );
+    if (!result) {
+      // The most likely refusal is the check gate, which is keyed to the draft's
+      // hash, so re-read it: the blocker list then says so rather than leaving
+      // Publish looking available.
+      await reloadRuns();
+      return;
+    }
+    const list = await getSpectraAgentReleases(artifactId).catch(() => null);
+    if (list) setReleases(list.releases);
+    // A private release carries no passing run, so it can never be promoted to
+    // the school later; the way out is a second release once checks pass.
+    setNotice(
+      rollout === "internal_test"
+        ? `Release ${result.releaseNumber} is available to you only. Use it in a conversation, then run the checks and publish when it holds up.`
+        : `Release ${result.releaseNumber} published.`,
+    );
+  }
+
+  async function manageRelease(
+    releaseId: string,
+    action: "promote" | "rollback",
+  ) {
+    const result = await run(
+      action,
+      action === "promote"
+        ? "The release was not promoted. It still reaches the same people as before."
+        : "The rollback did not happen. The current release is still the live one.",
+      () => manageSpectraAgentRelease(releaseId, action),
     );
     if (!result) return;
     const list = await getSpectraAgentReleases(artifactId).catch(() => null);
     if (list) setReleases(list.releases);
-    setNotice(`Release ${result.releaseNumber} published.`);
-  }
-
-  async function rollback(releaseId: string) {
-    const result = await run("rollback", () =>
-      manageSpectraAgentRelease(releaseId, "rollback"),
+    setNotice(
+      action === "promote"
+        ? "Promoted. Everyone who can use this agent now reaches this release."
+        : "Rolled back to the previous release.",
     );
-    if (!result) return;
-    const list = await getSpectraAgentReleases(artifactId).catch(() => null);
-    if (list) setReleases(list.releases);
-    setNotice("Rolled back to the previous release.");
   }
 
   /* -------------------- render -------------------- */
@@ -1030,20 +1639,134 @@ export function AgentFoundry({
     (section) => section.status === "dismissed",
   );
 
+  /* `newest` is what the creator last released, private or not, because that is
+     the state the bar has to report. `serving` is what anyone else actually
+     reaches, and it is the only sensible thing to roll back *to*. */
+  const published = releases.filter((release) => release.status === "published");
+  const highest = (list: SpectraAgentRelease[]) =>
+    list.reduce<SpectraAgentRelease | undefined>(
+      (best, release) =>
+        !best || release.releaseNumber > best.releaseNumber ? release : best,
+      undefined,
+    );
+  const newest = highest(published);
+  const serving = highest(
+    published.filter((release) => release.rollout !== "internal_test"),
+  );
+  const syncReadout = (
+    <span className="foundry-block-count">{contract.sync.label}</span>
+  );
+
+  /* Usage under the S8 rule: a number is drawn only where a measurement exists.
+     `completionRate` and `averageLatencyMs` come back null when there is nothing
+     to divide, and a missing denominator is not a zero. */
+  const usageReadings = useMemo<
+    ReadonlyArray<{ label: string; reading: MetricReading }>
+  >(() => {
+    if (analyticsState !== "ready" || !analytics)
+      return [
+        { label: "Times used", reading: { state: "loading" } },
+        { label: "Did not finish", reading: { state: "loading" } },
+        { label: "Average answer", reading: { state: "loading" } },
+        { label: "Rating", reading: { state: "loading" } },
+      ];
+    const completed =
+      analytics.completionRate === null
+        ? null
+        : Math.round(analytics.completionRate * analytics.invocations);
+    return [
+      {
+        label: "Times used",
+        reading: { state: "measured", value: String(analytics.invocations) },
+      },
+      {
+        label: "Did not finish",
+        reading:
+          completed === null
+            ? {
+                state: "unknown",
+                reason:
+                  "Nothing has run yet, so there is nothing that failed to finish.",
+              }
+            : {
+                state: "measured",
+                value: String(Math.max(0, analytics.invocations - completed)),
+              },
+      },
+      {
+        label: "Average answer",
+        reading:
+          analytics.averageLatencyMs === null
+            ? {
+                state: "unknown",
+                reason: "Timing is recorded only for runs that finished.",
+              }
+            : {
+                state: "measured",
+                value: `${(analytics.averageLatencyMs / 1000).toFixed(1)}s`,
+              },
+      },
+      {
+        label: "Rating",
+        reading:
+          analytics.feedback.averageRating === null
+            ? {
+                state: "unknown",
+                reason: "Nobody has rated an answer from this agent yet.",
+              }
+            : {
+                state: "measured",
+                value: `${analytics.feedback.averageRating.toFixed(1)} of 5`,
+              },
+      },
+    ];
+  }, [analytics, analyticsState]);
+
+  // One sentence per condition that needs explaining. A measured number explains
+  // itself, so "Measured from product records." is not printed four times.
+  const usageCaptions = useMemo(() => {
+    const sentences = new Set<string>();
+    for (const entry of usageReadings) {
+      if (entry.reading.state === "measured" || entry.reading.state === "loading")
+        continue;
+      sentences.add(metricCaption(entry.reading));
+    }
+    return [...sentences];
+  }, [usageReadings]);
+
+  // Only the ratings people chose to share carry a comment, so a rating without
+  // one is a number, not an empty quotation.
+  const comments = useMemo(
+    () =>
+      (analytics?.feedback.comments ?? [])
+        .filter((entry) => Boolean(entry.comment?.trim()))
+        .slice(-3)
+        .reverse(),
+    [analytics],
+  );
+
   if (!established) {
     return (
       <div className={`spectra-agent-foundry is-${mode} is-foundation`}>
+        {/* Every work type gets one control row, including the first screen of
+            one. This bar states what is being built and whether it is saved;
+            the verb stays with the two questions it depends on. */}
+        <ArtifactWorkbar
+          label="Agent"
+          modes={[]}
+          context="New agent"
+          trailing={syncReadout}
+        />
         <div className="foundry-foundation">
-          <p className="foundry-eyebrow">New specialist</p>
-          <h2 className="foundry-title">{artifactTitle || "Untitled agent"}</h2>
+          <p className="foundry-eyebrow">Foundation</p>
           <p className="foundry-lede">
-            Two answers set the foundation. Everything after them is decided by
-            what you say here — there is no fixed set of steps.
+            Two answers set the foundation. What Spectra asks after them is
+            decided by what you write here, so there is no fixed set of steps.
           </p>
 
           <label className="foundry-question">
             <span className="foundry-question-prompt">
-              What should this agent do?
+              What should {artifactTitle.trim() || "this agent"} do?
             </span>
             <LocalAutocompleteTextarea
               className="foundry-textarea"
@@ -1052,8 +1775,8 @@ export function AgentFoundry({
               rows={5}
               value={objective}
               onValueChange={setObjective}
-              disabled={readOnly || busy === "foundation"}
-              placeholder="Mark Year 11 history essays against our department rubric and write feedback the student can act on."
+              disabled={!canEdit || busy === "foundation"}
+              placeholder="Say what it should produce, who it is for, and what makes a result correct."
             />
           </label>
 
@@ -1068,22 +1791,20 @@ export function AgentFoundry({
               rows={3}
               value={interaction}
               onValueChange={setInteraction}
-              disabled={readOnly || busy === "foundation"}
-              placeholder="Direct and specific. It should never soften a weak argument."
+              disabled={!canEdit || busy === "foundation"}
+              placeholder="Direct and specific. It should never soften a weak answer."
             />
           </label>
 
-          {problem && (
-            <p className="foundry-problem">
-              <AlertTriangle size={14} />
-              {problem}
-            </p>
-          )}
+          <FoundryProblem problem={problem} />
 
-          <button
-            type="button"
-            className="foundry-primary"
-            disabled={readOnly || busy === "foundation" || objective.trim().length < 10}
+          <Button
+            variant="primary"
+            size="lg"
+            className="self-start"
+            disabled={
+              !canEdit || busy === "foundation" || objective.trim().length < 10
+            }
             onClick={() => void establishFoundation()}
           >
             {busy === "foundation" ? (
@@ -1097,39 +1818,155 @@ export function AgentFoundry({
                 <ArrowRight size={15} />
               </>
             )}
-          </button>
+          </Button>
         </div>
       </div>
     );
   }
 
+  /* One bar, one primary verb, and the modes the registry says this viewer may
+     enter. The baseline put `Build | Continue | Compile skills` in one segmented
+     control (two modes and a verb, with the verb styled as the active tab) and
+     then repeated both verbs as buttons in the body. */
+  const barActions: WorkbarActionSpec[] =
+    view === "build"
+      ? [
+          {
+            id: "next",
+            label: busy === "next" ? "Working" : "Continue",
+            icon: ArrowRight,
+            priority: "essential",
+            keepLabel: true,
+            requires: "edit",
+            disabled: !canEdit || busy === "next",
+            hint: "Ask the next question this mission needs",
+            onSelect: () => void requestSection(),
+          },
+          {
+            id: "source",
+            label: "Add a source",
+            icon: Plus,
+            priority: "essential",
+            requires: "edit",
+            disabled: !canEdit,
+            onSelect: () => setEvidenceOpen(true),
+          },
+          ...(dismissed.length
+            ? [
+                {
+                  id: "dismissed",
+                  label: `${dismissed.length} dismissed`,
+                  icon: RotateCcw,
+                  priority: "secondary" as const,
+                  active: showDismissed,
+                  onSelect: () => setShowDismissed((value) => !value),
+                },
+              ]
+            : []),
+        ]
+      : view === "checks"
+        ? [
+            {
+              id: "refresh",
+              label: "Refresh runs",
+              icon: RotateCcw,
+              priority: "secondary",
+              requires: "edit",
+              disabled: busy !== null,
+              onSelect: () => void reloadRuns(),
+            },
+          ]
+        : [
+            {
+              id: "brief",
+              label: "Operating brief",
+              icon: ScrollText,
+              priority: "secondary",
+              active: showBrief,
+              onSelect: () => setShowBrief((value) => !value),
+            },
+            {
+              id: "private",
+              label: "Release to yourself",
+              icon: Lock,
+              priority: "advanced",
+              requires: "edit",
+              disabled:
+                !canEdit ||
+                !canPublish ||
+                busy !== null ||
+                privateBlockers.length > 0,
+              hint: "Only you can use it, and it needs no passing check",
+              onSelect: () => void publish("internal_test"),
+            },
+          ];
+
+  const barPrimary =
+    view === "build"
+      ? {
+          label: busy === "compile" ? "Drafting skills" : "Compile skills",
+          disabled: !canEdit || busy === "compile",
+          busy: busy === "compile",
+          requires: "edit" as const,
+          onSelect: () => void compile(),
+        }
+      : view === "checks"
+        ? {
+            label: busy === "evaluate" ? "Running checks" : "Run checks",
+            icon: FlaskConical,
+            disabled: !canEdit || busy === "evaluate" || suite.length === 0,
+            busy: busy === "evaluate",
+            requires: "edit" as const,
+            onSelect: () => void evaluate(),
+          }
+        : {
+            label: busy === "publish" ? "Publishing" : "Publish",
+            disabled:
+              !canEdit ||
+              !canPublish ||
+              busy === "publish" ||
+              publishBlockers.length > 0,
+            busy: busy === "publish",
+            requires: "edit" as const,
+            onSelect: () => void publish("published"),
+          };
+
   return (
     <div className={`spectra-agent-foundry is-${mode}`}>
-      <ArtifactWorkbar label="Agent tools">
-        <WorkbarRail>
-          <span className="px-1 text-[12px] font-medium text-[var(--text-secondary)]">Build</span>
-        </WorkbarRail>
-        <button
-          type="button"
-          className="inline-flex h-8 items-center rounded-[6px] px-2.5 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] hover:text-[var(--text-primary)] disabled:opacity-45"
-          disabled={readOnly || busy === "next"}
-          onClick={() => void requestSection()}
-        >
-          {busy === "next" ? "Working…" : "Continue"}
-        </button>
-        <button
-          type="button"
-          className="spectra-workbar-primary inline-flex h-8 items-center rounded-[6px] bg-[var(--text-primary)] px-2.5 text-[11px] font-semibold text-[var(--bg-primary)] disabled:opacity-45"
-          disabled={readOnly || busy === "compile"}
-          onClick={() => void compile()}
-        >
-          {busy === "compile" ? "Drafting…" : "Compile skills"}
-        </button>
-      </ArtifactWorkbar>
+      <ArtifactWorkbar
+        label="Agent"
+        modes={{ registry: true, value: view, onChange: setView }}
+        context={newest ? `v${newest.releaseNumber} ${releaseLabel(newest)}` : "Not released"}
+        actions={barActions}
+        primary={barPrimary}
+        trailing={syncReadout}
+        /* Below 1020px the stylesheet stacks the grid and gives the ledger
+           `order: -1`, which put a status panel above the control row. The bar
+           is ordered ahead of both, so the sequence stays bar, ledger headline,
+           authoring surface at every width. */
+        className="order-[-2]"
+      />
       <div
         className="foundry-stream"
         data-ai-region={aiRegionAttr(pathTouches(aiChangedPaths, "/foundry"))}
       >
+        {notice && (
+          <p className="foundry-notice" role="status">
+            {notice}
+            <button
+              type="button"
+              className="foundry-icon-button"
+              aria-label="Dismiss"
+              onClick={() => setNotice(undefined)}
+            >
+              <X size={13} />
+            </button>
+          </p>
+        )}
+        <FoundryProblem problem={problem} />
+
+        {view === "build" ? (
+          <>
         <header className="foundry-mission" {...targetAttrs("/foundry/mission")}>
           <p className="foundry-eyebrow">Mission</p>
           <p
@@ -1149,25 +1986,6 @@ export function AgentFoundry({
           </ul>
         </header>
 
-        {notice && (
-          <p className="foundry-notice">
-            {notice}
-            <button
-              type="button"
-              className="foundry-icon-button"
-              aria-label="Dismiss"
-              onClick={() => setNotice(undefined)}
-            >
-              <X size={13} />
-            </button>
-          </p>
-        )}
-        {problem && (
-          <p className="foundry-problem">
-            <AlertTriangle size={14} />
-            {problem}
-          </p>
-        )}
 
         {answered.map((section) => {
           const editing = drafts[section.id] !== undefined;
@@ -1183,7 +2001,7 @@ export function AgentFoundry({
                   <button
                     type="button"
                     className="foundry-text-button"
-                    disabled={readOnly}
+                    disabled={!canEdit}
                     onClick={() =>
                       setDrafts((current) =>
                         editing
@@ -1209,17 +2027,17 @@ export function AgentFoundry({
                     onDraft={(value) =>
                       setDrafts((current) => ({ ...current, [section.id]: value }))
                     }
-                    disabled={readOnly}
+                    disabled={!canEdit}
                     artifacts={artifacts}
                   />
-                  <button
-                    type="button"
-                    className="foundry-primary is-compact"
-                    disabled={readOnly}
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    disabled={!canEdit}
                     onClick={() => saveSection(section)}
                   >
                     Save
-                  </button>
+                  </Button>
                 </>
               ) : (
                 <p className="foundry-section-answer">{summarizeValue(section.value)}</p>
@@ -1240,7 +2058,7 @@ export function AgentFoundry({
                 <button
                   type="button"
                   className="foundry-text-button"
-                  disabled={readOnly}
+                  disabled={!canEdit}
                   onClick={() =>
                     patchFoundry({
                       state: dismissSection(foundry.state, section.id, Date.now()),
@@ -1262,66 +2080,27 @@ export function AgentFoundry({
               onDraft={(value) =>
                 setDrafts((current) => ({ ...current, [section.id]: value }))
               }
-              disabled={readOnly}
+              disabled={!canEdit}
               artifacts={artifacts}
             />
-            <button
-              type="button"
-              className="foundry-primary is-compact"
+            <Button
+              variant="primary"
+              size="sm"
               disabled={
-                readOnly || isEmptyValue(drafts[section.id] ?? section.value)
+                !canEdit || isEmptyValue(drafts[section.id] ?? section.value)
               }
               onClick={() => saveSection(section)}
             >
               Save and continue
-            </button>
+            </Button>
           </article>
         ))}
 
         <div ref={streamEnd} />
 
-        <div className="foundry-stream-actions">
-          <button
-            type="button"
-            className="foundry-secondary"
-            disabled={readOnly || busy === "next"}
-            onClick={() => void requestSection()}
-          >
-            {busy === "next" ? (
-              <>
-                <Loader2 size={14} className="foundry-spin" />
-                Working out what to ask
-              </>
-            ) : (
-              "Continue building"
-            )}
-          </button>
-          <button
-            type="button"
-            className="foundry-secondary"
-            disabled={readOnly || busy === "compile"}
-            onClick={() => void compile()}
-          >
-            {busy === "compile" ? (
-              <>
-                <Loader2 size={14} className="foundry-spin" />
-                Drafting skills
-              </>
-            ) : (
-              "Compile skills"
-            )}
-          </button>
-          {dismissed.length > 0 && (
-            <button
-              type="button"
-              className="foundry-text-button"
-              onClick={() => setShowDismissed((value) => !value)}
-            >
-              {showDismissed ? "Hide" : `${dismissed.length} dismissed`}
-            </button>
-          )}
-        </div>
-
+        {/* `Continue building` and `Compile skills` were repeated here as body
+            buttons while the same two verbs sat in the bar. They live in the bar
+            only, and the dismissed list opens from there too. */}
         {showDismissed && (
           <ul className="foundry-dismissed">
             {dismissed.map((section) => (
@@ -1330,7 +2109,7 @@ export function AgentFoundry({
                 <button
                   type="button"
                   className="foundry-text-button"
-                  disabled={readOnly}
+                  disabled={!canEdit}
                   onClick={() =>
                     patchFoundry({
                       state: restoreSection(foundry.state, section.id, Date.now()),
@@ -1358,7 +2137,7 @@ export function AgentFoundry({
             <button
               type="button"
               className="foundry-text-button"
-              disabled={readOnly}
+              disabled={!canEdit}
               onClick={() => setEvidenceOpen((value) => !value)}
             >
               <Plus size={13} />
@@ -1400,9 +2179,9 @@ export function AgentFoundry({
                 value={evidenceText}
                 onChange={(event) => setEvidenceText(event.target.value)}
               />
-              <button
-                type="button"
-                className="foundry-primary is-compact"
+              <Button
+                variant="primary"
+                size="sm"
                 disabled={busy === "evidence" || !evidenceText.trim()}
                 onClick={() => void attachEvidence()}
               >
@@ -1414,7 +2193,7 @@ export function AgentFoundry({
                 ) : (
                   "Read this source"
                 )}
-              </button>
+              </Button>
             </div>
           )}
 
@@ -1432,7 +2211,7 @@ export function AgentFoundry({
                       type="button"
                       className="foundry-icon-button"
                       aria-label={`Remove ${binding.label}`}
-                      disabled={readOnly}
+                      disabled={!canEdit}
                       onClick={() => removeEvidence(binding.id)}
                     >
                       <Trash2 size={13} />
@@ -1479,7 +2258,7 @@ export function AgentFoundry({
                         <button
                           type="button"
                           className={`foundry-choice is-compact${binding.confirmed ? " is-active" : ""}`}
-                          disabled={readOnly}
+                          disabled={!canEdit}
                           onClick={() => confirmEvidence(binding.id, true)}
                         >
                           <Check size={13} />
@@ -1489,7 +2268,7 @@ export function AgentFoundry({
                           <button
                             type="button"
                             className="foundry-text-button"
-                            disabled={readOnly}
+                            disabled={!canEdit}
                             onClick={() => confirmEvidence(binding.id, false)}
                           >
                             Undo
@@ -1546,14 +2325,14 @@ export function AgentFoundry({
                     </p>
                   )}
                   <div className="foundry-skill-actions">
-                    <button
-                      type="button"
-                      className="foundry-primary is-compact"
-                      disabled={readOnly}
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      disabled={!canEdit}
                       onClick={() => acceptSkill(skill)}
                     >
                       Approve
-                    </button>
+                    </Button>
                     <button
                       type="button"
                       className="foundry-text-button"
@@ -1579,7 +2358,7 @@ export function AgentFoundry({
                   <button
                     type="button"
                     className="foundry-text-button"
-                    disabled={readOnly}
+                    disabled={!canEdit}
                     onClick={() =>
                       patchFoundry({
                         skills: foundry.skills.filter(
@@ -1602,107 +2381,263 @@ export function AgentFoundry({
           )}
         </section>
 
-        {/* ---------------- release ---------------- */}
+        {/* ---------------- end of the build stream ---------------- */}
+          </>
+        ) : null}
 
-        <section
-          className="foundry-block"
-          data-ai-region={aiRegionAttr(pathTouches(aiChangedPaths, "/routing"))}
-        >
-          <div className="foundry-block-head">
-            <h3>Release</h3>
-            <span className="foundry-block-count">
-              {runtimePackage.skillIndex.length} skills ·{" "}
-              {runtimePackage.verificationSteps.length} checks ·{" "}
-              {runtimePackage.safetyBoundaries.length} boundaries
-            </span>
-          </div>
+        {view === "checks" ? (
+          <ChecksView
+            suite={suite}
+            runs={evalRuns}
+            currentHash={currentHash}
+            canEdit={canEdit}
+            loading={runsLoading}
+          />
+        ) : null}
 
-          <p className="foundry-block-lede">
-            Publishing compiles the mission, skills and evidence into an
-            immutable package. Earlier releases stay available to roll back to.
-          </p>
-
-          {publishBlockers.length > 0 && (
-            <ul className="foundry-blockers">
-              {publishBlockers.slice(0, 6).map((blocker, index) => (
-                <li key={index}>{blocker}</li>
-              ))}
-            </ul>
-          )}
-
-          <div className="foundry-release-actions">
-            <button
-              type="button"
-              className="foundry-secondary"
-              disabled={readOnly || busy === "evaluate"}
-              onClick={() => void evaluate()}
+        {view === "releases" ? (
+          <>
+            <section
+              className="foundry-block"
+              data-ai-region={aiRegionAttr(
+                pathTouches(aiChangedPaths, "/routing"),
+              )}
             >
-              {busy === "evaluate" ? (
-                <>
-                  <Loader2 size={14} className="foundry-spin" />
-                  Running checks
-                </>
+              <div className="foundry-block-head">
+                <h3>Release</h3>
+                <span className="foundry-block-count">
+                  {runtimePackage.skillIndex.length} skills ·{" "}
+                  {runtimePackage.verificationSteps.length} checks ·{" "}
+                  {runtimePackage.safetyBoundaries.length} boundaries
+                </span>
+              </div>
+
+              <p className="foundry-block-lede">
+                Publishing compiles the mission, skills and evidence into a
+                package that cannot change afterwards. A release needs an
+                operating brief of at least {BRIEF_MINIMUM} characters
+                {agent.routing.enabled
+                  ? `, a routing sentence of at least ${ROUTING_MINIMUM},`
+                  : ""}{" "}
+                and a check run that passed on this exact draft. Earlier
+                releases stay available to roll back to.
+              </p>
+
+              {/* The routing sentence is a publish gate and was never shown, so
+                  the rejection arrived from a field nobody could read. */}
+              <p
+                className="foundry-skill-contract"
+                {...targetAttrs("/routing/description")}
+              >
+                {agent.routing.enabled
+                  ? `When Spectra should choose this agent: ${routingDescription || "not described yet."}`
+                  : "Automatic routing is off, so this agent is only used when someone asks for it by name."}
+              </p>
+
+              {/* The Foundry binds sources as evidence and never writes
+                  `content.resources`, but an agent converted from the old
+                  editor can still carry them, and publish refuses if one is no
+                  longer readable. Stated rather than hidden. */}
+              {agent.resources.length > 0 && (
+                <p className="foundry-ledger-note">
+                  {agent.resources.length} attached{" "}
+                  {agent.resources.length === 1 ? "item is" : "items are"} pinned
+                  to this agent from an earlier version of the editor. Each one
+                  has to still be readable by you when you publish, or the
+                  release is refused.
+                </p>
+              )}
+
+              {/* The operating brief is the 40-character gate. It is compiled,
+                  not typed, so it is shown and counted rather than edited. */}
+              <button
+                type="button"
+                className="foundry-text-button"
+                aria-expanded={showBrief}
+                onClick={() => setShowBrief((value) => !value)}
+              >
+                <ChevronDown
+                  size={13}
+                  style={{
+                    transform: showBrief ? "rotate(0deg)" : "rotate(-90deg)",
+                  }}
+                />
+                Operating brief · {brief.length} character
+                {brief.length === 1 ? "" : "s"}
+              </button>
+              {showBrief && (
+                <p
+                  className="foundry-skill-purpose"
+                  style={{ whiteSpace: "pre-wrap" }}
+                  {...targetAttrs("/instructions/text")}
+                >
+                  {brief ||
+                    "Nothing compiled yet. The brief is written from the mission and the approved skills."}
+                </p>
+              )}
+              <p className="foundry-ledger-note">
+                This is the whole of what the runtime reads. It is compiled from
+                the mission and the approved skills, so it changes by changing
+                them rather than by editing it here.
+              </p>
+
+              {publishBlockers.length > 0 && (
+                <ul className="foundry-blockers">
+                  {publishBlockers.map((blocker, index) => (
+                    <li key={index}>{blocker}</li>
+                  ))}
+                </ul>
+              )}
+
+              {releases.length > 0 ? (
+                <ul className="foundry-releases">
+                  {releases.slice(0, 6).map((release) => {
+                    const rollout = release.rollout ?? "published";
+                    /* Both verbs are refused by the server unless the release
+                       carries the passing check run it was published against,
+                       and a private release never carries one. A door that
+                       cannot open is removed rather than disabled. */
+                    const evidenced = Boolean(release.evalRunId);
+                    const promotable =
+                      evidenced &&
+                      release.status === "published" &&
+                      rollout === "limited";
+                    const restorable =
+                      evidenced &&
+                      release.status !== "deprecated" &&
+                      serving !== undefined &&
+                      release.releaseNumber < serving.releaseNumber;
+                    return (
+                      <li key={release.releaseId}>
+                        <span className="foundry-release-number">
+                          v{release.releaseNumber}
+                        </span>
+                        <StatusBadge tone={statusToneFor(releaseLabel(release))}>
+                          {releaseLabel(release)}
+                        </StatusBadge>
+                        <span className="foundry-release-notes">
+                          {release.releaseNotes || "No notes"}
+                        </span>
+                        {promotable ? (
+                          <button
+                            type="button"
+                            className="foundry-text-button"
+                            disabled={!canEdit || !canPublish || busy !== null}
+                            onClick={() =>
+                              void manageRelease(release.releaseId, "promote")
+                            }
+                          >
+                            Promote
+                          </button>
+                        ) : restorable ? (
+                          <button
+                            type="button"
+                            className="foundry-text-button"
+                            disabled={!canEdit || !canPublish || busy !== null}
+                            onClick={() =>
+                              void manageRelease(release.releaseId, "rollback")
+                            }
+                          >
+                            Roll back
+                          </button>
+                        ) : (
+                          <span />
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : (
+                <p className="foundry-empty">
+                  Nothing released yet. Release it to yourself first from the
+                  bar, use it in a conversation, then publish it to the school.
+                </p>
+              )}
+            </section>
+
+            {/* ---------------- what happened when it was used ---------------- */}
+
+            <section className="foundry-block">
+              <div className="foundry-block-head">
+                <h3>Use</h3>
+                <span className="foundry-block-count">
+                  {analyticsState === "ready" && analytics
+                    ? `${analytics.feedback.count} rating${analytics.feedback.count === 1 ? "" : "s"}`
+                    : ""}
+                </span>
+              </div>
+              {analyticsState === "failed" ? (
+                <p className="foundry-empty">
+                  Usage could not be read just now. Reopen this view to try
+                  again.
+                </p>
+              ) : !canEdit ? (
+                /* `agents.analytics` requires `modify`, so a read-only viewer is
+                   told that rather than left watching four skeletons that will
+                   never resolve. */
+                <p className="foundry-empty">
+                  Usage figures are available to people who can edit this agent.
+                </p>
               ) : (
                 <>
-                  <FlaskConical size={14} />
-                  Run checks
-                </>
-              )}
-            </button>
-            <button
-              type="button"
-              className="foundry-primary"
-              disabled={
-                readOnly ||
-                !canPublish ||
-                busy === "publish" ||
-                publishBlockers.length > 0
-              }
-              onClick={() => void publish()}
-            >
-              {busy === "publish" ? (
-                <>
-                  <Loader2 size={15} className="foundry-spin" />
-                  Publishing
-                </>
-              ) : (
-                "Publish"
-              )}
-            </button>
-          </div>
-
-          {releases.length > 0 && (
-            <ul className="foundry-releases">
-              {releases.slice(0, 5).map((release) => (
-                <li key={release.releaseId}>
-                  <span className="foundry-release-number">
-                    v{release.releaseNumber}
-                  </span>
-                  <span className="foundry-release-status">{release.status}</span>
-                  <span className="foundry-release-notes">
-                    {release.releaseNotes || "No notes"}
-                  </span>
-                  {release.status === "published" && (
-                    <button
-                      type="button"
-                      className="foundry-text-button"
-                      disabled={readOnly || busy === "rollback"}
-                      onClick={() => void rollback(release.releaseId)}
-                    >
-                      Roll back
-                    </button>
+                  <dl className="foundry-ledger-stats">
+                    {usageReadings.map((entry) => (
+                      <div key={entry.label}>
+                        <dt>{entry.label}</dt>
+                        <dd>
+                          <MetricValue
+                            reading={entry.reading}
+                            valueClassName="text-[16px]"
+                          />
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                  {usageCaptions.map((caption) => (
+                    <p key={caption} className="foundry-ledger-note">
+                      {caption}
+                    </p>
+                  ))}
+                  {comments.length > 0 && (
+                    <ul className="foundry-skill-list">
+                      {comments.map((entry) => (
+                        <li key={entry.createdAt} className="foundry-skill">
+                          <div className="foundry-skill-head">
+                            <span className="foundry-skill-name">
+                              {entry.category}
+                            </span>
+                            <span className="foundry-skill-state">
+                              {entry.rating} of 5 · {whenText(entry.createdAt)}
+                            </span>
+                          </div>
+                          <p className="foundry-skill-purpose">
+                            {entry.comment}
+                          </p>
+                        </li>
+                      ))}
+                    </ul>
                   )}
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
+                  <p className="foundry-ledger-note">
+                    {analytics?.privacy ??
+                      "Aggregates never include what anyone asked or what the agent answered."}
+                  </p>
+                  <p className="foundry-ledger-note">
+                    Runs that did not finish are counted, not listed. Spectra
+                    keeps no per-run record a creator can open yet.
+                  </p>
+                </>
+              )}
+            </section>
+          </>
+        ) : null}
       </div>
 
       <CompetenceLedger
         content={agent}
         skills={foundry.skills}
         evidence={foundry.evidenceBindings}
+        extraGaps={ledgerGaps}
+        startCollapsed={compressLedger}
       />
     </div>
   );

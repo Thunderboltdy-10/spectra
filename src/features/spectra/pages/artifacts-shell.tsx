@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import {
   BookOpen,
   CalendarCheck2,
+  CalendarClock,
   CheckCircle2,
   ChevronDown,
   ChevronLeft,
@@ -51,6 +52,7 @@ import {
 import { toast } from "sonner";
 import { useSearchParams } from "next/navigation";
 import { useNow } from "@/hooks/use-now";
+import { describeFailure } from "@/components/ui/truthful-state";
 import { useSpectraContextStore } from "@/stores/spectra-context-store";
 import { useSpectraRun } from "../ai/use-spectra-run";
 import { useSpectraContext } from "../hooks/use-spectra-context";
@@ -59,6 +61,7 @@ import {
   type ArtifactPayload,
 } from "../components/artifact-blueprint-sheet";
 import { ArtifactCard, blueprintMeta } from "../components/artifact-card";
+import { previewText } from "../components/preview-text";
 import {
   StudioTabRail,
   useArtifactStudioState,
@@ -114,12 +117,17 @@ import {
   type SpectraShareInvitation,
   type SpectraThread,
 } from "../data/api";
-import type { ArtifactTypeKey } from "../artifacts/types";
+import {
+  CREATABLE_ARTIFACT_TYPE_KEYS,
+  type ArtifactTypeKey,
+} from "../artifacts/types";
 import {
   readSharedWorkbenchSession,
   updateWorkbenchSurface,
   writeSharedWorkbenchSession,
 } from "../workbench";
+import { OverflowMenu } from "@/components/ui/dropdown-menu";
+import { SelectField } from "@/components/ui/select";
 
 type ArtifactMode = "list" | "board" | "canvas";
 type ArtifactSort =
@@ -164,7 +172,21 @@ const filters: Array<{
   { key: "sheets", label: "Sheets", icon: Table2 },
   { key: "code", label: "Code", icon: Code2 },
   { key: "whiteboard", label: "Whiteboards", icon: Workflow },
+  // Retired: Calendar owns scheduling now. Present so existing timetable work
+  // stays findable and exportable; excluded from every "New work" menu.
+  { key: "timetable", label: "Timetables (retired)", icon: CalendarClock },
 ];
+
+/**
+ * "New work" menus derive from the registry's creatable set, so a type that is
+ * browsable but not creatable can never leak into a create menu.
+ */
+function isCreatableFilter(key: (typeof filters)[number]["key"]) {
+  return (
+    key !== "all" &&
+    (CREATABLE_ARTIFACT_TYPE_KEYS as readonly string[]).includes(key)
+  );
+}
 
 function buttonClass(tone: "normal" | "dark" = "normal") {
   if (tone === "dark")
@@ -690,11 +712,13 @@ export function ArtifactsShell({
             : getSpectraOverview(),
           getSpectraThreads({ limit: 200 }).catch(() => ({ threads: [] })),
         ]);
-      const listedArtifacts = artifactResult.artifacts.filter(
-        (artifact) => artifact.blueprintKey !== "timetable",
-      );
-      if (sequence !== loadSequenceRef.current) return listedArtifacts;
-      setAllArtifacts(listedArtifacts);
+      // Legacy timetables are retired work, not hidden work. They stay in the
+      // dataset so counts are truthful, search finds them, deep links resolve
+      // and their events remain exportable. Creation is blocked in the "New
+      // work" menus and again in `spectraArtifacts:create`.
+      const loadedArtifacts = artifactResult.artifacts;
+      if (sequence !== loadSequenceRef.current) return loadedArtifacts;
+      setAllArtifacts(loadedArtifacts);
       setLibraryThreads(threadResult.threads);
       setShareInvitations(invitationResult.invitations);
       if (overview) {
@@ -707,11 +731,12 @@ export function ArtifactsShell({
           ),
         );
       }
-      return listedArtifacts;
+      return loadedArtifacts;
     } catch (error) {
       if (sequence !== loadSequenceRef.current) return [];
       toast.error(
-        error instanceof Error ? error.message : "Could not load your library.",
+        describeFailure(error, { fallback: "Could not load your library." })
+          .message,
       );
       return [];
     } finally {
@@ -904,10 +929,21 @@ export function ArtifactsShell({
     const artifact = allArtifacts.find(
       (item) => item._id === requestedArtifactId,
     );
-    if (!artifact) return;
+    if (artifact) {
+      openedQueryArtifactRef.current = requestedArtifactId;
+      openArtifactSurface(artifact);
+      return;
+    }
+    // Not found. Wait for the first load to finish before judging, then say so:
+    // a link that resolves to nothing must not leave the user on an unchanged
+    // Library with no explanation.
+    if (loading || loadSequenceRef.current === 0) return;
     openedQueryArtifactRef.current = requestedArtifactId;
-    openArtifactSurface(artifact);
-  }, [allArtifacts, openArtifactSurface, requestedArtifactId]);
+    toast.error("That work is not available.", {
+      description:
+        "It may have been deleted, or it may not be shared with your account.",
+    });
+  }, [allArtifacts, loading, openArtifactSurface, requestedArtifactId]);
 
   const artifacts = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -1037,7 +1073,8 @@ export function ArtifactsShell({
       if (created) studio.openSplit(created);
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : "Could not create this work.",
+        describeFailure(error, { fallback: "Could not create this work." })
+          .message,
       );
     } finally {
       setBusyKey(null);
@@ -1120,7 +1157,8 @@ export function ArtifactsShell({
           "Library import failed",
         ).catch(() => undefined);
       toast.error(
-        error instanceof Error ? error.message : "Could not import this file.",
+        describeFailure(error, { fallback: "Could not import this file." })
+          .message,
       );
     } finally {
       setBusyKey(null);
@@ -1140,7 +1178,8 @@ export function ArtifactsShell({
       await load(true);
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : "Could not archive this work.",
+        describeFailure(error, { fallback: "Could not archive this work." })
+          .message,
       );
     } finally {
       setBusyKey(null);
@@ -1164,7 +1203,8 @@ export function ArtifactsShell({
       await load(true);
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : "Could not delete this work.",
+        describeFailure(error, { fallback: "Could not delete this work." })
+          .message,
       );
     } finally {
       setBusyKey(null);
@@ -1188,7 +1228,8 @@ export function ArtifactsShell({
       await load(true);
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : "Could not place this work.",
+        describeFailure(error, { fallback: "Could not place this work." })
+          .message,
       );
     } finally {
       setBusyKey(null);
@@ -1203,7 +1244,8 @@ export function ArtifactsShell({
       await load(true);
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : "Could not remove placement.",
+        describeFailure(error, { fallback: "Could not remove placement." })
+          .message,
       );
     } finally {
       setBusyKey(null);
@@ -1233,9 +1275,8 @@ export function ArtifactsShell({
       if (response === "accept") setCollection("shared");
     } catch (error) {
       toast.error(
-        error instanceof Error
-          ? error.message
-          : "Could not update the invitation.",
+        describeFailure(error, { fallback: "Could not update the invitation." })
+          .message,
       );
     } finally {
       setBusyKey(null);
@@ -1436,9 +1477,8 @@ export function ArtifactsShell({
     {
       key: "shared" as const,
       label: "Shared with me",
-      count: workArtifacts.filter(
-        (artifact) => artifact.ownership === "shared",
-      ).length,
+      count: workArtifacts.filter((artifact) => artifact.ownership === "shared")
+        .length,
       icon: Share2,
     },
     {
@@ -1498,6 +1538,7 @@ export function ArtifactsShell({
             onAddHub={addAllHubTab}
             onActivateTab={studio.activateTab}
             onCloseTab={closeArtifactTab}
+            persistent
           />
         ) : null}
         <div className="spectra-workbench-frame relative flex min-h-0 flex-1">
@@ -1676,6 +1717,11 @@ export function ArtifactsShell({
                         ref={importInputRef}
                         type="file"
                         className="sr-only"
+                        // Opened by the Import button, never reached directly:
+                        // sr-only alone left a "Choose file" control in the tab
+                        // order and the accessibility tree at the top of Library.
+                        tabIndex={-1}
+                        aria-hidden="true"
                         accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.csv,.tsv,.txt,.md,.js,.jsx,.ts,.tsx,.py,.html,.css,.json"
                         onChange={(event) => {
                           const file = event.target.files?.[0];
@@ -1725,11 +1771,7 @@ export function ArtifactsShell({
                             </button>
                             <div className="my-1 h-px bg-[var(--border-subtle)]" />
                             {filters
-                              .filter(
-                                (filter) =>
-                                  filter.key !== "all" &&
-                                  filter.key !== "timetable",
-                              )
+                              .filter((filter) => isCreatableFilter(filter.key))
                               .map((filter) => {
                                 const Icon = filter.icon;
                                 const key = filter.key as ArtifactTypeKey;
@@ -1760,26 +1802,23 @@ export function ArtifactsShell({
                       </div>
                     </div>
                   </div>
-                  <label className="spectra-library-collection-select relative mt-6 block xl:hidden">
-                    <span className="sr-only">Library collection</span>
-                    <select
-                      aria-label="Library collection"
+                  <div className="spectra-library-collection-select mt-6 block xl:hidden">
+                    <SelectField
+                      ariaLabel="Library collection"
                       value={collection}
-                      onChange={(event) => {
-                        setCollection(event.target.value as ArtifactCollection);
+                      onChange={(next) => {
+                        setCollection(next as ArtifactCollection);
                         setSelectedWorkspaceId("");
                         setActiveFilter("all");
                       }}
-                      className="h-10 w-full appearance-none rounded-[8px] border border-[var(--border-default)] bg-[var(--bg-primary)] pl-3 pr-10 text-[12px] font-medium text-[var(--text-primary)] outline-none hover:bg-[var(--bg-hover)] focus-visible:ring-2 focus-visible:ring-[var(--brand-primary)]"
-                    >
-                      {collectionItems.map((item) => (
-                        <option key={item.key} value={item.key}>
-                          {item.label}{item.count ? ` (${compactCollectionCount(item.count)})` : ""}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-[var(--text-tertiary)]" />
-                  </label>
+                      options={collectionItems.map((item) => ({
+                        value: item.key,
+                        label: item.count
+                          ? `${item.label} (${compactCollectionCount(item.count)})`
+                          : item.label,
+                      }))}
+                    />
+                  </div>
                   <nav
                     className="spectra-library-collection-tabs mt-7 hidden items-end gap-6 border-b border-[var(--border-default)] xl:flex"
                     aria-label="Library collections"
@@ -1799,9 +1838,22 @@ export function ArtifactsShell({
                           aria-current={
                             collection === item.key ? "page" : undefined
                           }
+                          // The visible label is dropped by CSS when the rail
+                          // tightens, which left these named only by their
+                          // count — "button, 200" — and left Shared with me,
+                          // which has no count, with no name at all. The name
+                          // is stated here so it survives every width.
+                          aria-label={
+                            item.count > 0
+                              ? `${item.label}, ${item.count}`
+                              : item.label
+                          }
+                          title={item.label}
                         >
                           <Icon className="h-3.5 w-3.5" />
-                          <span className="spectra-library-collection-label">{item.label}</span>
+                          <span className="spectra-library-collection-label">
+                            {item.label}
+                          </span>
                           {item.count > 0 ? (
                             <span className="min-w-5 rounded-[5px] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-center text-micro text-[var(--text-secondary)]">
                               {compactCollectionCount(item.count)}
@@ -1813,11 +1865,17 @@ export function ArtifactsShell({
                         </button>
                       );
                     })}
-                    <label className={`relative ml-auto grid size-10 shrink-0 cursor-pointer place-items-center rounded-[8px] transition hover:bg-[var(--bg-hover)] ${secondaryCollectionItems.some((item) => item.key === collection) ? "text-[var(--text-primary)]" : "text-[var(--text-secondary)]"}`} title="More Library collections">
-                      <span className="sr-only">More Library collections</span>
-                      <Ellipsis className="pointer-events-none size-4" />
-                      <select
-                        aria-label="More Library collections"
+                    <div className="relative ml-auto shrink-0">
+                      <OverflowMenu
+                        label="More Library collections"
+                        items={secondaryCollectionItems.map((item) => ({
+                          key: item.key,
+                          label: item.label,
+                          icon: item.icon,
+                          hint: item.count
+                            ? compactCollectionCount(item.count)
+                            : undefined,
+                        }))}
                         value={
                           secondaryCollectionItems.some(
                             (item) => item.key === collection,
@@ -1825,25 +1883,21 @@ export function ArtifactsShell({
                             ? collection
                             : ""
                         }
-                        onChange={(event) => {
-                          if (!event.target.value) return;
-                          setCollection(
-                            event.target.value as ArtifactCollection,
-                          );
+                        active={secondaryCollectionItems.some(
+                          (item) => item.key === collection,
+                        )}
+                        onSelect={(key) => {
+                          setCollection(key);
                           setSelectedWorkspaceId("");
                           setActiveFilter("all");
                         }}
-                        className="absolute inset-0 cursor-pointer appearance-none opacity-0"
-                      >
-                        <option value="">More collections</option>
-                        {secondaryCollectionItems.map((item) => (
-                          <option key={item.key} value={item.key}>
-                            {item.label}{item.count ? ` (${compactCollectionCount(item.count)})` : ""}
-                          </option>
-                        ))}
-                      </select>
-                      {secondaryCollectionItems.some((item) => item.key === collection) ? <span className="absolute inset-x-0 -bottom-px h-0.5 bg-[var(--text-primary)]" /> : null}
-                    </label>
+                      />
+                      {secondaryCollectionItems.some(
+                        (item) => item.key === collection,
+                      ) ? (
+                        <span className="pointer-events-none absolute inset-x-0 -bottom-px h-0.5 bg-[var(--text-primary)]" />
+                      ) : null}
+                    </div>
                   </nav>
                   {collection !== "invitations" && collection !== "threads" ? (
                     <div className="spectra-library-filter-row mt-5 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
@@ -2325,10 +2379,7 @@ export function ArtifactsShell({
                     </CommandBarMenuItem>
                     <CommandBarSubmenu label="New work" icon={Plus}>
                       {filters
-                        .filter(
-                          (filter) =>
-                            filter.key !== "all" && filter.key !== "timetable",
-                        )
+                        .filter((filter) => isCreatableFilter(filter.key))
                         .map((filter) => {
                           const Icon = filter.icon;
                           const key = filter.key as ArtifactTypeKey;
@@ -2405,9 +2456,10 @@ export function ArtifactsShell({
                     window.dispatchEvent(new Event("spectra:threads-changed"));
                   } catch (error) {
                     toast.message(
-                      error instanceof Error
-                        ? error.message
-                        : "Could not select this thread for continuation.",
+                      describeFailure(error, {
+                        fallback:
+                          "Could not select this thread for continuation.",
+                      }).message,
                     );
                   }
                 })();
@@ -2642,6 +2694,81 @@ function InvitationInbox({
   );
 }
 
+/**
+ * One row for every Library list surface. The unplaced list and the
+ * per-workspace groups both render this, so they cannot drift in height, icon
+ * size, title weight, subtitle meaning, timestamp format or action behaviour
+ * the way the two hand-written rows did. Height is intrinsic: one line of
+ * content stays compact, and a row only grows when it has a summary to show.
+ */
+function LibraryRow({
+  artifact,
+  rowActions,
+  onOpen,
+}: {
+  artifact: SpectraArtifact;
+  rowActions: (artifact: SpectraArtifact) => ReactNode;
+  onOpen: (artifact: SpectraArtifact) => void;
+}) {
+  const meta = blueprintMeta[artifact.blueprintKey];
+  const Icon = meta.icon;
+  // The type already has its own column, so repeating it as a subtitle wastes
+  // the line that a real summary should occupy. Summaries can arrive as HTML —
+  // imported ManageBac tasks carry markup — and this row printed it raw, so a
+  // person read "<p>Your homework is completed in unifrog" in their own Library.
+  const rawSummary = previewText(artifact.summary);
+  const summary =
+    rawSummary && rawSummary.toLowerCase() !== meta.label.toLowerCase()
+      ? rawSummary
+      : null;
+  const tags = artifact.tags.slice(0, 2);
+  return (
+    <article className="group relative rounded-[8px] transition-colors hover:bg-[var(--bg-secondary)]">
+      <button
+        type="button"
+        onClick={() => onOpen(artifact)}
+        className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-[8px] px-3 py-2 pr-11 text-left sm:grid-cols-[minmax(0,1fr)_minmax(0,auto)_88px_auto]"
+      >
+        <span className="flex min-w-0 items-center gap-2.5">
+          <Icon className="size-4 shrink-0" style={{ color: meta.color }} />
+          <span className="min-w-0">
+            <strong className="block truncate text-[13px] font-medium leading-5 text-[var(--text-primary)]">
+              {artifact.title}
+            </strong>
+            {summary ? (
+              <span className="block truncate text-[11px] leading-4 text-[var(--text-secondary)]">
+                {summary}
+              </span>
+            ) : null}
+          </span>
+        </span>
+        <span className="hidden min-w-0 items-center gap-1 sm:flex">
+          {tags.map((tag) => (
+            <span
+              key={tag}
+              className="max-w-[104px] truncate rounded-[5px] bg-[var(--bg-secondary)] px-1.5 py-0.5 text-[10px] text-[var(--text-secondary)] group-hover:bg-[var(--bg-elevated)]"
+            >
+              {tag}
+            </span>
+          ))}
+        </span>
+        <span className="hidden truncate text-[11px] text-[var(--text-tertiary)] sm:block">
+          {meta.label}
+        </span>
+        <span className="whitespace-nowrap text-[11px] text-[var(--text-tertiary)]">
+          {formatRelativeTime(artifact.updatedAt)}
+        </span>
+      </button>
+      <div
+        className="absolute right-1.5 top-1/2 -translate-y-1/2 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100"
+        onClick={(event) => event.stopPropagation()}
+      >
+        {rowActions(artifact)}
+      </div>
+    </article>
+  );
+}
+
 function GroupedList({
   inbox,
   groups,
@@ -2659,7 +2786,7 @@ function GroupedList({
 }) {
   const [inboxExpanded, setInboxExpanded] = useState(false);
   return (
-    <main className="mt-8">
+    <div className="mt-8">
       <section>
         <div className="mb-4">
           <div className="flex items-center gap-2">
@@ -2674,67 +2801,28 @@ function GroupedList({
             {landingDescription}
           </p>
         </div>
-        <div className="space-y-1">
-          {inbox.slice(0, inboxExpanded ? inbox.length : 12).map((artifact) => {
-            const meta = blueprintMeta[artifact.blueprintKey];
-            const Icon = meta.icon;
-            return (
-              <article
-                key={artifact._id}
-                className="group relative rounded-[10px] transition-colors hover:bg-[var(--bg-secondary)]"
-              >
-                <button
-                  type="button"
-                  onClick={() => onOpen(artifact)}
-                  className="grid min-h-[64px] w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-3 py-2.5 pr-12 text-left sm:grid-cols-[minmax(0,1fr)_120px_auto]"
-                >
-                  <span className="flex min-w-0 items-center gap-3">
-                    <Icon
-                      className="size-4 shrink-0"
-                      style={{ color: meta.color }}
-                    />
-                    <span className="min-w-0">
-                      <strong className="block truncate text-[13px] font-medium text-[var(--text-primary)]">
-                        {artifact.title}
-                      </strong>
-                      {artifact.description &&
-                      artifact.description.trim().toLowerCase() !==
-                        meta.label.toLowerCase() ? (
-                        <span className="mt-0.5 block truncate text-[11px] text-[var(--text-secondary)]">
-                          {artifact.description}
-                        </span>
-                      ) : null}
-                    </span>
-                  </span>
-                  <span className="hidden text-[11px] text-[var(--text-tertiary)] sm:block">
-                    {meta.label}
-                  </span>
-                  <span className="text-[11px] text-[var(--text-tertiary)]">
-                    {formatRelativeTime(artifact.updatedAt)}
-                  </span>
-                </button>
-                <div
-                  className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
-                  onClick={(event) => event.stopPropagation()}
-                >
-                  {rowActions(artifact)}
-                </div>
-              </article>
-            );
-          })}
+        <div className="space-y-0.5">
+          {inbox.slice(0, inboxExpanded ? inbox.length : 18).map((artifact) => (
+            <LibraryRow
+              key={artifact._id}
+              artifact={artifact}
+              rowActions={rowActions}
+              onOpen={onOpen}
+            />
+          ))}
           {inbox.length === 0 ? (
             <div className="rounded-[8px] border border-dashed border-[var(--border-default)] px-4 py-8 text-[13px] text-[var(--text-secondary)]">
               No unplaced work in this scope.
             </div>
           ) : null}
         </div>
-        {inbox.length > 12 ? (
+        {inbox.length > 18 ? (
           <button
             type="button"
             className="mt-3 h-8 text-[11px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
             onClick={() => setInboxExpanded((value) => !value)}
           >
-            {inboxExpanded ? "Show fewer" : `Show ${inbox.length - 12} more`}
+            {inboxExpanded ? "Show fewer" : `Show ${inbox.length - 18} more`}
           </button>
         ) : null}
       </section>
@@ -2764,7 +2852,7 @@ function GroupedList({
             ))}
         </div>
       </section>
-    </main>
+    </div>
   );
 }
 
@@ -2800,60 +2888,23 @@ function WorkspaceGroup({
           </span>
         </div>
       </div>
-      {artifacts.slice(0, expanded ? artifacts.length : 6).map((artifact) => {
-        const meta = blueprintMeta[artifact.blueprintKey];
-        const Icon = meta.icon;
-        return (
-          <div
+      <div className="mt-0.5 space-y-0.5 px-1">
+        {artifacts.slice(0, expanded ? artifacts.length : 8).map((artifact) => (
+          <LibraryRow
             key={artifact._id}
-            className="mx-1 grid min-h-[58px] cursor-pointer grid-cols-[minmax(260px,1.2fr)_minmax(130px,0.6fr)_minmax(130px,0.5fr)_auto] items-center gap-4 rounded-[10px] px-3 py-2.5 transition-colors hover:bg-[var(--bg-hover)]"
-            role="button"
-            tabIndex={0}
-            onClick={() => onOpen(artifact)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                onOpen(artifact);
-              }
-            }}
-          >
-            <div className="flex min-w-0 items-center gap-3">
-              <Icon
-                className="h-5 w-5 shrink-0"
-                style={{ color: meta.color }}
-              />
-              <div className="min-w-0">
-                <div className="truncate text-[13px] font-semibold text-[var(--text-primary)]">
-                  {artifact.title}
-                </div>
-                <div className="text-[11px] text-[var(--text-secondary)]">
-                  {meta.label}
-                </div>
-              </div>
-            </div>
-            <div className="flex items-center gap-2 text-[12px] text-[var(--text-secondary)]">
-              <span
-                className="h-1.5 w-1.5 rounded-full"
-                style={{ background: accent.color }}
-              />
-              {workspace.title}
-            </div>
-            <div className="text-[12px] text-[var(--text-secondary)]">
-              Updated {formatRelativeTime(artifact.updatedAt)}
-            </div>
-            <div onClick={(event) => event.stopPropagation()}>
-              {rowActions(artifact)}
-            </div>
-          </div>
-        );
-      })}
-      {artifacts.length > 6 ? (
+            artifact={artifact}
+            rowActions={rowActions}
+            onOpen={onOpen}
+          />
+        ))}
+      </div>
+      {artifacts.length > 8 ? (
         <button
           type="button"
           className="m-2 h-8 px-2 text-[11px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
           onClick={() => setExpanded((value) => !value)}
         >
-          {expanded ? "Show fewer" : `Show ${artifacts.length - 6} more`}
+          {expanded ? "Show fewer" : `Show ${artifacts.length - 8} more`}
         </button>
       ) : null}
     </section>
@@ -2897,7 +2948,7 @@ function BoardColumns({
   );
   return (
     <div className="mt-8 overflow-x-auto pb-6">
-      <main
+      <div
         className="grid gap-4 pr-2"
         style={{
           gridTemplateColumns: `repeat(${Math.max(visibleGroups.length, 1)}, clamp(340px, 30vw, 430px))`,
@@ -2965,7 +3016,7 @@ function BoardColumns({
             </section>
           );
         })}
-      </main>
+      </div>
     </div>
   );
 }
@@ -3169,5 +3220,12 @@ function ArtifactsSkeleton() {
 }
 
 function EmptyArtifactsState() {
-  return <ProductEmptyState icon={Search} title="No work matches" detail="Adjust the search, type, or workspace scope." className="mt-10 min-h-[340px]" />;
+  return (
+    <ProductEmptyState
+      icon={Search}
+      title="No work matches"
+      detail="Adjust the search, type, or workspace scope."
+      className="mt-10 min-h-[340px]"
+    />
+  );
 }
